@@ -26,10 +26,8 @@ Plan 是 frozen、extra-forbid 的 Pydantic model。Tunables 是 extra-forbid mo
 
 ```python
 outcome = await env.run(T1Exp().run, cfg)
-if isinstance(outcome, Failed):
-    return
-save_t1(outcome, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
-fit = analyze_t1(outcome.value.result)
+if not isinstance(outcome, Failed):
+    save_t1(outcome, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
 ```
 
 可選的 async helper 只包裝相同呼叫，例如
@@ -52,8 +50,11 @@ Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重�
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
 Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。
 兩種情況都不重跑整個 workflow。
-Stop 讓 operation 正常回傳 partial result。Failed 表示 Schedule acquisition 失敗；
-未處理的其他例外停止 run。
+Stop 讓 operation 正常回傳 partial result。作者先保存每個 Completed 的原始資料，再檢查 partial_result。
+Partial 不進完整資料的擬合或接受流程，回 rejected、reason=stopped，不更新 accepted history。
+後續 attempt 與 commit 仍照各 workflow 的流程執行，不新增全局取消分支。
+Failed 表示 Schedule acquisition 或預期分析失敗。分析 helper 的 Failed 由 caller 記 failed 與 reason。
+NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其他程式例外仍 raise，停止 run。
 
 要回到過去某點，開新 run 並切 plan 範圍。History 初值用 `saved_run.read_records`
 從上一個 run 讀回，再在作者函式中初始化。框架不提供步驟回退或自動回灌 history。

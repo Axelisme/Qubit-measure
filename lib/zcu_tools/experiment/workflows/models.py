@@ -20,14 +20,15 @@ type Lifecycle = Literal[
 
 @dataclass(frozen=True)
 class Completed[T]:
-    """A returned value, partial-completion flag and operation attempt facts.
+    """A returned value, partial-delivery flag and facts for one attempt.
 
     value is fn's payload; env.run uses the existing RunRecord with cfg/data.
-    partial_result is True when the operation or a completed descendant was
-    stopped, not a scientific completeness check or a persistence guarantee.
-    facts is the required OperationFacts captured for this delivered attempt,
-    also written to journal and the enclosing commit. Its stopped bit reports
-    only the operation token's own stop state, independently of descendant stops.
+    partial_result includes cancellation of the operation or a descendant. It is
+    not a scientific completeness check or a persistence guarantee. facts is the
+    required OperationFacts for this delivered attempt, also written to journal
+    and the enclosing commit. facts.stopped records the operation token's own
+    control intent at completion, not descendant cancellation. These flags
+    describe different facts and must not be merged.
     """
 
     value: T

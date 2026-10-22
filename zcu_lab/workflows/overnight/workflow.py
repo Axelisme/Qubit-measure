@@ -106,8 +106,9 @@ class OvernightPoint(BaseModel):
     wall-clock times. flux is in the plan's explicit unit. t1_us/t2_us and their
     errors are accepted lifetimes and marginal uncertainties in microseconds,
     or None on rejection/native failure. t1_reason/t2_reason are None on
-    acceptance, otherwise the rejection or Schedule failure diagnosis. Exceptions
-    stop the run without committing this point. t1_file/t2_file are relative
+    acceptance, otherwise stopped for partial, a fit rejection, or the Schedule/
+    expected fitting failure diagnosis. Unexpected exceptions stop the run
+    without committing this point. t1_file/t2_file are relative
     native filenames for each completed member, or None after native failure;
     rejected fits retain their raw acquisition filenames.
     """
@@ -129,14 +130,17 @@ class OvernightPoint(BaseModel):
 
 
 def _summary(
-    fit: DecayFit, tun: OvernightTunables, name: str
+    fit: DecayFit | Failed, tun: OvernightTunables, name: str
 ) -> tuple[float | None, float | None, str | None]:
     """Apply the shared scalar acceptance bounds to either lifetime fit.
 
     fit contains microsecond lifetime/error and residual quality; tun holds
-    strict dimensionless bounds. name identifies rejected members. Return
-    accepted lifetime/error or None values with a diagnosis, without feedback.
+    strict dimensionless bounds. name identifies rejected members. Expected
+    fitting failures supply Failed(reason). Return accepted lifetime/error or
+    None values with a diagnosis, without feedback.
     """
+    if isinstance(fit, Failed):
+        return None, None, fit.reason
     residual = fit.quality.normalized_residual_rms
     if not (
         isfinite(fit.lifetime_us)
@@ -161,6 +165,9 @@ async def overnight[C](
 
     No calibration, context read or lifetime feedback occurs. A native Failed
     outcome is recorded per member; the other member is still attempted.
+    Completed members save before analysis. Partial records stopped without
+    fitting; expected fitting failures record their reason without estimates.
+    Neither case skips the next member or the pair commit.
     Unexpected acquisition/fit/plot/save/device errors propagate. Each pair starts
     at max(now, previous actual start + interval), without catch-up bursts.
     Pause resumes the pending operation; it does not freeze wall time.
@@ -211,11 +218,12 @@ async def overnight[C](
         if not isinstance(t1, Failed):
             save_t1(t1, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
             t1_file = "t1.h5"
-        t1_summary = (
-            (None, None, t1.reason)
-            if isinstance(t1, Failed)
-            else _summary(analyze_t1(t1.value.result), tun.current, "T1")
-        )
+        if isinstance(t1, Failed):
+            t1_summary = (None, None, t1.reason)
+        elif t1.partial_result:
+            t1_summary = (None, None, "stopped")
+        else:
+            t1_summary = _summary(analyze_t1(t1.value.result), tun.current, "T1")
         # Acquire zero-detune Echo even if the T1 member failed.
         t2_stop = tun.current.sweep_factor * tun.current.t2_guess_us
         t2_cfg = T2EchoCfg(
@@ -243,11 +251,14 @@ async def overnight[C](
                 t2, d / "t2echo.h5", snapshot=plan.snapshot, identity=env.identity
             )
             t2_file = "t2echo.h5"
-        t2_summary = (
-            (None, None, t2.reason)
-            if isinstance(t2, Failed)
-            else _summary(analyze_t2echo(t2.value.result), tun.current, "T2 Echo")
-        )
+        if isinstance(t2, Failed):
+            t2_summary = (None, None, t2.reason)
+        elif t2.partial_result:
+            t2_summary = (None, None, "stopped")
+        else:
+            t2_summary = _summary(
+                analyze_t2echo(t2.value.result), tun.current, "T2 Echo"
+            )
         t1_us, t1_error_us, t1_reason = t1_summary
         t2_us, t2_error_us, t2_reason = t2_summary
         point = OvernightPoint(
