@@ -3,9 +3,16 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Self
 
 import pytest
-from pydantic import BaseModel, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ModelWrapValidatorHandler,
+    TypeAdapter,
+    model_validator,
+)
 from zcu_tools.experiment.workflows import Live, WorkflowEnv
 from zcu_tools.experiment.workflows.saved_run import (
     native_path,
@@ -19,6 +26,61 @@ from ._engine_fakes import Plan, Point, Rig, Tunables
 
 class OtherPoint(BaseModel):
     other: str
+
+
+class AfterPoint(BaseModel):
+    model_config = ConfigDict(title="NotTheQualifiedType")
+    value: int
+
+    @model_validator(mode="after")
+    def positive(self) -> Self:
+        if self.value < 0:
+            raise ValueError("point must be positive")
+        return self
+
+
+class WrappedPoint(BaseModel):
+    value: int
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def positive(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        point = handler(value)
+        if point.value < 0:
+            raise ValueError("point must be positive")
+        return point
+
+
+@pytest.mark.parametrize("model", [AfterPoint, WrappedPoint], ids=["after", "wrap"])
+@pytest.mark.parametrize("use_adapter", [False, True], ids=["model", "adapter"])
+def test_typed_reader_runs_model_validators_and_preserves_source_and_identity(
+    tmp_path: Path, model: type[BaseModel], use_adapter: bool
+) -> None:
+    rig = Rig(tmp_path)
+    point = model.model_validate({"value": 2})
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.commit(point)
+
+    try:
+        rig.start(script)
+        assert rig.engine.execute("run").lifecycle == "done"
+        target = TypeAdapter(model) if use_adapter else model
+        records = read_records(rig.paths.metadata_root, target)
+        assert [row.record for row in records] == [point]
+        assert records[0].record_type == f"{model.__module__}.{model.__qualname__}"
+        source = records[0].record_path
+        document = json.loads(source.read_text())
+        document["record"]["value"] = {"value": -1}
+        source.write_text(json.dumps(document))
+        with pytest.raises(ValueError, match="point must be positive") as caught:
+            read_records(rig.paths.metadata_root, target)
+        assert str(source) in str(caught.value)
+        assert read_records_raw(rig.paths.metadata_root)[0].record.value == {
+            "value": -1
+        }
+    finally:
+        rig.close()
 
 
 @pytest.fixture

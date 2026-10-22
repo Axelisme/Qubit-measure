@@ -14,6 +14,7 @@
 - 2026-10-21 [三角色協定：Wait／Ask／Signal](2026-10-21-three-role-protocol.md)：agent、腳本、runtime 三角色；recipe 與 workflow Engine 底層同一份協定，effect 與 env 方法都是糖；Signal 第一版只有內建 kind 由 host 處理。
 - 2026-10-21 [Workflow 定位、承載與執行基底](2026-10-21-workflow-positioning-and-hosting.md)：recipe 操作 GUI tab 可多實驗，workflow 跑 Engine；workflow 由 measure-gui 承載；維持 helper，helper 搬到實驗目錄並列 core，共用零件不共用流程。
 - 2026-10-22 [Workflow 改為單一 generator：取消、Signal、step 模型與回退](2026-10-22-workflow-single-generator.md)：recipe 取消統一 return；協定移除 Signal；workflow 由 step 函式改為單一 generator 並刪 Effect，Pause 立即打斷並於 Resume 重跑 operation；回退走新 run 組合，engine 不提供整點重做。
+- 2026-10-22 [中斷 scope 成為顯式的 core 契約](2026-10-22-explicit-scope-contract.md)：協作式與錯誤式中斷依「我等的事」或「我」被中斷分流；Scope 由 experiment 層定義、core 與 workflow 共用，`with`／`for` 保證邊界，路徑 `kind:name#seq`，目錄鏡射 scope；決策見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
 
 ## 模擬量測環境
 
