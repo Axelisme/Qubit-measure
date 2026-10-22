@@ -26,8 +26,9 @@ jupyter:
 
 **Readers:** operator, lab-author. Select spectral lines, fit fluxonium parameters and export an entry-local predictor.
 
-Open an existing result entry and name its fluxonium component below. This notebook
-writes the predictor, declared setup fields and analysis ledger in separate steps.
+Set the entry name and component name below. The component must have kind
+`qubit/fluxonium` in the entry setup. This notebook does not choose from aliases.
+It writes the predictor, declared setup fields and analysis ledger in separate steps.
 It does not save Database output or read the old two-level params.json.
 The [fluxdep GUI](../../lib/zcu_tools/gui/app/fluxdep/README.md) uses the same artifact format.
 
@@ -58,7 +59,7 @@ import zcu_lab.v2 as ze
 ```python
 project_root = Path("../..").resolve()
 entry_name = "fluxonium-analysis"
-component = "Q1"  # Existing fluxonium component in this entry.
+component = "Q1"  # Set the exact component name from this entry, not an alias.
 register_all(component_registry)
 entry = ResultEntry.open(
     entry_name,
@@ -66,11 +67,8 @@ entry = ResultEntry.open(
     database_root=project_root / "Database",
 )
 component_model = snapshot(entry.setup).components[component]
-if not (
-    component_model.kind == "qubit/fluxonium"
-    or component_model.kind.startswith("qubit/fluxonium/")
-):
-    raise ValueError("Select a fluxonium component")
+if component_model.kind != "qubit/fluxonium":
+    raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 
 flux_half = None
 flux_int = None

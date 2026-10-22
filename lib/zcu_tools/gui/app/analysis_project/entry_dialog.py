@@ -3,6 +3,7 @@
 import logging
 from pathlib import Path
 
+from pydantic import ValidationError
 from qtpy.QtWidgets import (
     QComboBox,
     QDialog,
@@ -160,7 +161,7 @@ class EntryDialog(QDialog):
         self._component.setCurrentIndex(-1)
         try:
             target = opened.select()
-        except (InvalidInputError, RoleResolutionError) as error:
+        except (InvalidInputError, RoleResolutionError, ValidationError) as error:
             self._error.setText(str(error))
         else:
             self._component.setCurrentText(target.component)

@@ -26,9 +26,10 @@ jupyter:
 
 **Readers:** operator, lab-author. Fit resonator responses from an entry-local predictor and export a dispersive artifact.
 
-Select an existing entry and fluxonium component below. Predictor input comes from
-predictors/<component>.json. Resonator seeds come from the dispersive artifact,
-then the setup resonator alias, then 5 GHz. This notebook does not read params.json.
+Set the entry name, component name and bare_rf in GHz below. The component must
+have kind `qubit/fluxonium` in the entry setup. Predictor input comes from
+`predictors/<component>.json`. This notebook does not choose a component from aliases
+or seed bare_rf from saved artifacts. It does not read params.json.
 The [dispersive GUI](../../lib/zcu_tools/gui/app/dispersive/README.md) owns the interactive workflow;
 its MCP interface remains read-only.
 
@@ -46,10 +47,7 @@ from scipy.ndimage import gaussian_filter1d
 %autoreload 2
 import zcu_tools.notebook.analysis.dispersive as zd
 from zcu_lab.components import register_all
-from zcu_tools.resources.entry import (
-    ResultEntry, RoleResolutionError, component_registry, document_value, snapshot,
-)
-from zcu_tools.gui.session.aliases import AliasRow, AliasTable
+from zcu_tools.resources.entry import ResultEntry, component_registry, snapshot
 from zcu_tools.resources.predictor_file import load_predictor_file
 from zcu_tools.resources.analysis_source import AnalysisSource
 from zcu_tools.resources.dispersive_file import (
@@ -70,7 +68,8 @@ from zcu_tools.analysis.fitting.resonance import (
 ```python
 project_root = Path("../..").resolve()
 entry_name = "fluxonium-analysis"
-component = "Q1"  # Existing fluxonium component in this entry.
+component = "Q1"  # Set the exact component name from this entry, not an alias.
+bare_rf = 5.0  # Set the bare resonator frequency in GHz for this analysis.
 register_all(component_registry)
 entry = ResultEntry.open(
     entry_name,
@@ -78,11 +77,8 @@ entry = ResultEntry.open(
     database_root=project_root / "Database",
 )
 component_model = snapshot(entry.setup).components[component]
-if not (
-    component_model.kind == "qubit/fluxonium"
-    or component_model.kind.startswith("qubit/fluxonium/")
-):
-    raise ValueError("Select a fluxonium component")
+if component_model.kind != "qubit/fluxonium":
+    raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 result_dir = entry.result_path
 dispersive_path = entry.dispersive_path / f"{component}.json"
 
@@ -112,30 +108,6 @@ print("params = ", params, " GHz")
 print("flux_half = ", flux_half)
 print("flux_int = ", flux_int)
 print("flux_period = ", flux_period)
-
-bare_rf = prior.bare_rf
-if bare_rf is None:
-    bare_rf = prior.plot_transitions.r_f
-if bare_rf is None:
-    aliases = AliasTable([
-        AliasRow(name, target) for name, target in entry.load_aliases().aliases.items()
-    ])
-    document = snapshot(entry.setup)
-    try:
-        resonator = aliases.resolve("resonator", document)
-    except RoleResolutionError as exc:
-        if exc.reason not in ("Unknown alias", "Alias is not bound"):
-            raise
-    else:
-        model = document.components[resonator]
-        if "freq" in type(model).model_fields:
-            freq = document_value(document, f"{resonator}.freq")
-            if freq is not None:
-                if isinstance(freq, bool) or not isinstance(freq, (int, float)):
-                    raise ValueError("Resonator freq must be MHz")
-                bare_rf = float(freq) * 1e-3
-if bare_rf is None:
-    bare_rf = 5.0
 
 g = prior.g if prior.g is not None else 0.05  # GHz
 print(f"bare rf = {bare_rf}", "GHz")
