@@ -97,6 +97,71 @@ def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("scope", ["acquire", "schedule"])
+def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
+    tmp_path: Path, scope: str
+) -> None:
+    gui = SyntheticGui()
+    waiting = Event()
+    released = Event()
+    scoped_requests: list[int] = []
+    partials: list[bool] = []
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.status_scope":
+            assert params == {"operation_id": 2}
+            return {"active_path": "run/schedule#1/acquire#1"}
+        if method == "operation.cancel_scope":
+            assert params["operation_id"] == 2
+            scoped_requests.append(2)
+            gui.cancelled.set()
+            released.set()
+            return {
+                "cancelled": True,
+                "reason": "scope cancellation requested",
+                "active_path": "run/schedule#1/acquire#1",
+            }
+        if method == "operation.await" and params["operation_id"] == 2:
+            waiting.set()
+            return (
+                {"reason": "completed", "status": "finished"}
+                if released.is_set()
+                else {"reason": "timeout"}
+            )
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Keep fine cancellation bound to the observed Run")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        partials.append((await tab.run()).partial_result)
+        partials.append((await tab.run()).partial_result)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        assert waiting.wait(3), "The second Run must be active"
+        first, second = execution.snapshot().details
+        path = "script/iteration#1/operation#2/schedule#1/acquire#1"
+        stale = client.call("cancel", {"op": first.op, "scope": scope, "expected": 1})
+        assert stale.data["cancelled"] is False
+        assert stale.data["reason"] == "scope not active"
+        assert stale.data["active_path"] == path
+        assert scoped_requests == []
+        assert not released.is_set()
+        accepted = client.call(
+            "cancel", {"op": second.op, "scope": scope, "expected": 1}
+        )
+        assert accepted.data["cancelled"] is True
+        execution.join()
+        assert execution.snapshot().status == "completed"
+        assert partials == [False, True]
+        assert scoped_requests == [2]
+    finally:
+        released.set()
+        client.context.session.close()
+
+
 def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
     tmp_path: Path,
 ) -> None:
