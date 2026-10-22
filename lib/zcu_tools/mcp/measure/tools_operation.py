@@ -312,14 +312,14 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Cancel a live script, iteration, Run/operation, schedule or acquire scope. Use label#N or expected to refuse stale targets. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
+            "description": "Omit scope to stop the target root. Select a live kind, kind#N, operation:name or exact full live_paths path; ambiguous matches return full-path candidates. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "op": {"type": "integer"},
                     "execution": {"type": "string", "minLength": 1},
                     "run_id": {"type": "string", "minLength": 1},
-                    "scope": {"type": "string", "default": "script"},
+                    "scope": {"type": "string"},
                     "expected": {"type": "integer", "minimum": 1},
                 },
                 "oneOf": [
