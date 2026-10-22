@@ -18,6 +18,7 @@ from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
 )
@@ -148,8 +149,13 @@ def test_run_publishes_record_and_historical_metadata_together(
     assert outcome.status == ("cancelled" if stopped else "finished")
 
 
-def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata() -> None:
+def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
+    request: pytest.FixtureRequest,
+) -> None:
     state, tab_id, adapter = make_state()
+    board = white_noise()
+    request.addfinalizer(board.devices.close_all_devices)
+    state.set_context(replace(state.session_env, soc=board.soc, soccfg=board.soccfg))
     service, _gate, background, handles = make_run_service(state)
     inputs = replace(
         make_inputs(state, tab_id, adapter),
