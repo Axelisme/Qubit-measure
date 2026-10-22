@@ -44,6 +44,9 @@ class SyntheticGui:
             "tab.select_recipe_module",
         }:
             return {"errors": [], "changed": True}
+        return self._operation(method, params)
+
+    def _operation(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.run_start":
             self.runs += 1
             self.started.set()
@@ -251,13 +254,13 @@ def test_decorator_rejects_non_coroutine_and_invalid_report_annotations() -> Non
         return inputs.count
 
     # This test deliberately sends invalid Python callables at the runtime boundary.
-    decorate: Callable[..., object] = getattr(
-        recipe("invalid", "Reject invalid authors"), "__call__"
-    )
+    def apply(decorate: Callable[..., object], function: object) -> object:
+        return decorate(function)
+
     with pytest.raises(TypeError, match="coroutine"):
-        decorate(sync)
+        apply(recipe("invalid", "Reject invalid authors"), sync)
     with pytest.raises(TypeError, match="Report"):
-        decorate(invalid)
+        apply(recipe("invalid", "Reject invalid authors"), invalid)
 
 
 def test_invalid_inputs_fail_before_binding_gui(tmp_path: Path) -> None:
@@ -350,4 +353,109 @@ def test_analysis_summary_missing_authored_field_fails_without_repair(
         assert snapshot.error.type == "ValidationError"
         assert "absent" in snapshot.error.message
     finally:
+        client.context.session.close()
+
+
+def test_missing_parameters_is_terminal_and_releases_recipe_admission(
+    tmp_path: Path,
+) -> None:
+    from zcu_tools.mcp.measure.recipe_contracts import (
+        MissingParameter,
+        RecipeNeedsParameters,
+    )
+
+    @recipe("missing", "Require an authored calibration parameter")
+    async def missing(session: RecipeSession, inputs: Inputs) -> Report:
+        raise RecipeNeedsParameters(
+            (MissingParameter("frequency_mhz", "Provide the center frequency"),)
+        )
+
+    @recipe("next", "Prove the next recipe can be admitted")
+    async def next_recipe(session: RecipeSession, inputs: Inputs) -> Report:
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, recipes=(missing, next_recipe))
+    try:
+        execution = start(client, "missing")
+        execution.wait(3)
+        snapshot = execution.snapshot()
+        assert snapshot.status == "needs_parameters"
+        assert snapshot.missing == ("frequency_mhz",)
+        assert snapshot.outcome is None
+        following = start(client, "next")
+        following.wait(3)
+        assert following.snapshot().status == "completed"
+    finally:
+        client.context.session.close()
+
+
+def test_run_cancel_during_ask_is_acknowledged_noop(tmp_path: Path) -> None:
+    from zcu_tools.core.script_protocol import Answer, Question
+
+    class Choice(Answer):
+        accepted: bool
+
+    class Confirm(Question[Choice]):
+        evidence: str
+
+    @recipe("synthetic", "Keep the question pending when no Run is active")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        answer = await session.ask(Confirm(evidence="no acquisition"))
+        assert answer is not None and answer.accepted
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        pending = execution.snapshot().pending_question
+        assert pending is not None
+        reply = execution.cancel(scope="run")
+        assert reply.data["cancelled"] is False
+        assert reply.data["reason"] == "no run in progress"
+        assert execution.snapshot().pending_question == pending
+        answered = execution.answer(
+            {"request_id": pending.request_id, "answer": {"accepted": True}}
+        )
+        assert answered.data["outcome"]["status"] == "completed"
+    finally:
+        client.context.session.close()
+
+
+def test_run_cancel_during_analysis_does_not_stop_analysis(tmp_path: Path) -> None:
+    gui = SyntheticGui()
+    analysis_started, release_analysis = Event(), Event()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if (
+            method == "operation.await"
+            and params["operation_id"] == 100
+            and not analysis_started.is_set()
+        ):
+            analysis_started.set()
+            assert release_analysis.wait(3)
+            return {"reason": "timeout"}
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Keep analysis running when cancelling only Run")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        fit = await tab.analyze("primary", result=Fit)
+        assert fit is not None and fit.result.estimate == 3.5
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        assert analysis_started.wait(3)
+        reply = execution.cancel(scope="run")
+        release_analysis.set()
+        assert reply.data["cancelled"] is False
+        assert reply.data["reason"] == "no run in progress"
+        execution.wait(3)
+        assert execution.snapshot().status == "completed"
+        assert not gui.cancelled.is_set()
+    finally:
+        release_analysis.set()
         client.context.session.close()
