@@ -5,11 +5,8 @@ from __future__ import annotations
 from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import (
-    CfgSnapshot,
-    JsonObject,
-    encode_labber_comment,
-)
+from zcu_tools.datafile import JsonObject, encode_labber_comment
+from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.utils import format_obj
 
 

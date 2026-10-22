@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
 from zcu_tools.cfg_model import ModuleCfgFactory, PulseReadoutSpec, PulseSpec
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.gui.form import (
     Display,
     FormEnv,

@@ -7,7 +7,8 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import load
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
@@ -159,13 +160,13 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
     assert saved["ok"], saved
     runs = ctrl.save_control.list_saved_runs()
     assert len(runs) == 1 and runs[0].data_path is not None
-    stored = load_run_data(runs[0].data_path)
-    variable = next(iter(stored.payload.variables.values()))
-    np.testing.assert_array_equal(variable.data.values, 0)
-    assert stored.metadata.completion == (
+    stored = load(runs[0].data_path)
+    variable = next(iter(stored.vars.values()))
+    np.testing.assert_array_equal(variable.values, 0)
+    assert metadata_from_container(stored).completion == (
         "stopped" if outcome == "stopped" else "complete"
     )
     assert (
-        getattr(stored.metadata.provenance, "simulation_id", None)
+        getattr(metadata_from_container(stored).provenance, "simulation_id", None)
         == env.soc.binding.provenance.identifier
     )

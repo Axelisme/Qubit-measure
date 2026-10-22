@@ -147,6 +147,7 @@ class TabService:
 
         analysis_items = _items_for_pane(tab.analysis)
         post_items = _items_for_pane(tab.post_analysis)
+        metadata = None if tab.run.result is None else tab.run.result.metadata
         return TabSnapshot(
             adapter_name=tab.adapter_name,
             cfg_input=tab.cfg.input.data,
@@ -159,9 +160,7 @@ class TabService:
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
-                acquisition_run_id=(
-                    tab.run.metadata.run_id if tab.run.metadata is not None else None
-                ),
+                acquisition_run_id=(metadata.run_id if metadata is not None else None),
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,

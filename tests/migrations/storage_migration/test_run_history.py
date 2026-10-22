@@ -3,20 +3,13 @@
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.datafile import DataVariable, JsonObject, RunMetadata, load_run_data
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    ExpCfgModel,
-    ZSpec,
-    load_run_with_metadata,
-)
+from zcu_tools.datafile import JsonObject
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -27,6 +20,10 @@ from migrations.storage_migration import (
     RunAssignment,
     load_run_evidence,
     migrate_storage,
+)
+from tests.migrations.storage_migration.containers import (
+    MigrationMetadata,
+    read_migrated,
 )
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
@@ -87,26 +84,6 @@ def allocated_run(
     return request, report, manifest.runs[0]
 
 
-class SyntheticCfg(ExpCfgModel):
-    frequency: float
-
-
-@dataclass
-class HistoricalResult:
-    x: np.ndarray
-    signal: np.ndarray
-
-
-HISTORY_SPEC = AxesSpec(
-    axes=(Axis("x", "x", "s"),),
-    z=ZSpec("signal", "signal", "V"),
-    result_type=HistoricalResult,
-    cfg_type=SyntheticCfg,
-    tag="synthetic_scan",
-    data_variable=DataVariable("signal"),
-)
-
-
 def history_request(
     request: MigrationRequest,
     changes: JsonObject,
@@ -132,17 +109,19 @@ def history_request(
     return replace(request, run_evidence=evidence)
 
 
-def read_history(path: Path, tag: str, cfg_type: str) -> RunMetadata:
-    """Read through generic and typed owners, checking data and historical identity."""
-    stored = load_run_data(path)
-    record, metadata = load_run_with_metadata(path, spec=HISTORY_SPEC)
-    assert metadata == stored.metadata
-    assert metadata.experiment == tag
+def read_history(path: Path, tag: str, cfg_type: str) -> MigrationMetadata:
+    """Read the public container and validate migration-owned historical fields."""
+    stored = read_migrated(path)
+    assert stored.metadata.experiment == tag
     assert stored.cfg.cfg_type == cfg_type
-    assert record.cfg == SyntheticCfg(frequency=12.5)
-    np.testing.assert_array_equal(record.result.x, [0.0, 1.0])
-    np.testing.assert_array_equal(record.result.signal, [1 + 2j, 3 + 4j])
-    return metadata
+    assert stored.cfg.values == {"frequency": 12.5}
+    np.testing.assert_array_equal(
+        stored.container.vars["signal"].axes[0].values, [0.0, 1.0]
+    )
+    np.testing.assert_array_equal(
+        stored.container.vars["signal"].values, [1 + 2j, 3 + 4j]
+    )
+    return stored.metadata
 
 
 @pytest.mark.parametrize("missing", [(), ("started_at", "run_id")])
@@ -156,7 +135,7 @@ def test_unknown_start_still_publishes_native_and_reports_assigned_identity(
         {"started_at": None, "run_id": None, "finished_at": "2025-10-01T00:00:01Z"},
         missing=missing,
     )
-    observed: list[RunMetadata] = []
+    observed: list[MigrationMetadata] = []
 
     def validate(path: Path, tag: str, cfg_type: str) -> None:
         assert source.read_bytes() == before
@@ -224,7 +203,7 @@ def test_trusted_historical_identity_and_times_survive_native_conversion(
             read_history(path, tag, cfg_type) and None
         ),
     )
-    metadata = load_run_data(report.converted_files[0].destination).metadata
+    metadata = read_migrated(report.converted_files[0].destination).metadata
     assert metadata.run_id == "20251001T000000Z-abc123"
     assert metadata.started_at == "2025-10-01T00:00:00Z"
     assert metadata.finished_at == "2025-10-01T00:00:01Z"
@@ -417,7 +396,7 @@ def test_allocated_identity_resume_keeps_original_id_and_assignment_origin(
         ),
     )
     assert report.converted_files[0].destination == identity.new_file
-    metadata = load_run_data(identity.new_file).metadata
+    metadata = read_migrated(identity.new_file).metadata
     assert metadata.run_id == assignment.run_id
     assert metadata.started_at is None
     assert (

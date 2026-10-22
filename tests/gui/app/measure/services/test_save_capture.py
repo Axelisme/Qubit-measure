@@ -1,7 +1,7 @@
 """Fixed context/storage through Context, Tab, synchronous Save and RunInputs."""
 
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -32,6 +32,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import GUI_ORIGIN, native_save_session
+from tests.gui.app.measure._record_support import require_record
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -212,8 +213,10 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
         tab_id = tabs.new_tab("pure")
         empty_state.update_tab_result(
             tab_id,
-            native.state.get_tab("tab").run.result,
-            metadata=native.metadata,
+            replace(
+                require_record(native.state.get_tab("tab").run),
+                metadata=native.metadata,
+            ),
         )
         empty_state.set_context(native.state.session_env)
         control = SaveControlFacet(

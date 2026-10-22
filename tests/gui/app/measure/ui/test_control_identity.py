@@ -27,11 +27,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -85,12 +85,14 @@ class StoppableAdapter(OldAdapter):
         requires_soc=False
     )
 
-    def run(self, req: RunRequest, cfg: ConfigBase, *, context: RunContext) -> object:
+    def run(
+        self, req: RunRequest, cfg: ConfigBase, *, context: RunContext
+    ) -> RunRecord[ExpCfgModel, object]:
         del req, cfg
         # The test Stop/close action releases this held adapter via cancellation.
         if not context.cancel_signal.event.wait(30):
             raise RuntimeError("test run was not stopped")
-        return object()
+        return RunRecord(None, object())
 
 
 class ModalRuntimeCfg(ExpCfgModel):
@@ -110,11 +112,13 @@ class ModalLoadAdapter(OldAdapter):
     experiment_tag: ClassVar[str | None] = "test/load"
 
     def restore(
-        self, stored: StoredRun
+        self, stored: Container
     ) -> RestoredRun[RunRecord[ModalRuntimeCfg, ModalLoadResult]]:
         return RestoredRun(
             RunRecord(
-                cfg=ModalRuntimeCfg(), result=ModalLoadResult(stored.metadata.run_id)
+                cfg=ModalRuntimeCfg(),
+                result=ModalLoadResult(metadata_from_container(stored).run_id),
+                metadata=metadata_from_container(stored),
             ),
             None,
         )

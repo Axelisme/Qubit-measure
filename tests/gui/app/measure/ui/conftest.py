@@ -1,6 +1,7 @@
 """Shared real measure UI composition and teardown for public view contracts."""
 
 from collections.abc import Callable, Generator, Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_record
 
 
 @pytest.fixture
@@ -66,8 +68,7 @@ def live_ui(
         original = session.state.get_tab("tab")
         session.state.update_tab_result(
             tab_id,
-            original.run.result,
-            metadata=session.metadata,
+            replace(require_record(original.run), metadata=session.metadata),
             parameters=original.run.parameters,
         )
         window = MainWindow(

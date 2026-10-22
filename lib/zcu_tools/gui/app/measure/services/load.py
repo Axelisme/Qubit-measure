@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import load
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -128,11 +129,12 @@ class LoadService:
         storage = None if captured is None else captured.bind_aliases((), {}).storage
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
-            stored = load_run_data(Path(data_path))
-            if stored.metadata.experiment != tab.adapter.experiment_tag:
+            stored = load(Path(data_path))
+            metadata = metadata_from_container(stored)
+            if metadata.experiment != tab.adapter.experiment_tag:
                 raise ValueError(
                     f"Expected experiment tag {tab.adapter.experiment_tag!r}, "
-                    f"got {stored.metadata.experiment!r}"
+                    f"got {metadata.experiment!r}"
                 )
             restored = tab.adapter.restore(stored)
         except NotImplementedError as exc:
@@ -151,7 +153,12 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
-        metadata = stored.metadata
+        metadata = restored.record.metadata
+        if metadata is None:
+            raise LoadDataError(
+                f"{data_path}: restored record has no metadata",
+                reason_code="invalid_data_file",
+            )
         history = metadata.snapshot
         parameters = None
         if (
@@ -167,7 +174,6 @@ class LoadService:
             tab_id,
             restored.record,
             data_path,
-            metadata=metadata,
             parameters=parameters,
             storage=storage,
         )

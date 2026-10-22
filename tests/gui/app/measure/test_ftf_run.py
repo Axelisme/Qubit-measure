@@ -7,8 +7,9 @@ from typing import ClassVar
 import numpy as np
 import pytest
 import yaml
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import load
 from zcu_tools.experiment.ftf import ftf
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
@@ -153,10 +154,10 @@ def test_ftf_yaml_environment_runs_and_saves_only_public_iq(ftf_window):
     assert saved["ok"], saved
     runs = ctrl.save_control.list_saved_runs()
     assert len(runs) == 1 and runs[0].data_path is not None
-    stored = load_run_data(runs[0].data_path)
-    values = next(iter(stored.payload.variables.values())).data.values
+    stored = load(runs[0].data_path)
+    values = next(iter(stored.vars.values())).values
     assert np.isfinite(values).all()
     assert np.any(values != 0)
-    assert stored.metadata.completion == "complete"
-    assert stored.metadata.provenance is not None
-    assert stored.metadata.provenance.simulation_id is not None
+    assert metadata_from_container(stored).completion == "complete"
+    assert metadata_from_container(stored).provenance is not None
+    assert metadata_from_container(stored).provenance.simulation_id is not None

@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 import numpy as np
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.workflows import Failed, WorkflowEnv
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
