@@ -16,7 +16,7 @@ Description 的 options 只列 detached value、label 與 command name／label�
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。沒有初值宣告的必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
 
-`InputDefault(factory)` 是欄位或型別別名上的 fresh-input metadata。只有欄位沒有 Pydantic default 或 default_factory 時，`static_defaults` 才呼叫 factory，並複製其有限 JSON 結果。外層 metadata 覆蓋內層別名的宣告。它不改 Pydantic 值預設、驗證或已存在的 authored input；具體型別的初值由宣告者提供，Core 不猜選項。
+`InputDefault(factory)` 是 adapter 依領域知識填 fresh raw input 的管道，可放在欄位或型別別名。只有欄位沒有 Pydantic default 或 default_factory 時，`static_defaults` 才呼叫 factory，並複製其有限 JSON 結果。外層 metadata 覆蓋內層別名的宣告。它不改 Pydantic 值預設、驗證或已存在的 authored input；具體型別的初值由宣告者提供，Core 不猜選項。
 
 FormModel 的實例承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags。FormState 擁有 draft/base、batch write、branch switch、結果、差異與 recursive restore。宿主持有 Engine revision 與提交 policy。
 
@@ -46,7 +46,7 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `FormModel.default_input` 與 `FormInput` 在入口拒絕未標 tag 的 `str | Model` 欄位。ValueError 指出欄位路徑與不支援的形狀。檢查走過 nullable、alias 與所有 model branches，包含未啟用的分支；它不讀 captured sources。Key-or-inline input 必須使用明確的 tagged ref／inline union，不能靠 JSON 字串或物件型別選分支。持久 Spec 的 `str | Spec` 不改，生成器在 input 邊界投影成 tagged wrappers。
 
-Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gui.form_adapter.sweep` 擁有。Core 不辨識 sweep 型別或其 tag。
+Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gui.form_adapter.sweep` 擁有。座標與採樣值必填。未指定初值時，adapter 的 fresh input 只選 Range + Expts，不填數值。Core 不辨識 sweep 型別或其 tag。
 
 Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result 與 defaults evaluation 的 expression 能力。Restore 仍保留這些 invalid raw。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 
@@ -73,6 +73,8 @@ FormState 的 subscriber 在 input 安裝後同步執行。個別 subscriber 故
 FormState.preview 提供隔離的 ordinary leaf values 與完整 errors，供 view 在 model-invalid draft 中顯示其他欄位的新求值結果。失敗的 expression 或含失敗子值的 whole container 不提供值。成功時包含 Pydantic defaults 與 coercions，不把它們寫回 input。Preview values 不代表可提交；host 仍檢查 errors 與 view 的 local parse errors。
 
 WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外，message 由 host 寫給使用者看。Host 在寫入任何內容前 raise，FormState 維持原狀；model 會拒絕的值仍寫進 state，由 result 回報。Core 自己不 raise 它。Editor 收到時保留該欄輸入並顯示 message，其他例外照常拋出。
+
+`Display` 在巢狀 `Annotated` 與具名 alias 間逐屬性疊加。外層只覆蓋明示的 keyword，未指定者沿用內層。明示 `False` 或 `None` 也會覆蓋；例如 `Display(label="Fluxes")` 保留 alias 的 `selector=False`，`Display(selector=True)` 則重新顯示 dropdown。公開屬性仍回傳具體預設值；使用 `display.overlay(outer)` 合成 metadata 時會保留未指定狀態，不要把所有屬性重新傳入建構子。`InputDefault` 仍以外層整份宣告覆蓋內層。其他 metadata 沿用原有的完整宣告與優先規則，不套用 Display 的逐屬性疊加。
 
 Display 承載欄位呈現資訊與 readonly 寫入限制。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，包含其子類別。Union 位置的 tag 仍是 selector。`Display(selector=False)` 只隱藏 dropdown，仍保留 selector metadata 與 active branch。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
 

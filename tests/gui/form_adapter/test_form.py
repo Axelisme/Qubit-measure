@@ -186,18 +186,41 @@ def test_blank_range_endpoints_remain_required_when_input_keys_are_absent(
     assert cfg.sweep.freq.expts == 4
     assert cfg.sweep.freq.step == (cfg.sweep.freq.stop - cfg.sweep.freq.start) / 3
 
-    # Requiredness belongs to this authored form, not the shared range class.
+    # Even a literal-authored form requires endpoints absent from a restored draft.
     control = form_adapter.Form(
         ScalarCfg, {"sweep": {"freq": nodes.Range(2.0, 8.0, 4)}}
     )
     control_state = FormState(
         FormInput(control.model, {"sweep": {"freq": {"kind": "linrange", "n": 4}}})
     )
-    control_cfg = control.to_cfg(require_result(control_state, env), env)
-    if isinstance(control_cfg, FormErrors):
-        pytest.fail(str(control_cfg.messages))
-    assert control_cfg.sweep.freq.start == 0.0
-    assert control_cfg.sweep.freq.stop == 1.0
+    missing_control = control_state.result(env)
+    assert isinstance(missing_control, FormErrors)
+    assert missing_control.messages == {
+        ("sweep", "freq", name): "Field required" for name in ("start", "stop")
+    }
+
+
+def test_generated_sweep_fresh_input_requires_all_coordinates() -> None:
+    env = FormEnv()
+    form = form_adapter.Form(ScalarCfg, {})
+    state = FormState(form.default_input(env))
+    assert state.input.data["sweep"] == {"freq": {"kind": "linrange"}}
+    missing = state.result(env)
+    assert isinstance(missing, FormErrors)
+    assert {
+        ("sweep", "freq", name) for name in ("start", "stop", "n")
+    } <= missing.messages.keys()
+    state.write(
+        {
+            ("sweep", "freq", "start"): 2,
+            ("sweep", "freq", "stop"): 8,
+            ("sweep", "freq", "n"): 4,
+        },
+        env,
+    )
+    cfg = form.to_cfg(require_result(state, env), env)
+    assert isinstance(cfg, ScalarCfg)
+    assert cfg.sweep.freq == SweepCfg(start=2, stop=8, expts=4, step=2)
 
 
 class PreciseSweepCfg(ConfigBase):

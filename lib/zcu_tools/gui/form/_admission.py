@@ -4,8 +4,9 @@ from collections.abc import Iterable, Iterator, Mapping
 
 from pydantic import BaseModel, JsonValue
 
+from ._display import field_display
 from ._structure import alternatives, list_model, selected
-from .model import Display, FormInput, FormInputRejected, FormModel, FormWritePath
+from .model import FormInput, FormInputRejected, FormModel, FormWritePath
 from .options import Option
 
 
@@ -41,10 +42,7 @@ def _readonly_fields(
     for name, info in model.model_fields.items():
         path = (*prefix, name)
         old, new = before.get(name), after.get(name)
-        display = next(
-            (item for item in reversed(info.metadata) if isinstance(item, Display)),
-            Display(),
-        )
+        display = field_display(info)
         if display.readonly:
             changed = (name in before) != (name in after) or not _equal(old, new)
             yield path, old, changed

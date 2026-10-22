@@ -325,8 +325,12 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
     class RangeAliasForm(FormModel):
         """Reuse the exported linear range model at two independent paths."""
 
-        restricted: LinRange = Field(default_factory=LinRange)
-        unrestricted: LinRange = Field(default_factory=LinRange)
+        restricted: LinRange = Field(
+            default_factory=lambda: LinRange(start=0, stop=1, n=3)
+        )
+        unrestricted: LinRange = Field(
+            default_factory=lambda: LinRange(start=0, stop=1, n=3)
+        )
 
         @classmethod
         def choices(cls, _env: FormEnv, /) -> Mapping[FormPath, tuple[JsonValue, ...]]:
@@ -335,8 +339,8 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
 
     env = FormEnv()
     valid: dict[str, JsonValue] = {
-        "restricted": {"kind": "linrange", "n": 2},
-        "unrestricted": {"kind": "linrange", "n": 3},
+        "restricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 2},
+        "unrestricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 3},
     }
     result = FormState(FormInput(RangeAliasForm, valid)).result(env)
     assert isinstance(result, RangeAliasForm)
@@ -346,15 +350,15 @@ def test_public_range_alias_projects_choices_without_reused_field_pollution() ->
     assert result.unrestricted.n == 3
     # Only the unrestricted occurrence is a text field taking an expression.
     expression: dict[str, JsonValue] = {
-        "restricted": {"kind": "linrange", "n": 2},
-        "unrestricted": {"kind": "linrange", "n": {"expr": "3"}},
+        "restricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 2},
+        "unrestricted": {"kind": "linrange", "start": 0, "stop": 1, "n": {"expr": "3"}},
     }
     assert isinstance(
         FormState(FormInput(RangeAliasForm, expression)).result(env), RangeAliasForm
     )
     invalid: dict[str, JsonValue] = {
-        "restricted": {"kind": "linrange", "n": 3},
-        "unrestricted": {"kind": "linrange", "n": 3},
+        "restricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 3},
+        "unrestricted": {"kind": "linrange", "start": 0, "stop": 1, "n": 3},
     }
     errors = FormState(FormInput(RangeAliasForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)
@@ -373,14 +377,19 @@ def test_nullable_public_range_alias_projects_choices_and_null() -> None:
             return {("fluxes", "n"): (2,)}
 
     env = FormEnv()
-    values: tuple[JsonValue, ...] = (None, {"kind": "linrange", "n": 2})
+    values: tuple[JsonValue, ...] = (
+        None,
+        {"kind": "linrange", "start": 0, "stop": 1, "n": 2},
+    )
     for value in values:
         valid: dict[str, JsonValue] = {"fluxes": value}
         assert isinstance(
             FormState(FormInput(NullableAliasForm, valid)).result(env),
             NullableAliasForm,
         )
-    invalid: dict[str, JsonValue] = {"fluxes": {"kind": "linrange", "n": 3}}
+    invalid: dict[str, JsonValue] = {
+        "fluxes": {"kind": "linrange", "start": 0, "stop": 1, "n": 3}
+    }
     errors = FormState(FormInput(NullableAliasForm, invalid)).result(env)
     assert isinstance(errors, FormErrors)
     assert ("fluxes", "n") in errors.messages
