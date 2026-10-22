@@ -55,7 +55,11 @@ def test_invalid_topology_or_material_is_rejected(defect, diagnostic):
     elif defect == "version":
         document["version"] = True
     elif defect in ("mux", "pulse", "pulse_adc"):
-        field = {"mux": "mux_gen_ch", "pulse": "pulse_gen_ch", "pulse_adc": "pulse_ro_ch"}[defect]
+        field = {
+            "mux": "mux_gen_ch",
+            "pulse": "pulse_gen_ch",
+            "pulse_adc": "pulse_ro_ch",
+        }[defect]
         document[field] = 99
     elif defect == "source":
         document["dc_source"]["name"] = "other"
