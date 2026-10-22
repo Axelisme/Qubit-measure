@@ -26,6 +26,42 @@ Open 或表單的 Reset 會固定捕捉當時的 aliases、參數與 module libr
 
 保存本次資料及 cfg。重新載入後的分析與提案只用該次來源；Load 保持目前表單原值。歷史來源缺失時，部分分析仍可顯示數值，pulse proposal 則需要完整的量測來源。
 
+## Run 前的表單與環境檢查
+
+MCP `status` 的 `ready.can_run` 只檢查 entry、active context、SoC 與至少一張 tab 是否存在。它不表示這張 FTF 表單有效。即使回覆 `can_run=true`、`missing=[]`，仍先用 `tab.get_cfg` 讀目標 tab 的 `input`、`values`、`errors`，補齊必填值並重新檢查。查單一欄位的 metadata 用 `tab.describe_cfg`。呼叫方式見 [MCP 連線與觀察](../../../lib/zcu_tools/mcp/measure/README.md#連線與觀察)。
+
+表單有效只表示 cfg 通過驗證，不表示初值已校準、硬體操作已獲授權或 Run 一定能取得控制權。先核對實際接線、安全範圍與量測來源，再 Run。
+
+## 採樣數與成本
+
+Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`rounds` 是 software acquisition rounds。完整量測的每座標、每分支採樣數是 `reps × rounds`。有多個 sweep 軸時，座標數是各軸點數的乘積；分支數另外乘入。Mux 的兩個 tones 屬於同一 shot，不是兩份獨立 joint samples。
+
+以下是單 qubit 準備流程的初開值，尚未計入對 F1、F2 各做一次的倍數。Open／Reset 的來源或人工編輯可能改變目前 cfg，Run 前以表單為準。
+
+| 入口 | 初開採樣設定 | 一次完整 Run 的採樣數 |
+| --- | --- | --- |
+| Resonator spectroscopy，onetone freq | 301 個頻率，reps=100、rounds=100 | 每頻率 10,000 次，共 3,010,000 次。 |
+| Qubit spectroscopy，twotone freq | 301 個頻率，reps=1000、rounds=100 | 每頻率 100,000 次，共 30,100,000 次。 |
+| GE single-shot | shots=100000，probe off／on 各一分支 | 每分支 100,000 shots，共 200,000 shots。此入口內部使用 reps=shots、rounds=1，不再乘一組平均次數。 |
+
+兩 qubit FTF 表單未另設平均數時，初開 reps=1、rounds=1，每座標、每分支只有一個 raw joint shot。這個數量不代表分類、擬合或校準已有足夠統計。各入口的總量依下列軸計算，DC sweep 關閉時 DC 點數取 1。
+
+| FTF 入口 | 總 joint shots |
+| --- | --- |
+| Joint readout | `4 × reps × rounds`，四個名目準備分支。 |
+| Idle ZZ | `DC 點數 × 2 spectator 分支 × delay 點數 × reps × rounds`。 |
+| Conditional spectroscopy | `DC 點數 × 4 準備分支 × frequency 點數 × reps × rounds`。 |
+| Constructive phase／chevron | `phase 或 frequency 點數 × duration 點數 × reps × rounds`。Chevron 初開為 25×101 點，端點仍須人工提供。 |
+| CZ amplitude | `scale 點數 × reps × rounds`。 |
+| Conditional phase | `frequency 點數 × gate-count 個數 × 2 spectator 分支 × 2 projections × reps × rounds`。 |
+| Local Z | `gate-count 個數 × 2 targets × 2 projections × reps × rounds`。 |
+
+估算硬體採集時間時，先用 `總 shots × 每 shot 序列時間`。序列時間要包含 preparation、drive、readout 與 relax delay。假設每 shot 共 10 µs，上表 onetone、twotone 的純序列時間分別為 30.1 s 與 301 s。這只是換算例，不是執行時間保證。編譯、傳輸、round 交接、DC ramp／settle、繪圖與保存都另計；gate-count 改變序列長度時，要分座標加總。
+
+FTF raw IQ 保存完整 tones 與 shots。Complex128 IQ 的陣列大小約為 `總 joint shots × tone 數 × 16 bytes`，尚未計入分析陣列與保存開銷。例如 chevron 25×101 點、兩 tones、reps=1000、rounds=1，raw IQ 約 80.8 MB。模擬器可重用相同物理條件的計算，因此 wall time 不一定隨 reps 線性增加；抽樣與 raw 輸出仍有成本。先以同一 backend、相近序列與點數實測，再外推，不把硬體序列時間當成模擬秒數。
+
+要縮短操作診斷時，明確減少點數或採樣數並保存該次 cfg，標記為「診斷、非校準」。本指南不更改正式預設值。低採樣圖只能用來排查接線、流程與掃描窗口，接受校準前仍須取得可判讀的資料與 uncertainty。
+
 ## 分別準備 F1 與 F2，實驗 0a
 
 既有單 qubit 表單使用 `qubit`、`resonator` 與 DC 掃描所需的 `flux_dev`。先把這些 scalar aliases 綁到 F1、它的 readout resonator 與對應 DC source，完成下列步驟。再改綁 F2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 F1 的結果套到 F2。
@@ -48,12 +84,12 @@ Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接�
 
 ## FTF 的四個角色與 tone 對應
 
-| Scalar alias | 指向 | 用途 |
+| Scalar alias | 指向（kickstart／simulation 新 entry 的綁定） | 用途 |
 | --- | --- | --- |
-| `f1` | 第一個 fluxonium component | 取 `$f1.module.x180`／`x90`，供準備與 projection。 |
-| `f2` | 另一個 fluxonium component | 取 `$f2.module.x180`／`x90`，使用另一個 charge generator。 |
-| `coupler` | 本對 transmon component | 保存這一對的兩線 CZ pulses 與 local-Z pair。 |
-| `mux` | MuxGroup component | 從 `$mux.module.readout` 取完整 mux readout。缺來源時須手填有效設定；template 只是起點。 |
+| `f1` | 第一個 fluxonium component，`Q1` | 取 `$f1.module.x180`／`x90`，供準備與 projection。既有 entry 缺此角色時，在 Aliases 加入 `f1` 並綁到 `Q1`。 |
+| `f2` | 另一個 fluxonium component，`Q2` | 取 `$f2.module.x180`／`x90`，使用另一個 charge generator。既有 entry 缺此角色時，在 Aliases 加入 `f2` 並綁到 `Q2`。 |
+| `coupler` | 本對 transmon component，`coupler` | 保存這一對的兩線 CZ pulses 與 local-Z pair。 |
+| `mux` | MuxGroup component，`MG12` | 從 `$mux.module.readout` 取完整 mux readout。缺來源時須手填有效設定；template 只是起點。 |
 
 F1 的 tone 是 `$f1` component 在 Open／Reset 所固定的 `$mux.qubits` 中的位置，F2 同理。例如 `f1=FA`、`f2=FB`，`qubits=[FB, FA]`，則 F1 對應 `tones[1]`，F2 對應 `tones[0]`。Tone index 由綁定決定，畫面只供核對。
 

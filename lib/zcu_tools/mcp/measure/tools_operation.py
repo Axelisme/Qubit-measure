@@ -264,7 +264,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
