@@ -25,9 +25,9 @@ def configure_numba_cache() -> None:
     Otherwise use the shared user cache root. Numba retains its ABI/CPU keys.
     Force Numba's built-in user-directory locator; unavailable storage fails
     rather than falling back to unprotected caches. This replaces caller locator
-    settings process-wide. The package import calls this once; changing sources
-    or cache roots requires a new process. Later-created dispatchers in other
-    packages share this root and locator policy.
+    settings process-wide. The first Numba tool import loads this module once;
+    changing sources or cache roots requires a new process. Later-created
+    dispatchers in other packages share this root and locator policy.
     """
     source_root = Path(__file__).parent
     digest = sha256()
@@ -58,3 +58,8 @@ def configure_numba_cache() -> None:
     os.environ["NUMBA_CACHE_LOCATOR_CLASSES"] = "UserProvidedCacheLocator"
     # Numba may already be imported by an application or another package.
     config.reload_config()
+
+
+# Python serializes this module's import across the ADC and evolution entries.
+# Only a successful import is retained; a failed initialization can be retried.
+configure_numba_cache()

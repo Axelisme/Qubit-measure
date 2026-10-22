@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-23，效能量測邊界與重跑入口
+**Last updated:** 2026-10-23，Numba 工具 import 與 basic 工具邊界
 
 **讀者：** framework-dev。查閱數值模擬的責任邊界、快取契約與效能證據入口。
 
@@ -53,12 +53,21 @@ No benchmark CLI is provided by this module.
 
 ## Numba machine-code cache
 
-The first `zcu_tools.simulate` import selects one process-wide Numba cache
-directory before simulator dispatchers are created. Without `NUMBA_CACHE_DIR`,
-it uses `user_cache_root()/numba/<digest>/`; the shared root honors
+Importing `value2flux` or `flux2value` from `zcu_tools.simulate` requires only
+NumPy. This basic import does not load Numba or SciPy, scan simulator sources,
+access cache storage, or set Numba policy.
+
+The first import of `zcu_tools.simulate.evolution` or `zcu_tools.simulate.adc`
+selects one process-wide Numba cache directory before either tool creates
+its dispatchers or first compiles JIT code. Both entries import the same private
+bootstrap module. Python serializes its initialization and retains only a
+successful import, so multiple tools share one namespace without nesting it.
+A failed bootstrap propagates its error and is retried on the next tool import.
+Without `NUMBA_CACHE_DIR`, it uses `user_cache_root()/numba/<digest>/`.
+The shared root honors
 `ZCU_TOOLS_CACHE_DIR`. An existing `NUMBA_CACHE_DIR` becomes a parent:
 `<NUMBA_CACHE_DIR>/zcu-simulate-<digest>/`. Set overrides before the first
-simulator import. Changing them later requires a new process.
+Numba tool import. Changing them later requires a new process.
 
 The SHA-256 namespace includes every simulator `.py` file's relative name and
 contents, plus the Python, Numba, NumPy and SciPy versions. Changing an inline
@@ -77,7 +86,7 @@ already-created dispatchers keep their existing cache locations.
 The namespace does not track other packages' sources, runtime monkeypatches,
 or changes to external native libraries. It does not make those packages'
 cross-module caches safe. Old namespaces remain on disk until the cache owner
-removes them; importing the simulator does not prune them.
+removes them; importing a Numba tool does not prune them.
 
 Existing `cache=True` dispatchers can load machine code on a later launch with
 matching sources, versions and signatures. This does not persist physical

@@ -6,6 +6,7 @@ receiver noise. ADC owns complete integrated raw sums and numeric layout;
 acquisition normalization belongs to program.
 """
 
+from .. import _numba_cache  # Bootstrap before any dispatcher is created.
 from .cache import ReadoutCache
 from .cavity import (
     CavityAverageCache,

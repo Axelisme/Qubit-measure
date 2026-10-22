@@ -5,10 +5,6 @@ from typing import overload
 import numpy as np
 from numpy.typing import NDArray
 
-from ._numba_cache import configure_numba_cache as _configure_cache
-
-_configure_cache()
-
 
 @overload
 def value2flux(

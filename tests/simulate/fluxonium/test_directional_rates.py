@@ -21,6 +21,28 @@ from zcu_tools.simulate.fluxonium.coherence.rates import (
 )
 
 
+def raw_directional_rates(raw, channels, esys, temperature):
+    """Independent raw-scqubits rates, indexed by [target, source]."""
+    levels = len(esys[0])
+    expected = np.zeros((levels, levels))
+    for source in range(levels):
+        for target in range(levels):
+            if source == target:
+                continue
+            expected[target, source] = raw.t1_effective(
+                noise_channels=channels,
+                common_noise_options={
+                    "i": source,
+                    "j": target,
+                    "T": temperature,
+                    "total": False,
+                },
+                esys=esys,
+                get_rate=True,
+            )
+    return expected
+
+
 @pytest.mark.parametrize(
     "noise,channels",
     [
@@ -48,22 +70,7 @@ def test_directional_channels_preserve_scalar_lifetimes_and_balance(noise, chann
         params, flux, esys, noise, cutoff=16, temperature_k=temperature
     )
     raw = Fluxonium(*params, flux=flux, cutoff=16, truncated_dim=4)
-    expected = np.zeros((4, 4))
-    for source in range(4):
-        for target in range(4):
-            if source == target:
-                continue
-            expected[target, source] = raw.t1_effective(
-                noise_channels=channels,
-                common_noise_options={
-                    "i": source,
-                    "j": target,
-                    "T": temperature,
-                    "total": False,
-                },
-                esys=esys,
-                get_rate=True,
-            )
+    expected = raw_directional_rates(raw, channels, esys, temperature)
     assert_allclose(actual, expected, rtol=2e-13, atol=1e-25)
     assert_allclose(np.diag(actual), 0, atol=0)
     assert np.all(actual >= 0)
@@ -163,25 +170,16 @@ def test_secular_projected_losses_and_nonzero_photon_dephasing():
     _, dc_vectors = calculate_eigensystem(params, dc, cutoff=18, evals_count=3)
     projected = (secular.energies_ghz, dc_vectors @ secular.eigenvectors)
     raw = Fluxonium(*params, flux=0.42, cutoff=18, truncated_dim=3)
-    expected = np.zeros((3, 3))
-    for source in range(3):
-        for target in range(3):
-            if source != target:
-                expected[target, source] = raw.t1_effective(
-                    noise_channels=[
-                        ("t1_capacitive", {"Q_cap": 1e6}),
-                        ("t1_inductive", {"Q_ind": 1e8}),
-                        ("t1_quasiparticle_tunneling", {"x_qp": 2e-7}),
-                    ],
-                    common_noise_options={
-                        "i": source,
-                        "j": target,
-                        "T": temperature,
-                        "total": False,
-                    },
-                    esys=projected,
-                    get_rate=True,
-                )
+    expected = raw_directional_rates(
+        raw,
+        [
+            ("t1_capacitive", {"Q_cap": 1e6}),
+            ("t1_inductive", {"Q_ind": 1e8}),
+            ("t1_quasiparticle_tunneling", {"x_qp": 2e-7}),
+        ],
+        projected,
+        temperature,
+    )
     assert_allclose(secular.rates_per_ns, expected, rtol=2e-12, atol=1e-25)
     resonator = DispersiveResonator(6.0, 0.03, 0.006, thermal_occupation=0.02)
     thermal = model.secular_model((0,), noise=noise, resonator=resonator)
