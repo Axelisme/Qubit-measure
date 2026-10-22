@@ -35,6 +35,40 @@ def test_only_framework_or_defined_lab_calls_can_be_awaited(target: str) -> None
     ]
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "asyncio.create_task(tab.run())",
+        "create_task(tab.run())",
+        "gather(tab.run())",
+        "wait_for(tab.run(), 1)",
+        "async with asyncio.TaskGroup() as group:\n        pass",
+        "async with TaskGroup() as group:\n        pass",
+        "aio.sleep(0)",
+    ],
+)
+def test_scheduling_calls_are_rejected_even_without_await(statement: str) -> None:
+    source = (
+        "import asyncio as aio\n"
+        f"async def unused(tab):\n    {statement}\n"
+    )
+
+    violations = check_script_awaits.check_sources({"zcu_lab/helpers.py": source})
+
+    assert len(violations) == 1
+
+
+def test_other_async_contexts_and_iterators_are_not_blanket_banned() -> None:
+    source = (
+        "async def run(env):\n"
+        "    async with env.context():\n"
+        "        async for item in env.stream():\n"
+        "            await env.run(item)\n"
+    )
+
+    assert check_script_awaits.check_sources({"zcu_lab/workflows/demo.py": source}) == ()
+
+
 def test_uniform_rule_allows_framework_calls_and_real_lab_helpers() -> None:
     sources = {
         "zcu_lab/recipes/demo.py": (
