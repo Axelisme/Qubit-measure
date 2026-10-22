@@ -18,10 +18,11 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.analysis_project.entry import (
+    AnalysisEntry,
     AnalysisTarget,
-    fluxonium_components,
 )
-from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.resources.entry import RoleResolutionError
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class EntryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Analysis entry")
         self.resize(620, 250)
-        self._target: AnalysisTarget | None = None
+        self._opened: AnalysisEntry | None = None
         self._writable = True
         self._content = QWidget()
         form = QFormLayout(self._content)
@@ -86,14 +87,18 @@ class EntryDialog(QDialog):
         buttons.addWidget(self._write_buttons)
         buttons.addWidget(cancel)
         root.addLayout(buttons)
-        self._root.textChanged.connect(self._invalidate)
-        self._entry.currentTextChanged.connect(self._invalidate)
+        self._connect_inputs()
         self._refresh_entries()
         if target is not None:
             self._entry.setCurrentText(target.entry)
             self._open_entry()
             self._component.setCurrentText(target.component)
         self._update_ok()
+
+    def _connect_inputs(self) -> None:
+        self._root.textChanged.connect(self._invalidate)
+        self._entry.currentTextChanged.connect(self._invalidate)
+        self._component.currentTextChanged.connect(self._update_ok)
 
     def set_writable(self, *, writable: bool) -> None:
         """Gate entry editing and OK while leaving Cancel available."""
@@ -103,19 +108,21 @@ class EntryDialog(QDialog):
 
     def selected_target(self) -> AnalysisTarget | None:
         """Return the opened target with the current component, or None if unopened."""
-        if self._target is None:
+        component = self._component.currentText()
+        if self._opened is None or not component:
             return None
-        return AnalysisTarget.open(
-            self._root.text().strip(), self._target.entry, self._component.currentText()
-        )
+        return self._opened.select(component)
 
     def _invalidate(self, _text: str = "") -> None:
-        self._target = None
+        self._opened = None
         self._component.clear()
         self._update_ok()
 
     def _update_ok(self) -> None:
-        self._write_buttons.setEnabled(self._writable and self._target is not None)
+        selected = self._opened is not None and bool(self._component.currentText())
+        self._write_buttons.setEnabled(self._writable and selected)
+        if selected:
+            self._error.clear()
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -132,9 +139,7 @@ class EntryDialog(QDialog):
         current = self._entry.currentText()
         self._entry.clear()
         try:
-            self._entry.addItems(
-                ResultEntry.list_names(result_root=Path(self._root.text()) / "result")
-            )
+            self._entry.addItems(AnalysisEntry.list_names(self._root.text()))
         except Exception as error:
             logger.exception("Unable to list analysis entries")
             self._error.setText(str(error))
@@ -143,16 +148,21 @@ class EntryDialog(QDialog):
     def _open_entry(self) -> None:
         self._invalidate()
         try:
-            target = AnalysisTarget.open(
+            opened = AnalysisEntry.open(
                 self._root.text().strip(), self._entry.currentText().strip()
             )
-            names = fluxonium_components(target.resource)
         except Exception as error:
             logger.exception("Unable to open analysis target")
             self._error.setText(str(error))
             return
-        self._target = target
-        self._component.addItems(names)
-        self._component.setCurrentText(target.component)
-        self._error.clear()
+        self._opened = opened
+        self._component.addItems(opened.components)
+        self._component.setCurrentIndex(-1)
+        try:
+            target = opened.select()
+        except (InvalidInputError, RoleResolutionError) as error:
+            self._error.setText(str(error))
+        else:
+            self._component.setCurrentText(target.component)
+            self._error.clear()
         self._update_ok()

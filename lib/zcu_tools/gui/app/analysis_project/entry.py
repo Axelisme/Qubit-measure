@@ -21,6 +21,73 @@ def fluxonium_components(entry: ResultEntry) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
+class AnalysisEntry:
+    """Opened entry with legal choices, before choosing an analysis target.
+
+    Analysis binds the real Database root but never reads or saves Database.
+    Missing or invalid qubit aliases do not prevent explicit component choice.
+    """
+
+    result_root: Path
+    entry: str
+    resource: ResultEntry
+
+    @classmethod
+    def open(cls, project_root: str | Path, entry: str) -> AnalysisEntry:
+        """Open an existing entry and require at least one fluxonium component."""
+        project = Path(project_root).resolve()
+        root = project / "result"
+        resource = ResultEntry.open(
+            entry, result_root=root, database_root=project / "Database"
+        )
+        opened = cls(root, entry, resource)
+        if not opened.components:
+            raise InvalidInputError(
+                f"Entry {entry!r} has no fluxonium components",
+                reason_code="no_fluxonium_components",
+            )
+        return opened
+
+    @staticmethod
+    def list_names(project_root: str | Path) -> tuple[str, ...]:
+        """List existing entries under the same project-root convention as open."""
+        return tuple(
+            ResultEntry.list_names(result_root=Path(project_root).resolve() / "result")
+        )
+
+    @property
+    def components(self) -> tuple[str, ...]:
+        """Legal fluxonium choices in setup order, without any default selection."""
+        return fluxonium_components(self.resource)
+
+    def select(self, component: str | None = None) -> AnalysisTarget:
+        """Validate an explicit name, or resolve the qubit alias when omitted.
+
+        Missing/unbound aliases preserve AliasTable errors. Unknown components
+        and non-fluxonium kinds raise InvalidInputError before publication.
+        No default is substituted for an absent or invalid alias.
+        """
+        document = snapshot(self.resource.setup)
+        if component is None:
+            aliases = self.resource.load_aliases().aliases
+            component = AliasTable(
+                [AliasRow(k, v) for k, v in aliases.items()]
+            ).resolve("qubit", document)
+        if component not in document.components:
+            raise InvalidInputError(
+                f"Component {component!r} does not exist in entry {self.entry!r}",
+                reason_code="component_not_found",
+            )
+        if component not in self.components:
+            raise InvalidInputError(
+                f"Component {component!r} must be a fluxonium qubit, got "
+                f"{document.components[component].kind!r}",
+                reason_code="component_kind",
+            )
+        return AnalysisTarget(self.result_root, self.entry, component, self.resource)
+
+
+@dataclass(frozen=True)
 class AnalysisTarget:
     """Existing entry and concrete setup target; analysis never performs Save.
 
@@ -48,29 +115,7 @@ class AnalysisTarget:
         Missing/unbound aliases preserve AliasTable errors. Unknown components
         and non-fluxonium kinds raise InvalidInputError before publication.
         """
-        project = Path(project_root).resolve()
-        root = project / "result"
-        resource = ResultEntry.open(
-            entry, result_root=root, database_root=project / "Database"
-        )
-        document = snapshot(resource.setup)
-        if component is None:
-            aliases = resource.load_aliases().aliases
-            component = AliasTable(
-                [AliasRow(k, v) for k, v in aliases.items()]
-            ).resolve("qubit", document)
-        if component not in document.components:
-            raise InvalidInputError(
-                f"Component {component!r} does not exist in entry {entry!r}",
-                reason_code="component_not_found",
-            )
-        if component not in fluxonium_components(resource):
-            raise InvalidInputError(
-                f"Component {component!r} must be a fluxonium qubit, got "
-                f"{document.components[component].kind!r}",
-                reason_code="component_kind",
-            )
-        return cls(root, entry, component, resource)
+        return AnalysisEntry.open(project_root, entry).select(component)
 
     @property
     def predictor_path(self) -> Path:
