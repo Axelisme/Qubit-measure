@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.workflows import saved_run
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost
 
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
 
@@ -38,7 +38,7 @@ type Rig = tuple[w.Engine[int], w.RunPaths]
 
 @pytest.fixture
 def rig(tmp_path: Path) -> Iterator[Rig]:
-    plots = Plots(NonPresentingHost())
+    plots = w.WorkflowPlots(NonPresentingHost())
     engine = w.Engine(
         w.EnginePorts(
             plots, RecordingBar, ManualClock(), context=7, devices=RecordingDevices()

@@ -109,7 +109,9 @@ Latest-wins 由 sample table owner 決定。GUI、RPC、MCP 沒有 conversion co
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
 每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 Completed.facts，不因 Resume、alias 修改或 Save 刷新 snapshot。
 
-核心只透過 env.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
+核心只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
+每次 env.run attempt 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。
+Decay PNG 由 Completed.value.result 的 times/signals 重畫並疊加既有 fit，summary 從接受的 lifetime history 重畫。MIST gain.png 同樣從 Result 的實際 gains/signals 重畫，不取 operation live 圖。
 Live 與 summary 只建立 enabled lifetime 的圖。圖形副作用不放進 carry。
 GUI forms、measure headless owner、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
 行為比對使用 measure GUI 的 workflow tabs 與離線來源，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。

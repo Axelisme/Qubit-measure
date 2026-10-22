@@ -377,6 +377,15 @@ class Plots(FigureCollection):
         self._finished_figures: NamedFigures | None = None
         self._released: set[Figure] = set()
 
+    def fork(self) -> Plots:
+        """Return an empty independent producer using this same presentation host.
+
+        Membership, Figure ownership, typed handles, finish and release are not
+        shared. The caller owns the new producer's lifecycle. Always return a
+        plain Plots, even when this producer has a frontend-specific subtype.
+        """
+        return Plots(self._host)
+
     def _ensure_active(self) -> None:
         if self._finished:
             raise RuntimeError("Plot operation has finished")

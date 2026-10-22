@@ -183,7 +183,7 @@ def test_author_identity_matches_supplied_run_and_saved_manifest(rig: Rig) -> No
 def test_run_accepts_typed_bound_callable_with_config_parameter(rig: Rig) -> None:
     class Experiment:
         def run(self, config: Cfg, *, context: RunContext) -> int:
-            assert context.plots is rig.plots
+            assert context.plots is not rig.plots
             assert context.devices == {}
             return config.value + 4
 
