@@ -14,7 +14,7 @@
 
 Pause 只停止目前 operation、增加 epoch 並關 gate，不停止 iteration。Resume 只開 gate。CallResult 固定起跑 epoch 與 fn 完成時的 stop bit。Workflow env 決定是否丟棄 partial 並重跑相同 request；host 不重跑外部效果。Commit 等 gate 後更換 iteration child。Script cancel 打開 gate，使作者可收尾。
 
-`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳，第一個錯誤往上傳。`release()` 移除已完成 scope。原 `script_driver.ScriptDriver` 暫只服務尚未遷移的 workflow；其直接 `cancel()` 保留既有邊界語意，不提供控制訊息 inbox。
+`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳。`set_error()` 只在本 scope 記第一個錯誤並停止自己與子孫，不改祖先或兄弟的停止與錯誤狀態。`release()` 移除已完成 scope。原 `script_driver.ScriptDriver` 暫只服務尚未遷移的 workflow；其直接 `cancel()` 保留既有邊界語意，不提供控制訊息 inbox。
 
 ## Explicit simulation environments
 
