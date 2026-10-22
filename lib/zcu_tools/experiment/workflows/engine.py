@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.script_host import PendingQuestion
+from zcu_tools.experiment.stop_signal import CancelResult
 
 from .declaration import WorkflowScript, workflow_definition
 from .execution import WorkflowRun
@@ -36,6 +37,7 @@ class _RunView(Protocol):
     def pause(self) -> RunStatus: ...
     def resume(self) -> RunStatus: ...
     def stop(self) -> RunStatus: ...
+    def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult: ...
     def answer(self, answer: Answer, *, request_id: str) -> RunStatus: ...
     def pending_question(self) -> PendingQuestion | None: ...
     def parse_answer(
@@ -118,6 +120,17 @@ class Engine[C]:
     def stop(self, run_id: str) -> RunStatus:
         """Stop cooperatively; release Ask with None and permit author cleanup."""
         return self._current(run_id).stop()
+
+    def cancel(
+        self, run_id: str, scope: str = "script", *, expected: int | None = None
+    ) -> CancelResult:
+        """Acknowledge a matching live scope; stale run IDs raise RunMismatch.
+
+        scope/expected use ScriptHost's label or label#N contract. Script requests
+        retain Stop lifecycle/journal semantics; narrower requests leave the
+        workflow running. Acknowledgement does not wait for cleanup.
+        """
+        return self._current(run_id).cancel(scope, expected=expected)
 
     def pending_question(self, run_id: str) -> PendingQuestion | None:
         """Read the exact pending host request including id, evidence and schema type."""

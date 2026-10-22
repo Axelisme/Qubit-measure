@@ -155,6 +155,7 @@ class TabService:
             capabilities=tab.adapter.capabilities,
             run=RunPaneSnapshot(
                 result=tab.run.result,
+                partial_result=tab.run.partial_result,
                 source_path=tab.run.source_path,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,

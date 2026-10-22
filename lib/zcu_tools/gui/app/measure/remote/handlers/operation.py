@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+from ._wire_values import cancel_scope_arguments
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -65,6 +68,29 @@ def h_operation_cancel(
             ErrorCode.INVALID_PARAMS, str(exc), reason="unknown_op"
         ) from exc
     return {"status": status}
+
+
+def h_operation_cancel_scope(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Match one scope in an exact GUI Run; do not use the generic cancel hook."""
+    operation_id = params["operation_id"]
+    if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "operation_id must be an integer")
+    scope, expected = cancel_scope_arguments(params)
+    return asdict(
+        adapter.run_analyze_control.cancel_scope(operation_id, scope, expected=expected)
+    )
+
+
+def h_operation_status_scope(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read only the tree owned by the exact active GUI Run handle."""
+    operation_id = params["operation_id"]
+    if not isinstance(operation_id, int) or isinstance(operation_id, bool):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "operation_id must be an integer")
+    return {"active_path": adapter.run_analyze_control.status_scope(operation_id)}
 
 
 def h_operation_await(

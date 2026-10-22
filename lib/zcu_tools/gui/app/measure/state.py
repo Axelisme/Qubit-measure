@@ -81,6 +81,8 @@ class RunPaneState(Generic[T_Result]):
     storage fixes the Save capability: Run admission or Load request storage.
     None means no Save destination. Native Load may have a different analysis
     target; Save still checks this capability against file history.
+    partial_result is the Run owner's completion-time cancellation fact, even
+    without metadata. Non-acquisition replacement and new Run reset it to False.
     """
 
     result: T_Result | None = None
@@ -90,6 +92,7 @@ class RunPaneState(Generic[T_Result]):
     confirmed_run_id: str | None = None
     parameters: ParameterContext | None = None
     storage: PointStorageBinding | None = None
+    partial_result: bool = False
 
 
 @dataclass
@@ -431,12 +434,15 @@ class State(SessionState):
         source_operation_id: int | None = None,
         metadata: RunMetadata | None = None,
         parameters: ParameterContext | None = None,
+        partial_result: bool = False,
     ) -> RetiredPaneResources:
         """Replace result/evidence together and invalidate dependent panes.
 
         metadata must describe this result, never the current session. Omit it
         for non-acquisition replacement. parameters is this result's accepted
         source, or None for context-free data, never a current-context fallback.
+        partial_result is the producer's fixed completion fact, independent of
+        metadata and user Stop intent. Omission resets the fact to False.
         Returns detached resources for cleanup;
         unknown tabs raise KeyError, and off-owner calls fail before mutation.
         """
@@ -448,6 +454,7 @@ class State(SessionState):
             tab_id,
             RunPaneState(
                 result=result,
+                partial_result=partial_result,
                 source_operation_id=source_operation_id,
                 metadata=metadata,
                 parameters=parameters,

@@ -85,6 +85,7 @@ class RunStatus:
     revision is the latest tunables version. reason describes failure or None.
     progress is display-only. pending holds the exact request id, authored
     question and declared answer type while an Ask is answerable, otherwise None.
+    active_path identifies the current live scopes as label/label#sequence.
     """
 
     run_id: str
@@ -96,6 +97,7 @@ class RunStatus:
     reason: str | None
     progress: tuple[ProgressSnapshot, ...]
     pending: PendingQuestion | None = None
+    active_path: str = "script"
 
 
 @dataclass(frozen=True)

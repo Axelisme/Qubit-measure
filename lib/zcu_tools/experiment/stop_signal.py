@@ -3,12 +3,57 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 ErrorStatus: TypeAlias = Literal["interrupted", "failed"]
 ScopeLabel: TypeAlias = Literal[
     "script", "run", "iteration", "operation", "schedule", "acquire"
 ]
+
+
+@dataclass(frozen=True)
+class CancelResult:
+    """Acknowledged scope request, not a promise that work has drained.
+
+    cancelled is True only when the target token was set. reason is scope
+    cancellation requested, scope not active, sequence mismatch, or the recipe
+    admission refusal no run in progress. active_path is the path at the check.
+    """
+
+    cancelled: bool
+    reason: str
+    active_path: str
+
+
+def parse_cancel_scope(
+    scope: object, expected: object = None
+) -> tuple[ScopeLabel, int | None]:
+    """Validate a label or label#N and return its label and expected sequence.
+
+    N and expected must be positive integers; bool is not an integer here.
+    Conflicting sequences, unknown labels and malformed segments raise ValueError.
+    A root's sequence is checked by the resolver, not by this syntax parser.
+    """
+    if expected is not None and (
+        not isinstance(expected, int) or isinstance(expected, bool) or expected <= 0
+    ):
+        raise ValueError("expected must be a positive integer")
+    if not isinstance(scope, str):
+        raise ValueError("scope must be a label or label#N")
+    label, separator, suffix = scope.partition("#")
+    if separator:
+        if not suffix.isascii() or not suffix.isdecimal() or int(suffix) <= 0:
+            raise ValueError("scope sequence must be a positive integer")
+        sequence = int(suffix)
+        if expected is not None and expected != sequence:
+            raise ValueError("scope sequence conflicts with expected")
+        expected = sequence
+    match label:
+        case "script" | "run" | "iteration" | "operation" | "schedule" | "acquire":
+            return label, expected
+        case _:
+            raise ValueError(f"Unknown stop scope label: {label!r}")
 
 
 class ScheduleOutcomeError(RuntimeError):
@@ -87,6 +132,31 @@ class StopSignal:
                 segments.append(f"{child.label}#{child.sequence}")
                 child = child.active_child
             return "/".join(segments)
+
+    def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
+        """Atomically match the active path and set one scope and its descendants.
+
+        scope is a label or label#N. run aliases operation unless this tree has
+        a run root. Missing targets and stale sequences return a refusal with
+        the current path; malformed input raises ValueError. Roots have no
+        sequence. Child creation/release shares this check's tree lock.
+        """
+        label, sequence = parse_cancel_scope(scope, expected)
+        if label == "run" and self.label != "run":
+            label = "operation"
+        with self._lock:
+            path = self.active_path
+            token: StopSignal | None = self
+            while token is not None and token.label != label:
+                token = token.active_child
+            if token is None:
+                return CancelResult(False, "scope not active", path)
+            if sequence is not None and (
+                token.sequence == 0 or token.sequence != sequence
+            ):
+                return CancelResult(False, "sequence mismatch", path)
+            token.set()
+            return CancelResult(True, "scope cancellation requested", path)
 
     @property
     def partial_result(self) -> bool:

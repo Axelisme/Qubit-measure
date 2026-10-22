@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pydantic import JsonValue
 
 from zcu_tools.core.script_protocol import Answer
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.experiment.workflows import (
     Actor,
     CommittedRecord,
@@ -234,6 +235,14 @@ class WorkflowControlFacet:
     def resume(self, run_id: str) -> int:
         """Continue a delivered paused run with its original operation token."""
         result = self._run_tab(run_id).run.resume(run_id)
+        self._notify()
+        return result
+
+    def cancel(
+        self, run_id: str, scope: str = "script", *, expected: int | None = None
+    ) -> CancelResult:
+        """Match one scope in the explicit native run, acknowledging without drain."""
+        result = self._run_tab(run_id).run.cancel(run_id, scope, expected=expected)
         self._notify()
         return result
 

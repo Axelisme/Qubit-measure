@@ -21,14 +21,14 @@ from pydantic import BaseModel
 
 from zcu_tools.core.script_protocol import Answer, Question
 
-from .stop_signal import StopSignal
+from .stop_signal import CancelResult, StopSignal, parse_cancel_scope
 
 logger = logging.getLogger(__name__)
 
 type ScriptStatus = Literal[
     "ready", "running", "paused", "completed", "cancelled", "failed"
 ]
-type CancelScope = Literal["script", "run"]
+type CancelScope = str
 
 
 @dataclass(frozen=True)
@@ -309,31 +309,31 @@ class ScriptHost:
 
         self._command(apply, allow_idle=True)
 
-    def cancel(self, *, scope: CancelScope = "script") -> None:
-        """Acknowledge cooperative script or current-operation stop on the loop.
+    def cancel(
+        self, scope: str = "script", *, expected: int | None = None
+    ) -> CancelResult:
+        """Match and stop a live scope on the loop, acknowledging without drain.
 
-        Script sets the root, releases a pending ask with None, and causes later
-        operations to inherit stop. Run sets only the active operation token;
-        subsequent calls are unaffected. No active run is a no-op. This method
-        never waits for operation drain and never cancels the author Task.
-        Before run, script cancellation is retained; after terminal it is a no-op.
+        scope is a label or label#N; expected optionally guards its birth number.
+        run aliases the current operation. A successful script request also opens
+        the gate and releases Ask with None. Other targets leave parents running.
+        Invalid syntax raises ValueError; inactive/stale targets return a refusal.
+        Before run, script stop is retained; terminal hosts refuse further stops.
         """
-        if scope not in ("script", "run"):
-            raise ValueError("scope must be script or run")
+        label, _sequence = parse_cancel_scope(scope, expected)
 
-        def stop() -> None:
+        def stop() -> CancelResult:
             if self._done.is_set():
-                return
-            if scope == "script":
-                self._root.set()
+                return CancelResult(False, "scope not active", self.active_path)
+            result = self._root.cancel(scope, expected=expected)
+            if result.cancelled and label == "script":
                 if self._gate is not None:
                     self._gate.set()
                 if self._answer is not None and not self._answer.done():
                     self._answer.set_result(None)
-            elif self._active is not None:
-                self._active.set()
+            return result
 
-        self._command(stop, allow_idle=True)
+        return self._command(stop, allow_idle=True)
 
     def close(self) -> None:
         """Request script stop and cooperatively drain before returning off-worker.

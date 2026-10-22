@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from zcu_tools.gui.remote.method_spec import MethodSpec
+from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
 from ._params import (
     default_number,
+    optional_integer,
     required_integer,
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
@@ -46,6 +48,31 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Request cancellation of a GUI-local operation by id (MCP exposes "
             "the fixed cancel(op) tool instead of this internal method).",
             (required_integer("operation_id", "Known GUI-local operation id"),),
+        ),
+        agent=AgentMethodPolicy(exposure="internal"),
+    ),
+    method_entry(
+        "operation.cancel_scope",
+        "operation:h_operation_cancel_scope",
+        MethodSpec(
+            5.0,
+            "Match and cancel a labeled scope in one active Run; stale handles never target the next Run.",
+            (
+                required_integer("operation_id", "Exact GUI Run operation id"),
+                ParamSpec("scope", JsonType.STRING),
+                optional_integer("expected", "Expected positive scope sequence"),
+            ),
+        ),
+        agent=AgentMethodPolicy(exposure="internal"),
+    ),
+    method_entry(
+        "operation.status_scope",
+        "operation:h_operation_status_scope",
+        MethodSpec(
+            5.0,
+            "Read this active Run scope path; stale/non-Run handles return an empty path.",
+            (required_integer("operation_id", "Exact GUI Run operation id"),),
+            readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
     ),

@@ -34,7 +34,8 @@ Schedule acquire failure 回 Failed，作者決定重試、繼續或 return。�
 
 Pause set 當前 operation token、推進 epoch 並關閉 gate，不 set iteration token。被打斷且 stale 的 partial attempt 記為 discarded。Resume 後重跑同一個 callable 與原 capture，作者不會提前收到該 partial。已自然完成的結果等 Resume 後交付，不重跑。
 
-Stop set run scope，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
+`Engine.cancel(run_id, scope, expected=None)` 沿共用 host 核對 label 或 label#N，回 CancelResult，不等待 cleanup。Acquire 只停一次取得，Schedule 停該段後續取得，iteration 停本輪且 commit 後下一輪正常，run 是當前 operation 的別名。Status 回 active_path。例如 `engine.cancel("run-id", "acquire", expected=3)` 拒絕不是第 3 次的 acquire，不停止父 scope。
+\nGUI Stop 與 `Engine.stop` set script 根，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
 
 ## Commit 目錄與保存
 

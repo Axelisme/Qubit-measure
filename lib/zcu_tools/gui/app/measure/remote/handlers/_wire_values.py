@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 import numpy as np
 from pydantic import JsonValue
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
+from zcu_tools.experiment.stop_signal import parse_cancel_scope
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
+
+
+def cancel_scope_arguments(params: Mapping[str, object]) -> tuple[str, int | None]:
+    """Decode scope primitives and translate shared resolver syntax errors."""
+    scope, expected = params.get("scope", "script"), params.get("expected")
+    if not isinstance(scope, str) or (
+        expected is not None and not isinstance(expected, int)
+    ):
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "Invalid scope or expected type")
+    try:
+        return parse_cancel_scope(scope, expected)
+    except ValueError as error:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(error)) from error
 
 
 def context_wire_value(value: object) -> JsonValue:

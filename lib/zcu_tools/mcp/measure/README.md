@@ -117,10 +117,37 @@ Run 未成功取得來源前不要進 Save finalizer，避免 Save 蓋掉原錯�
 
 ### 取消與缺參
 
-`cancel(execution, scope="script"|"run")` 預設 script，沒有 finish_early。
-Run scope 在 host loop 同一回合檢查與 set 正在取得資料的 token。
-Analysis、Ask 或閒置時回 `cancelled=False, reason="no run in progress"`，不改 execution。
-當前 Run 合作返回 `RunResult(partial_result=True)`，recipe 繼續分析、問答與保存。
+`cancel(op=...|execution=...|run_id=..., scope="script", expected=None)` 恰填一個 target。
+`execution` 指本地 recipe 或 standalone analysis，`run_id` 指 native workflow，`op` 指 GUI operation handle。
+細層 scope 與序號只用於 recipe 或 workflow。沒有 finish_early。
+
+| Scope | 效果 |
+| --- | --- |
+| `acquire` | 只停目前 acquire，交付 partial，同一 Schedule 的下一次 acquire 正常。 |
+| `schedule` | 停目前 Schedule 與其後續 acquire，交付 partial，下一個 operation 正常。 |
+| `iteration` | 停本輪及本輪之後出生的 operation。Commit 更換 iteration 後下一輪正常。 |
+| `run` | 停目前 operation，下一個 operation 正常。Recipe 只接受進行中的 `tab.run`；workflow 可停任何 operation。 |
+
+`operation` 是直接的 operation label，recipe analysis 也可被此 scope 停止。
+Recipe 的 run／schedule／acquire 在沒有進行中 `tab.run` 時回
+`cancelled=False, reason="no run in progress"`。Ask 不會被細層 scope 回答或關閉。
+Run scope 在 host loop 同一回合檢查與 set token，當前 Run 合作交付 partial，recipe 繼續。
+
+Status 回 `active_path`，例如 `script/iteration#1/operation#2/schedule#1/acquire#3`。
+只填 label 會取消處理命令時的當前 scope。填 `scope="acquire#3"` 或
+`scope="acquire", expected=3` 可拒絕已換次的 acquire。兩者同填時序號必須相同。
+例如 `cancel(execution="recipe-...", scope="acquire", expected=3)` 只接受目前 GUI Run root 的第 3 次 acquire。
+GUI root 的序號可在下一 Run 重用。跨 Run 精確取消要用
+`cancel(op=17, scope="acquire", expected=3)`，其中 op 來自觀察到的那次 Run。
+細層 op target 必須仍是目前 tab.run handle，舊 op 回 scope not active，不改打新 Run。
+不帶細層 scope 的 generic `cancel(op=17)` 仍保留既有 script Stop 語意。
+不接受整條 slash path。序號必須是正整數，bool 不算整數，壞格式或未知 label 回 invalid_params。
+Script root 沒有序號，`script#1` 或 script 配 expected 都回 sequence mismatch。
+
+回覆保留 execution/workflow snapshot，另帶 `cancelled/reason/active_path`。
+Reason 是 `scope cancellation requested`、`scope not active`、`sequence mismatch`，
+recipe 另有 `no run in progress`。合法但不在路徑上的 scope 或 stale 序號是拒絕資料，不是 tool error。
+`cancelled=True` 只證明已 set token，不證明工作或 cleanup 已 drain，終局仍讀 wait/status。
 
 Script scope 設根 token，當前與後續 Run 都會啟動並返回 partial。
 Analyze、ask_writeback、session.ask 無結果時 raise 普通 `RecipeCancelled`，
@@ -137,6 +164,13 @@ RecipeOutcome 仍只有 completed／failed／cancelled，不把缺參包成失�
 ### Runtime 與回覆
 
 `script_recipe_execution.py` 使用 production `experiment.script_host.ScriptHost`。
+Recipe 的本地樹與 GUI Run 樹分屬兩個 process。Schedule／acquire 經
+`operation.cancel_scope` 以目前 tab.run 的 operation handle 代理，GUI 原子核對自己的樹。
+Status 每次用 `operation.status_scope` 取得尾段，接在本地 path 後，不重列 GUI run root。
+拒絕回覆的 cancelled/reason 保留 GUI 事實，active_path 使用相同合成規則。
+這不是跨 process 原子快照，晚到請求靠 handle 與序號拒絕，不取消下一個 Run。
+GUI `result_state.partial_result` 交付 Run 的完成事實，即使沒有 native metadata 也保留。
+Recipe RunResult 讀這一欄，不因 GUI operation 仍為 finished 而遺失內層取消。
 `recipe_runtime.py` 擁有 GUI binding、wire 解碼、合作取消與 operation source；
 `recipe_host.py` 組合 scheduler、runtime 與 author session。
 `recipe_execution.py` 管理注入 declarations、單一 recipe admission 與 execution 查詢。
@@ -161,14 +195,14 @@ answer 符合 pending question 的 Answer schema 與 evidence 規則。
 不消耗問題、不記 answered。
 問題沒有自動預設回答或 timeout。
 
-Terminal summary 只回 status／report／runs。
+Terminal wait summary 只回 status／report／runs。Status 另帶 active_path。
 Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operation status、
 partial 與 Save 收據，不靠作者補取消報告。
 非終態另帶 execution 與明確的 pending question／analysis。
 `status(execution, detail="full")` 保留 detached Run 前 Form 條件、
 各 stage 的 owner-native summary／invalid、最後明確捕捉的 writeback proposal、各次 writeback_receipts 與 error。
 Scalar、uncertainty、unit 與元素 identity 都沿 owner summary，不重算或套 reporting 宣告。
-Query 不重讀 GUI，也不自動存檔。
+Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重讀 GUI，也不自動存檔。
 
 全域 status 的 entry 是 null 或 GUI entry.info 的 UUID、name、result_path、database_path，
 只讀 metadata，不建立 context observation。
@@ -202,7 +236,8 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 | `workflow_close` | `tab_id`，回 `tab_id/closed`。Busy 回 false，不替 caller Stop。 |
 | `workflow_status` | 可選 `run_id`。明填回 native status 與 tab 識別，省略/null 回 names 與全部 opened tabs。 |
 | `workflow_start` | `tab_id/run_id`，可選 `plan/tunables` batches。回 pending `handle`，用既有 `wait(op=handle)` 觀察終局。 |
-| `workflow_pause/resume/stop` | 明填 native `run_id`。Pause 保留 lease，Resume 重用原 run 與 handle，Stop 等 terminal delivery。 |
+| `workflow_pause/resume/stop` | 明填 native `run_id`。Pause 保留 lease，Resume 重用原 run 與 handle，Stop 維持 script scope，等 terminal delivery。 |
+| `cancel` | 明填 `run_id`，可選 scope 與 expected，經 `workflow.cancel` 核對 native active_path，不另建 workflow execution。 |
 | `workflow_form` | `tab_id/form`，form 是 plan 或 tunables。可選 batch 只 preview，回 input/values/errors。 |
 | `workflow_describe_form` | 同上另給 typed `path`，root 是 []。只加同一 candidate 的單層 metadata，不回整棵 schema。 |
 | `workflow_edit_form` | `tab_id/form/batch`，修改 owner 的 shared draft，回更新後觀察。 |

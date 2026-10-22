@@ -14,6 +14,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.experiment.script_host import PendingQuestion, ScriptHost
+from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
 from zcu_tools.progress_bar import use_pbar_factory
 
 from .artifacts import RecordStarted, RunArtifacts
@@ -349,6 +350,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._host.cancel()
         return self.status()
 
+    def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
+        """Match one live scope on the host loop; script retains explicit Stop."""
+        label, _sequence = parse_cancel_scope(scope, expected)
+
+        def apply() -> CancelResult:
+            result = self._host.cancel(scope, expected=expected)
+            if result.cancelled and label == "script":
+                self.stop()
+            return result
+
+        return self._host.control(apply)
+
     def pending_question(self) -> PendingQuestion | None:
         """Read the host's exact current request, including its unique request id."""
         return deepcopy(self._host.pending_question)
@@ -492,6 +505,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._reason,
                 self._displays.snapshot(),
                 self.pending_question(),
+                self._host.active_path,
             )
 
     def tunables(self) -> TunablesSnapshot:
