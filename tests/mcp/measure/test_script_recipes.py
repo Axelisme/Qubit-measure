@@ -6,7 +6,6 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.script_host import CancelScope
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
@@ -101,9 +100,8 @@ def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
                 partial.append((await tab.run()).partial_result)
                 await tab.analyze("primary", result=Fit)
                 raise AssertionError("Cancelled analysis resumed author")
-            else:
-                fit = await tab.analyze("primary", result=Fit)
-                assert fit is not None
+            fit = await tab.analyze("primary", result=Fit)
+            assert fit is not None
             return Report(count=inputs.count)
         finally:
             threads.append(get_ident())

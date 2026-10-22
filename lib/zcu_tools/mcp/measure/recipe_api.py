@@ -53,6 +53,15 @@ None passed to set/apply retains input rather than clearing it.
 """
 
 
+class RecipeCancelled(Exception):
+    """End a recipe when a cancelled await cannot deliver a value.
+
+    This ordinary exception unwinds author finally blocks without cancelling
+    the author task. Execution reports cancelled, retaining runs but no error
+    for this exception; genuine failures from operations or cleanup remain.
+    """
+
+
 @dataclass(frozen=True)
 class FormError:
     """One owner-reported logical validation error.
@@ -155,8 +164,8 @@ class AnalysisResult[T]:
 
     result is exactly TypeAdapter(T).validate_python(summary); missing or
     incompatible fields raise without repair. status is completed (failed is
-    reserved for operation-level records). Cooperative stop returns None from
-    analyze instead of constructing this model.
+    reserved for operation-level records). Cooperative stop raises
+    RecipeCancelled instead of constructing this model.
     """
 
     result: T
@@ -351,13 +360,16 @@ class RecipeSession:
         """
         return self._runtime.open_tab(adapter, aliases=aliases, reuse=reuse)
 
-    async def ask[A: Answer](self, question: Question[A]) -> A | None:
-        """Wait for this explicit question's validated answer, or None on cancel.
+    async def ask[A: Answer](self, question: Question[A]) -> A:
+        """Wait for a validated answer; raise RecipeCancelled on script cancel.
 
         Only asked evidence is exposed. Invalid answers leave the request pending.
         Asking does not write, supply a timeout, or synthesize acceptance.
         """
-        return await self._runtime.host.ask(question)
+        answer = await self._runtime.host.ask(question)
+        if answer is None:
+            raise RecipeCancelled("Script cancelled while awaiting an answer")
+        return answer
 
 
 class RecipeTab:
@@ -440,12 +452,13 @@ class RecipeTab:
         *,
         result: type[T],
         interactive: bool = False,
-    ) -> AnalysisResult[T] | None:
+    ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
-        No automatic Save or preview occurs. Stopped script/analysis returns
-        None. Invalid stages, missing/superseded Run sources, incompatible summary
-        fields, owner failures and transport errors propagate. interactive=True
+        No automatic Save or preview occurs. Stopped script/analysis raises
+        RecipeCancelled. Invalid stages, missing/superseded Run sources,
+        incompatible summary fields, owner failures and transport errors
+        propagate. interactive=True
         explicitly enables GUI interaction handoff before completion.
         """
         return await self._runtime.analyze(
@@ -474,14 +487,17 @@ class RecipeTab:
         """Capture completed stages' current candidates without asking or writing."""
         return self._runtime.writeback_proposal(self.tab)
 
-    async def ask_writeback(self) -> WritebackAnswer | None:
-        """Ask about a fresh proposal; return validated choices or None on stop.
+    async def ask_writeback(self) -> WritebackAnswer:
+        """Ask for validated choices; raise RecipeCancelled on script cancel.
 
         Reject unknown, changed or duplicate items before author continuation.
         Answering never writes. Call accept_writeback explicitly to write.
         """
         proposal = self.writeback_proposal()
-        return await self._runtime.host.ask(WritebackQuestion(proposal=proposal))
+        answer = await self._runtime.host.ask(WritebackQuestion(proposal=proposal))
+        if answer is None:
+            raise RecipeCancelled("Script cancelled while awaiting writeback choices")
+        return answer
 
     def accept_writeback(self, items: Sequence[WritebackItem]) -> WritebackReceipt:
         """Write selected captured candidates, Primary then Post, without retry.

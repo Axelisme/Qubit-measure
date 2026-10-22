@@ -27,6 +27,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     FormSelector,
     FormSource,
     FormValue,
+    RecipeCancelled,
     RecipeRun,
     RecipeTab,
     RunResult,
@@ -339,7 +340,7 @@ class RecipeRuntime:
         result: type[T],
         *,
         interactive: bool,
-    ) -> AnalysisResult[T] | None:
+    ) -> AnalysisResult[T]:
         """Await analysis without saving, then validate its exact public summary as T."""
         if stage not in ("primary", "post"):
             raise ValueError("stage must be primary or post")
@@ -350,11 +351,7 @@ class RecipeRuntime:
         finally:
             self._publish_analysis(None)
         summary = completion.result
-        return (
-            None
-            if summary is None
-            else AnalysisResult(TypeAdapter(result).validate_python(summary))
-        )
+        return AnalysisResult(TypeAdapter(result).validate_python(summary))
 
     def save(self, tab: str) -> SaveResult:
         """Save fixed Run raw then all completed artifacts and retain the whole attempt."""
@@ -572,7 +569,7 @@ class RecipeRuntime:
         self, tab: str, stage: str, ctx: CallContext, *, interactive: bool
     ) -> object:
         if ctx.stop_signal.is_set():
-            return None
+            raise RecipeCancelled("Script cancelled before analysis")
         run = self._run_ops[tab]
         primary = self._analysis_ops[(tab, "primary")] if stage == "post" else None
         started = _Started.model_validate(
@@ -599,7 +596,7 @@ class RecipeRuntime:
             self.host.control(lambda: self._publish_analysis(pending))
         completion = self._await(started.handle, ctx)
         if completion.status == "cancelled":
-            return None
+            raise RecipeCancelled("Analysis cancelled before delivering a result")
         reply = self._tools.gui.send_gui_rpc(
             "tab.get_analyze_result"
             if stage == "primary"

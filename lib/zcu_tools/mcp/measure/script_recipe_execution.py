@@ -17,7 +17,11 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.script_host import CancelScope, ScriptStatus
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration, RecipeOutcome
+from zcu_tools.mcp.measure.recipe_api import (
+    RecipeCancelled,
+    RecipeDeclaration,
+    RecipeOutcome,
+)
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 from zcu_tools.mcp.measure.recipe_details import RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_host import RecipeHost, RecipeHostFactory
@@ -291,6 +295,8 @@ class ScriptRecipeExecution:
             report = host.scheduler.run(
                 self._definition.coroutine(host.session, inputs)
             )
+        except RecipeCancelled as failure:
+            error = failure
         except RecipeNeedsParameters as failure:
             error = failure
         except Exception as failure:
@@ -300,8 +306,10 @@ class ScriptRecipeExecution:
 
     def _finish(self, report: BaseModel | None, error: Exception | None) -> None:
         host = self._host
-        cancelled = self._cancelled.is_set() or (
-            host is not None and host.scheduler.status == "cancelled"
+        cancelled = (
+            isinstance(error, RecipeCancelled)
+            or self._cancelled.is_set()
+            or (host is not None and host.scheduler.status == "cancelled")
         )
         status = (
             "cancelled" if cancelled else "failed" if error is not None else "completed"
@@ -328,7 +336,7 @@ class ScriptRecipeExecution:
                 pending_question=None,
                 outcome=RecipeOutcome(status, None if cancelled else report, runs),
                 error=ScriptRecipeError(type(error).__name__, str(error))
-                if error is not None
+                if error is not None and not isinstance(error, RecipeCancelled)
                 else None,
             )
             self._condition.notify_all()
