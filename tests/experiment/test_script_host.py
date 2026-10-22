@@ -60,7 +60,8 @@ def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
     async def script() -> int:
         try:
             author_threads.append(get_ident())
-            return await host.call(lambda ctx: executor_threads.append(get_ident()) or 17)
+            completion = await host.call(lambda ctx: executor_threads.append(get_ident()) or 17)
+            return completion.result
         finally:
             author_threads.append(get_ident())
 
@@ -85,8 +86,8 @@ def test_cooperative_cancel_never_cancels_author_and_starts_later_calls(scope: s
 
     async def script() -> str:
         try:
-            calls.append(await host.call(operation))
-            calls.append(await host.call(lambda ctx: ctx.stop_signal.is_set()))
+            calls.append((await host.call(operation)).result)
+            calls.append((await host.call(lambda ctx: ctx.stop_signal.is_set())).result)
             return "author report"
         except asyncio.CancelledError:
             pytest.fail("The host cancelled the author task")
