@@ -165,3 +165,19 @@ def test_unusable_namespace_stops_import_instead_of_loading_unnamespaced_code(
     assert "cannot cache function" in process.stderr
     assert "[cache] data loaded" not in process.stdout
     assert "[cache] data saved" not in process.stdout
+
+
+def test_unreadable_source_directory_stops_import_instead_of_omitting_sources(
+    copied_package: Path, tmp_path: Path
+) -> None:
+    directory = copied_package / "simulate" / "inaccessible_sources"
+    directory.mkdir()
+    (directory / "callee.py").write_text("CONSTANT = 1\n")
+    directory.chmod(0o100)
+    try:
+        process = launch(copied_package, tmp_path / "cache")
+        assert process.returncode != 0
+        assert "PermissionError" in process.stderr
+        assert "inaccessible_sources" in process.stderr
+    finally:
+        directory.chmod(0o700)
