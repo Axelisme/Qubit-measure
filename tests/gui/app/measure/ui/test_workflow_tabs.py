@@ -471,6 +471,27 @@ def _ask_shot(driver: ComponentDriver, root: Path, step: str) -> None:
     (root / f"{step}.txt").write_text(repr(driver.visible()), encoding="utf-8")
 
 
+@pytest.mark.parametrize("reopen", [False, True])
+def test_idle_ask_content_is_hidden_after_open_and_reopen(
+    asking_window, tmp_path, reopen
+):
+    driver = ComponentDriver(asking_window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("asking",))
+    _ask_shot(driver, tmp_path, "idle-ask-01-opened")
+    if reopen:
+        driver.click_tooltip("Close asking (1)")
+        _ask_shot(driver, tmp_path, "idle-ask-02-closed")
+        driver.select_menu("New Tab ▾", ("asking",))
+        _ask_shot(driver, tmp_path, "idle-ask-03-reopened")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
+    assert not any(
+        widget.object_name
+        in {"workflow.ask", "workflow.answer", "workflow.answer_status"}
+        for widget in driver.visible().widgets
+    ), "Removing the Ask tab must also hide its page contents"
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 def test_ask_answer_or_cancel_preserves_visible_exchange(
     asking_window, tmp_path, cancel
@@ -490,7 +511,7 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
     assert "value" in driver.observe(object_name="workflow.answer_schema").text
     assert "等待回答" in driver.observe(object_name="workflow.badge").text
-    assert not driver.observe("Resume").enabled
+    assert _controls(driver) == {"Stop"}
     driver.select_tab("Tunables")
     _ask_shot(driver, tmp_path, "ask-05-tunables")
     driver.click(object_name="workflow.toggle")
@@ -653,8 +674,7 @@ def _check_remote_workflow_controls(driver: ComponentDriver, root: Path) -> None
         "Remote · workflow-agent · online"
     )
     assert driver.observe("Stop").enabled, "Remote must not disable local workflow Stop"
-    assert not driver.observe("Pause").enabled
-    assert not driver.observe("Resume").enabled
+    assert _controls(driver) == {"Stop"}
     assert not driver.observe("Answer").enabled
     driver.select_tab("Tunables")
     _ask_shot(driver, root, "remote-06-remote-tunables")
@@ -738,7 +758,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         qt_until(cleanup_entered.is_set, label="remote Stop author cancellation")
         _ask_shot(driver, tmp_path, "remote-08-local-cancelling")
         assert driver.observe(object_name="control_indicator").text == "Local locked"
-        assert not driver.observe("Start").enabled
+        assert _controls(driver) == {"Stop"}
         assert observed == [
             ("rpc:workflow-agent", False, "paused", token),
             ("gui", True, "paused", token),
