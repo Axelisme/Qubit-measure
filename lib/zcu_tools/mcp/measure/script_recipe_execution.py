@@ -7,6 +7,7 @@ import time
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 from math import isfinite
 from threading import Condition, Event, Thread, current_thread
 from typing import Literal
@@ -18,6 +19,7 @@ from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.script_host import ScriptStatus
 from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.analysis_execution import ExecutionPhase
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeCancelled,
     RecipeDeclaration,
@@ -35,10 +37,15 @@ SCRIPT_TERMINAL = frozenset({"completed", "cancelled", "failed", "needs_paramete
 
 @dataclass(frozen=True)
 class ScriptRecipeError:
-    """Original unhandled failure; type is its class name, message is its diagnostic."""
+    """Unhandled failure: class name, human diagnostic and attempted action phase.
+
+    phase uses ExecutionPhase; unclassified author/Run errors are operation.
+    message is str(exception), without a formatted traceback.
+    """
 
     type: str
     message: str
+    phase: ExecutionPhase = "operation"
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,7 @@ class ScriptRecipeSnapshot:
     missing lists authored parameter paths only at needs_parameters terminal;
     that state has no outcome/error and releases registry admission.
     active_path is the detached local host path; status adds the live GUI tail.
+    finished_at is the UTC ISO-8601 terminal publication time, or None while live.
     """
 
     execution: str
@@ -84,6 +92,7 @@ class ScriptRecipeSnapshot:
     missing: tuple[str, ...] = ()
     details: tuple[RecipeRunDetail, ...] = ()
     active_path: str = "script"
+    finished_at: str | None = None
 
 
 class ScriptRecipeExecution:
@@ -342,6 +351,7 @@ class ScriptRecipeExecution:
                     self._progress,
                     status="needs_parameters",
                     phase="terminal",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
                     pending_question=None,
                     missing=tuple(item.parameter for item in error.missing),
                     outcome=None,
@@ -354,9 +364,16 @@ class ScriptRecipeExecution:
                 self._progress,
                 status=status,
                 phase="terminal",
+                finished_at=datetime.now(timezone.utc).isoformat(),
                 pending_question=None,
                 outcome=RecipeOutcome(status, None if cancelled else report, runs),
-                error=ScriptRecipeError(type(error).__name__, str(error))
+                error=ScriptRecipeError(
+                    type(error).__name__,
+                    str(error),
+                    host.runtime.failure_phase(error)
+                    if host is not None
+                    else "operation",
+                )
                 if error is not None and not isinstance(error, RecipeCancelled)
                 else None,
             )
