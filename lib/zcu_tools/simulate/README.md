@@ -1,12 +1,55 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-22，跨 process Numba machine-code cache
+**Last updated:** 2026-10-23，效能量測邊界與重跑入口
 
-**讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
+**讀者：** framework-dev。查閱數值模擬的責任邊界、快取契約與效能證據入口。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+## Measured performance and reproduction
+
+Call-local reuse of directional-loss operators and matrix elements reduced the
+fixed single-fluxonium flux scan's resident-warm acquisition wall time from
+5.718435 s to 4.505389 s, about 21%. CPU time fell from 5.654049 s to
+3.156055 s. The comparison used revisions `b19d249d` and `66729542`, one
+old/new pair with cProfile, 21 DC points × 41 frequencies and 100 repetitions.
+It retained production pacing, solver precision and physical settings. Complete
+cold and warm signals matched exactly. This does not establish a speedup for
+other environments or workloads.
+
+The source-namespaced Numba cache saved 5.5–17.4 s on the first acquisition in
+a new process when matching sources, dependencies and signatures already had
+machine code on disk. At revision `eef5edf5`, four separate empty-cache/disk-hit
+pairs covered single-fluxonium and FTF flux scans and amplitude Rabi. These
+acquisition timers excluded imports and environment construction and did not use
+cProfile. Each pair represents a possible first measurement after launching a
+GUI process. This is not GUI window startup time, and the four savings must not
+be added. Changed sources, versions or new signatures can still require compile.
+
+These scripts live in the separately retained `sim-bottleneck-opt` task evidence
+bundle, not in a fresh clone or an installed benchmark CLI. Its `scratch/`
+contains the following reproduction entry points:
+
+- `baseline/README.md` and `baseline/run.sh` define the original single/FTF
+  workloads through public experiment `run` and program acquire.
+- `warm-readout/implementation/report.md` describes copying the existing
+  `compare/run.sh` and inputs to a new evidence directory for the old/new pair.
+- `cold-cache/report.md` and `cold-cache/run.sh` define the two-fresh-process
+  comparison. Flux uses 21 × 41 points, reps 100; Rabi uses 41 gains, reps 200.
+- `six-baseline/README.md` and `six-baseline/launch.sh` define six-tone Rabi
+  and T1 plus the separate single-tone range and flux workloads.
+
+Use the original host with the saved evidence bundle, or preserve the bundle and
+adapt its host-specific paths before rerunning elsewhere. An orchestrator must
+provide a live worktree at each measurement's source revision with a locked
+quality environment. Set the script's lane override; archived lanes no longer
+exist. The evidence instructions preserve original configurations, cache state,
+heavy-slot coordination, single-thread limits and production pacing. Python
+entry points use `uv run --directory <live-lane> --no-sync --`. The bundle's
+`scratch/final-report.md` records the numbers, source manifests and limitations.
+No benchmark CLI is provided by this module.
 
 ## Numba machine-code cache
 
