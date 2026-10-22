@@ -151,3 +151,17 @@ def test_unreadable_simulator_source_stops_import_before_using_disk_cache(
     assert process.returncode != 0
     assert "FileNotFoundError" in process.stderr
     assert "unreadable.py" in process.stderr
+
+
+def test_unusable_namespace_stops_import_instead_of_loading_unnamespaced_code(
+    copied_package: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "not-a-directory"
+    parent.write_text("a cache directory cannot be created beneath this file")
+    # A caller-selected fallback must not bypass simulator source invalidation.
+    monkeypatch.setenv("NUMBA_CACHE_LOCATOR_CLASSES", "InTreeCacheLocator")
+    process = launch(copied_package, tmp_path / "cache", numba_parent=parent)
+    assert process.returncode != 0
+    assert "cannot cache function" in process.stderr
+    assert "[cache] data loaded" not in process.stdout
+    assert "[cache] data saved" not in process.stdout
