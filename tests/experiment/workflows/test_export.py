@@ -9,8 +9,13 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import (
+    Axis as ContainerAxis,
+)
+from zcu_tools.datafile import (
+    Container,
     DataVariable,
     LabberMetadata,
+    Variable,
     load,
     load_grouped_labber_data,
     save,
@@ -83,6 +88,169 @@ def test_trace_requires_known_completion_but_not_known_start_time(
             )
         np.testing.assert_array_equal(trace.z, [1 + 2j, 3 - 4j])
         np.testing.assert_array_equal(trace.axes[0].values, [4e9, 5e9])
+
+
+@dataclass
+class SyntheticTraceResult:
+    frequency: np.ndarray
+    flux: np.ndarray
+    signal: np.ndarray
+
+
+@pytest.fixture
+def trace_spec() -> AxesSpec[SyntheticTraceResult, ExpCfgModel]:
+    return AxesSpec(
+        axes=(Axis("frequency", "frequency", "Hz"), Axis("flux", "Flux", "V")),
+        z=ZSpec("signal", "signal", "V"),
+        result_type=SyntheticTraceResult,
+        cfg_type=ExpCfgModel,
+        tag="test/native",
+        data_variable=DataVariable("readout"),
+    )
+
+
+@pytest.fixture
+def stopped_trace() -> Container:
+    container = native_container(
+        metadata=native_metadata().model_copy(update={"completion": "stopped"})
+    )
+    return replace(
+        container,
+        vars={
+            "readout": Variable(
+                np.array([[1 + 2j, 3 - 4j, 5j], [6 + 7j, complex(np.nan, np.nan), 9j]]),
+                (
+                    ContainerAxis("Flux", "V", np.array([0.1, 0.2])),
+                    ContainerAxis("frequency", "Hz", np.array([4e9, 5e9, 6e9])),
+                ),
+                "V",
+            )
+        },
+        docs={
+            **container.docs,
+            "cfg": {"values": {}, "cfg_type": "ExpCfgModel", "schema_version": "1.0"},
+        },
+    )
+
+
+def test_trace_rejects_stopped_by_default(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+) -> None:
+    path = tmp_path / "stopped.h5"
+    save(path, stopped_trace)
+    with pytest.raises(
+        ValueError, match="Expected complete test/native acquisition"
+    ) as error:
+        load_trace(tmp_path, path.name, trace_spec)
+    assert str(path) in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "completion,allow_stopped",
+    [("complete", False), ("complete", True), ("stopped", True)],
+)
+def test_trace_completion_policy_preserves_raw_values_and_inner_first_axes(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+    completion: str,
+    allow_stopped: bool,
+) -> None:
+    path = tmp_path / "trace.h5"
+    metadata = native_metadata().model_copy(update={"completion": completion})
+    save(
+        path,
+        replace(
+            stopped_trace,
+            docs={**stopped_trace.docs, "metadata": metadata.model_dump(mode="json")},
+        ),
+    )
+    try:
+        trace = load_trace(tmp_path, path.name, trace_spec, allow_stopped=allow_stopped)
+    except (TypeError, ValueError) as error:
+        pytest.fail(
+            f"Explicit allow_stopped={allow_stopped} must load {completion} raw data: {error}"
+        )
+    np.testing.assert_array_equal(
+        trace.z, [[1 + 2j, 3 - 4j, 5j], [6 + 7j, complex(np.nan, np.nan), 9j]]
+    )
+    assert trace.z.shape == (2, 3)
+    assert trace.data.unit == "V"
+    assert [(axis.name, axis.unit) for axis in trace.axes] == [
+        ("frequency", "Hz"),
+        ("Flux", "V"),
+    ]
+    np.testing.assert_array_equal(trace.axes[0].values, [4e9, 5e9, 6e9])
+    np.testing.assert_array_equal(trace.axes[1].values, [0.1, 0.2])
+
+
+@pytest.mark.parametrize("completion", ["partial", "unknown"])
+@pytest.mark.parametrize("allow_stopped", [False, True])
+def test_trace_never_allows_partial_or_unknown(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+    completion: str,
+    allow_stopped: bool,
+) -> None:
+    path = tmp_path / "incomplete.h5"
+    metadata = native_metadata().model_copy(update={"completion": completion})
+    save(
+        path,
+        replace(
+            stopped_trace,
+            docs={**stopped_trace.docs, "metadata": metadata.model_dump(mode="json")},
+        ),
+    )
+    with pytest.raises(ValueError, match="Expected complete") as error:
+        load_trace(tmp_path, path.name, trace_spec, allow_stopped=allow_stopped)
+    assert str(path) in str(error.value)
+
+
+@pytest.mark.parametrize("allow_stopped", [False, True])
+@pytest.mark.parametrize(
+    "invalid,diagnosis",
+    [
+        ("tag", "test/native acquisition"),
+        ("unit", "signal unit"),
+        ("missing", "missing variables"),
+        ("empty", "Empty acquisition"),
+    ],
+)
+def test_trace_completion_policy_keeps_validation_and_source_diagnostics(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+    allow_stopped: bool,
+    invalid: str,
+    diagnosis: str,
+) -> None:
+    path = tmp_path / "invalid.h5"
+    metadata = native_metadata().model_copy(
+        update={"completion": "stopped" if allow_stopped else "complete"}
+    )
+    if invalid == "tag":
+        metadata = metadata.model_copy(update={"experiment": "test/other"})
+    variable = stopped_trace.vars["readout"]
+    if invalid == "unit":
+        variable = replace(variable, unit="A")
+    elif invalid == "empty":
+        variable = replace(
+            variable,
+            values=np.empty((0, 3), dtype=complex),
+            axes=(ContainerAxis("Flux", "V", np.array([])), variable.axes[1]),
+        )
+    container = replace(
+        stopped_trace,
+        vars={} if invalid == "missing" else {"readout": variable},
+        docs={**stopped_trace.docs, "metadata": metadata.model_dump(mode="json")},
+    )
+    save(path, container)
+    with pytest.raises(ValueError, match=diagnosis) as error:
+        load_trace(tmp_path, path.name, trace_spec, allow_stopped=allow_stopped)
+    assert str(path) in str(error.value)
 
 
 def inputs(
