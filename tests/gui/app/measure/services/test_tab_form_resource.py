@@ -5,7 +5,7 @@ from inspect import signature
 
 import pytest
 from pydantic import JsonValue
-from zcu_tools.cfg_model import ConfigBase, Expr, Hidden, PulseSpec
+from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta, Hidden, PulseSpec
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
@@ -311,6 +311,42 @@ def test_resource_edit_preview_run_use_capture_until_reset() -> None:
         resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
     assert resource.input.data["amount"] == {"expr": "unfinished +"}
+
+
+def test_refresh_retains_seed_metadata_and_sources_until_reset() -> None:
+    latest = 2.0
+
+    def make_form(ctx: FormContext) -> Form[ScalarCore]:
+        form = Form(ScalarCore, {"amount": Expr("general.ext.amount")})
+        if ctx.parameters is not None and ctx.parameters.value("general.ext.amount") == 2.0:
+            return form.with_seed_metadata(
+                {
+                    ("amount",): FieldMeta(
+                        description="synthetic derived seed",
+                        calibration="uncalibrated",
+                    )
+                }
+            )
+        return form
+
+    resource = resource_api.TabFormResource(
+        make_form=make_form,
+        capture=lambda _aliases: resource_api.TabFormSources(captured_env(latest)),
+        mutation_allowed=lambda: True,
+    )
+    original = resource.diagnostics()
+    assert original[0].seed_source == "synthetic derived seed"
+    assert original[0].uncalibrated is True
+    latest = 5.0
+    resource.refresh_sources()
+    assert resource.input.data == {"amount": 2.0}
+    assert resource.diagnostics() == original
+    resource.reset()
+    assert resource.input.data == {"amount": 5.0}
+    row = resource.diagnostics()[0]
+    assert row.seed_source == "general.ext.amount"
+    assert row.seed_status == "available"
+    assert row.uncalibrated is None
 
 
 def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
