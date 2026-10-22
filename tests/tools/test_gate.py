@@ -13,14 +13,16 @@ def test_formatting_runs_before_anything_measures_the_code() -> None:
     """Measuring first would report a state the formatter is about to replace."""
     names = [step.name for step in gate.steps("abc", ("lib/a.py",), fix=True)]
 
-    assert names == ["ruff import sort", "ruff format", "import contracts", "ratchet"]
+    assert names == [
+        "ruff import sort", "ruff format", "import contracts", "script awaits", "ratchet"
+    ]
 
 
 def test_the_ratchet_runs_even_when_no_python_file_changed() -> None:
     """A candidate can widen a per-file-ignore without touching any Python."""
     names = [step.name for step in gate.steps("abc", (), fix=True)]
 
-    assert names == ["import contracts", "ratchet"]
+    assert names == ["import contracts", "script awaits", "ratchet"]
 
 
 def test_the_rewriting_steps_receive_only_the_changed_files() -> None:
