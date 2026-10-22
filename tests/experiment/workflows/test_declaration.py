@@ -51,8 +51,13 @@ def test_decorator_infers_models_preserves_coroutine_and_defers_execution() -> N
 
 
 def test_catalog_rejects_copied_metadata_and_duplicate_names() -> None:
+    async def original(
+        env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
+    ) -> int:
+        return plan.count + tun.current.reps
+
     try:
-        declared = w.workflow("original", "A synthetic workflow")(script)
+        declared = w.workflow("original", "A synthetic workflow")(original)
     except TypeError as error:
         pytest.fail(f"The async authoring declaration must be accepted: {error}")
 
