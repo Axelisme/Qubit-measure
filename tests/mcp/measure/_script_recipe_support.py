@@ -33,8 +33,9 @@ class ConfirmQuestion(Question[ConfirmAnswer]):
 class SyntheticGui:
     """A wire collaborator; no production recipe or instrument dependencies."""
 
-    def __init__(self, *, hold: bool = False) -> None:
+    def __init__(self, *, hold: bool = False, partial_first: bool = False) -> None:
         self.hold = hold
+        self.partial_first = partial_first
         self.started = Event()
         self.cancelled = Event()
         self.runs = 0
@@ -99,6 +100,7 @@ class SyntheticGui:
                         "result_state": {
                             "available": True,
                             "source_operation_id": self.runs,
+                            "partial_result": self.partial_first and self.runs == 1,
                         },
                     }
                 ]

@@ -24,7 +24,7 @@ from ._support import make_client
 def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
     tmp_path: Path, scope: str
 ) -> None:
-    gui = SyntheticGui()
+    gui = SyntheticGui(partial_first=True)
     waiting = Event()
     released = Event()
     requests: list[tuple[str, dict[str, object]]] = []
@@ -52,7 +52,7 @@ def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
         if method == "operation.await" and params["operation_id"] == 1:
             waiting.set()
             return (
-                {"reason": "completed", "status": "cancelled"}
+                {"reason": "completed", "status": "finished"}
                 if released.is_set()
                 else {"reason": "timeout"}
             )
@@ -94,6 +94,34 @@ def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
         assert not [method for method, _ in requests if method == "operation.cancel"]
     finally:
         released.set()
+        client.context.session.close()
+
+
+def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui(partial_first=True)
+    partials: list[bool] = []
+
+    @recipe("synthetic", "Observe GUI completion independently of control intent")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        partials.append((await tab.run()).partial_result)
+        partials.append((await tab.run()).partial_result)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        assert execution.snapshot().status == "completed"
+        assert partials == [True, False]
+        assert not [
+            method
+            for method, _ in client.transport.sent
+            if method == "operation.cancel_scope"
+        ]
+    finally:
         client.context.session.close()
 
 
