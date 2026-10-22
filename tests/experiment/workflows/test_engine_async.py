@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict, TypeAdapter
-
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.workflows import saved_run
@@ -101,7 +100,8 @@ def test_async_commits_heterogeneous_records_and_tracks_every_live_revision(
             manifest, TypeAdapter(FirstRecord | SecondRecord)
         )
         assert [point.point for point in saved] == [
-            FirstRecord(first=3, latest=8), SecondRecord(value=8)
+            FirstRecord(first=3, latest=8),
+            SecondRecord(value=8),
         ]
         first = json.loads((paths.data_root / "iter/000001/record.json").read_text())
         second = json.loads((paths.data_root / "iter/000002/record.json").read_text())

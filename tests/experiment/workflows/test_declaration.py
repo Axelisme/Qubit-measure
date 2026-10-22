@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
 from functools import wraps
 from types import CoroutineType
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.workflows.declaration import workflow_definition
 
@@ -26,9 +27,7 @@ class Summary(BaseModel):
     count: int
 
 
-async def script(
-    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
-) -> Summary:
+async def script(env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]) -> Summary:
     return Summary(count=plan.count + tun.current.reps)
 
 
@@ -88,7 +87,9 @@ def test_empty_names_are_rejected(name: str) -> None:
     try:
         decorate = w.workflow(name, "A synthetic workflow")
     except TypeError as error:
-        pytest.fail(f"The async authoring declaration must accept a description: {error}")
+        pytest.fail(
+            f"The async authoring declaration must accept a description: {error}"
+        )
     with pytest.raises(ValueError, match="name must not be empty"):
         decorate(script)
 
@@ -102,6 +103,119 @@ def test_synchronous_author_is_rejected() -> None:
     try:
         decorate = w.workflow("synchronous", "Invalid synchronous author")
     except TypeError as error:
-        pytest.fail(f"The async authoring declaration must accept a description: {error}")
+        pytest.fail(
+            f"The async authoring declaration must accept a description: {error}"
+        )
     with pytest.raises(TypeError, match="coroutine"):
         decorate(synchronous)
+
+
+class MutablePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    count: int = 1
+
+
+class ExtraPlan(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    count: int = 1
+
+
+class ExtraKnobs(BaseModel):
+    count: int = 1
+
+
+class NestedExtraKnobs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nested: ExtraKnobs
+
+
+class MappingKnobs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    values: dict[str, float]
+
+
+class DateKnobs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: datetime
+
+
+class SetKnobs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    values: set[float]
+
+
+class OpaqueKnobs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: object
+
+
+async def mutable_plan(
+    env: w.WorkflowEnv[None], plan: MutablePlan, tun: w.Live[Knobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def extra_plan(
+    env: w.WorkflowEnv[None], plan: ExtraPlan, tun: w.Live[Knobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def extra_knobs(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[ExtraKnobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def nested_extra_knobs(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[NestedExtraKnobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def mapping_knobs(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[MappingKnobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def date_knobs(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[DateKnobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def set_knobs(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[SetKnobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+async def opaque_knobs(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[OpaqueKnobs]
+) -> Summary:
+    raise AssertionError("Declaration must not execute the author")
+
+
+@pytest.mark.parametrize(
+    ("author", "message"),
+    [
+        (mutable_plan, "frozen extra-forbid"),
+        (extra_plan, "frozen extra-forbid"),
+        (extra_knobs, "extra-forbid"),
+        (nested_extra_knobs, "model layers must forbid extras"),
+        (mapping_knobs, "mappings are not tunables"),
+        (date_knobs, "JSON scalars"),
+        (set_knobs, "lists or tuples"),
+        (opaque_knobs, "JSON scalars"),
+    ],
+)
+def test_signature_inference_keeps_model_validation(
+    author: Callable[..., CoroutineType[None, None, Summary]], message: str
+) -> None:
+    try:
+        decorate = w.workflow("invalid", "Reject invalid input models")
+    except TypeError as error:
+        pytest.fail(f"The async declaration must accept a description: {error}")
+    with pytest.raises(ValueError, match=message):
+        decorate(author)

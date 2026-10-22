@@ -130,7 +130,7 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
     np.testing.assert_allclose(signals_buffer.array, [1.0])
 
 
-def test_build_and_acquire_rebuilds_program_on_retry():
+def test_build_and_acquire_retries_acquire_on_the_same_program():
     result = None
     FlakyBuildProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -148,9 +148,8 @@ def test_build_and_acquire_rebuilds_program_on_retry():
     assert result is not None
     assert np.allclose(result, [4.0])
     assert np.allclose(signals_buffer.array, [4.0])
-    assert len(FlakyBuildProgram.instances) == 2
-    assert FlakyBuildProgram.instances[0].acquire_count == 1
-    assert FlakyBuildProgram.instances[1].acquire_count == 1
+    assert len(FlakyBuildProgram.instances) == 1
+    assert FlakyBuildProgram.instances[0].acquire_count == 2
 
 
 def test_build_and_acquire_retry_clears_shared_failure_cause():
@@ -244,9 +243,8 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
-    assert len(AlwaysFailingProgram.instances) == 2
-    assert AlwaysFailingProgram.instances[0].acquire_count == 1
-    assert AlwaysFailingProgram.instances[1].acquire_count == 1
+    assert len(AlwaysFailingProgram.instances) == 1
+    assert AlwaysFailingProgram.instances[0].acquire_count == 2
 
 
 def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
@@ -330,56 +328,3 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
     assert result is not None
     np.testing.assert_allclose(result, np.array([1.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([1.0]))
-
-
-def test_build_program_failure_does_not_retry_when_stop_requested():
-    result = None
-    stop = StopSignal()
-    cause = RuntimeError("build failure with stop")
-    attempts: list[int] = []
-    signals_buffer = SignalBuffer((1,), dtype=np.float64)
-
-    class StopAfterBuildFailureProgram:
-        cfg_model: FlowCfg
-        modules: list[Module]
-        sweep: list[tuple[str, Any]] | None
-
-        def __init__(
-            self,
-            soccfg: Any,
-            cfg: FlowCfg,
-            *,
-            modules: list[Module],
-            sweep: list[tuple[str, Any]] | None,
-        ) -> None:
-            attempts.append(1)
-            stop.set()
-            raise cause
-
-        def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
-            raise NotImplementedError
-
-        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
-            raise NotImplementedError
-
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=stop) as sched:
-        result = (
-            sched.prog_builder(
-                "soc",
-                "soccfg",
-                program_cls=StopAfterBuildFailureProgram,
-            )
-            .add(FakeModule("readout"))
-            .build_and_acquire(
-                raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
-            )
-        )
-        assert sched.outcome.exception is cause
-        assert sched.outcome.status == "stopped"
-        assert sched.outcome.reason == "stop requested"
-        assert stop.error is None
-
-    assert attempts == [1]
-    assert result is not None
-    np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
-    np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)

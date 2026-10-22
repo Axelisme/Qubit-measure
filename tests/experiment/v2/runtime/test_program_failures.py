@@ -77,6 +77,7 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
     signal = StopSignal()
     buffer = SignalBuffer((1,), on_update=update, update_interval=None)
     schedule = Schedule(make_flow_cfg(rounds=1), buffer, stop=signal)
+
     def run_acquire() -> None:
         with schedule:
             builder = schedule.prog_builder("soc", "soccfg", program_cls=Program).add(

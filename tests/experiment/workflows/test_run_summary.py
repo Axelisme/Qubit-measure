@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, TypeAdapter
-
 from zcu_tools.experiment.workflows import EncodedRecord, saved_run
 from zcu_tools.experiment.workflows.encoding import encode_record
 
@@ -23,11 +22,15 @@ def read_summary(run: Path) -> EncodedRecord | None:
 
 def test_read_summary_returns_the_detached_encoded_return(tmp_path: Path) -> None:
     encoded = encode_record(Summary(points=2))
-    (tmp_path / "summary.json").write_bytes(TypeAdapter(EncodedRecord).dump_json(encoded))
+    (tmp_path / "summary.json").write_bytes(
+        TypeAdapter(EncodedRecord).dump_json(encoded)
+    )
     assert read_summary(tmp_path) == encoded
 
 
-def test_read_summary_returns_none_only_when_the_file_is_missing(tmp_path: Path) -> None:
+def test_read_summary_returns_none_only_when_the_file_is_missing(
+    tmp_path: Path,
+) -> None:
     assert read_summary(tmp_path) is None
 
 
