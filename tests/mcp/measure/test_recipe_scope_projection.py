@@ -34,7 +34,9 @@ def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
             assert params["operation_id"] == 1
             scope = params["scope"]
             assert isinstance(scope, str)
-            return asdict(root.cancel(scope, expected=params.get("expected")))
+            expected = params.get("expected")
+            assert expected is None or isinstance(expected, int)
+            return asdict(root.cancel(scope, expected=expected))
         if method == "operation.await" and params["operation_id"] == 1:
             waiting.set()
             return (
@@ -74,6 +76,7 @@ def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
         assert execution.snapshot().status == "completed"
     finally:
         released.set()
+        execution.join()
         client.context.session.close()
         right.release()
         left.release()
