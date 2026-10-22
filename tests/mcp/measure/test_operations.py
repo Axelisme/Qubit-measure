@@ -179,6 +179,7 @@ def test_status_indexes_gui_operations_and_session_executions(
         "tabs": [{"tab": "gui-tab", "experiment": "ramsey", "running": False}],
         "executions": [pending_summary],
         "terminal_count": analysis_count,
+        "recent_terminal_executions": [],
         "query_hint": 'Use status(execution=<id>, detail="full") for completed executions.',
         "running": [
             {"op": analysis_count + 1, "tab": "gui-tab", "kind": "analyze"},

@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-10-22，range find 與 core／Form 共用分工
+**Last updated:** 2026-10-23，mux fine 初值來源
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
@@ -27,14 +27,9 @@ Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Templa
 ## Mux 初值
 
 [`mux/onetone_fine`](../mux/onetone_fine/form.py) 啟用 `mux_readout_initial` 的 ringup 初值政策。
-共同等待為 `5 / (2 * pi * min(已設 group kappas)) us`，忽略缺 leaf 或 null 的成員。
-全未設時不加等待，`trig_offset` 保留來源的 time-of-flight offset。
+有 captured readout Slot 時，副本保留來源的 `ro_length`，在原 `trig_offset` 上增加 ringup 等待。
+缺 slot 時，從完整 group 校準推導 mixer 與 timing 候選，不沿用 blank Template 的 offset 或積分窗。
+兩條路徑的公式、缺值條件與無效來源錯誤以 [fine guide](../mux/onetone_fine/guide.md#無-readout-slot-的候選來源) 為準。
 
-有 captured readout Slot 時，以 detached copy 的原 `trig_offset` 加上共同等待。
-使用 `readout/mux:blank` Template 時，以其 `0 us` offset 加上共同等待。
-兩條來源路徑都保留原 `ro_length`，並以
-`length = max(原長度, 新 trig_offset + ro_length)` 覆蓋 ADC 窗口。
-Tone 槽位沿 group 順序產生，scalar 初值沿所選來源保留。
-
-每個已設 group member 的 kappa 都須為有限正數。任一已設值無效時，Open／Reset 明確報錯。
-Mux 的 timing 同樣在 Open／Reset 後保持可編輯，cfg 輸出保留操作員的編輯。
+Tone 槽位沿 group 順序產生。Timing 在 Open／Reset 後保持可編輯，cfg 輸出保留操作員的編輯。
+候選未經裝置確認，Run 前須核對 mixer、接線、功率與 timing。
