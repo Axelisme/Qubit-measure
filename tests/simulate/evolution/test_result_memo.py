@@ -38,6 +38,18 @@ class CountingKernel(RecordingKernel):
         return self.guards, self.preparations, len(self.calls)
 
 
+@pytest.mark.parametrize("value", [-1, True, 1.5, "1024"])
+@pytest.mark.parametrize("field", ["result_memo_bytes", "routing_cache_bytes"])
+def test_auxiliary_cache_limits_reject_invalid_bytes(field, value):
+    try:
+        with pytest.raises(ValueError, match=field):
+            Engine(1, 100_000, **{field: value})
+    except TypeError as error:
+        pytest.fail(
+            f"Engine must validate explicit auxiliary cache byte limits: {error}"
+        )
+
+
 def test_repeat_skips_all_kernel_work_and_returns_isolated_bitwise_results():
     kernel = CountingKernel()
     with closing(Engine(1, 100_000, kernels=(kernel,))) as engine:

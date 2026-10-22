@@ -22,10 +22,26 @@ def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
     path = tmp_path / "material.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
     loaded = api.load_six_fluxonium(path)
-    assert parsed.model_dump(mode="json") == document
+    assert parsed.model_dump(mode="json", exclude={"numerics"}) == document
     assert loaded == parsed
     document["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] = 99
     assert loaded.model_dump()["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] == 4
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "prepare_cache_bytes",
+        "result_memo_bytes",
+        "routing_cache_bytes",
+        "adc_cache_bytes",
+    ],
+)
+@pytest.mark.parametrize("value", [-1, True, 1.5, "1024"])
+def test_cache_budgets_reject_noninteger_or_negative_bytes(field, value):
+    document: dict[str, object] = {**six_document(), "numerics": {field: value}}
+    with pytest.raises(ValueError, match=rf"numerics\.{field}"):
+        api.parse_six_fluxonium(document)
 
 
 @pytest.mark.parametrize(
