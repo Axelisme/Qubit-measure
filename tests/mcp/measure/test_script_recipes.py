@@ -776,12 +776,16 @@ def test_mcp_interactive_wait_and_status_project_same_pending_owner(
             "op": 2,
         }
         assert reply.data["status"] == "interactive"
-        assert client.call("status", {"execution": key}) == reply.data
+        assert client.call("status", {"execution": key}) == {
+            **reply.data,
+            "active_path": "script/iteration#1/operation#2",
+        }
         assert client.call("wait", {"execution": key, "timeout": 1}).data == reply.data
         finished.set()
         client.context.session.recipes.get(key).join()
         assert client.call("status", {"execution": key}) == {
             "status": "completed",
+            "active_path": "script",
             "report": {"count": 9},
             "runs": [
                 {
