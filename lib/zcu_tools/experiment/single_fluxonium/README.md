@@ -1,12 +1,12 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **Readers:** framework-dev, lab-author. Compose complete fluxonium timelines with one physical readout cavity.
 
 `single_fluxonium(path_or_settings, *, private_replay=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
-one microwave route, one fast-flux route and one readout generator/ADC route.
+one microwave route, an optional fast-flux route and one readout generator/ADC route.
 All generators bind to that ADC for transport admission. Only the configured
 readout generator supplies physical readout pulses. No real hardware or numeric
 warmup runs at construction.
@@ -18,7 +18,10 @@ Transferring a driver to the GUI transfers only that driver's cleanup responsibi
 
 ## Complete timelines
 
-`plan_template(settings, snapshot, template)` returns a `SingleFluxoniumPlan`.
+`plan_template(settings, snapshot, template, *, readout_kind="pulse")` returns a `SingleFluxoniumPlan`.
+`readout_kind="mux"` accepts coherent terminal tones on the same physical cavity.
+A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
+It binds no fast-flux generator and rejects foreign controls.
 It converts QICK us/MHz/degrees into ns/GHz/radians. Shared
 `experiment.readout_plan.drive_track` preserves signed gains, complex envelopes
 and the common carrier origin. Each template remains one `TimelineBatch`.
@@ -40,7 +43,7 @@ when flux has not returned to DC.
 
 ## Physical and ADC composition
 
-`SingleFluxoniumSource(settings, devices, *, private_replay=None)` captures the
+`SingleFluxoniumSource(settings, devices, *, private_replay=None, readout_kind="pulse")` captures the
 startup driver object. `snapshot()` reads its current A/V value and checks the
 fixed unit and inclusive limits. Registry removal or renaming does not restore
 startup values. `model_facts(snapshot)` builds the retained projection, Gibbs
@@ -87,7 +90,7 @@ Pass an explicit absolute `private_replay` directory to the builder or source.
 The resource owner archives detached settings, controls, envelopes, RNG identity
 and the selected snapshot. It stores no measured IQ. Call
 `replay_round(round_json_path)` to recompute only that round without live devices.
-The single-fluxonium backend has its own version string. Wrong settings backend,
+The single-fluxonium backend has its own version string. Private single-model replay supports pulse mode only; the constructor rejects mux mode with a replay root. Wrong settings backend,
 model identity, dependency versions or numeric references raise `ValueError`.
 Integrity and I/O errors propagate. These author-only archives contain model
 truth and do not belong in normal GUI/RPC metadata.
