@@ -212,6 +212,11 @@ def read_records[P: BaseModel](
 def _record_type[P: BaseModel](adapter: TypeAdapter[P]) -> str:
     # Pydantic's public model core schema retains the actual class, unlike JSON title overrides.
     schema = adapter.core_schema
+    while schema["type"] in ("function-after", "function-before", "function-wrap"):
+        inner = schema.get("schema")
+        if inner is None:
+            break
+        schema = inner
     model = schema.get("cls")
     if not isinstance(model, type) or not issubclass(model, BaseModel):
         raise TypeError("read_records requires a single BaseModel type or TypeAdapter")
