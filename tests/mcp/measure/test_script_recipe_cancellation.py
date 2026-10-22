@@ -20,6 +20,83 @@ from ._script_recipe_support import (
 from ._support import make_client
 
 
+@pytest.mark.parametrize("scope", ["acquire", "schedule"])
+def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
+    tmp_path: Path, scope: str
+) -> None:
+    gui = SyntheticGui()
+    waiting = Event()
+    released = Event()
+    requests: list[tuple[str, dict[str, object]]] = []
+    partials: list[bool] = []
+    path = "script/iteration#1/operation#1/schedule#1/acquire#2"
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        requests.append((method, params))
+        if method == "operation.status_scope":
+            assert params == {"operation_id": 1}
+            return {"active_path": "run/schedule#1/acquire#2"}
+        if method == "operation.cancel_scope":
+            assert params["operation_id"] == 1
+            expected = params.get("expected")
+            accepted = expected is None or expected == (2 if scope == "acquire" else 1)
+            if accepted:
+                released.set()
+            return {
+                "cancelled": accepted,
+                "reason": "scope cancellation requested"
+                if accepted
+                else "sequence mismatch",
+                "active_path": "run/schedule#1/acquire#2",
+            }
+        if method == "operation.await" and params["operation_id"] == 1:
+            waiting.set()
+            return (
+                {"reason": "completed", "status": "cancelled"}
+                if released.is_set()
+                else {"reason": "timeout"}
+            )
+        if method == "operation.cancel":
+            released.set()
+            return {"status": "requested"}
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Cancel a GUI-owned scope, then run again")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        partials.append((await tab.run()).partial_result)
+        partials.append((await tab.run()).partial_result)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        assert waiting.wait(30), "The first GUI operation must enter its await"
+        execution_id = execution.snapshot().execution
+        assert client.call("status", {"execution": execution_id})["active_path"] == path
+        rejected = client.call(
+            "cancel", {"execution": execution_id, "scope": scope, "expected": 99}
+        )
+        assert rejected.data["cancelled"] is False
+        assert rejected.data["reason"] == "sequence mismatch"
+        assert rejected.data["active_path"] == path
+        accepted = client.call("cancel", {"execution": execution_id, "scope": scope})
+        assert accepted.data["cancelled"] is True
+        assert accepted.data["active_path"] == path
+        execution.join()
+        assert execution.snapshot().status == "completed"
+        assert partials == [True, False]
+        assert [
+            params["operation_id"]
+            for method, params in requests
+            if method == "operation.cancel_scope"
+        ] == [1, 1]
+        assert not [method for method, _ in requests if method == "operation.cancel"]
+    finally:
+        released.set()
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("await_kind", ["analyze", "ask", "writeback"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(

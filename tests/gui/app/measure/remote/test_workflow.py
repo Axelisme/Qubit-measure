@@ -190,6 +190,35 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         client.context.session.close()
 
 
+def test_workflow_scoped_cancel_uses_native_host_and_preserves_stop(workflow_rpc):
+    controller, rpc = workflow_rpc
+    facet = controller.workflow_control()
+    facet.configure((AskAuthor().attachment(),))
+    tab = result(rpc, "workflow.open", name="asking")["tab_id"]
+    result(rpc, "workflow.start", tab_id=tab, run_id="scoped")
+    qt_until(
+        lambda: facet.pending_question("scoped") is not None,
+        label="native Ask for scoped control",
+    )
+    rejected = result(
+        rpc, "workflow.cancel", run_id="scoped", scope="script", expected=1
+    )
+    assert rejected["cancelled"] is False
+    assert rejected["reason"] == "sequence mismatch"
+    assert rejected["active_path"] == "script/iteration#1"
+    status = result(rpc, "workflow.status", run_id="scoped")
+    assert status["native"]["active_path"] == "script/iteration#1"
+    accepted = result(rpc, "workflow.cancel", run_id="scoped", scope="iteration#1")
+    assert accepted["cancelled"] is True
+    assert facet.pending_question("scoped") is not None
+    result(rpc, "workflow.stop", run_id="scoped")
+    qt_until(lambda: not facet.tabs()[0].busy, label="script Stop terminal delivery")
+    assert (
+        result(rpc, "workflow.status", run_id="scoped")["native"]["lifecycle"]
+        == "cancelled"
+    )
+
+
 def test_mcp_status_retains_accepted_exchange_after_answer(workflow_rpc, tmp_path):
     controller, rpc = workflow_rpc
     control = controller.workflow_control()

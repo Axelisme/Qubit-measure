@@ -148,6 +148,67 @@ def test_run_publishes_record_and_historical_metadata_together(
     assert outcome.status == ("cancelled" if stopped else "finished")
 
 
+def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata() -> None:
+    state, tab_id, adapter = make_state()
+    service, _gate, background, handles = make_run_service(state)
+    inputs = replace(
+        make_inputs(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    acquisitions = []
+
+    def acquire(*_args: object, context: RunContext) -> object:
+        schedule = context.cancel_signal.child(label="schedule")
+        first = schedule.child(label="acquire")
+        try:
+            assert service.status_scope(token) == "run/schedule#1/acquire#1"
+            rejected = service.cancel_scope(token, scope="acquire", expected=2)
+            assert not rejected.cancelled
+            assert rejected.reason == "sequence mismatch"
+            accepted = service.cancel_scope(token, scope="acquire#1")
+            assert accepted.cancelled
+            acquisitions.append(first.is_set())
+        finally:
+            first.release()
+        second = schedule.child(label="acquire")
+        acquisitions.append(second.is_set())
+        second.release()
+        schedule.release()
+        assert not context.cancel_signal.is_set()
+        return record
+
+    adapter.run.side_effect = acquire
+    token = service.start_run(inputs, plots=make_plots())
+    background.run_work()
+    pane = state.get_tab(tab_id).run
+    assert pane.result is record
+    assert pane.metadata is not None
+    assert pane.metadata.completion == "stopped"
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+    assert acquisitions == [True, False]
+    assert not service.cancel_scope(token, scope="acquire").cancelled
+
+    def next_run(*_args: object, context: RunContext) -> object:
+        rejected = service.cancel_scope(token, scope="run")
+        assert not rejected.cancelled
+        assert rejected.reason == "scope not active"
+        assert not context.cancel_signal.is_set()
+        return record
+
+    adapter.run.side_effect = next_run
+    next_token = service.start_run(inputs, plots=make_plots())
+    assert next_token != token
+    background.run_work()
+    metadata = state.get_tab(tab_id).run.metadata
+    assert metadata is not None
+    assert metadata.completion == "complete"
+    next_outcome = handles.poll(next_token)
+    assert next_outcome is not None and next_outcome.status == "finished"
+
+
 @pytest.mark.parametrize("provenance_failure", [False, True])
 def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
     monkeypatch: pytest.MonkeyPatch, provenance_failure: bool
