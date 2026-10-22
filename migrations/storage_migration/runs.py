@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     Container,
     JsonObject,
@@ -18,7 +17,7 @@ from zcu_tools.datafile import (
     load_labber_device_snapshot,
     save,
 )
-from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.metadata import CfgSnapshot, RunMetadata, RunSnapshot
 from zcu_tools.resources.entry import (
     ArtifactKey,
     ResultEntry,
@@ -69,28 +68,26 @@ def _run_metadata(
     entry_id: UUID,
     native_tag: str,
     device_snapshot: dict[str, JsonObject] | None,
-) -> JsonObject:
+    labber: LabberMetadata | None,
+) -> RunMetadata:
     snapshot = legacy.snapshot
-    return {
-        "run_id": assignment.run_id,
-        "experiment": native_tag,
-        "started_at": legacy.started_at,
-        "finished_at": None if legacy.started_at is None else legacy.finished_at,
-        "completion": "unknown" if legacy.started_at is None else legacy.completion,
-        "snapshot": {
-            "entry_id": str(entry_id),
-            "entry_name": snapshot.entry_name,
-            "point": snapshot.point,
-            "description": snapshot.description,
-            "roles": dict(snapshot.roles),
-        },
-        "provenance": TypeAdapter(JsonObject).validate_json(
-            TypeAdapter(type(legacy.provenance)).dump_json(legacy.provenance)
+    return RunMetadata(
+        run_id=assignment.run_id,
+        experiment=native_tag,
+        started_at=legacy.started_at,
+        finished_at=None if legacy.started_at is None else legacy.finished_at,
+        completion="unknown" if legacy.started_at is None else legacy.completion,
+        snapshot=RunSnapshot(
+            entry_id=entry_id,
+            entry_name=snapshot.entry_name,
+            point=snapshot.point,
+            description=snapshot.description,
+            roles=snapshot.roles,
         ),
-        "device_snapshot": None
-        if device_snapshot is None
-        else {name: value for name, value in device_snapshot.items()},
-    }
+        provenance=legacy.provenance,
+        device_snapshot=device_snapshot,
+        labber=labber,
+    )
 
 
 def _load_payload(
@@ -99,7 +96,7 @@ def _load_payload(
     session: MigrationSession,
     entry: ResultEntry | None,
     mapping: MigrationMapping,
-) -> Container:
+) -> tuple[Container, LabberMetadata]:
     if legacy.cfg is None:
         raise ValueError("cfg.cfg_type: missing explicit historical identity")
     identity = (legacy.experiment, legacy.cfg.cfg_type)
@@ -122,14 +119,7 @@ def _load_payload(
         comment.cfg, legacy.cfg.values
     ):
         raise ValueError("cfg: evidence disagrees with file comment.cfg")
-    return replace(
-        payload,
-        docs={
-            "labber": TypeAdapter(JsonObject).validate_json(
-                TypeAdapter(LabberMetadata).dump_json(metadata)
-            )
-        },
-    )
+    return payload, metadata
 
 
 def _assignment(
@@ -202,10 +192,11 @@ def _convert_run(
         return
     native = session.state(source, "native")
     payload = None
+    labber = None
     device_snapshot = None
     if native is None or native.phase == "planned":
         try:
-            payload = _load_payload(source, legacy, session, entry, mapping)
+            payload, labber = _load_payload(source, legacy, session, entry, mapping)
             validate_cfg(legacy.experiment, cfg)
         except MigrationInputError:
             raise
@@ -286,7 +277,8 @@ def _convert_run(
         session.manifest.identity.entry_id,
         mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
         device_snapshot,
-    )
+        labber,
+    ).model_dump(mode="json")
 
     def build(path: Path) -> None:
         if payload is None:
@@ -303,7 +295,7 @@ def _convert_run(
                         "cfg_type": cfg.cfg_type,
                         "schema_version": cfg.schema_version,
                     },
-                    "metadata": {**metadata, "labber": payload.docs["labber"]},
+                    "metadata": metadata,
                 },
             ),
         )

@@ -15,6 +15,7 @@ from .container_nodes import (
     name_segment,
     validate_variable,
     write_attrs,
+    write_axes,
     write_doc,
 )
 
@@ -148,9 +149,4 @@ def _create_variable(group: h5.Group, schema: VariableSchema) -> None:
         "values", shape=schema.shape, dtype=schema.dtype, fillvalue=schema.fill_value
     )
     values.attrs["unit"] = schema.unit
-    axes = group.create_group("axes")
-    for index, axis in enumerate(schema.axes):
-        dataset = axes.create_dataset(axis.name, data=axis.values)
-        dataset.attrs["unit"] = axis.unit
-        dataset.make_scale(axis.name)
-        values.dims[index].attach_scale(dataset)
+    write_axes(group.create_group("axes"), values, schema.axes)

@@ -6,6 +6,7 @@ import io
 import os
 import tempfile
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import h5py as h5
@@ -37,6 +38,13 @@ from .container_nodes import (
 from .native_nodes import known_group, known_node
 
 
+@dataclass(frozen=True)
+class _DetachedContainer(Container):
+    """Retain the object graph across edits, including dataclasses.replace."""
+
+    image: bytes = field(repr=False, compare=False)
+
+
 def save(path: Path, container: Container, *, replace: bool = False) -> None:
     """Write a container to exactly path through a same-directory temporary file.
 
@@ -54,7 +62,6 @@ def save(path: Path, container: Container, *, replace: bool = False) -> None:
     path = Path(path)
     if not replace and path.exists():
         raise FileExistsError(path)
-    header = container.attrs
     validate_contents(container.vars, container.docs, container.groups)
     descriptor, temporary = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -62,23 +69,45 @@ def save(path: Path, container: Container, *, replace: bool = False) -> None:
     os.close(descriptor)
     temp = Path(temporary)
     try:
-        with h5.File(temp, "w") as file:
-            write_attrs(file, header)
-            variables = file.create_group("vars")
-            documents = file.create_group("docs")
-            opaque = file.create_group("groups")
-            for name, variable in container.vars.items():
-                write_variable(variables.create_group(name), variable)
-            for name, doc in container.docs.items():
-                write_doc(documents, name, doc)
-            for name, source in container.groups.items():
-                copy_group(opaque, name, source)
+        image = container.image if isinstance(container, _DetachedContainer) else b""
+        if image:
+            temp.write_bytes(image)
+        with h5.File(temp, "r+" if image else "w") as file:
+            _write_contents(file, container, image)
         if replace:
             os.replace(temp, path)
         else:
             os.link(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def _write_contents(file: h5.File, container: Container, image: bytes) -> None:
+    # Editing the detached graph keeps references attached to canonical objects.
+    for key in tuple(file.attrs):
+        del file.attrs[key]
+    write_attrs(file, container.attrs)
+    variables = file.require_group("vars")
+    documents = file.require_group("docs")
+    opaque = file.require_group("groups")
+    for namespace, contents in (
+        (variables, container.vars),
+        (documents, container.docs),
+        (opaque, container.groups),
+    ):
+        for name in tuple(namespace):
+            if name not in contents:
+                del namespace[name]
+    for name, variable in container.vars.items():
+        write_variable(variables.require_group(name), variable)
+    for name, doc in container.docs.items():
+        write_doc(documents, name, doc)
+    for name, source in container.groups.items():
+        if image and source == GroupSource(image, f"/groups/{name}"):
+            continue
+        if name in opaque:
+            del opaque[name]
+        copy_group(opaque, name, source)
 
 
 def validate_contents(
@@ -149,12 +178,12 @@ def load(path: Path) -> Container:
             for name in node_names(documents):
                 name_segment(name)
                 docs[name] = read_document(documents, name)
-            image = file.id.get_file_image() if len(opaque) else b""
+            image = file.id.get_file_image()
             groups = {}
             for name in node_names(opaque):
                 name_segment(name)
                 groups[name] = GroupSource(image, f"/groups/{name}")
-            return Container(result, docs, groups, attrs)
+            return _DetachedContainer(result, docs, groups, attrs, image)
         except ValueError as error:
             raise FormatError(f"{path}: {error}") from error
 

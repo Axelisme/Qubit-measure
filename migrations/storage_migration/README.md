@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -21,7 +21,7 @@
 
 ## 組合根與依賴
 
-- 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。本 package 不 import `zcu_lab`、experiment 或舊資源容器。`lib` 不 import `migrations`。
+- 組合根提供 mapping、entry 的共用 kind 註冊、planning 前的 concrete cfg validation 與發布後的 native validation callback。本 package 使用 experiment 的 metadata 型別與編碼，不 import `zcu_lab` 或舊資源容器。`lib` 不 import `migrations`。
 
 - Parameters 與 data 可分開執行。第二部分改 part 即自動續接同一 manifest，仍可明填 resume，不合併任意既有條目。完成的 setup／point 可以獨立編輯，但之後重跑遷移會列出與 baseline 的差異，不恢復舊值。
 
@@ -155,26 +155,26 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 | 開始／結束時間、完成狀態 | `RunMetadata`，未知規則見下文 |
 | entry、point、description、roles | `RunSnapshot`，point 無證據時為 None |
 | 軟體、主機、SoC | `SoftwareProvenance`，未知為 None 或空 mapping |
-| 原 Labber 新位置 | `RunMetadata.labber_path` |
+| 原 Labber 新位置 | migration report／manifest 的 publication 目的路徑，不進 RunMetadata |
 | Labber `Instrument config` | `device_snapshot`，無法表達時 None 並列 pending |
 
-型別與編解碼由 [datafile](../../lib/zcu_tools/datafile/README.md) 擁有。遷移不手造 ledger 事件，Load 由 native metadata 取得身分，不解析目錄名補歷史事實。
+RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_tools/experiment/README.md) 擁有。遷移先建 typed metadata，再以 `model_dump(mode="json")` 編碼，完成後才發布 native。通用容器格式由 [datafile](../../lib/zcu_tools/datafile/README.md) 擁有。遷移不手造 ledger 事件，Load 由 native metadata 取得身分，不解析目錄名補歷史事實。
 
 - Native schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
 
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
-  Converter 產生 native 2.1 簡單 context，不把歷史 params 投影到 native。
+  Converter 產生 Container 3.0 的 docs/metadata snapshot，不把歷史 params 投影到 native。
 
 - Legacy evidence 的 started_at 與 run_id 可缺省或為 null。開始時間無證據時，native 寫 started_at=None、completion=unknown、finished_at=None，即使原 evidence 留有完成狀態或結束時間也不宣稱已知生命週期；完整 raw 留在 manifest。已知開始時間時保留可證實時間與完成狀態，完成狀態缺省為 unknown。
 
-- 明示可信 run_id 須通過 datafile 的公開 `validate_run_id`。缺 ID 時依 entry 的 `new_run_id` 分配，報告標「遷移賦值」。分配時間不是歷史量測時間。Manifest 在 native publication 前固定來源/hash、ID 與輸出分配時間，resume 不重配。非法的非空時間或 ID 仍拒絕，不當成缺失。
+- 明示可信 run_id 須通過 experiment 的公開 `validate_run_id`。缺 ID 時依 entry 的 `new_run_id` 分配，報告標「遷移賦值」。分配時間不是歷史量測時間。Manifest 在 native publication 前固定來源/hash、ID 與輸出分配時間，resume 不重配。非法的非空時間或 ID 仍拒絕，不當成缺失。
 
 - Manifest 保存固定 entry／run 身分、來源 baseline、完整 evidence raw 與逐檔 publication 狀態。持久化 run 分配即固定該來源的完整 evidence，不必等到 native publication；resume 在任何 checkpoint 或 report 寫入前拒絕變更，避免把遷移 ID 改稱歷史 ID。Report 是累積快照。兩者保留同 major 的未知 JSON 欄位。
 
 - Native 路徑由 `SaveLayout` 依 evidence 的 experiment 與完整 run_id 計算為 `Database/<entry>/runs/<experiment>_<run_id>/data.h5`，實驗名中的 `/` 轉 `_`。Dry-run 規劃與 resume 驗證使用同一規則，不解析舊目錄名。
 
-- Native 的 `labber_path` 保存相對 entry Database 根的原檔保存路徑，例如 `Labber/2025/10/scan.hdf5`。`Instrument config` 透過 datafile owner 的唯讀 codec 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
+- 原 Labber 的保存路徑記在 migration report／manifest，例如 entry Database 根下的 `Labber/2025/10/scan.hdf5`。RunMetadata.labber 只保留原 comment、tags、project、user 與 creation_time。`Instrument config` 透過 datafile owner 的唯讀 codec 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
 
 - 所有 Labber 原檔一律保存到 `Database/<entry>/Labber/<來源相對路徑>`，不依 native 轉換成功與否分流。Native publication 與驗證完成後才安全搬移對應原檔，先複製、驗證雜湊，再刪來源。無法轉換者先發布 byte-identical copy，仍保留必要證據的 pending；兩部分完成後才隨完整來源清理。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。除開始時間與 run_id 外，experiment tag+cfg_type、完整歷史 cfg、variable/axes/signal 名稱、單位、dtype、shape 或其他必要 mapping 缺失時，不產生 native，不猜名稱或補量測時間。原樣發布只固定來源 bytes/hash 與目的 ownership，不提前凍結外部 run evidence。尚無 native 規劃或 run assignment 時，可在 resume 補足證據；成功後重驗原樣副本，再沿既有 native 驗證與安全搬移協定完成。
 

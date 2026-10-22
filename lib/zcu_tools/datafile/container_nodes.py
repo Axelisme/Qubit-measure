@@ -67,9 +67,15 @@ def write_doc(node: h5.Group, name: str, value: JsonObject) -> None:
     """Replace the whole named document after validating its finite JSON."""
     name_segment(name)
     text = json_text(value)
+    dataset = known_node(node, name)
+    if isinstance(dataset, h5.Dataset) and dataset.dtype == h5.string_dtype("utf-8"):
+        dataset[()] = text
+        return
+    attributes = {} if dataset is None else dict(dataset.attrs)
     if name in node:
         del node[name]
-    node.create_dataset(name, data=text, dtype=h5.string_dtype("utf-8"))
+    dataset = node.create_dataset(name, data=text, dtype=h5.string_dtype("utf-8"))
+    dataset.attrs.update(attributes)
 
 
 def text_attr(node: h5.Group | h5.Dataset, name: str) -> str:
@@ -148,16 +154,48 @@ def validate_variable(variable: Variable) -> None:
             raise ValueError(f"{axis.name}: axis dtype must be numeric")
 
 
-def write_variable(group: h5.Group, variable: Variable) -> None:
-    """Write a validated variable and attach one scale per NumPy dimension."""
-    values = group.create_dataset("values", data=variable.values)
-    values.attrs["unit"] = variable.unit
-    axes = group.create_group("axes")
-    for index, axis in enumerate(variable.axes):
-        dataset = axes.create_dataset(axis.name, data=axis.values)
+def _write_array(group: h5.Group, name: str, array: np.ndarray) -> h5.Dataset:
+    dataset = known_node(group, name)
+    if (
+        isinstance(dataset, h5.Dataset)
+        and dataset.shape == array.shape
+        and dataset.dtype == array.dtype
+    ):
+        dataset[()] = array
+        return dataset
+    if name in group:
+        del group[name]
+    return group.create_dataset(name, data=array)
+
+
+def write_axes(group: h5.Group, values: h5.Dataset, axes: tuple[Axis, ...]) -> None:
+    """Write axis coordinates/units and attach their scales in NumPy order.
+
+    group is the variable's axes namespace. values has no attached scales yet.
+    Both preallocated append and full-array writers use this wire rule.
+    """
+    for index, axis in enumerate(axes):
+        dataset = _write_array(group, axis.name, axis.values)
         dataset.attrs["unit"] = axis.unit
         dataset.make_scale(axis.name)
         values.dims[index].attach_scale(dataset)
+
+
+def write_variable(group: h5.Group, variable: Variable) -> None:
+    """Update a validated variable, retaining unchanged-shape/dtype datasets."""
+    old_values = known_node(group, "values")
+    if isinstance(old_values, h5.Dataset):
+        for dimension in old_values.dims:
+            for scale in tuple(dimension.values()):
+                dimension.detach_scale(scale)
+    values = _write_array(group, "values", variable.values)
+    values.attrs["unit"] = variable.unit
+    axes = group.require_group("axes")
+    names = {axis.name for axis in variable.axes}
+    for name in tuple(axes):
+        if name not in names:
+            del axes[name]
+    write_axes(axes, values, variable.axes)
 
 
 def variable_parts(
