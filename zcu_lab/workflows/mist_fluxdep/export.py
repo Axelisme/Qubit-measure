@@ -48,6 +48,9 @@ def prepare_export(
 ) -> PreparedRunData:
     """Assemble raw MIST response across flux and gain for offline analysis.
 
+    Completed partial traces retain their native reference with success=False.
+    They export raw IQ without contributing an acquisition-success value.
+
     Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
 
     plan is the fixed manifest plan; points are structured saved commits. Only
@@ -75,7 +78,7 @@ def prepare_export(
                     "MIST index must be unique/inside plan and flux finite"
                 )
             seen.add(point.index)
-            if point.success != (point.gain_file is not None):
+            if point.success and point.gain_file is None:
                 raise ValueError("MIST success must identify its Completed acquisition")
             fluxes[point.index] = point.flux
             if point.gain_file is None:

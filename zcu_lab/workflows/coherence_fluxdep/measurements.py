@@ -40,12 +40,15 @@ class LifetimeResult:
     """An enabled lifetime's scalar outcome and immutable native reference.
 
     kind is t1/t2ramsey/t2echo, in that acquisition order. status is accepted,
-    rejected (Completed fit), failed (Schedule) or skipped (missing current
-    frequency/Rabi). reason is None only on acceptance. lifetime_us/error_us
+    rejected (fit gates or stopped partial), failed (Schedule or expected fit
+    failure) or skipped (missing current frequency/Rabi).
+    reason is None only on acceptance. lifetime_us/error_us
     contain accepted microseconds only, otherwise both None. file is relative
     to the iteration and exists only after Completed, including rejected fits.
     Disabled lifetimes have no result or placeholder in the point tuple.
-    Unexpected fit/adapter/writer/plot exceptions propagate, not a status.
+    Partial saves then returns rejected/stopped without fitting or acceptance.
+    Expected fit failures return failed/reason after saving. Unexpected fit/
+    adapter/writer/plot exceptions propagate, not a status.
     """
 
     kind: LifetimeKind
@@ -130,19 +133,25 @@ async def measure_t1(
 
     plan supplies fixed routing/grid resolution/snapshot, tun supplies native
     averaging/timing/fit gates, and cal is this point's accepted frequency/pi
-    with retained legal readout. directory is this point's allocated commit path. save precedes fit, so rejected fits retain raw.
-    Normal Schedule failures return failed without a file. Unexpected errors
-    propagate; Engine owns cancellation. History updates belong to the caller.
+    with retained legal readout. directory is this point's allocated commit path.
+    Save precedes fit, so rejected fits retain raw.
+    Partial saves then returns rejected/stopped without fitting. Schedule failures
+    return failed without a file; expected fit failures return failed with the raw
+    filename. Unexpected errors propagate. History updates belong to the caller.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(env, "t1")
     outcome = await env.run(T1Exp().run, t1_cfg(plan, tun, cal, guess_us))
     if isinstance(outcome, Failed):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
-    plot.update(outcome.value.result.times, outcome.value.result.signals.real)
-    # Save every completed trace before fitting and applying acceptance gates.
+    # Save every completed trace before plotting or analyzing it.
     save_t1(outcome, directory / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
+    if outcome.partial_result:
+        return LifetimeResult("t1", "rejected", "stopped", None, None, "t1.h5")
+    plot.update(outcome.value.result.times, outcome.value.result.signals.real)
     fit = analyze_t1(outcome.value.result)
+    if isinstance(fit, Failed):
+        return LifetimeResult("t1", "failed", fit.reason, None, None, "t1.h5")
     residual = fit.quality.normalized_residual_rms
     accepted = (
         np.isfinite(fit.lifetime_us)
@@ -174,9 +183,10 @@ async def measure_ramsey(
     supplies averaging, timing and detuning. cal contains this point's accepted
     frequency/pi/pi2 and retained legal readout. guess_us is this lifetime's
     positive microsecond delay estimate. directory is this point's allocated
-    commit path. Save precedes fit; Schedule failures
-    return failed without a file and unexpected errors propagate. Engine owns
-    cancellation; history updates belong to the caller. Fitted pi2 is not pi/2.
+    commit path. Partial saves then returns rejected/stopped without fitting.
+    Schedule failures return failed without a file; expected fit failures return
+    failed with the raw filename. Unexpected errors propagate. History updates
+    belong to the caller. Fitted pi2 is not pi/2.
     Detune remains detune_ratio/length_step; native actual detune is retained.
     Relax remains relax_factor*tun.guess_us, not the current T1 or delay EWMA.
     Original overlong/mean-absolute-error gates apply, with rejected raw retained.
@@ -186,15 +196,23 @@ async def measure_ramsey(
     outcome = await env.run(run_t2ramsey, t2ramsey_cfg(plan, tun, cal, guess_us))
     if isinstance(outcome, Failed):
         return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
-    plot.update(outcome.value.result.times, outcome.value.result.signals.real)
-    # Save every completed trace before fitting and applying acceptance gates.
+    # Save every completed trace before plotting or analyzing it.
     save_t2ramsey(
         outcome,
         directory / "t2ramsey.h5",
         snapshot=plan.snapshot,
         identity=env.identity,
     )
+    if outcome.partial_result:
+        return LifetimeResult(
+            "t2ramsey", "rejected", "stopped", None, None, "t2ramsey.h5"
+        )
+    plot.update(outcome.value.result.times, outcome.value.result.signals.real)
     fit = analyze_t2ramsey(outcome.value.result)
+    if isinstance(fit, Failed):
+        return LifetimeResult(
+            "t2ramsey", "failed", fit.reason, None, None, "t2ramsey.h5"
+        )
     return _finish(
         env,
         "t2ramsey",
@@ -220,9 +238,10 @@ async def measure_echo(
     supplies averaging and fixed relaxation timing. cal contains this point's
     accepted frequency/pi/pi2 and retained legal readout. guess_us is Echo's
     positive microsecond delay estimate. directory is this point's allocated
-    commit path. Save precedes fit; Schedule failures
-    return failed without a file and unexpected errors propagate. Engine owns
-    cancellation. Whole-trace fluxdep projection and T2 gates remain unchanged.
+    commit path. Partial saves then returns rejected/stopped without fitting.
+    Schedule failures return failed without a file; expected fit failures return
+    failed with the raw filename. Unexpected errors propagate.
+    Whole-trace fluxdep projection and T2 gates remain unchanged.
     No extra T1 measurement or fallback is made; history belongs to the caller.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
@@ -230,12 +249,16 @@ async def measure_echo(
     outcome = await env.run(T2EchoExp().run, t2echo_cfg(plan, tun, cal, guess_us))
     if isinstance(outcome, Failed):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
-    plot.update(outcome.value.result.times, outcome.value.result.signals.real)
-    # Save every completed trace before fitting and applying acceptance gates.
+    # Save every completed trace before plotting or analyzing it.
     save_t2echo(
         outcome, directory / "t2echo.h5", snapshot=plan.snapshot, identity=env.identity
     )
+    if outcome.partial_result:
+        return LifetimeResult("t2echo", "rejected", "stopped", None, None, "t2echo.h5")
+    plot.update(outcome.value.result.times, outcome.value.result.signals.real)
     fit = analyze_t2echo_fluxdep(outcome.value.result)
+    if isinstance(fit, Failed):
+        return LifetimeResult("t2echo", "failed", fit.reason, None, None, "t2echo.h5")
     return _finish(
         env,
         "t2echo",

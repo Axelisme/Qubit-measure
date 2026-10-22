@@ -181,12 +181,14 @@ class CalibrationInputs:
 class FrequencyResult:
     """One point's spectroscopy outcome and immutable relative native references.
 
-    status is accepted, rejected (completed fits), or failed (Schedule).
+    status is accepted, rejected (fit gates or stopped partial), or failed
+    (Schedule or expected fitting failure). Partial reason is stopped.
     reason is None on acceptance, otherwise the diagnostic. frequency_mhz is
     this point's positive fitted MHz only on acceptance, never a prior seed.
     files lists every Completed widening attempt in acquisition order, including
-    rejected fits; failed attempts have no filename. References do not guarantee
-    later existence. Writer/adapter/fit/plot exceptions propagate instead.
+    partial, rejected and failed fits; Schedule failures have no filename.
+    References do not guarantee later existence. Unexpected writer/adapter/fit/
+    plot exceptions propagate instead.
     """
 
     status: StageStatus
@@ -205,7 +207,9 @@ class RabiResult:
     previous point's frequency. Accepted implies a current accepted frequency.
     pi_length_us/pi2_length_us are positive fitted durations only on acceptance;
     pi2 comes from the phase-aware fit, not pi/2. file is the relative native
-    filename after Completed, including fit rejection, otherwise None.
+    filename after Completed, including partial and failed/rejected fits,
+    otherwise None. Partial returns rejected/stopped without fitting; expected
+    fitting failures return failed/reason. Unexpected errors propagate.
     """
 
     status: StageStatus
@@ -225,6 +229,8 @@ class ReadoutResult:
     accepted readout MHz/native gain only; nonaccepted results have no values.
     file names the Completed landscape, including rejection, otherwise None.
     Nonacceptance leaves the legal seed/prior readout carry unchanged.
+    Partial returns rejected/stopped after saving, without SNR selection.
+    Unexpected analysis/configuration/writer errors propagate.
     """
 
     status: StageStatus
@@ -268,7 +274,9 @@ async def calibrate_frequency(
     used by the native saver after each Completed attempt,
     before fitting. Widening uses inputs.tun.qf_widen; the center follows an
     EWMA(alpha=.5) and relax timing is 1 us. Acceptance uses the captured gates.
-    Failed schedules/rejected fits return their status and all Completed refs.
+    Partial attempts save then return rejected/stopped without fitting. Widening
+    continues as usual. Expected fit failures return failed/reason, with all
+    Completed refs retained; neither failure nor partial updates carry/history.
     Invalid flux raises before acquisition; all unexpected errors propagate.
     """
     # Check the setpoint before acquiring and project the frequency history.
@@ -330,7 +338,13 @@ async def calibrate_frequency(
             identity=env.identity,
         )
         filenames.append(filename)
+        if outcome.partial_result:
+            status, reason = "rejected", "stopped"
+            continue
         fit = analyze_qubit_freq(outcome.value.result)
+        if isinstance(fit, Failed):
+            status, reason = "failed", fit.reason
+            continue
         residual = fit.quality.normalized_residual_rms
         if (
             math.isfinite(fit.frequency_mhz)
@@ -375,8 +389,9 @@ async def calibrate_rabi(
     must be a nonnegative integer (not bool), the zero-based flux index; invalid
     indexes raise ValueError at entry. The title shows its one-based number. Lengths
     stay in microseconds and the projected signal has arbitrary units.
-    Schedule failures are named failed; unexpected errors propagate. Invalid
-    timing raises before any acquisition. Await in a workflow.
+    Partial saves then returns rejected/stopped without fitting or carry updates.
+    Schedule and expected fit failures are named failed; unexpected errors
+    propagate. Invalid timing raises before any acquisition. Await in a workflow.
     """
     # Require a valid plot index and this point's accepted frequency.
     if type(point_index) is not int or point_index < 0:
@@ -421,7 +436,11 @@ async def calibrate_rabi(
         snapshot=inputs.snapshot,
         identity=env.identity,
     )
+    if outcome.partial_result:
+        return RabiResult("rejected", "stopped", f01, None, None, "rabi.h5")
     fit = analyze_len_rabi(outcome.value.result)
+    if isinstance(fit, Failed):
+        return RabiResult("failed", fit.reason, f01, None, None, "rabi.h5")
     residual = fit.quality.normalized_residual_rms
     if not (
         math.isfinite(fit.pi_length_us)
@@ -493,7 +512,8 @@ async def calibrate_readout(
     only on accepted finite SNR. Failure/rejection retains legal prior
     readout, without returning fabricated accepted values. inputs.snapshot is
     the fixed historical entry/point state used to save readout.h5 after Completed,
-    including rejection. Invalid input/unexpected errors raise.
+    including rejection. Partial saves then returns rejected/stopped without
+    selecting a best point or updating carry. Invalid input/unexpected errors raise.
     Await in a workflow; cancellation remains Engine-owned.
     """
     # Require accepted frequency and pulse durations at this point.
@@ -540,6 +560,8 @@ async def calibrate_readout(
         snapshot=inputs.snapshot,
         identity=env.identity,
     )
+    if outcome.partial_result:
+        return ReadoutResult("rejected", "stopped", None, None, "readout.h5")
     signals = outcome.value.result.signals
     accepted = np.isfinite(signals) & (signals >= inputs.tun.min_readout_snr)
     if not np.any(accepted):

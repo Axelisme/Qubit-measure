@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 coherence、MIST 與 overnight workflow 的校準、分析和保存契約。
 
-**Last updated:** 2026-10-22，async workflow 與 operation facts
+**Last updated:** 2026-10-22，partial 保存與分析失敗收尾
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、區域 history 與 point record。
 每個 workflow 是一個 async 函式。Engine 執行 await operations，記錄 tunables revision，並保存作者明確提交的 record。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
@@ -42,14 +42,16 @@ Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifet
 `CoherencePoint` 保存 frequency、rabi、readout 與 enabled `measurements` tuple。
 Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
 Frequency widening 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
-Failed／skipped stage 沒有偽造檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
+Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
 Carry 與 lifetime history 是 async 函式的區域變數。作者以 `await env.commit(point, d)` 提交完整點。
 Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準與區域變數不重做。
-Stop 讓 operation 回傳 partial result，作者仍可保存及提交。之後的 operation 以已停止的 token 啟動。
-沒有 stage checkpoint、原始檔 reader、檔案追蹤或 rollback 保證。
-Schedule Failed 與 fit 拒絕隔離為各項具名結果。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
+Stop 讓 operation 回傳 partial result。作者先保存每個 Completed 的 raw，再檢查 partial_result。
+Partial 回 rejected、reason=stopped，不進擬合或接受，不更新 accepted history。Frequency 仍依 widening 次序嘗試，其餘階段保留依賴與 commit 流程。之後的 operation 以已停止的 token 啟動。
+分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 明示的 non-convergence fallback warning 與 scipy 非有限 array 錯誤也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
+Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。完整資料的投影、fit 選擇、接受門檻與 history 政策不變。
+沒有 stage checkpoint、原始檔 reader、檔案追蹤或 rollback 保證。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
 
 ## MIST 與 overnight
 
@@ -57,9 +59,11 @@ Schedule Failed 與 fit 拒絕隔離為各項具名結果。Unexpected adapter�
 `MISTPoint` 保留三份 stage 結果、success、reason 與 gain_file；raw IQ 留 native `mist/gain`。
 Live trace/map 保留 centred magnitude／spread projection，不推 threshold。
 Map 使用 native 實際 gain 與有單位的 flux sample centres，不用 requested extent 或 flux index 替代。
+MIST partial 先保存 mist.h5，再回 success=False、reason=stopped，gain_file 保留檔名。不更新 map 的成功 trace，也不保存完整 gain 圖。
 
 `overnight` 維持固定 flux、有限 T1→Hahn-echo pair、固定開始間隔與無 feedback。
 它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
+每個 Completed member 先保存 raw，partial 不擬合並記 reason=stopped。預期 fit failure 記 reason 且 lifetime/error 為 None。兩者都繼續另一 member 並提交 pair。
 下一 pair 在 max(now, previous actual start + interval) 開始，不做 catch-up bursts。
 Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop 保留既有 commits。
 區域變數 `trend_points` 保留具名 scalar pair tuple，不保存 Figure 或 axes。
@@ -77,7 +81,7 @@ Workflow 在 env.run 返回 Completed 後呼既有 exact-path native writer，fi
 Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
 Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間與 device snapshot。
 Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，不捕捉新事實。
-H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。stopped 決定 complete 或 stopped，experiment 取 persistence spec.tag。
+H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completed.partial_result 決定 complete 或 stopped，experiment 取 persistence spec.tag。
 Provenance 取 workflow identity，不逐 operation 捕捉。Lab 不建立 AcquisitionEvidence。
 Framework 只保存 manifest、journal 與 best-effort record.json。
 Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 reader 或通用 dispatcher。

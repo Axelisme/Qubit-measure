@@ -104,10 +104,10 @@ class MISTPoint(BaseModel):
     index is zero-based in plan.fluxes; flux is the actual device setpoint.
     frequency/rabi/readout are independent named stage results, including their
     accepted scalar parts, reasons and immutable native references.
-    success is True only after native acquisition completes, otherwise False.
-    reason is None on success or a dependency/Schedule diagnostic on failure.
-    gain_file names the final native trace, or is None on failed
-    calibration/acquisition.
+    success is True only after full native acquisition completes, otherwise False.
+    reason is None on success, stopped on partial acquisition, or a dependency/
+    Schedule diagnostic on failure. gain_file names every Completed native trace,
+    including partial, or is None on failed calibration/acquisition.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -181,6 +181,9 @@ async def mist_fluxdep(
     Current frequency/Rabi are required. Nonaccepted readout retains legal
     prior settings. Save raw IQ and commit one MISTPoint without a threshold fit;
     normal calibration/acquisition failure retains a NaN map row and its reason.
+    Partial saves raw IQ then records success=False/reason=stopped, without
+    projecting the trace into the map or declaring success. The point still
+    commits and later points follow the same flow.
     Unexpected native/plot/save errors propagate. Pause resumes the pending
     operation, not the whole point. Tunables reads use tun.current.
     To revisit past points, start a new run with a sliced plan and seed local
@@ -249,6 +252,7 @@ async def mist_fluxdep(
         cal = current_point_calibration(rabi, carry)
         reason = rabi.reason
         success = False
+        gain_file = None
         if cal is not None:
             # The custom native sequence rebuilds its gain plot on each attempt.
             outcome = await env.run(run_mist, mist_cfg(plan, tun.current, cal))
@@ -261,11 +265,15 @@ async def mist_fluxdep(
                     snapshot=plan.snapshot,
                     identity=env.identity,
                 )
-                result = outcome.value.result
-                traces[index] = result.signals
-                gains = result.gains.copy()
-                _save_gain(env.plots, result, d)
-                success, reason = True, None
+                gain_file = "mist.h5"
+                if outcome.partial_result:
+                    reason = "stopped"
+                else:
+                    result = outcome.value.result
+                    traces[index] = result.signals
+                    gains = result.gains.copy()
+                    _save_gain(env.plots, result, d)
+                    success, reason = True, None
         await env.commit(
             MISTPoint(
                 index=index,
@@ -275,7 +283,7 @@ async def mist_fluxdep(
                 readout=readout,
                 success=success,
                 reason=reason,
-                gain_file="mist.h5" if success else None,
+                gain_file=gain_file,
             ),
             d,
         )
