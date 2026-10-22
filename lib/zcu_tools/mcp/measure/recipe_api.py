@@ -22,6 +22,7 @@ from zcu_tools.core.script_protocol import (
 )
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.measure.raw_save import SaveOutput, SaveReport
+from zcu_tools.mcp.measure.writeback_recovery import WritebackRecovery
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe_runtime import RecipeRuntime
@@ -264,16 +265,20 @@ class WritebackQuestion(Question[WritebackAnswer]):
 class WritebackReceipt:
     """GUI-confirmed writeback result, including a successful prefix on failure.
 
-    status is completed, cancelled or failed. items lists original captured
+    status is completed, cancelled, failed or unknown after a write timeout.
+    submission_id/recovery query the GUI-lifetime owner receipt before resending.
+    items lists original captured
     candidates for owner-confirmed applied IDs, in owner order. Actual written
     values and destinations come from the owner's current draft; items is not a
     written-value snapshot. error describes a failed or uncertain attempt,
     otherwise None. No rollback or automatic retry follows a failed write.
     """
 
-    status: OperationStatus
+    status: OperationStatus | Literal["unknown"]
     items: tuple[WritebackItem, ...]
     error: str | None = None
+    submission_id: str | None = None
+    recovery: WritebackRecovery | None = None
 
     def raise_for_error(self) -> None:
         """Raise RuntimeError with the owner diagnostic unless status is completed.

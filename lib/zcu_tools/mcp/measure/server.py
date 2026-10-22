@@ -251,7 +251,13 @@ Primary/Post candidates by stable target_name. Omit items for all; an empty arra
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
 any write, using current IDs rather than proposal IDs. It does not answer recipes.
 apply_writeback stops on the first error and reports confirmed
-progress without retry or rollback. Inspect proposals and the destination first.
+progress without retry or rollback. Each attempted pane has a GUI-lifetime
+submission_id in submissions, and recovery queries tab.writeback_receipt.
+A write timeout returns unknown with the ID and partial-write warning, not a
+failed-write outcome. Check status before deciding whether to resubmit. Receipt
+queries return confirmed IDs, actual values and fixed entry/point destinations.
+Recipe acceptance retains the same submission_id/recovery in its receipt.
+Inspect proposals and the destination first.
 
 When a recipe is paused, answer(execution, request_id, answer) supplies named
 fields described by pending_question.answer_schema. request_id is required.

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict
 
 from zcu_tools.mcp.measure.analysis_execution import AnalysisWriteback
+from zcu_tools.mcp.measure.writeback_recovery import WritebackRecovery
 
 AnalysisStage = Literal["primary", "post"]
 
@@ -81,19 +82,26 @@ class WritebackFailure(TypedDict):
 class WritebackReceipt(TypedDict):
     """Progress of a Primary-then-Post writeback without rollback or retry.
 
-    tab is the GUI locator. status is finished or failed. completed contains only
+    tab is the GUI locator. status is finished, failed, or unknown after timeout. completed contains only
     confirmed writes grouped by stage. skipped names stages with no selected
     candidates; not_started names stages not attempted after the first failure.
     Failed replies additionally name failed_stage and error. The partial-writes
     flag says only that a write RPC was attempted in the failed stage, not which
-    unconfirmed items were written. Finished replies omit all three failure keys.
+    unconfirmed items were written. submission_id identifies the latest attempted
+    pane, submissions maps attempted stages to their IDs, and recovery queries its
+    retained owner receipt. next_action requires checking status before resending.
+    Finished replies omit all three failure keys.
     """
 
     tab: str
-    status: Literal["finished", "failed"]
+    status: Literal["finished", "failed", "unknown"]
     completed: list[WritebackStageReceipt]
     skipped: list[AnalysisStage]
     not_started: list[AnalysisStage]
+    submission_id: NotRequired[str]
+    submissions: NotRequired[dict[AnalysisStage, str]]
+    recovery: NotRequired[WritebackRecovery]
+    next_action: NotRequired[str]
     failed_stage: NotRequired[AnalysisStage]
     error: NotRequired[WritebackFailure]
     failed_stage_may_have_partial_writes: NotRequired[bool]

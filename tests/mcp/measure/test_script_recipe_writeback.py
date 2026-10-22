@@ -4,7 +4,9 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.writeback.submissions import WritebackCompleted
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeSession,
@@ -182,15 +184,18 @@ def test_owner_submission_receipt_retains_prefix_and_rejects_duplicate_commit(
     gui.respond("tab.writeback_accept", params)
     receipt = gui.respond("tab.writeback_receipt", query)
     assert receipt["status"] == ("failed" if partial else "completed")
-    completed = receipt["completed"]
-    assert [
-        (row["subtab_id"], row["item"]["id"], row["item"]["value"]) for row in completed
-    ] == [("analysis", "param-1", 20.0), ("post_analysis", "param-1", 30.0)]
-    assert [row["item"]["target"] for row in completed] == [
+    completed = TypeAdapter(list[WritebackCompleted]).validate_python(
+        receipt["completed"]
+    )
+    assert [(row.subtab_id, row.item.id, row.item.value) for row in completed] == [
+        ("analysis", "param-1", 20.0),
+        ("post_analysis", "param-1", 30.0),
+    ]
+    assert [row.item.target for row in completed] == [
         "general.ext.first",
         "general.ext.second",
     ]
-    assert all(row["item"]["destination"]["point"] == "point" for row in completed)
+    assert all(row.item.destination["point"] == "point" for row in completed)
     gui.respond(
         "tab.writeback_set",
         {

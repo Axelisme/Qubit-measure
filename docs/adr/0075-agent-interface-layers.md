@@ -138,7 +138,13 @@ unknown／duplicate 在第一筆寫入前拒絕。通過後按 Primary、Post、
 
 收據用 owner item ID 關聯確認項目，不將 authored alias 名稱與 concrete target 比較。
 `WritebackReceipt.items` 是成功 ID 對應的原捕捉候選，不是實際寫入值快照。
-RPC 回覆仍只確認成功 IDs。實際值與目的地取提交當下的 owner draft，不擴 wire 回 actual value。
+接受回覆以成功 IDs 關聯原捕捉候選。實際值與目的地取提交當下的 owner draft。
+2026-10-23 補充：同步寫入前由 owner 配置一次性 submission_id，完成項另存 ID、值、固定目的地。
+Caller 先 begin，再帶同一 ID 提交；begin 不表示已寫入，同 ID 重複提交拒絕。
+逾時回覆帶 ID 並要求先查狀態，再決定是否重送，不把 10 秒 handler 逾時當成寫入失敗。
+唯讀 receipt 查詢保留成功前綴，不重讀當前 draft 或目的地。
+Receipt 只存在 GUI 生命週期的記憶體，不保證重啟恢復。這取代原先只回 IDs 的限制，
+原因是接受回覆可能逾時，但 owner 已完成寫入；查詢必須能回當次實際內容。
 作者處理 failed receipt，或以 `raise_for_error()` 保留診斷並終止流程，finally 仍 Save。
 Report 不以 answer.accepted 宣稱已寫入。Full execution details 保留每次接受收據。
 

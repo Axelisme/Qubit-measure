@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pydantic import JsonValue
 
@@ -83,14 +83,42 @@ class WritebackSelection:
     ids: tuple[str, ...]
 
 
+class WritebackDestination(TypedDict):
+    """Fixed persisted target: kind=saved_point, entry UUID and point label."""
+
+    kind: Literal["saved_point"]
+    entry_id: str
+    point: str
+
+
+@dataclass(frozen=True)
+class WritebackApplied:
+    """One confirmed write captured at submission, never a later preview.
+
+    id is draft-local; kind is parameter/module/sample. target is the concrete
+    path or sample component. value is the actual stored value after the write.
+    destination identifies the fixed entry and point that received it.
+    """
+
+    id: str
+    kind: Literal["parameter", "module", "sample"]
+    target: str
+    value: object
+    destination: WritebackDestination
+
+
 @dataclass(frozen=True)
 class WritebackAcceptance:
     """Receipt for an ordered group submission, without retry or rollback.
 
     applied_ids has one tuple per submitted draft, in submission order; only
     confirmed writes appear. error is None on completion, otherwise the first
-    write failure diagnostic. Invalid IDs raise before writes.
+    write failure diagnostic. written has one group per submitted draft, with
+    the actual values and fixed destinations for its confirmed prefix. Invalid
+    IDs raise before writes.
     """
 
     applied_ids: tuple[tuple[str, ...], ...]
     error: str | None = None
+    # One group per submitted draft, containing detached actual successful values.
+    written: tuple[tuple[WritebackApplied, ...], ...] = ()

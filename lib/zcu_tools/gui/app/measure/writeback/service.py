@@ -16,17 +16,18 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.library_entry import ModuleEntryForm
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleResolutionError, document_unit, document_value
+from zcu_tools.resources.entry import RoleResolutionError, document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
-from .contracts import UNCHANGED
+from .contracts import UNCHANGED, WritebackApplied
 from .contracts import WritebackAcceptance as WritebackAcceptance
 from .contracts import WritebackEdit as WritebackEdit
 from .contracts import WritebackSelection as WritebackSelection
 from .contracts import WritebackValues as WritebackValues
 from .contracts import WritebackWritten as WritebackWritten
 from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, WritebackItem
+from .values import applied_values, destination_path, read_destination_value
 
 logger = logging.getLogger(__name__)
 
@@ -80,29 +81,6 @@ def _sample_fields(
             f"Run device {device_name!r} has no usable value_unit"
         )
     return copy.deepcopy(fields) | {"dev_value": value, "dev_unit": unit}
-
-
-def _destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
-    if isinstance(item, SampleWriteback):
-        return item.target_name
-    if isinstance(item, ParameterWriteback):
-        return parameters.resolve_path(item.target_name)
-    return parameters.library_key(item.target_name)
-
-
-def _destination_value(
-    item: WritebackItem, parameters: ParameterContext, path: str
-) -> object:
-    if isinstance(item, ParameterWriteback):
-        # The destination is already concrete; do not resolve captured roles again.
-        try:
-            return document_value(parameters.document(), path)
-        except AttributeError:
-            return None
-    library = parameters.library
-    if path not in library.module_keys():
-        return None
-    return library.entry_value(path, kind="module")
 
 
 @dataclass
@@ -298,6 +276,7 @@ class _DraftApplication:
     applied_ids: tuple[str, ...]
     written: dict[str, list[str]]
     error: BaseException | None = None
+    values: tuple[WritebackApplied, ...] = ()
 
 
 class WritebackService:
@@ -448,7 +427,7 @@ class WritebackService:
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         values: dict[str, WritebackValues] = {}
         for item in items:
-            path = _destination_path(item, parameters)
+            path = destination_path(item, parameters)
             if isinstance(item, SampleWriteback):
                 proposed = item.proposed_value
             elif isinstance(item, ParameterWriteback):
@@ -460,7 +439,7 @@ class WritebackService:
                 proposed = self._module_spec(entry).model_dump(mode="python")
             values[item.session_id] = WritebackValues(
                 actual_path=path,
-                current=self._read_destination_value(draft, item, current, path),
+                current=read_destination_value(self._write, draft, item, current, path),
                 proposed=proposed,
                 unit=(
                     document_unit(current.document(), path)
@@ -469,19 +448,6 @@ class WritebackService:
                 ),
             )
         return values
-
-    def _read_destination_value(
-        self,
-        draft: WritebackDraft,
-        item: WritebackItem,
-        current: ParameterContext,
-        path: str,
-    ) -> object:
-        """Read one captured destination consistently for preview and receipts."""
-        if isinstance(item, SampleWriteback) and draft.run_id is not None:
-            parameters = self._require_parameters(draft)
-            return self._write.read_sample(parameters.target, path, draft.run_id)
-        return _destination_value(item, current, path)
 
     @staticmethod
     def _require_parameters(draft: WritebackDraft) -> ParameterContext:
@@ -614,6 +580,7 @@ class WritebackService:
         *,
         item_ids: tuple[str, ...] | None,
         origin: CommandOrigin,
+        capture_values: bool = False,
     ) -> _DraftApplication:
         self._require_draft(draft)
         selected_entries = _entries_to_apply(draft.entries_for(self), item_ids)
@@ -679,11 +646,24 @@ class WritebackService:
                 ),
                 written,
                 cause,
+                applied_values(
+                    self._write,
+                    draft,
+                    tuple(entry.item for entry in selected_entries[: exc.applied]),
+                )
+                if capture_values
+                else (),
             )
         for entry in selected_entries:
             entry.applied = True
         return _DraftApplication(
-            tuple(entry.item.session_id for entry in selected_entries), written
+            tuple(entry.item.session_id for entry in selected_entries),
+            written,
+            values=applied_values(
+                self._write, draft, tuple(entry.item for entry in selected_entries)
+            )
+            if capture_values
+            else (),
         )
 
     def accept_drafts(
@@ -709,19 +689,26 @@ class WritebackService:
             seen.add(draft)
             _entries_to_apply(draft.entries_for(self), selection.ids)
         applied: list[tuple[str, ...]] = [() for _ in selections]
+        written: list[tuple[WritebackApplied, ...]] = [() for _ in selections]
         for index, selection in enumerate(selections):
             try:
                 result = self._apply_draft(
-                    selection.draft, item_ids=selection.ids, origin=origin
+                    selection.draft,
+                    item_ids=selection.ids,
+                    origin=origin,
+                    capture_values=True,
                 )
             except Exception as error:
                 # Isolate an uncertain read/ledger failure; earlier groups remain confirmed.
                 logger.exception("Captured writeback failed after confirmed groups")
-                return WritebackAcceptance(tuple(applied), str(error))
+                return WritebackAcceptance(tuple(applied), str(error), tuple(written))
             applied[index] = result.applied_ids
+            written[index] = result.values
             if result.error is not None:
-                return WritebackAcceptance(tuple(applied), str(result.error))
-        return WritebackAcceptance(tuple(applied))
+                return WritebackAcceptance(
+                    tuple(applied), str(result.error), tuple(written)
+                )
+        return WritebackAcceptance(tuple(applied), written=tuple(written))
 
     def write_draft(
         self,
@@ -729,6 +716,7 @@ class WritebackService:
         changes: tuple[WritebackEdit, ...],
         *,
         origin: CommandOrigin = _GUI_ORIGIN,
+        on_applied: Callable[[tuple[WritebackApplied, ...]], None] | None = None,
     ) -> list[WritebackWritten]:
         """Edit sequentially and return actual fixed-target before/after values.
 
@@ -739,7 +727,9 @@ class WritebackService:
         whose Form is invalid (LibraryEntryInvalid), retain the successful
         draft prefix without writes. Read/append/setter failures propagate; accepted
         evidence and any successful writes remain. MCP supplies
-        CommandOrigin("mcp"); GUI uses the default.
+        CommandOrigin("mcp"); GUI uses the default. on_applied, when supplied,
+        receives the confirmed prefix before any write error propagates; it must
+        only record the detached receipt, not issue further mutations.
         """
         self._require_draft(draft)
         if not changes:
@@ -762,13 +752,19 @@ class WritebackService:
                 # Built only to reject invalid input before any context read or write.
                 self._module_spec(entry)
             items.append(entry.item)
-        paths = [_destination_path(item, parameters) for item in items]
+        paths = [destination_path(item, parameters) for item in items]
         current = self._write.read_target(parameters.target, roles=parameters.roles)
         before = [
-            self._read_destination_value(draft, item, current, path)
+            read_destination_value(self._write, draft, item, current, path)
             for item, path in zip(items, paths, strict=True)
         ]
-        self.apply_draft(draft, item_ids=ids, origin=origin)
+        applied = self._apply_draft(
+            draft, item_ids=ids, origin=origin, capture_values=True
+        )
+        if on_applied is not None:
+            on_applied(applied.values)
+        if applied.error is not None:
+            raise applied.error from applied.error.__cause__
         after = self._write.read_target(parameters.target, roles=parameters.roles)
         return [
             WritebackWritten(
@@ -782,7 +778,7 @@ class WritebackService:
                 ),
                 target=path,
                 before=previous,
-                after=self._read_destination_value(draft, item, after, path),
+                after=read_destination_value(self._write, draft, item, after, path),
             )
             for item, path, previous in zip(items, paths, before, strict=True)
         ]

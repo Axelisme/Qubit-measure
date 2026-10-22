@@ -43,7 +43,15 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 `tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, ids}` 清單，不帶 `expected_revision`。
 Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
 通過後按 Primary、Post、各 pane 的候選順序寫入 owner 當下 draft 的值與目的地，不還原捕捉時的 proposal。
-回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴，不是寫入值快照。
+接受回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴。
+先呼叫 `tab.writeback_begin(tab_id)` 取得 owner 配置的一次性 `submission_id`，再帶到
+`tab.writeback_write` 或 `tab.writeback_accept`。Begin 不代表已寫入，同 ID 重複提交會拒絕。
+`tab.writeback_receipt(submission_id)` 唯讀回 `{submission_id, tab_id, status, completed, error}`。
+Status 是 pending、completed 或 failed。Pending 包含只 reserve 或仍執行，不能推論沒有副作用。
+Completed 的每列是 `{subtab_id, item:{id, kind, target, value, destination}}`。
+Destination 是固定的 `{kind: "saved_point", entry_id, point}`，value 是 owner 當次確認的實際值。
+查詢不重讀當前 draft 或磁碟，僅保留 GUI 生命週期的記憶體 receipt。
+10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。
 GUI／MCP 的所有權模型允許問答期間的 draft 編輯與替換，見 ADR-0075 的 2026-10-23 使用者裁定。
 第一次寫入失敗就停止，不 retry／rollback。單 pane `tab.writeback_set`／`tab.writeback_write` 仍編輯當前 draft。

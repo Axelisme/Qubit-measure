@@ -52,6 +52,25 @@ from zcu_tools.mcp.measure.recipe_form import (
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.writeback_recovery import (
+    CHECK_WRITEBACK_STATUS,
+    begin_writeback,
+    writeback_recovery,
+)
+
+
+def _writeback_failure_receipt(
+    error: GuiRpcError, identity: str | None
+) -> WritebackReceipt:
+    """Keep a known submission queryable when a timeout hides the owner outcome."""
+    uncertain = identity is not None and error.code == "timeout"
+    return WritebackReceipt(
+        "unknown" if uncertain else "failed",
+        (),
+        f"{error}. {CHECK_WRITEBACK_STATUS}" if uncertain else str(error),
+        identity,
+        writeback_recovery(identity) if identity is not None else None,
+    )
 
 
 @dataclass(frozen=True)
@@ -665,15 +684,17 @@ class RecipeRuntime:
                         "ids": ids,
                     }
                 )
+        identity: str | None = None
         try:
+            identity = begin_writeback(self._tools, tab)
             reply = _Acceptance.model_validate(
                 self._tools.gui.send_gui_rpc(
                     "tab.writeback_accept",
-                    {"tab_id": tab, "stages": stages},
+                    {"tab_id": tab, "stages": stages, "submission_id": identity},
                 )
             )
         except GuiRpcError as error:
-            receipt = WritebackReceipt("failed", (), str(error))
+            receipt = _writeback_failure_receipt(error, identity)
         else:
             confirmed = {
                 (row.subtab_id, identity)
@@ -690,7 +711,13 @@ class RecipeRuntime:
                 )
                 in confirmed
             )
-            receipt = WritebackReceipt(reply.status, deepcopy(applied), reply.error)
+            receipt = WritebackReceipt(
+                reply.status,
+                deepcopy(applied),
+                reply.error,
+                identity,
+                writeback_recovery(identity),
+            )
         with self._lock:
             index = self._detail_index(tab)
             detail = self._details[index]

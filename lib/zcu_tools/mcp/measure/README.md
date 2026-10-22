@@ -356,6 +356,14 @@ Recipe 的 typed T 驗證不會補資料或更改這份 owner summary。
 Primary 先於 Post，首錯停止，不 retry 或 rollback。
 收據只列 GUI-confirmed completed，保留 skipped、failed stage、
 not_started 與失敗 stage 的不確定性。
+每個實際提交的 pane 都先向 owner 取得一次性 ID。`submissions` 以 primary／post 對應 ID，
+`submission_id` 是最後嘗試的 pane，`recovery` 帶 `tab.writeback_receipt` 與精確 query params。
+寫入逾時時 status 是 unknown，保留 `failed_stage_may_have_partial_writes`，
+並要求先查狀態，再決定是否重送。不能把 handler 逾時當成寫入失敗。
+查詢回完成列的 item ID、實際值、concrete target 與固定 entry_id／point。
+Receipt 只保留在 GUI 生命週期內，查詢不重新讀取當前 draft 或目的地。
+Recipe `accept_writeback` 的 receipt 也保留 submission_id／recovery，逾時回 unknown。
+它的 items 仍是 confirmed IDs 對應的原捕捉候選，不取代 owner 的實際值 receipt。
 
 Recipe 的 captured 問答與這個當前 draft 工具不同。
 Recipe 只在 `accept_writeback(items)` 以已捕捉候選的 IDs 寫入當下 draft，
