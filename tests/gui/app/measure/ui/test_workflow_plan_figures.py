@@ -284,6 +284,10 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     _snapshot(driver, tmp_path, "required-01-experiment")
     driver.click(object_name="form.fold.sweep")
     _snapshot(driver, tmp_path, "required-01a-expanded-experiment")
+    fresh_experiment_values = tuple(
+        driver.observe(object_name=f"form.input.sweep.{field}").text
+        for field in ("start", "stop", "n")
+    )
     for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
         driver.enter_text(object_name=f"form.input.sweep.{field}", value=value)
         _snapshot(driver, tmp_path, f"required-02-experiment-{field}")
@@ -310,9 +314,13 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     ):
         driver.click(object_name="form.fold.fluxes")
         _snapshot(driver, tmp_path, "required-04a-expanded-workflow")
-    assert driver.observe(object_name="form.input.fluxes.start").text == "0.0"
-    assert driver.observe(object_name="form.input.fluxes.stop").text == "1.0"
-    assert driver.observe(object_name="form.input.fluxes.n").text == "3"
+    assert (
+        tuple(
+            driver.observe(object_name=f"form.input.fluxes.{field}").text
+            for field in ("start", "stop", "n")
+        )
+        == fresh_experiment_values
+    )
     for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
         driver.enter_text(object_name=f"form.input.fluxes.{field}", value=value)
         _snapshot(driver, tmp_path, f"required-05-workflow-{field}")

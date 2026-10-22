@@ -548,6 +548,96 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
 
 
 @pytest.fixture
+def restart_questions_window(workflow_window):
+    ctrl, window = workflow_window
+
+    @workflow(
+        "restart-questions", plan=Native, tunables=Native, init=lambda env, plan: 0
+    )
+    def questions(
+        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
+    ) -> Step[int, int]:
+        # An explicit zero plan makes the entire run question-free.
+        if plan.value:
+            yield from env.ask(Choose(point=plan.value))
+        return Done()
+
+    ctrl.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                step=questions,
+                plan_model=Values,
+                knobs_model=Values,
+                plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
+                knobs_to_cfg=lambda form: Native(value=form.value),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    return window
+
+
+def test_new_run_hides_retained_exchange_until_new_question(
+    restart_questions_window, tmp_path
+):
+    driver = ComponentDriver(restart_questions_window)
+    driver.click(object_name="workflow.toggle")
+    _ask_shot(driver, tmp_path, "restart-01-workflows")
+    driver.select_menu("New Tab ▾", ("restart-questions",))
+    _ask_shot(driver, tmp_path, "restart-02-opened")
+    driver.enter_text(object_name="form.input.value", value="1")
+    _ask_shot(driver, tmp_path, "restart-03-first-plan")
+    driver.click("Start")
+    # The finite author segment yields the explicitly requested first question.
+    qt_until(lambda: _status(driver, "paused"), label="first run question")
+    _ask_shot(driver, tmp_path, "restart-04-first-question")
+    assert driver.tabs("Ask").current == "Ask"
+    assert '"point": 1' in driver.observe(object_name="workflow.ask").text
+    driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
+    _ask_shot(driver, tmp_path, "restart-05-answer-edited")
+    driver.click("Answer")
+    # Answer resumes the finite author continuation, which returns Done.
+    qt_until(lambda: _status(driver, "done"), label="first run answered")
+    _ask_shot(driver, tmp_path, "restart-06-retained-exchange")
+    assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
+    assert '"point": 1' in driver.observe(object_name="workflow.ask").text
+    assert driver.observe(object_name="workflow.answer").text == '{"value": 17}'
+    assert driver.observe(object_name="workflow.answer_status").text == "已回答"
+    assert not driver.observe("Answer").enabled
+    driver.select_tab("Plan")
+    _ask_shot(driver, tmp_path, "restart-07-plan")
+    driver.enter_text(object_name="form.input.value", value="0")
+    _ask_shot(driver, tmp_path, "restart-08-question-free-plan")
+    driver.click("Start")
+    # The zero plan returns Done without any Ask, so this is a stable no-question state.
+    qt_until(lambda: _status(driver, "done"), label="question-free run completed")
+    _ask_shot(driver, tmp_path, "restart-09-question-free-run")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
+    assert not any(
+        widget.object_name
+        in {"workflow.ask", "workflow.answer", "workflow.answer_status"}
+        for widget in driver.visible().widgets
+    ), "A new run must clear the old exchange and hide its Ask page"
+    driver.enter_text(object_name="form.input.value", value="2")
+    _ask_shot(driver, tmp_path, "restart-10-new-question-plan")
+    driver.click("Start")
+    # The nonzero plan yields a fresh question on this same tab's third run.
+    qt_until(lambda: _status(driver, "paused"), label="new run question")
+    _ask_shot(driver, tmp_path, "restart-11-new-question")
+    assert driver.tabs("restart-questions (1)").captions == ("restart-questions (1)",)
+    assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
+    assert driver.tabs("Ask").current == "Ask"
+    assert '"point": 2' in driver.observe(object_name="workflow.ask").text
+    assert driver.observe(object_name="workflow.answer").text == "{}"
+    assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
+    assert driver.observe("Answer").enabled
+    driver.click("Stop")
+    # Stop drains the retained question before the shared window fixture closes.
+    qt_until(lambda: _status(driver, "stopped"), label="new run question cancelled")
+    _ask_shot(driver, tmp_path, "restart-12-stopped")
+
+
+@pytest.fixture
 def two_questions_window(workflow_window):
     ctrl, window = workflow_window
     release = Event()

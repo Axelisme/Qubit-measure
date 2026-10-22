@@ -11,6 +11,7 @@ from zcu_tools.gui.form import (
     FormInput,
     FormModel,
     FormState,
+    static_defaults,
 )
 from zcu_tools.gui.form_adapter import CenterSpan, LinRange, SweepInput
 
@@ -30,11 +31,11 @@ class ExplicitSweepForm(FormModel):
 def test_required_sweep_fresh_input_matches_generated_range_defaults():
     env = FormEnv()
     input = RequiredSweepForm.default_input(env)
-    assert input.data == {"sweep": {"kind": "linrange", "start": 0, "stop": 1, "n": 3}}
+    assert input.data == {"sweep": static_defaults(LinRange)}
     state = FormState(input)
     result = state.result(env)
     assert not isinstance(result, FormErrors)
-    assert (result.sweep.start, result.sweep.stop, result.sweep.n) == (0, 1, 3)
+    assert result.sweep == LinRange()
     assert [field.name for field in state.describe(("sweep",), env).children] == [
         "start",
         "stop",
@@ -77,7 +78,7 @@ def test_sweep_authored_partial_range_keeps_existing_endpoint_defaults():
     )
     result = state.result(env)
     assert not isinstance(result, FormErrors)
-    assert (result.sweep.start, result.sweep.stop, result.sweep.n) == (0, 1, 3)
+    assert result.sweep == LinRange(n=3)
 
 
 def test_required_sweep_coordinates_can_roundtrip_through_commands():
