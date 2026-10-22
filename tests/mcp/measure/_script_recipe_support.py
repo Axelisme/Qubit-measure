@@ -39,6 +39,7 @@ class SyntheticGui:
         self.started = Event()
         self.cancelled = Event()
         self.runs = 0
+        self.submissions = 0
 
     def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.read_recipe_field":
@@ -53,6 +54,9 @@ class SyntheticGui:
                 "source": None,
                 "readonly": False,
             }
+        if method == "tab.writeback_begin":
+            self.submissions += 1
+            return {"submission_id": f"wb-{self.submissions}", "status": "pending"}
         if method == "tab.new":
             return {"tab_id": "tab-1"}
         if method in {

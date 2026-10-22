@@ -20,15 +20,20 @@ from zcu_tools.experiment.stop_signal import (
     CancelResult,
 )
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.remote.analysis_types import AnalysisPresentation
+from zcu_tools.gui.app.measure.remote.form_description import RecipeEditResult
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
 from zcu_tools.mcp.measure.analysis_execution import (
+    AnalysisReadPolicy,
+    AnalysisRecovery,
     ExecutionPhase,
     InvalidAnalysisValue,
 )
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
+    FieldEdit,
     FormError,
     FormField,
     FormPath,
@@ -44,14 +49,38 @@ from zcu_tools.mcp.measure.recipe_api import (
     WritebackProposal,
     WritebackReceipt,
 )
+from zcu_tools.mcp.measure.recipe_contracts import (
+    MissingParameter,
+    RecipeNeedsParameters,
+)
 from zcu_tools.mcp.measure.recipe_details import RecipeAnalysisDetail, RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_form import (
+    RecipeFormError,
     field_observation,
     field_path,
     read_form_field,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.writeback_recovery import (
+    CHECK_WRITEBACK_STATUS,
+    begin_writeback,
+    writeback_recovery,
+)
+
+
+def _writeback_failure_receipt(
+    error: GuiRpcError, identity: str | None
+) -> WritebackReceipt:
+    """Keep a known submission queryable when a timeout hides the owner outcome."""
+    uncertain = identity is not None and error.code == "timeout"
+    return WritebackReceipt(
+        "unknown" if uncertain else "failed",
+        (),
+        f"{error}. {CHECK_WRITEBACK_STATUS}" if uncertain else str(error),
+        identity,
+        writeback_recovery(identity) if identity is not None else None,
+    )
 
 
 @dataclass(frozen=True)
@@ -106,7 +135,7 @@ class _Snapshots(BaseModel):
     tabs: list[_TabSnapshot]
 
 
-class _Started(BaseModel):
+class _Started(AnalysisReadPolicy):
     handle: int
     interactive: bool = False
 
@@ -187,7 +216,9 @@ class RecipeRuntime:
         self._images: list[PngImage] = []
         self._run_scope: Scope | None = None
         self._run_handle: int | None = None
-        self._failures: list[tuple[Exception, ExecutionPhase]] = []
+        self._failures: list[
+            tuple[Exception, ExecutionPhase, AnalysisRecovery | None]
+        ] = []
 
     def failure_phase(self, error: Exception) -> ExecutionPhase:
         """Read the phase of this exact runtime failure, or operation for author errors.
@@ -197,19 +228,29 @@ class RecipeRuntime:
         classified using an unrelated, previously caught runtime failure.
         """
         with self._lock:
-            for failure, phase in reversed(self._failures):
+            for failure, phase, _recovery in reversed(self._failures):
                 if failure is error:
                     return phase
             return "operation"
 
+    def failure_recovery(self, error: Exception) -> AnalysisRecovery | None:
+        """Return the read-only route for this exact failure, without querying GUI."""
+        with self._lock:
+            for failure, _phase, recovery in reversed(self._failures):
+                if failure is error:
+                    return deepcopy(recovery)
+            return None
+
     @contextmanager
-    def _failure_phase(self, phase: ExecutionPhase) -> Generator[None]:
+    def _failure_phase(
+        self, phase: ExecutionPhase, *, recovery: AnalysisRecovery | None = None
+    ) -> Generator[None]:
         try:
             yield
         except Exception as error:
             # Preserve the original exception so author-side recovery still works.
             with self._lock:
-                self._failures.append((error, phase))
+                self._failures.append((error, phase, deepcopy(recovery)))
             raise
 
     def runs(self) -> tuple[RecipeRun, ...]:
@@ -438,6 +479,68 @@ class RecipeRuntime:
                 "Owner retained an invalid cfg draft", reason="invalid_cfg"
             )
 
+    def apply_fields(
+        self, tab: str, edits: Sequence[FieldEdit], *, require_valid: bool = False
+    ) -> None:
+        """Send one native batch; validated rejection never installs its candidate.
+
+        None-valued edits retain input. Invalid labels/paths fail before RPC.
+        require_valid delegates complete cfg admission to the GUI owner; its
+        errors raise RecipeNeedsParameters. Ordinary invalid drafts raise
+        invalid_cfg after installation. No rollback or retry occurs.
+        """
+        changes: list[dict[str, object]] = []
+        for edit in edits:
+            if not edit.source.strip():
+                raise ValueError("Edit source must be nonblank")
+            field_path(edit.path)
+            if edit.value is not None:
+                changes.append(
+                    {
+                        "path": list(edit.path),
+                        "value": TypeAdapter(FormValue).dump_python(
+                            edit.value, mode="json"
+                        ),
+                    }
+                )
+        if not changes and not require_valid:
+            return
+        reply = TypeAdapter(RecipeEditResult).validate_python(
+            self._tools.send_gui_rpc(
+                "tab.edit_recipe_fields",
+                {"tab_id": tab, "edits": changes, "require_valid": require_valid},
+            ),
+            strict=True,
+        )
+        errors = tuple(
+            RecipeFormError(tuple(error["path"]), error["message"])
+            for error in reply["errors"]
+        )
+        if require_valid:
+            self._require_cfg(errors)
+        elif errors:
+            raise GuiRpcError(
+                "Owner retained an invalid cfg draft", reason="invalid_cfg"
+            )
+
+    @staticmethod
+    def _require_cfg(errors: Sequence[RecipeFormError]) -> None:
+        if errors:
+            missing = tuple(
+                MissingParameter(
+                    "".join(
+                        f"[{part}]"
+                        if isinstance(part, int)
+                        else ("." if index else "") + part
+                        for index, part in enumerate(error.path)
+                    )
+                    or "$",
+                    error.message,
+                )
+                for error in errors
+            )
+            raise RecipeNeedsParameters(missing, parameter_errors=tuple(errors))
+
     def select(
         self, tab: str, path: FormPath, *, ref: str | None, inline: bool
     ) -> None:
@@ -665,15 +768,17 @@ class RecipeRuntime:
                         "ids": ids,
                     }
                 )
+        identity: str | None = None
         try:
+            identity = begin_writeback(self._tools, tab)
             reply = _Acceptance.model_validate(
                 self._tools.gui.send_gui_rpc(
                     "tab.writeback_accept",
-                    {"tab_id": tab, "stages": stages},
+                    {"tab_id": tab, "stages": stages, "submission_id": identity},
                 )
             )
         except GuiRpcError as error:
-            receipt = WritebackReceipt("failed", (), str(error))
+            receipt = _writeback_failure_receipt(error, identity)
         else:
             confirmed = {
                 (row.subtab_id, identity)
@@ -690,7 +795,13 @@ class RecipeRuntime:
                 )
                 in confirmed
             )
-            receipt = WritebackReceipt(reply.status, deepcopy(applied), reply.error)
+            receipt = WritebackReceipt(
+                reply.status,
+                deepcopy(applied),
+                reply.error,
+                identity,
+                writeback_recovery(identity),
+            )
         with self._lock:
             index = self._detail_index(tab)
             detail = self._details[index]
@@ -758,6 +869,12 @@ class RecipeRuntime:
         )
         with self._lock:
             self._details[index] = replace(self._details[index], conditions=conditions)
+        self._require_cfg(
+            tuple(
+                RecipeFormError(tuple(error["path"]), error["message"])
+                for error in conditions["errors"]
+            )
+        )
         started = _Started.model_validate(
             self._tools.send_gui_rpc("tab.run_start", {"tab_id": tab})
         )
@@ -821,12 +938,20 @@ class RecipeRuntime:
             )
         if completion.status == "cancelled":
             return AnalysisResult(None, status="failed", reason="Analysis cancelled")
-        with self._failure_phase("result_read"):
+        recovery: AnalysisRecovery | None = (
+            {**started.recovery, "op": started.handle}
+            if stage == "post" and started.recovery is not None
+            else None
+        )
+        with self._failure_phase("result_read", recovery=recovery):
             reply = self._tools.gui.send_gui_rpc(
                 "tab.get_analyze_result"
                 if stage == "primary"
                 else "tab.get_post_analyze_result",
                 {"tab_id": tab},
+                timeout_seconds=started.result_read_timeout_seconds
+                if stage == "post"
+                else None,
                 operation_handle=started.handle,
             )
             summary = TypeAdapter(YamlValue).validate_python(reply["summary"])
@@ -838,6 +963,9 @@ class RecipeRuntime:
                 started.handle,
                 summary,
                 invalid,
+                presentation=TypeAdapter(AnalysisPresentation | None).validate_python(
+                    reply.get("presentation")
+                ),
             )
             with self._lock:
                 index = self._detail_index(tab)

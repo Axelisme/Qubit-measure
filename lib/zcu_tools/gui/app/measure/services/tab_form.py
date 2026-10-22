@@ -266,12 +266,17 @@ class TabFormResource:
         self._require_open()
         return self._form.read_logical_field(self._state.input, path, self._sources.env)
 
-    def edit_recipe_fields(self, edits: Sequence[LogicalEdit]) -> bool:
+    def edit_recipe_fields(
+        self, edits: Sequence[LogicalEdit], *, require_valid: bool = False
+    ) -> bool | FormErrors:
         """Admit and install one ordered logical batch under all mutation guards.
 
         edits retains duplicate paths and request indexes for adapter admission.
         Structural/source/ref-ancestor failures leave the entire resource intact.
-        Ordinary invalid drafts are installed, not rolled back. Return whether
+        With require_valid=True, validate the detached candidate through Form
+        result and native cfg lowering before installation. Return complete logical
+        FormErrors without installation/publication when it is invalid. Otherwise
+        ordinary invalid drafts are installed, not rolled back. Return whether
         input changed, not whether it is valid. Changed input notifies state and
         resource subscribers once, preserving base and the fixed source capture.
         Busy, revoked and notification-reentrant commands reject even empty edits.
@@ -280,6 +285,16 @@ class TabFormResource:
             candidate = self._form.prepare_logical_edits(
                 self._state.input, edits, self._sources.env
             )
+            if require_valid:
+                result = FormState(candidate.input).result(self._sources.env)
+                if not isinstance(result, FormErrors):
+                    result = self._form.to_cfg(result, self._sources.env)
+                if isinstance(result, FormErrors):
+                    errors = self._form.logical_errors(
+                        candidate.input, result, self._sources.env
+                    )
+                    if errors is not None:
+                        return errors
             return self._install_recipe_candidate(candidate)
 
     def select_recipe_module(

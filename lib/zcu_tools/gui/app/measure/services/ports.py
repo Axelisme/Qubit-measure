@@ -76,6 +76,8 @@ class AnalysisPaneSnapshot:
     result_params: object | None = None
     # Fixed reasons for proposals omitted because Run-time sample evidence is missing.
     unavailable_reasons: tuple[str, ...] = ()
+    # This publication replaced a nonempty collection in this Run's same pane.
+    figures_replaced: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,8 @@ class PostAnalysisPaneSnapshot:
     result_params: object | None = None
     # Fixed reasons for proposals omitted because Run-time sample evidence is missing.
     unavailable_reasons: tuple[str, ...] = ()
+    # This publication replaced a nonempty collection in this Run's same pane.
+    figures_replaced: bool = False
 
 
 @dataclass(frozen=True, slots=True)

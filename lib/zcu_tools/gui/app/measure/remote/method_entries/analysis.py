@@ -119,10 +119,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "tab.get_post_analyze_result",
         "analysis:h_tab_get_post_analyze_result",
         MethodSpec(
-            5.0,
+            60.0,
             "Read the current post-analysis scalar summary. "
             "Optional operation_id requires that operation's result and also returns complete "
-            "operation_state.",
+            "operation_state. The handler ceiling is 60 seconds; Post start "
+            "receipts provide the per-result read budget. After a read timeout, "
+            "check tab.snapshot source_operation_id and read with the original "
+            "operation_id; a replaced result returns result_superseded.",
             (required_string("tab_id"), optional_integer("operation_id")),
             readonly=True,
         ),
@@ -147,7 +150,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             30.0,
             "Start post analysis on the tab's PRIMARY analyze result via tab_analyze. "
-            "Returns operation_id, interactive=false, complete params and "
+            "Returns operation_id, result_read_timeout_seconds (5 seconds plus "
+            "5 per measured tone, capped at 60), source-bound recovery, "
+            "interactive=false, complete params and "
             "invalidated_on_success (post.writeback when previously present). "
             "Invalidation applies only on successful completion. "
             "Runs on a worker thread; MCP maps the GUI operation_id "

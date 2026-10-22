@@ -14,6 +14,7 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
 )
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
+from ..analysis_types import AnalysisPresentation
 from ..save_types import project_raw_data_state
 from ._common import follow_tab
 from .tab import tab_operation_state
@@ -92,8 +93,15 @@ def h_tab_get_analyze_result(
         )
     reply = _summary_to_wire(to_summary())
     if operation_id is not None:
-        pane = control.get_tab_snapshot(tab_id).analysis
+        snap = control.get_tab_snapshot(tab_id)
+        pane = snap.analysis
         reply.update(
+            presentation=AnalysisPresentation(
+                run_id=None if snap.run is None else snap.run.acquisition_run_id,
+                stage="primary",
+                figure_names=list(() if pane is None else pane.figures or ()),
+                figures_replaced=False if pane is None else pane.figures_replaced,
+            ),
             params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
@@ -209,8 +217,15 @@ def h_tab_get_post_analyze_result(
         )
     reply = _summary_to_wire(to_summary())
     if operation_id is not None:
-        pane = control.get_tab_snapshot(tab_id).post_analysis
+        snap = control.get_tab_snapshot(tab_id)
+        pane = snap.post_analysis
         reply.update(
+            presentation=AnalysisPresentation(
+                run_id=None if snap.run is None else snap.run.acquisition_run_id,
+                stage="post",
+                figure_names=list(() if pane is None else pane.figures or ()),
+                figures_replaced=False if pane is None else pane.figures_replaced,
+            ),
             params=_params_to_wire(None if pane is None else pane.result_params),
             operation_id=operation_id,
             operation_state=tab_operation_state(adapter, tab_id),
@@ -289,6 +304,7 @@ def h_tab_post_analyze(
         if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
         else []
     )
+    read_timeout = control.analysis_result_read_timeout_seconds(tab_id)
     follow_tab(adapter, tab_id, "post_analysis")
     operation_id = control.start_post_analyze(
         tab_id,
@@ -298,6 +314,12 @@ def h_tab_post_analyze(
     )
     return {
         "operation_id": operation_id,
+        "result_read_timeout_seconds": read_timeout,
+        "recovery": {
+            "rpc": "tab.get_post_analyze_result",
+            "params": {"tab_id": tab_id, "operation_id": operation_id},
+            "stage": "post",
+        },
         "interactive": False,
         "params": dataclasses.asdict(updated),
         "invalidated_on_success": invalidated,

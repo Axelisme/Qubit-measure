@@ -14,6 +14,32 @@ from ._registry import RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "tab.writeback_begin",
+        "writeback:h_tab_writeback_begin",
+        MethodSpec(
+            5.0,
+            "Reserve a once-only submission_id for tab_id without writing or granting "
+            "admission. Supply it to writeback_write or writeback_accept. Begin does "
+            "not mean any item was written. IDs last for this GUI lifetime only.",
+            (required_string("tab_id"),),
+        ),
+    ),
+    method_entry(
+        "tab.writeback_receipt",
+        "writeback:h_tab_writeback_receipt",
+        MethodSpec(
+            5.0,
+            "Query submission_id: returns status pending|completed|failed, tab_id, "
+            "completed [{subtab_id,item:{id,kind,target,value,destination}}] and error. "
+            "Destination identifies the fixed entry_id/point. Values are retained "
+            "confirmed writes, not a fresh preview. Pending means reserved or still "
+            "running, not that no writes occurred. After a timeout, check this status "
+            "before deciding whether to resubmit. No retry or rollback.",
+            (required_string("submission_id"),),
+            readonly=True,
+        ),
+    ),
+    method_entry(
         "tab.writeback_accept",
         "writeback:h_tab_writeback_accept",
         MethodSpec(
@@ -23,10 +49,13 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "values and destinations without restoring captured proposals. Returns "
             "{status,written:[{subtab_id,ids}],error}, retaining only confirmed successful "
             "prefixes on write failure, without retry or rollback. Confirmed IDs are not "
-            "written-value snapshots. Does not edit the draft.",
+            "written-value snapshots. Does not edit the draft. A reserved submission_id "
+            "retains actual confirmed values via tab.writeback_receipt. Duplicate "
+            "submissions are rejected. Timeout is not a failed-write outcome.",
             (
                 required_string("tab_id"),
                 ParamSpec("stages", JsonType.JSON, required=True),
+                optional_string("submission_id", "Reserved once-only writeback ID"),
             ),
         ),
     ),
@@ -46,11 +75,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "cross-kind names may coincide. Empty write is a no-op. Explicit null "
             "value sets an md value to null; omission keeps its proposal. "
             "Requires a selected working point; writes retain the captured SavedPoint destination. "
-            "Context apply retains existing failure semantics, not cross-file atomicity.",
+            "Context apply retains existing failure semantics, not cross-file atomicity. "
+            "A reserved submission_id retains confirmed values via tab.writeback_receipt; "
+            "duplicate submission is rejected. Check status before resubmitting on timeout.",
             (
                 required_string("tab_id"),
                 required_string("subtab_id", "Pane: analysis|post_analysis"),
                 ParamSpec("write", JsonType.JSON, required=True),
+                optional_string("submission_id", "Reserved once-only writeback ID"),
             ),
         ),
     ),

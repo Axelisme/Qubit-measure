@@ -109,6 +109,12 @@ def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
         ],
         "skipped": [],
         "not_started": [],
+        "submission_id": "wb-2",
+        "submissions": {"primary": "wb-1", "post": "wb-2"},
+        "recovery": {
+            "rpc": "tab.writeback_receipt",
+            "params": {"submission_id": "wb-2"},
+        },
     }
     domain_calls = business_effects_after_initial_control(
         [
@@ -122,20 +128,24 @@ def test_apply_writeback_writes_all_ids_in_each_pane_without_hidden_reads(
         ("tab.get_post_analyze_result", {"tab_id": "t"}),
         ("tab.writeback_preview", {"tab_id": "t", "subtab_id": "analysis"}),
         ("tab.writeback_preview", {"tab_id": "t", "subtab_id": "post_analysis"}),
+        ("tab.writeback_begin", {"tab_id": "t"}),
         (
             "tab.writeback_write",
             {
                 "tab_id": "t",
                 "subtab_id": "analysis",
                 "write": [{"id": "param-1"}, {"id": "wf-1"}],
+                "submission_id": "wb-1",
             },
         ),
+        ("tab.writeback_begin", {"tab_id": "t"}),
         (
             "tab.writeback_write",
             {
                 "tab_id": "t",
                 "subtab_id": "post_analysis",
                 "write": [{"id": "param-1"}, {"id": "wf-1"}],
+                "submission_id": "wb-2",
             },
         ),
     ]
@@ -177,7 +187,7 @@ def test_apply_writeback_skips_missing_results(
     assert [
         params["subtab_id"]
         for method, params in apply_writeback_client.transport.sent
-        if method.startswith("tab.writeback_")
+        if method in {"tab.writeback_preview", "tab.writeback_write"}
     ] == [pane for _ in range(2) for _, pane in present]
 
 
@@ -213,9 +223,9 @@ def test_apply_writeback_skips_absent_or_empty_drafts(apply_writeback_client, pr
         ("tab.get_analyze_result", "primary", 1),
         ("tab.get_post_analyze_result", "post", 2),
         ("tab.writeback_preview", "primary", 3),
-        ("tab.writeback_write", "primary", 5),
+        ("tab.writeback_write", "primary", 6),
         ("tab.writeback_preview", "post", 4),
-        ("tab.writeback_write", "post", 6),
+        ("tab.writeback_write", "post", 8),
     ],
 )
 def test_apply_writeback_stops_at_first_rpc_error_with_confirmed_progress(
@@ -262,7 +272,9 @@ def test_apply_writeback_stops_at_first_rpc_error_with_confirmed_progress(
         "tab.get_post_analyze_result",
         "tab.writeback_preview",
         "tab.writeback_preview",
+        "tab.writeback_begin",
         "tab.writeback_write",
+        "tab.writeback_begin",
         "tab.writeback_write",
     ]
     effects = business_effects_after_initial_control(
@@ -306,6 +318,12 @@ def test_apply_writeback_reports_partial_write_after_skipped_primary(
             "message": "GUI Error (internal_error): context apply interrupted",
         },
         "failed_stage_may_have_partial_writes": True,
+        "submission_id": "wb-1",
+        "submissions": {"post": "wb-1"},
+        "recovery": {
+            "rpc": "tab.writeback_receipt",
+            "params": {"submission_id": "wb-1"},
+        },
     }
     assert destination == {"freq": 2}
     assert (

@@ -42,7 +42,15 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 `tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, ids}` 清單，不帶 `expected_revision`。
 Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
 通過後按 Primary、Post、各 pane 的候選順序寫入 owner 當下 draft 的值與目的地，不還原捕捉時的 proposal。
-回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴，不是寫入值快照。
+接受回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴。
+先呼叫 `tab.writeback_begin(tab_id)` 取得 owner 配置的一次性 `submission_id`，再帶到
+`tab.writeback_write` 或 `tab.writeback_accept`。Begin 不代表已寫入，同 ID 重複提交會拒絕。
+`tab.writeback_receipt(submission_id)` 唯讀回 `{submission_id, tab_id, status, completed, error}`。
+Status 是 pending、completed 或 failed。Pending 包含只 reserve 或仍執行，不能推論沒有副作用。
+Completed 的每列是 `{subtab_id, item:{id, kind, target, value, destination}}`。
+Destination 是固定的 `{kind: "saved_point", entry_id, point}`，value 是 owner 當次確認的實際值。
+查詢不重讀當前 draft 或磁碟，僅保留 GUI 生命週期的記憶體 receipt。
+10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。
 GUI／MCP 的所有權模型允許問答期間的 draft 編輯與替換，見 ADR-0075 的 2026-10-23 使用者裁定。
 第一次寫入失敗就停止，不 retry／rollback。單 pane `tab.writeback_set`／`tab.writeback_write` 仍編輯當前 draft。
@@ -123,6 +131,21 @@ unclassified. Recipe converts the analysis classification to a failed value,
 while arbitrary errors still raise. Root cancellation uses ScriptCancelled after
 drain and does not overwrite genuine errors.
 
+## Analysis presentation
+
+Operation-bound `tab.get_analyze_result` and `tab.get_post_analyze_result`
+include `presentation: {run_id, stage, figure_names, figures_replaced}`.
+Run identity comes from the selected Run/Load metadata, not the live point or
+Save receipt. Missing metadata yields null. Stage is primary or post.
+Figure names are the native names in that pane's current collection.
+`figures_replaced` records whether this successful publication replaced a
+nonempty collection in the same Run and pane. It does not report disk writes.
+New Run/Load clears this history; Primary replacement also invalidates Post.
+An old operation-bound read rejects with `result_superseded` after replacement.
+Unbound summary reads retain their summary/invalid shape.
+Element names and original positions belong to the experiment's summary;
+the remote does not infer element identity from figure names or row offsets.
+
 ## Predictor sources
 
 `predictor.list_files` returns `{files: [filename, ...]}` from the current entry's
@@ -177,7 +200,7 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref。`RecipeFieldObservation.readonly` 在 wire 上仍名為 `readonly`，表示穿過 ref 祖先，不表示宣告唯讀。公開 Recipe helper 的屬性命名由 MCP 層負責，wire 不改名。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 
-Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
+Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。`require_valid=true` 先以固定來源驗證 detached candidate 與 native cfg，錯誤回 changed=false 與完整 logical errors，不安裝或發布候選。省略或 false 保留一般 invalid draft 行為。空 batch 也可要求驗證目前 cfg。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
 
 Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 path、edit_index、selector_path、available_keys。FormPathError 保留 form_path，LogicalSourceError 回 precondition_failed/library_source，並帶 consuming path 與來源身分。Cfg/control 失敗沿既有投影。ParamSpec primitive/required/enum 失敗維持原生 reason；handler carrier 與 action/key 語義失敗才回 form_errors。Unexpected provider/declaration failures 不重分類。
 
@@ -258,6 +281,16 @@ Run 完成不保存 raw。RPC 呼叫 `tab.save_data` 才保存 raw；recipe work
 提供 `raw_data: {run_id, saved}`。這個 run_id 是固定 Run／Load metadata 的身分，保存前就存在。
 Saved 只反映 measurement_data 在 owner tracker 是否全部保存，不查檔案是否仍存在。
 保存 analysis 不會把 raw 的 saved 改成 true。原本頂層 run_id 仍只在至少一個持久輸出成功後出現。
+
+Post start receipts include `result_read_timeout_seconds` and a source-bound
+`recovery` RPC envelope. The owner budgets 5 seconds plus 5 per measured tone,
+capped at 60 seconds. The Post result handler ceiling is 60 seconds.
+After a result-read timeout, read `tab.snapshot` and compare
+`post_analysis_state.source_operation_id` with the recovery operation ID.
+Use the supplied `operation_id` with `tab.get_post_analyze_result`; a replaced
+pane returns `result_superseded`, including replacement after the snapshot.
+These reads never rerun analysis. Both analysis pane snapshots expose their
+native `source_operation_id`; MCP operation handles are separate identities.
 
 `tab.save_data` and `tab.save_artifacts` complete synchronously on the GUI owner
 thread. They return the current complete Save report with the original Run ID,

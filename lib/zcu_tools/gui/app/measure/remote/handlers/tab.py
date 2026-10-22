@@ -12,7 +12,12 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormCommandError, FormInputRejected, FormPathError
+from zcu_tools.gui.form import (
+    FormCommandError,
+    FormErrors,
+    FormInputRejected,
+    FormPathError,
+)
 from zcu_tools.gui.form_adapter import LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -138,6 +143,7 @@ def tab_operation_state(
             "partial_result": snap.run.partial_result,
         },
         "analysis_state": {
+            "source_operation_id": snap.analysis.source_operation_id,
             "revision": versions.get(f"tab:{tab_id}:analyze", 0),
             "available": snap.analysis.result is not None,
             "has_figure": bool(snap.analysis.figures),
@@ -145,6 +151,7 @@ def tab_operation_state(
             "has_writeback_draft": snap.analysis.has_writeback_draft,
         },
         "post_analysis_state": {
+            "source_operation_id": snap.post_analysis.source_operation_id,
             "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
             "available": snap.post_analysis.result is not None,
             "has_figure": bool(snap.post_analysis.figures),
@@ -640,10 +647,12 @@ def _recipe_edits(raw: object) -> list[LogicalEdit]:
 def h_tab_edit_recipe_fields(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Commit one ordered logical batch; invalid ordinary drafts remain installed.
+    """Commit one ordered batch, optionally requiring a complete executable cfg.
 
     Structural/source/ref/guard failures reject without a successful prefix.
-    Returns changed and complete logical Form preview errors, not cfg validity.
+    require_valid rejects invalid detached candidates without installation and
+    returns their complete logical errors with changed=False. Otherwise invalid
+    ordinary drafts remain installed. No earlier selector action is rolled back.
     """
     from ..form_description import RecipeEditResult
     from ..form_errors import recipe_form_errors
@@ -652,8 +661,13 @@ def h_tab_edit_recipe_fields(
     tab_id = str(params["tab_id"])
     with recipe_form_errors():
         resource = adapter.cfg_lookup(tab_id)
-        changed = resource.edit_recipe_fields(edits)
-        errors = resource.recipe_errors()
+        outcome = resource.edit_recipe_fields(
+            edits, require_valid=params.get("require_valid") is True
+        )
+        if isinstance(outcome, FormErrors):
+            changed, errors = False, outcome
+        else:
+            changed, errors = outcome, resource.recipe_errors()
         result: RecipeEditResult = {
             "changed": changed,
             "errors": [

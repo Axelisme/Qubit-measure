@@ -94,6 +94,10 @@ class RunAnalyzeControlPort(Protocol):
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
+    def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
+        """Read the captured result budget: 5 s + 5 s/tone, capped at 60 s."""
+        ...
+
     def start_run(
         self,
         tab_id: str,
@@ -212,6 +216,23 @@ class RunAnalyzeControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
+
+    def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
+        """Budget reading this tab’s captured result, without rerunning analysis.
+
+        Use the adapter’s declared measured tone count, never current Form input.
+        Missing results and non-mux adapters receive 5 s. Invalid adapter counts
+        raise ValueError before analysis start. Unknown tabs raise KeyError.
+        """
+        tab = self._state.get_tab(tab_id)
+        count = (
+            0
+            if tab.run.result is None
+            else tab.adapter.analysis_result_tone_count(tab.run.result)
+        )
+        if isinstance(count, bool) or count < 0:
+            raise ValueError("analysis_result_tone_count must be a nonnegative integer")
+        return float(min(60, 5 + 5 * count))
 
     def start_run(
         self,

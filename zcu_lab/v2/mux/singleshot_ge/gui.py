@@ -155,6 +155,10 @@ class MuxGEAdapter(
         names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
         return MuxGEAnalyzeResult(outcomes, names)
 
+    def analysis_result_tone_count(self, result: MuxGERunResult) -> int:
+        """Budget Post result reads for the measured original tone positions."""
+        return len(result.result.tone_indices)
+
     def get_post_analyze_params(
         self, analyze_result: MuxGEAnalyzeResult, ctx: SessionEnv
     ) -> GEPostAnalyzeParams:

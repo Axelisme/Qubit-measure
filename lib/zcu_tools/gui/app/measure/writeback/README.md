@@ -49,3 +49,14 @@ Writeback control 固定 Primary 在 Post 前，並在提交前檢查 permission
 Unknown／duplicate IDs 在第一筆寫入前拒絕。Draft 編輯或替換本身不拒絕接受，見 ADR-0075。
 提交中的失敗回 confirmed IDs 成功前綴及診斷，不 retry／rollback。
 `apply_draft` 與單 pane `write_draft` 保留原有 raise 與 edit/write 契約。
+
+## Submission receipts
+
+Control 的 `begin_writeback(tab_id)` 配置一次性 `submission_id`，不驗證 draft、不寫入，也不授權提交。
+`write_writeback_for_pane` 與 `accept_writeback` 可帶該 ID，仍在 owner thread 同步執行。
+同 ID 只准提交一次，未知 ID 或不同 tab 的 ID 會拒絕。
+`get_writeback_receipt` 回 detached 的 pending／completed／failed 狀態與成功前綴。
+每列保留 pane、item ID、kind、實際值、concrete target 與固定 entry_id／point。
+Pending 可表示只 reserve 或仍在執行，不能推論尚未寫入。
+Receipt 留在 GUI 生命週期的記憶體。後續 draft 編輯或目的地變更不改舊 receipt。
+逾時只結束 caller 的等待，不取消同步寫入，也不觸發 retry 或 rollback。
