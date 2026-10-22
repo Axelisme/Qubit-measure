@@ -13,6 +13,7 @@ from zcu_tools.program.v2 import ProgramV2Cfg
 
 if TYPE_CHECKING:
     from zcu_tools.experiment import Scope
+    from zcu_tools.experiment.scope import RootKind
 
 
 def make_root() -> Scope:
@@ -127,6 +128,17 @@ def test_full_path_disambiguates_equal_sequences_under_different_parents() -> No
         assert root.cancel("run/right#1/operation#1").cancelled
         assert selected.cancelled
         assert not left.stop.partial_result
+
+
+@pytest.mark.parametrize("kind", ["workflow", "recipe", "run"])
+def test_full_live_leaf_path_selects_a_named_root_without_children(kind: RootKind) -> None:
+    root = experiment.Scope(kind, name="synthetic")
+    path = root.live_paths[0]
+    assert path == f"{kind}:synthetic"
+    result = root.cancel(path)
+    assert result.cancelled
+    assert root.cancelled
+    assert result.active_path == path
 
 
 def test_release_is_idempotent_and_closed_scope_rejects_new_children() -> None:
