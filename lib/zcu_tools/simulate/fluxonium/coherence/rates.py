@@ -55,7 +55,7 @@ def calculate_directional_loss_rates(
     Invalid shapes/values raise ValueError; scqubits errors propagate. Does not
     mutate eigenpairs or global settings. Empty loss channels give a zero matrix.
     """
-    from scqubits.core.fluxonium import Fluxonium
+    from ._loss_circuit import DirectionalLossCircuit
 
     validate_circuit(params, cutoff)
     energy, vectors = esys
@@ -77,7 +77,11 @@ def calculate_directional_loss_rates(
             "loss rates require finite flux, temperature and ordered native eigenpairs"
         )
     rates = np.zeros((len(energy), len(energy)))
-    circuit = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=len(energy))
+    # This circuit dies with this call. Only native operators are reused; scalar
+    # matrix elements and directional T1 evaluation retain scqubits' arithmetic.
+    circuit = DirectionalLossCircuit(
+        *params, flux=flux, cutoff=cutoff, truncated_dim=len(energy)
+    )
     channels = (
         ("t1_capacitive", "Q_cap", noise.q_cap),
         ("t1_inductive", "Q_ind", noise.q_ind),
