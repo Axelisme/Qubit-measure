@@ -28,6 +28,7 @@ from zcu_tools.mcp.measure.recipe_api import (
 )
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 from zcu_tools.mcp.measure.recipe_details import RecipeRunDetail
+from zcu_tools.mcp.measure.recipe_form import RecipeFormError
 from zcu_tools.mcp.measure.recipe_host import RecipeHost, RecipeHostFactory
 from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis, ScopeProjection
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -79,6 +80,8 @@ class ScriptRecipeSnapshot:
     details retains detached per-Run conditions, analyses and explicit proposals.
     missing lists authored parameter paths only at needs_parameters terminal;
     that state has no outcome/error and releases registry admission.
+    parameter_errors retains owner cfg paths/reasons for preflight rejection;
+    an empty tuple means no cfg diagnostics were supplied.
     active_path is the detached local host path; status adds the live GUI tail.
     finished_at is the UTC ISO-8601 terminal publication time, or None while live.
     """
@@ -93,6 +96,7 @@ class ScriptRecipeSnapshot:
     error: ScriptRecipeError | None = None
     cancel_requested: bool = False
     missing: tuple[str, ...] = ()
+    parameter_errors: tuple[RecipeFormError, ...] = ()
     details: tuple[RecipeRunDetail, ...] = ()
     active_path: str = "recipe"
     finished_at: str | None = None
@@ -366,6 +370,7 @@ class ScriptRecipeExecution:
                     finished_at=datetime.now(timezone.utc).isoformat(),
                     pending_question=None,
                     missing=tuple(item.parameter for item in error.missing),
+                    parameter_errors=error.parameter_errors,
                     outcome=None,
                     error=None,
                 )

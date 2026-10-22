@@ -10,6 +10,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from zcu_tools.gui.app.measure.remote.analysis_types import AnalysisPresentation
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.operation_wait import await_operation
@@ -77,6 +78,8 @@ class AnalysisResult:
     params: dict[str, Any]
     operation_state: dict[str, Any]
     invalid: list[InvalidAnalysisValue]
+    # Owner-captured Run/stage/figure facts; None when no projection was supplied.
+    presentation: AnalysisPresentation | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +212,9 @@ def _analysis_result(
         params=deepcopy(params),
         operation_state=deepcopy(state),
         invalid=_invalid_analysis_values(reply.get("invalid")),
+        presentation=TypeAdapter(AnalysisPresentation | None).validate_python(
+            reply.get("presentation")
+        ),
     ), list(names)
 
 

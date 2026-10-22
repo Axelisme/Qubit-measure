@@ -191,7 +191,7 @@ async def mux_singleshot_ge(
         )
     ]
     edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits)
+    tab.apply(edits, require_valid=True)
 
     # Acquire paired shots before fitting GE separation.
     await tab.run()

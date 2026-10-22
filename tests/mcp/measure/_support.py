@@ -77,6 +77,12 @@ class WireTransport:
                 "ok": True,
                 "result": {"wire_version": WIRE_VERSION, "gui_version": 79},
             }
+        elif method == "tab.writeback_begin" and self.responder is None:
+            identity = sum(name == method for name, _ in self.sent)
+            reply = {
+                "ok": True,
+                "result": {"submission_id": f"wb-{identity}", "status": "pending"},
+            }
         elif self.responder is not None:
             try:
                 reply = {"ok": True, "result": self.responder(method, params)}

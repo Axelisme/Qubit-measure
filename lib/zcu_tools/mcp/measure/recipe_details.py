@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.remote.analysis_types import AnalysisPresentation
 from zcu_tools.gui.app.measure.remote.form_description import RecipeFieldObservation
 from zcu_tools.mcp.measure.analysis_execution import InvalidAnalysisValue
 from zcu_tools.mcp.measure.recipe_api import WritebackProposal, WritebackReceipt
@@ -16,12 +17,14 @@ class RecipeAnalysisDetail:
     stage identifies primary/post and op is its session handle. summary preserves
     all owner estimates, including nulls and nested values, in native units.
     invalid preserves the owner's paths/reasons without interpreting quality.
+    presentation captures Run/stage/figure replacement facts, or None if absent.
     """
 
     stage: Literal["primary", "post"]
     op: int
     summary: YamlValue
     invalid: tuple[InvalidAnalysisValue, ...]
+    presentation: AnalysisPresentation | None = None
 
 
 @dataclass(frozen=True)

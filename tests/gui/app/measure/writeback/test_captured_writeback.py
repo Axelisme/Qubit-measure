@@ -1,7 +1,7 @@
 """Accepted evidence and fixed destinations at the real writeback/owner seam."""
 
 from collections.abc import Generator
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -23,6 +23,7 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackDraft,
     WritebackEdit,
     WritebackItem,
+    WritebackSelection,
     WritebackService,
     WritebackWritten,
 )
@@ -99,6 +100,45 @@ def saved_session(session: WritebackSession) -> WritebackSession:
     session.control.use_point(PointUseRequest("saved"))
     session.control.add_component("Q1", "fake/drive/a", {})
     return session
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_prefix(
+    session: WritebackSession, fails: bool
+) -> None:
+    captured = session.control.read_context()
+    proposals = [ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4)]
+    if fails:
+        proposals.extend(
+            [
+                ParameterWriteback("general.description", "Invalid", proposed_value=42),
+                ParameterWriteback("Q1.ext.later", "Later", proposed_value=0.8),
+            ]
+        )
+    draft = session.service.create_draft(
+        proposals, parameters=captured, experiment_name="synthetic"
+    )
+    ids = tuple(item.session_id for item in draft.items)
+    draft.edit("param-1", target_name="Q1.ext.accepted", proposed_value=0.6)
+    result = session.service.accept_drafts((WritebackSelection(draft, ids),))
+    expected = (
+        (
+            {
+                "id": "param-1",
+                "kind": "parameter",
+                "target": "Q1.ext.accepted",
+                "value": 0.6,
+                "destination": captured.target.model_dump(),
+            },
+        ),
+    )
+    assert asdict(result).get("written") == expected
+    assert result.applied_ids == (("param-1",),)
+    assert (result.error is not None) == fails
+    draft.edit("param-1", proposed_value=0.9)
+    session.control.set_parameter(captured.target, "Q1.ext.accepted", 0.7)
+    assert asdict(result)["written"] == expected
+    assert not session.control.read_context().lookup("Q1.ext.later").present
 
 
 def test_draft_detaches_author_element_identity(session: WritebackSession) -> None:

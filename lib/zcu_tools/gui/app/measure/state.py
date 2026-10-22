@@ -102,6 +102,8 @@ class AnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     writeback_draft: object | None = None
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
+    # Whether this publication replaced this Run's previous nonempty pane plots.
+    figures_replaced: bool = False
 
 
 @dataclass
@@ -112,6 +114,8 @@ class PostAnalysisPaneState(Generic[T_AnalyzeResult, T_AnalyzeParams]):
     writeback_draft: object | None = None
     source_operation_id: int | None = None
     result_params: T_AnalyzeParams | None = None
+    # Whether this publication replaced this Run's previous nonempty pane plots.
+    figures_replaced: bool = False
 
 
 @dataclass
@@ -520,6 +524,7 @@ class State(SessionState):
                 layout=layout,
             )
             tab.artifacts.replace_section("post_analysis", (), layout=layout)
+        pane.figures_replaced = bool(tab.analysis.plots)
         tab.analysis = pane
         tab.post_analysis = PostAnalysisPaneState()
         self.version.bump(f"tab:{tab_id}:analyze")
@@ -614,6 +619,7 @@ class State(SessionState):
                 self._pane_declarations("post_analysis", pane),
                 layout=layout,
             )
+        pane.figures_replaced = bool(tab.post_analysis.plots)
         tab.post_analysis = pane
         self.version.bump(f"tab:{tab_id}:post_analyze")
         return retired

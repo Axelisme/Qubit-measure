@@ -42,6 +42,7 @@ def _pane(execution: dict[str, Any] | None) -> dict[str, Any] | None:
         "params": result.get("params", execution.get("params")),
         "summary": result.get("summary"),
         "invalid": result.get("invalid", []),
+        "presentation": result.get("presentation"),
     }
 
 
@@ -207,7 +208,16 @@ def _script_execution(
     if detail == "full":
         return {**projected, **failure}
     if status == "needs_parameters":
-        return {"status": status, "missing": projected["missing"], "outcome": None}
+        return {
+            "status": status,
+            "missing": projected["missing"],
+            "outcome": None,
+            **(
+                {"parameter_errors": projected["parameter_errors"]}
+                if projected.get("parameter_errors")
+                else {}
+            ),
+        }
     outcome = projected.get("outcome")
     if isinstance(outcome, dict):
         return {

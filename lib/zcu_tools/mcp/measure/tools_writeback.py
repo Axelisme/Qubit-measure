@@ -50,11 +50,15 @@ def build_writeback_tools(ctx: MeasureToolContext) -> ToolTable:
                 "rejects unknown or ambiguous names before any write. Resolves current "
                 "IDs, not earlier proposal IDs. Writes Primary then Post and stops on "
                 "the first error without retry or rollback. Returns tab, status "
-                "(finished|failed), completed ([{stage,written}]), skipped and "
+                "(finished|failed|unknown), completed ([{stage,written}]), skipped and "
                 "not_started. Failed replies also include failed_stage, error "
                 "({code,reason,message}) and failed_stage_may_have_partial_writes. "
                 "Only GUI-confirmed writes count as completed. The failed stage is "
-                "separate from not_started. Reads do not refresh guards: explicitly "
+                "separate from not_started. Each attempted pane has an owner submission_id "
+                "in submissions; recovery queries the latest tab.writeback_receipt. "
+                "A write timeout returns unknown, not failed. Check status before "
+                "deciding whether to resubmit. IDs last for this GUI lifetime only. "
+                "Reads do not refresh guards: explicitly "
                 "observe tab/context before writing. Does not answer recipe questions."
             ),
             "inputSchema": {
