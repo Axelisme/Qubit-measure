@@ -94,7 +94,7 @@ importlib.import_module("zcu_tools.simulate.{first}")
 directory = config.CACHE_DIR
 assert Path(directory).parent == Path(parent)
 assert Path(directory).name.startswith("zcu-simulate-")
-assert config.CACHE_LOCATOR_CLASSES == ["UserProvidedCacheLocator"]
+assert config.CACHE_LOCATOR_CLASSES == "UserProvidedCacheLocator"
 assert len(scans) == 1, scans
 importlib.import_module("zcu_tools.simulate.{second}")
 assert config.CACHE_DIR == directory
@@ -128,7 +128,7 @@ Path({str(unreadable)!r}).unlink()
 importlib.import_module("zcu_tools.simulate.adc")
 from numba import config
 assert Path(config.CACHE_DIR).parent == Path(parent)
-assert config.CACHE_LOCATOR_CLASSES == ["UserProvidedCacheLocator"]
+assert config.CACHE_LOCATOR_CLASSES == "UserProvidedCacheLocator"
 importlib.import_module("zcu_tools.simulate.evolution")
 assert os.environ["NUMBA_CACHE_DIR"] == config.CACHE_DIR
 """,
