@@ -29,11 +29,11 @@ def test_root_and_branch_names_reject_unparseable_paths(name: str) -> None:
     root = make_root()
     from zcu_tools.experiment import Scope
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="name"):
         Scope("workflow", name=name)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="name"):
         root.branch("operation", name=name)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="name"):
         root.branch("schedule", name=name)
 
 
@@ -57,10 +57,14 @@ def test_child_lifetime_and_birth_numbers_survive_exception() -> None:
         with child.child("fit"):
             assert root.active_path == "run/calibration#1/fit#1"
     assert root.active_path == "run"
-    with pytest.raises(ValueError, match="author failure"):
+
+    def fail_calibration() -> None:
         with root.child("calibration") as child:
             assert child.active_path == "run/calibration#2"
             raise ValueError("author failure")
+
+    with pytest.raises(ValueError, match="author failure"):
+        fail_calibration()
     assert root.active_path == "run"
     assert not root.cancel("calibration").cancelled
 
@@ -83,9 +87,8 @@ def test_child_lifetime_and_birth_numbers_survive_exception() -> None:
 )
 def test_author_labels_reject_path_syntax_and_reserved_kinds(label: str) -> None:
     root = make_root()
-    with pytest.raises(ValueError):
-        with root.child(label):
-            pass
+    with pytest.raises(ValueError, match="label"):
+        root.child(label)
     assert root.active_path == "run"
 
 
@@ -110,16 +113,20 @@ def test_named_operation_selector_requires_sequence_for_live_siblings() -> None:
 
 def test_full_path_disambiguates_equal_sequences_under_different_parents() -> None:
     root = make_root()
-    with root.child("left") as left, root.child("right") as right:
-        with left.branch("operation"), right.branch("operation") as selected:
-            assert root.cancel("operation#1").reason == "ambiguous"
-            assert root.live_paths == [
-                "run/left#1/operation#1",
-                "run/right#1/operation#1",
-            ]
-            assert root.cancel("run/right#1/operation#1").cancelled
-            assert selected.cancelled
-            assert not left.stop.partial_result
+    with (
+        root.child("left") as left,
+        root.child("right") as right,
+        left.branch("operation"),
+        right.branch("operation") as selected,
+    ):
+        assert root.cancel("operation#1").reason == "ambiguous"
+        assert root.live_paths == [
+            "run/left#1/operation#1",
+            "run/right#1/operation#1",
+        ]
+        assert root.cancel("run/right#1/operation#1").cancelled
+        assert selected.cancelled
+        assert not left.stop.partial_result
 
 
 def test_release_is_idempotent_and_closed_scope_rejects_new_children() -> None:
@@ -127,7 +134,7 @@ def test_release_is_idempotent_and_closed_scope_rejects_new_children() -> None:
     child = root.child("point")
     child.release()
     child.release()
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="released"):
         child.child("nested")
     assert root.live_paths == ["run"]
 
@@ -175,7 +182,7 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
         cfg_model = ProgramV2Cfg()
         calls = 0
 
-        def acquire(self, _soc: object, **_kwargs: object) -> np.ndarray:
+        def acquire(self, soc: object, **_kwargs: object) -> np.ndarray:
             self.calls += 1
             assert root.active_path == f"run/schedule:readout#1/acquire#{self.calls}"
             if self.calls == 1:
