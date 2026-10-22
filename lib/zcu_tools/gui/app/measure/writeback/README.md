@@ -5,6 +5,8 @@
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
 本模組擁有 parameter、module 與 sample 的 proposal、draft、service、control 與 Qt review widget。
+`items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
+`service.py` 保留 draft 生命週期、revision 檢查與寫入執行，也繼續匯出既有公開型別。
 
 ## Initial selection and notes
 

@@ -15,21 +15,20 @@ from .items import (
 )
 
 if TYPE_CHECKING:
+    from .contracts import (
+        WritebackAcceptance,
+        WritebackEdit,
+        WritebackSelection,
+        WritebackValues,
+        WritebackWritten,
+    )
     from .control import (
         CapturedWritebackPane,
         WritebackControlFacet,
         WritebackControlPort,
         WritebackPane,
     )
-    from .service import (
-        WritebackAcceptance,
-        WritebackDraft,
-        WritebackEdit,
-        WritebackSelection,
-        WritebackService,
-        WritebackValues,
-        WritebackWritten,
-    )
+    from .service import WritebackDraft, WritebackService
     from .widget import WritebackWidget
 
 __all__ = [
@@ -56,13 +55,13 @@ _EXPORT_MODULES = {
     "WritebackControlPort": ".control",
     "WritebackPane": ".control",
     "CapturedWritebackPane": ".control",
-    "WritebackSelection": ".service",
-    "WritebackAcceptance": ".service",
+    "WritebackSelection": ".contracts",
+    "WritebackAcceptance": ".contracts",
     "WritebackDraft": ".service",
-    "WritebackEdit": ".service",
+    "WritebackEdit": ".contracts",
     "WritebackService": ".service",
-    "WritebackValues": ".service",
-    "WritebackWritten": ".service",
+    "WritebackValues": ".contracts",
+    "WritebackWritten": ".contracts",
     "WritebackWidget": ".widget",
 }
 

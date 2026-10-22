@@ -13,7 +13,8 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from .service import WritebackAcceptance, WritebackDraft, WritebackSelection
+from .contracts import WritebackAcceptance, WritebackSelection
+from .service import WritebackDraft
 
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
@@ -23,12 +24,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
     from ..services.guard import GuardService
-    from .service import (
-        WritebackEdit,
-        WritebackService,
-        WritebackValues,
-        WritebackWritten,
-    )
+    from .contracts import WritebackEdit, WritebackValues, WritebackWritten
+    from .service import WritebackService
 
 
 @dataclass(frozen=True)
