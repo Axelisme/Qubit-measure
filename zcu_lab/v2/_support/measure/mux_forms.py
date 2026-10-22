@@ -128,10 +128,7 @@ def _blank_ringup_timing(
     seeds: dict[str, TemplateSeed] = dict.fromkeys(
         ("mixer_freq", "trig_offset", "ro_length", "length")
     )
-    if len(kappas) != len(group.resonators):
-        return seeds
-    wait_us = 5 / (2 * pi * min(kappas))
-    seeds["ro_length"] = wait_us
+    source_values: dict[str, list[float]] = {}
     for field in ("freq", "ext.time_of_fly"):
         values: list[float] = []
         for resonator in group.resonators:
@@ -152,13 +149,19 @@ def _blank_ringup_timing(
                 )
                 raise ValueError(f"{resonator}.{field}: expected {requirement}")
             values.append(value)
-        if len(values) != len(group.resonators):
-            continue
-        if field == "freq":
-            seeds["mixer_freq"] = (min(values) + max(values)) / 2
-        else:
-            trigger = max(values) + wait_us
-            seeds.update({"trig_offset": trigger, "length": trigger + wait_us})
+        source_values[field] = values
+
+    if len(kappas) != len(group.resonators):
+        return seeds
+    wait_us = 5 / (2 * pi * min(kappas))
+    seeds["ro_length"] = wait_us
+    frequencies = source_values["freq"]
+    if len(frequencies) == len(group.resonators):
+        seeds["mixer_freq"] = (min(frequencies) + max(frequencies)) / 2
+    flight_times = source_values["ext.time_of_fly"]
+    if len(flight_times) == len(group.resonators):
+        trigger = max(flight_times) + wait_us
+        seeds.update({"trig_offset": trigger, "length": trigger + wait_us})
     return seeds
 
 
