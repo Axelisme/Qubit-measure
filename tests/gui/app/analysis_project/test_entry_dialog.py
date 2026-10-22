@@ -41,6 +41,14 @@ def dialog(qapp, tmp_path: Path, request) -> Iterator[ComponentDriver]:
         component_registry.unregister("resonator")
 
 
+def _caption(driver: ComponentDriver, text: str) -> str:
+    return next(
+        widget.text
+        for widget in driver.visible().widgets
+        if widget.kind == "QPushButton" and widget.text.replace("&", "") == text
+    )
+
+
 @pytest.mark.parametrize(
     ("dialog", "diagnostic"),
     [(None, "$qubit"), ("", "$qubit"), ("missing", "missing"), ("R1", "fluxonium")],
@@ -55,19 +63,19 @@ def test_invalid_qubit_alias_requires_explicit_component_choice(
     dialog.click("Open entry")
     dialog.screenshot(tmp_path / "01-no-default.png")
     assert dialog.observe(object_name="analysisComponent").text == ""
-    assert not dialog.observe("&OK").enabled
+    assert not dialog.observe(_caption(dialog, "OK")).enabled
     assert diagnostic in "\n".join(item.text for item in dialog.visible().widgets)
     try:
         dialog.choose_option(object_name="analysisComponent", value="Q1")
     except LookupError as error:
         pytest.fail(f"Open entry must list valid components despite its alias: {error}")
-    assert dialog.observe("&OK").enabled
+    assert dialog.observe(_caption(dialog, "OK")).enabled
     dialog.screenshot(tmp_path / "02-explicit-choice.png")
     dialog.choose_option(object_name="analysisComponent", value="Q2")
     assert dialog.observe(object_name="analysisComponent").text == "Q2"
     dialog.screenshot(tmp_path / "03-other-component.png")
-    dialog.click("&OK")
-    assert not dialog.observe("&OK").visible
+    dialog.click(_caption(dialog, "OK"))
+    assert not dialog.visible().widgets
 
 
 @pytest.mark.parametrize("dialog", ["no_components"], indirect=True)
@@ -78,7 +86,7 @@ def test_entry_without_fluxonium_components_reports_the_cause(
     dialog.choose_option(object_name="analysisEntry", value="synthetic")
     dialog.click("Open entry")
     dialog.screenshot(tmp_path / "no-components.png")
-    assert not dialog.observe("&OK").enabled
+    assert not dialog.observe(_caption(dialog, "OK")).enabled
     assert "no fluxonium" in "\n".join(item.text for item in dialog.visible().widgets)
-    dialog.click("&Cancel")
-    assert not dialog.observe("&Cancel").visible
+    dialog.click(_caption(dialog, "Cancel"))
+    assert not dialog.visible().widgets
