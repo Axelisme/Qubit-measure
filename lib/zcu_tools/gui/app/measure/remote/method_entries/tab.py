@@ -54,8 +54,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "require select_recipe_module; no content write crosses ref ancestors. "
             "Structural/source/guard rejection commits no prefix. Returns changed "
             "and complete logical Form preview errors; invalid ordinary drafts "
-            "remain installed. Empty batches still require mutation authority.",
-            (required_string("tab_id"), ParamSpec("edits", JsonType.ARRAY)),
+            "remain installed by default. require_valid=true preflights the complete "
+            "detached candidate through native cfg validation; invalid candidates "
+            "return changed=false and all errors without installation. Empty batches "
+            "still require mutation authority and can preflight current input.",
+            (
+                required_string("tab_id"),
+                ParamSpec("edits", JsonType.ARRAY),
+                ParamSpec(
+                    "require_valid", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
         ),
     ),
     method_entry(
@@ -190,7 +199,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Read Form input, ordinary leaf values and errors from the "
-            "tab's fixed source snapshot. Reads do not refresh sources. "
+            "tab's fixed source snapshot, plus full-form diagnostics for every "
+            "original tone: name/index, seed_source, seed_status and authored "
+            "uncalibrated (null when unknown). Reads do not refresh sources. "
             "Expressions use {expr: text}; library keys are ordinary strings. "
             "Use Reset to capture new sources. Independent library editors retain "
             "their own interface.",
@@ -211,7 +222,11 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "reason=form_path and data.form_path. Other author failures retain "
             "the controller_error boundary. Errors are Form preview root/descendant "
             "only; use get_cfg or Run admission for lowered cfg errors. Busy and "
-            "observer reads are allowed; no widget is required.",
+            "observer reads are allowed; no widget is required. The separate "
+            "diagnostics array covers the entire form, including all original "
+            "tones and lowered errors, regardless of this local path. Each row "
+            "includes name/index, seed_source, seed_status and uncalibrated "
+            "(null when the author has not declared calibration).",
             (
                 required_string("tab_id"),
                 required_json("path", "Model-field string array; [] for root"),

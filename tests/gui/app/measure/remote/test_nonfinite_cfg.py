@@ -50,7 +50,7 @@ def test_invalid_resource_publishes_complete_socket_and_mcp_cfg_then_blocks_run(
         tab = call(sock, "tab.get_cfg", {"tab_id": tab_id}, rid="tab")
         assert tab["ok"]
         observed = tab["result"]
-        assert set(observed) == {"input", "values", "errors"}
+        assert set(observed) == {"input", "values", "errors", "diagnostics"}
         assert observed["input"]["gain"] == text
         assert observed["errors"][0]["path"] == ["gain"]
         assert observed["errors"][0]["message"]

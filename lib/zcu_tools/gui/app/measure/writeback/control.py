@@ -13,8 +13,9 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from .contracts import WritebackAcceptance, WritebackSelection
+from .contracts import WritebackAcceptance, WritebackApplied, WritebackSelection
 from .service import WritebackDraft
+from .submissions import WritebackCompleted, WritebackSubmission, WritebackSubmissions
 
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
 
@@ -91,17 +92,44 @@ class WritebackControlPort(Protocol):
         ...
 
     def write_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
-    ) -> list[WritebackWritten]: ...
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        changes: tuple[WritebackEdit, ...],
+        *,
+        submission_id: str | None = None,
+    ) -> list[WritebackWritten]:
+        """Edit/write one pane and optionally retain its reserved submission receipt.
+
+        submission_id must be an unused ID from begin_writeback for this tab.
+        Unknown, reused or foreign-tab IDs raise before editing or writing.
+        None omits retained tracking; write errors retain the confirmed prefix
+        when an ID is supplied, then propagate without retry or rollback.
+        """
+        ...
 
     def accept_writeback(
-        self, tab_id: str, selections: tuple[CapturedWritebackPane, ...]
+        self,
+        tab_id: str,
+        selections: tuple[CapturedWritebackPane, ...],
+        *,
+        submission_id: str | None = None,
     ) -> WritebackAcceptance:
         """Admit and submit all selected panes synchronously, Primary then Post.
 
-        Return one applied-ID tuple per selection. Repeated/out-of-order panes
+        submission_id optionally names an unused reservation for this tab;
+        unknown, reused or foreign-tab IDs raise before writes. Return one
+        applied-ID tuple per selection. Repeated/out-of-order panes
         or invalid IDs raise before writing. No retry or rollback on failure.
         """
+        ...
+
+    def begin_writeback(self, tab_id: str) -> WritebackSubmission:
+        """Reserve a queryable ID for an existing tab, without writing."""
+        ...
+
+    def get_writeback_receipt(self, submission_id: str) -> WritebackSubmission:
+        """Read a detached receipt; unknown IDs raise InvalidInputError."""
         ...
 
     def get_context_version(self) -> int: ...
@@ -120,6 +148,7 @@ class WritebackControlFacet:
         bus: EventBus,
         access: ExperimentAccess | None = None,
     ) -> None:
+        self._submissions = WritebackSubmissions()
         self._state = state
         self._guard = guard
         self._writeback = writeback
@@ -194,49 +223,87 @@ class WritebackControlFacet:
             self._emit_draft_changed(tab_id)
 
     def write_writeback_for_pane(
-        self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
+        self,
+        tab_id: str,
+        pane: WritebackPane,
+        changes: tuple[WritebackEdit, ...],
+        *,
+        submission_id: str | None = None,
     ) -> list[WritebackWritten]:
-        self._guard.check_writeback(tab_id)
-        self._require_tab_idle(tab_id)
-        draft = self._draft_for_pane(tab_id, pane)
-        if not isinstance(draft, WritebackDraft):
-            raise InvalidInputError("unknown writeback draft")
-        try:
-            return self._writeback.write_draft(draft, changes)
-        finally:
-            # Failed batches may have changed the shared draft's prefix.
-            self._emit_draft_changed(tab_id)
+        """Write once; a reserved ID retains the confirmed prefix and outcome."""
+        with self._submissions.submit(tab_id, submission_id) as receipt:
+            self._guard.check_writeback(tab_id)
+            self._require_tab_idle(tab_id)
+            draft = self._draft_for_pane(tab_id, pane)
+            if not isinstance(draft, WritebackDraft):
+                raise InvalidInputError("unknown writeback draft")
+
+            def retain(values: tuple[WritebackApplied, ...]) -> None:
+                if receipt is not None:
+                    receipt.completed.extend(
+                        WritebackCompleted(pane, item) for item in values
+                    )
+
+            try:
+                return self._writeback.write_draft(draft, changes, on_applied=retain)
+            finally:
+                self._emit_draft_changed(tab_id)
 
     def accept_writeback(
-        self, tab_id: str, selections: tuple[CapturedWritebackPane, ...]
+        self,
+        tab_id: str,
+        selections: tuple[CapturedWritebackPane, ...],
+        *,
+        submission_id: str | None = None,
     ) -> WritebackAcceptance:
         """Validate all captured panes in one admitted owner call, then write.
 
         See WritebackControlPort.accept_writeback for ordering and receipt rules.
         Permission, idle and active draft checks apply before any submission.
         """
-        self._guard.check_writeback(tab_id)
-        self._require_tab_idle(tab_id)
-        panes = tuple(selection.subtab_id for selection in selections)
-        if panes not in (
-            (),
-            ("analysis",),
-            ("post_analysis",),
-            ("analysis", "post_analysis"),
-        ):
-            raise InvalidInputError(
-                "Captured writeback panes must be unique, Primary then Post"
-            )
-        groups: list[WritebackSelection] = []
-        for selection in selections:
-            draft = self._draft_for_pane(tab_id, selection.subtab_id)
-            if not isinstance(draft, WritebackDraft):
-                raise InvalidInputError("unknown writeback draft")
-            groups.append(WritebackSelection(draft, selection.ids))
-        try:
-            return self._writeback.accept_drafts(tuple(groups))
-        finally:
-            self._emit_draft_changed(tab_id)
+        with self._submissions.submit(tab_id, submission_id) as receipt:
+            self._guard.check_writeback(tab_id)
+            self._require_tab_idle(tab_id)
+            panes = tuple(selection.subtab_id for selection in selections)
+            if panes not in (
+                (),
+                ("analysis",),
+                ("post_analysis",),
+                ("analysis", "post_analysis"),
+            ):
+                raise InvalidInputError(
+                    "Captured writeback panes must be unique, Primary then Post"
+                )
+            groups: list[WritebackSelection] = []
+            for selection in selections:
+                draft = self._draft_for_pane(tab_id, selection.subtab_id)
+                if not isinstance(draft, WritebackDraft):
+                    raise InvalidInputError("unknown writeback draft")
+                groups.append(WritebackSelection(draft, selection.ids))
+            try:
+                result = self._writeback.accept_drafts(tuple(groups))
+                if receipt is not None:
+                    receipt.error = result.error
+                    for selection, values in zip(
+                        selections, result.written, strict=True
+                    ):
+                        receipt.completed.extend(
+                            WritebackCompleted(selection.subtab_id, item)
+                            for item in values
+                        )
+                return result
+            finally:
+                self._emit_draft_changed(tab_id)
+
+    def begin_writeback(self, tab_id: str) -> WritebackSubmission:
+        """Reserve an ID without admission or writes; unknown tabs raise."""
+        if not self.has_tab(tab_id):
+            raise InvalidInputError(f"unknown tab_id: {tab_id!r}")
+        return self._submissions.begin(tab_id)
+
+    def get_writeback_receipt(self, submission_id: str) -> WritebackSubmission:
+        """Read a detached retained receipt, without refreshing targets or drafts."""
+        return self._submissions.receipt(submission_id)
 
     def get_writeback_values_for_pane(
         self, tab_id: str, pane: WritebackPane, *, session_id: str | None = None

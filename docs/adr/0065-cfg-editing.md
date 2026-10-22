@@ -54,7 +54,7 @@ Preview、result 與 description 都不暗改 input。Values 顯示有效端點�
 
 `tab.run_cfg_command(tab_id, path, name)` 只派發目前 active path 描述的公開指令，沿 resource 的控制身份、busy、lifetime 與 mutation guard。成功回 input／values／errors。掛載欄位的 description 提供公開 command，Qt 檢查相關 local parse errors，不猜模型結構或自行換算。Sweep command 由 sweep row 的右鍵選單呈現，不掛在數值葉；標準文字與 Expression 選單保留。禁止編輯時指令也不可執行。
 
-`tab.describe_cfg(path)` 以 str 欄位名／int index 查目標與直接 children，不產生整棵 JSON Schema。回覆同時包含局部 input_present、input、value 與 Form preview 定向 errors，不 materialize 或呼叫 to_cfg。Lowered cfg errors 用 get_cfg 或 Run admission 檢查。Unknown、inactive 與 whole-leaf 子路徑回 invalid_params／form_path，data.form_path 保留請求路徑。其他 ValueError 維持 controller_error。Writeback 的 observe_entry 同樣只回 input、values、errors。
+`tab.describe_cfg(path)` 以 str 欄位名／int index 查目標與直接 children，不產生整棵 JSON Schema。回覆同時包含局部 input_present、input、value 與 Form preview 定向 errors，不 materialize 或呼叫 to_cfg。Lowered cfg errors 用 get_cfg 或 Run admission 檢查。兩個讀取入口另回全表 diagnostics，涵蓋全部原始 list 位置並合併 preview／lowered errors，不受 describe path 或 picker 影響。Form adapter 保留逐位置 seed 來源，校準狀態只依作者的 `with_seed_metadata` 宣告，未知保持 null，不從缺值推論。Unknown、inactive 與 whole-leaf 子路徑回 invalid_params／form_path，data.form_path 保留請求路徑。其他 ValueError 維持 controller_error。Writeback 的 observe_entry 同樣只回 input、values、errors。
 
 使用者 2026-10-15：「好，先照這個規劃開始」。共用描述直接讀宣告與目前 input，options 只列 label、value 與 command name／label，不帶 fields。查 active path 才列 children；單一普通 model wrapper 攤平一層，完整 path 仍保留 wrapper。can_expand 只表示結構可展開，不執行 child hooks 或保證 children 非空。selection_fixed 表示本層 annotation 只有一個非 null 分支，不凍結內部欄位；fixed 表示完整值固定。Core cfg 本身的單值 Literal 仍算固定值。`RecipeFormField.locked` 是 selection_fixed、fixed 與宣告 readonly 三者的 or，不從當次選單數量推定。
 

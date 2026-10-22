@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue, TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.form import FormErrors, FormPath, FormPreview, FormWritePath
+from zcu_tools.gui.form_adapter import FieldDiagnostic
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.library_entry import (
     LibraryEntryInvalid,
@@ -40,6 +41,40 @@ class FormObservation(TypedDict):
     input: dict[str, JsonValue]
     values: list[FormWrite]
     errors: list[FormError]
+    diagnostics: NotRequired[list[FieldDiagnosticWire]]
+
+
+class FieldDiagnosticWire(TypedDict):
+    """Canonical field error/seed facts; name/index identify the original element.
+
+    message is None without a current error; seed_source identifies the original
+    expression/key or author formula. seed_status is Open/Reset availability,
+    not current validity. uncalibrated is author-declared, None when unknown.
+    """
+
+    path: list[str | int]
+    message: str | None
+    name: str | None
+    index: int | None
+    seed_source: str | None
+    seed_status: Literal["missing", "available", "literal"]
+    uncalibrated: bool | None
+
+
+def diagnostic_rows(rows: tuple[FieldDiagnostic, ...]) -> list[FieldDiagnosticWire]:
+    """Serialize owner diagnostics without inspecting fields or interpreting errors."""
+    return [
+        {
+            "path": list(row.path),
+            "message": row.message,
+            "name": row.name,
+            "index": row.index,
+            "seed_source": row.seed_source,
+            "seed_status": row.seed_status,
+            "uncalibrated": row.uncalibrated,
+        }
+        for row in rows
+    ]
 
 
 class EditPathHints(TypedDict):
@@ -79,11 +114,13 @@ def edit_path_hints(resource: TabFormResource) -> EditPathHints:
 
 def observe_form(resource: TabFormResource) -> FormObservation:
     """Project current input/preview/errors without capture or mutation."""
-    return _observation(
+    observed = _observation(
         resource.input.data,
         resource.preview(),
         resource.result(),
     )
+    observed["diagnostics"] = diagnostic_rows(resource.diagnostics())
+    return observed
 
 
 class ElementObservationWire(TypedDict):

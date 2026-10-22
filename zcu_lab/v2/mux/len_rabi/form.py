@@ -9,6 +9,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     mux_readout_initial,
+    mux_readout_seed_metadata,
     mux_relax_delay,
 )
 from zcu_lab.v2._support.measure.rabi_initial_values import len_rabi_initial_values
@@ -37,12 +38,13 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
                 "sweep": Range.between(0.03, stop, expts=101),
             }
         )
+    readout = mux_readout_initial(ctx)
     return Form(
         MuxLenRabiCfg,
         tree={
             "modules": {
                 "reset": Slot("$mux.module.reset"),
-                "readout": mux_readout_initial(ctx),
+                "readout": readout,
             },
             "tones": tones,
             "participants": list(names),
@@ -63,4 +65,4 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
             "reps",
             "rounds",
         ),
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

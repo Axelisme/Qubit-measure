@@ -8,6 +8,8 @@ from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from tests.gui.app.measure._load_support import historical_metadata
+
 from ._helpers import Fixture, call, mcp_client, open_client
 
 
@@ -255,6 +257,58 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
         )["result"]
         assert current["params"] == {"threshold": 0.7}
         assert current["summary"] == {"value": 7.0}
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
+    tab = fx.ctrl.new_tab("fake")
+    metadata = historical_metadata()
+    source = RunRecord(None, object(), metadata=metadata)
+    fx.state.update_tab_result(tab, source)
+    summary: dict[str, object] = {
+        "tones": [
+            {"position": 2, "name": "Q3"},
+            {"position": 4, "name": "Q5"},
+        ]
+    }
+    with open_client(fx.service.port) as sock:
+        for operation, replaced in [(101, False), (102, True)]:
+            _install_result(fx, tab, stage, 3.0, operation, summary=summary)
+            reply = call(
+                sock,
+                _result_method(stage),
+                {"tab_id": tab, "operation_id": operation},
+            )["result"]
+            assert reply.get("presentation") == {
+                "run_id": metadata.run_id,
+                "stage": "primary" if stage == "analysis" else "post",
+                "figure_names": ["fit"],
+                "figures_replaced": replaced,
+            }
+            assert reply["summary"] == summary
+        superseded = call(
+            sock, _result_method(stage), {"tab_id": tab, "operation_id": 101}
+        )
+        assert superseded["error"]["reason"] == "result_superseded"
+        fx.state.update_tab_result(
+            tab,
+            replace(
+                source,
+                metadata=metadata.model_copy(
+                    update={"run_id": "20261008T000000Z-d4e5f6"}
+                ),
+            ),
+        )
+        _install_result(fx, tab, stage, 5.0, 103, summary=summary)
+        fresh = call(sock, _result_method(stage), {"tab_id": tab, "operation_id": 103})[
+            "result"
+        ]
+        assert fresh["presentation"] == {
+            "run_id": "20261008T000000Z-d4e5f6",
+            "stage": "primary" if stage == "analysis" else "post",
+            "figure_names": ["fit"],
+            "figures_replaced": False,
+        }
 
 
 def test_operation_bound_run_figure_is_rejected(fx):

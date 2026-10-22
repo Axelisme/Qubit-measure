@@ -3,7 +3,10 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import mux_readout_initial
+from zcu_lab.v2._support.measure.mux_forms import (
+    mux_readout_initial,
+    mux_readout_seed_metadata,
+)
 
 from .._measure import captured_roles
 from .core import SpectroscopyCfg
@@ -39,6 +42,7 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
                 },
             )
         )
+    readout = mux_readout_initial(ctx)
     return Form(
         SpectroscopyCfg,
         tree={
@@ -46,11 +50,11 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
             "modules": {
                 "x180_f1": Slot("$f1.module.x180", copy=True),
                 "x180_f2": Slot("$f2.module.x180", copy=True),
-                "readout": mux_readout_initial(ctx),
+                "readout": readout,
             },
             "drive": drive,
             "frequency": Range.between(None, None, expts=101),
             "dc_device": None,
             "dc_values": Range.between(0, 0, expts=1),
         },
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

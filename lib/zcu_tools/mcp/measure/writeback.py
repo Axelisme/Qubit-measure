@@ -16,6 +16,11 @@ from zcu_tools.mcp.measure.recipe_contracts import (
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.writeback_recovery import (
+    CHECK_WRITEBACK_STATUS,
+    begin_writeback,
+    writeback_recovery,
+)
 
 _PANES: tuple[tuple[AnalysisStage, Literal["analysis", "post_analysis"], str], ...] = (
     ("primary", "analysis", "tab.get_analyze_result"),
@@ -147,7 +152,8 @@ def write_current_draft(
     unknown/ambiguous names cannot cause a partial write. Never reuse proposal IDs.
 
     Return GUI-confirmed completed stages, skipped stages and not_started stages.
-    A GuiRpcError stops the first failed step and returns a failed receipt. The
+    A GuiRpcError stops the first failed step. A write timeout returns unknown
+    and its owner submission_id/recovery, not an assertion of failed writes. The
     partial-writes flag is true only after admission of that stage's write RPC.
     Unexpected errors propagate. No guard refresh, retry or rollback is performed;
     callers must already have the GUI observations required by writeback guards.
@@ -199,12 +205,17 @@ def write_current_draft(
             if preview is None or not preview["items"]:
                 _skip_stage(receipt, stage)
                 continue
+            identity = begin_writeback(ctx, tab)
+            receipt["submission_id"] = identity
+            receipt.setdefault("submissions", {})[stage] = identity
+            receipt["recovery"] = writeback_recovery(identity)
             written: list[WritebackItemReceipt] = ctx.gui.send_gui_rpc(
                 "tab.writeback_write",
                 {
                     "tab_id": tab,
                     "subtab_id": subtab,
                     "write": [{"id": item["id"]} for item in preview["items"]],
+                    "submission_id": identity,
                 },
                 before_send=admit_write,
             )["written"]
@@ -212,7 +223,11 @@ def write_current_draft(
             receipt["not_started"].remove(stage)
     except GuiRpcError as error:
         receipt["not_started"].remove(stage)
-        receipt["status"] = "failed"
+        receipt["status"] = (
+            "unknown" if write_attempted and error.code == "timeout" else "failed"
+        )
+        if write_attempted and error.code == "timeout":
+            receipt["next_action"] = CHECK_WRITEBACK_STATUS
         receipt["failed_stage"] = stage
         receipt["error"] = {
             "code": error.code,

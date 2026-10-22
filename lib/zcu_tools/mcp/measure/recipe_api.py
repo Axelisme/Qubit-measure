@@ -22,6 +22,7 @@ from zcu_tools.core.script_protocol import (
 )
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.measure.raw_save import SaveOutput, SaveReport
+from zcu_tools.mcp.measure.writeback_recovery import WritebackRecovery
 
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe_runtime import RecipeRuntime
@@ -264,16 +265,20 @@ class WritebackQuestion(Question[WritebackAnswer]):
 class WritebackReceipt:
     """GUI-confirmed writeback result, including a successful prefix on failure.
 
-    status is completed, cancelled or failed. items lists original captured
+    status is completed, cancelled, failed or unknown after a write timeout.
+    submission_id/recovery query the GUI-lifetime owner receipt before resending.
+    items lists original captured
     candidates for owner-confirmed applied IDs, in owner order. Actual written
     values and destinations come from the owner's current draft; items is not a
     written-value snapshot. error describes a failed or uncertain attempt,
     otherwise None. No rollback or automatic retry follows a failed write.
     """
 
-    status: OperationStatus
+    status: OperationStatus | Literal["unknown"]
     items: tuple[WritebackItem, ...]
     error: str | None = None
+    submission_id: str | None = None
+    recovery: WritebackRecovery | None = None
 
     def raise_for_error(self) -> None:
         """Raise RuntimeError with the owner diagnostic unless status is completed.
@@ -417,16 +422,17 @@ class RecipeTab:
         """
         self._runtime.select(self.tab, path, ref=ref, inline=inline)
 
-    def apply(self, edits: Sequence[FieldEdit]) -> None:
-        """Apply edits in order; first error leaves the successful prefix intact.
+    def apply(self, edits: Sequence[FieldEdit], *, require_valid: bool = False) -> None:
+        """Apply one ordered batch, optionally requiring a complete executable cfg.
 
-        None retains input. Empty edits do nothing. Each source label must be
-        nonblank; this escape hatch does not bypass owner validation.
+        None retains input. Each source label must be nonblank. Structural and
+        source errors reject the entire batch. With require_valid=True, invalid
+        candidates leave input unchanged and raise RecipeNeedsParameters with
+        every owner-reported path and reason. Earlier selections are not rolled
+        back. False retains invalid drafts and raises invalid_cfg after commit.
+        An empty validated batch checks the current cfg without changing it.
         """
-        for edit in edits:
-            if not edit.source.strip():
-                raise ValueError("Edit source must be nonblank")
-            self.set(edit.path, edit.value)
+        self._runtime.apply_fields(self.tab, edits, require_valid=require_valid)
 
     def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
         """Call one named RPC and decode its reply as result, without retries.

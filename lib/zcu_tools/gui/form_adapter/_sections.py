@@ -212,6 +212,11 @@ class SpecSection:
         self.children: dict[str, Section] = {}
         self.modules: dict[str, ModuleField] = {}
 
+    def seed_origins(self, prefix: FormWritePath = ()) -> dict[FormWritePath, str]:
+        """Return no authored source origins for an empty persistent-Spec tree."""
+        del prefix
+        return {}
+
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
         """Accept the host catalog and adapter name; Spec roots have no seed nodes."""
         # The section contains no Template or Slot node to resolve.
@@ -471,6 +476,25 @@ class Section:
                 if isinstance(item, Mapping)
             )
         return list[child.model]
+
+    def seed_origins(self, prefix: FormWritePath = ()) -> dict[FormWritePath, str]:
+        """Return declared source ancestry without defaults, evaluation or capture."""
+        result: dict[FormWritePath, str] = {}
+        for name, module in self.modules.items():
+            node = module.node
+            if isinstance(node, Slot):
+                result[(*prefix, name)] = node.path
+            elif isinstance(node, Template):
+                result[(*prefix, name)] = f"template:{node.id}"
+        for name, node in self.tree.items():
+            if isinstance(node, AliasName):
+                result[(*prefix, name)] = node.alias
+        for name, child in self.children.items():
+            result.update(child.seed_origins((*prefix, name)))
+        for name, positions in self.element_seeds.items():
+            for index, child in enumerate(positions):
+                result.update(child.seed_origins((*prefix, name, index)))
+        return result
 
     def _sweep_defaults(self) -> dict[str, JsonValue]:
         """Select Range + Expts for fresh, otherwise unauthored sweep fields."""

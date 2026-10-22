@@ -4,7 +4,11 @@ from zcu_tools.cfg_model import Hidden, Range
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
-from zcu_lab.v2._support.measure.mux_forms import READOUT_ELEMENTS, mux_readout_initial
+from zcu_lab.v2._support.measure.mux_forms import (
+    READOUT_ELEMENTS,
+    mux_readout_initial,
+    mux_readout_seed_metadata,
+)
 from zcu_lab.v2.mux.onetone_fine.core import MuxOnetoneCfg
 
 
@@ -29,12 +33,13 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     validate_mux_bindings(ctx.parameters)
 
     # The group owns readout slot count; individual values remain editable.
+    readout = mux_readout_initial(ctx, wait_for_ringup=True)
     return Form(
         MuxOnetoneCfg,
         tree={
             "modules": {
                 "reset": Hidden(),
-                "readout": mux_readout_initial(ctx, wait_for_ringup=True),
+                "readout": readout,
             },
             "sweep": {"df": Range.between(-1.0, 1.0, expts=101)},
             "initial_delay": Hidden(),
@@ -48,4 +53,4 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
             "reps",
             "rounds",
         ),
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

@@ -42,6 +42,7 @@ def _pane(execution: dict[str, Any] | None) -> dict[str, Any] | None:
         "params": result.get("params", execution.get("params")),
         "summary": result.get("summary"),
         "invalid": result.get("invalid", []),
+        "presentation": result.get("presentation"),
     }
 
 
@@ -187,6 +188,7 @@ def _analysis_envelope(snapshot: dict[str, Any]) -> dict[str, Any]:
         "post_writeback": snapshot["writeback"] if stage == "post" else None,
         "missing": [],
         "error": snapshot["error"],
+        "recovery": snapshot.get("recovery"),
     }
 
 
@@ -201,10 +203,21 @@ def _script_execution(
         if not isinstance(error, dict):
             raise ValueError("Failed recipe is missing its error diagnostic")
         failure["failure"] = {"phase": error["phase"], "reason": error["message"]}
+        if error.get("recovery") is not None:
+            failure["recovery"] = error["recovery"]
     if detail == "full":
         return {**projected, **failure}
     if status == "needs_parameters":
-        return {"status": status, "missing": projected["missing"], "outcome": None}
+        return {
+            "status": status,
+            "missing": projected["missing"],
+            "outcome": None,
+            **(
+                {"parameter_errors": projected["parameter_errors"]}
+                if projected.get("parameter_errors")
+                else {}
+            ),
+        }
     outcome = projected.get("outcome")
     if isinstance(outcome, dict):
         return {
@@ -338,6 +351,7 @@ def _analysis_execution(
             "missing": snapshot["missing"],
             "invalid": invalid,
             "error": snapshot["error"],
+            "recovery": snapshot.get("recovery"),
         }
     )
 

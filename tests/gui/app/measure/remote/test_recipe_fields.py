@@ -58,6 +58,50 @@ def test_recipe_rpc_logical_batch_invalid_draft_and_atomic_rejection(form_rpc) -
     assert owner.input.data["gain"] == {"expr": "1 / 0"}
 
 
+def test_validated_recipe_batch_rejects_candidate_without_changing_shared_draft(
+    form_rpc,
+) -> None:
+    fixture, tab, rpc = form_rpc
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.to_json()
+    notices: list[str] = []
+    owner.subscribe(lambda: notices.append("changed"))
+    rejected = rpc.call(
+        "tab.edit_recipe_fields",
+        {
+            "tab_id": tab,
+            "require_valid": True,
+            "edits": [
+                {"path": ["gain"], "value": {"expr": "1 / 0"}},
+                {"path": ["sweep", "start"], "value": {"expr": "1 / 0"}},
+            ],
+        },
+    )
+    assert rejected["ok"], rejected
+    assert rejected["result"]["changed"] is False
+    assert {tuple(error["path"]) for error in rejected["result"]["errors"]} == {
+        ("gain",),
+        ("sweep", "start"),
+    }
+    assert owner.input.to_json() == before
+    assert notices == []
+    accepted = rpc.call(
+        "tab.edit_recipe_fields",
+        {
+            "tab_id": tab,
+            "require_valid": True,
+            "edits": [
+                {"path": ["gain"], "value": 0.7},
+                {"path": ["sweep", "start"], "value": 0.5},
+            ],
+        },
+    )
+    assert accepted["ok"], accepted
+    assert accepted["result"] == {"changed": True, "errors": []}
+    assert notices == ["changed"]
+    assert owner.accept().values["gain"] == 0.7
+
+
 @pytest.mark.parametrize(
     "selection",
     [

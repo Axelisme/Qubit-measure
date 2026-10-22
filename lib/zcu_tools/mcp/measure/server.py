@@ -85,7 +85,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v122: predictor RPC uses entry-local filenames or independent inline params.
 # v123: actionable launch collisions and explicit raw-save analysis observations.
 # v124: Async declarations, request-scoped answers, full owner evidence and scoped cancel.
-MCP_VERSION = 125
+# v126: Queryable writeback receipts, complete cfg preflight and source-bound analysis recovery.
+MCP_VERSION = 126
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -150,12 +151,24 @@ Nonterminal summaries include execution. A paused question supplies
 pending_question with request_id, evidence and answer_schema. Interactive
 analysis supplies pending={tab,stage,op}; complete that same GUI operation with
 tab_interact. Missing parameters return needs_parameters, missing paths and
-outcome=null, not a failed RecipeOutcome.
+outcome=null, not a failed RecipeOutcome. Cfg preflight also returns
+parameter_errors=[{path,message}] with all typed indexed paths and owner reasons.
+Mux participants/overrides apply as one require_valid batch; invalid candidates
+install no fields and start no Run. Earlier open/reset/library/inline actions
+remain. Run also checks the complete Form errors before starting acquisition.
 Full recipe detail retains per-Run/tab/operation conditions from the owner's
 fixed Form observation, native analysis estimates and invalid paths, and explicit
 writeback candidates. Reading detail never reruns analysis, writes or saves.
 Runs retain acquisition run_id and every explicit Save attempt, even failed
 outputs. Output status/error, not run_id, determines save success.
+Post result reads use the owner's start-receipt budget: 5 seconds plus 5 per
+measured tone, capped at 60 seconds; an absent budget uses 5 seconds.
+A result_read failure retains recovery with rpc, params, original op and stage.
+First read tab.snapshot and compare post_analysis_state.source_operation_id with
+recovery.params.operation_id. If different, report superseded and do not deliver
+the replacement as the old result. Otherwise rpc_call the supplied source-bound
+route; replacement races return result_superseded. Do not rerun analysis to
+recover a result read. GUI Post read handlers have a 60-second ceiling.
 Standalone analysis retains its native summary and Save reports. Artifacts
 preserve producer sections, names, members, paths, formats, statuses and errors. Synchronous tab.save_data and
 tab.save_artifacts return the complete current report, not a Save handle. No Save
@@ -227,7 +240,12 @@ contain label/value and commands, not fields; the owner reports selected.
 Select by writing the option's whole value once. A single ordinary wrapper may
 be flattened in children, but paths still include it. Ref options have no children.
 Describe replies include current local input_present/input/value and Form preview
-errors from one owner turn. For lowered cfg errors use get_cfg or Run admission.
+errors from one owner turn. For lowered cfg errors use get_cfg or Run admission. get_cfg and describe_cfg
+also return full-form diagnostics for every original tone, independent of picker
+or describe path. Each row carries path/message, name/index, seed_source,
+seed_status (missing/available/literal at Open/Reset), and author-declared
+uncalibrated (true/false/null for unknown). Filling a field does not rewrite its
+seed provenance, and missing input never implies uncalibrated.
 Recipe tab.read makes one atomic read_recipe_field RPC per call from fixed
 sources. Its locked flag includes selection_fixed, fixed and readonly.
 Ordinary strings are literal; expressions use {expr: text}, complex uses the
@@ -251,7 +269,13 @@ Primary/Post candidates by stable target_name. Omit items for all; an empty arra
 writes none. It ignores checkboxes and rejects unknown or ambiguous names before
 any write, using current IDs rather than proposal IDs. It does not answer recipes.
 apply_writeback stops on the first error and reports confirmed
-progress without retry or rollback. Inspect proposals and the destination first.
+progress without retry or rollback. Each attempted pane has a GUI-lifetime
+submission_id in submissions, and recovery queries tab.writeback_receipt.
+A write timeout returns unknown with the ID and partial-write warning, not a
+failed-write outcome. Check status before deciding whether to resubmit. Receipt
+queries return confirmed IDs, actual values and fixed entry/point destinations.
+Recipe acceptance retains the same submission_id/recovery in its receipt.
+Inspect proposals and the destination first.
 
 When a recipe is paused, answer(execution, request_id, answer) supplies named
 fields described by pending_question.answer_schema. request_id is required.

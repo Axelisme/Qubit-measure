@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。Core cfg 與持久 Spec 的表單推導與轉換契約。
 
@@ -155,6 +155,12 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 `prepare_logical_edits` 先按呼叫開始時的 active structure 解析整批 paths，再經 core prepare_write 一次產生候選。重複、重疊、不可達路徑與 ref 祖先整批拒絕，`LogicalEditError` 保留原 edit index。普通 model-invalid 值仍是可安裝的 draft。Generated selector 本身只接受專用的 `prepare_library_selection`、`prepare_inline_copy` 與 `prepare_module_disable`。Library selection 檢查 actual key/family 與宣告限制；copy 保留 child keys；disable 只允許 nullable selector。Inline copy 的 no-op 回 changed=False。Read 不會讓 ref descendants 變成可寫。
 
 候選保留範本的 input projection／model、requiredness 與唯讀宣告，不以單值 Literal 實作 lock。Adapter 不取得 host 控制權，也不 install 或發布 state。Host 在同一 guarded turn 以目前 input/env prepare，再 install。`logical_errors` 只翻譯已有 directed errors，保留真實同名欄位與 container indexes，不求值或新增診斷。
+
+## Seed diagnostics
+
+`Form.with_seed_metadata(mapping)` 回傳帶逐位置 metadata 的新 Form，原 Form 不變。Mapping 以 canonical typed paths 指向 FieldMeta，來源公式使用 description，calibration 接受 measured／uncalibrated／None。後一次呼叫取代整份 mapping。只有實際產生推導初值的 Form 需要這項宣告，不將動態 seed 的校準狀態綁到 core 靜態欄位。
+
+`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。保留 input 的 host 在 Refresh 換 Form 時也保留這份 mapping，Reset 才重算。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
 
 ## 依賴方向
 

@@ -61,7 +61,7 @@ def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> No
     assert {tuple(item["path"]): item["value"] for item in observed["values"]}[
         ("gain",)
     ] == 0.4
-    assert set(observed) == {"input", "values", "errors"}
+    assert set(observed) == {"input", "values", "errors", "diagnostics"}
     assert observed["errors"] == []
 
 
