@@ -287,7 +287,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -1,7 +1,9 @@
 """Fixed capture FTF conditional Ramsey form, with editable calibrated pulses."""
 
-from zcu_tools.cfg_model import Range, Slot, Template
+from zcu_tools.cfg_model import Range, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.mux_forms import mux_readout_initial
 
 from .._measure import captured_roles
 from .core import IdleZZCfg
@@ -27,9 +29,7 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
                 "x180_f2": Slot("$f2.module.x180", copy=True),
                 "x90_f1": Slot("$f1.module.x90", copy=True),
                 "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": mux_readout_initial(ctx),
             },
             "detune": None,
             "delay": Range.between(0, 10, expts=101),

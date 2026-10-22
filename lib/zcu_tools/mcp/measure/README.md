@@ -217,7 +217,10 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 
 全域 status 的 entry 是 null 或 GUI entry.info 的 UUID、name、result_path、database_path，
 只讀 metadata，不建立 context observation。
-未 open entry 時 ready.missing 包含 entry。
+`ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
+
+即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力，不能取代 `get_cfg` 的完整 cfg 診斷。Run admission 仍會檢查目前表單與動態條件。
+
 全域 status 列 GUI operations 與本 MCP session 非終態 executions。
 `terminal_count` 計算所有本地終態 execution，包含 standalone analysis。
 `recent_terminal_executions` 只列最近 10 筆終態 recipe，依 finished_at 新至舊排列。
