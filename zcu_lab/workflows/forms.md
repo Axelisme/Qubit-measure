@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。維護 workflow 表單、cfg 轉換與宿主註冊接線。
 
-**Last updated:** 2026-10-22，measure headless hosting 與公開 workflow 工具
+**Last updated:** 2026-10-22，async scripts 與 live tunables
 
 這個 package 擁有具體 workflow 的表單、to_cfg 與校準 module 轉換，不實作通用 editor、Window 或 Engine。
 Native science 不依賴 GUI。宿主、泛型 attachment、表單草稿、presentation、RPC 與 MCP 組裝由 lib 擁有，見 [measure host README](../../lib/zcu_tools/gui/app/measure/README.md#workflow-hosting)。
@@ -10,7 +10,7 @@ Native science 不依賴 GUI。宿主、泛型 attachment、表單草稿、prese
 ## Catalog 與 Coherence forms
 
 `zcu_lab.workflows.registry.build_registry` 依序配對 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。
-每個 `WorkflowAttachment` 保留 native step、plan/knobs model、converter 與 scalar seed 的同一版本配對，import 來自 `gui.app.measure.services.workflow_attachment`。
+每個 `WorkflowAttachment` 保留 native async script、plan/knobs model、converter 與 scalar seed 的同一版本配對，import 來自 `gui.app.measure.services.workflow_attachment`。
 Caller 把清單交給 measure headless facet。`WorkflowRegistry` 只驗 declaration，不提供 lookup。
 MCP 以 `workflow_open(name)` 明填名稱，再以回傳的 tab_id 呼叫 `workflow_start`。RPC 使用 `workflow.open` 與 `workflow.start`，未知名稱拒絕，不預選 Coherence 或提供舊名 alias。
 
@@ -19,7 +19,7 @@ MCP 以 `workflow_open(name)` 明填名稱，再以回傳的 tab_id 呼叫 `work
 All false 回 consuming-field error，不提交 acquisition。Disabled lifetime 不量、不保存、不產生 record 元素。
 共用 FormEditor 顯示 owner 的 Plan draft 與 Form preview。Start 經 headless owner 驗 Form，再呼附件 converter；remote preview 不執行 native lowering。
 
-`CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 paused tunables。
+`CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 tunables。
 `T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
 Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
 `defaults(env)` 不接收 previous，只宣告新表單初值。Module 切換使用 `ModuleInputField.converter(env)` 的共用繼承政策。T1 guess 以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。
@@ -54,9 +54,9 @@ Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不�
 ## 單一 run 與 remote
 
 Headless tab owner 將 fixed context/storage、typed cached device mapping、software provenance 與 native plan 交給該 run 的 controller。
-Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 native env effects acquisition。
-Pause 保留 operation、lease、plan、accepted input、capture 與 Plots。Resume 用同 token、新 tunables revision 重做未提交點，不在 Resume 讀硬體。
-Device actual snapshot 只在每次 env.run callback 前讀取；native 保存使用該次 evidence。
+Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 `await env.run(core.run, cfg)` acquisition。
+Pause 保留 operation、lease、plan、accepted input、capture 與 Plots。Resume 保留同一 workflow coroutine，重試被 Pause 中斷的 operation，不在 Resume 讀硬體。
+Device actual snapshot 只在每次 env.run callback 前讀取；native 保存使用該次 Completed.facts。
 Stop 等 producer 返回與 terminal delivery 後才 finish。Busy tab 拒絕 close；replacement Start 或成功 close 才 release presentation，不 disconnect 共用硬體。
 
 GUI、RPC、MCP 呼同一 WorkflowControlFacet，不另存 run。tab_id 識別 opened draft owner，run_id 識別 native run。
@@ -72,7 +72,7 @@ Tunables 使用 retained binding 的唯一 state/env。Complex tag 與 whole tup
 Tuning view 直接呈現 Host 的唯一 FormState，GUI Apply 與 RPC workflow.tunables 共用 facet.apply_tunables。
 兩者整批提交當下普通值，不保存另一個 draft revision guard。
 只有成功才更新 accepted input/base 並清 local text；invalid input 留在 shared draft，RPC 保留 field path/message。
-Paused Apply 後 Resume 保留 commits，新 revision 只用於重做未提交點。
+Running 或 paused 都可 Apply。作者下次讀 `tun.current` 時取得新 revision；已捕捉的 operation request 不變。
 
 Records RPC 直接投影 Engine committed records；point 現在含獨立 stage 與 enabled measurements。
 Live/summary 只建立 enabled lifetime 圖。具名圖/PNG 沿 retained Plots 與 owner-thread renderer，status-only 不渲染。

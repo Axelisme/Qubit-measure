@@ -1,53 +1,42 @@
 """coherence_fluxdep acquire helpers for lab workflows."""
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from copy import deepcopy
 
-from zcu_tools.experiment.acquisition import (
-    AcquisitionEvidence,
-    capture_software_provenance,
-    new_run_id,
-)
+import numpy as np
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.experiment.workflows import Run
-from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    Delay,
+    Pulse,
+    Readout,
+    Reset,
+    sweep2param,
+)
 
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyResult
 
 
-@dataclass(frozen=True, kw_only=True)
-class T2RamseyAcquisition(T2RamseyResult):
-    """Native Ramsey IQ trace with acquisition-time evidence.
-
-    times is the native rounded delay vector in microseconds; signals is
-    complex IQ with the same shape. true_activate_detune is the actual MHz
-    phase-ramp frequency after native time/phase quantization. evidence retains
-    acquisition UTC boundaries, provenance and the Run device snapshot.
-    """
-
-    evidence: AcquisitionEvidence
-
-
-def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
+def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
     """Measure Ramsey fringes to observe dephasing between two pi/2 pulses.
 
     Supply complete native cfg with scalar detune in MHz and length sweep in
-    microseconds, plus Run soc/soccfg/device snapshot. The second pi/2 phase
-    advances by 360*detune*delay. Return rounded delays, complex IQ and evidence;
-    cancelled acquisition retains partial data for Engine interpretation.
-    Schedule failure remains in Run.outcome. Native capability, compilation
-    and acquisition errors propagate. No setup, fit, plot or save occurs.
+    microseconds. context supplies SoC, plots and the cancellation token.
+    The second pi/2 phase advances by 360*detune*delay. Return rounded delays,
+    complex IQ and actual activated detune in MHz, retaining partial data on
+    stop. Schedule records acquisition failures on the token; other errors
+    propagate. No setup, fit or save occurs, and cfg remains unchanged.
     """
-    cfg = run.cfg
-    soc, soccfg = run.soc, run.soccfg
+    cfg = deepcopy(cfg)
+    soc, soccfg = context.soc, context.soccfg
     times = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
-    buffer = run.buffer((len(times),), axes=(times,))
-    provenance = capture_software_provenance(context=None)
-    started_at = datetime.now(UTC)
-    run_id = new_run_id(started_at)
+    plot = context.plots.liveplot_1d("measurement", "Time (us)", "Signal")
+    buffer = SignalBuffer(
+        (len(times),), on_update=lambda samples: plot.update(times, np.real(samples))
+    )
     # Execute the pulse sequence using schedule-local modules and sweeps.
-    with run.schedule(buffer) as sched:
+    with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
         modules = sched.cfg.modules
         length_sweep = cfg.sweep.length
         length_param = sweep2param("length", length_sweep)
@@ -68,16 +57,7 @@ def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
             .declare_sweep("length", length_sweep)
             .build_and_acquire()
         )
-    # Retain acquisition identity, device evidence and partial-stop status.
-    evidence = AcquisitionEvidence(
-        run_id=run_id,
-        started_at=started_at,
-        finished_at=datetime.now(UTC),
-        completion="stopped" if run.cancel_signal.is_set() else "complete",
-        provenance=provenance,
-        device_snapshot=run.device_snapshot,
-    )
-    return T2RamseyAcquisition(
+    return T2RamseyResult(
         times=times,
         signals=buffer.array,
         true_activate_detune=actual_detune(
@@ -87,5 +67,4 @@ def run_t2ramsey(run: Run[T2RamseyCfg]) -> T2RamseyAcquisition:
             soccfg=soccfg,
             time_scaler=1.0,
         ),
-        evidence=evidence,
     )
