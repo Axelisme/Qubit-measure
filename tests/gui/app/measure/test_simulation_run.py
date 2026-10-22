@@ -57,7 +57,7 @@ class NoiseAdapter(SavingAdapter):
             sweep=[("point", 3)],
         )
         acquired = prog.acquire(
-            context.soc, progress=False, cancel_flag=context.cancel_signal
+            context.soc, progress=False, cancel_flag=context.scope.stop
         )
         assert acquired is not None
         iq = acquired[0][0]

@@ -1,8 +1,8 @@
 """ExportService — write the spectrum collection to spectrums.hdf5.
 
 Assembles each SpectrumEntry into an analysis.fluxdep.models ``SpectrumResult`` and delegates
-to ``dump_spectrums``. The default path follows the notebook layout
-(``result_dir/data/fluxdep/spectrums.hdf5``); the directory is created only here,
+to ``dump_spectrums``. The default path uses the entry layout
+(``<entry>/fluxdep/spectrums.hdf5``); the directory is created only here,
 at the command boundary, not on a pure query.
 """
 
@@ -13,6 +13,7 @@ import os
 
 from zcu_tools.analysis.fluxdep.io import dump_spectrums
 from zcu_tools.analysis.fluxdep.models import SpectrumResult
+from zcu_tools.gui.app.analysis_project.entry import require_target
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 
@@ -24,14 +25,9 @@ __all__ = [
 ]
 
 
-def default_export_path(result_dir: str) -> str:
-    """The notebook-layout default export path under a result dir.
-
-    ``<result_dir>/data/fluxdep/spectrums.hdf5``. ``result_dir`` is the project's
-    result dir (always concrete — derived from chip/qubit eagerly, or overridden),
-    so this respects a user-overridden result dir rather than re-deriving it.
-    """
-    return os.path.join(result_dir, "data", "fluxdep", "spectrums.hdf5")
+def default_export_path(result_path: str) -> str:
+    """Return <entry result_path>/fluxdep/spectrums.hdf5 without creating it."""
+    return os.path.join(result_path, "fluxdep", "spectrums.hdf5")
 
 
 class ExportService:
@@ -41,8 +37,10 @@ class ExportService:
         self._state = state
 
     def default_path(self) -> str:
-        """Default export path under the project's result dir."""
-        return default_export_path(self._state.project.result_dir)
+        """Return the opened entry intermediate path; reject no_entry."""
+        return default_export_path(
+            str(require_target(self._state.project).resource.result_path)
+        )
 
     def export_spectrums(self, filepath: str | None = None, mode: str = "x") -> str:
         """Write every loaded spectrum to ``filepath`` (or the default path).

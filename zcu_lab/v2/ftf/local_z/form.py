@@ -1,7 +1,9 @@
 """Fixed-capture inputs for a two-target local-Z experiment."""
 
-from zcu_tools.cfg_model import Expr, Slot, Template
+from zcu_tools.cfg_model import Expr, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.mux_forms import mux_readout_initial
 
 from .._measure import captured_roles
 from .core import LocalZCfg
@@ -22,9 +24,7 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
             "modules": {
                 "x90_f1": Slot("$f1.module.x90", copy=True),
                 "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": mux_readout_initial(ctx),
             },
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),

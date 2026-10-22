@@ -4,14 +4,12 @@ import asyncio
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from contextvars import Context
-from datetime import timedelta
 from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
-from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -26,12 +24,10 @@ from zcu_tools.experiment.workflows import (
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
 from ._engine_fakes import (
-    START,
     Plan,
     Point,
     Rig,
     Tunables,
-    completed,
     identity,
     pending,
     question,
@@ -61,8 +57,7 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
 
 async def ask_once(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
     answer = await env.ask(Choose(point=0))
-    if answer is not None:
-        await env.commit(Point(value=answer.value))
+    env.commit(Point(value=answer.value))
 
 
 def test_pending_answer_type_and_parse_are_readonly_and_allow_retry(rig: Rig) -> None:
@@ -101,12 +96,18 @@ def test_answer_continues_same_author_with_live_tunables(rig: Rig) -> None:
     seen: list[tuple[int, int]] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        entered.append(get_ident())
-        captured = tun.current
-        answer = await env.ask(Choose(point=0))
-        assert answer is not None
-        seen.append((captured.value, tun.current.value))
-        await env.commit(Point(value=answer.value))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            entered.append(get_ident())
+            captured = tun.current
+            answer = await env.ask(Choose(point=0))
+            assert answer is not None
+            seen.append((captured.value, tun.current.value))
+            iteration.commit(Point(value=answer.value))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -168,53 +169,31 @@ def test_each_answer_continues_until_next_question_without_restart(rig: Rig) -> 
 
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
-def test_stop_delivers_none_and_cooperative_stopped_calls_then_runs_finally(
+def test_stop_interrupts_ask_and_runs_finally_on_the_author_worker(
     rig: Rig,
     cleanup_fails: bool,
 ) -> None:
     closed: list[int] = []
-    received: list[Decision | None] = []
-    stops: list[bool] = []
+    received: list[Decision] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         try:
             received.append(await env.ask(Choose(point=0)))
-
-            def operation(ctx: CallContext) -> int:
-                stops.append(ctx.stop_signal.is_set())
-                return 0
-
-            result = completed(await env.call(operation))
-            assert result.partial_result and result.value == 0
-            assert completed(
-                await env.setup_device(
-                    "unused", FakeDeviceInfo(address="unused", value=0.5)
-                )
-            ).partial_result
-            assert completed(
-                await env.wait_until(START + timedelta(days=1))
-            ).partial_result
-            received.append(await env.ask(Choose(point=1)))
-            if cleanup_fails:
-                raise ValueError("cancel cleanup failed")
         finally:
             closed.append(get_ident())
+            if cleanup_fails:
+                raise ValueError("cancel cleanup failed")
 
     rig.start(script)
     with running(rig) as future:
         pending(rig)
-        assert closed == []
         rig.engine.stop("run")
         final = future.result(timeout=10)
     assert final.lifecycle == ("failed" if cleanup_fails else "cancelled")
     if cleanup_fails:
         assert final.reason == "ValueError: cancel cleanup failed"
     assert len(closed) == 1 and closed[0] != get_ident()
-    assert received == [None, None]
-    assert stops == [True]
-    assert rig.devices.values == [("unused", 0.5)]
-    assert rig.devices.signals[0].is_set()
-    assert rig.clock.targets == [START + timedelta(days=1)]
+    assert received == []
     assert rig.engine.pending_question("run") is None
     assert rig.engine.records("run") == ()
 
@@ -262,14 +241,19 @@ def test_answer_is_nonblocking_and_continuation_errors_fail_execution(rig: Rig) 
     entered, release = Event(), Event()
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        await env.ask(Choose(point=0))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await env.ask(Choose(point=0))
 
-        def operation(ctx: CallContext) -> None:
-            entered.set()
-            assert release.wait(10), "Caller releases operation in finally"
-            raise ValueError("analysis after answer failed")
+            def operation(ctx: CallContext) -> None:
+                entered.set()
+                assert release.wait(10), "Caller releases operation in finally"
+                raise ValueError("analysis after answer failed")
 
-        await env.call(operation)
+            await iteration.call(operation)
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -353,15 +337,9 @@ def test_answer_flush_preserves_io_cause_and_drains_finally(
         try:
             await env.ask(Choose(point=0))
         finally:
-
-            def cleanup(ctx: CallContext) -> None:
-                cleanup_threads.append(get_ident())
-                cleanup_entered.set()
-                assert release_cleanup.wait(10), (
-                    "Test finally releases executor cleanup"
-                )
-
-            await env.call(cleanup)
+            cleanup_threads.append(get_ident())
+            cleanup_entered.set()
+            assert release_cleanup.wait(10), "Test finally releases author cleanup"
 
     rig.start(script)
     with running(rig) as future:

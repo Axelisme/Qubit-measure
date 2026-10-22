@@ -133,7 +133,7 @@ class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
                 zigzag_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             # 2. Count X90 gates in pairs so each step adds a nominal pi rotation.
             modules = sched.cfg.modules
             repeat_pulse = getattr(modules, sched.cfg.repeat_on)

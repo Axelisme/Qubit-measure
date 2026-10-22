@@ -32,12 +32,7 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.gui.app.analysis_project.project import (
-    ProjectInfo,
-    is_real_project,
-    project_info_payload,
-)
-from zcu_tools.gui.app.analysis_project.readonly_handlers import h_project_info
+from zcu_tools.gui.app.analysis_project.entry import target_payload
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
@@ -106,19 +101,16 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 def _h_project_setup(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> ProjectSetupReply:
-    chip_name = params["chip_name"]
-    qub_name = params["qub_name"]
-    # ParamSpec validates identity; the GUI derives paths from its own root.
-    assert isinstance(chip_name, str)
-    assert isinstance(qub_name, str)
-    adapter.ctrl.setup_project(
-        ProjectInfo(
-            chip_name=chip_name,
-            qub_name=qub_name,
-            root_dir=adapter.ctrl.get_project_root(),
-        )
+    project_root, entry, component = (
+        params["project_root"],
+        params["entry"],
+        params["component"],
     )
-    return {"project": project_info_payload(adapter.ctrl.state.project)}
+    assert isinstance(project_root, str)
+    assert isinstance(entry, str)
+    assert component is None or isinstance(component, str)
+    adapter.ctrl.setup_project(project_root, entry, component)
+    return {"project": target_payload(adapter.ctrl.state.project)}
 
 
 def _h_spectrum_list(
@@ -567,14 +559,15 @@ def _h_export_spectrums(
 def _h_fit_export_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> ParamsExportedReply:
-    savepath = params["savepath"]
-    assert savepath is None or isinstance(savepath, str)
-    receipt = adapter.ctrl.export_params_receipt(savepath)
+    del params
+    receipt = adapter.ctrl.export_params_receipt()
     EJ, EC, EL = receipt.params
     return {
         "savepath": receipt.savepath,
         "params": {"EJ": EJ, "EC": EC, "EL": EL},
         "alignment_from": receipt.alignment_from,
+        "component": receipt.component,
+        "analysis_id": receipt.analysis_id,
     }
 
 
@@ -590,7 +583,7 @@ def _h_state_check(
     del params
     state = adapter.ctrl.state
     return {
-        "has_project": is_real_project(state.project),
+        "has_project": state.project is not None,
         "spectrum_count": len(state.spectrums),
         "has_active": state.active_spectrum is not None,
     }
@@ -602,7 +595,7 @@ def _h_state_check(
 
 
 _HANDLERS: dict[str, Handler] = {
-    "project.info": h_project_info,
+    "project.info": lambda adapter, _params: target_payload(adapter.ctrl.state.project),
     "project.setup": _h_project_setup,
     "spectrum.list": _h_spectrum_list,
     "spectrum.snapshot": _h_spectrum_snapshot,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay, fit_dual_decay
 from zcu_tools.plotting.plots import Plots
 
@@ -108,6 +109,7 @@ def analyze_t1(
             fit = T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality})
             outcome = MuxT1Fit(index, fit)
         except (
+            AnalysisFailed,
             ValueError,
             RuntimeError,
             ArithmeticError,

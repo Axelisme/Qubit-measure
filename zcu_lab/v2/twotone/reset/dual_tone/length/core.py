@@ -126,7 +126,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         )
 
         # Sweep both durations together before reading out the reset response.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             tested_reset_cfg = modules.tested_reset
             pulse1_cfg = tested_reset_cfg.pulse1_cfg

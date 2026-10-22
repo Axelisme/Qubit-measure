@@ -12,7 +12,7 @@ from zcu_tools.resources.entry import RoleResolutionError, document_value
 
 if TYPE_CHECKING:
     from zcu_tools.resources.entry import RoleSpec
-    from zcu_tools.resources.entry.schema import PointDocument
+    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class AliasTable:
 
     Construction and replace validate the complete authored table without
     reading components. InvalidInputError(alias_invalid) leaves the old table
-    unchanged. Reads use only the supplied fixed PointDocument, not a provider,
+    unchanged. Reads use only the supplied fixed SetupDocument or PointDocument, not a provider,
     file, registry, or hardware. Empty bindings remain legal until read. No
     persistence, default policy or event publication belongs to this owner.
     """
@@ -125,9 +125,13 @@ class AliasTable:
         return AliasTable(rows)
 
     def resolve(
-        self, alias: str, point: PointDocument, *, kind: str | None = None
+        self,
+        alias: str,
+        point: SetupDocument | PointDocument,
+        *,
+        kind: str | None = None,
     ) -> str:
-        """Read an alias's component or device name from this fixed point.
+        """Read an alias's component or device name from a fixed setup or point.
 
         Concrete names need not belong to point.components or a device catalog.
         Follow only this row's earlier-row dependency chain. kind optionally
@@ -154,7 +158,7 @@ class AliasTable:
         return name
 
     def names(
-        self, point: PointDocument, declarations: Mapping[str, RoleSpec]
+        self, point: SetupDocument | PointDocument, declarations: Mapping[str, RoleSpec]
     ) -> dict[str, str]:
         """Capture all bound rows as concrete names for Run/storage records.
 
@@ -175,7 +179,11 @@ class AliasTable:
         return names
 
     def _resolve_name(
-        self, alias: str, point: PointDocument, *, kind: str | None = None
+        self,
+        alias: str,
+        point: SetupDocument | PointDocument,
+        *,
+        kind: str | None = None,
     ) -> str | None:
         if all(row.alias != alias for row in self._rows):
             raise RoleResolutionError(

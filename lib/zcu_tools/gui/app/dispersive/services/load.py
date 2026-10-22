@@ -7,7 +7,7 @@ in MHz and would pull the whole measure experiment layer in). Frequencies are
 stored in GHz.
 
 The flux axis is derived from the project's fluxonium fit alignment
-(``flux_half`` / ``flux_period`` from the ``fluxdep_fit`` section), so a one-tone
+(``flux_half`` / ``flux_period`` / ``flux_bias`` from the selected predictor), so a one-tone
 can only be loaded after the fit inputs are present.
 """
 
@@ -57,7 +57,7 @@ class LoadService:
         inputs = self._state.fit_inputs
         if inputs is None:
             raise RuntimeError(
-                "load the fluxonium fit inputs (params.json) before a one-tone "
+                "load the fluxonium fit inputs (choose a predictor) before a one-tone "
                 "spectrum — the flux axis is derived from the fit's alignment"
             )
 
@@ -78,7 +78,9 @@ class LoadService:
             )
 
         dev_values, freqs, signals2d = format_rawdata(dev_values, freqs, signals2d)
-        fluxs = value2flux(dev_values, inputs.flux_half, inputs.flux_period)
+        fluxs = value2flux(
+            dev_values + inputs.flux_bias, inputs.flux_half, inputs.flux_period
+        )
 
         raw = SpectrumData(
             dev_values=dev_values.astype(np.float64),

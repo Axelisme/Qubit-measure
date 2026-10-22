@@ -8,14 +8,17 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
-from zcu_tools.experiment.stop_signal import parse_cancel_scope
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import (
     ReplyDetail,
     project_control,
     project_execution,
 )
-from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
+from zcu_tools.mcp.measure.script_recipe_execution import (
+    ScriptRecipeExecution,
+    ScriptRecipeSnapshot,
+)
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_workflow import cancel_workflow
 
@@ -27,9 +30,10 @@ def _execution_status(
     if key.startswith("recipe-"):
         execution = ctx.session.recipes.get(key)
         snapshot = asdict(execution.snapshot())
+        paths = asdict(execution.scope_status())
         return {
             **project_execution(snapshot, detail=detail),
-            "active_path": execution.active_path,
+            **paths,
         }
     return project_execution(
         asdict(ctx.session.executions.get(key).snapshot()),
@@ -37,8 +41,18 @@ def _execution_status(
     )
 
 
+def _recent_terminal_recipes(
+    snapshots: tuple[ScriptRecipeSnapshot, ...],
+) -> list[ScriptRecipeSnapshot]:
+    return sorted(
+        (item for item in snapshots if item.finished_at is not None),
+        key=lambda item: item.finished_at or "",
+        reverse=True,
+    )[:10]
+
+
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Read a local execution, or GUI orientation and nonterminal executions."""
+    """Read one execution, or GUI orientation with active and recent recipe IDs."""
     detail = arguments.get("detail", "summary")
     if detail not in ("summary", "full"):
         raise ValueError("detail must be summary or full")
@@ -74,14 +88,15 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         )
         if not present
     ]
+    recipe_snapshots = ctx.session.recipes.snapshots()
     execution_snapshots = [
         asdict(item) for item in ctx.session.executions.snapshots()
     ] + [
         {
             **asdict(item),
-            "active_path": ctx.session.recipes.get(item.execution).active_path,
+            **asdict(ctx.session.recipes.get(item.execution).scope_status()),
         }
-        for item in ctx.session.recipes.snapshots()
+        for item in recipe_snapshots
     ]
     return {
         "entry": entry,
@@ -97,13 +112,25 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             {
                 **project_execution(item),
                 **(
-                    {"active_path": item["active_path"]}
+                    {
+                        "active_path": item["active_path"],
+                        "live_paths": item["live_paths"],
+                    }
                     if "active_path" in item
                     else {}
                 ),
             }
             for item in execution_snapshots
             if item["phase"] != "terminal"
+        ],
+        "recent_terminal_executions": [
+            {
+                "execution": item.execution,
+                "recipe": item.recipe,
+                "status": item.status,
+                "finished_at": item.finished_at,
+            }
+            for item in _recent_terminal_recipes(recipe_snapshots)
         ],
         "terminal_count": sum(
             item["phase"] == "terminal" for item in execution_snapshots
@@ -236,12 +263,16 @@ def cancel(
         )
     else:
         op = _operation_id(arguments)
-        if label in {"schedule", "acquire"}:
+        if label in {"schedule", "acquire"} or "/" in label:
             target_op = op
         execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
         if isinstance(execution, ScriptRecipeExecution):
-            reply = execution.cancel(scope=scope, expected=expected, op=target_op)
+            reply = execution.cancel(
+                scope=scope if "scope" in arguments else "recipe",
+                expected=expected,
+                op=target_op,
+            )
         elif label != "script" or sequence is not None:
             raise ValueError("scoped cancellation requires a recipe or workflow")
         else:
@@ -264,7 +295,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -283,7 +314,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for one operation or execution; timeout does not cancel. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
+            "description": "Wait for one operation or execution; timeout does not cancel. Terminal recipes retain execution; failed recipes include failure.phase and the human failure.reason without a traceback. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -304,14 +335,14 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Cancel a live script, iteration, Run/operation, schedule or acquire scope. Use label#N or expected to refuse stale targets. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
+            "description": "Omit scope to stop the target root. Select a live kind, kind#N, operation:name or exact full live_paths path; ambiguous matches return full-path candidates. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "op": {"type": "integer"},
                     "execution": {"type": "string", "minLength": 1},
                     "run_id": {"type": "string", "minLength": 1},
-                    "scope": {"type": "string", "default": "script"},
+                    "scope": {"type": "string"},
                     "expected": {"type": "integer", "minimum": 1},
                 },
                 "oneOf": [

@@ -53,9 +53,9 @@ class BaseController(Generic[StateT, BusT]):
 
     def get_project_root(self) -> str:
         """Base dir the default result/database paths anchor under (the repo
-        root, injected by the entry script). The project dialog derives defaults
-        through ``default_result_dir`` against this, NOT cwd, so a .bat launcher
-        that cd's into scripts/ still scopes under the repo root."""
+        root, injected by the entry script). Entry selection derives result/ and
+        Database/ against this, not cwd, so a launcher that changes into scripts/
+        still scopes defaults under the repo root."""
         return self._project_root
 
     def _emit(self, payload: BasePayload) -> None:

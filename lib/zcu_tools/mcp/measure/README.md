@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -92,13 +92,15 @@ Status／wait 提前回 `status="interactive"`，GUI 完成同一 operation 後�
 
 `tab.writeback_proposal()` 捕捉 completed stages 的候選。
 `ask_writeback()` 等待經 evidence 驗證的 `WritebackAnswer`，回答不寫入。
-只有 `tab.accept_writeback(decision.items)` 寫入選定的 captured 候選。
-Unknown、重複或已變更的項目在第一筆寫入前拒絕。
-Recipe 將 preview 的 owner revisions 與選定 IDs 一次交給 `tab.writeback_accept`。
-Owner 在同一提交核對 Primary／Post 全部選定 drafts，任何 draft 改動或替換都在第一筆寫入前拒絕。
+只有 `tab.accept_writeback(decision.items)` 寫入選定 IDs 對應的 owner 當下 draft 值與目的地。
+Unknown、重複或經作者修改的 captured 項目在第一筆寫入前拒絕。
+Recipe 將選定 IDs 一次交給 `tab.writeback_accept`，不帶 `expected_revision`，preview 也不回 revision。
+Owner 在同一提交核對 Primary／Post 全部選定 IDs。問答期間的 draft 編輯或替換不觸發 stale 拒絕，也不還原舊 proposal。
+這沿用 GUI／MCP 的所有權模型，見 ADR-0075 的 2026-10-23 使用者裁定。
 單 pane L1 `tab.writeback_write` 仍編輯並寫入當前 draft，不供 recipe captured acceptance 使用。
 Primary 先於 Post，首錯停止，成功前綴保留，不 retry 或 rollback。
-`WritebackReceipt` 以 pane 與 owner item ID 關聯 confirmed items，不拿 alias 名稱比 concrete target。
+`WritebackReceipt.items` 是 owner 確認成功 ID 對應的原捕捉候選，不是寫入值快照。
+實際寫入值與目的地取 owner 當下 draft。Receipt 以 pane 與 owner item ID 關聯 confirmed items，不拿 alias 名稱比 concrete target。
 Proposal、receipt 與 full details 的 structured mappings 各自分離，不共用 retained acceptance evidence。
 作者原地修改 proposal 的 nested value 後接受，會在任何 owner write 前拒絕。
 作者可檢查收據或呼叫 `receipt.raise_for_error()`，不可將 decision.accepted 當作寫入成功。
@@ -117,49 +119,70 @@ Run 未成功取得來源前不要進 Save finalizer，避免 Save 蓋掉原錯�
 
 ### 取消與缺參
 
-`cancel(op=...|execution=...|run_id=..., scope="script", expected=None)` 恰填一個 target。
-`execution` 指本地 recipe 或 standalone analysis，`run_id` 指 native workflow，`op` 指 GUI operation handle。
-細層 scope 與序號只用於 recipe 或 workflow。沒有 finish_early。
+`cancel(op=...|execution=...|run_id=..., scope=..., expected=None)` 恰填一個 target。
+Execution 指本地 recipe 或 standalone analysis，run_id 指 native workflow，op 指 GUI operation handle。
+省略 scope 停整個目標，recipe／workflow 根分別可明填 recipe／workflow。細層選擇器只供 recipe／workflow 使用。
 
 | Scope | 效果 |
 | --- | --- |
-| `acquire` | 只停目前 acquire，交付 partial，同一 Schedule 的下一次 acquire 正常。 |
-| `schedule` | 停目前 Schedule 與其後續 acquire，交付 partial，下一個 operation 正常。 |
-| `iteration` | 停本輪及本輪之後出生的 operation。Commit 更換 iteration 後下一輪正常。 |
-| `run` | 停目前 operation，下一個 operation 正常。Recipe 只接受進行中的 `tab.run`；workflow 可停任何 operation。 |
+| acquire | 只停一次取得，交付 partial，同 Schedule 的下一次 acquire 正常。 |
+| schedule | 停該 Schedule 及其後續 acquire，下一個 operation 正常。 |
+| iteration | 跳過目前這一點。作者釋放本趟後，下一趟 iteration 正常。 |
+| run | 停 operation。Recipe 限進行中的 tab.run，workflow 可停任何 operation。 |
+| operation | 選本地 operation，包括 recipe analysis，不取消父 scope。 |
 
-`operation` 是直接的 operation label，recipe analysis 也可被此 scope 停止。
-Recipe 的 run／schedule／acquire 在沒有進行中 `tab.run` 時回
-`cancelled=False, reason="no run in progress"`。Ask 不會被細層 scope 回答或關閉。
-Run scope 在 host loop 同一回合檢查與 set token，當前 Run 合作交付 partial，recipe 繼續。
+Recipe 的 run／schedule／acquire 在沒有進行中 tab.run 時回
+`cancelled=False, reason="no run in progress"`。Ask 不會被細層取消回答或關閉。
+Iteration.cancelled 只退出目前 point，主 for 用 continue，point helper 用 return。
+Point 在 try/finally 以同步 commit 保存一次 record，不在 finally await；根 ScriptCancelled 繼續向上傳播。
 
-Status 回 `active_path`，例如 `script/iteration#1/operation#2/schedule#1/acquire#3`。
-只填 label 會取消處理命令時的當前 scope。填 `scope="acquire#3"` 或
-`scope="acquire", expected=3` 可拒絕已換次的 acquire。兩者同填時序號必須相同。
-例如 `cancel(execution="recipe-...", scope="acquire", expected=3)` 只接受目前 GUI Run root 的第 3 次 acquire。
+Status 的 active_path 是根到第一個 fork 的單一鏈。
+Live_paths 是所有存活葉的完整路徑 list[str]，例如：
+
+```json
+{
+  "active_path": "recipe:calibrate/operation#1",
+  "live_paths": [
+    "recipe:calibrate/operation#1/schedule#1/acquire#1",
+    "recipe:calibrate/operation#1/schedule#2/acquire#1"
+  ]
+}
+```
+
+Selector 搜整棵存活子樹，支援 kind、kind#N、operation:<name> 與 live_paths 的完整路徑精確比對。
+多筆命中回 cancelled=False、reason="ambiguous"，candidates 列完整候選路徑。
+同 parent 的同名 operation 用 operation:<name>#N 解歧。不同 parent 各有 acquire#1 時，
+acquire#1 仍 ambiguous，改用完整路徑。不以最新 child 或 callable 反射選對象。
+Name 由 caller 提供，非 None 時必須非空且不含 #、/、:。
+
+`scope="acquire#3"` 與 `scope="acquire", expected=3` 等價，兩者同填須一致。
+序號必須為正整數，bool 不算整數。Root 沒有序號。合法但未存活回 scope not active，
+序號不符回 sequence mismatch，均不設 token；壞語法回 invalid_params。
+
 GUI root 的序號可在下一 Run 重用。跨 Run 精確取消要用
-`cancel(op=17, scope="acquire", expected=3)`，其中 op 來自觀察到的那次 Run。
+`cancel(op=17, scope="acquire", expected=3)`，op 必須來自觀察到的 Run。
 細層 op target 必須仍是目前 tab.run handle，舊 op 回 scope not active，不改打新 Run。
-不帶細層 scope 的 generic `cancel(op=17)` 仍保留既有 script Stop 語意。
-不接受整條 slash path。序號必須是正整數，bool 不算整數，壞格式或未知 label 回 invalid_params。
-Script root 沒有序號，`script#1` 或 script 配 expected 都回 sequence mismatch。
+Generic cancel(op=17) 維持整個 script Stop 語意。
 
-回覆保留 execution/workflow snapshot，另帶 `cancelled/reason/active_path`。
-Reason 是 `scope cancellation requested`、`scope not active`、`sequence mismatch`，
-recipe 另有 `no run in progress`。合法但不在路徑上的 scope 或 stale 序號是拒絕資料，不是 tool error。
-`cancelled=True` 表示命令已被 owner 接受，不證明工作或 cleanup 已 drain，終局仍讀 wait/status。
-Workflow 裸 `script` 且 `expected=None` 先由 Stop owner lock 寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
-這個分支的 accepted ack 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。
+Ack 保留 execution／workflow snapshot，另帶 cancelled、reason、active_path 與 candidates。
+Cancelled=True 表示 owner 已接受命令，不證明 operation 或 cleanup 已 drain，終局仍讀 wait/status。
+Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
+這個分支的 accepted ack 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token。
 Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。
-帶序號或 expected 的 script 與其他 scope 直接由 host 核對。Terminal workflow 對合法 scope 回 scope not active，錯誤語法仍回 invalid_params。
+其他 selector 直接由 host 核對。Terminal workflow 對合法 scope 回 scope not active，錯誤語法仍回 invalid_params。
 
-Script scope 設根 token，當前與後續 Run 都會啟動並返回 partial。
-Analyze、ask_writeback、session.ask 無結果時 raise 普通 `RecipeCancelled`，
-不是 `asyncio.CancelledError`，三者的作者回傳型別都不是 Optional。
-作者不 catch、不寫取消分支，finally 在同一 worker 照跑，同步操作仍可做。
-終態為 `RecipeOutcome(status="cancelled", report=None, runs=[...])`。
-RecipeCancelled 不記入 error，其他 owner、作者或 cleanup 例外仍保留診斷。
+根 recipe／workflow 取消在下一個 await 丟共用 ScriptCancelled，普通 Exception 子類，
+不是 asyncio.CancelledError。進行中的 Run 先合作 drain、保留 run_id／partial／completion facts，再讓 await raise。
+作者 finally 在同一 worker 照跑，同步 Save 可保留已取得資料；不在 finally 開新的 await。
+Recipe 終態為 `RecipeOutcome(status="cancelled", report=None, runs=[...])`。
+ScriptCancelled 不記入 error，真實 owner、作者或 cleanup 例外仍保留診斷。
 Completed 不代表所有輸出已保存。
+
+Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
+只有 analyze work 明確丟 AnalysisFailed 才轉成這個值。任意程式錯誤、record 或 writeback 失敗仍 raise。
+作者看 status 後自行保存、跳過、重試或停止，不需要為預期 fit 失敗 raise。
+成功 result 按作者提供的 T 驗證，缺欄位與型別不合仍 raise。
+已分類的數值路徑見 [fitting README](../../analysis/fitting/README.md)。
 
 Run 前的 `RecipeNeedsParameters` 使 execution 終態為 needs_parameters，
 snapshot 列具名 missing paths、outcome=None，並釋放 admission。
@@ -171,17 +194,17 @@ RecipeOutcome 仍只有 completed／failed／cancelled，不把缺參包成失�
 Recipe 的本地樹與 GUI Run 樹分屬兩個 process。Schedule／acquire 經
 `operation.cancel_scope` 以目前 tab.run 的 operation handle 代理，GUI 原子核對自己的樹。
 Status 每次用 `operation.status_scope` 取得尾段，接在本地 path 後，不重列 GUI run root。
-拒絕回覆的 cancelled/reason 保留 GUI 事實，active_path 使用相同合成規則。
+拒絕回覆的 cancelled/reason 保留 GUI 事實，active_path、live_paths 與候選 candidates 使用相同合成規則。
 這不是跨 process 原子快照，晚到請求靠 handle 與序號拒絕，不取消下一個 Run。
 GUI `result_state.partial_result` 交付 Run 的完成事實，即使沒有 native metadata 也保留。
 Recipe RunResult 讀這一欄，不因 GUI operation 仍為 finished 而遺失內層取消。
 `recipe_runtime.py` 擁有 GUI binding、wire 解碼、合作取消與 operation source；
 `recipe_host.py` 組合 scheduler、runtime 與 author session。
 `recipe_execution.py` 管理注入 declarations、單一 recipe admission 與 execution 查詢。
-舊 RecipeDefinition／generator handles 路徑已移除，尚未遷移的 workflow driver 不在 recipe 路徑使用。
+Recipe 不建隱式 iteration，路徑直接由 recipe:<name> 掛 operation#N。
 
 Host loop 只在 execution worker。作者 task 不被 cancel，阻塞操作由 executor 合作 drain。
-每個 operation 都有獨立 StopSignal child，已停止的 token 仍啟動 operation。
+每個 operation 都有顯式 Scope child，底層讀 scope.stop。根已停止時不再開始新的 await operation。
 `set_error` 只記本 scope 第一個錯誤並向下停止，不改祖先或後續兄弟。
 跨 thread 的 cancel／answer／control 經同一 loop 控制序列與 acknowledgement。
 Acknowledgement 不是 operation drain 的證明。
@@ -199,7 +222,12 @@ answer 符合 pending question 的 Answer schema 與 evidence 規則。
 不消耗問題、不記 answered。
 問題沒有自動預設回答或 timeout。
 
-Terminal wait summary 只回 status／report／runs。Status 另帶 active_path。
+Terminal recipe summary 回 execution／status／report／runs。Status 另帶 active_path 與結構化 live_paths。
+Failed 另帶 `failure: {phase, reason}`，full detail 也保留同一 failure 與原 error。
+Phase 在失敗動作處記錄：作者／Run／開 tab 為 operation，分析結果讀取與解碼為 result_read，
+Save 為 image_save，preview 為 figure_read，writeback 候選讀取為 writeback_read。
+Reason 是 `str(exception)`，不附格式化 traceback。作者 catch 後的新錯誤不沿用舊 phase，
+成功的 finally Save 也不覆蓋原失敗的 phase。
 Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operation status、
 partial 與 Save 收據，不靠作者補取消報告。
 非終態另帶 execution 與明確的 pending question／analysis。
@@ -210,9 +238,16 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 
 全域 status 的 entry 是 null 或 GUI entry.info 的 UUID、name、result_path、database_path，
 只讀 metadata，不建立 context observation。
-未 open entry 時 ready.missing 包含 entry。
-全域 status 列 GUI operations 與本 MCP session 非終態 executions，
-終態只給數量及按 ID 查詢提示。
+`ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
+
+即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力，不能取代 `get_cfg` 的完整 cfg 診斷。Run admission 仍會檢查目前表單與動態條件。
+
+全域 status 列 GUI operations 與本 MCP session 非終態 executions。
+`terminal_count` 計算所有本地終態 execution，包含 standalone analysis。
+`recent_terminal_executions` 只列最近 10 筆終態 recipe，依 finished_at 新至舊排列。
+每筆含 execution、recipe、status、finished_at；finished_at 是發布終態的 UTC ISO-8601 時間，
+包含 completed、failed、cancelled 與 needs_parameters。索引不含 standalone analysis。
+超出最近 10 筆的 recipe 仍可按 ID 查詢；全域回覆保留 query_hint。
 `wait(op)` 只觀察 GUI operation，`wait(execution)` 等本地後續處理與當次 image 交付。
 Execution ID 是 session-local，不是持久恢復機制；query 不建立新的寫回授權。
 
@@ -323,7 +358,7 @@ Primary 先於 Post，首錯停止，不 retry 或 rollback。
 not_started 與失敗 stage 的不確定性。
 
 Recipe 的 captured 問答與這個當前 draft 工具不同。
-Recipe 只在 `accept_writeback(items)` 寫入已捕捉且仍有效的候選，
+Recipe 只在 `accept_writeback(items)` 以已捕捉候選的 IDs 寫入當下 draft，
 回答本身不授權寫入。
 Destination.path 保留 owner actual_path，label 只作顯示。
 元素 index／name 由 lab owner 明確提供，framework 不從 row offset 或 participants 猜 identity。

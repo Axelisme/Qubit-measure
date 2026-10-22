@@ -53,15 +53,6 @@ None passed to set/apply retains input rather than clearing it.
 """
 
 
-class RecipeCancelled(Exception):
-    """End a recipe when a cancelled await cannot deliver a value.
-
-    This ordinary exception unwinds author finally blocks without cancelling
-    the author task. Execution reports cancelled, retaining runs but no error
-    for this exception; genuine failures from operations or cleanup remain.
-    """
-
-
 @dataclass(frozen=True)
 class FormError:
     """One owner-reported logical validation error.
@@ -160,16 +151,17 @@ class RunResult:
 
 @dataclass(frozen=True)
 class AnalysisResult[T]:
-    """Completed analysis decoded as the author's typed view of the owner summary.
+    """Analysis success or an expected failure that the author can act on.
 
-    result is exactly TypeAdapter(T).validate_python(summary); missing or
-    incompatible fields raise without repair. status is completed (failed is
-    reserved for operation-level records). Cooperative stop raises
-    RecipeCancelled instead of constructing this model.
+    Completed result is TypeAdapter(T).validate_python(summary); incompatible
+    fields raise without repair. Failed result is None and reason explains the
+    expected fitting failure or descendant cancellation. Programming errors
+    still raise. Root cancellation raises ScriptCancelled after owner drain.
     """
 
-    result: T
+    result: T | None
     status: Literal["completed", "failed"] = "completed"
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -272,8 +264,10 @@ class WritebackQuestion(Question[WritebackAnswer]):
 class WritebackReceipt:
     """GUI-confirmed writeback result, including a successful prefix on failure.
 
-    status is completed, cancelled or failed. items lists only confirmed applied
-    candidates in owner order. error describes a failed or uncertain attempt,
+    status is completed, cancelled or failed. items lists original captured
+    candidates for owner-confirmed applied IDs, in owner order. Actual written
+    values and destinations come from the owner's current draft; items is not a
+    written-value snapshot. error describes a failed or uncertain attempt,
     otherwise None. No rollback or automatic retry follows a failed write.
     """
 
@@ -370,15 +364,12 @@ class RecipeSession:
         return self._runtime.open_tab(adapter, aliases=aliases, reuse=reuse)
 
     async def ask[A: Answer](self, question: Question[A]) -> A:
-        """Wait for a validated answer; raise RecipeCancelled on script cancel.
+        """Wait for a validated answer; raise ScriptCancelled on script cancel.
 
         Only asked evidence is exposed. Invalid answers leave the request pending.
         Asking does not write, supply a timeout, or synthesize acceptance.
         """
-        answer = await self._runtime.host.ask(question)
-        if answer is None:
-            raise RecipeCancelled("Script cancelled while awaiting an answer")
-        return answer
+        return await self._runtime.host.ask(question)
 
 
 class RecipeTab:
@@ -449,9 +440,10 @@ class RecipeTab:
     async def run(self) -> RunResult:
         """Acquire the current cfg and retain its identity, without saving.
 
-        Always starts, including with a stopped script token. Cooperative stop
-        returns completed with partial_result=True; later synchronous calls are
-        still allowed. Genuine operation/admission failures propagate.
+        Descendant cancellation returns completed with partial_result=True.
+        Root cancellation raises ScriptCancelled without starting a new Run;
+        an in-flight Run drains and retains completion facts first. Synchronous
+        finally Save remains available. Genuine operation/admission failures propagate.
         """
         return await self._runtime.run(self.tab, self.adapter)
 
@@ -464,10 +456,12 @@ class RecipeTab:
     ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
-        No automatic Save or preview occurs. Stopped script/analysis raises
-        RecipeCancelled. Invalid stages, missing/superseded Run sources,
-        incompatible summary fields, owner failures and transport errors
-        propagate. interactive=True
+        No automatic Save or preview occurs. Expected fitting failures and
+        descendant cancellation return status="failed", result=None and reason;
+        the author decides whether to save, retry, skip or stop. Root cancellation
+        raises ScriptCancelled after owner drain. Invalid stages, stale sources,
+        incompatible summary fields, programming and transport errors propagate.
+        interactive=True
         explicitly enables GUI interaction handoff before completion.
         """
         return await self._runtime.analyze(
@@ -497,23 +491,22 @@ class RecipeTab:
         return self._runtime.writeback_proposal(self.tab)
 
     async def ask_writeback(self) -> WritebackAnswer:
-        """Ask for validated choices; raise RecipeCancelled on script cancel.
+        """Ask for validated choices; raise ScriptCancelled on script cancel.
 
         Reject unknown, changed or duplicate items before author continuation.
         Answering never writes. Call accept_writeback explicitly to write.
         """
         proposal = self.writeback_proposal()
-        answer = await self._runtime.host.ask(WritebackQuestion(proposal=proposal))
-        if answer is None:
-            raise RecipeCancelled("Script cancelled while awaiting writeback choices")
-        return answer
+        return await self._runtime.host.ask(WritebackQuestion(proposal=proposal))
 
     def accept_writeback(self, items: Sequence[WritebackItem]) -> WritebackReceipt:
-        """Write selected captured candidates, Primary then Post, without retry.
+        """Write selected IDs from current owner drafts, Primary then Post.
 
-        Validate all items before the first write. Unknown/changed/duplicate
-        candidates raise. Return confirmed applied items; first failed stage
-        leaves the successful prefix and its diagnostic, with no rollback.
+        Unknown/duplicate candidates or author edits to captured items raise
+        before writing. Owner draft edits are accepted, including retargets.
+        Return original captured candidates for confirmed IDs, not written-value
+        snapshots. First failure leaves the successful prefix and diagnostic,
+        without retry or rollback.
         """
         return self._runtime.accept_writeback(self.tab, items)
 

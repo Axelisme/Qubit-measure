@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.measure.state import State
@@ -42,7 +42,7 @@ def test_fluxdep_state_rejects_foreign_thread_mutation() -> None:
     state = FluxDepState()
     original = state.project
 
-    error = _foreign_error(lambda: state.set_project(ProjectInfo(chip_name="new")))
+    error = _foreign_error(lambda: state.set_project(MagicMock(spec=AnalysisTarget)))
 
     assert isinstance(error, RuntimeError)
     assert state.project is original
@@ -53,7 +53,7 @@ def test_dispersive_state_rejects_foreign_thread_mutation() -> None:
     state = DispersiveState()
     original = state.project
 
-    error = _foreign_error(lambda: state.set_project(ProjectInfo(chip_name="new")))
+    error = _foreign_error(lambda: state.set_project(MagicMock(spec=AnalysisTarget)))
 
     assert isinstance(error, RuntimeError)
     assert state.project is original

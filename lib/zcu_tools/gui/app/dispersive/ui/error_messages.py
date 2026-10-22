@@ -31,10 +31,7 @@ def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
 
     if isinstance(exc, FileNotFoundError) or "unable to open file" in raw.lower():
         if action == "Export":
-            head = (
-                f"Could not write {name!r}. The params.json must already exist (it "
-                "holds the fluxdep_fit section) — load the fit inputs first."
-            )
+            head = f"Could not write {name!r}. Check the entry path and permissions."
         elif not os.path.exists(filepath):
             head = f"File not found: {name!r}. Check the path and try again."
         else:
@@ -46,11 +43,6 @@ def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
             f"{name!r} is not a 2D spectrum (no frequency axis). A one-tone is a "
             "device-value × frequency sweep."
         )
-    elif "no 'fluxdep_fit'" in raw.lower() or "run fluxdep-gui first" in raw.lower():
-        head = (
-            "This params.json has no fluxdep_fit section. Run fluxdep-gui first to "
-            "fit (EJ, EC, EL) and the flux alignment dispersive needs as inputs."
-        )
     else:
         head = f"{action} of {name!r} failed."
 
@@ -61,8 +53,8 @@ def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
 # lowercased raw error). Covers the dispersive-pipeline preconditions.
 _FIT_RULES: list[FriendlyRule] = [
     (
-        lambda low: "no fluxonium fit inputs" in low or "load params.json first" in low,
-        "Load the fit inputs (params.json) first.",
+        lambda low: "no fluxonium fit inputs" in low,
+        "Load a fluxonium predictor from the opened entry first.",
     ),
     (lambda low: "no one-tone" in low, "Load a one-tone spectrum first."),
     (lambda low: "no preprocessing" in low, "Run preprocessing before fitting g."),
@@ -81,7 +73,7 @@ def friendly_fit_message(action: str, exc: Exception | str) -> str:
     """Message for a preprocess / auto-fit / export failure.
 
     ``action`` is "Preprocess" / "Auto-fit" / "Export". ``exc`` may be the exception
-    (caught locally) or its message string (crossing a worker signal). A params.json
+    (caught locally) or its message string (crossing a worker signal). A file
     write failure is delegated to ``friendly_io_message``; otherwise the domain rules
     above match.
     """

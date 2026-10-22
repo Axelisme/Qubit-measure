@@ -15,7 +15,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.text import Text
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
@@ -79,10 +78,10 @@ def test_shell_exposes_top_bar_commands_and_two_pages(window):
     assert current_page(window) == "spectra"
 
 
-def test_project_label_names_the_project_after_setup(window, ctrl):
+def test_project_label_names_the_project_after_setup(window, ctrl, fluxonium_entry):
     assert "Q5_2D" not in project_label(window).text()
-    ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
-    assert project_label(window).text() == "Project: Q5_2D / Q1"
+    ctrl.setup_project(str(fluxonium_entry.result_path.parent.parent), "synthetic")
+    assert project_label(window).text() == "Entry: synthetic / Q2"
 
 
 def test_load_refreshes_list(window, ctrl, spectrum_hdf5):

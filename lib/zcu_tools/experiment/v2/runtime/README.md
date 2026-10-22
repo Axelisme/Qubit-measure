@@ -56,7 +56,7 @@ path，並觸發該 buffer 的 update hook。
 
 `outcome.py` 擁有完成狀態值與 exception reason 格式化。`Schedule` 擁有狀態轉換、stop token 與 partial buffer 的生命週期。`RunStatus`、`ScheduleOutcome` 仍可從既有 runtime 與 schedule 入口匯入。
 
-`Schedule` 是 run 內的 scope：入口 deepcopy cfg、typed env、持有 `StopSignal` child，並
+`Schedule` 是 run 內的 scope：入口 deepcopy cfg、typed env、持有顯式 `Scope` child，並
 建立 host-side control flow。
 
 ```python
@@ -64,7 +64,7 @@ signals_buffer = SignalBuffer(
     (len(freqs),),
     on_update=lambda data: viewer.update(freqs, signal2real(data)),
 )
-with Schedule(cfg, signals_buffer) as sched:
+with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
     freq_sweep = sched.cfg.sweep.freq
     sched.cfg.modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
@@ -94,7 +94,7 @@ with Schedule(cfg, signals_buffer) as sched:
   result；per-child retry 由 caller 編排。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot。
-- `with Schedule(cfg, result_buffer, stop=context.cancel_signal) as sched` 可編排任何實作 `BufferProtocol` 的 result
+- `with Schedule(cfg, result_buffer, scope=context.scope) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
@@ -137,8 +137,8 @@ with Schedule(cfg, signals_buffer) as sched:
 
 ## Stop 與 Retry
 
-- `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
-  透過 `Schedule(..., stop=context.cancel_signal)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
+- `Scope` 擁有具名父子鏈與選擇器，`StopSignal` 擁有向下停止與完成事實。Caller 每次 run 建立根 Scope，
+  透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
 - Child release 將第一個 error 與 partial 完成事實交到父 token，不設父 event。交付在 operation 層截止。GUI 的 run root 收到 Schedule error 後仍可用 `raise_if_error()` 轉成 failure。已完成 child 從 active tree 移除，不隨 run 長度累積。
 - `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 schedule child 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
@@ -178,6 +178,6 @@ SignalBuffer 寫入通知、manual update 與 flush。
 `test_schedule_lifecycle.py` 覆蓋 context 使用邊界、schedule child 的停止與錯誤交付、host body 中斷的
 partial/NaN 保存、其他 exception 傳播與 repeat stop。Runtime 案例重用 `_flow_cfg.py` 的
 cfg builder，共用 recording fake 放在 `_flow_fakes.py`，由最近的 conftest 還原每個案例的
-mutable fake state。案例經公開 Schedule／buffer／StopSignal 接縫驗證。
+mutable fake state。案例經公開 Scope／Schedule／buffer／StopSignal 接縫驗證。
 `test_result_tree.py` 覆蓋 ResultTree node set、child buffer、subscription、flush 與
 ordinary SignalBuffer regression。Runtime 整合行為由最小合成實驗驗證。

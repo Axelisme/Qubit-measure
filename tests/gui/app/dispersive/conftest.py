@@ -5,7 +5,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.datafile import save_labber_data
-from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.entry import ResultEntry, component_registry
+from zcu_tools.resources.entry.aliases import EntryAliases
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorSource,
+    save_predictor_file,
+)
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+
+from ._entry_fakes import CoupledFluxonium, Fluxonium, Resonator
 
 
 @pytest.fixture(autouse=True, name="_drain_qt_events")
@@ -46,32 +55,60 @@ def onetone_hdf5(tmp_path):
 
 
 @pytest.fixture
-def params_json(tmp_path):
-    """A params.json holding a fluxdep_fit section (dispersive's hard input).
-
-    Returns (filepath, fluxdep_fit_dict). The fit gives (EJ, EC, EL), the flux
-    alignment, and a plot_transitions.r_f (so the bare_rf priority chain has a
-    middle tier to exercise).
-    """
-    fluxdep_fit = {
-        "params": {"EJ": 4.0, "EC": 1.0, "EL": 0.5},
-        "flux_half": 0.5,
-        "flux_int": 1.0,
-        "flux_period": 2.0,
-        "plot_transitions": {"r_f": 5.3, "transitions": [[0, 1]]},
+def analysis_entry(tmp_path):
+    """An entry with synthetic fluxonium kinds and a nonzero predictor bias."""
+    models = {
+        "qubit/fluxonium/test_plain": Fluxonium,
+        "qubit/fluxonium/test_coupled": CoupledFluxonium,
+        "resonator/test_dispersive": Resonator,
     }
-    path = str(tmp_path / "params.json")
-    params = QubitParams(path)
-    params.ensure_project(ParamsProject("Q1", "Q1"))
-    params.set_fluxdep_fit(
-        FluxDepFit(
-            EJ=4.0,
-            EC=1.0,
-            EL=0.5,
-            flux_half=0.5,
-            flux_int=1.0,
-            flux_period=2.0,
-            plot_transitions={"r_f": 5.3, "transitions": [[0, 1]]},
+    before = {kind: component_registry.get(kind) for kind in component_registry.kinds()}
+    try:
+        for kind, model in models.items():
+            component_registry.register(kind, model)
+        entry = ResultEntry.create(
+            "synthetic",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
         )
+        entry.setup.add_component(
+            "q1", kind="qubit/fluxonium/test_plain", EJ=4.0, EC=1.0, EL=0.5
+        )
+        entry.setup.add_component(
+            "q2", kind="qubit/fluxonium/test_coupled", EJ=6.0, EC=1.5, EL=0.7
+        )
+        entry.setup.add_component("r1", kind="resonator/test_dispersive", freq=5750.0)
+        entry.save_aliases(EntryAliases(aliases={"qubit": "q1", "resonator": "r1"}))
+        entry.predictors_path.mkdir()
+        entry.dispersive_path.mkdir()
+        save_predictor_file(
+            entry.predictors_path / "fit.json",
+            PredictorFile(
+                model="fluxonium",
+                params=FluxoniumParams(
+                    EJ=4.0,
+                    EC=1.0,
+                    EL=0.5,
+                    flux_half=0.5,
+                    flux_period=-2.0,
+                    flux_bias=0.25,
+                ),
+                flux_unit="V",
+                source=PredictorSource(run_id="source-run", created_at=None),
+            ),
+        )
+        yield entry
+    finally:
+        for kind in models:
+            component_registry.unregister(kind)
+            if kind in before:
+                component_registry.register(kind, before[kind])
+
+
+@pytest.fixture
+def analysis_target(analysis_entry):
+    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+
+    return AnalysisTarget.open(
+        analysis_entry.result_path.parent.parent, analysis_entry.result_path.name
     )
-    return path, fluxdep_fit

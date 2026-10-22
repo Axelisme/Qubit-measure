@@ -91,7 +91,7 @@ def test_search_is_single_flight_until_delivery(search_case):
 @pytest.mark.parametrize(
     "mutation", ["selection", "fit", "project", "points", "empty", "membership"]
 )
-def test_changed_input_rejects_success(search_case, mutation):
+def test_changed_input_rejects_success(search_case, mutation, fluxonium_entry):
     ctrl, bg, _owner, _progress, result = search_case
     facts = []
     ctrl.bus.subscribe(FitChangedPayload, facts.append)
@@ -108,7 +108,7 @@ def test_changed_input_rejects_success(search_case, mutation):
             None,
         )
     elif mutation == "project":
-        ctrl.setup_project(ctrl.state.project)
+        ctrl.setup_project(str(fluxonium_entry.result_path.parent.parent), "synthetic")
     elif mutation == "points":
         ctrl.set_points("a", np.array([0.2]), np.array([4.1]))
     elif mutation == "empty":

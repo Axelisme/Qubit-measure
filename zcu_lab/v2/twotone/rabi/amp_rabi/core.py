@@ -118,7 +118,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
         )
 
         # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 

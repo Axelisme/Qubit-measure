@@ -1,51 +1,62 @@
-"""ExportService — write the fitted g / bare_rf back to ``params.json``."""
+"""Export dispersive fits to the entry artifact and declared setup fields."""
 
 from __future__ import annotations
 
-import logging
+from datetime import datetime, timezone
 
-from zcu_tools.gui.app.dispersive.services.project import default_params_path
+from zcu_tools.gui.app.analysis_project.entry import require_target
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.resources.qubit_params import (
-    DispersiveFit,
-    QubitParams,
-    QubitParamsError,
+from zcu_tools.resources.analysis_source import AnalysisSource
+from zcu_tools.resources.dispersive_file import (
+    DispersiveFile,
+    DispersiveParams,
+    load_dispersive_file,
+    save_dispersive_file,
 )
-
-logger = logging.getLogger(__name__)
+from zcu_tools.resources.entry import snapshot
 
 
 class ExportService:
-    """Writes the dispersive fit result into ``params.json``'s dispersive section."""
+    """Write accepted GHz values without adding undeclared component fields."""
 
     def __init__(self, state: DispersiveState) -> None:
         self._state = state
 
-    def export_params(self, savepath: str | None = None) -> str:
-        """Write ``{g, bare_rf}`` into ``params.json``, preserving ``fluxdep_fit``.
+    def export_params(self) -> str:
+        """Write dispersive/<component>.json; update only declared g/bare_rf.
 
-        ``savepath`` defaults to ``<result_dir>/params.json``. Fast-fails when no fit
-        result is recorded, or when the target file does not exist (the fluxdep_fit
-        inputs must already be there). Returns the written path.
+        Reject no entry or no accepted result before writing. Preserve authored
+        transition annotations from an existing artifact. Source run is unknown;
+        created_at is this export's UTC time. Setup edits and the artifact are
+        separate commits; filesystem/schema failures propagate without rollback.
+        Database is never saved.
         """
+        target = require_target(self._state.project)
         fit = self._state.disp_fit
-        if not fit.has_result or fit.bare_rf is None:
+        if fit.g is None or fit.bare_rf is None:
             raise RuntimeError("no dispersive fit result to export (fit g first)")
-
-        path = savepath or default_params_path(self._state.project.result_dir)
-        assert fit.g is not None  # has_result guards this
-        try:
-            QubitParams(path).set_dispersive_fit(
-                DispersiveFit(g=fit.g, bare_rf=fit.bare_rf)
-            )
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                f"params.json not found at {path!r} — it must already hold the "
-                "fluxdep_fit section (load the fit inputs from it first)"
-            ) from exc
-        except QubitParamsError as exc:
-            raise ValueError(
-                f"Failed to export dispersive fit to {path!r}: {exc}"
-            ) from exc
-        logger.debug("export_params: wrote dispersive to %r", path)
-        return path
+        path = target.resource.dispersive_path / f"{target.component}.json"
+        params = (
+            load_dispersive_file(path).params if path.exists() else DispersiveParams()
+        )
+        document = DispersiveFile(
+            format="zcu.dispersive",
+            version=1,
+            params=params.model_copy(update={"g": fit.g, "bare_rf": fit.bare_rf}),
+            source=AnalysisSource(
+                run_id=None, created_at=datetime.now(timezone.utc).isoformat()
+            ),
+        )
+        target.resource.dispersive_path.mkdir(parents=True, exist_ok=True)
+        save_dispersive_file(path, document)
+        component = snapshot(target.resource.setup).components[target.component]
+        updates = {
+            field: value
+            for field, value in (("g", fit.g), ("bare_rf", fit.bare_rf))
+            if field in type(component).model_fields
+        }
+        if updates:
+            with target.resource.setup.edit() as draft:
+                for field, value in updates.items():
+                    draft.set(f"{target.component}.{field}", value)
+        return str(path)

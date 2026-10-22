@@ -70,8 +70,7 @@ class OnetoneSpectrumOverFluxInputs(FormModel):
 
 
 class OnetoneSpectrumOverFluxReport(FormModel):
-    """Completed onetone spectrum over flux results; cancellation returns no
-    report."""
+    """Onetone spectrum over flux results and failure reason; cancellation returns no report."""
 
     flux_half: float | None = Field(
         description="Accepted half-flux line in device-native coordinates; null means not estimable."
@@ -84,6 +83,11 @@ class OnetoneSpectrumOverFluxReport(FormModel):
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -118,8 +122,9 @@ async def onetone_spectrum_over_flux(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     if (
@@ -184,6 +189,14 @@ async def onetone_spectrum_over_flux(
         analysis = await tab.analyze(
             "primary", result=FluxPickSummary, interactive=True
         )
+        if analysis.result is None:
+            return OnetoneSpectrumOverFluxReport(
+                flux_half=None,
+                flux_integer=None,
+                flux_period=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

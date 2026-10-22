@@ -131,7 +131,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         )
 
         # Compare pulse-off/on branches at each hardware-swept readout gain.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             gain_sweep = sched.cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)

@@ -98,14 +98,17 @@ def _read_record(manifest: RunManifest, source: Path) -> RecordEnvelope:
             or envelope.workflow != manifest.workflow
         ):
             raise ValueError("Record identity differs from manifest")
-        if envelope.directory != f"commits/{source.parent.name}":
+        if (
+            envelope.directory
+            != source.parent.relative_to(manifest.roots.data_root).as_posix()
+        ):
             raise ValueError("Record directory reference differs from its location")
         if (
             envelope.commit_seq <= 0
             or envelope.started.commit_seq != envelope.commit_seq - 1
         ):
             raise ValueError("Invalid commit sequence")
-        if envelope.started.call_seq <= 0:
+        if envelope.started.call_seq < 0:
             raise ValueError("Invalid commit scope")
         revisions = envelope.started.revisions
         if any(revision < 0 for revision in revisions) or len(set(revisions)) != len(
@@ -131,21 +134,13 @@ def read_records_raw(run: Path) -> tuple[SavedRecord[EncodedRecord], ...]:
     Journal is not read; lost record files cannot be reconstructed here.
     """
     manifest = read_manifest(run)
-    root = manifest.roots.data_root / "commits"
+    root = manifest.roots.data_root
     if not root.exists():
         return ()
     records: list[SavedRecord[EncodedRecord]] = []
     sequences: set[int] = set()
-    for directory in sorted(root.iterdir()):
-        if (
-            not directory.is_dir()
-            or not directory.name.isdecimal()
-            or len(directory.name) < 6
-        ):
-            continue
-        source = directory / "record.json"
-        if not source.exists():
-            continue
+    for source in sorted(root.rglob("record.json")):
+        directory = source.parent
         envelope = _read_record(manifest, source)
         if envelope.commit_seq in sequences:
             raise ValueError(

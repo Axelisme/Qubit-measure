@@ -1,6 +1,7 @@
 """Compiled-template planning for one fluxonium without density propagation."""
 
 from dataclasses import dataclass, replace
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -85,6 +86,8 @@ def _point_flux(
     NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.int64]
 ]:
     line = settings.flux_line
+    if line is None:
+        raise ValueError("no fast-flux line is bound")
     controls = ControlSequence(
         tuple(_controls(t, point) for t in tracks if t.active[point])
     )
@@ -135,6 +138,12 @@ def _flux_inputs(
     tracks: tuple[DriveTrack, ...],
     ends: NDArray[np.float64],
 ) -> tuple[FluxSchedule, FluxWaveform | None]:
+    if settings.flux_line is None:
+        return FluxSchedule(
+            np.arange(len(ends) + 1, dtype=np.int64),
+            np.zeros(len(ends)),
+            np.zeros((len(ends), 1), dtype=np.int64),
+        ), None
     offsets, waveform_offsets = [0], [0]
     starts, levels, times, values = [], [], [], []
     for point, end in enumerate(ends):
@@ -173,6 +182,8 @@ def plan_template(
     settings: SingleFluxoniumSettings,
     snapshot: EnvironmentSnapshot,
     template: TimelineTemplate,
+    *,
+    readout_kind: Literal["pulse", "mux"] = "pulse",
 ) -> SingleFluxoniumPlan:
     """Convert one complete QICK template to evolution and terminal readout inputs.
 
@@ -189,7 +200,9 @@ def plan_template(
     No forced return to DC or physics calculation occurs. All original points
     occupy one batch, even when their readout times differ. Engine owns segmenting.
 
-    Exactly one configured receiver and a terminal pulse per point are required.
+    Exactly one configured receiver and terminal readout per point are required.
+    readout_kind="pulse" requires one tone; "mux" accepts 1..8 coherent tones
+    with common start. A None flux_line permits only DC flux and microwaves.
     Earlier readout pulses are retained separately, not treated as microwaves.
     Unbound generators/receivers, invalid DC, crossing readout blocks or invalid
     numeric records raise ValueError. No ADC solver, density or RNG is used.
@@ -203,7 +216,9 @@ def plan_template(
     dc = dc_flux(settings, snapshot)
     memo: dict[int, EnvelopeSpec] = {}
     drive = ReadoutDrive(
-        settings.readout.drive.gen_ch, settings.readout.drive.input_per_gain
+        settings.readout.drive.gen_ch,
+        settings.readout.drive.input_per_gain,
+        readout_kind,
     )
     partition = classify_readout(template, drive, memo)
     contents = readout_contents(
@@ -218,7 +233,9 @@ def plan_template(
             continue
         if event.gen_ch == settings.drive_line.gen_ch:
             microwave.append(drive_track(event, settings.drive_line.name, memo))
-        elif event.gen_ch == settings.flux_line.gen_ch:
+        elif (
+            settings.flux_line is not None and event.gen_ch == settings.flux_line.gen_ch
+        ):
             fast_flux.append(drive_track(event, settings.flux_line.name, memo))
         else:
             raise ValueError(f"unbound single-fluxonium generator {event.gen_ch}")

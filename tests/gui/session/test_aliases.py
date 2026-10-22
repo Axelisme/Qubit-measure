@@ -4,7 +4,12 @@ import pytest
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.resources.entry import ComponentSchema, RoleResolutionError, RoleSpec
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import (
+    PointDocument,
+    PointGeneral,
+    SetupDocument,
+    SetupGeneral,
+)
 
 
 class LinkedComponent(ComponentSchema):
@@ -29,6 +34,26 @@ def point() -> PointDocument:
             "qubit": LinkedComponent(kind="qubit/test", frequency=3.0),
         },
     )
+
+
+def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> None:
+    setup = SetupDocument.model_construct(
+        general=SetupGeneral(
+            entry_id="00000000-0000-0000-0000-000000000001",
+            created_at="2026-10-09T00:00:00Z",
+        ),
+        components={
+            "R1": LinkedComponent(kind="resonator", frequency=6.0, partner="Q2"),
+            "Q2": LinkedComponent(kind="qubit/fluxonium", frequency=4.0),
+        },
+    )
+    table = AliasTable(
+        (AliasRow("resonator", "R1"), AliasRow("qubit", "$resonator.partner"))
+    )
+    assert table.resolve("qubit", setup, kind="qubit/fluxonium") == "Q2"
+    assert table.names(setup, {}) == {"resonator": "R1", "qubit": "Q2"}
+    with pytest.raises(RoleResolutionError):
+        table.resolve("qubit", setup, kind="resonator")
 
 
 def test_links_follow_changed_earlier_rows_without_expanding_authored_values(

@@ -2,50 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import JsonValue
 
-from zcu_tools.datafile import JsonObject
-from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.operations import Completed as Completed
+from zcu_tools.experiment.operations import Failed as Failed
+from zcu_tools.experiment.operations import MissingCapability as MissingCapability
+from zcu_tools.experiment.operations import OperationFacts as OperationFacts
+from zcu_tools.experiment.operations import OperationKind as OperationKind
+from zcu_tools.experiment.operations import OperationOutcome as OperationOutcome
+from zcu_tools.experiment.operations import RunIdentity as RunIdentity
 from zcu_tools.experiment.script_host import PendingQuestion
 
 type Lifecycle = Literal[
     "running", "pausing", "paused", "stopping", "done", "cancelled", "failed"
 ]
-
-
-@dataclass(frozen=True)
-class Completed[T]:
-    """A returned value, partial-delivery flag and facts for one attempt.
-
-    value is fn's payload; env.run uses the existing RunRecord with cfg/data.
-    partial_result includes cancellation of the operation or a descendant. It is
-    not a scientific completeness check or a persistence guarantee. facts is the
-    required OperationFacts for this delivered attempt, also written to journal
-    and the enclosing commit. facts.stopped records the operation token's own
-    control intent at completion, not descendant cancellation. These flags
-    describe different facts and must not be merged.
-    """
-
-    value: T
-    partial_result: bool
-    facts: OperationFacts
-
-
-@dataclass(frozen=True)
-class Failed:
-    """A recoverable acquire/analysis failure, without partial data.
-
-    reason describes the cause. Authors decide whether to retry or continue;
-    arbitrary framework/build/conversion exceptions instead propagate.
-    """
-
-    reason: str
 
 
 @dataclass(frozen=True)
@@ -87,7 +62,12 @@ class RunStatus:
     revision is the latest tunables version. reason describes failure or None.
     progress is display-only. pending holds the exact request id, authored
     question and declared answer type while an Ask is answerable, otherwise None.
-    active_path identifies the current live scopes as label/label#sequence.
+    active_path is the root-to-first-fork path through the live scope tree.
+    live_paths lists every live leaf's full root-to-leaf scope path in child
+    birth order, including the root itself when it has no children. It defaults
+    to an empty list, never None.
+    Both use slash-separated kind:name#seq segments, omitting :name when unnamed
+    and #seq for the root. Author children use their label in place of kind.
     """
 
     run_id: str
@@ -100,6 +80,7 @@ class RunStatus:
     progress: tuple[ProgressSnapshot, ...]
     pending: PendingQuestion | None = None
     active_path: str = "script"
+    live_paths: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -115,24 +96,6 @@ class RunPaths:
 
 
 @dataclass(frozen=True)
-class RunIdentity:
-    """Stable run_id, native software provenance and optional entry identity.
-
-    entry_id/entry_label are host-supplied workpoint evidence or None. Unknown
-    provenance remains None in SoftwareProvenance; it is not inferred here.
-    """
-
-    run_id: str
-    provenance: SoftwareProvenance
-    entry_id: str | None = None
-    entry_label: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.run_id:
-            raise ValueError("RunIdentity.run_id must not be empty")
-
-
-@dataclass(frozen=True)
 class EncodedRecord:
     """Detached record projection: JSON value or diagnostic repr degradation.
 
@@ -145,43 +108,15 @@ class EncodedRecord:
     error: str | None
 
 
-type OperationKind = Literal["run", "call", "setup_device", "wait_until"]
-type OperationOutcome = Literal["completed", "partial", "discarded", "failed", "raised"]
-
-
-@dataclass(frozen=True)
-class OperationFacts:
-    """One actual executor attempt, retained even when Pause discards its value.
-
-    kind names run/call/setup_device/wait_until. iteration starts at one and
-    advances only after successful commit, not directory allocation. attempt
-    counts from one within that scope, including retries. started_at/finished_at are UTC
-    worker boundaries. device_snapshot is detached pre-call driver JSON for run,
-    otherwise None. outcome is completed, partial, discarded by Pause, failed
-    acquire, or raised exception. reason is a diagnostic or None on completion.
-    stopped is the operation token's completion-time stop bit, including failed,
-    raised and discarded attempts; it is not inferred from later run state.
-    """
-
-    kind: OperationKind
-    iteration: int
-    attempt: int
-    started_at: datetime
-    finished_at: datetime
-    device_snapshot: Mapping[str, JsonObject] | None
-    outcome: OperationOutcome
-    reason: str | None
-    stopped: bool
-
-
 @dataclass(frozen=True)
 class CommittedRecord:
     """One journal-authoritative record, independent of directory allocation.
 
-    commit_seq counts successful commits; call_seq identifies the commit scope.
+    commit_seq counts successful commits; call_seq is the nearest iteration birth
+    number, or zero outside iterations.
     revision is the scope's initial tunables version. revisions lists versions
     actually read, deduplicated in read order. encoded_record is detached JSON.
-    directory is relative to data_root, e.g. commits/000007. committed_at is UTC.
+    directory is relative to data_root, e.g. iteration-000007/calibration-000001. committed_at is UTC.
     record_type is the model's module-qualified name, keyed in manifest schemas.
     operations retains this scope's actual executor attempts in start order.
     """
@@ -206,14 +141,6 @@ class QuestionMismatch(ValueError):
         super().__init__(
             f"Question {request_id!r} is not pending; current request is {pending_request_id!r}"
         )
-
-
-class MissingCapability(RuntimeError):
-    """A required capability is absent; capability identifies the missing port."""
-
-    def __init__(self, capability: str) -> None:
-        self.capability = capability
-        super().__init__(f"Missing workflow capability: {capability}")
 
 
 class RunMismatch(ValueError):

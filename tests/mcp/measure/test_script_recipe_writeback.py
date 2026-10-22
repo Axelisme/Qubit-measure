@@ -114,7 +114,7 @@ def writeback_gui(
 
 
 @pytest.mark.parametrize("edit", ["target", "value", "module", "replacement"])
-def test_accept_rejects_changed_post_before_any_primary_write(
+def test_accept_writes_current_post_draft_after_question(
     tmp_path: Path,
     edit: str,
     writeback_gui: Callable[[bool, bool], WritebackGui],
@@ -122,7 +122,7 @@ def test_accept_rejects_changed_post_before_any_primary_write(
     gui = writeback_gui(edit == "module", False)
     receipts: list[WritebackReceipt] = []
 
-    @recipe("synthetic", "Bind accepted candidates across both stages")
+    @recipe("synthetic", "Accept current draft candidates across both stages")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
         await tab.run()
@@ -164,16 +164,21 @@ def test_accept_rejects_changed_post_before_any_primary_write(
                 "answer": {"accepted": True, "items": items},
             }
         )
+        assert receipts[0].status == "completed"
         current = gui.read_context()
-        assert not current.lookup("general.ext.second").present
-        assert not current.lookup("general.ext.wrong").present
-        assert "Q1.pulses.pi" not in current.library.module_keys()
-        assert not current.lookup("general.ext.first").present, (
-            "stale Post must reject the whole acceptance before Primary writes"
-        )
-        assert receipts[0].status == "failed"
-        assert receipts[0].items == ()
-        assert receipts[0].error is not None and "changed" in receipts[0].error
+        assert current.value("general.ext.first") == 20.0
+        if edit == "module":
+            pulse = current.library.entry_value("Q1.pulses.pi", kind="module")
+            assert isinstance(pulse, dict) and pulse["gain"] == 0.9
+        elif edit == "target":
+            assert current.value("general.ext.wrong") == 30.0
+            assert not current.lookup("general.ext.second").present
+        else:
+            assert current.value("general.ext.second") == (
+                99.0 if edit == "value" else 30.0
+            )
+        assert [item.stage for item in receipts[0].items] == ["primary", "post"]
+        assert receipts[0].error is None
     finally:
         client.context.session.close()
 

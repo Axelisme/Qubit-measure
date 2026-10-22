@@ -9,13 +9,15 @@ import numpy as np
 from pydantic import JsonValue
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
-from zcu_tools.experiment.stop_signal import parse_cancel_scope
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 
-def cancel_scope_arguments(params: Mapping[str, object]) -> tuple[str, int | None]:
+def cancel_scope_arguments(
+    params: Mapping[str, object], *, default: str
+) -> tuple[str, int | None]:
     """Decode scope primitives and translate shared resolver syntax errors."""
-    scope, expected = params.get("scope", "script"), params.get("expected")
+    scope, expected = params.get("scope", default), params.get("expected")
     if not isinstance(scope, str) or (
         expected is not None and not isinstance(expected, int)
     ):

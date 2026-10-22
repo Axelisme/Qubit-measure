@@ -7,7 +7,7 @@ from zcu_tools.mcp.core.rpc import GuiInvocationError
 from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
 
 
-@pytest.mark.parametrize("arguments", [{}, {"savepath": "/chosen/params.json"}])
+@pytest.mark.parametrize("arguments", [{}])
 def test_fit_export_returns_only_gui_receipt_without_other_reads(
     client: Client, arguments: dict[str, object]
 ) -> None:
@@ -15,6 +15,8 @@ def test_fit_export_returns_only_gui_receipt_without_other_reads(
         "savepath": "/resolved/params.json",
         "params": {"EJ": 2.741234567, "EC": 1.420123456, "EL": 0.148123456},
         "alignment_from": "empty-first-aligned",
+        "component": "Q2",
+        "analysis_id": "analysis-uuid",
     }
     client.transport.replies.append(
         GuiResponse(result={**receipt, "unprojected": [1, 2, 3]})

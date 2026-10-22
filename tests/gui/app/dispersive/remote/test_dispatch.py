@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.dispersive.state import (
@@ -42,7 +41,7 @@ def _inputs() -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
         flux_half=0.5,
-        flux_int=1.0,
+        flux_bias=0.0,
         flux_period=2.0,
         bare_rf_seed=5.3,
     )
@@ -51,8 +50,8 @@ def _inputs() -> FluxoniumInputs:
 # --- handler behaviour -------------------------------------------------
 
 
-def test_state_check_reports_pipeline_progress():
-    state = DispersiveState(ProjectInfo(chip_name="ChipA", qub_name="Q1"))
+def test_state_check_reports_pipeline_progress(analysis_target):
+    state = DispersiveState(analysis_target)
     adapter = _adapter(state)
     out = _call(adapter, "state.check")
     assert out == {
@@ -73,12 +72,16 @@ def test_state_check_unknown_project_is_false():
     assert out["has_project"] is False  # default unknown_* placeholders
 
 
-def test_project_info_handler():
-    state = DispersiveState(ProjectInfo(chip_name="ChipA", qub_name="Q1"))
-    out = _call(_adapter(state), "project.info")
-    assert out["chip_name"] == "ChipA"
-    assert out["qub_name"] == "Q1"
-    assert out["data_root"] == "Database/ChipA/Q1"
+def test_project_info_handler(analysis_target):
+    state = DispersiveState(analysis_target)
+    ctrl = Controller(state)
+    ctrl.load_fit_inputs("fit.json")
+    out = _call(_StubAdapter(ctrl), "project.info")
+    assert out["entry"] == "synthetic"
+    assert out["component"] == "q1"
+    assert out["predictor"] == "fit.json"
+    assert out["result_root"] == str(analysis_target.result_root)
+    assert out["dispersive_path"] == str(analysis_target.resource.dispersive_path)
 
 
 def test_fit_inputs_info_none_then_loaded():

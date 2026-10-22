@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -30,7 +30,7 @@ app 自帶（version table、worker 模式等仍 per-app）。
   → [累積多張 spectrum 進集合]
   → 跨譜篩選(Selector)     → 每張譜的 Filter 遮罩 + min_distance
   → 匯出 spectrums.hdf5
-  → [v2] 搜資料庫(FitPanel) → (EJ,EC,EL) + 視覺化 + 診斷圖 → 匯出 params.json
+  → 搜資料庫(FitPanel) → (EJ,EC,EL) + 視覺化 + 診斷圖 → 匯出 component predictor 與 setup
 ```
 
 與 measure 的根本差異（為何領域全新寫、不套 adapter/tab/run）：fluxdep 是
@@ -38,6 +38,22 @@ app 自帶（version table、worker 模式等仍 per-app）。
 可反覆重做；不碰硬體（無 soc/device/reps/sweep）。
 
 **只做 search，不做 scipy fit**（fit_spectrum 留在 notebook，未移植）。
+
+## Entry and export
+
+Project… 使用共用 EntryDialog 開啟 `project_root/result/<entry>`。CLI 使用 `--project-root`、`--entry`、
+`--component`。未指定 component 時，app 解析 setup 的 `qubit` alias。
+目標必須是 `qubit/fluxonium` 或其子 kind。共用 owner 回報不存在的 entry/component 或無效的 alias。
+CLI 未指定 entry 時，GUI 保持未開啟。
+Dialog 列出全部合法 component，有效 qubit alias 只作預選。
+Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
+不建立新條目，不讀舊兩級目錄或 params.json。啟動腳本註冊 lab component schema，框架不 import lab。
+
+Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 EJ／EC／EL
+與 flux 欄位，最後追加 analysis ledger。未宣告的 flux 欄位只留在 predictor。
+沒有來源 run 時 source.run_id 是 null。校正取第一張已對齊的 spectrum，包含零點來源。
+這些檔案依序寫入，不提供跨檔 rollback。中間 spectrum 集合預設寫到
+`<entry>/fluxdep/spectrums.hdf5`。分析不呼叫 Database Save。
 
 ## Architecture and owners
 
@@ -47,7 +63,7 @@ Controller owners。
 
 - [`app.py`](app.py) 只做 controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
 - [`state.py`](state.py)： `FluxDepState`（領域容器）。
-- [`analysis_project`](../analysis_project/README.md)：與 dispersive 共用的過渡 project owner，包含 ProjectInfo、ProjectDialog、ResultScopeManager、project CLI 與 RPC 投影，保留 chip／qubit 資料流。
+- [`analysis_project`](../analysis_project/README.md)：與 dispersive 共用的 entry/component 開啟、qubit alias 預設、kind 驗證、選擇 dialog 與 CLI。
 - [`services/`](services/)： 薄包裝純運算，mutate State。
   全部 Qt-free、同步、可獨立測。純運算核心複用
   `zcu_tools.analysis.fluxdep` + `zcu_tools.analysis.spectrum`。

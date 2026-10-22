@@ -75,7 +75,8 @@ class NativeStatusReply(TypedDict):
     revision is the native numeric tunables version. reason is a native diagnostic
     or null. progress is the list of native display snapshots, not commit proof.
     pending_request_id names the exact answerable Ask, or null outside Ask.
-    active_path is the host's live labeled scope path.
+    active_path is the unique root-to-first-fork chain. live_paths contains
+    every live leaf full path as separate strings, never a comma-joined value.
     """
 
     run_id: str
@@ -88,6 +89,7 @@ class NativeStatusReply(TypedDict):
     progress: list[ProgressReply]
     pending_request_id: str | None
     active_path: str
+    live_paths: list[str]
 
 
 def project_record(record: CommittedRecord) -> RecordReply:
@@ -138,6 +140,7 @@ def project_status(status: RunStatus | None) -> NativeStatusReply | None:
         "committed_seq": status.committed_seq,
         "revision": status.revision,
         "active_path": status.active_path,
+        "live_paths": list(status.live_paths),
         "reason": status.reason,
         "pending_request_id": None
         if status.pending is None

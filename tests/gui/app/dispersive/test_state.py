@@ -1,13 +1,10 @@
-"""Tests for dispersive-fit-gui state: ProjectInfo derivation + version discipline."""
+"""Tests for dispersive state inputs, invalidation and version discipline."""
 
 from __future__ import annotations
-
-import os
 
 import numpy as np
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.state import (
     DEFAULT_BARE_RF,
     FIT_VERSION_KEY,
@@ -48,49 +45,10 @@ def _inputs(bare_rf: float = 5.3) -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
         flux_half=0.5,
-        flux_int=1.0,
+        flux_bias=0.0,
         flux_period=1.0,
         bare_rf_seed=bare_rf,
     )
-
-
-# --- ProjectInfo path derivation ---------------------------------------
-
-
-def test_project_info_derives_paths_from_chip_qub():
-    p = ProjectInfo(chip_name="ChipA", qub_name="Q1")
-    # result_dir = processed outputs / params.json; data_root = raw one-tone root.
-    assert p.result_dir == os.path.join("result", "ChipA", "Q1")
-    assert p.data_root == os.path.join("Database", "ChipA", "Q1")
-
-
-def test_project_info_explicit_path_overrides_derivation():
-    p = ProjectInfo(chip_name="ChipA", qub_name="Q1", result_dir="/custom/dir")
-    assert p.result_dir == "/custom/dir"
-    # data_root still derived (independent override).
-    assert p.data_root == os.path.join("Database", "ChipA", "Q1")
-
-
-def test_project_info_empty_names_fall_back_to_placeholders():
-    p = ProjectInfo(chip_name="", qub_name="")
-    assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
-
-
-def test_project_info_root_dir_anchors_derived_defaults():
-    # root_dir (the repo root, injected by the entry script) anchors the derived
-    # defaults there instead of leaving them relative to cwd — the .bat-launcher
-    # fix: a launcher that cd's into scripts/ must not scope defaults under scripts/.
-    root = os.path.join(os.sep, "repo")
-    p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir=root)
-    assert p.result_dir == os.path.join(root, "result", "ChipA", "Q1")
-    assert p.data_root == os.path.join(root, "Database", "ChipA", "Q1")
-
-
-def test_project_info_empty_root_dir_keeps_relative_default():
-    # No injection → the legacy cwd-relative default, so nothing regresses.
-    p = ProjectInfo(chip_name="ChipA", qub_name="Q1", root_dir="")
-    assert p.result_dir == os.path.join("result", "ChipA", "Q1")
-    assert p.data_root == os.path.join("Database", "ChipA", "Q1")
 
 
 # --- VersionTable is the shared mechanism ------------------------------
@@ -105,10 +63,10 @@ def test_version_table_is_shared_mechanism():
 # --- setter version discipline -----------------------------------------
 
 
-def test_set_project_bumps_project_version():
+def test_set_project_bumps_project_version(analysis_target):
     st = DispersiveState()
     before = st.version.get(PROJECT_VERSION_KEY)
-    st.set_project(ProjectInfo(chip_name="X", qub_name="Y"))
+    st.set_project(analysis_target)
     assert st.version.get(PROJECT_VERSION_KEY) > before
 
 

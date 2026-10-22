@@ -218,7 +218,7 @@ class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
         )
 
         # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
                 modules = step_cfg.modules
@@ -442,7 +442,7 @@ class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyC
         )
 
         # At each Stark gain, sweep the Ramsey delay and its programmed phase.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
                 modules = step_cfg.modules

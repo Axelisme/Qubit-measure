@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-23，mux group wiring 初值
+**Last updated:** 2026-10-23，mux fine timing 候選
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -41,7 +41,13 @@ Analyze／Load 從該次 cfg 取可編輯的名單初值，不讀目前 Form。
 `mux/onetone_fine` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
-`mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones。有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1；時長留空必填。active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。Lab 將 subset 交 program，不改完整 cfg。RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
+`mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones。
+有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
+缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
+完整 group 的 kappa 都有效時填入可編輯的 mixer／timing 候選，來源見 [fine guide](mux/onetone_fine/guide.md#無-readout-slot-的候選來源)。
+active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。
+Lab 將 subset 交 program，不改完整 cfg。
+RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
 Module proposal 只更新成功 active tone 的頻率，保留其他完整設定，固定寫到 `$mux.readout.readout_rf`。
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
@@ -58,7 +64,11 @@ Gen_ch 取 `$mux.wiring.gen_ch`，各 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`�
 Pulse length 與 ro_length 留空必填，頻率缺失或無效時也留空必填。
 `mux/onetone_fine` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
 Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
-缺 slot 時仍使用 blank 範本，ringup timing 不補齊必填時長。
+Fine 缺 slot 時仍使用 blank 範本，完整 group 的 kappa 都有效才推導四個候選欄位。
+Mixer 取 tone 頻率最小與最大值中點，ADC window 取五倍 ringup 時間。
+Trigger 取全部 resonators.ext.time_of_fly 最大值加 ringup，pulse 長度取 trigger 加 window。
+任一 kappa 缺值時四欄留空；任一 time_of_fly 缺值時 trigger 與 pulse 長度留空。
+Readout 欄位說明列來源與未經裝置確認的限制，Run 仍執行 capability 檢查。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
 Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
 九個 FTF Forms 有 readout slot 時同樣引用 library。八張缺 slot 時提供 blank mux 範本，rb 缺 slot 時保持 Invalid。
@@ -119,7 +129,7 @@ Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
 Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
 它們不讀目前 Form 或 library。Freq 取消保留全 sweep 已完成 rounds 的平均；
 Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
-Caller 先呼叫 RunContext.cancel_signal.raise_if_error()，不把 failure 的 partial data 報為成功。
+Caller 先呼叫 RunContext.scope.stop.raise_if_error()，不把 failure 的 partial data 報為成功。
 Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## 實驗角色與 device 操作

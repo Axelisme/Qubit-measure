@@ -28,7 +28,7 @@ from zcu_tools.experiment.interfaces import (
     SynchronousExperiment,
 )
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
@@ -167,7 +167,7 @@ class NotebookExperiment(Generic[CoreT]):
             soccfg=self._soccfg,
             plots=plots,
             devices=devices,
-            cancel_signal=StopSignal(),
+            scope=Scope("run"),
         )
         try:
             working_cfg = deepcopy(retained_cfg)
@@ -179,16 +179,16 @@ class NotebookExperiment(Generic[CoreT]):
             started_at = datetime.now(UTC)
             run_id = new_run_id(started_at)
             result = self._core.run(working_cfg, context=context)
-            error = context.cancel_signal.error
+            error = context.scope.stop.error
             if error is not None and error.status != "interrupted":
-                context.cancel_signal.raise_if_error()
+                context.scope.stop.raise_if_error()
             finished_at = datetime.now(UTC)
             evidence = AcquisitionEvidence(
                 run_id=run_id,
                 started_at=started_at,
                 finished_at=finished_at,
                 completion=(
-                    "stopped" if context.cancel_signal.partial_result else "complete"
+                    "stopped" if context.scope.stop.partial_result else "complete"
                 ),
                 provenance=provenance,
                 device_snapshot=device_snapshot,

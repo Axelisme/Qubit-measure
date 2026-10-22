@@ -30,10 +30,15 @@ class MistFluxDepInputs(FormModel):
 
 
 class MistFluxDepReport(FormModel):
-    """Completed mist flux dep results; cancellation returns no report."""
+    """MIST flux dependence results and failure reason; cancellation returns no report."""
 
     analysis_completed: bool = Field(
         description="Whether the default raw-coordinate baseline-difference map completed."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -54,8 +59,9 @@ async def mist_flux_dep(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     """
     for name, values in (
         ("flux_range", inputs.flux_range),
@@ -92,7 +98,12 @@ async def mist_flux_dep(
     await tab.run()
     try:
         # Analyze the acquisition with the GUI parameters.
-        await tab.analyze("primary", result=MistFluxDepSummary)
+        analysis = await tab.analyze("primary", result=MistFluxDepSummary)
+        if analysis.result is None:
+            return MistFluxDepReport(
+                analysis_completed=False,
+                analysis_failure=analysis.reason,
+            )
         return MistFluxDepReport(analysis_completed=True)
     finally:
         tab.save()

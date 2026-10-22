@@ -126,16 +126,21 @@ class CPMGInputs(FormModel):
 
 
 class CPMGReport(FormModel):
-    """Completed cpmg results; cancellation returns no report."""
+    """CPMG results and failure reason; cancellation returns no report."""
 
     counts: list[int] = Field(
-        description="Measured positive refocusing pulse counts in row order."
+        description="Measured refocusing counts, or requested counts after analysis failure; empty when GUI counts are unavailable."
     )
     t2_us: list[float | None] = Field(
         description="Fitted coherence times in us; rejected rows are null."
     )
     t2_err_us: list[float | None] = Field(
         description="Coherence uncertainties in us; rejected rows are null."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -161,8 +166,9 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     for name, value in (
@@ -237,6 +243,14 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=CPMGSummary)
+        if analysis.result is None:
+            failure_counts = [] if counts is None else counts
+            return CPMGReport(
+                counts=failure_counts,
+                t2_us=[None] * len(failure_counts),
+                t2_err_us=[None] * len(failure_counts),
+                analysis_failure=analysis.reason,
+            )
         return CPMGReport(
             counts=analysis.result.ns,
             t2_us=analysis.result.t2s,

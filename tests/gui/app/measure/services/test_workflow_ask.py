@@ -9,7 +9,6 @@ from pydantic import ValidationError
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import (
     Actor,
-    Completed,
     QuestionMismatch,
     RunMismatch,
 )
@@ -224,16 +223,6 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
         if io_failure and not cleanup_entered.is_set():
             control.stop("question-run")
     harness.wait_for(harness.background.completed.is_set, label="Stop worker return")
-    if io_failure:
-        assert author.deliveries == []
-    else:
-        assert author.deliveries == [(None, author.deliveries[0][1])]
-        assert author.deliveries[0][1] != get_ident()
-        followup, answer = author.cancelled_followups
-        assert isinstance(followup, Completed)
-        assert followup.value is None
-        assert followup.partial_result is True
-        assert answer is None
     assert control.tabs()[0].operation_id == token
     assert run_lease_presence(harness) == lease
     assert not control.close(tab)

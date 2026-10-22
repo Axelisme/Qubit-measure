@@ -29,6 +29,8 @@ Stop 沿用 `onetone/freq` linear 的硬體掃頻語意，保留已完成 acquis
 
 在 Analysis 檢查 Resonators (JSON) 與 Min separation。Analyze 參數從該次 Run 的 `cfg.resonators` 取初值。Load 從檔案 cfg 取，不從目前 Form 或 alias 重建。沒有可還原的 cfg 時，分析名單留空供手填。可修改 JSON 名單，例如 `["R2", "R1"]`。名稱必須是非空、不重複的字串列表。無效輸入會拒絕 Analyze，不會自動換成空列表。
 
+Analyze 以這次 JSON 名單逐項讀取固定 Run／Load capture 的 `<name>.freq`。全部值都是有限數值且按名單嚴格升冪時，才有頻率排序依據。缺 capture、缺值、null、頻率相同或非升冪時，summary 的 `identity_diagnostic` 顯示「dip 與元件身分配對待確認」。此標示不改名單順序，也不阻擋分析。非 null 的 freq 若不是有限數值，Analyze 會報錯，bool 也不接受。不會以目前 alias 或新校準補歷史依據。即使有排序依據，也須人工核對身分，排序不等於配對已確認。
+
 `min_separation` 是兩個選中凹陷間的最小 MHz 距離，必須為有限正數。預設 1 MHz。寬凹陷附近有多個細小結構時可提高；兩個 resonator 靠近時需減小並增加取樣點數。
 
 Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景，再以一個取樣點的 Gaussian sigma 平滑去背景曲線。候選 prominence 必須超過五倍相鄰差值的穩健雜訊估計，也須超過原始 magnitude 動態範圍的百萬分之一。分析依 prominence 由大到小選取，排除距離太近的候選，直到取得名稱數量。掃描邊緣的最低點不算凹陷。曲線至少需要 11 個不同且有限的頻率點。
@@ -40,6 +42,8 @@ Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景，再以�
 ## 審閱與 Apply
 
 成功後，每個 capture 中存在的 resonator 各有一列 `<name>.freq` MHz proposal。沒有 Run／Load capture 時全部省略，名稱不在 capture 時省略該名稱的列，summary 說明原因。不讀目前 alias 猜目的地。
+
+沒有頻率排序依據時，每列 writeback 候選的 description 也顯示「dip 與元件身分配對待確認」。這個提示不封鎖 Apply。先核對 dip 與元件身分，再決定接受哪些列。需要改名單順序時，在 Analysis 修改 JSON 並重新 Analyze，候選才會重新配對。
 
 對照圖上的名稱與位置，逐列檢查目的地和頻率。取消不接受的列，再按 Apply Selected。這裡不提出 module、kappa 或 edelay。確認粗頻率後，另開或 Reset `onetone/freq` 做普通 channel 窄掃。需要 mux readout 校準時，另開或 Reset `mux/onetone_fine` 並核對 mux 接線，再執行窄掃。
 

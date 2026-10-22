@@ -1,6 +1,8 @@
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+from zcu_tools.analysis.failure import AnalysisFailed as AnalysisFailed
+
 if TYPE_CHECKING:
     from . import config
     from .acquisition import (
@@ -62,8 +64,12 @@ if TYPE_CHECKING:
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
+    from .scope import Scope, ScriptCancelled
 
 __all__ = [
+    "AnalysisFailed",
+    "Scope",
+    "ScriptCancelled",
     "validate_run_id",
     "validate_cfg_snapshot",
     "SoftwareProvenance",
@@ -116,6 +122,8 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "Scope": ".scope",
+    "ScriptCancelled": ".scope",
     "validate_run_id": ".metadata",
     "validate_cfg_snapshot": ".metadata",
     "SoftwareProvenance": ".metadata",

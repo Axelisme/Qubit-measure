@@ -5,6 +5,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
 from zcu_tools.program.acquisition import CancelFlagProtocol
@@ -76,7 +77,9 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
 
     signal = StopSignal()
     buffer = SignalBuffer((1,), on_update=update, update_interval=None)
-    schedule = Schedule(make_flow_cfg(rounds=1), buffer, stop=signal)
+    schedule = Schedule(
+        make_flow_cfg(rounds=1), buffer, scope=Scope("run", stop=signal)
+    )
 
     def run_acquire() -> None:
         with schedule:

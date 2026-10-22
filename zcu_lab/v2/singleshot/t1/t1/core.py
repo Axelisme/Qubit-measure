@@ -194,7 +194,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
             dtype=np.float64,
             on_update=plot_fn,
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
             modules = run_cfg.modules
 

@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -10,7 +10,7 @@
 
 預設的 session 還原腳本屬於框架，位於 `lib/zcu_tools/gui/app/measure/default_startup.py`，行為見 [ADR-0064](../docs/adr/0064-process-startup.md#保存與關閉)。這裡只放使用者自己的 startup 腳本（`simulation_envs/`、`kickstart/`）；自訂腳本要先還原上次 session 時，import 並呼叫 `zcu_tools.gui.app.measure.default_startup.startup`。`--clean` 略過全部腳本，`--script` 完全取代預設腳本，兩者互斥。建立 entry 與 alias 的步驟見 [startup 教學](tutorial/02-startup-and-entry.md)。
 
-`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬參數檔與 startup 範例，不提供離線建庫入口。
+`v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬參數檔與 startup 範例，不提供離線建庫入口。[Six-fluxonium](simulation_envs/six_fluxonium/README.md) 提供六顆無耦合 fluxonium、單一 global DC source 與 mux 讀出。六顆各自設定 flux offset 與週期，不含 fast-flux pulse。
 
 GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 的 `aliases.yaml`：開 entry 清空 alias，選 point 載入該 point 的表；Inspect 編輯目前表的草稿，Apply 才保存至目前 point。要在啟動時有初值，由 startup 腳本先建立 point，再用 `ctx.context.apply_alias_rows` 初始化並保存其表（simulation_envs 與 kickstart 的腳本都這樣做）。框架不選裝置，也不從 cache 綁定 flux_dev。
 
@@ -43,7 +43,9 @@ Recipe 的 Report 由作者選欄位，不另宣告 SummaryElements 或 estimate
 
 所有 lab async def 的 await 只允許 env／tab／session 呼叫或靜態解析到 lab 定義的 async helper，helper 可以再呼叫 helper。Quality gate 全掃本文，不分 recipe、workflow 或 helper。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫不論有無 await 都拒絕，其他 async with／async for 不另禁。這是 AST guardrail，不追蹤 assignment aliases、動態分派或包裝，不是完整 type checker。作者仍須遵守序列執行契約，詳見 [recipes](recipes/README.md)。
 
-Run scope cancel 回 partial 後繼續；script cancel 無結果的 Analyze／Ask raise 普通 RecipeCancelled，不是 CancelledError。作者不寫取消分支，已有 Run 的 finally 仍可同步 Save。取消終態回 cancelled、report=null 與 runs，不把 await 結果改成 Optional。
+Run 子層取消回 partial，作者可繼續。根取消使下一個 Run／Analyze／Ask await raise 普通 ScriptCancelled，不是 CancelledError。進行中的 Run 先 drain 並保留 run_id 與 partial facts，再 raise；partial 留在 tab 交 agent 決定是否保存。既有 Run 在 try 外，該 await 被根取消時不進後續 Save finalizer。已進入 try 的流程仍在 finally 同步 Save，不新增取消分支或 Save finalizer。取消終態回 cancelled、report=null 與 runs。
+
+Analyze 預期擬合失敗回 AnalysisResult(result=None, status="failed", reason=...)，任意程式錯誤仍 raise。Recipe 每次 Analyze 後先檢查 result，失敗即回含 analysis_failure 的 report，不 Ask、不接受 writeback、不跑相依 Post。Post 失敗保留 Primary 估計；成功時 analysis_failure=None。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 
