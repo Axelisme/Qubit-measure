@@ -25,13 +25,12 @@ def acquire(cfg: PlotCfg, *, context: RunContext) -> int:
 async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
     trend = env.plots.liveplot_1d("trend", "Iteration", "Workflow trend")
     trend.update(np.array([0.0, 1.0]), np.array([1.0, 2.0]))
-    for stage in (1, 2):
-        outcome = await env.run(acquire, PlotCfg(stage=stage))
+    for stage, iteration in zip((1, 2), env.iterations(), strict=False):
+        outcome = await iteration.run(acquire, PlotCfg(stage=stage))
         if isinstance(outcome, Failed):
             raise RuntimeError(outcome.reason)
-        await env.commit(Native(value=outcome.value.result))
-        if await env.ask(Choose(point=stage)) is None:
-            return
+        iteration.commit(Native(value=outcome.value.result))
+        await env.ask(Choose(point=stage))
 
 
 def attachment() -> WorkflowAttachment[Native, Native, None, Values, Values, None]:

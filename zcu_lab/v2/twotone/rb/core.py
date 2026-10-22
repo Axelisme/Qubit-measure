@@ -99,7 +99,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
         inverse in two recovery slots, then read out. Return mean complex IQ
         per (seed, depth); unfinished acquisitions remain NaN. Depth and reps
         run on hardware, with rounds averaged within each seed's program.
-        Acquisition errors are recorded on context.cancel_signal.
+        Acquisition errors are recorded on context.scope.stop.
         """
         # 1. Prepare reproducible seeds and a depth axis without changing cfg.
         run_cfg = deepcopy(cfg)
@@ -122,7 +122,7 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
                 rb_signal2real(data),
             ),
         )
-        with Schedule(run_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
                 builder = step.prog_builder(soc, soccfg)

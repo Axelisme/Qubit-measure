@@ -120,7 +120,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         )
 
         # Acquire a complete spectrum at each fixed drive gain.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
                 modules = cfg.modules

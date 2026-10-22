@@ -5,8 +5,8 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
-from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -34,16 +34,16 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
     decimated: bool,
     before_data: bool,
 ) -> None:
-    host = ScriptHost()
+    host = ScriptHost(Scope("workflow", name="test"))
     paths: list[str] = []
     produced: list[tuple[int, int]] = []
     results: list[NDArray[np.float64]] = []
 
     def operation(ctx: CallContext) -> None:
         with Schedule(
-            _cfg(rounds=3), SignalBuffer(1, dtype=np.float64), stop=ctx.stop_signal
+            _cfg(rounds=3), SignalBuffer(1, dtype=np.float64), scope=ctx.scope
         ) as sched:
-            assert sched.stop is not ctx.stop_signal, "Schedule must own its stop"
+            assert sched.stop is not ctx.scope.stop, "Schedule must own its stop"
 
             class Program:
                 cfg_model = ProgramV2Cfg(rounds=3)
@@ -61,12 +61,12 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
                     **_kwargs: object,
                 ) -> NDArray[np.float64]:
                     self.calls += 1
-                    token = sched.stop.active_child
-                    assert token is not None
-                    assert token.label == "acquire"
+                    assert sched.scope.active_path.endswith(
+                        "acquire#" + str(self.calls)
+                    )
                     paths.append(host.active_path)
                     if self.calls == 1 and before_data:
-                        token.set()
+                        assert host.cancel("acquire").cancelled
                         raise StoppedPartialAcquireError("no completed round")
                     raw = np.array([np.nan])
                     for ir in range(1, 4):
@@ -76,7 +76,7 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
                         produced.append((self.calls, ir))
                         round_hook(ir, raw, cancel_flag)
                         if self.calls == 1:
-                            token.set()
+                            assert host.cancel("acquire").cancelled
                     return raw
 
                 acquire_decimated = acquire
@@ -92,17 +92,17 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
                         options=AcquireOptions(retry=3),
                     ).copy()
                 )
-                assert sched.stop.active_child is None
+                assert sched.scope.active_path == sched.scope.path
                 assert not sched.is_stop()
                 assert sched.outcome.status == "completed"
                 assert sched.stop.error is None
             assert program.calls == 2
-        assert not ctx.stop_signal.is_set()
+        assert not ctx.scope.stop.is_set()
 
     async def script() -> None:
         result = await host.call(operation)
         assert result.partial_result
-        later = await host.call(lambda ctx: ctx.stop_signal.partial_result)
+        later = await host.call(lambda ctx: ctx.scope.stop.partial_result)
         assert later.result is False
         assert later.partial_result is False
 
@@ -111,19 +111,19 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
     np.testing.assert_allclose(results[1], [3.0])
     assert produced == ([] if before_data else [(1, 1)]) + [(2, 1), (2, 2), (2, 3)]
     assert paths == [
-        "script/iteration#1/operation#1/schedule#1/acquire#1",
-        "script/iteration#1/operation#1/schedule#1/acquire#2",
+        "workflow:test/operation#1/schedule#1/acquire#1",
+        "workflow:test/operation#1/schedule#1/acquire#2",
     ]
 
 
 def test_stop_condition_completes_without_partial_or_scope_cancellation() -> None:
-    host = ScriptHost()
+    host = ScriptHost(Scope("workflow", name="test"))
 
     def operation(ctx: CallContext) -> None:
         with Schedule(
-            _cfg(rounds=2), SignalBuffer(1, dtype=np.float64), stop=ctx.stop_signal
+            _cfg(rounds=2), SignalBuffer(1, dtype=np.float64), scope=ctx.scope
         ) as sched:
-            assert sched.stop is not ctx.stop_signal
+            assert sched.stop is not ctx.scope.stop
             builder = sched.prog_builder(
                 "soc", "soccfg", program_cls=FakeProgram, marker="kw"
             ).add(FakeModule("readout"))
@@ -134,7 +134,7 @@ def test_stop_condition_completes_without_partial_or_scope_cancellation() -> Non
             assert not sched.stop.partial_result
             assert not sched.is_stop()
             assert sched.outcome.status == "completed"
-        assert not ctx.stop_signal.partial_result
+        assert not ctx.scope.stop.partial_result
 
     async def script() -> None:
         assert not (await host.call(operation)).partial_result
@@ -153,7 +153,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
         on_update=lambda data: buffer_updates.append(data.copy()),
         update_interval=None,
     )
-    with Schedule(_cfg(reps=4, rounds=2), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(reps=4, rounds=2), signals_buffer, scope=Scope("run")) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(module)
@@ -191,7 +191,7 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
 
     def run_root_acquire(progress_leave: bool | None = None) -> None:
         with Schedule(
-            _cfg(rounds=2), SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+            _cfg(rounds=2), SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
         ) as sched:
             builder = sched.prog_builder(
                 "soc",
@@ -224,7 +224,7 @@ def test_step_program_progress_closes_with_default_or_explicit_leave(
 
     with (
         use_pbar_factory(recording_pbar_factory(progress_bars)),
-        Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched,
+        Schedule(_cfg(rounds=2), signals_buffer, scope=Scope("run")) as sched,
     ):
         for _, step in sched.scan("host", [0]):
             step.prog_builder(
@@ -249,7 +249,7 @@ def test_run_program_reuses_caller_owned_program_cache():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
     programs: dict[float, FakeCachedProgram] = {}
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         for value, step in sched.scan("value", [1.0, 1.0, 2.0]):
             # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
             setattr(step.cfg, "value", value)  # noqa: B010
@@ -284,7 +284,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
         update_interval=None,
     )
 
-    with Schedule(_cfg(reps=1, rounds=2), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(reps=1, rounds=2), signals_buffer, scope=Scope("run")) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeDecimatedProgram)
             .add(FakeModule("readout"))
@@ -312,7 +312,7 @@ def test_schedule_registers_program_derived_buffer_before_decimated_run():
     FakeDecimatedProgram.instances.clear()
     buffer_updates: list[np.ndarray] = []
 
-    with Schedule(_cfg(reps=1, rounds=2), stop=StopSignal()) as sched:
+    with Schedule(_cfg(reps=1, rounds=2), scope=Scope("run")) as sched:
         builder = sched.prog_builder(
             "soc",
             "soccfg",

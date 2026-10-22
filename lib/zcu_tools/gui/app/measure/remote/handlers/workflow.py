@@ -300,7 +300,7 @@ def h_workflow_cancel(
 ) -> Mapping[str, object]:
     """Cancel one native scope and retain the existing workflow snapshot."""
     run_id = str(params["run_id"])
-    scope, expected = cancel_scope_arguments(params)
+    scope, expected = cancel_scope_arguments(params, default="workflow")
     with _workflow_errors():
         result = adapter.workflow_control.cancel(run_id, scope, expected=expected)
         return {**_snapshot(_run(adapter.workflow_control, run_id)), **asdict(result)}

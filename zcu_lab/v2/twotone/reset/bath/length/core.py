@@ -147,7 +147,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         )
 
         # Repeat the host length scan; each program sweeps the four pi/2 phases.
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             length_values = lengths.tolist()
             for _, rep in sched.repeat("rounds", rounds):
                 for length, step in rep.scan("length", length_values):

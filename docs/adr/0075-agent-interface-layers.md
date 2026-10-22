@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0075 — Agent 介面分層
 
-**狀態：** accepted。使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層及已落實的 recipe 契約；workflow 的 agent yield 仍是方向，見「現況與後續」。不新增工具、不改 method policy，也不授權硬體操作。
+**狀態：** accepted。使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 **關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
 ## 問題
@@ -26,20 +26,20 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各自提供工具，[[0068
 | L0 實驗環境與硬體 | SoC、儀器 driver、program 執行 | 沒有直接入口，只能經由 L1 的 owner | 不適用 |
 | L1 GUI／Notebook | 儀器控制、實驗建立、完整 cfg、實驗參數、單次分析與保存 | Measure 的 `rpc_list`／`rpc_describe`／`rpc_call`、`device_setup`、`simulation_initialize`、`tab_analyze`、`tab_interact`、`apply_writeback` | 一次實驗是多步流程，agent 可以在任兩步之間介入 |
 | L2 Recipe | 操作 GUI tab 的腳本，可串多個 tab 與實驗 | Measure 的各 recipe 工具，搭配 `recipe_guide`、`status`、`wait`、`answer`、`cancel(scope)` | Agent 控制輸入、接受輸出，中途只在 recipe 明確提問或互動交接時協作 |
-| L3 Workflow | 一次設定，執行跨多組實驗的流程，例如 overnight、T1 over flux | Workflows MCP 的 Start、Pause、Resume、Stop 與 tunables | 現行以 Pause／Stop 和 tunables 介入；由 workflow 明確 yield 給 agent 是尚未落實的方向 |
+| L3 Workflow | 一次設定，執行跨多組實驗的流程，例如 overnight、T1 over flux | Measure MCP 的 workflow 工具與 answer | Workflow 以 Ask 決定提問位置；agent 另可用 Pause／Resume／Stop 與 tunables 介入 |
 | L3 跨實驗整合分析 | 整合多次量測的資料做聯合分析，例如 flux-dependence fit | Fluxdep MCP 的決策點工具；dispersive MCP 只讀 | 分析步驟由 agent 驅動，順序不固定；agent 的判斷落在宣告的決策點，程式能判斷的事不交給 agent |
 
 Notebook 是使用者在 L1 的入口，agent 目前不經 Notebook 操作。
 
 ### Agent 介入點
 
-正常使用時，agent 只提供真正需要它判斷的資訊。自動推導得出的參數由 recipe 或 workflow 補齊，agent 不必逐一傳入。Recipe 在已宣告的判斷交接處停下，把資訊和選項交給 agent。Workflow 的同類 agent 交接尚未落實。
+正常使用時，agent 只提供真正需要它判斷的資訊。自動推導得出的參數由 recipe 或 workflow 補齊，agent 不必逐一傳入。Recipe 與 workflow 在作者明填的 Ask 處停下，把問題與 answer schema 交給 agent。
 
 L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在任兩步之間停下、讀取或修改。L2 由 recipe 決定，只在明確需要 agent 的位置交還控制權，其餘步驟自動執行。交接可以落在輸入端（缺少必要參數）、中途（互動分析交接 tab，agent 以 `tab_interact` 完成選取）或輸出端（寫回確認）。Agent 需要在 recipe 沒有交接的位置調整步驟時，改用 L1。
 
 Recipe 作者以 `await tab.run()` 與 `await tab.analyze(stage, result=T)` 等待工作結果，不表示每一步都要 agent 回答。互動分析以 `interactive=True` 明確交接 GUI tab。`await tab.ask_writeback()` 或 `await session.ask(question)` 才是等待 agent 或使用者回答的提問。回答本身不寫入資料，作者接受寫回時另呼叫同步 `tab.accept_writeback(items)`。取消不回傳 cancelled 分支給作者，作者以 `finally` 保存已有的 Run，終態與 runs 由 runtime 回報。
 
-L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 workflow 決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。現行 `yield from env.<effect>` 是交給 Engine 的工作請求，不是交給 agent 的提問，也不表示 workflow 已提供 `ask`。
+L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。`await env.run(...)` 等待 Engine 執行工作，`await env.ask(question)` 才是交給 agent 的提問。
 
 2026-10-21 使用者修正 L2 與 L3 的定位與協作模型。以下保留當時的協定術語，現行 async 契約見下節。推導見 [Recipe 接口重設計](../discussions/2026-10-21-recipe-interface-redesign.md)、[三角色協定](../discussions/2026-10-21-three-role-protocol.md)、[Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
 
@@ -48,7 +48,7 @@ L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 wo
 - Recipe 執行分兩層：驅動引擎與實驗語義解耦，只處理 yield 流程；便利層提供 `run`／`analyze`／`ask_writeback` 等語法。原話：「recipe執行要分兩層，一層是驅動引擎，與實驗語義解耦，只負責處理yield的流程。另外一層利用前者，提供run/analysis/ask_writeback等便利語法」。Recipe inputs 的欄位由作者定義意義，框架不設帶 overrides 的基底。原話：「overrides不該出現在base class中，超過負責的範疇了」。
 - Workflow 由 measure-gui 承載（同程序、同 session、同 RUN lease、同 MCP server），步驟不經 measure tab 執行。原話：「我也傾向B+D」（B 嵌入 measure-gui）。
 
-以上保留 2026-10-21 的討論原話。當時的 `Wait`／`Ask`／`Signal` 與 yield 描述已由下節的 async host 契約取代。Recipe 的公開契約見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)。尚未遷移的 workflow 仍使用原有 Engine，後 land 的遷移負責移除舊 driver。
+以上保留 2026-10-21 的討論原話。當時的 `Wait`／`Ask`／`Signal` 與 yield 描述已由下節的 async host 契約取代。Recipe 的公開契約見 [measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)，workflow 的作者面見 [workflow README](../../lib/zcu_tools/experiment/workflows/README.md)。
 
 跨實驗整合分析與 workflow 同屬 L3，但不由 workflow 決定 yield。Fluxdep 是獨立、可選的分析 app，不併入 measure 或 workflows。Agent 在資料可用性、對齊、採樣、躍遷假設、驗收與剔除六個決策點介入，各步可以重做。程式處理前置條件、計算與發布；agent 判讀證據並選下一步。人與 agent 共駕同一份 application state，寫入由 [[0070]] 的 holder 控制。
 
@@ -56,63 +56,65 @@ L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 wo
 
 ### Async 協作與控制命令
 
-2026-10-22 使用者裁定作者面改為 `async def`／`await`：「我之所以多次嘗試將generator換成async/await，是因為我認為作者應該比較熟悉原生python語法，而不是框架自己定義的語法，前者上手應該會比較容易」「改，但先別開task，我重啟後再開」。這取代 2026-10-06 的「同意，一律 yield from」。Asyncio 只負責排程，host 從不對作者 task 呼叫 `cancel()`。Loop 只跑在 caller 指定的 worker thread，不改 GUI scheduler、operation owner、RUN lease 與 drain 邊界。
+2026-10-22 使用者裁定作者面改為 `async def`／`await`：「我之所以多次嘗試將generator換成async/await，是因為我認為作者應該比較熟悉原生python語法，而不是框架自己定義的語法，前者上手應該會比較容易」。這取代舊的 yield from 作者介面。Asyncio 在 caller 指定的 worker 排程，不改 GUI scheduler、operation owner、RUN lease 或 drain 邊界。Host 從不對作者 task 呼叫 cancel。
 
-`experiment.script_host.ScriptHost` 是 recipe 與後續 workflow async 遷移的共用宿主。它不複製原型 Host，也不理解實驗政策。公開 ABI 如下：
+`experiment.script_host.ScriptHost` 共用於 recipe 與 workflow。Caller 以 catalog 實名建立根 Scope 並交給 host，`host.root` 就是該物件。
 
-- `run(coroutine)` 在呼叫它的 worker 執行一次作者 coroutine，完成 finally 與 executor drain 後才返回或 raise。
-- `await call(fn)` 在 executor 執行 `fn(CallContext)`，回傳 `CallResult(result, epoch, partial_result)`。每次呼叫建立 operation child，完成後 release。即使 token 已 set 仍啟動 fn，由 owner 合作返回 partial。
-- `await ask(question)` 持有 Future，公開 pending question、answer model 與唯一 request id。`answer(request_id, answer)` 驗證當前問題，拒絕錯誤、重複或遲到的答案，不消耗問題。Host 取消等待時的內部 None 由 recipe 便利層轉成普通 `RecipeCancelled`，不暴露成作者的 Optional。
-- `await commit()` 等 pause gate 後更換 iteration child。Recipe 不使用 iteration commit，也不暴露 Pause／Resume。
-- `control(fn)` 與 cancel／pause／resume／answer 共用 loop 控制序列，呼叫端同步取得結果或原例外。Callback 必須 memory-only、數微秒級，不 await、不阻塞、不做 I/O。
-- `close()` 請求 script stop，off-worker 等待 coroutine、finally 與 executor drain，不強制終止 task。
+- `run(coroutine)` 在 caller worker 執行一次作者 coroutine，等 finally 與 executor drain 後返回或 raise。
+- `await call(fn, *, scope=None, name=None, on_completed=None)` 在 executor 執行 fn。未填 scope 時，operation child 掛根；明填時掛該顯式 parent。回傳 CallResult 的 epoch、partial_result、stopped 是 fn 完成時的事實。
+- on_completed 是 framework recording hook。fn 正常返回後，host 在作者 worker、operation 尚存活時呼叫一次 hook，再檢查根取消。Hook 同步、不 await、不重入；fn 或 hook 的真實例外原樣傳播。這讓 journal 與 recipe Run facts 在根取消時仍保留完成資料。
+- `await ask(question)` 回具名 Answer，公開唯一 request id。錯誤、遲到或重複答案不消耗問題。根取消使 await raise ScriptCancelled，不向作者交付 Optional。
+- `control(fn)` 與 cancel／pause／resume／answer 共用 loop 控制序列。Fn 只做 memory-only、數微秒級的操作，不 await、不阻塞、不 I/O。
+- `close()` 請求根停止，off-worker 等待 coroutine、finally 與 executor drain，不強制終止 task。
 
 作者 await 的 AST 規則統一套用到 `zcu_lab/` 所有 async def，不識別 decorator、不分 entry 與 helper，也不做可達性分析。只允許 `env.*`／`tab.*`／`session.*` 呼叫，或靜態解析到 lab async 定義的 helper 呼叫。Helper 可以呼叫另一個 helper，自己的本文也受檢查。工具拒絕 `asyncio.*`、`create_task`、`gather`、`wait_for`、`TaskGroup`，明列原語的直接 Call 不論有無 await 都拒絕，包括 `async with TaskGroup()`。其他 async with／async for 不另禁。`tools/check_script_awaits.py` 接入 quality gate，不是完整 type checker，別名、動態分派與包裝仍可能繞過規則。
 
-#### 控制命令的傳遞路徑：bit 往下傳，意圖留在 host
+#### 顯式 Scope 與取消出口
 
-Workflow host 建立一棵 `StopSignal` scope 樹，包含 script 根、iteration、operation 及其下的 Schedule／acquire。Recipe host 的 script／iteration／operation 在 MCP process，GUI Run owner 另有 run 根及 Schedule／acquire。兩邊共用 experiment 層的 scope resolver 與 `CancelResult(cancelled, reason, active_path)`，不建立跨 process 的 token 樹。底層 owner 只讀自己的 Event。
+使用者於 2026-10-22 裁定：「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」「你認為signal是不是應該是顯式的？」「可以考慮讓scope成為zcu_lib/core的契約」「it.commit_dir可以對應到scope的層級與深度」。Scope 由 experiment 定義，包裝 StopSignal。底層 driver、clock、program builder 只收 `scope.stop`，不認識 host。
 
-```text
-agent ──MCP cancel(execution|run_id, scope, expected)──▶ host／recipe runtime
-                                                       │
-                           ScriptHost.control／cancel 的 loop 控制序列
-                           跨執行緒 call_soon_threadsafe + acknowledgement
-                                                       │
-                       active_path 比對 label／序號，再 token.set()
-                                                       ▼
-                           已存在的子孫、之後出生的 child
-                                                       ▼
-                   Schedule／device setup 等 owner 合作退出
-                                                       ▼
-                        partial 結果／作者 finally／終態
-```
+根 kind 限 workflow／recipe／run。Workflow 與 recipe 根的 name 由 host 使用 catalog 實名顯式注入，不做 fallback。非 None 的 name 必須非空，不含 #、/、:。框架用 `branch(kind, name=...)` 建 iteration／operation／schedule／acquire；作者用 `child(label)` 建自訂 scope，label 不得含分隔符或使用保留 kind。With 或顯式 release 管理壽命，release 後不得再建 child。
 
-2026-10-22 使用者裁定：「裸 script（expected=None）的 ack 權威是 Stop owner lock：owner 先寫 StopRequested／manifest 並 latch，再 host.cancel 原子設 root」。Workflow 沿既有 owner lock 記錄與接受 Stop，持久化不進 control callback。此分支的 `cancelled=True` 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled，不以最後 host.cancel 的 refusal 推翻 owner 的接受。帶序號或 expected 的 script 與其他 scope 直接由 host.cancel 核對，不寫 Stop 意圖。Terminal workflow 對合法請求先回 typed scope-not-active refusal，錯誤語法仍 fail fast。持久化失敗保留 failed 與原始 cause，不偽裝成 accepted。
+作者的 env 就是 workflow 根。每個 child 提供相同的 run／call／setup_device／wait_until／dir／commit 能力。作者用 `with env.scope(label) as scope` 與 `for item, iteration in zip(items, env.iterations())` 明填 parent，沒有隱式 current scope。
 
-Acknowledgement 只證明控制命令已處理，不證明 operation 或 cleanup 已 drain。Recipe runtime 用公開 `control(fn)` 在同一 loop 回合檢查與停止當前 Run token，避免 check／ack race。Analysis、Ask 或閒置時的 run cancel 回 `cancelled=False, reason="no run in progress"`，不停止下一個 operation。
+Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root。持久化不進 control callback。此分支的 cancelled=True 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled，不以 host.cancel 的 refusal 推翻 owner 的接受。其他 selector 直接由 host.cancel 核對，不寫 Stop 意圖。Terminal workflow 對合法請求回 typed scope-not-active refusal，錯誤語法仍 fail fast。持久化失敗保留 failed 與原始 cause，不偽裝成 accepted。
 
-- `set()` 只停止本 scope 與子孫，父已停止時新 child 出生即 set。`set_error(status, reason, cause)` 只在本 token 記第一個錯誤並向下 set，不改祖先 event／error；後續兄弟 operation 出生乾淨。`raise_if_error()` 仍讀本 token，完成的 child 由 owner release。
-- `cancel(scope="acquire")` 只停一次取得，同 Schedule 的下一次 acquire 正常。`schedule` 停該 Schedule 及其之後出生的 acquire。`iteration` 停本輪，剩餘 operation 出生即 set；commit 換 token 後下一輪正常。父 scope 都繼續。
-- `cancel(scope="run")` 是當前 operation 的別名，workflow 可停任何 operation。Recipe 保留 Run-only admission，只停當前 tab.run。`operation` label 可直接停當前 operation。`await tab.run()` 回 `RunResult(partial_result=True)`，作者仍可分析、問答與保存。沒有 `finish_early` 工具，也沒有 operation `Cancelled` 分支。
-- `cancel(scope="script")` 設根 token 並開 gate。進行中與之後的 Run 都合作返回 partial。Analyze／Ask 無結果時 raise 普通 `Exception` 子類 `RecipeCancelled`，不是 `asyncio.CancelledError`。三個 recipe await 入口 analyze／ask_writeback／session.ask 都回非 Optional 結果。作者不捕捉取消、不寫取消分支，已有 Run 的 finally 照常做同步 Save。
-- 作者 coroutine 以 return 或 raise 結束後，script cancel 的終態仍為 cancelled。`RecipeOutcome(status="cancelled", report=None, runs=[...])` 保留每個 Run 的 tab、adapter、run_id、partial 與各次 Save 收據。`RecipeCancelled` 不記入 error，真正的程式或 owner 例外仍保留診斷。使用者於 2026-10-22 裁定：「既然用不到cannel，那也不用handler了，統一return，這樣寫法比較簡潔」。這取代 2026-10-04／2026-10-16 的作者側 cancelled status 與 handler 選項。
+Host 首次根取消在自己的 owner lock 內 latch bit 並記 typed ack，不等待 loop 通知。重複取消回第一次 ack，不再排 loop 工作。這避免作者 finally 阻塞 loop 時，控制端也被迫等待。Ack 表示 token 已設，不表示工作已 drain。
 
-Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration；Resume 只開 gate。`CallResult` 帶起跑 epoch 與完成時的 stop bit，之後的 Pause 不追改自然完成的結果。Workflow env 負責丟棄過期 partial，等 gate 後重跑同 request；自然完成也等 gate 後交付，不重跑。Host 不重試外部效果，workflow 與 recipe 都使用同一個 async host。
+Recipe runtime 用公開 control(fn) 在同一 loop 回合檢查與停止當前 Run token，避免 check／ack race。Analysis、Ask 或閒置時的 run cancel 回 cancelled=False、reason="no run in progress"，不停止下一個 operation。
 
-Scope 不設固定層數。使用者於 2026-10-22 說：「我認為可以安排支援，scope機制是需要的，因為我們無法阻止一個run裡有兩次acquire的合理使用場景，這種情況做不到early_stop第一個並開始第二個」「不一定是5層，比如說workflow應該可以跳過operation直接使用Schedule與Program才對。還有都有scope了真的還需要不同kind嗎？finish_early與cancel應該只是不同scope的cancel吧？」MCP 公開 acquire／schedule／iteration／run 與 script，status 回 active_path。Scope 只收 label 或 label#正整數，不收整條 path。Expected 只收正整數，拒絕 bool；與 #N 同填須一致。未知 label 或壞語法為 invalid_params。合法但不在路徑上回 scope not active，序號不符回 sequence mismatch，都不設 token。Root 沒有序號，script 配合法 expected 也拒絕。例：`cancel(run_id="r", scope="acquire", expected=3)` 只接受當前第 3 次 acquire。
+Iteration generator 的 next 釋放前一趟，close 釋放最後一趟。Host 不建隱式 iteration，也不以 commit 更換 iteration。Recipe 無作者 iteration，路徑直接是 `recipe:<name>/operation#N`。
 
-已知限制是 process 邊界。Recipe 的 schedule／acquire 經 `operation.cancel_scope` 代理到目前 tab.run 的 operation handle，GUI 在共享樹鎖下原子比對與 set。`operation.status_scope` 回 GUI run path。Recipe status 及 cancel ack 省略 run 根，將 schedule／acquire 尾段接在本地 path 後；cancelled/reason 保留 GUI 回覆。兩邊各自檢查，合成 path 不是跨 process 原子快照。Fine scope 的 op target 必須仍是當前 tab.run handle，舊 op 回 scope not active，不以歷史 registry 歸屬改打新 Run。Execution target 的 expected 只檢查目前 GUI root；下一 Run 的序號可以重用，跨 Run 精確取消要用 op target。沒有進行中 tab.run 時，execution-target 細層 cancel 回 no run in progress。
+Commit 是同步 snapshot 寫檔，不經 pause gate。它不啟動硬體工作，取消收尾也必須能存已有成果。Async operation／ask 才經 pause gate。Iteration.cancelled 只退出目前 point，主 for 用 continue，point helper 用 return。Point 的 try/finally 同步 commit 一次，不在 finally await，根 ScriptCancelled 繼續往上傳播。
 
-GUI 在 worker 完成時固定 Run root 的 partial_result。State、snapshot 與 wire 的 result_state.partial_result 保留該值，沒有 native metadata 也不遺失。Recipe RunResult 解碼這項完成事實，不用 cancel ack 或 operation 終態猜測。GUI metadata 的 stopped 讀同一值，user Stop 意圖仍由 cancel_requested 保留。這些 import 沿既有前端依賴 experiment 方向，受 .importlinter C8／C13 管理。
+- 根 workflow／recipe 被取消表示腳本本身停止。下一個 call／ask await raise 普通 Exception 子類 ScriptCancelled，不是 asyncio.CancelledError。進行中的 call 先合作 drain、保留 completion facts，再 raise。真正的 fn、recording hook 或 cleanup 例外優先傳播。
+- 根以下的取消表示等待中的工作被打斷。Acquire 只停一次取得；schedule 停該段後續取得；iteration 跳過目前這一點。後續 sibling 不繼承已釋放 child 的停止。Workflow 交付 Completed(partial_result=True) 或 Failed，由作者決定繼續、返回或重試。
+- run 是 operation 的選擇器別名。Recipe 只接受進行中的 tab.run；analysis／Ask／閒置時回 no run in progress。Operation 可選本地 analysis；其無結果的合作取消回 AnalysisResult(status="failed")，不冒充根取消。
+- 根取消後 finally 仍在原 worker 執行，同步 Save 保持可用。Recipe 終態為 cancelled，report=None，runs 保留 run_id、partial 與每次 Save 收據。ScriptCancelled 不記入 Host.error 或 recipe error；真實錯誤仍保留診斷。
 
-Operation 的完成型別只有 completed／failed，合作中止以 `partial_result=True` 表示。使用者於 2026-10-22 裁定：「Completed(complete=False)不直觀，應該叫Completed(partial_result=True)比較好理解。其餘沒有問題，標準也可以」。Workflow 的 Failed 表示目標結果未取得但狀態仍可信；cfg、callback、device setup、saver 或腳本本體的真實錯誤仍 raise，不能以 partial 或空結果掩蓋。
+StopSignal 的 set 只停止自己與子孫。Set_error 只記本 scope 第一個錯誤並向下停止，不改祖先 event／error。Release 向上交付 partial／error 事實，operation boundary 截止，不污染後續 sibling。GUI 單次 run 根視為 operation boundary。GUI result_state.partial_result 與 metadata stopped 讀 Run root 的 partial_result，cancel_requested 只記使用者整次 Stop 意圖。
 
-主動命令只支援控制命令與步驟邊界的 workflow tunables。當前 step 保留 capture，要重做該步先 Pause、Apply、Resume，見 [[0062]]。不支援 Run 中即時資料或同時等待多個來源。使用者於 2026-10-16 裁定：「好，那先不支援c，做ab就好，順便把這討論紀錄到discussion」。採用 async 語法不放寬這個序列腳本邊界。
+Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration。Resume 開 gate。Workflow 丟棄 Pause 造成的 stale stopped attempt，重跑同 request；普通 scope cancel 直接交值。自然完成也等 gate 後交付，不重跑。主動命令仍限控制命令與步驟邊界的 tunables，不支援 Run 中改科學參數或同時等待多來源。
 
-#### 2026-10-22 裁定：Scope 成為顯式的 core 契約（已採用，待實作）
+#### 路徑、選擇器與跨 process 投影
 
-使用者裁定：「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」「你認為signal是不是應該是顯式的？」「可以考慮讓scope成為zcu_lib/core的契約，讓core.py使用」「it.commit_dir可以對應到scope的層級與深度」。採用：experiment 層定義 `Scope`（`stop`、`cancelled`、`child(label)`、`dir`、`run`／`call`、`commit`），`RunContext.scope` 取代 `cancel_signal`，`Schedule(scope=)` 自建 schedule child、acquire 建 acquire child，driver／clock／program_builder 仍只收 bit；作者以 `with env.scope(label)` 與 `for item, iteration in zip(items, env.iterations())` 取得顯式 scope 物件，沒有「目前 scope」；路徑 `kind:name#seq`（根 `workflow:<名>`／`recipe:<名>`，`operation:<name>#N` 的 name 由呼叫端可選提供）；`scope.dir` 鏡射路徑、`scope.commit` 一個 scope 一次；根被取消以 `ScriptCancelled` 結束腳本，其下各層以值交付。推導與否決的選項見 [顯式 scope 契約討論](../discussions/2026-10-22-explicit-scope-contract.md)。本段取代上文「已知限制」中關於不同粒度中斷的描述；實作後由該 task 把本節其餘段落對齊。
+路徑由父子鏈計算。根為 `workflow:<name>`／`recipe:<name>`，GUI 根為 run。Child 段為 kind:name#N，無 name 時省略冒號與 name；作者 label 為 label#N。序號按同 parent 的 kind 從 1 遞增。Operation name 只能由 caller 提供，不從 callable 反射。
+
+Status 的 active_path 是根到第一個有多個存活 child 的節點的單一鏈。Live_paths 是所有存活葉完整路徑的 list[str]，不是逗號字串。沒有 fork 時 active_path 等於唯一葉路徑。GUI workflow pane 顯示這兩項原生投影。
+
+Cancel 搜整棵存活子樹，接受 kind、kind#N、operation:<name> 與 live_paths 中的完整路徑精確比對。多筆命中回 cancelled=False、reason="ambiguous" 與候選完整路徑 candidates。同層同名 operation 必須填 #N；跨 parent 的 kind#N 仍多筆就繼續 ambiguous。不選 latest child。Expected 只接受正整數，拒絕 bool，與 #N 同填須一致。合法但不存活的 selector 回 scope not active，序號不符回 sequence mismatch，均不設 token。Root 無序號。
+
+Recipe 本地樹在 MCP process，GUI Run 是另一棵樹。Schedule／acquire 與 composite 完整路徑經 operation.cancel_scope 代理至目前 tab.run 的 handle。Operation.status_scope 回 GUI active_path 與 live_paths。Recipe 省略 GUI run 根，把尾段接到明確的本地 Run operation，並以同一規則投影 cancel ack 的 active_path／candidates。GUI 的 cancelled／reason 原值保留。
+
+兩邊只在自己的控制序列或樹鎖下核對，不宣稱跨 process 原子。細層 op target 必須仍為目前 tab.run handle，舊 op 回 scope not active，不經歷史歸屬改打新 Run。Execution target 的 expected 只檢查目前 GUI root，下一 Run 可重用序號；跨 Run 精確取消使用觀察到的 op handle。Acknowledgement 只證明已處理控制命令，不證明 operation 或 cleanup 已 drain。
+
+#### 擬合失敗以值交付
+
+AnalysisFailed 定義於 Qt-free 的 analysis 葉模組，experiment 公開同一型別。這個依賴方向遵守 analysis 位於 experiment 下層的 import contract，不讓 fitting 反向 import experiment。
+
+只有 analyze work 的 AnalysisFailed 產生 OperationOutcome.failure_kind="analysis"。Record、writeback、postprocessing 與任意程式錯誤不降級。Operation.await wire 保留分類；recipe 對 analysis 分類回 AnalysisResult(result=None, status="failed", reason=...)。作者決定保存、跳過、重試或停止。成功 summary 仍按作者型別驗證，缺欄位不補值。
+
+Fitting owner 的 fit_func 把 optimizer 不收斂與已知自由參數數目下的資料不足轉為 AnalysisFailed，不再回初猜加 warning。Model callback 自己的例外原樣傳播。其餘 backend 的有效性或 fallback 契約不因此全改，已分類路徑見 fitting README。這些 frontend→experiment／analysis 依賴受既有 import contracts 約束。
 
 ### 層與層之間以共享狀態交接
 
@@ -221,8 +223,8 @@ Skill 放流程與完成條件，每個決策點保留最小判準，並指向�
 
 ## 現況與後續
 
-- Workflow 的 agent yield 尚未落實。現行 L3 workflow 把接受度寫在 workflow 定義與 tunables 中，校準失敗或 fit 不被接受時提交具名 reason，agent 可用 Pause／Stop 與 tunables 介入，不能回答 workflow 的 agent 提問。2026-10-12 使用者說明另有 task 正在重構 workflow 並實作此協作。Yield 的介面以該實作為準，本篇不先行規定。
-- 核准方向是無人回應時停在 yield。2026-10-12 使用者裁定：「就卡住，有需求再加設計。」Workflow yield 後沒有 agent 或使用者回應時，流程停在該處等待。套用預設決定、逾時或跳過等機制，等有具體需求再設計。因此含 yield 的 workflow 在無人值守時可能整段停住，overnight 流程要靠宣告的接受度減少 yield。
+- Recipe 與 workflow 共用 Ask。Agent 用 request_id 回答同一 worker 上的問題，不另起 execution segment。GUI 與 MCP 投影同一 pending question，錯誤或過期回答不消耗問題。
+- 無人回應時，Ask 停在原處等待。2026-10-12 使用者裁定：「就卡住，有需求再加設計。」Ask 不套預設決定、不逾時或跳過。根取消以 ScriptCancelled 解開等待。因此含 Ask 的 workflow 在無人值守時可能整段停住，overnight 流程要靠宣告的接受度減少提問。
 - L0 邊界只靠政策維持。Agent 有 shell 時，技術上仍可繞過 MCP 碰觸硬體。目前由 MEASUREMENT 角色規則約束「不以分析腳本旁路控制硬體」。2026-10-12 使用者裁定：「有需要再加設計。」出現具體失敗類別時，再升級成權限設定或執行期強制。
 
 ## 取捨

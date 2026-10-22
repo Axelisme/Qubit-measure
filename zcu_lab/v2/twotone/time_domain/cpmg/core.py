@@ -308,7 +308,7 @@ class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
             (len(times), len(length_idxs)),
             on_update=lambda data: update_viewer(data),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
                 viewer.update(

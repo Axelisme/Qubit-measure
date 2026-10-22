@@ -103,6 +103,11 @@ class MuxSingleshotGEReport(FormModel):
         default=False, description="Whether accepted calibration items were applied."
     )
 
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
+    )
+
 
 class MuxGEFitSummary(MuxSummaryTone):
     """Author view of owner summary fields; no missing values are invented."""
@@ -161,8 +166,9 @@ async def mux_singleshot_ge(
     Fit Primary separation, then estimate Post radius and confusion.
     Ask before applying calibration items. Save raw shots and completed artifacts
     in the Run finalizer. Return ordered GE scalars, radii and the writeback
-    decision. Skipping writes nothing. Invalid inputs and operation failures
-    propagate without undoing completed edits or saves.
+    decision. Skipping writes nothing. Expected analysis failures return a reason
+    without writeback, retaining Primary estimates if only Post failed. Invalid
+    inputs and other operation failures propagate without undoing edits or saves.
     """
     # Capture this group's defaults without changing global aliases.
     tab = session.open_tab(
@@ -191,9 +197,23 @@ async def mux_singleshot_ge(
     await tab.run()
     try:
         primary = await tab.analyze("primary", result=MuxGESummary)
+        if primary.result is None:
+            return MuxSingleshotGEReport(
+                tones=[],
+                post_tones=[],
+                writeback_applied=False,
+                analysis_failure=primary.reason,
+            )
 
         # Post uses the adopted Primary fit for radius and confusion diagnostics.
         post = await tab.analyze("post", result=MuxGEPostSummary)
+        if post.result is None:
+            return MuxSingleshotGEReport(
+                tones=_primary_tone_reports(primary.result),
+                post_tones=[],
+                writeback_applied=False,
+                analysis_failure=post.reason,
+            )
 
         # Asking does not write; only an accepted answer applies calibration items.
         answer = await tab.ask_writeback()

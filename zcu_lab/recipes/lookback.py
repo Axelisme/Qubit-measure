@@ -75,13 +75,18 @@ class LookbackInputs(FormModel):
 
 
 class LookbackReport(FormModel):
-    """Completed lookback results; cancellation returns no report."""
+    """Lookback results and failure reason; cancellation returns no report."""
 
     trigger_offset_us: float | None = Field(
         description="Proposed ADC trigger offset in us; null means not estimable."
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -106,8 +111,9 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     # Select the captured sources before editing measurement fields.
@@ -143,6 +149,12 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=LookbackSummary)
+        if analysis.result is None:
+            return LookbackReport(
+                trigger_offset_us=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

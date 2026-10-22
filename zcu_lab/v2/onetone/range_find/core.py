@@ -121,7 +121,7 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
         cfg = deepcopy(config)
         freqs = linear_freqs(cfg, context=context)
         signals = spectrum_buffer(freqs, plots=context.plots)
-        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
             freq_sweep = cfg.sweep.freq

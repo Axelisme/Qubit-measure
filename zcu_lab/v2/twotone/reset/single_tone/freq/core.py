@@ -112,7 +112,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         )
 
         # Sweep the tested reset frequency after the optional preparation.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
                 "freq", sweep2param("freq", sched.cfg.sweep.freq)

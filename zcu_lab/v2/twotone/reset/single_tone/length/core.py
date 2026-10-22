@@ -107,7 +107,7 @@ class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
         )
 
         # Sweep only the tested reset length after the optional preparation.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
                 "length", sweep2param("length", sched.cfg.sweep.length)

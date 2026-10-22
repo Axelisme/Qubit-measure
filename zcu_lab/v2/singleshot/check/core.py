@@ -110,7 +110,7 @@ class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
         )
 
         signals_buffer = SignalBuffer((cfg.shots,))
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
 
             # Prepare the same state for every shot before probing and readout.

@@ -8,7 +8,7 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
-from zcu_tools.experiment.stop_signal import parse_cancel_scope
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import (
     ReplyDetail,
@@ -30,9 +30,10 @@ def _execution_status(
     if key.startswith("recipe-"):
         execution = ctx.session.recipes.get(key)
         snapshot = asdict(execution.snapshot())
+        paths = asdict(execution.scope_status())
         return {
             **project_execution(snapshot, detail=detail),
-            "active_path": execution.active_path,
+            **paths,
         }
     return project_execution(
         asdict(ctx.session.executions.get(key).snapshot()),
@@ -93,7 +94,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     ] + [
         {
             **asdict(item),
-            "active_path": ctx.session.recipes.get(item.execution).active_path,
+            **asdict(ctx.session.recipes.get(item.execution).scope_status()),
         }
         for item in recipe_snapshots
     ]
@@ -111,7 +112,10 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             {
                 **project_execution(item),
                 **(
-                    {"active_path": item["active_path"]}
+                    {
+                        "active_path": item["active_path"],
+                        "live_paths": item["live_paths"],
+                    }
                     if "active_path" in item
                     else {}
                 ),
@@ -259,12 +263,16 @@ def cancel(
         )
     else:
         op = _operation_id(arguments)
-        if label in {"schedule", "acquire"}:
+        if label in {"schedule", "acquire"} or "/" in label:
             target_op = op
         execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
         if isinstance(execution, ScriptRecipeExecution):
-            reply = execution.cancel(scope=scope, expected=expected, op=target_op)
+            reply = execution.cancel(
+                scope=scope if "scope" in arguments else "recipe",
+                expected=expected,
+                op=target_op,
+            )
         elif label != "script" or sequence is not None:
             raise ValueError("scoped cancellation requires a recipe or workflow")
         else:
@@ -327,14 +335,14 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Cancel a live script, iteration, Run/operation, schedule or acquire scope. Use label#N or expected to refuse stale targets. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
+            "description": "Omit scope to stop the target root. Select a live kind, kind#N, operation:name or exact full live_paths path; ambiguous matches return full-path candidates. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "op": {"type": "integer"},
                     "execution": {"type": "string", "minLength": 1},
                     "run_id": {"type": "string", "minLength": 1},
-                    "scope": {"type": "string", "default": "script"},
+                    "scope": {"type": "string"},
                     "expected": {"type": "integer", "minimum": 1},
                 },
                 "oneOf": [

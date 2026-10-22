@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.utils.single_shot.ge import GENumericalError
 from zcu_tools.plotting.plots import Plots
@@ -100,9 +101,9 @@ def analyze_ge(
     cfg=None is supported. Validate option keys before fitting; invalid options
     raise. Each original index gets fit_i and either existing GE calibration /
     quality or a numerical/missing-preparation failure reason. No calibration
-    is invented for partial data. Only the GE owner's GENumericalError is
-    isolated; plotting and other errors propagate unchanged. Caller owns plots
-    finish/release. No hardware, current cfg, binding or proposal access occurs.
+    is invented for partial data. GENumericalError and AnalysisFailed are isolated;
+    plotting and other errors propagate unchanged. Caller owns plots finish/release.
+    No hardware, current cfg, binding or proposal access occurs.
     """
     indices = [int(i) for i in source.result.tone_indices]
     if any(type(i) is not int or i not in indices for i in options.overrides):
@@ -141,7 +142,7 @@ def analyze_ge(
                 _tone_source(source.result, row), option, plots=plots, figure_name=name
             )
             outcomes.append(MuxGEAnalysis(index, primary))
-        except GENumericalError as exc:
+        except (GENumericalError, AnalysisFailed) as exc:
             _failure_plot(plots, name, str(exc))
             outcomes.append(MuxFitFailure(index, str(exc)))
     return tuple(outcomes)
@@ -161,9 +162,9 @@ def post_analyze_ge(
     Invalid keys/radii or index mismatch raise before diagnostics. Publish post_i;
     retain primary failures and per-tone numerical failures without fabricating a
     calibration. Values are existing GE 3x3 diagnostics, not four-state assignment
-    matrices. Only the GE owner's GENumericalError is isolated; plotting and
-    other errors propagate unchanged. Caller finishes/releases plots; no hardware
-    or live source is read.
+    matrices. GENumericalError and AnalysisFailed are isolated; plotting and other
+    errors propagate unchanged. Caller finishes/releases plots; no hardware or live
+    source is read.
     """
     indices = [int(i) for i in source.result.tone_indices]
     if [item.index for item in primary] != indices:
@@ -199,7 +200,7 @@ def post_analyze_ge(
                 figure_name=name,
             )
             outcomes.append(MuxGEPostAnalysis(item.index, post))
-        except GENumericalError as exc:
+        except (GENumericalError, AnalysisFailed) as exc:
             _failure_plot(plots, name, str(exc))
             outcomes.append(MuxFitFailure(item.index, str(exc)))
     return tuple(outcomes)

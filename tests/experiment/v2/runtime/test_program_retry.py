@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -33,7 +34,9 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
     run_stop = StopSignal()
 
-    with Schedule(_cfg(reps=4, rounds=2), signals_buffer, stop=run_stop) as sched:
+    with Schedule(
+        _cfg(reps=4, rounds=2), signals_buffer, scope=Scope("run", stop=run_stop)
+    ) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(FakeModule("readout"))
@@ -108,7 +111,9 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
         checked_signals.append(signals_buffer.array.copy())
         return True
 
-    with Schedule(_cfg(rounds=3), signals_buffer, stop=run_stop) as sched:
+    with Schedule(
+        _cfg(rounds=3), signals_buffer, scope=Scope("run", stop=run_stop)
+    ) as sched:
         builder = sched.prog_builder("soc", "soccfg")
         runner = builder.run_program_decimated if decimated else builder.run_program
         result = runner(
@@ -135,7 +140,7 @@ def test_build_and_acquire_retries_acquire_on_the_same_program():
     FlakyBuildProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
             .add(FakeModule("readout"))
@@ -158,7 +163,9 @@ def test_build_and_acquire_retry_clears_shared_failure_cause():
     run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=run_stop) as sched:
+    with Schedule(
+        _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=run_stop)
+    ) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=FlakyBuildProgram)
             .add(FakeModule("readout"))
@@ -178,7 +185,7 @@ def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retryin
     InterruptingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
             .add(FakeModule("readout"))
@@ -202,7 +209,7 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial(
     result = None
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=2), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=2), signals_buffer, scope=Scope("run")) as sched:
         monkeypatch.setattr(StopBeforeDataProgram, "external_stop", sched.stop)
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=StopBeforeDataProgram)
@@ -227,7 +234,7 @@ def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
     AlwaysFailingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
@@ -253,7 +260,9 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
     run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=run_stop) as sched:
+    with Schedule(
+        _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=run_stop)
+    ) as sched:
         result = (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
@@ -309,7 +318,9 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
             raise NotImplementedError
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=stop) as sched:
+    with Schedule(
+        _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=stop)
+    ) as sched:
         result = (
             sched.prog_builder(
                 "soc",

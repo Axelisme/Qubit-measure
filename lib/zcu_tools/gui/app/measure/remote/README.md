@@ -77,9 +77,11 @@ unchanged, current-operation names are operation/<name>. A new attempt replaces
 the whole operation group; terminal delivery retains the latest group.
 Status includes `pending_question`, a
 `{request_id, question_type, question, answer_schema}` envelope or null outside
-Ask. Native status also projects pending_request_id and active_path.
+Ask. Native status also projects pending_request_id, active_path and live_paths.
+Active_path is the root-to-first-fork chain; live_paths is a structured list of
+all live leaf paths, never a comma-joined string.
 `workflow.cancel(run_id, scope, expected)` returns the existing snapshot plus
-cancelled/reason/active_path from the shared resolver. Stop remains script scope. Answer requires run_id,
+cancelled/reason/active_path/candidates from the shared resolver. Stop cancels the workflow root. Answer requires run_id,
 request_id and answer, and returns the original operation_id. Engine matches the
 ID before validating fields. Stale or absent questions return
 `precondition_failed/question_mismatch` with current pending_request_id or null.
@@ -98,19 +100,29 @@ actual operation-attempt facts alongside the encoded authored record.
 
 `operation.cancel_scope(operation_id, scope, expected=None)` targets the exact
 active GUI Run handle, alongside the unchanged generic `operation.cancel` hook.
-`operation.status_scope(operation_id)` returns its active_path, or an empty path
-when that Run is no longer active. Cancellation of an inactive handle returns
+`operation.status_scope(operation_id)` returns active_path and structured live_paths.
+An inactive Run returns an empty path and an empty list. Cancellation of an inactive handle returns
 scope not active and never targets the next Run. The Run owner and workflow host
-reuse experiment StopSignal resolution and CancelResult.
+reuse the experiment Scope resolver and CancelResult. Selectors include kind,
+kind#N, operation:<name> and exact full leaf paths. Multiple matches refuse with
+reason="ambiguous" and full-path candidates; kind#N only resolves same-parent
+sequences. Cross-parent duplicates still require an exact full path.
 
 The GUI path starts with run. Recipe projects only its schedule/acquire tail
-onto the local script/iteration/operation path. It preserves GUI acceptance and
-refusal reasons. Handle and sequence checks are process-local; the combined path
+onto the local recipe:<name>/operation#N path. Composite live_paths and cancel
+ack candidates omit the GUI run root by the same rule. GUI acceptance and refusal
+reasons remain unchanged. Handle and sequence checks are process-local; the combined path
 is not an atomic cross-process observation. Descendant cancellation marks Run
 metadata stopped through partial_result, without changing run Stop intent.
 `tab.snapshot.result_state.partial_result` carries the fixed completion fact even
 without native metadata. New Run and result replacement clear the old fact.
 Recipe RunResult reads this field, not operation terminal status or cancel ack.
+
+Analyze work may explicitly raise AnalysisFailed. Only that work failure adds
+failure_kind="analysis" to operation.await; recording/postprocessing errors stay
+unclassified. Recipe converts the analysis classification to a failed value,
+while arbitrary errors still raise. Root cancellation uses ScriptCancelled after
+drain and does not overwrite genuine errors.
 
 ## Predictor sources
 

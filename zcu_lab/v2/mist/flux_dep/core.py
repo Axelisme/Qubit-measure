@@ -150,13 +150,13 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
         )
 
         # 2. Set each external bias before acquiring its full gain trace.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for flux, step in sched.scan("flux", values.tolist()):
                 set_flux(
                     context.devices[step.cfg.flux_dev],
                     flux,
                     unit=step.cfg.flux_unit,
-                    stop=context.cancel_signal,
+                    stop=context.scope.stop,
                     progress=False,
                 )
 

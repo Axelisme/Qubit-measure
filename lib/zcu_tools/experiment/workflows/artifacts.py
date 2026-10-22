@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.utils import atomic_replace
 
 from .journal import JournalPayload, RecordCommitted, RunMetadata, RunStarted
@@ -66,9 +67,17 @@ class RecordEnvelope:
     """One persisted commit, independent of its directory allocation number.
 
     run_id/workflow bind the manifest. commit_seq orders committed records.
-    directory is data-root-relative commits/<allocation number>. committed_at
+    directory is data-root-relative and mirrors the committed scope. committed_at
     is UTC. started retains scope identity and actual tunables reads.
     record_type keys the informational manifest schema. record is encoded JSON.
+    scope_path is the committed scope's full path from the workflow root, using
+    slash-separated kind:name#seq segments. Unnamed scopes omit :name; the root
+    omits #seq. Author children use their label in place of kind.
+    name is this scope's optional explicit name: the workflow catalog name at
+    the root, or a caller-supplied built-in scope name (for example an operation
+    name). It is None for unnamed scopes, including author-labeled children;
+    an author label belongs to scope_path, not name. Non-None names are nonempty
+    and contain none of #, / or :.
     operations lists actual executor attempts in this committed scope.
     format/version identify the record file schema.
     """
@@ -81,6 +90,8 @@ class RecordEnvelope:
     started: RecordStarted
     record_type: str
     record: EncodedRecord
+    scope_path: str
+    name: str | None
     operations: tuple[OperationFacts, ...] = ()
     format: Literal["zcu-workflow-record"] = field(
         default="zcu-workflow-record", init=False
@@ -139,8 +150,6 @@ class RunArtifacts:
         self._paths = roots
         self._run_id = metadata.identity.run_id
         self._seq = 0
-        self._allocation_seq = 0
-        self._allocated: set[Path] = set()
         self._committed: set[Path] = set()
         self._journal_broken = False
         self._manifest = RunManifest(
@@ -246,32 +255,23 @@ class RunArtifacts:
         )
         self._manifest = manifest
 
-    def new_commit_dir(self) -> Path:
-        """Allocate/create the next six-digit commits directory, independent of commits.
+    def directory(self, scope: Scope) -> Path:
+        """Create the root-relative kind/sequence mirror only when requested."""
+        parts: list[str] = []
+        node = scope
+        while node.parent is not None:
+            parts.append(f"{node.kind}-{node.sequence:06d}")
+            node = node.parent
+        directory = self._paths.data_root.joinpath(*reversed(parts))
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
 
-        Each call allocates a distinct directory. Failed creation does not
-        consume a number. Allocation does not write a record or switch scopes.
-        """
+    def prepare_commit(self, scope: Scope) -> Path:
+        """Resolve the receiver directory and refuse a second publication."""
         with self._lock:
-            number = self._allocation_seq + 1
-            directory = self._paths.data_root / "commits" / f"{number:06d}"
-            directory.mkdir(parents=True, exist_ok=False)
-            self._allocated.add(directory)
-            self._allocation_seq = number
-            return directory
-
-    def prepare_commit(self, directory: Path | None) -> Path:
-        """Allocate when None; otherwise reject foreign/already-committed directories."""
-        with self._lock:
-            if directory is None:
-                return self.new_commit_dir()
-            directory = directory.resolve()
-            if directory not in self._allocated:
-                raise ValueError(
-                    f"Commit directory was not allocated by this run: {directory}"
-                )
+            directory = self.directory(scope)
             if directory in self._committed:
-                raise ValueError(f"Commit directory is already committed: {directory}")
+                raise ValueError("Scope is already committed")
             return directory
 
     def register_record(self, record: BaseModel) -> str:
@@ -295,7 +295,11 @@ class RunArtifacts:
             return name
 
     def publish_record(
-        self, directory: Path, event: RecordCommitted, started: RecordStarted
+        self,
+        directory: Path,
+        event: RecordCommitted,
+        started: RecordStarted,
+        scope: Scope,
     ) -> None:
         """Journal/flush a commit, then best-effort write its matching record.json.
 
@@ -315,6 +319,8 @@ class RunArtifacts:
                 started,
                 event.record_type,
                 event.encoded_record,
+                scope.path,
+                scope.name,
                 event.operations,
             )
             try:
