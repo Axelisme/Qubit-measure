@@ -6,6 +6,7 @@ from hashlib import sha256
 from math import prod
 from pathlib import Path
 from threading import Event
+from typing import Literal
 
 import numpy as np
 
@@ -148,8 +149,11 @@ class SingleFluxoniumSource:
     Direct callers must serialize all methods. One Engine owns numeric caches,
     one ReadoutCache owns ADC responses, and one complete preparation survives
     across acquires. No noisy result or sampling identity enters these caches.
+    readout_kind selects one terminal pulse or coherent mux tones on the same
+    physical cavity. It does not add receivers, coupling or hardware routes.
     private_replay optionally selects an explicit absolute author archive root;
-    None disables I/O. The caller owns devices, including after source close.
+    None disables I/O. Private single-model replay accepts pulse mode only;
+    combining mux mode with private_replay raises ValueError before acquisition. The caller owns devices, including after source close.
     """
 
     def __init__(
@@ -158,9 +162,15 @@ class SingleFluxoniumSource:
         devices: DeviceManager,
         *,
         private_replay: Path | None = None,
+        readout_kind: Literal["pulse", "mux"] = "pulse",
     ) -> None:
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
+        if readout_kind not in ("pulse", "mux"):
+            raise ValueError("readout_kind must be pulse or mux")
+        if readout_kind == "mux" and private_replay is not None:
+            raise ValueError("single-fluxonium private replay requires pulse readout")
+        self._readout_kind: Literal["pulse", "mux"] = readout_kind
         self.settings = settings
         self.devices = devices
         self.private_replay = private_replay
@@ -246,7 +256,9 @@ class SingleFluxoniumSource:
         if self._plan is None or self._plan_key != key:
             self._plan = None
             self._plan_key = None
-            self._plan = plan_template(self.settings, snapshot, template)
+            self._plan = plan_template(
+                self.settings, snapshot, template, readout_kind=self._readout_kind
+            )
             self._plan_key = key
         return self._plan
 
@@ -402,7 +414,8 @@ def single_fluxonium(
     configuration is validated settings or a physical YAML path, relative to cwd.
     Startup applies initial once in fixed A/V units. Returned SimulationEnvironment
     owns the manager; caller closes its devices, or transfers each to the GUI.
-    Source models/plans remain lazy. All three generators bind to the one ADC
+    Source models/plans remain lazy. The microwave and readout generators, plus
+    the optional fast-flux generator, bind to the one ADC
     for transport admission. The planner still requires readout-generator ADC
     windows; transport routes do not enable microwave/fast-flux readout physics.
     The backend evolves complete timelines and uses one physical ADC cavity.
@@ -435,8 +448,8 @@ def single_fluxonium(
         source = SingleFluxoniumSource(settings, devices, private_replay=private_replay)
         gens = (
             settings.drive_line.gen_ch,
-            settings.flux_line.gen_ch,
             settings.readout.drive.gen_ch,
+            *((settings.flux_line.gen_ch,) if settings.flux_line is not None else ()),
         )
         adc = settings.readout.adc.ro_ch
         soccfg = make_mock_soccfg(max(gens) + 1, adc + 1)
@@ -452,7 +465,7 @@ def single_fluxonium(
             soc,
             soccfg,
             devices,
-            "Single fluxonium with one microwave line, fast flux and one readout cavity",
+            "Single fluxonium with microwave control and one readout cavity",
             close_backend=source.close,
         )
     except Exception as error:

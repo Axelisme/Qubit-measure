@@ -8,7 +8,10 @@ import yaml
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
+    from zcu_tools.resources.single_fluxonium.schema import (
+        FluxLine,
+        SingleFluxoniumSettings,
+    )
 
 
 DOCUMENT = """
@@ -76,17 +79,23 @@ def _load(path: Path) -> "SingleFluxoniumSettings":
     return load_single_fluxonium(path)
 
 
+def _bound_flux(settings: "SingleFluxoniumSettings") -> "FluxLine":
+    if settings.flux_line is None:
+        raise AssertionError("pulsed fixture requires a bound fast-flux line")
+    return settings.flux_line
+
+
 def test_parse_returns_named_immutable_settings_and_replayable_values() -> None:
     settings = _parse(yaml.safe_load(DOCUMENT))
     assert settings.chip.qubit.ej_ghz == 4.0
     assert settings.dc_bias.source.flux_per_unit == 100.0
     assert settings.drive_line.charge_drive_ghz_per_gain.imag == -0.02
-    assert settings.flux_line.distortion_terms[0].amplitude == -0.1
+    assert _bound_flux(settings).distortion_terms[0].amplitude == -0.1
     assert settings.readout.adc.noise_psd_adc2_ns == ((1.0, 0.5), (0.5, 0.25))
     assert settings.numerics.truncation.levels == 4
     assert _parse(settings.model_dump(mode="json")) == settings
     with pytest.raises(ValidationError, match="frozen"):
-        settings.flux_line.tau_ns = 5.0
+        _bound_flux(settings).tau_ns = 5.0
 
 
 def test_load_reads_utf8_and_honors_yaml_merge_overrides(tmp_path: Path) -> None:
@@ -101,7 +110,7 @@ def test_load_reads_utf8_and_honors_yaml_merge_overrides(tmp_path: Path) -> None
     settings = _load(path)
     assert settings.dc_bias.source.name == "偏壓"
     assert settings.dc_bias.offset_phi0 == 0.5
-    assert settings.flux_line.delay_ns == 3.0
+    assert _bound_flux(settings).delay_ns == 3.0
 
 
 @pytest.mark.parametrize(
@@ -199,8 +208,8 @@ def test_zero_filter_and_noise_and_omitted_optional_values_are_legal() -> None:
             .replace("  seed: 123\n", "")
         )
     )
-    assert settings.flux_line.distortion_terms == ()
-    assert settings.flux_line.tau_ns == 0
+    assert _bound_flux(settings).distortion_terms == ()
+    assert _bound_flux(settings).tau_ns == 0
     assert settings.chip.qubit.q_cap is None
     assert settings.readout.resonator.thermal_occupation is None
     assert settings.numerics.seed is None
