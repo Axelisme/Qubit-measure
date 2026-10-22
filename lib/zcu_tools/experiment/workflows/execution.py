@@ -40,7 +40,7 @@ from .models import (
     CommittedRecord,
     InvalidRunState,
     Lifecycle,
-    OperationFact,
+    OperationFacts,
     QuestionMismatch,
     RunIdentity,
     RunPaths,
@@ -194,14 +194,14 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._revisions = []
         self._run_no = 0
         self._attempt = 0
-        self._operations: list[OperationFact] = []
+        self._operations: list[OperationFacts] = []
 
-    def _next_attempt(self) -> int:
+    def _next_attempt(self) -> tuple[int, int]:
         with self._lock:
             self._attempt += 1
-            return self._attempt
+            return self._commit_seq + 1, self._attempt
 
-    def _operation_finished(self, operation: OperationFact) -> None:
+    def _operation_finished(self, operation: OperationFacts) -> None:
         with self._lock:
             self._artifacts.append(OperationFinished(self._commit_seq + 1, operation))
             self._operations.append(deepcopy(operation))

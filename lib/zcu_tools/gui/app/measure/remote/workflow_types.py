@@ -5,7 +5,7 @@ from typing import Literal, TypedDict
 from pydantic import JsonValue
 
 from zcu_tools.datafile import JsonObject
-from zcu_tools.experiment.workflows import CommittedRecord, OperationFact, RunStatus
+from zcu_tools.experiment.workflows import CommittedRecord, OperationFacts, RunStatus
 from zcu_tools.experiment.workflows.models import OperationKind, OperationOutcome
 
 
@@ -21,16 +21,20 @@ class OperationReply(TypedDict):
     """One native attempt; UTC timestamps are ISO text, snapshot is JSON or None.
 
     kind identifies the operation helper; attempt counts actual executor starts
-    within this commit scope. outcome/reason retain native delivery classification.
+    within this commit scope. iteration counts successful commit scopes from one,
+    independently of directory allocation. stopped is the completion-time token
+    bit. outcome/reason retain native delivery classification.
     """
 
     kind: OperationKind
+    iteration: int
     attempt: int
     started_at: str
     finished_at: str
     device_snapshot: dict[str, JsonObject] | None
     outcome: OperationOutcome
     reason: str | None
+    stopped: bool
 
 
 class RecordReply(TypedDict):
@@ -103,10 +107,11 @@ def project_record(record: CommittedRecord) -> RecordReply:
     }
 
 
-def project_operation(operation: OperationFact) -> OperationReply:
+def project_operation(operation: OperationFacts) -> OperationReply:
     """Project one detached native attempt without reading devices or files."""
     return {
         "kind": operation.kind,
+        "iteration": operation.iteration,
         "attempt": operation.attempt,
         "started_at": operation.started_at.isoformat(),
         "finished_at": operation.finished_at.isoformat(),
@@ -115,6 +120,7 @@ def project_operation(operation: OperationFact) -> OperationReply:
         else dict(operation.device_snapshot),
         "outcome": operation.outcome,
         "reason": operation.reason,
+        "stopped": operation.stopped,
     }
 
 
