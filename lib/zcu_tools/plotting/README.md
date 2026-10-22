@@ -15,6 +15,7 @@
 canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換全域 backend。
 一般圖可先繪製與保存，adapter 於操作完成後才接上呈現。此接口不處理 frontend
 呈現、保存政策或 Matplotlib thread safety。
+`Plots.fork()` 建立共享同一 presentation host 的全新通用 Plots。兩個集合各自持有圖、finish 與 release，不共享名稱或 typed handles。即使原集合是子型別，fork 也不繼承其命名政策。
 `plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot、單熱圖
 `liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。`liveplot_scatter` 接同長、非空一維實數 xs／ys／colors，保留 scalar color coordinate 與自動色階；更新前複製三組資料，artist mutation 仍由 host owner 執行。兩種 2D handle 共用
 `(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。單熱圖可指定 `clim=(min, max)`，固定色階跨 update 保留，未指定時沿資料自動縮放。

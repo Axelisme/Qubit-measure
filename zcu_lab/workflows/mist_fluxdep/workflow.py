@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -15,12 +16,14 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import (
     PowerDepCfg,
     PowerDepModuleCfg,
+    PowerDepResult,
     PowerDepSweepCfg,
 )
 from zcu_lab.workflows.common.calibration import (
@@ -154,6 +157,21 @@ def mist_cfg(plan: MISTPlan, tun: MISTTunables, cal: CalibratedPi2) -> PowerDepC
     )
 
 
+def _save_gain(plots: Plots, result: PowerDepResult, directory: Path) -> None:
+    name = "mist/gain"
+    if name not in plots:
+        plots.subplots(name)
+
+    def draw(figure: Figure) -> None:
+        figure.clear()
+        axis = figure.subplots()
+        axis.plot(result.gains, mist_signal2real(result.signals), ".-")
+        axis.set(xlabel="MIST gain (a.u.)", ylabel="MIST")
+
+    plots.draw(name, draw)
+    plots.save(name, directory / "gain.png")
+
+
 @workflow("mist_fluxdep", "Calibrate and acquire MIST gain traces versus flux.")
 async def mist_fluxdep(
     env: WorkflowEnv[Calibrated], plan: MISTPlan, tun: Live[MISTTunables]
@@ -233,7 +251,6 @@ async def mist_fluxdep(
         success = False
         if cal is not None:
             # The custom native sequence rebuilds its gain plot on each attempt.
-            gain_name = "mist/gain"
             outcome = await env.run(run_mist, mist_cfg(plan, tun.current, cal))
             if isinstance(outcome, Failed):
                 reason = outcome.reason
@@ -244,9 +261,10 @@ async def mist_fluxdep(
                     snapshot=plan.snapshot,
                     identity=env.identity,
                 )
-                traces[index] = outcome.value.result.signals
-                gains = outcome.value.result.gains.copy()
-                env.plots.save(gain_name, d / "gain.png")
+                result = outcome.value.result
+                traces[index] = result.signals
+                gains = result.gains.copy()
+                _save_gain(env.plots, result, d)
                 success, reason = True, None
         await env.commit(
             MISTPoint(

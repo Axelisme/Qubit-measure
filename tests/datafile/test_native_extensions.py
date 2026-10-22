@@ -437,10 +437,11 @@ def test_detached_image_preserves_minor_unknown_nodes_links_and_references(
 
 
 @pytest.mark.parametrize(
-    "version,expected", [("2.0", "2.1"), ("2.1", "2.1"), ("2.7", "2.7")]
+    "version,expected",
+    [("2.0", "2.2"), ("2.1", "2.2"), ("2.2", "2.2"), ("2.7", "2.7")],
 )
 @pytest.mark.parametrize("unknown", [False, True])
-def test_image_rewrite_uses_at_least_2_1_without_downgrading_future_minor(
+def test_image_rewrite_uses_at_least_2_2_without_downgrading_future_minor(
     tmp_path: Path, version: str, expected: str, unknown: bool
 ) -> None:
     source = tmp_path / "source.h5"

@@ -48,7 +48,7 @@ def save_run_data(
     same-directory temporary file, close it, then atomically publish; failures
     remove this call's temp and preserve the prior destination.
     extensions reuses a detached validated image for same-shape generic rewrites;
-    rewrites use max(source version, 2.1); None creates version 2.1.
+    rewrites use max(source version, 2.2); None creates version 2.2.
     Known nodes must resolve within this file. Existing
     fixed UTF-8 JSON retains unchanged raw text; edits beyond byte capacity fail.
     Invalid known data raises a destination/location ValueError. I/O errors
@@ -74,11 +74,11 @@ def save_run_data(
         with h5.File(temp, "r+" if extensions is not None else "w") as file:
             if extensions is not None:
                 version = _validate_header(file, destination)
-                if version.minor < 1:
-                    file.attrs["format_version"] = "2.1"
+                if version.minor < 2:
+                    file.attrs["format_version"] = "2.2"
             else:
                 file.attrs["format"] = "zcu.experiment-data"
-                file.attrs["format_version"] = "2.1"
+                file.attrs["format_version"] = "2.2"
             write_metadata(file, metadata, cfg)
             _write_payload(file, payload, labber_json)
         if replace:

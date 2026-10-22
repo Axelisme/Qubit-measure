@@ -18,13 +18,13 @@
 
 ## Host 與操作
 
-宿主以 `EnginePorts` 注入 clock、devices、`Plots`、concrete progress factory 與 context。宿主持有連線、worker 與 RUN lease。核心不 connect、disconnect，也不依賴 Qt。
+宿主以 `EnginePorts` 注入 clock、devices、`WorkflowPlots`、concrete progress factory 與 context。宿主持有連線、worker 與 RUN lease。核心不 connect、disconnect，也不依賴 Qt。
 
 `Engine.start` 驗證與保存啟動資料，不執行作者。宿主在一個 worker 呼叫一次 `Engine.execute`。這個呼叫透過共用 `experiment.script_host.ScriptHost` 推進整個 coroutine，包含 Pause 與 Ask 的等待。控制命令只通知同一個 worker，不另排 execute、answer 或 drain segment。新 run 必須等原 worker 的 finally 與 executor 都結束。
 
 `await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示 operation 或已完成 descendant 在完成時曾被取消。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
 
-`await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 必須是 ExpCfgModel。每個 attempt 建立既有 RunContext，借用 soc、soccfg、env.plots 與 connected drivers，並使用當次 operation token。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
+`await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 必須是 ExpCfgModel。每個 attempt 建立新的 RunContext，借用 soc、soccfg 與 connected drivers，使用當次 operation token 及獨立的 operation Plots。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
 
 `DevicePort.get_connected_devices` 回 detached mapping，driver 生命週期仍屬宿主。DeviceMapping 集中異質 driver 的型別邊界。缺 devices capability 會 raise MissingCapability；確定沒有 device 時，宿主提供回空 mapping 的 port。Snapshot 讀取失敗阻止 core fn 執行。框架不依 cfg.dev 自動 setup 或預先解析角色。
 
@@ -70,7 +70,11 @@ Stale 或無 pending 的 ID 會 raise QuestionMismatch，攜帶目前 pending_re
 
 GUI facet 與 MCP status 讀相同 pending envelope。GUI Answer 使用畫面原題的 ID，MCP workflow_answer 必填 request_id。Wrong model 或 schema 不消耗問題。Stop 在同一 worker 交 None 並執行 finally。只有 terminal owner delivery 才釋放 operation、progress 與 RUN lease。
 
-`env.plots` 跨 commit、Pause 與 retry 保留同一 lifetime。作者使用 typed plot handles 或 draw 更新，並自行保存圖片。宿主在 producer 結束後 finish/release。`assemble_rows` 與 `assemble_scalars` 將稀疏結果組成 detached 顯示陣列，不插值。
+`env.plots` 是原注入的 `WorkflowPlots`，跨 commit、Pause 與 retry 保留 workflow 趨勢圖。每次 `env.run` attempt 經 `start_operation()` 建立同一 presentation host 上的獨立 Plots。返回、Pause 丟棄與失敗都先 finish；下一個 attempt 開始前 release 舊 operation。Core 與 finish 同時失敗時保留 core 例外並附 cleanup note；只有 finish 失敗則直接 raise，不交 Completed。
+
+`WorkflowPlots.figures()` 回 workflow `<name>` 與目前 `operation/<name>` 的同一投影，供 pane 與 MCP 使用。Workflow 圖名登記時拒絕 `operation/` 前綴，通用 Plots 與 operation 圖不受此限制。新 attempt 整組替換 operation，terminal 保留最新一組；宿主在 workflow producer 結束後 finish，tab replacement 或 close release 兩組 presentation，不銷毀原生 Figures。
+
+作者用 typed plot handles 或 draw 更新 workflow 圖。保存圖片時從 `completed.value.result` 重畫，不依賴 operation live 圖的保存位置。`assemble_rows` 與 `assemble_scalars` 將稀疏結果組成 detached 顯示陣列，不插值。
 
 GUI 組裝見 [measure README](../../gui/app/measure/README.md#workflow-hosting)，agent 工具見 [measure MCP](../../mcp/measure/README.md#workflow-tools)。框架不依賴具體 workflow、校準資料或 GUI 選中狀態。
 
