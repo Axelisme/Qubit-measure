@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.experiment.workflows import Done, InitEnv, Step, WorkflowEnv, workflow
+from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
@@ -62,17 +62,12 @@ class NativeTunables(BaseModel):
     gain: float
 
 
-def _init(env: InitEnv[None], plan: NativePlan) -> int:
-    return 0
-
-
-@workflow("synthetic", plan=NativePlan, tunables=NativeTunables, init=_init)
-def _waiting(
-    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: int
-) -> Step[int, int]:
-    # Public wait effect lets Pause and Stop end the segment without elapsed-time success.
-    yield from env.wait_until(env.started_at + timedelta(days=1))
-    return Done()
+@workflow("synthetic", "Synthetic retained-worker wait")
+async def _waiting(
+    env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+) -> None:
+    # A public wait keeps this invocation live until the scenario requests Stop.
+    await env.wait_until(env.started_at + timedelta(days=1))
 
 
 @pytest.fixture
@@ -98,7 +93,7 @@ def _host_window(
     ctrl.workflow_control().configure(
         (
             WorkflowAttachment(
-                step=_waiting,
+                script=_waiting,
                 plan_model=Plan,
                 knobs_model=Tunables,
                 plan_to_cfg=lambda form, env, snapshot: NativePlan(cycles=form.cycles),
@@ -393,7 +388,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     _shot(driver, tmp_path, "06-badge-navigation")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
     driver.click("Pause")
-    qt_until(lambda: _status(driver, "paused"), label="paused segment delivered")
+    qt_until(lambda: _status(driver, "paused"), label="native pause gate")
     _shot(driver, tmp_path, "07-paused")
     driver.click_tooltip("Close synthetic (1)")
     _shot(driver, tmp_path, "08-paused-close-refused")
@@ -409,7 +404,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     qt_until(lambda: _status(driver, "running"), label="resumed")
     _shot(driver, tmp_path, "10-resumed")
     driver.click("Stop")
-    qt_until(lambda: _status(driver, "stopped"), label="stop delivered")
+    qt_until(lambda: _status(driver, "cancelled"), label="stop delivered")
     _shot(driver, tmp_path, "11-stopped")
     driver.click_tooltip("Close synthetic (1)")
     _shot(driver, tmp_path, "12-closed-after-stop")
@@ -438,14 +433,14 @@ def test_run_state_shows_only_meaningful_controls(
     _ask_shot(driver, tmp_path, "controls-01-idle")
     if state != "idle":
         driver.click("Start")
-        # The finite start segment delivers Ask or the synthetic public wait.
+        # The retained invocation delivers Ask or the synthetic public wait.
         qt_until(
             lambda: _status(driver, "paused" if state == "waiting" else "running"),
             label="control scenario start delivery",
         )
     if state == "paused":
         driver.click("Pause")
-        # Pause ends the waiting segment and delivers its native paused status.
+        # Pause interrupts the wait and retains the invocation at its native gate.
         qt_until(lambda: _status(driver, "paused"), label="control scenario paused")
     _ask_shot(driver, tmp_path, f"controls-02-{state}")
     try:
@@ -454,7 +449,9 @@ def test_run_state_shows_only_meaningful_controls(
         if state != "idle":
             driver.click("Stop")
             # Stop releases the synthetic wait or retained Ask before teardown.
-            qt_until(lambda: _status(driver, "stopped"), label="control scenario stop")
+            qt_until(
+                lambda: _status(driver, "cancelled"), label="control scenario stop"
+            )
             _ask_shot(driver, tmp_path, "controls-03-stopped")
 
 
@@ -504,7 +501,7 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     _ask_shot(driver, tmp_path, "ask-03-opened")
     assert driver.tabs("Plan").captions == ("Plan", "Tunables")
     driver.click("Start")
-    # Start submitted a finite segment that must yield its synthetic question.
+    # Start submitted a retained invocation that must yield its synthetic question.
     qt_until(lambda: _status(driver, "paused"), label="Ask pause")
     _ask_shot(driver, tmp_path, "ask-04-question")
     assert driver.tabs("Ask").current == "Ask", "Pending question must select Ask"
@@ -521,13 +518,15 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     assert driver.tabs("Ask").current == "Ask"
     if cancel:
         driver.click("Stop")
-        # Stop scheduled the retained Ask drain; delivery ends this same run.
-        qt_until(lambda: _status(driver, "stopped"), label="Ask cancellation delivery")
+        # Stop releases the retained Ask; delivery ends this same run.
+        qt_until(
+            lambda: _status(driver, "cancelled"), label="Ask cancellation delivery"
+        )
     else:
         driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
         _ask_shot(driver, tmp_path, "ask-08-answer-edited")
         driver.click("Answer")
-        # Answer submitted a finite continuation ending in Done.
+        # Answer releases the coroutine to its terminal return.
         qt_until(lambda: _status(driver, "done"), label="answer terminal delivery")
     _ask_shot(driver, tmp_path, "ask-09-retained-exchange")
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
@@ -551,21 +550,18 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
 def restart_questions_window(workflow_window):
     ctrl, window = workflow_window
 
-    @workflow(
-        "restart-questions", plan=Native, tunables=Native, init=lambda env, plan: 0
-    )
-    def questions(
-        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
-    ) -> Step[int, int]:
+    @workflow("restart-questions", "Synthetic fresh-run Ask presentation")
+    async def questions(
+        env: WorkflowEnv[None], plan: Native, tun: Live[Native]
+    ) -> None:
         # An explicit zero plan makes the entire run question-free.
         if plan.value:
-            yield from env.ask(Choose(point=plan.value))
-        return Done()
+            await env.ask(Choose(point=plan.value))
 
     ctrl.workflow_control().configure(
         (
             WorkflowAttachment(
-                step=questions,
+                script=questions,
                 plan_model=Values,
                 knobs_model=Values,
                 plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
@@ -588,7 +584,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     driver.enter_text(object_name="form.input.value", value="1")
     _ask_shot(driver, tmp_path, "restart-03-first-plan")
     driver.click("Start")
-    # The finite author segment yields the explicitly requested first question.
+    # The author coroutine yields the explicitly requested first question.
     qt_until(lambda: _status(driver, "paused"), label="first run question")
     _ask_shot(driver, tmp_path, "restart-04-first-question")
     assert driver.tabs("Ask").current == "Ask"
@@ -596,7 +592,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
     _ask_shot(driver, tmp_path, "restart-05-answer-edited")
     driver.click("Answer")
-    # Answer resumes the finite author continuation, which returns Done.
+    # Answer resumes the author coroutine, which returns.
     qt_until(lambda: _status(driver, "done"), label="first run answered")
     _ask_shot(driver, tmp_path, "restart-06-retained-exchange")
     assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
@@ -609,7 +605,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     driver.enter_text(object_name="form.input.value", value="0")
     _ask_shot(driver, tmp_path, "restart-08-question-free-plan")
     driver.click("Start")
-    # The zero plan returns Done without any Ask, so this is a stable no-question state.
+    # The zero plan returns without any Ask, so this is a stable no-question state.
     qt_until(lambda: _status(driver, "done"), label="question-free run completed")
     _ask_shot(driver, tmp_path, "restart-09-question-free-run")
     assert driver.tabs("Plan").captions == ("Plan", "Tunables")
@@ -633,7 +629,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     assert driver.observe("Answer").enabled
     driver.click("Stop")
     # Stop drains the retained question before the shared window fixture closes.
-    qt_until(lambda: _status(driver, "stopped"), label="new run question cancelled")
+    qt_until(lambda: _status(driver, "cancelled"), label="new run question cancelled")
     _ask_shot(driver, tmp_path, "restart-12-stopped")
 
 
@@ -642,22 +638,21 @@ def two_questions_window(workflow_window):
     ctrl, window = workflow_window
     release = Event()
 
-    @workflow("two-questions", plan=Native, tunables=Native, init=lambda env, plan: 0)
-    def questions(
-        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
-    ) -> Step[int, int]:
-        first = yield from env.ask(Choose(point=1))
+    @workflow("two-questions", "Synthetic successive Ask presentation")
+    async def questions(
+        env: WorkflowEnv[None], plan: Native, tun: Live[Native]
+    ) -> None:
+        first = await env.ask(Choose(point=1))
         if first is None:
-            return Done()
+            return
         if not release.wait(30):
             raise TimeoutError("Second question was not released by the scenario")
-        yield from env.ask(Choose(point=2))
-        return Done()
+        await env.ask(Choose(point=2))
 
     ctrl.workflow_control().configure(
         (
             WorkflowAttachment(
-                step=questions,
+                script=questions,
                 plan_model=Values,
                 knobs_model=Values,
                 plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
@@ -679,7 +674,7 @@ def test_next_question_replaces_answer_and_selects_ask(two_questions_window, tmp
     driver.select_menu("New Tab ▾", ("two-questions",))
     _ask_shot(driver, tmp_path, "next-01-opened")
     driver.click("Start")
-    # The finite start segment must yield the first synthetic question.
+    # The retained invocation must yield the first synthetic question.
     qt_until(lambda: _status(driver, "paused"), label="first question")
     _ask_shot(driver, tmp_path, "next-02-first-question")
     assert '"point": 1' in driver.observe(object_name="workflow.ask").text
@@ -689,7 +684,7 @@ def test_next_question_replaces_answer_and_selects_ask(two_questions_window, tmp
     driver.select_tab("Plan")
     _ask_shot(driver, tmp_path, "next-04-plan-during-continuation")
     release.set()
-    # Releasing the author lets the finite continuation yield its second question.
+    # Releasing the author lets the author continuation yield its second question.
     qt_until(
         lambda: any(
             w.object_name == "workflow.ask" and '"point": 2' in w.text
@@ -703,7 +698,7 @@ def test_next_question_replaces_answer_and_selects_ask(two_questions_window, tmp
     assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
     driver.click("Stop")
     # Stop drains the second retained Ask before fixture shutdown.
-    qt_until(lambda: _status(driver, "stopped"), label="second question cancelled")
+    qt_until(lambda: _status(driver, "cancelled"), label="second question cancelled")
     _ask_shot(driver, tmp_path, "next-06-cancelled")
 
 
@@ -718,7 +713,7 @@ def test_external_answer_projects_accepted_exchange_to_window(
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "external-01-opened")
     driver.click("Start")
-    # Start's finite Ask segment must publish answerable controls on owner delivery.
+    # The retained Ask must publish answerable controls.
     qt_until(
         lambda: any(w.text == "Answer" and w.enabled for w in driver.visible().widgets),
         label="external Ask owner delivery",
@@ -726,22 +721,23 @@ def test_external_answer_projects_accepted_exchange_to_window(
     _ask_shot(driver, tmp_path, "external-02-question")
     run_id = control.tabs()[0].run_id
     assert run_id is not None
+    question = control.pending_question(run_id)
+    assert question is not None
     if reject_first:
-        control.answer(run_id, OtherAnswer(value=99))
-        # Rejected native model returns a paused error on the same owner delivery.
-        qt_until(
-            lambda: control.tabs()[0].error is not None,
-            label="rejected answer delivery",
-        )
+        # External callers receive synchronous validation; no worker segment is submitted.
+        with pytest.raises(
+            TypeError, match="Answer must match the question's declared model"
+        ):
+            control.answer(
+                run_id, OtherAnswer(value=99), request_id=question["request_id"]
+            )
         _ask_shot(driver, tmp_path, "external-03-rejected")
-        assert _text(driver, "workflow.message") == (
-            "Choose: Answer must be an instance of Decision"
-        )
+        assert control.pending_question(run_id) == question
         assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
         assert driver.observe("Answer").enabled
-    control.answer(run_id, {"value": 29})
+    control.answer(run_id, {"value": 29}, request_id=question["request_id"])
     # This is deliberately an external-caller seam, not a replacement for the
-    # ComponentDriver local Answer/Stop scenarios. The finite segment ends Done.
+    # ComponentDriver local Answer/Stop scenarios. The answered coroutine returns.
     qt_until(lambda: _status(driver, "done"), label="external answer delivery")
     _ask_shot(driver, tmp_path, "external-04-accepted")
     assert json.loads(driver.observe(object_name="workflow.answer").text) == {
@@ -752,9 +748,9 @@ def test_external_answer_projects_accepted_exchange_to_window(
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
     assert not any(
         w.object_name == "workflow.message"
-        and "Choose: Answer must be an instance of Decision" in w.text
+        and "Answer must match the question's declared model" in w.text
         for w in driver.visible().widgets
-    ), "Accepted retry must clear the previous owner error from the Window"
+    ), "An accepted exchange must not display an answer validation error"
 
 
 def _check_remote_workflow_controls(driver: ComponentDriver, root: Path) -> None:
@@ -815,7 +811,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "remote-03-opened")
     driver.click("Start")
-    # The submitted finite segment must deliver its synthetic Ask pause.
+    # The submitted retained invocation must deliver its synthetic Ask pause.
     qt_until(lambda: _status(driver, "paused"), label="remote Stop Ask pause")
     _ask_shot(driver, tmp_path, "remote-04-question")
     token = control.tabs()[0].operation_id
@@ -866,9 +862,9 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         assert pending is not None and pending.reason == "timeout"
         assert pending.outcome is None
         release_cleanup.set()
-        # Released cleanup returns Done; the original owner must deliver stopped.
+        # Released cleanup returns; the original owner must deliver cancellation.
         qt_until(
-            lambda: _status(driver, "stopped"), label="remote Stop terminal delivery"
+            lambda: _status(driver, "cancelled"), label="remote Stop terminal delivery"
         )
         _ask_shot(driver, tmp_path, "remote-09-local-stopped")
         _check_workflow_cancelled(driver, ctrl, run_id, token, author)

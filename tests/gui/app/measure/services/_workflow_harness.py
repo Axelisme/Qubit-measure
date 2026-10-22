@@ -2,6 +2,8 @@
 
 import logging
 from collections.abc import Callable
+from threading import Event, Thread
+from time import monotonic
 
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -36,6 +38,8 @@ class DeferredBackground:
         self.on_error: Callable[[Exception], None] | None = None
         self.result: object = None
         self.error: Exception | None = None
+        self.worker: Thread | None = None
+        self.completed = Event()
 
     def submit(
         self,
@@ -64,6 +68,16 @@ class DeferredBackground:
         except Exception as error:
             logging.exception("Deferred test worker failed")
             self.error = error
+        finally:
+            self.completed.set()
+
+    def start(self) -> None:
+        """Start the retained invocation without delivering owner terminal callbacks."""
+        if self.worker is not None:
+            raise RuntimeError("a retained worker already exists")
+        self.completed.clear()
+        self.worker = Thread(target=self.execute)
+        self.worker.start()
 
     def deliver(self) -> None:
         if self.on_done is None or self.on_error is None:
@@ -131,6 +145,27 @@ class StartHarness:
         for name in names:
             self.devices.register_device(name, FakeDevice(address=name, fast_mode=True))
         self.services.device.publish_initial_devices()
+
+    def wait_for(self, completed: Callable[[], bool], *, label: str) -> None:
+        """Pump the manual owner until a public condition holds, with a watchdog."""
+        deadline = monotonic() + 30
+        while not completed():
+            if monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for {label}")
+            self.owner.pump_once(block=True, timeout=0.01)
+
+    def finish_worker(self) -> None:
+        """Wait for the retained worker, then deliver its terminal callbacks once."""
+        worker = self.background.worker
+        if worker is None:
+            raise RuntimeError("no retained worker")
+        self.wait_for(self.background.completed.is_set, label="workflow worker return")
+        worker.join(timeout=30)
+        if worker.is_alive():
+            raise TimeoutError("Workflow worker did not exit")
+        self.background.worker = None
+        self.owner.pump_all()
+        self.background.deliver()
 
     def complete_segment(self) -> None:
         """Run the deferred worker, pump its progress, then deliver owner terminal."""

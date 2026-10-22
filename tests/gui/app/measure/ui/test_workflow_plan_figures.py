@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.experiment.workflows import Done, InitEnv, Step, WorkflowEnv, workflow
+from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.adapter import RunRequest
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -81,31 +81,25 @@ class NativeTunables(BaseModel):
     gain: float
 
 
-def _init(env: InitEnv[None], plan: NativePlan) -> None:
-    return None
-
-
-@workflow("flux-list", plan=NativePlan, tunables=NativeTunables, init=_init)
-def _plot_fluxes(
-    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: None
-) -> Step[None, None]:
+@workflow("flux-list", "Synthetic float-list plan plotting")
+async def _plot_fluxes(
+    env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+) -> None:
     if plan.fluxes:
         viewer = env.plots.liveplot_1d("flux trace", "Flux", f"fluxes={plan.fluxes}")
         values = np.asarray(plan.fluxes)
-        viewer.update(values, values * tun.gain)
-    yield from env.wait_until(env.started_at)
-    return Done()
+        viewer.update(values, values * tun.current.gain)
+    await env.wait_until(env.started_at)
 
 
-@workflow("flux-sweep", plan=NativePlan, tunables=NativeTunables, init=_init)
-def _plot_sweep(
-    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: None
-) -> Step[None, None]:
+@workflow("flux-sweep", "Synthetic sweep plan plotting")
+async def _plot_sweep(
+    env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+) -> None:
     values = np.asarray(plan.fluxes)
     viewer = env.plots.liveplot_1d("flux trace", "Flux", f"fluxes={plan.fluxes}")
-    viewer.update(values, values * tun.gain)
-    yield from env.wait_until(env.started_at)
-    return Done()
+    viewer.update(values, values * tun.current.gain)
+    await env.wait_until(env.started_at)
 
 
 @pytest.fixture
@@ -136,7 +130,7 @@ def _host_plan_window(
     ctrl.workflow_control().configure(
         (
             WorkflowAttachment(
-                step=_plot_fluxes,
+                script=_plot_fluxes,
                 plan_model=Plan,
                 knobs_model=Tunables,
                 plan_to_cfg=lambda form, env, snapshot: NativePlan(fluxes=form.fluxes),
@@ -144,7 +138,7 @@ def _host_plan_window(
                 seed=lambda plan, form: None,
             ),
             WorkflowAttachment(
-                step=_plot_sweep,
+                script=_plot_sweep,
                 plan_model=RequiredSweepPlan if required else SweepPlan,
                 knobs_model=Tunables,
                 plan_to_cfg=lambda form, env, snapshot: NativePlan(

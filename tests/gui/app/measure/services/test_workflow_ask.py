@@ -1,14 +1,18 @@
 """Native Ask through the registered headless facet and retained operation owner."""
 
 import json
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from threading import Event, get_ident
 
 import pytest
 from pydantic import ValidationError
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.experiment.workflows import Actor, InvalidRunState, RunMismatch
+from zcu_tools.experiment.workflows import (
+    Actor,
+    Completed,
+    QuestionMismatch,
+    RunMismatch,
+)
 from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.session.context_types import PointUseRequest
@@ -40,12 +44,18 @@ def asking(tmp_path):
     tab = control.open("asking")
     token = control.start(tab, "question-run")
     assert not isinstance(token, FormErrors)
-    harness.complete_segment()
+    harness.background.start()
     try:
+        harness.wait_for(
+            lambda: control.pending_question("question-run") is not None,
+            label="native Ask publication",
+        )
         yield control, harness, author, tab, token
     finally:
         control.stop("question-run")
-        if harness.background.work is not None:
+        if harness.background.worker is not None:
+            harness.finish_worker()
+        elif harness.background.work is not None:
             harness.complete_segment()
         control.close(tab)
 
@@ -69,35 +79,41 @@ def test_answer_keeps_invocation_operation_and_lease_until_owner_delivery(asking
     assert question["question_type"] == "Choose"
     assert question["question"] == {"question_type": "authored evidence", "point": 4}
     assert question["answer_schema"]["properties"]["value"]["type"] == "integer"
+    request_id = question["request_id"]
     control.apply_tunables("question-run", {("value",): 9}, actor=Actor("user", "test"))
-    assert control.answer("question-run", {"value": 23}) == token
-    assert author.deliveries == [], "Submission must not execute author code inline"
-    with pytest.raises(InvalidRunState):
-        control.answer("question-run", {"value": 24})
+    assert control.answer("question-run", {"value": 23}, request_id=request_id) == token
+    with pytest.raises(QuestionMismatch):
+        control.answer("question-run", {"value": 24}, request_id=request_id)
     other = control.open("asking")
     try:
-        with ThreadPoolExecutor(max_workers=1) as worker:
-            worker.submit(harness.background.execute).result(timeout=30)
+        harness.wait_for(
+            harness.background.completed.is_set, label="answered worker return"
+        )
         assert author.captures == [3]
         assert author.deliveries == [(Decision(value=23), author.deliveries[0][1])]
-        assert author.deliveries[0][1] != get_ident()
+        assert author.deliveries[0][1] != get_ident(), (
+            "Answer must not execute author code inline"
+        )
         assert control.tabs()[0].operation_id == token
         assert run_lease_presence(harness) == lease
         assert not control.close(tab)
         with pytest.raises(OperationConflictError):
             control.start(other, "competing")
-        harness.owner.pump_all()
-        harness.background.deliver()
+        harness.finish_worker()
         assert control.tabs()[0].operation_id is None
         assert run_lease_presence(harness) == ()
         assert control.records("question-run")[0].revision == 0
-        assert control.records("question-run")[0].encoded_record.value == 23
+        assert control.records("question-run")[0].encoded_record.value == {"value": 23}
         assert harness.handles.known_outcome(token).status == "finished"
         replacement = control.start(other, "after-delivery")
         assert isinstance(replacement, int)
-        harness.complete_segment()
+        harness.background.start()
+        harness.wait_for(
+            lambda: control.pending_question("after-delivery") is not None,
+            label="replacement Ask publication",
+        )
         control.stop("after-delivery")
-        harness.complete_segment()
+        harness.finish_worker()
     finally:
         control.close(other)
 
@@ -106,14 +122,16 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
     control, harness, author, tab, token = asking
     lease = run_lease_presence(harness)
     assert lease
-    assert control.answer("question-run", OtherAnswer(value=7)) == token
-    harness.background.execute()
-    assert isinstance(harness.background.error, TypeError)
-    harness.owner.pump_all()
-    harness.background.deliver()
+    question = control.pending_question("question-run")
+    assert question is not None
+    request_id = question["request_id"]
+    with pytest.raises(
+        TypeError, match="Answer must match the question's declared model"
+    ):
+        control.answer("question-run", OtherAnswer(value=7), request_id=request_id)
     assert control.status("question-run").lifecycle == "paused"
     assert control.tabs()[0].operation_id == token
-    assert control.pending_question("question-run") is not None
+    assert control.pending_question("question-run") == question
     assert run_lease_presence(harness) == lease
     assert not control.close(tab)
     assert harness.handles.known_outcome(token) is None
@@ -122,8 +140,11 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
         json.loads(line)["kind"] for line in journal.read_text().splitlines()
     ]
     assert author.deliveries == []
-    assert control.answer("question-run", Decision(value=8)) == token
-    harness.complete_segment()
+    assert (
+        control.answer("question-run", Decision(value=8), request_id=request_id)
+        == token
+    )
+    harness.finish_worker()
     assert control.status("question-run").lifecycle == "done"
     assert harness.handles.known_outcome(token).status == "finished"
     assert run_lease_presence(harness) == ()
@@ -131,17 +152,23 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
 
 def test_invalid_json_answer_is_rejected_without_consuming_question(asking):
     control, harness, author, _tab, token = asking
-    with pytest.raises(ValidationError, match="Choose"):
-        control.answer("question-run", {"value": "not an integer"})
-    assert harness.background.work is None
+    question = control.pending_question("question-run")
+    assert question is not None
+    request_id = question["request_id"]
+    with pytest.raises(ValidationError, match="Decision"):
+        control.answer(
+            "question-run", {"value": "not an integer"}, request_id=request_id
+        )
+    assert not harness.background.completed.is_set()
+    assert control.pending_question("question-run") == question
     assert control.status("question-run").lifecycle == "paused"
     assert control.tabs()[0].operation_id == token
     with pytest.raises(RunMismatch):
-        control.answer("stale", {"value": 8})
-    control.answer("question-run", {"value": 8})
-    harness.complete_segment()
-    with pytest.raises(InvalidRunState):
-        control.answer("question-run", {"value": 9})
+        control.answer("stale", {"value": 8}, request_id=request_id)
+    control.answer("question-run", {"value": 8}, request_id=request_id)
+    harness.finish_worker()
+    with pytest.raises(QuestionMismatch):
+        control.answer("question-run", {"value": 9}, request_id=request_id)
     assert len(author.deliveries) == 1
 
 
@@ -167,14 +194,6 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     lease = run_lease_presence(harness)
     assert lease
     assert control.pending_question("question-run") is not None
-    if io_failure:
-        with failed_journal_write(tmp_path), pytest.raises(DIRECTORY_OPEN_ERROR):
-            control.stop("question-run")
-    else:
-        assert control.stop("question-run").lifecycle == "stopping"
-    assert author.deliveries == [], "Stop is pure control, not author cleanup"
-    assert control.tabs()[0].operation_id == token
-    assert not control.close(tab)
     cleanup_entered, release_cleanup = Event(), Event()
 
     def hold_cleanup():
@@ -183,34 +202,45 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
         assert release_cleanup.wait(30)
 
     author.on_finish = hold_cleanup
-    with ThreadPoolExecutor(max_workers=1) as worker:
-        completed = worker.submit(harness.background.execute)
-        try:
-            # The submitted drain must reach the retained generator finally.
-            assert cleanup_entered.wait(30)
-            assert author.finally_threads[0] != get_ident()
-            assert control.tabs()[0].operation_id == token
-            assert run_lease_presence(harness) == lease
-            assert not control.close(tab)
-            assert harness.handles.known_outcome(token) is None
-        finally:
-            release_cleanup.set()
-            completed.result(timeout=30)
+    try:
+        if io_failure:
+            with failed_journal_write(tmp_path), pytest.raises(DIRECTORY_OPEN_ERROR):
+                control.stop("question-run")
+        else:
+            assert control.stop("question-run").lifecycle == "stopping"
+        # Stop must reach the retained coroutine's finally without owner delivery.
+        assert cleanup_entered.wait(5), (
+            "Stop must drain author cleanup even after journal failure"
+        )
+        assert author.finally_threads[0] != get_ident()
+        assert control.tabs()[0].operation_id == token
+        assert run_lease_presence(harness) == lease
+        assert not control.close(tab)
+        assert harness.handles.known_outcome(token) is None
+    finally:
+        release_cleanup.set()
+        # A broken baseline may reject Stop before releasing the Ask. Restore the
+        # filesystem first, then retry only for bounded fixture cleanup.
+        if io_failure and not cleanup_entered.is_set():
+            control.stop("question-run")
+    harness.wait_for(harness.background.completed.is_set, label="Stop worker return")
     if io_failure:
         assert author.deliveries == []
     else:
         assert author.deliveries == [(None, author.deliveries[0][1])]
         assert author.deliveries[0][1] != get_ident()
-        assert author.cancelled_followups == [None, None]
+        assert author.cancelled_followups == [
+            Completed(None, partial_result=True),
+            None,
+        ]
     assert control.tabs()[0].operation_id == token
     assert run_lease_presence(harness) == lease
     assert not control.close(tab)
-    harness.owner.pump_all()
-    harness.background.deliver()
+    harness.finish_worker()
     assert control.tabs()[0].operation_id is None
     assert run_lease_presence(harness) == ()
     assert control.status("question-run").lifecycle == (
-        "failed" if io_failure else "stopped"
+        "failed" if io_failure else "cancelled"
     )
     assert harness.handles.known_outcome(token).status == (
         "failed" if io_failure else "cancelled"
