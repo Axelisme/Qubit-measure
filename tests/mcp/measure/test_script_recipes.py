@@ -582,6 +582,7 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         tab = session.open_tab("lookback")
         sweep = tab.read(("sweep",))
         assert {"start", "stop", "n"}.issubset(sweep.fields)
+        assert sweep.value == {"start": 1.0, "stop": 2.0, "n": 51}
         module = tab.read(("modules", "readout"))
         assert module.fields
         assert tab.read(("rounds",)).value == 3
@@ -595,5 +596,65 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         execution.wait(3)
         outcome = execution.snapshot().outcome
         assert outcome is not None and outcome.status == "completed"
+    finally:
+        client.context.session.close()
+
+
+def test_mapping_writeback_round_trips_without_guessing_or_mutating_owner_values(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    proposed = {"pulse": {"gain": [0.2, None], "shape": "synthetic"}}
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.writeback_preview":
+            return {
+                "has_draft": True,
+                "items": [
+                    {
+                        "id": "param-0",
+                        "kind": "module",
+                        "target_name": "Q1.freq",
+                        "actual_path": "library:opaque.key",
+                        "proposed": proposed,
+                    }
+                ],
+                "destination_context": {"active_label": "current"},
+            }
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Confirm an opaque persistent module value")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        answer = await tab.ask_writeback()
+        assert answer is not None
+        receipt = tab.accept_writeback(answer.items)
+        assert receipt.items[0].value == proposed
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        pending = execution.snapshot().pending_question
+        assert pending is not None
+        items = pending.question.model_dump(mode="json")["proposal"]["items"]
+        assert items[0]["value"] == proposed
+        reply = execution.answer(
+            {
+                "request_id": pending.request_id,
+                "answer": {"accepted": True, "items": items},
+            }
+        )
+        assert reply.data["outcome"]["status"] == "completed"
+        assert proposed == {"pulse": {"gain": [0.2, None], "shape": "synthetic"}}
+        writes = [
+            params["write"]
+            for method, params in client.transport.sent
+            if method == "tab.writeback_write"
+        ]
+        assert writes == [[{"id": "param-0"}]]
     finally:
         client.context.session.close()
