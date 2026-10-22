@@ -41,6 +41,10 @@ SignalArray: TypeAlias = NDArray[Any]
 StopCondition: TypeAlias = Callable[[], bool]
 
 
+class _AcquireStopped(Exception):
+    """An acquire child was cancelled; retain its completed-round slot."""
+
+
 class _CallbackError(Exception):
     """Carry callback origin across the producer's synchronous acquire boundary."""
 
@@ -385,6 +389,9 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                         slot=slot,
                         pbar=pbar,
                     )
+                except _AcquireStopped:
+                    self._schedule.check_stop_requested()
+                    break
                 except _CallbackError as exc:
                     raise exc.error from None
                 except KeyboardInterrupt as exc:
@@ -451,7 +458,8 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         slot: SignalSlot,
         pbar: BaseProgressBar,
     ) -> T_Raw:
-        acquire_cancel_flag = AcquireCancelFlag(self._schedule.stop)
+        token = self._schedule.stop.child(label="acquire")
+        acquire_cancel_flag = AcquireCancelFlag(token)
 
         def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
             try:
@@ -462,13 +470,24 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             except Exception as exc:
                 raise _CallbackError(exc) from exc
 
-        return acquire(
-            self._soc,
-            progress=options.progress,
-            round_hook=update_hook,
-            cancel_flag=acquire_cancel_flag,
-            **dict(acquire_kwargs),
-        )
+        try:
+            try:
+                raw = acquire(
+                    self._soc,
+                    progress=options.progress,
+                    round_hook=update_hook,
+                    cancel_flag=acquire_cancel_flag,
+                    **dict(acquire_kwargs),
+                )
+            except StoppedPartialAcquireError as exc:
+                if token.is_set():
+                    raise _AcquireStopped from exc
+                raise
+            if token.is_set():
+                raise _AcquireStopped
+            return raw
+        finally:
+            token.release()
 
     def _rounds_from(self, program: ProgramProtocol[Any, Any]) -> int:
         rounds = program.cfg_model.rounds

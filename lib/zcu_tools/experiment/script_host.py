@@ -50,9 +50,10 @@ class CallResult[T]:
     """One executor completion with an immutable control snapshot.
 
     result is fn's unchanged payload. epoch is the attempt's starting epoch.
-    partial_result snapshots the operation stop bit as fn completes, not the
-    payload's own data completeness. Snapshot and pause have one lock ordering;
-    pause after this snapshot cannot retroactively mark natural completion.
+    partial_result snapshots cancellation of the operation or its completed
+    descendant scopes, not the payload's own data completeness. Snapshot and
+    pause have one lock ordering; pause after this snapshot cannot retroactively
+    mark natural completion.
     """
 
     result: T
@@ -87,8 +88,8 @@ class ScriptHost:
 
     def __init__(self, *, on_change: Callable[[], None] | None = None) -> None:
         self._on_change = on_change
-        self._root = StopSignal()
-        self._iteration = self._root.child()
+        self._root = StopSignal(label="script")
+        self._iteration = self._root.child(label="iteration")
         self._active: StopSignal | None = None
         self._epoch = 0
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -119,6 +120,11 @@ class ScriptHost:
         """Read the answerable request, or None before/after the explicit ask."""
         with self._lock:
             return self._pending
+
+    @property
+    def active_path(self) -> str:
+        """Read the labeled live scope path, starting at the script root."""
+        return self._root.active_path
 
     @property
     def epoch(self) -> int:
@@ -178,14 +184,14 @@ class ScriptHost:
         """
         loop = self._require_loop()
         await self.wait_until_resumed()
-        token = self._iteration.child()
+        token = self._iteration.child(label="operation")
         self._active = token
         context = CallContext(token, self._epoch)
 
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
-                return CallResult(value, context.epoch, token.is_set())
+                return CallResult(value, context.epoch, token.partial_result)
 
         try:
             return await loop.run_in_executor(None, invoke)
@@ -258,7 +264,7 @@ class ScriptHost:
         """
         await self.wait_until_resumed()
         self._iteration.release()
-        self._iteration = self._root.child()
+        self._iteration = self._root.child(label="iteration")
 
     async def wait_until_resumed(self) -> None:
         """Wait on the worker pause gate; script cancellation also opens it.

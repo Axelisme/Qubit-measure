@@ -1,28 +1,26 @@
-"""Acquire-local cancellation projected from a borrowed run stop signal."""
+"""Program stop condition combined with the current acquire scope token."""
 
 from __future__ import annotations
-
-import threading
 
 from zcu_tools.experiment.stop_signal import StopSignal
 
 
 class AcquireCancelFlag:
-    """Combine run cancellation with an independent stop flag for one acquire.
+    """Combine acquire-scope cancellation with a normal data stop condition.
 
-    external is the borrowed Schedule stop signal. Create a fresh instance for
-    each program acquire. set() stops only that acquire; it never mutates
-    external or records a Schedule outcome.
+    external is the acquire child token owned by ProgramBuilder. Create a fresh
+    instance per attempt. set() ends acquisition when the authored data condition
+    is satisfied; it never cancels a scope or records partial completion.
     """
 
     def __init__(self, external: StopSignal) -> None:
         self._external = external
-        self._local = threading.Event()
+        self._condition_met = False
 
     def is_set(self) -> bool:
-        """Return whether external cancellation or the acquire-local flag is set."""
-        return self._external.is_set() or self._local.is_set()
+        """Return whether the scope is cancelled or the data condition is met."""
+        return self._external.is_set() or self._condition_met
 
     def set(self) -> None:
-        """Set only the acquire-local stop flag, leaving the run signal unchanged."""
-        self._local.set()
+        """Mark normal data completion, leaving all scope events unchanged."""
+        self._condition_met = True

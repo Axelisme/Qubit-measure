@@ -338,11 +338,10 @@ class RunService:
         # draft; cleanup happens only after the new empty panes are committed.
         self._prepare_tab_for_run(tab_id)
 
-        # A single StopSignal owns the Schedule-visible stop flag for this run.
-        # ``cancel_requested`` is separate: Schedule failures also set the stop
-        # flag to halt host loops, but they are not user cancellations.
+        # The run root receives completed Schedule errors without being stopped.
+        # ``cancel_requested`` records user intent separately from scope outcomes.
         stop_event = threading.Event()
-        stop_signal = StopSignal(stop_event)
+        stop_signal = StopSignal(stop_event, label="run")
         cancel_requested = threading.Event()
         adapter = inputs.adapter
         request = inputs.request
