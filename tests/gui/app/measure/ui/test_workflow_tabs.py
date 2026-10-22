@@ -366,6 +366,24 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     assert driver.observe(object_name="empty_tabs_hint").visible
 
 
+def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tmp_path):
+    _, window = workflow_window
+    driver = ComponentDriver(window)
+    driver.click(object_name="workflow.toggle")
+    _open(driver, tmp_path / "scope-01-open.png")
+    driver.click("Start")
+    qt_until(lambda: _status(driver, "running"), label="workflow accepted")
+    _shot(driver, tmp_path, "scope-02-running")
+    active = driver.observe(object_name="workflow.active_path")
+    leaves = driver.observe(object_name="workflow.live_paths")
+    assert active.visible and active.text == "workflow:synthetic/operation#1"
+    assert leaves.visible and leaves.text == "workflow:synthetic/operation#1"
+    driver.click("Stop")
+    qt_until(lambda: _status(driver, "cancelled"), label="scope root cancelled")
+    _shot(driver, tmp_path, "scope-03-cancelled")
+    assert driver.observe(object_name="workflow.active_path").text == "workflow:synthetic"
+
+
 def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
