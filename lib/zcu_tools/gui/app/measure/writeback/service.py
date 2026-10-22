@@ -622,7 +622,7 @@ class WritebackService:
                 raise InvalidInputError(f"duplicate writeback destination: {path!r}")
             destinations.add(path)
         try:
-            self._write.apply_writeback(
+            outcome = self._write.apply_writeback(
                 parameters.target,
                 tuple(items),
                 evidence=concrete.WritebackEvidence(
@@ -647,9 +647,9 @@ class WritebackService:
                 written,
                 cause,
                 applied_values(
-                    self._write,
                     draft,
-                    tuple(entry.item for entry in selected_entries[: exc.applied]),
+                    tuple(entry.item for entry in selected_entries),
+                    exc.result,
                 )
                 if capture_values
                 else (),
@@ -660,7 +660,7 @@ class WritebackService:
             tuple(entry.item.session_id for entry in selected_entries),
             written,
             values=applied_values(
-                self._write, draft, tuple(entry.item for entry in selected_entries)
+                draft, tuple(entry.item for entry in selected_entries), outcome
             )
             if capture_values
             else (),
@@ -699,7 +699,7 @@ class WritebackService:
                     capture_values=True,
                 )
             except Exception as error:
-                # Isolate an uncertain read/ledger failure; earlier groups remain confirmed.
+                # Isolate admission/ledger failure; earlier groups remain confirmed.
                 logger.exception("Captured writeback failed after confirmed groups")
                 return WritebackAcceptance(tuple(applied), str(error), tuple(written))
             applied[index] = result.applied_ids
@@ -720,8 +720,8 @@ class WritebackService:
     ) -> list[WritebackWritten]:
         """Edit sequentially and return actual fixed-target before/after values.
 
-        The owner reads the captured destination before and after application;
-        no current selection or stale capture substitutes for the receipt.
+        Read the captured destination before application, then use each write
+        owner's committed value; no postcommit destination read is needed.
         Targets in receipts are concrete paths resolved from the creation capture.
         Empty changes are a no-op. Edit failures, including a listed module
         whose Form is invalid (LibraryEntryInvalid), retain the successful
@@ -765,7 +765,6 @@ class WritebackService:
             on_applied(applied.values)
         if applied.error is not None:
             raise applied.error from applied.error.__cause__
-        after = self._write.read_target(parameters.target, roles=parameters.roles)
         return [
             WritebackWritten(
                 id=item.session_id,
@@ -778,9 +777,11 @@ class WritebackService:
                 ),
                 target=path,
                 before=previous,
-                after=read_destination_value(self._write, draft, item, after, path),
+                after=committed.value,
             )
-            for item, path, previous in zip(items, paths, before, strict=True)
+            for item, path, previous, committed in zip(
+                items, paths, before, applied.values, strict=True
+            )
         ]
 
     def teardown_draft(self, draft: WritebackDraft) -> None:

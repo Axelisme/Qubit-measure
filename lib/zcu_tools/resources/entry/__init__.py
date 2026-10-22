@@ -60,6 +60,7 @@ from .views import (
     source_path,
 )
 from .writeback import (
+    CommittedWrite,
     ModuleWriteback,
     ParameterWriteback,
     PointWritebackTarget,
@@ -68,5 +69,6 @@ from .writeback import (
     WritebackApplyError,
     WritebackEvidence,
     WritebackItem,
+    WritebackResult,
     apply_writeback,
 )

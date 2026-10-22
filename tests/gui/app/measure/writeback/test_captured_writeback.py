@@ -155,6 +155,7 @@ def test_acceptance_keeps_per_item_values_without_postcommit_readback(
         experiment_name="synthetic",
     )
     if readback_fails:
+
         def unavailable(*args, **kwargs):
             raise OSError("fixed-target read unavailable after commit")
 

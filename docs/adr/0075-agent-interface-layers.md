@@ -143,6 +143,9 @@ unknown／duplicate 在第一筆寫入前拒絕。通過後按 Primary、Post、
 Caller 先 begin，再帶同一 ID 提交；begin 不表示已寫入，同 ID 重複提交拒絕。
 逾時回覆帶 ID 並要求先查狀態，再決定是否重送，不把 10 秒 handler 逾時當成寫入失敗。
 唯讀 receipt 查詢保留成功前綴，不重讀當前 draft 或目的地。
+實際值由每筆寫入 owner 回傳並由 executor 保留，GUI 只關聯 item ID、pane 與固定目的地。
+不能在整批後 readback，因為後續父／子路徑寫入可能改變先前的值；讀取失敗也不能抹去成功前綴。
+具名結果與單一 accepted event 的 owner 契約見 [ADR-0063](0063-persistence-ownership.md#失敗路徑與遷移邊界)。
 Receipt 只存在 GUI 生命週期的記憶體，不保證重啟恢復。這取代原先只回 IDs 的限制，
 原因是接受回覆可能逾時，但 owner 已完成寫入；查詢必須能回當次實際內容。
 作者處理 failed receipt，或以 `raise_for_error()` 保留診斷並終止流程，finally 仍 Save。

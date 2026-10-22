@@ -47,7 +47,9 @@ Apply 同步執行。
 值與目的地取 owner 當下的 draft，不比對 preview、不還原捕捉時的 proposal。
 Writeback control 固定 Primary 在 Post 前，並在提交前檢查 permission、idle 與 active draft。
 Unknown／duplicate IDs 在第一筆寫入前拒絕。Draft 編輯或替換本身不拒絕接受，見 ADR-0075。
-提交中的失敗回 confirmed IDs 成功前綴及診斷，不 retry／rollback。
+提交中的失敗回 confirmed IDs、逐項 actual values 成功前綴及診斷，不 retry／rollback。
+Actual values 由 resources/context 的實際寫入 owner 當筆回傳，GUI 只關聯 ID、pane 與固定目的地。
+不在整批後 readback，後項覆寫與讀取故障不改先前已確認的 receipt。
 `apply_draft` 與單 pane `write_draft` 保留原有 raise 與 edit/write 契約。
 
 ## Submission receipts

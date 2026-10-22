@@ -1,4 +1,4 @@
-"""Fixed-destination reads shared by draft preview and retained receipts."""
+"""Fixed-destination preview reads and confirmed owner receipt projection."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import document_value
+from zcu_tools.resources.entry.writeback import WritebackResult
 
 from .contracts import WritebackApplied
 from .items import ParameterWriteback, SampleWriteback, WritebackItem
@@ -64,22 +65,19 @@ def read_destination_value(
 
 
 def applied_values(
-    write_port: ContextControlPort,
     draft: WritebackDraft,
     items: tuple[WritebackItem, ...],
+    result: WritebackResult,
 ) -> tuple[WritebackApplied, ...]:
-    """Detach confirmed items at their fixed destination before yielding the owner.
+    """Associate the owner's ordered committed prefix with draft IDs/destination.
 
-    items must be the confirmed successful prefix of the current submission.
-    Empty items need no context. Context/read failures propagate, never substitute
-    proposal values for actual stored values.
+    items is the selected submission order; result contains actual values formed
+    by each write owner. No destination read, source refresh or proposal-value
+    substitution occurs. The captured SavedPoint supplies entry/point identity.
     """
-    if not items:
-        return ()
     parameters = draft.parameters
     if parameters is None:
         raise FailedPreconditionError("Writeback requires captured parameters")
-    current = write_port.read_target(parameters.target, roles=parameters.roles)
     return tuple(
         WritebackApplied(
             id=item.session_id,
@@ -88,17 +86,15 @@ def applied_values(
             else "parameter"
             if isinstance(item, ParameterWriteback)
             else "module",
-            target=destination_path(item, parameters),
-            value=deepcopy(
-                read_destination_value(
-                    write_port, draft, item, current, destination_path(item, parameters)
-                )
-            ),
+            target=committed.path,
+            value=deepcopy(committed.value),
             destination={
                 "kind": "saved_point",
                 "entry_id": parameters.target.entry_id,
                 "point": parameters.target.point,
             },
         )
-        for item in items
+        for item, committed in zip(
+            items[: len(result.committed)], result.committed, strict=True
+        )
     )
