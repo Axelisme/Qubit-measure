@@ -124,6 +124,21 @@ unclassified. Recipe converts the analysis classification to a failed value,
 while arbitrary errors still raise. Root cancellation uses ScriptCancelled after
 drain and does not overwrite genuine errors.
 
+## Analysis presentation
+
+Operation-bound `tab.get_analyze_result` and `tab.get_post_analyze_result`
+include `presentation: {run_id, stage, figure_names, figures_replaced}`.
+Run identity comes from the selected Run/Load metadata, not the live point or
+Save receipt. Missing metadata yields null. Stage is primary or post.
+Figure names are the native names in that pane's current collection.
+`figures_replaced` records whether this successful publication replaced a
+nonempty collection in the same Run and pane. It does not report disk writes.
+New Run/Load clears this history; Primary replacement also invalidates Post.
+An old operation-bound read rejects with `result_superseded` after replacement.
+Unbound summary reads retain their summary/invalid shape.
+Element names and original positions belong to the experiment's summary;
+the remote does not infer element identity from figure names or row offsets.
+
 ## Predictor sources
 
 `predictor.list_files` returns `{files: [filename, ...]}` from the current entry's

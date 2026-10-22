@@ -20,6 +20,7 @@ from zcu_tools.experiment.stop_signal import (
     CancelResult,
 )
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.remote.analysis_types import AnalysisPresentation
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -838,6 +839,9 @@ class RecipeRuntime:
                 started.handle,
                 summary,
                 invalid,
+                presentation=TypeAdapter(AnalysisPresentation | None).validate_python(
+                    reply.get("presentation")
+                ),
             )
             with self._lock:
                 index = self._detail_index(tab)

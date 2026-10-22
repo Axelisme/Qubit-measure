@@ -265,7 +265,7 @@ def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
     metadata = historical_metadata()
     source = RunRecord(None, object(), metadata=metadata)
     fx.state.update_tab_result(tab, source)
-    summary = {
+    summary: dict[str, object] = {
         "tones": [
             {"position": 2, "name": "Q3"},
             {"position": 4, "name": "Q5"},

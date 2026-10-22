@@ -86,7 +86,7 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
         },
         "tab_analyze": {
             "handler": partial(tab_analyze, ctx),
-            "description": "Analyze the GUI tab with shared parameters. Wait briefly for an execution summary with effective params, per-pane analysis/save steps and in-memory MCP image content. Complete synchronous Save reports are in artifacts, including JSON and all PNG outputs. Use status(execution, detail=full) for captured native detail; otherwise wait by execution. Interactive analysis immediately reads and returns the active state, commands and available image with tab/op. No hidden pre-reads or retry.",
+            "description": "Analyze the GUI tab with shared parameters. Wait briefly for an execution summary with effective params, per-pane analysis/save steps and in-memory MCP image content. Analysis presentation retains source run_id, stage, native figure_names and figures_replaced for the same pane; this flag does not claim saved files were overwritten. Mux summaries retain original tone positions with Q names. Save old comparison images before reanalysis. Complete synchronous Save reports are in artifacts, including JSON and all PNG outputs. Use status(execution, detail=full) for captured native detail; otherwise wait by execution. Interactive analysis immediately reads and returns the active state, commands and available image with tab/op. No hidden pre-reads or retry.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

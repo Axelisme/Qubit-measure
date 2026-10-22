@@ -42,6 +42,7 @@ def _pane(execution: dict[str, Any] | None) -> dict[str, Any] | None:
         "params": result.get("params", execution.get("params")),
         "summary": result.get("summary"),
         "invalid": result.get("invalid", []),
+        "presentation": result.get("presentation"),
     }
 
 

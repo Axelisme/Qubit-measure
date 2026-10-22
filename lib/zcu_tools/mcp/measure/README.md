@@ -329,6 +329,19 @@ run_id 在保存前已存在，saved 只在 measurement_data 全部保存時為 
 尚未捕捉到觀察時 raw_data 為 null。
 這與 analysis artifact 保存分開，status 不重查目前 tab。
 
+Operation-bound analysis 回覆附 `presentation`，記錄來源 `run_id`、
+`stage`（primary／post）、目前 pane 的 `figure_names` 與 `figures_replaced`。
+Standalone summary 放在 `analysis.<stage>.presentation`，full 放在
+`result.presentation`；recipe full 放在 `details[].analyses[].presentation`。
+`figures_replaced=true` 表示同 Run、同 pane 原有非空圖集合已被這次分析替換，
+舊圖不能再從該 pane 取得。它不表示任何 Save 檔案已覆寫。
+需要比較模型時，先另存舊圖或保留當次 MCP image，再提交新分析。
+新 Run／Load 清除這個 pane 歷史；Primary 更新也使舊 Post 失效。
+缺來源 metadata 時 run_id 為 null，不拿目前工作點補歷史。
+Mux qubit summary 保留完整原始位置與 Q 名，例如 Q3／Q5 專掃仍為
+`position=2,name=Q3` 與 `position=4,name=Q5`，不把參與順序重編成 0／1。
+圖名仍由實驗定義，例如 `fit_2`；framework 不從圖名推測 Q 身分。
+
 Standalone analysis execution 等原 GUI operation 完成，讀結果、保存 analysis artifacts，
 再以原 opaque operation 讀一次 writeback preview。
 沒有圖也讀候選，Read 失敗保留已有 result、當次 Save report 與 image，回 writeback_read error。
