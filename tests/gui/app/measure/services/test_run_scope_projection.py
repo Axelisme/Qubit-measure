@@ -1,6 +1,8 @@
 """Run owner exposes forks and resolves selectors without selecting the latest."""
 
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 
 from ._run_support import make_inputs, make_plots, make_run_service, make_state
 
@@ -9,7 +11,7 @@ def test_run_scope_reports_fork_candidates_and_exact_leaf_selection() -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
 
-    def run(*_args: object, context: RunContext) -> object:
+    def run(*_args: object, context: RunContext) -> RunRecord[ExpCfgModel, object]:
         with (
             context.scope.branch("operation", name="T1") as first,
             context.scope.branch("operation", name="T1") as second,
@@ -24,7 +26,7 @@ def test_run_scope_reports_fork_candidates_and_exact_leaf_selection() -> None:
             assert service.cancel_scope(token, paths[1]).cancelled
             assert not first.cancelled and second.cancelled
             assert service.cancel_scope(token, "operation:T1#1").cancelled
-        return object()
+        return RunRecord(None, object())
 
     adapter.run.side_effect = run
     token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())

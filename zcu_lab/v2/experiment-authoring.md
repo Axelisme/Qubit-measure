@@ -75,9 +75,11 @@ Helper 只能完成單一步驟，例如選一次 library，不能包住整個�
 `session.open_tab(...)`、`tab.select(...)`、`tab.set(...)`、
 `await tab.run()`、`await tab.analyze("primary", result=T)` 與
 `await tab.ask_writeback()`。接受答案後才 `tab.accept_writeback(decision.items)`。
-已有 Run 後以 finally 同步 `tab.save()`，作者不寫取消分支。
+每次 Analyze 後先檢查 `analysis.result`。預期擬合失敗時 result=None、status="failed"，立即回含 `analysis_failure=analysis.reason` 的 report，不 Ask、不接受 writeback、不跑相依 Post。Post 失敗保留 Primary 估計；成功時 analysis_failure=None。任意程式錯誤仍 raise。
+
+Run 留在 try 外，成功返回後的流程以既有 finally 同步 `tab.save()`。根取消使下一個 await raise 普通 ScriptCancelled，進行中的 Run 先 drain 並保留 facts。該 Run await 被根取消時不進後續 Save finalizer，partial 留在 tab 交 agent 決定。作者不新增取消分支或 Save finalizer。
 Inputs 用 FormModel，框架只作 pydantic／MCP JSON schema 驗證，不渲染 recipe inputs Form。
-完整宣告與非 Optional await 契約見 [recipe 教學](../tutorial/04-recipe.md)。
+完整宣告、Analyze 失敗值與根取消契約見 [recipe 教學](../tutorial/04-recipe.md)。
 
 ### 3. Docstring 說明量測、序列與結果
 
