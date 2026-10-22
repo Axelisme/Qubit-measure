@@ -1,11 +1,12 @@
 """Async recipe contracts through declarations and a recording GUI transport."""
 
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, Field, ValidationError
-
+from zcu_tools.experiment.script_host import CancelScope
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
@@ -37,43 +38,112 @@ class SyntheticGui:
     def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.new":
             return {"tab_id": "tab-1"}
-        if method in {"tab.reset_cfg", "tab.edit_recipe_fields", "tab.select_recipe_module"}:
+        if method in {
+            "tab.reset_cfg",
+            "tab.edit_recipe_fields",
+            "tab.select_recipe_module",
+        }:
             return {"errors": [], "changed": True}
         if method == "tab.run_start":
             self.runs += 1
             self.started.set()
-            return {"operation_id": f"run-op-{self.runs}"}
+            return {"operation_id": self.runs}
         if method in {"tab.analyze", "tab.post_analyze"}:
-            return {"operation_id": "analysis-op"}
+            return {"operation_id": 100}
         if method == "operation.await":
-            if self.hold and not self.cancelled.is_set():
+            if (
+                self.hold
+                and params["operation_id"] != 100
+                and not self.cancelled.is_set()
+            ):
                 return {"reason": "timeout"}
-            return {"reason": "completed", "status": "cancelled" if self.cancelled.is_set() else "finished"}
+            return {
+                "reason": "completed",
+                "status": "cancelled"
+                if self.cancelled.is_set() and params["operation_id"] != 100
+                else "finished",
+            }
         if method in {"tab.cancel", "tab.analyze_cancel", "operation.cancel"}:
             self.cancelled.set()
             return {"status": "requested"}
         if method == "tab.snapshot":
-            return {"tabs": [{"tab_id": "tab-1", "adapter_name": "synthetic", "interaction": {"is_running": False, "is_analyzing": False}, "raw_data": {"run_id": f"native-{self.runs}", "saved": False}, "result_state": {"available": True, "source_operation_id": f"run-op-{self.runs}"}}]}
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "tab-1",
+                        "adapter_name": "synthetic",
+                        "interaction": {"is_running": False, "is_analyzing": False},
+                        "raw_data": {"run_id": f"native-{self.runs}", "saved": False},
+                        "result_state": {
+                            "available": True,
+                            "source_operation_id": self.runs,
+                        },
+                    }
+                ]
+            }
+        return self._artifacts(method, params)
+
+    def _artifacts(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.writeback_preview":
-            return {"has_draft": True, "items": [{"id": "param-0", "target_name": "Q1.freq", "actual_path": "Q1.freq", "proposed": 3.5, "current": 2.0, "stderr": None, "note": None, "kind": "parameter"}], "destination_context": {"active_label": "preview-context"}}
+            return {
+                "has_draft": True,
+                "items": [
+                    {
+                        "id": "param-0",
+                        "target_name": "Q1.freq",
+                        "actual_path": "Q1.freq",
+                        "proposed": 3.5,
+                        "current": 2.0,
+                        "stderr": None,
+                        "note": None,
+                        "kind": "parameter",
+                    }
+                ],
+                "destination_context": {"active_label": "preview-context"},
+            }
         if method == "tab.writeback_write":
             return {"written": [{"id": "param-0", "target_name": "Q1.freq"}]}
         if method == "tab.get_analyze_result":
             return {"summary": {"estimate": 3.5}, "invalid": []}
         if method in {"tab.save_data", "tab.save_artifacts"}:
             section = "measurement_data" if method == "tab.save_data" else "analysis"
-            return {"run_id": f"native-{self.runs}", "artifacts": {section: {"results": {"status": "Saved", "members": {"data": [{"format": "data_h5" if method == "tab.save_data" else "json", "path": "/synthetic/output", "status": "saved", "error": None}]}}}}}
+            return {
+                "run_id": f"native-{self.runs}",
+                "artifacts": {
+                    section: {
+                        "results": {
+                            "status": "Saved",
+                            "members": {
+                                "data": [
+                                    {
+                                        "format": "data_h5"
+                                        if method == "tab.save_data"
+                                        else "json",
+                                        "path": "/synthetic/output",
+                                        "status": "saved",
+                                        "error": None,
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                },
+            }
         raise AssertionError(f"Unexpected GUI request: {method}")
 
 
 def start(client: MeasureClient, name: str, count: int = 9) -> ScriptRecipeExecution:
     """Start through the shared registry, asserting the declaration route."""
-    execution = client.context.session.recipes.start(client.context, name, {"count": count})
+    execution = client.context.session.recipes.start(
+        client.context, name, {"count": count}
+    )
     assert isinstance(execution, ScriptRecipeExecution)
     return execution
 
 
-def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(tmp_path: Path) -> None:
+def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
+    tmp_path: Path,
+) -> None:
     gui = SyntheticGui()
 
     @recipe("synthetic", "Run and analyze a synthetic tab")
@@ -103,18 +173,36 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(tmp_p
         assert outcome.report == Report(count=9)
         assert len(outcome.runs) == 1
         run = outcome.runs[0]
-        assert (run.tab, run.adapter, run.run_id, run.status) == ("tab-1", "synthetic", "native-1", "completed")
+        assert (run.tab, run.adapter, run.run_id, run.status) == (
+            "tab-1",
+            "synthetic",
+            "native-1",
+            "completed",
+        )
         assert len(run.saves) == 1
         assert {output.format for output in run.saves[0].outputs} == {"data_h5", "json"}
         methods = [name for name, _ in client.transport.sent]
-        assert methods.index("tab.get_analyze_result") < methods.index("tab.save_data") < methods.index("tab.save_artifacts")
-        assert next(params for method, params in client.transport.sent if method == "tab.save_artifacts")["artifacts"] == "all"
+        assert (
+            methods.index("tab.get_analyze_result")
+            < methods.index("tab.save_data")
+            < methods.index("tab.save_artifacts")
+        )
+        assert (
+            next(
+                params
+                for method, params in client.transport.sent
+                if method == "tab.save_artifacts"
+            )["artifacts"]
+            == "all"
+        )
     finally:
         client.context.session.close()
 
 
 @pytest.mark.parametrize("scope", ["script", "run"])
-def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(tmp_path: Path, scope: str) -> None:
+def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
+    tmp_path: Path, scope: CancelScope
+) -> None:
     gui = SyntheticGui(hold=True)
     threads: list[int] = []
     partial: list[bool] = []
@@ -156,15 +244,20 @@ def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(tmp_path: Pat
 
 
 def test_decorator_rejects_non_coroutine_and_invalid_report_annotations() -> None:
-    with pytest.raises(TypeError, match="coroutine"):
-        @recipe("sync", "Reject sync authors")
-        def sync(session: RecipeSession, inputs: Inputs) -> Report:
-            return Report(count=inputs.count)
+    def sync(session: RecipeSession, inputs: Inputs) -> Report:
+        return Report(count=inputs.count)
 
+    async def invalid(session: RecipeSession, inputs: Inputs) -> int:
+        return inputs.count
+
+    # This test deliberately sends invalid Python callables at the runtime boundary.
+    decorate: Callable[..., object] = getattr(
+        recipe("invalid", "Reject invalid authors"), "__call__"
+    )
+    with pytest.raises(TypeError, match="coroutine"):
+        decorate(sync)
     with pytest.raises(TypeError, match="Report"):
-        @recipe("invalid", "Reject untyped reports")
-        async def invalid(session: RecipeSession, inputs: Inputs) -> int:
-            return inputs.count
+        decorate(invalid)
 
 
 def test_invalid_inputs_fail_before_binding_gui(tmp_path: Path) -> None:
@@ -174,7 +267,9 @@ def test_invalid_inputs_fail_before_binding_gui(tmp_path: Path) -> None:
 
     client = make_client(tmp_path, recipes=(synthetic,))
     try:
-        execution = client.context.session.recipes.start(client.context, "synthetic", {"count": "not an integer"})
+        execution = client.context.session.recipes.start(
+            client.context, "synthetic", {"count": "not an integer"}
+        )
         execution.wait(3)
         assert execution.snapshot().status == "failed"
         assert client.transport.sent == []
@@ -209,9 +304,22 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         question = pending.question
         items = question.model_dump(mode="json")["proposal"]["items"]
         with pytest.raises((ValueError, ValidationError)):
-            execution.answer({"request_id": pending.request_id, "answer": {"accepted": True, "items": [{**items[0], "name": "unknown"}]}})
+            execution.answer(
+                {
+                    "request_id": pending.request_id,
+                    "answer": {
+                        "accepted": True,
+                        "items": [{**items[0], "name": "unknown"}],
+                    },
+                }
+            )
         assert execution.snapshot().pending_question is not None
-        reply = execution.answer({"request_id": pending.request_id, "answer": {"accepted": True, "items": items}})
+        reply = execution.answer(
+            {
+                "request_id": pending.request_id,
+                "answer": {"accepted": True, "items": items},
+            }
+        )
         assert reply.data["outcome"]["status"] == "completed"
         methods = [method for method, _ in client.transport.sent]
         assert methods.index("tab.writeback_write") < methods.index("tab.save_data")
@@ -219,7 +327,9 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         client.context.session.close()
 
 
-def test_analysis_summary_missing_authored_field_fails_without_repair(tmp_path: Path) -> None:
+def test_analysis_summary_missing_authored_field_fails_without_repair(
+    tmp_path: Path,
+) -> None:
     class RequiredFit(BaseModel):
         absent: float
 

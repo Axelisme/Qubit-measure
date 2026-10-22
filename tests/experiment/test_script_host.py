@@ -8,7 +8,6 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import ValidationError
-
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.stop_signal import StopSignal
 
@@ -60,7 +59,9 @@ def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
     async def script() -> int:
         try:
             author_threads.append(get_ident())
-            completion = await host.call(lambda ctx: executor_threads.append(get_ident()) or 17)
+            completion = await host.call(
+                lambda ctx: executor_threads.append(get_ident()) or 17
+            )
             return completion.result
         finally:
             author_threads.append(get_ident())
@@ -72,7 +73,9 @@ def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
 
 
 @pytest.mark.parametrize("scope", ["script", "run"])
-def test_cooperative_cancel_never_cancels_author_and_starts_later_calls(scope: str) -> None:
+def test_cooperative_cancel_never_cancels_author_and_starts_later_calls(
+    scope: str,
+) -> None:
     module = host_module()
     host = module.ScriptHost()
     entered = Event()
@@ -160,3 +163,73 @@ def test_close_drains_question_and_preserves_cancelled_cleanup_error() -> None:
     assert cleaned.is_set()
     assert host.status == "cancelled"
     assert str(host.error) == "cleanup failed"
+
+
+def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() -> None:
+    module = host_module()
+    host = module.ScriptHost()
+    entered = Event()
+    delivered = Event()
+    attempts: list[object] = []
+
+    def blocking(ctx) -> int:
+        entered.set()
+        assert ctx.stop_signal.event.wait(3)
+        return 11
+
+    async def script() -> int:
+        first = await host.call(blocking)
+        attempts.append(first)
+        delivered.set()
+        await host.commit()
+        second = await host.call(lambda ctx: ctx.stop_signal.is_set())
+        attempts.append(second)
+        return second.epoch
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lambda: host.run(script()))
+        try:
+            assert entered.wait(3)
+            host.pause()
+            assert delivered.wait(3)
+            # A second acknowledged pause orders before the gate can release.
+            host.pause()
+            assert host.epoch == 2
+            host.resume()
+            assert future.result(timeout=3) == 2
+        finally:
+            if not future.done():
+                host.close()
+    assert [(item.result, item.epoch, item.partial_result) for item in attempts] == [
+        (11, 0, True),
+        (False, 2, False),
+    ]
+
+
+def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> None:
+    module = host_module()
+    changed = Event()
+    host = module.ScriptHost(on_change=changed.set)
+    completions: list[object] = []
+
+    async def script() -> None:
+        completions.append(await host.call(lambda ctx: 19))
+        await host.ask(Confirm(evidence="natural completion"))
+        await host.wait_until_resumed()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lambda: host.run(script()))
+        try:
+            assert changed.wait(3)
+            host.pause()
+            pending = host.pending_question
+            assert pending is not None
+            host.answer(pending.request_id, {"accepted": True})
+            host.resume()
+            future.result(timeout=3)
+        finally:
+            if not future.done():
+                host.close()
+    assert [(item.result, item.epoch, item.partial_result) for item in completions] == [
+        (19, 0, False)
+    ]
