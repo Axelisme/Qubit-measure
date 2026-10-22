@@ -9,7 +9,7 @@ from pathlib import Path, PureWindowsPath
 from pydantic import BaseModel, TypeAdapter
 
 from .artifacts import RecordEnvelope, RunManifest
-from .models import EncodedRecord, OperationFact
+from .models import EncodedRecord, OperationFacts
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class SavedRecord[P]:
     record_path: Path
     call_seq: int
     record: P
-    operations: tuple[OperationFact, ...] = ()
+    operations: tuple[OperationFacts, ...] = ()
 
 
 def read_summary(run: Path) -> EncodedRecord | None:

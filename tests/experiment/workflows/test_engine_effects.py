@@ -8,6 +8,7 @@ from threading import Event
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from pydantic import TypeAdapter
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.script_host import CallContext
@@ -18,6 +19,7 @@ from zcu_tools.experiment.workflows import (
     Completed,
     Failed,
     Live,
+    OperationFacts,
     WorkflowEnv,
     saved_run,
 )
@@ -113,6 +115,16 @@ def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
     assert isinstance(observed[0], Failed)
     assert "acquire disconnected" in observed[0].reason
     assert rig.engine.records("run") == ()
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert len(facts) == 1
+    assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "failed")
+    assert facts[0].stopped is True
+    assert facts[0].reason == observed[0].reason
+    assert facts[0].device_snapshot is None
 
 
 @pytest.mark.parametrize(
@@ -191,9 +203,18 @@ def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
     final = rig.engine.execute("run")
     assert final.lifecycle == "failed"
     assert observed == []
-    assert ("disconnected" if source == "outside" else "foreign failure") in str(
-        final.reason
-    )
+    reason = "disconnected" if source == "outside" else "foreign failure"
+    assert reason in str(final.reason)
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert len(facts) == 1
+    assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "raised")
+    assert facts[0].stopped is False
+    assert reason in str(facts[0].reason)
+    assert facts[0].device_snapshot is None
 
 
 def test_schedule_interrupt_returns_partial_not_acquire_failure(rig: Rig) -> None:
@@ -205,7 +226,8 @@ def test_schedule_interrupt_returns_partial_not_acquire_failure(rig: Rig) -> Non
     observed = start_call(rig, acquire)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    assert completed(observed[0]) == Completed(7, partial_result=True)
+    outcome = completed(observed[0])
+    assert (outcome.value, outcome.partial_result) == (7, True)
 
 
 def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) -> None:
@@ -233,11 +255,19 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
         rig.engine.stop("run")
         final = future.result(timeout=10)
     assert final.lifecycle == "cancelled"
-    assert outcomes == [
-        Completed(7, partial_result=True),
-        Completed(0, partial_result=True),
+    assert [(outcome.value, outcome.partial_result) for outcome in outcomes] == [
+        (7, True),
+        (0, True),
     ]
     assert stops == [True]
+    assert [
+        (outcome.facts.iteration, outcome.facts.attempt) for outcome in outcomes
+    ] == [
+        (1, 1),
+        (1, 2),
+    ]
+    assert all(outcome.facts.stopped is outcome.partial_result for outcome in outcomes)
+    assert all(outcome.facts.outcome == "partial" for outcome in outcomes)
 
 
 def test_wait_pause_retries_original_deadline_without_restarting_author(
@@ -246,6 +276,7 @@ def test_wait_pause_retries_original_deadline_without_restarting_author(
     deadline = rig.clock.now() + timedelta(seconds=10)
     entered = Event()
     authors: list[int] = []
+    outcomes: list[Completed[None]] = []
 
     def wait(signal: StopSignal) -> None:
         if len(rig.clock.targets) == 1:
@@ -256,7 +287,7 @@ def test_wait_pause_retries_original_deadline_without_restarting_author(
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         authors.append(1)
-        completed(await env.wait_until(deadline))
+        outcomes.append(completed(await env.wait_until(deadline)))
 
     rig.start(script)
     with running(rig) as future:
@@ -269,6 +300,18 @@ def test_wait_pause_retries_original_deadline_without_restarting_author(
     assert final.lifecycle == "done", final.reason
     assert rig.clock.targets == [deadline, deadline]
     assert authors == [1]
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert [(op.iteration, op.attempt, op.stopped, op.outcome) for op in facts] == [
+        (1, 1, True, "discarded"),
+        (1, 2, False, "completed"),
+    ]
+    assert facts[0].reason == "Pause interrupted this attempt"
+    assert outcomes[0].facts == facts[1]
+    assert outcomes[0].partial_result is False
 
 
 def test_setup_pause_retries_captured_full_cfg_with_fresh_operation_token(
@@ -459,7 +502,9 @@ def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> Non
     observed = start_call(rig, acquire)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    assert observed == [Completed(7)]
+    assert len(observed) == 1
+    outcome = completed(observed[0])
+    assert (outcome.value, outcome.partial_result) == (7, False)
 
 
 @pytest.mark.parametrize("source", ["build", "acquire", "conversion"])
@@ -555,7 +600,9 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     observed = start_call(rig, operation)
     final = rig.engine.execute("run")
     assert final.lifecycle == "cancelled", final.reason
-    assert observed == [Completed(99, partial_result=True)]
+    assert len(observed) == 1
+    outcome = completed(observed[0])
+    assert (outcome.value, outcome.partial_result) == (99, True)
 
 
 def test_active_tunables_journal_failure_stops_operation_and_retains_original_cause(

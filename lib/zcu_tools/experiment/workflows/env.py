@@ -27,10 +27,11 @@ from .models import (
     Completed,
     Failed,
     MissingCapability,
-    OperationFact,
+    OperationFacts,
     OperationKind,
     OperationOutcome,
     ProgressSnapshot,
+    RunIdentity,
 )
 from .ports import DevicePort, EnginePorts, ProgressFactory
 
@@ -43,19 +44,22 @@ def _validate_model(value: object, model: type[BaseModel], label: str) -> None:
 class RunFunction[Cfg: ExpCfgModel, Result](Protocol):
     """Core experiment callable, including bound Experiment.run methods.
 
-    cfg is an owned, mutable experiment configuration. context provides borrowed
-    hardware, plots, drivers and the cooperative operation cancellation token.
+    cfg is an owned, mutable experiment configuration passed positionally; its
+    parameter name is unrestricted. context provides borrowed hardware, plots,
+    drivers and the cooperative operation cancellation token.
     """
 
-    def __call__(self, cfg: Cfg, *, context: RunContext) -> Result: ...
+    def __call__(self, cfg: Cfg, /, *, context: RunContext) -> Result: ...
 
 
 @dataclass
 class _Attempt:
+    iteration: int
     number: int
     started_at: datetime
     finished_at: datetime
     device_snapshot: Mapping[str, JsonObject] | None = None
+    stopped: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,7 +115,8 @@ class EnvHooks:
     new_commit_dir allocates a fresh author directory. commit persists a model
     before record publication. boundary acknowledges suspension or raises the
     original control I/O error. stopping reads explicit cancellation; question
-    marks Ask suspension/return. next_attempt numbers actual executor starts and
+    marks Ask suspension/return. next_attempt returns the one-based successful
+    commit scope and actual executor attempt number within it, including retries;
     operation_finished persists their facts. experiment_failed retains acquire
     causes; device_setup retains the requested full typed settings.
     """
@@ -122,17 +127,19 @@ class EnvHooks:
     stopping: Callable[[], bool]
     experiment_failed: Callable[[str, str, BaseException], None]
     question: Callable[[Literal["waiting", "answered"]], None]
-    next_attempt: Callable[[], int]
-    operation_finished: Callable[[OperationFact], None]
+    next_attempt: Callable[[], tuple[int, int]]
+    operation_finished: Callable[[OperationFacts], None]
     device_setup: Callable[[str, BaseDeviceInfo], None]
 
 
 class WorkflowEnv[C]:
     """One async author's capabilities, commit allocation and operations.
 
-    started_at is aware UTC. ports borrows native handles without connecting or
-    copying them. host owns loop/executor and scope tokens. displays retains
-    bars. hooks delegates persistence/control to the Engine execution owner.
+    started_at is aware UTC. identity is the existing host-supplied RunIdentity,
+    detached on construction and access; no new provenance is captured. ports
+    borrows native handles without connecting or copying them. host owns
+    loop/executor and scope tokens. displays retains bars. hooks delegates
+    persistence/control to the Engine execution owner.
     Authors use env.call for blocking work, env.ask for decisions, and explicit
     env.commit for records. Missing capabilities raise at use, not at Start.
     """
@@ -144,10 +151,13 @@ class WorkflowEnv[C]:
         host: ScriptHost,
         displays: Displays,
         hooks: EnvHooks,
+        *,
+        identity: RunIdentity,
     ) -> None:
         if started_at.utcoffset() != timedelta(0):
             raise ValueError("Workflow start must be timezone-aware UTC")
         self._started_at = started_at
+        self._identity = deepcopy(identity)
         self._ports = ports
         self._host = host
         self._displays = displays
@@ -157,6 +167,11 @@ class WorkflowEnv[C]:
     def started_at(self) -> datetime:
         """Return the original aware UTC run start, unchanged by Resume."""
         return self._started_at
+
+    @property
+    def identity(self) -> RunIdentity:
+        """Return detached startup identity/provenance, unchanged across operations."""
+        return deepcopy(self._identity)
 
     @property
     def context(self) -> C:
@@ -208,6 +223,9 @@ class WorkflowEnv[C]:
         await pending: interrupted attempts restart with the same callable;
         naturally completed attempts wait for Resume without being repeated.
         Stop does not throw CancelledError, and does not suppress later calls.
+        Completed.facts is the same completion-time OperationFacts written to
+        journal and commit, including iteration, attempt and stopped. Directory
+        allocation does not advance iteration; successful commit does.
         """
 
         return await self._call("call", lambda ctx, attempt: fn(ctx))
@@ -226,34 +244,40 @@ class WorkflowEnv[C]:
             try:
                 result = await self._host.call(invoke)
             except BaseException as error:
-                self._record_attempt(
-                    kind, attempts, "raised", f"{type(error).__name__}: {error}"
-                )
+                if attempts:  # Executor admission can fail before an attempt starts.
+                    self._record_attempt(
+                        kind, attempts[0], "raised", f"{type(error).__name__}: {error}"
+                    )
                 raise
+            attempt = attempts[0]
+            # Use the host's completion bit, never a later control-state read.
+            attempt.stopped = result.partial_result
             discard = (
                 result.epoch != self._host.epoch
                 and result.partial_result
                 and not self._hooks.stopping()
             )
             if isinstance(result.result, Failed):
-                self._record_attempt(kind, attempts, "failed", result.result.reason)
+                facts = self._record_attempt(
+                    kind, attempt, "failed", result.result.reason
+                )
             elif discard:
-                self._record_attempt(
-                    kind, attempts, "discarded", "Pause interrupted this attempt"
+                facts = self._record_attempt(
+                    kind, attempt, "discarded", "Pause interrupted this attempt"
                 )
             elif result.partial_result:
-                self._record_attempt(
-                    kind, attempts, "partial", "Operation stop token was set"
+                facts = self._record_attempt(
+                    kind, attempt, "partial", "Operation stop token was set"
                 )
             else:
-                self._record_attempt(kind, attempts, "completed")
+                facts = self._record_attempt(kind, attempt, "completed")
             self._hooks.boundary()
             await self._host.wait_until_resumed()
             if discard:
                 continue
             if isinstance(result.result, Failed):
                 return result.result
-            return Completed(result.result.value, partial_result=result.partial_result)
+            return Completed(result.result.value, result.partial_result, facts)
 
     def _invoke[T](
         self,
@@ -262,7 +286,8 @@ class WorkflowEnv[C]:
         ctx: CallContext,
     ) -> _Value[T] | Failed:
         started = self._ports.clock.now()
-        attempt = _Attempt(self._hooks.next_attempt(), started, started)
+        iteration, number = self._hooks.next_attempt()
+        attempt = _Attempt(iteration, number, started, started)
         attempts.append(attempt)
         try:
             value = fn(ctx, attempt)
@@ -271,29 +296,29 @@ class WorkflowEnv[C]:
                 return Failed(error.reason)
             return _Value(value)
         finally:
+            attempt.stopped = ctx.stop_signal.is_set()
             attempt.finished_at = self._ports.clock.now()
 
     def _record_attempt(
         self,
         kind: OperationKind,
-        attempts: list[_Attempt],
+        attempt: _Attempt,
         outcome: OperationOutcome,
         reason: str | None = None,
-    ) -> None:
-        if not attempts:
-            return  # Executor admission failed before an attempt started.
-        attempt = attempts[0]
-        self._hooks.operation_finished(
-            OperationFact(
-                kind,
-                attempt.number,
-                attempt.started_at,
-                attempt.finished_at,
-                attempt.device_snapshot,
-                outcome,
-                reason,
-            )
+    ) -> OperationFacts:
+        facts = OperationFacts(
+            kind=kind,
+            iteration=attempt.iteration,
+            attempt=attempt.number,
+            started_at=attempt.started_at,
+            finished_at=attempt.finished_at,
+            device_snapshot=attempt.device_snapshot,
+            outcome=outcome,
+            reason=reason,
+            stopped=attempt.stopped,
         )
+        self._hooks.operation_finished(facts)
+        return facts
 
     async def run[Cfg: ExpCfgModel, Result](
         self, experiment: RunFunction[Cfg, Result], cfg: Cfg
@@ -305,7 +330,9 @@ class WorkflowEnv[C]:
         Each attempt builds RunContext with this operation token and borrowed
         soc/soccfg/plots/devices, captures device settings, then invokes the core
         callable with a fresh deepcopy of cfg. Completed.value is RunRecord with
-        callback-return cfg and result; savers consume that record directly.
+        callback-return cfg and result. Completed.facts carries the same
+        OperationFacts as journal/commit, including the pre-call device snapshot,
+        one-based successful commit scope (iteration), attempt and stopped bit.
         Schedule acquire failure returns Failed; other exceptions propagate.
         Stop delivers a partial/empty record. Pause retries the captured cfg.
         Framework journal/commit envelopes retain attempt facts and snapshots;
@@ -350,6 +377,8 @@ class WorkflowEnv[C]:
         The device owner revalidates fields and enforces limits. Errors propagate
         unchanged. Pause retries the same captured settings; Stop still invokes
         the device with an already-stopped token for cooperative empty work.
+        Completed.facts records this setup attempt with device_snapshot=None;
+        no snapshot read is required.
         """
         captured = deepcopy(cfg)
 
@@ -363,7 +392,8 @@ class WorkflowEnv[C]:
         """Wait for an aware deadline through call; Stop cooperatively returns.
 
         A naive deadline raises ValueError. A past target returns immediately.
-        Pause retries the same deadline, not a new relative delay.
+        Pause retries the same deadline, not a new relative delay. Completed.facts
+        records this wait attempt with device_snapshot=None and its stop bit.
         """
         if target.tzinfo is None or target.utcoffset() is None:
             raise ValueError("Wait target must be timezone-aware")

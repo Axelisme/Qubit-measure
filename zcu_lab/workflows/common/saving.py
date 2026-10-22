@@ -1,14 +1,13 @@
-"""common saving helpers for lab workflows."""
+"""Save workflow acquisitions using core records and framework operation facts."""
 
 from pathlib import Path
 
 from zcu_tools.datafile import RunMetadata, RunSnapshot
-from zcu_tools.experiment.acquisition import AcquisitionEvidence
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.workflows import Completed
+from zcu_tools.experiment.workflows import Completed, RunIdentity
 
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqExp, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiExp, LenRabiResult
@@ -23,167 +22,151 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoExp,
     T2EchoResult,
 )
-from zcu_lab.workflows.common.acquire import (
-    FrequencyAcquisition,
-    RabiAcquisition,
-    ReadoutAcquisition,
-    T1Acquisition,
-    T2EchoAcquisition,
-)
 
 
 def save_native[Cfg: ExpCfgModel, Result](
-    source: RunRecord[Cfg, Result],
+    source: Completed[RunRecord[Cfg, Result]],
     destination: Path,
     *,
     spec: AxesSpec[Result, Cfg] | GroupedAxesSpec[Result, Cfg],
     snapshot: RunSnapshot,
-    evidence: AcquisitionEvidence,
+    identity: RunIdentity,
 ) -> None:
-    """Preserve a measured trace and its evidence as a typed native record.
+    """Save a completed core record with its fixed workflow acquisition facts.
 
-    source contains the complete cfg/result pair; its cfg must match spec's
-    cfg_type. destination names the native file, not a directory. spec declares
-    the experiment tag, array mapping and SI/discrete units. snapshot supplies
-    the host-captured historical entry/point state. evidence supplies acquisition
-    identity, timestamps, completion, provenance and captured device state.
-    Build RunMetadata from this fixed evidence and snapshot, then call save_run.
-    Existing destinations raise FileExistsError. Invalid cfg/result/spec/metadata
-    raises ValueError or TypeError; I/O errors propagate. No live capture or
-    filename inference occurs.
+    source.value supplies cfg/result; source.facts supplies UTC boundaries,
+    iteration, attempt, stopped status and the pre-operation device snapshot.
+    identity is env.identity for that workflow run; snapshot is the caller's
+    historical entry/point capture. spec supplies the experiment tag and native
+    array mapping. Compose existing RunMetadata without capturing new facts.
+    destination is an exact new filename whose parent exists. Native schema,
+    metadata, collision and I/O errors propagate; no overwrite or retry occurs.
     """
+    facts = source.facts
     metadata = RunMetadata(
-        run_id=evidence.run_id,
+        run_id=f"{identity.run_id}-{facts.iteration:06d}-{facts.attempt}",
         experiment=spec.tag,
-        started_at=evidence.started_at.isoformat(),
-        finished_at=evidence.finished_at.isoformat(),
-        completion=evidence.completion,
+        started_at=facts.started_at.isoformat(),
+        finished_at=facts.finished_at.isoformat(),
+        completion="stopped" if facts.stopped else "complete",
         labber_path=None,
         snapshot=snapshot,
-        provenance=evidence.provenance,
-        device_snapshot=evidence.device_snapshot,
+        provenance=identity.provenance,
+        device_snapshot=facts.device_snapshot,
     )
-    save_run(source, destination, spec=spec, metadata=metadata)
+    save_run(source.value, destination, spec=spec, metadata=metadata)
 
 
 def save_frequency(
-    source: Completed[FreqCfg, FrequencyAcquisition],
+    source: Completed[RunRecord[FreqCfg, FreqResult]],
     destination: Path,
     *,
     snapshot: RunSnapshot,
+    identity: RunIdentity,
 ) -> None:
-    """Preserve spectroscopy data so the resonance fit can be inspected later.
+    """Preserve spectroscopy IQ and its rounded MHz coordinate.
 
-    destination is the exact new native filename; its parent must exist.
-
-    source is Engine's complete cfg/result pair. snapshot is the host-captured
-    historical entry state. Preserve the Result's acquisition evidence. Parent
-    must exist; schema, existing-destination and I/O errors propagate.
+    source is env.run's completed core record and operation facts. Pass the same
+    run's env.identity and historical snapshot. destination is an exact new
+    native filename; its parent must exist. Schema, collision and I/O errors
+    propagate without recapture or retry.
     """
-    record: RunRecord[FreqCfg, FreqResult] = RunRecord(source.cfg, source.result)
     save_native(
-        record,
+        source,
         destination,
         spec=FreqExp().persistence_spec(),
         snapshot=snapshot,
-        evidence=source.result.evidence,
+        identity=identity,
     )
 
 
 def save_rabi(
-    source: Completed[LenRabiCfg, RabiAcquisition],
+    source: Completed[RunRecord[LenRabiCfg, LenRabiResult]],
     destination: Path,
     *,
     snapshot: RunSnapshot,
+    identity: RunIdentity,
 ) -> None:
-    """Preserve Rabi oscillations so pulse-duration calibration remains traceable.
+    """Preserve Length-Rabi IQ and its rounded microsecond coordinate.
 
-    destination is the exact new native filename; its parent must exist.
-
-    source supplies Engine's complete cfg/result pair; snapshot is historical
-    entry state. Preserve acquisition evidence. Parent must exist; schema,
-    existing-destination and I/O errors propagate, without retry or overwrite.
+    source is env.run's completed core record and operation facts. Pass the same
+    run's env.identity and historical snapshot. destination is an exact new
+    native filename; its parent must exist. Schema, collision and I/O errors
+    propagate without recapture or retry.
     """
-    record: RunRecord[LenRabiCfg, LenRabiResult] = RunRecord(source.cfg, source.result)
     save_native(
-        record,
+        source,
         destination,
         spec=LenRabiExp().persistence_spec(),
         snapshot=snapshot,
-        evidence=source.result.evidence,
+        identity=identity,
     )
 
 
 def save_readout(
-    source: Completed[FreqGainCfg, ReadoutAcquisition],
+    source: Completed[RunRecord[FreqGainCfg, FreqGainResult]],
     destination: Path,
     *,
     snapshot: RunSnapshot,
+    identity: RunIdentity,
 ) -> None:
-    """Preserve the readout SNR landscape so its selected settings remain traceable.
+    """Preserve readout SNR with frequency and gain coordinates.
 
-    destination is the exact new native filename; its parent must exist.
-
-    source supplies Engine's complete cfg/result pair; snapshot is historical
-    entry state. Preserve native axes and acquisition evidence. Parent must
-    exist; schema, existing-destination and I/O errors propagate.
+    source is env.run's completed core record and operation facts. Pass the same
+    run's env.identity and historical snapshot. destination is an exact new
+    native filename; its parent must exist. Schema, collision and I/O errors
+    propagate without recapture or retry.
     """
-    record: RunRecord[FreqGainCfg, FreqGainResult] = RunRecord(
-        source.cfg, source.result
-    )
     save_native(
-        record,
+        source,
         destination,
         spec=FreqGainExp().persistence_spec(),
         snapshot=snapshot,
-        evidence=source.result.evidence,
+        identity=identity,
     )
 
 
 def save_t1(
-    source: Completed[T1Cfg, T1Acquisition],
+    source: Completed[RunRecord[T1Cfg, T1Result]],
     destination: Path,
     *,
     snapshot: RunSnapshot,
+    identity: RunIdentity,
 ) -> None:
-    """Preserve population decay so the relaxation estimate can be inspected later.
+    """Preserve relaxation IQ and its rounded microsecond delay coordinate.
 
-    destination is the exact new native filename; its parent must exist.
-
-    source supplies the complete cfg/result pair; snapshot is historical entry
-    state. Keep microsecond-to-disk mapping and acquisition evidence from their
-    owners. Parent must exist; schema, collision and I/O errors propagate.
+    source is env.run's completed core record and operation facts. Pass the same
+    run's env.identity and historical snapshot. destination is an exact new
+    native filename; its parent must exist. Schema, collision and I/O errors
+    propagate without recapture or retry.
     """
-    record: RunRecord[T1Cfg, T1Result] = RunRecord(source.cfg, source.result)
     save_native(
-        record,
+        source,
         destination,
         spec=T1Exp().persistence_spec(),
         snapshot=snapshot,
-        evidence=source.result.evidence,
+        identity=identity,
     )
 
 
 def save_t2echo(
-    source: Completed[T2EchoCfg, T2EchoAcquisition],
+    source: Completed[RunRecord[T2EchoCfg, T2EchoResult]],
     destination: Path,
     *,
     snapshot: RunSnapshot,
+    identity: RunIdentity,
 ) -> None:
-    """Preserve Hahn-echo decay so the refocused coherence fit remains traceable.
+    """Preserve Hahn-echo IQ and its rounded total-delay coordinate.
 
-    destination is the exact new native filename; its parent must exist.
-
-    source owns cfg/result and fixed acquisition/device evidence. snapshot is
-    historical entry/point/roles. Preserve native time-to-disk mapping and
-    persistence declaration. Parent must exist; schema/collision/I/O errors
-    propagate without recapture, layout selection or retry.
+    source is env.run's completed core record and operation facts. Pass the same
+    run's env.identity and historical snapshot. destination is an exact new
+    native filename; its parent must exist. Schema, collision and I/O errors
+    propagate without recapture or retry.
     """
-    record: RunRecord[T2EchoCfg, T2EchoResult] = RunRecord(source.cfg, source.result)
     save_native(
-        record,
+        source,
         destination,
         spec=T2EchoExp().persistence_spec(),
         snapshot=snapshot,
-        evidence=source.result.evidence,
+        identity=identity,
     )

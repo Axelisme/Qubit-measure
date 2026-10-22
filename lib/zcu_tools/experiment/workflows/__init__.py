@@ -15,7 +15,7 @@ from .models import (
     InvalidRunState,
     Lifecycle,
     MissingCapability,
-    OperationFact,
+    OperationFacts,
     ProgressSnapshot,
     QuestionMismatch,
     RevisionConflict,

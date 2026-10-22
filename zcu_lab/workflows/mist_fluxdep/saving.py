@@ -1,10 +1,10 @@
-"""mist_fluxdep saving helpers for lab workflows."""
+"""Save native mist records with fixed workflow operation facts."""
 
 from pathlib import Path
 
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.workflows import Completed
+from zcu_tools.experiment.workflows import Completed, RunIdentity
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import (
     PowerDepCfg,
@@ -12,29 +12,26 @@ from zcu_lab.v2.mist.power_dep.single_trace.core import (
     PowerDepResult,
 )
 from zcu_lab.workflows.common.saving import save_native
-from zcu_lab.workflows.mist_fluxdep.acquire import MISTAcquisition
 
 
 def save_mist(
-    source: Completed[PowerDepCfg, MISTAcquisition],
+    source: Completed[RunRecord[PowerDepCfg, PowerDepResult]],
     destination: Path,
     *,
     snapshot: RunSnapshot,
+    identity: RunIdentity,
 ) -> None:
-    """Save raw MIST gain response so later analysis can use its original IQ.
+    """Preserve raw mist IQ and its native rounded coordinate.
 
-    source owns actual gains/IQ/cfg and acquisition/device evidence; snapshot is
-    the historical Start entry/roles capture. Parent must exist and destination
-    must not. Native schema, collision and I/O errors propagate. This writer
-    does not transform IQ, fit thresholds, choose paths or recapture metadata.
+    source is env.run's completed core record and operation facts. Pass the same
+    run's env.identity and historical snapshot. destination is an exact new
+    native filename; its parent must exist. Schema, collision and I/O errors
+    propagate without recapture, fitting or retry.
     """
-    record: RunRecord[PowerDepCfg, PowerDepResult] = RunRecord(
-        source.cfg, source.result
-    )
     save_native(
-        record,
+        source,
         destination,
         spec=PowerDepExp().persistence_spec(),
         snapshot=snapshot,
-        evidence=source.result.evidence,
+        identity=identity,
     )

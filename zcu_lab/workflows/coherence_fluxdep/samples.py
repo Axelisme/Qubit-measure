@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from zcu_tools.datafile import load_run_data
 from zcu_tools.experiment.workflows.export import load_trace
-from zcu_tools.experiment.workflows.saved_run import SavedPoint, native_path
+from zcu_tools.experiment.workflows.saved_run import SavedRecord, native_path
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from zcu_lab.v2.twotone.freq.core import FreqExp
@@ -98,8 +98,8 @@ def _positive(value: float | None, name: str) -> float:
     return value
 
 
-def _last_completed(saved: SavedPoint[CoherencePoint]) -> str:
-    point = saved.point
+def _last_completed(saved: SavedRecord[CoherencePoint]) -> str:
+    point = saved.record
     references: list[str] = []
     # Validate every explicit reference, not just the snapshot chosen for the row.
     for file in point.frequency.files:
@@ -125,7 +125,7 @@ def _last_completed(saved: SavedPoint[CoherencePoint]) -> str:
 
 
 def _coordinate(
-    saved: SavedPoint[CoherencePoint], device: str
+    saved: SavedRecord[CoherencePoint], device: str
 ) -> tuple[SampleField, SampleField]:
     path = native_path(saved.directory, _last_completed(saved))
     snapshot = load_run_data(path).metadata.device_snapshot
@@ -146,7 +146,7 @@ def _coordinate(
 
 
 def prepare_samples(
-    run_id: str, plan: CoherencePlan, points: tuple[SavedPoint[CoherencePoint], ...]
+    run_id: str, plan: CoherencePlan, points: tuple[SavedRecord[CoherencePoint], ...]
 ) -> tuple[SampleRow, ...]:
     """Prepare at most one row per point: accepted frequency OR any lifetime.
 
@@ -159,7 +159,7 @@ def prepare_samples(
     """
     rows: list[SampleRow] = []
     for saved in points:
-        point = saved.point
+        point = saved.record
         fields: list[SampleField] = []
         try:
             if point.frequency.status == "accepted":
