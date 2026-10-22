@@ -5,7 +5,6 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
 from zcu_tools.program.acquisition import CancelFlagProtocol
@@ -25,9 +24,7 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
     acquires: list[int] = []
 
     class Program:
-        def __init__(
-            self, soccfg: object, cfg: ProgramV2Cfg, **kwargs: object
-        ) -> None:
+        def __init__(self, soccfg: object, cfg: ProgramV2Cfg, **kwargs: object) -> None:
             builds.append(1)
             if failure_site == "build":
                 raise cause
@@ -61,7 +58,11 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
             **kwargs: object,
         ) -> NDArray[np.float64]:
             return self.acquire(
-                soc, progress=progress, round_hook=round_hook, cancel_flag=cancel_flag, **kwargs
+                soc,
+                progress=progress,
+                round_hook=round_hook,
+                cancel_flag=cancel_flag,
+                **kwargs,
             )
 
     def convert(raw: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -76,7 +77,7 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
     signal = StopSignal()
     buffer = SignalBuffer((1,), on_update=update, update_interval=None)
     schedule = Schedule(make_flow_cfg(rounds=1), buffer, stop=signal)
-    with pytest.raises(RuntimeError, match=f"broken {failure_site}") as caught:
+    def run_acquire() -> None:
         with schedule:
             builder = schedule.prog_builder("soc", "soccfg", program_cls=Program).add(
                 FakeModule("readout")
@@ -87,6 +88,9 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
                 else builder.build_and_acquire
             )
             acquire(raw2signal_fn=convert, options=AcquireOptions(retry=2))
+
+    with pytest.raises(RuntimeError, match=f"broken {failure_site}") as caught:
+        run_acquire()
     assert caught.value is cause
     assert schedule.outcome.status == "completed"
     assert signal.error is None
