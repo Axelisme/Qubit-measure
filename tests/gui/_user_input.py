@@ -906,12 +906,23 @@ class ComponentDriver:
         index = widget.findText(value)
         if index < 0:
             raise LookupError(f"{object_name!r} has no option {value!r}")
+        model = widget.model()
+        selectable = [
+            row
+            for row in range(widget.count())
+            if model.flags(model.index(row, widget.modelColumn()))
+            & Qt.ItemFlag.ItemIsEnabled
+            and model.flags(model.index(row, widget.modelColumn()))
+            & Qt.ItemFlag.ItemIsSelectable
+        ]
+        if index not in selectable:
+            raise ValueError(f"{value!r} is not selectable")
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             popup = widget.view()
             assert popup is not None
             key_click(popup, Qt.Key.Key_Home)
-            for _ in range(index):
+            for _ in range(selectable.index(index)):
                 key_click(popup, Qt.Key.Key_Down)
             key_click(popup, Qt.Key.Key_Return)
         QApplication.processEvents()

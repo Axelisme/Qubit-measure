@@ -147,7 +147,9 @@ def test_operation_finishes_before_return_or_failure_delivery(
         if outcome == "raised":
             raise ValueError("core failed")
         if outcome == "failed":
-            context.cancel_signal.set_error("failed", "acquire failed")
+            context.cancel_signal.set_error(
+                "failed", "acquire failed", OSError("acquire failed")
+            )
         return 3
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
