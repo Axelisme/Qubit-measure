@@ -151,7 +151,7 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 | --- | --- |
 | tag、cfg_type、schema_version | 明示 cfg model 與 disk schema |
 | 完整歷史 cfg | `CfgSnapshot(values, cfg_type, schema_version)`，不以目前預設補值 |
-| variable、axes、signal 名稱／單位／dtype／shape | `VariableSchema`，axes 由內到外，array shape 是 axes 長度反序 |
+| variable、axes、signal 名稱／單位／dtype／shape | `LegacyVariableSchema`，axes 由內到外，array shape 是 axes 長度反序 |
 | 開始／結束時間、完成狀態 | `RunMetadata`，未知規則見下文 |
 | entry、point、description、roles | `RunSnapshot`，point 無證據時為 None |
 | 軟體、主機、SoC | `SoftwareProvenance`，未知為 None 或空 mapping |

@@ -4,7 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from zcu_tools.datafile import CfgSnapshot, VariableSchema
+from zcu_tools.datafile import CfgSnapshot
+
+from migrations.legacy_labber import LegacyVariableSchema
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,6 @@ class MigrationExperiment:
     source_tag: str
     native_tag: str
     cfg_type: str
-    schemas: tuple[VariableSchema, ...]
+    schemas: tuple[LegacyVariableSchema, ...]
     validate_cfg: Callable[[CfgSnapshot], None]
     validate_native: Callable[[Path], None]

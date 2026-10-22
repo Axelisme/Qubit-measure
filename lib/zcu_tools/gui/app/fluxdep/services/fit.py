@@ -36,7 +36,6 @@ from zcu_tools.analysis.fluxdep.search_models import (
     transition_requires_levels,
     validate_transition_levels,
 )
-from zcu_tools.datafile import read_fluxdep_database_info
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     PipelineStage,
@@ -51,6 +50,8 @@ from zcu_tools.resources.qubit_params import (
     QubitParams,
     params_path_for_result_dir,
 )
+
+from ..database import read_fluxdep_database_info
 
 logger = logging.getLogger(__name__)
 

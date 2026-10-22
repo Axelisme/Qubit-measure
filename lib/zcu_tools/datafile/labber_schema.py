@@ -3,8 +3,8 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
+from .container_models import VariableSchema
 from .models import LabberPayload
-from .native_models import VariableSchema
 
 
 def validate_labber_payload(
@@ -12,10 +12,10 @@ def validate_labber_payload(
 ) -> None:
     """Check labels/units, numeric containers and reversed inner-first shape.
 
-    schema declares channel names, units and target dtype kinds. Labber stores
-    float/complex containers, so exact NumPy width is not required; real targets
-    reject nonzero imaginary values. schema.variable is the caller's domain
-    identity, checked separately by the grouped reader's required_variables.
+    schema declares NumPy-ordered axes, full shape, value unit and dtype. Labber
+    uses inner-first axes and float/complex containers, so exact numeric widths
+    are not required; real targets reject nonzero imaginary values. The caller
+    owns variable/channel identity; the generic schema has no signal label.
     context identifies the source/variable in ValueError. This function neither
     changes arrays nor converts units; integer coordinate semantics belong to
     the typed mapping. Malformed axes/shape/dtype raise ValueError.
@@ -26,7 +26,7 @@ def validate_labber_payload(
         )
     lengths: list[int] = []
     for index, (actual, expected) in enumerate(
-        zip(payload.axes, schema.axes, strict=True)
+        zip(payload.axes, reversed(schema.axes), strict=True)
     ):
         label = f"{context} axis {index}"
         if actual.name != expected.name:
@@ -40,26 +40,21 @@ def validate_labber_payload(
         values = np.asarray(actual.values)
         if values.ndim != 1:
             raise ValueError(f"{label} is {values.ndim}D; expected 1D")
-        _validate_dtype(values, expected.dtype, context=label)
+        _validate_dtype(values, expected.values.dtype, context=label)
         lengths.append(len(values))
-    if payload.data.name != schema.signal_name:
-        raise ValueError(
-            f"{context} z channel label is {payload.data.name!r}; "
-            f"expected {schema.signal_name!r}"
-        )
-    if payload.data.unit != schema.signal_unit:
+    if payload.data.unit != schema.unit:
         raise ValueError(
             f"{context} z channel unit is {payload.data.unit!r}; "
-            f"expected {schema.signal_unit!r}"
+            f"expected {schema.unit!r}"
         )
     values = np.asarray(payload.z)
     shape = tuple(reversed(lengths))
-    if values.shape != shape:
+    if values.shape != shape or values.shape != schema.shape:
         raise ValueError(
             f"{context} z shape {values.shape} != expected {shape}; "
             "axis lengths must match z dimensions"
         )
-    _validate_dtype(values, schema.signal_dtype, context=f"{context} z channel")
+    _validate_dtype(values, schema.dtype, context=f"{context} z channel")
 
 
 def cast_labber_values(

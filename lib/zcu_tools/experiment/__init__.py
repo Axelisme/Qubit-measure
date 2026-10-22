@@ -9,6 +9,7 @@ if TYPE_CHECKING:
         new_run_id,
     )
     from .artifacts import (
+        AnalysisDocument,
         AnalysisItem,
         ArtifactItem,
         ArtifactRef,
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
         OutputResult,
         SaveArtifact,
         SaveReport,
+        encode_analysis_document,
         save_artifacts,
     )
     from .axes_spec import (
@@ -56,6 +58,8 @@ if TYPE_CHECKING:
     from .records import AnalysisRecord, RunRecord
 
 __all__ = [
+    "AnalysisDocument",
+    "encode_analysis_document",
     "config",
     "AcquisitionEvidence",
     "capture_software_provenance",
@@ -102,6 +106,8 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "AnalysisDocument": ".artifacts",
+    "encode_analysis_document": ".artifacts",
     "config": ".config",
     "AcquisitionEvidence": ".acquisition",
     "capture_software_provenance": ".acquisition",

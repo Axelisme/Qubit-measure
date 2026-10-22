@@ -1,80 +1,22 @@
-"""Native HDF5 metadata encoding and historical JSON projection."""
+"""JSON comparison and historical cfg/identity validation pending producer move."""
 
 import json
 import re
-from datetime import datetime, timedelta
-from pathlib import Path
 
-import h5py as h5
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
-from .native_models import CfgSnapshot, JsonObject, RunMetadata
-from .native_nodes import known_group, known_node
+from .container_models import JsonObject
+from .native_models import CfgSnapshot
 
 _JSON = TypeAdapter(JsonObject)
-_METADATA = TypeAdapter(RunMetadata)
-_DEVICE = TypeAdapter(dict[str, JsonObject])
-_OPTIONAL_EVIDENCE = (
-    "git_commit",
-    "qick_version",
-    "soc_fingerprint",
-    "hostname",
-    "simulation_id",
-)
-
-
-def text_attr(node: h5.Group | h5.Dataset, name: str) -> str:
-    """Read a required UTF-8 scalar attr; malformed/missing attrs raise ValueError."""
-    if name not in node.attrs:
-        raise ValueError(f"{node.name}: missing {name} attr")
-    value = node.attrs[name]
-    if isinstance(value, bytes):
-        try:
-            value = value.decode("utf-8")
-        except UnicodeDecodeError as error:
-            raise ValueError(f"{node.name}: {name} is not UTF-8") from error
-    if not isinstance(value, str):
-        raise ValueError(f"{node.name}: {name} must be a UTF-8 string")
-    return value
-
-
-def json_object(text: str, location: str) -> JsonObject:
-    """Decode a complete JSON object, preserving unknown keys or raising ValueError."""
-    try:
-        value = json.loads(text, parse_constant=_reject_json_constant)
-        return _JSON.validate_python(value, strict=True)
-    except ValueError as error:
-        raise ValueError(f"{location}: invalid JSON object: {error}") from error
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"non-finite JSON number {value}")
-
-
-def read_json(node: h5.Group, name: str) -> JsonObject:
-    """Read a required scalar UTF-8 JSON dataset under node, without pruning keys."""
-    location = f"{str(node.name).rstrip('/')}/{name}"
-    dataset = known_node(node, name)
-    if dataset is None:
-        raise ValueError(f"{location}: missing dataset")
-    if not isinstance(dataset, h5.Dataset) or dataset.shape != ():
-        raise ValueError(f"{location}: expected scalar JSON dataset")
-    dtype = h5.check_string_dtype(dataset.dtype)
-    if dtype is None or dtype.encoding != "utf-8":
-        raise ValueError(f"{location}: expected UTF-8 JSON dataset")
-    text = dataset.asstr()[()]
-    if not isinstance(text, str):
-        raise ValueError(f"{location}: expected scalar JSON text")
-    return json_object(text, location)
 
 
 def json_values_equal(left: JsonValue, right: JsonValue) -> bool:
-    """Compare validated JSON recursively, distinguishing boolean from number.
+    """Compare finite JSON recursively, distinguishing boolean from number.
 
     Numbers compare by numeric value (1 equals 1.0). Object key order does not
-    matter, but key sets and list order do. Compare every key, including unknown
-    fields; no projection, mutation, parsing or filesystem access is performed.
-    Inputs must already be valid finite JSON values.
+    matter, but key sets and list order do. Compare unknown fields as well.
+    Inputs must already be valid finite JSON; neither input is changed.
     """
     if isinstance(left, bool) or isinstance(right, bool):
         return type(left) is type(right) and left == right
@@ -89,45 +31,11 @@ def json_values_equal(left: JsonValue, right: JsonValue) -> bool:
     return left == right
 
 
-def write_json(node: h5.Group, name: str, value: JsonObject) -> h5.Dataset:
-    """Write full JSON values while retaining an existing scalar's identity.
-
-    Unchanged JSON retains raw text, including compact number/Unicode spelling.
-    Changed fixed UTF-8 strings use compact JSON and must fit their encoded byte
-    capacity, otherwise raise a located ValueError before assignment. New datasets
-    use vlen UTF-8.
-    """
-    text = json.dumps(value, ensure_ascii=False, allow_nan=False)
-    dataset = known_node(node, name)
-    if dataset is not None:
-        old = read_json(node, name)
-        if not isinstance(dataset, h5.Dataset):
-            raise ValueError(f"{node.name}/{name}: expected scalar JSON dataset")
-        if json_values_equal(old, value):
-            return dataset
-        dtype = h5.check_string_dtype(dataset.dtype)
-        if dtype is not None and dtype.length is not None:
-            # Fixed storage must not reject a fitting edit for optional whitespace.
-            text = json.dumps(
-                value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
-            )
-            if len(text.encode("utf-8")) > dtype.length:
-                raise ValueError(
-                    f"{str(node.name).rstrip('/')}/{name}: JSON exceeds fixed UTF-8 "
-                    f"byte capacity {dtype.length}"
-                )
-        dataset[()] = text
-        return dataset
-    return node.create_dataset(name, data=text, dtype=h5.string_dtype("utf-8"))
-
-
 def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
-    """Check historical cfg format without I/O, normalization or input mutation.
+    """Check finite cfg JSON, nonempty cfg_type and an ASCII major.minor version.
 
-    cfg.values must be a finite JSON object, cfg.cfg_type a nonempty declaration
-    name, and cfg.schema_version an ASCII major.minor string. Unknown JSON keys
-    are valid. Return None; invalid format raises ValueError located at /cfg.
-    This checks storage format, not concrete model fields or supported majors.
+    Unknown document keys are valid. Do not inspect concrete cfg model fields or
+    change the supplied snapshot. Invalid values raise ValueError naming /cfg.
     """
     try:
         _JSON.validate_json(json.dumps(cfg.values, allow_nan=False), strict=True)
@@ -140,177 +48,12 @@ def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
 
 
 def validate_run_id(run_id: str) -> None:
-    """Check the native run identity format without deriving acquisition time.
+    """Check YYYYMMDDTHHMMSSZ-six_lowercase_alphanumerics without deriving time.
 
-    Accept YYYYMMDDTHHMMSSZ followed by a hyphen and six lowercase ASCII
-    alphanumeric characters. This validates the stored token, not calendar
-    semantics or historical timing evidence. Return None; a malformed string
-    raises ValueError naming run_id. Non-string inputs raise TypeError.
+    Invalid strings raise ValueError naming run_id; nonstrings raise TypeError.
+    Calendar semantics and acquisition evidence are not inferred from this token.
     """
     if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}", run_id) is None:
         raise ValueError(
             "/: run_id must be a UTC timestamp plus six-character identity"
         )
-
-
-def validate_metadata(metadata: RunMetadata, cfg: CfgSnapshot) -> None:
-    """Validate historical metadata, UTC times and cfg JSON before creating a file."""
-    validate_cfg_snapshot(cfg)
-    if metadata.device_snapshot is not None:
-        try:
-            _DEVICE.validate_json(
-                json.dumps(dict(metadata.device_snapshot), allow_nan=False), strict=True
-            )
-        except (ValidationError, ValueError) as error:
-            raise ValueError(f"/device: {error}") from error
-    # JSON validation rechecks dataclass fields rather than trusting instance types.
-    try:
-        checked = _METADATA.validate_json(
-            json.dumps(_METADATA.dump_python(metadata, mode="json"), allow_nan=False),
-            strict=True,
-        )
-    except (ValidationError, ValueError) as error:
-        raise ValueError(f"/context: {error}") from error
-    validate_run_id(checked.run_id)
-    if not checked.experiment:
-        raise ValueError("/: experiment must not be empty")
-    if checked.started_at is not None:
-        _validate_utc(checked.started_at, "/: started_at")
-    if checked.finished_at is not None:
-        _validate_utc(checked.finished_at, "/: finished_at")
-    for name in _OPTIONAL_EVIDENCE:
-        value = getattr(checked.provenance, name)
-        if value == "":
-            raise ValueError(f"/provenance: {name} must be nonempty or None")
-    if checked.labber_path == "":
-        raise ValueError("/: labber_path must be nonempty or None")
-
-
-def _validate_utc(value: str, location: str) -> None:
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError as error:
-        raise ValueError(f"{location}: expected UTC ISO timestamp") from error
-    if parsed.utcoffset() != timedelta(0):
-        raise ValueError(f"{location}: expected UTC ISO timestamp")
-
-
-def write_metadata(file: h5.File, metadata: RunMetadata, cfg: CfgSnapshot) -> None:
-    """Update known run attrs and JSON, preserving context's unknown fixed siblings.
-
-    Caller validates metadata first. cfg.values and dynamic roles are complete
-    replacements; unknown fixed context siblings remain unchanged.
-    Existing scalar datasets retain their HDF5 object identity.
-    """
-    raw = json_object(_METADATA.dump_json(metadata).decode(), "/")
-    for name in (
-        "run_id",
-        "experiment",
-        "started_at",
-        "finished_at",
-        "completion",
-        "labber_path",
-    ):
-        file.attrs[name] = raw[name] if raw[name] is not None else ""
-    device = raw["device_snapshot"]
-    if device is None:
-        if known_node(file, "device") is not None:
-            del file["device"]
-    elif isinstance(device, dict):
-        write_json(file, "device", device)
-    else:
-        raise ValueError("/device: expected JSON object")
-    cfg_dataset = write_json(file, "cfg", cfg.values)
-    cfg_dataset.attrs["cfg_type"] = cfg.cfg_type
-    cfg_dataset.attrs["cfg_schema_version"] = cfg.schema_version
-    snapshot = raw["snapshot"]
-    if not isinstance(snapshot, dict):
-        raise ValueError("/context: snapshot must be a JSON object")
-    if "context" in file:
-        snapshot = {**read_json(file, "context"), **snapshot}
-    write_json(file, "context", snapshot)
-    provenance = raw["provenance"]
-    if not isinstance(provenance, dict):
-        raise ValueError("/provenance: expected JSON object")
-    group = known_group(file, "provenance")
-    group.attrs["software_versions"] = json.dumps(provenance["software_versions"])
-    for name in _OPTIONAL_EVIDENCE:
-        group.attrs[name] = provenance[name] if provenance[name] is not None else ""
-    group.attrs["git_dirty"] = {True: "true", False: "false", None: "unknown"}[
-        metadata.provenance.git_dirty
-    ]
-
-
-def read_metadata(
-    file: h5.File, source: Path, *, minor_version: int
-) -> tuple[RunMetadata, CfgSnapshot]:
-    """Decode required metadata/cfg and validate known fields; unknown cfg keys remain.
-
-    minor_version is the validated native major-2 header minor. Minor 0 requires
-    a known started_at and complete/partial/stopped completion. Since minor 1,
-    an empty started_at attr decodes to None and completion may be unknown.
-    Required attrs remain required. Invalid JSON or wire values raise located
-    ValueError; the caller adds source context for other decoding errors.
-    """
-    raw: JsonObject = {}
-    for name in (
-        "run_id",
-        "experiment",
-        "started_at",
-        "finished_at",
-        "completion",
-        "labber_path",
-    ):
-        value = text_attr(file, name)
-        if minor_version == 0 and (name, value) in {
-            ("started_at", ""),
-            ("completion", "unknown"),
-        }:
-            raise ValueError(f"/: {name}: {value!r} requires native 2.1 or later")
-        raw[name] = (
-            None
-            if name in {"started_at", "finished_at", "labber_path"} and value == ""
-            else value
-        )
-    cfg_values = read_json(file, "cfg")
-    cfg_node = known_node(file, "cfg")
-    if not isinstance(cfg_node, h5.Dataset):
-        raise ValueError("/cfg: expected dataset")
-    cfg = CfgSnapshot(
-        values=cfg_values,
-        cfg_type=text_attr(cfg_node, "cfg_type"),
-        schema_version=text_attr(cfg_node, "cfg_schema_version"),
-    )
-    if known_node(file, "device") is not None:
-        device = read_json(file, "device")
-        try:
-            _DEVICE.validate_python(device, strict=True)
-        except ValidationError as error:
-            raise ValueError(f"/device: {error}") from error
-        raw["device_snapshot"] = device
-    raw["snapshot"] = read_json(file, "context")
-    group = known_node(file, "provenance")
-    if not isinstance(group, h5.Group):
-        raise ValueError("/provenance: missing group")
-    evidence: JsonObject = {
-        "software_versions": json_object(
-            text_attr(group, "software_versions"), "/provenance: software_versions"
-        )
-    }
-    for name in _OPTIONAL_EVIDENCE:
-        if name == "simulation_id" and name not in group.attrs:
-            evidence[name] = None
-            continue
-        value = text_attr(group, name)
-        evidence[name] = value or None
-    dirty = text_attr(group, "git_dirty")
-    if dirty not in {"true", "false", "unknown"}:
-        raise ValueError("/provenance: git_dirty must be true, false or unknown")
-    evidence["git_dirty"] = {"true": True, "false": False, "unknown": None}[dirty]
-    raw["provenance"] = evidence
-    try:
-        metadata = _METADATA.validate_json(json.dumps(raw), strict=True)
-    except ValidationError as error:
-        raise ValueError(f"{source}: /context or /provenance: {error}") from error
-    validate_metadata(metadata, cfg)
-    return metadata, cfg

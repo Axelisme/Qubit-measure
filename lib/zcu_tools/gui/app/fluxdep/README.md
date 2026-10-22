@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -99,6 +99,9 @@ RPC clients 可訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
 ### Database search 的 app ownership
+
+`database.py` 擁有 search HDF5 的 metadata reader，讀 ranges、參數表與 energies 維度，不讀 energy values，也不建立 search cache。這是 fluxdep 專用資料，不屬於通用 datafile 容器。FitService 與 remote dispatch 共用此 reader。
+
 
 `Controller.search` 的 `FluxDepSearchOwner` 集中 single-flight、版本依賴與 terminal policy。
 State 集中定義 alignment → points → Filter → fit 依賴圖，另納入 spectrum 集合。

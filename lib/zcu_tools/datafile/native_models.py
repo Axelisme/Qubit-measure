@@ -5,62 +5,9 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 from uuid import UUID
 
-import numpy as np
-from pydantic import JsonValue, PlainSerializer
+from pydantic import PlainSerializer
 
-from .models import DataVariable, LabberMetadata, LabberPayload
-
-type JsonObject = dict[str, JsonValue]
-
-
-@dataclass(frozen=True, kw_only=True)
-class ExperimentPayload:
-    """Ordered variables and shared Labber metadata for either writer.
-
-    variables maps stable DataVariable identities to inner-first LabberPayloads
-    in SI (or explicitly declared discrete units). It must be nonempty.
-    metadata carries comments, tags, project, user and optional creation time.
-    representation is single (exactly one variable) or grouped (one or more).
-    Native I/O validates names, numeric arrays and reversed-axis shapes;
-    different variables may use different grids. Freezing does not copy arrays.
-    """
-
-    variables: Mapping[DataVariable, LabberPayload]
-    metadata: LabberMetadata
-    representation: Literal["single", "grouped"]
-
-
-@dataclass(frozen=True, kw_only=True)
-class AxisSchema:
-    """Expected disk axis name, units and numeric dtype.
-
-    name is a nonempty HDF5 path segment; unit is the declared SI/discrete unit,
-    including an explicit empty unit for dimensionless coordinates.
-    dtype is the expected NumPy disk dtype, not a memory conversion rule.
-    """
-
-    name: str
-    unit: str
-    dtype: np.dtype[np.generic]
-
-
-@dataclass(frozen=True, kw_only=True)
-class VariableSchema:
-    """Disk declaration for one stable variable identity.
-
-    variable is its DataVariable group key. axes is ordered inner-first.
-    signal_name is a nonempty dataset name distinct from axes and timestamps.
-    signal_unit is the declared SI/discrete unit (empty is dimensionless).
-    signal_dtype is the expected real or complex numeric NumPy disk dtype.
-    Arrays must match reversed axis lengths. Timestamps use the fixed native
-    per-inner-trace Unix epoch contract, not a per-experiment schema.
-    """
-
-    variable: DataVariable
-    axes: tuple[AxisSchema, ...]
-    signal_name: str
-    signal_unit: str
-    signal_dtype: np.dtype[np.generic]
+from .container_models import JsonObject
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -84,7 +31,7 @@ class RunSnapshot:
     entry_id is the entry UUID. entry_name is its name at context capture.
     point and description are optional work-point label and description.
     roles maps role names to component names. No writer recaptures values from a
-    live entry. Unknown context fields use NativeExtensions.
+    live entry. The producer owns validation of the historical context.
     """
 
     entry_id: UUID
@@ -157,34 +104,3 @@ class RunMetadata:
         ]
         | None
     ) = None
-
-
-@dataclass(frozen=True, kw_only=True)
-class NativeExtensions:
-    """Complete validated HDF5 file image for explicit lossless minor rewrites.
-
-    file_image owns detached bytes, not a source path or an open file handle.
-    Only load_run_data(preserve_unknown=True) produces this envelope. Generic
-    callers pass it unchanged to save_run_data to preserve unknown attrs, nodes,
-    links, dtypes and JSON siblings. Shape-changing reference remapping is not
-    promised. Ordinary typed experiment loading does not allocate this image.
-    """
-
-    file_image: bytes
-
-
-@dataclass(frozen=True, kw_only=True)
-class StoredRun:
-    """Known native data plus an optional detached unknown-field envelope.
-
-    payload is the validated generic SI/discrete variable mapping.
-    metadata contains the known context projection and run/provenance evidence.
-    cfg contains the complete JSON cfg, including unknown nested keys.
-    extensions is None by default or NativeExtensions when explicitly requested.
-    Source files are closed before this envelope is returned.
-    """
-
-    payload: ExperimentPayload
-    metadata: RunMetadata
-    cfg: CfgSnapshot
-    extensions: NativeExtensions | None

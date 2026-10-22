@@ -14,7 +14,6 @@ from matplotlib.figure import Figure
 
 from zcu_tools.datafile import (
     RunMetadata,
-    encode_analysis_document,
     save_run_data,
     write_labber,
 )
@@ -32,6 +31,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.ledger_models import validate_origin
 from zcu_tools.utils import atomic_replace
 
+from .analysis_document import encode_analysis_document
 from .items import (
     AnalysisItem,
     DataItem,
@@ -98,7 +98,7 @@ def save_artifacts(
     Encode each figure/analysis item once. figure_encoder receives a native Figure
     and returns PNG bytes; None uses Figure.savefig. The callback runs synchronously
     on the calling thread, so callers must encode a live GUI Figure on its owner
-    thread. AnalysisDocument always uses the datafile analysis encoder.
+    thread. AnalysisDocument uses the artifacts-owned analysis encoder.
     Encoding failure marks all destinations of that member failed and still
     attempts other members. Do not encode in the caller or accept bytes aliases.
     Attempt Labber before native for each data member, retaining the previous

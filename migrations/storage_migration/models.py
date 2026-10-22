@@ -11,12 +11,12 @@ from pydantic import JsonValue
 from zcu_tools.datafile import (
     CfgSnapshot,
     JsonObject,
-    SoftwareProvenance,
-    VariableSchema,
 )
+from zcu_tools.datafile.native_models import SoftwareProvenance
 
 from migrations.comparison import ExistingItem
 from migrations.comparison import MigrationDifference as MigrationDifference
+from migrations.legacy_labber import LegacyVariableSchema
 from migrations.sample_csv import PreservedCsvField
 
 type MigrationPart = Literal["parameters", "data", "all"]
@@ -93,7 +93,7 @@ class MigrationMapping:
     components: Mapping[str, JsonObject]
     rules: tuple[KeyRule, ...]
     roles: Mapping[str, str]
-    data_schemas: Mapping[tuple[str, str], tuple[VariableSchema, ...]]
+    data_schemas: Mapping[tuple[str, str], tuple[LegacyVariableSchema, ...]]
     module_rules: tuple[ModuleRule, ...] = ()
     native_tags: Mapping[tuple[str, str], str] = field(default_factory=dict)
 

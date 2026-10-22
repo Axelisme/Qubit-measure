@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
-from zcu_tools.datafile import AnalysisDocument, RunMetadata, RunSnapshot
+from zcu_tools.datafile import RunMetadata, RunSnapshot
 from zcu_tools.experiment import (
     AcquisitionEvidence,
     AxesSpec,
@@ -21,6 +21,7 @@ from zcu_tools.experiment import (
     RunRecord,
 )
 from zcu_tools.experiment.artifacts import (
+    AnalysisDocument,
     AnalysisItem,
     ArtifactRef,
     DataItem,

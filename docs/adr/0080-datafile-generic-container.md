@@ -8,9 +8,9 @@ related: [0063, 0072]
 
 ## 脈絡
 
-`datafile` 今天同時擁有通用的變數／軸模型與一整組實驗語義：native `data.h5` 2.1 的根屬性是 run_id、experiment tag、時間與 completion，`/context` 放 entry、point、roles，`/device` 放 device snapshot，`/provenance` 放軟體版本；`RunMetadata`、`RunSnapshot`、`SoftwareProvenance` 都定義在 datafile 內。分析結果則走另一個獨立的 JSON 檔（`zcu.analysis-result` 1.0），因為 `data.h5` 的槽位是為量測 run 設計的，cfg 對分析結果沒有意義。另有 `fluxdep_database.py` 這種實驗專用 reader 放在 datafile。
+`datafile` 原本同時擁有通用的變數／軸模型與一整組實驗語義：native `data.h5` 2.1 的根屬性是 run_id、experiment tag、時間與 completion，`/context` 放 entry、point、roles，`/device` 放 device snapshot，`/provenance` 放軟體版本；`RunMetadata`、`RunSnapshot`、`SoftwareProvenance` 都定義在 datafile 內。分析結果則走另一個獨立的 JSON 檔（`zcu.analysis-result` 1.0），因為 `data.h5` 的槽位是為量測 run 設計的，cfg 對分析結果沒有意義。另有 `fluxdep_database.py` 這種實驗專用 reader 放在 datafile。
 
-使用者 2026-10-22 裁定：「我們應該約定好一個足夠通用，足夠穩定，容許使用者根據自己的需要擴充的datafile格式與介面，這樣其他人有不同的repo也能只import datafile而不需要知道其他模塊的用途」；「datafile應該專心處理數據與json就好，符合KISS原則，而使用方可以自己用adapter來將json轉成需要的強型別」；對「cfg、metadata、ext 以意義分槽」的異議：「對於分析結果之類的，cfg是沒什麼意義的，metadata與ext定位也模糊」。本 ADR 把容器改成以表示法分槽，實驗語義全部退回 experiment 層。使用者 2026-10-22 對草稿回「可以」，狀態為已採用、待實作。
+使用者 2026-10-22 裁定：「我們應該約定好一個足夠通用，足夠穩定，容許使用者根據自己的需要擴充的datafile格式與介面，這樣其他人有不同的repo也能只import datafile而不需要知道其他模塊的用途」；「datafile應該專心處理數據與json就好，符合KISS原則，而使用方可以自己用adapter來將json轉成需要的強型別」；對「cfg、metadata、ext 以意義分槽」的異議：「對於分析結果之類的，cfg是沒什麼意義的，metadata與ext定位也模糊」。本 ADR 把容器改成以表示法分槽，實驗語義全部退回 experiment 層。使用者 2026-10-22 對草稿回「可以」。
 
 ## 決策
 
@@ -41,19 +41,19 @@ related: [0063, 0072]
 
 公開面收斂為一個模組層級的 API，型別只用 datafile 自己的：
 
-- `save(path, *, vars: Mapping[str, Variable], docs: Mapping[str, JsonObject], groups: Mapping[str, GroupSource] = {}, producer: str, kind: str | None = None, replace: bool = False)`：寫到呼叫者的精確路徑，同目錄 temp 加 atomic replace。
-- `load(path) -> Container`：`Container(vars, docs, groups, attrs)`，`groups` 是 opaque handle 只供寫回。
+- `save(path, container: Container, *, replace: bool = False)`：寫到呼叫者的精確路徑，同目錄 temp 加 atomic replace。讀寫共用 `Container(vars, docs, groups, attrs)`，caller 可以直接修改 load 的結果再寫回，不另行拆出 header 參數。
+- `load(path) -> Container`：`groups` 是 detached opaque handle，只供寫回，原檔關閉或刪除後仍可使用。`attrs` 是 frozen `ContainerAttrs(format_version: str, producer: str, kind: str | None, extra: Mapping[str, JsonScalar])`。新檔由 caller 指定 3.0 與 producer，kind 可為 None。讀回的同 major 來源 minor 與未知根屬性 extra 在 save 保留，不降版。`format` 固定為 zcu.container，不接受 extra 覆寫 header keys。extra 只接受有限 JSON scalar，null 以 HDF5 null-dataspace attribute 表示。舊 2.x reader 回傳的 attrs 已正規化為 3.0。
 - `inspect(path) -> ContainerInfo`：只讀根屬性與每個 var／doc 的 schema，不載陣列。
 - `open_append(path, *, vars: Mapping[str, VariableSchema], ...)`：長時間量測用，預先宣告完整形狀與 fill value，逐外層列寫入，`finalize()` 標記完成；這是今天 streaming 版面的通用化，不再是 Labber 專屬。
-- `Variable(values, axes: tuple[Axis, ...], unit)`、`Axis(name, unit, values)`、`VariableSchema`、`JsonObject`、`FormatError`。
+- `Variable(values, axes: tuple[Axis, ...], unit)`、`Axis(name, unit, values)`：axes 按 NumPy 維度順序排列。`VariableSchema(shape, axes, dtype, unit, fill_value)` 宣告 append 的完整形狀與座標。`ContainerInfo` 的 axes 不載座標值。另提供 `JsonObject`、`JsonScalar` 與 `FormatError`。
 
-Labber 轉出（`write_labber`、grouped、trace）保留為 datafile 內的獨立模組，消費 `Container` 或 `vars`，不在容器核心路徑上；Labber 讀取同樣獨立。
+Labber 轉出保留為 datafile 內的獨立模組。`write_labber` 消費 Container.vars，不解釋 docs，LabberMetadata 由 caller 明傳。`read_labber` 回傳 `(Container, LabberMetadata)`，原始子樹與 timestamps 放在 opaque groups/labber。既有低層 readers 仍可直接取得 timestamps。`open_append` 只寫容器，Labber independent 的多 Log_N 版面由內部 helper 直接寫，不經中介檔。量測中的逐列保存改用容器 append，舊 Labber streaming 公開入口退場。
 
 ### 獨立性
 
-datafile 不 import `zcu_tools` 的其他 package。今天僅有的三個依賴（`core.numeric_scalar.normalize_numpy_scalar`、`format_version`、`utils.atomic_replace`）搬進 datafile 自有的小模組或改用標準函式庫。`.importlinter` 新增 contract `datafile-standalone`（forbidden：`zcu_tools.datafile` → `zcu_tools.*` 除自身），ID 在實作時填入本節。外部依賴只有 NumPy、h5py、pydantic。
+datafile 不 import `zcu_tools` 的其他 package。今天僅有的三個依賴（`core.numeric_scalar.normalize_numpy_scalar`、`format_version`、`utils.atomic_replace`）搬進 datafile 自有的小模組或改用標準函式庫。`.importlinter` 的 `datafile-standalone` contract 禁止 `zcu_tools.datafile` import 其他 framework packages。Contract 明列目前所有其他 package 與 format_version module，不新增 ignore_imports。外部依賴只有 NumPy、h5py、pydantic。
 
-`fluxdep_database.py` 不是容器格式，搬到 fluxdep 分析的 owner；`analysis_document.py` 的 JSON 信封改為 `docs/analysis` 的內容約定，owner 是 experiment 的 artifacts。
+Fluxdep database reader 由 `gui.app.fluxdep.database` 擁有。`analysis_document.py` 的 JSON 信封是 `docs/analysis` 的內容約定，owner 是 experiment.artifacts，`AnalysisDocument.to_doc()` 回傳有限 JSON 物件。現有 artifact 仍寫 analysis/<pane>.json，SaveLayout 與 ledger 不因 owner 搬遷改變。
 
 ### 其他 package 的對應
 
@@ -65,7 +65,7 @@ datafile 不 import `zcu_tools` 的其他 package。今天僅有的三個依賴�
 
 - 其他 repo 可以只安裝 datafile 讀寫同一種容器；他們的 docs 與 groups 名稱自己定，不需要知道 experiment、resources 或 GUI。
 - 分析結果與量測 run 用同一個容器，差別只在 docs 的名字與 vars 的內容。
-- 一次格式升版（2.x → 3.0），伴隨 [[0063]] 的「datafile 擁有通用檔案格式」段與 `experiment/README.md`、`datafile/README.md` 改寫；`tests/datafile` 九個檔與其他五個釘住舊版面的測試改期望。
+- 新寫入使用 3.0。[[0063]] 的保存權威不變，通用格式與版本規則由本篇擁有。測試從 save／load／inspect／append 與 Labber 的公開接縫驗證。
 - 失去的：`/context`、`/device` 逐欄驗證從 datafile 移到 experiment 層；datafile 不再能單獨判斷一個檔「是不是合法的量測 run」，只能判斷「是不是合法的容器」。
 
 ## 實作時的固定選擇

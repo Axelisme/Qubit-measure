@@ -1,0 +1,187 @@
+"""Atomic one-shot I/O for representation-only HDF5 containers."""
+
+from __future__ import annotations
+
+import io
+import os
+import tempfile
+from collections.abc import Mapping
+from pathlib import Path
+
+import h5py as h5
+import numpy as np
+
+from .container_models import (
+    Container,
+    ContainerInfo,
+    FormatError,
+    GroupSource,
+    JsonObject,
+    Variable,
+)
+from .container_nodes import (
+    json_text,
+    name_segment,
+    root_attrs,
+    text_attr,
+    validate_variable,
+    variable_parts,
+    variable_schema,
+    write_attrs,
+    write_doc,
+    write_variable,
+)
+from .native_nodes import known_group
+
+
+def save(path: Path, container: Container, *, replace: bool = False) -> None:
+    """Write a container to exactly path through a same-directory temporary file.
+
+    container.vars use NumPy axis order; docs contain strict finite JSON objects;
+    groups copy opaque HDF5 subtrees. Names are nonempty path segments excluding
+    '.', '..', slash and NUL. container.attrs preserves major-3 forward minors,
+    producer/kind and finite scalar extensions. New callers specify version 3.0;
+    load returns the same value type, ready for a lossless rewrite.
+    Existing paths raise FileExistsError unless replace=True. Publication is
+    atomic, not a cross-file transaction or power-loss guarantee. Failed writes
+    preserve the destination and remove temporary files. Invalid input raises
+    ValueError (FormatError for malformed headers); I/O errors propagate.
+    References in groups to reshaped variables are not guaranteed to remain valid.
+    """
+    path = Path(path)
+    if not replace and path.exists():
+        raise FileExistsError(path)
+    header = container.attrs
+    validate_contents(container.vars, container.docs, container.groups)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    os.close(descriptor)
+    temp = Path(temporary)
+    try:
+        with h5.File(temp, "w") as file:
+            write_attrs(file, header)
+            variables = file.create_group("vars")
+            documents = file.create_group("docs")
+            opaque = file.create_group("groups")
+            for name, variable in container.vars.items():
+                write_variable(variables.create_group(name), variable)
+            for name, doc in container.docs.items():
+                write_doc(documents, name, doc)
+            for name, source in container.groups.items():
+                copy_group(opaque, name, source)
+        if replace:
+            os.replace(temp, path)
+        else:
+            os.link(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def validate_contents(
+    variables: Mapping[str, Variable],
+    docs: Mapping[str, JsonObject],
+    groups: Mapping[str, GroupSource],
+) -> None:
+    """Validate all names and in-memory content before creating the output file."""
+    for namespace in (variables, docs, groups):
+        for name in namespace:
+            name_segment(name)
+    for variable in variables.values():
+        validate_variable(variable)
+    for value in docs.values():
+        json_text(value)
+
+
+def node_names(group: h5.Group) -> tuple[str, ...]:
+    """Return validated immediate child names, refusing unnamed HDF5 objects."""
+    names: list[str] = []
+    for name in group:
+        if not isinstance(name, str):
+            raise FormatError(f"{group.name}: child name must be text")
+        name_segment(name)
+        names.append(name)
+    return tuple(names)
+
+
+def copy_group(destination: h5.Group, name: str, source: GroupSource) -> None:
+    """Copy a caller-provided or detached HDF5 group, preserving its subtree."""
+    stream = (
+        io.BytesIO(source.source) if isinstance(source.source, bytes) else source.source
+    )
+    with h5.File(stream, "r") as file:
+        node = file[source.node]
+        if not isinstance(node, h5.Group):
+            raise ValueError(f"{source.node}: group source must be an HDF5 group")
+        file.copy(node, destination, name=name, expand_refs=True)
+
+
+def load(path: Path) -> Container:
+    """Read and close a major-3 container or legacy native major-2 file.
+
+    All arrays/docs are detached, and opaque groups retain a detached file image.
+    Unknown named content is retained. Known nodes must be local, never external
+    links. Same-major future minors are accepted. Legacy metadata is mapped to
+    docs/cfg and docs/metadata and its original tree is retained in groups/legacy.
+    Malformed content raises path-qualified FormatError; I/O errors propagate.
+    """
+    from .container_nodes import read_doc
+    from .legacy_native import load_legacy
+
+    with h5.File(path, "r") as file:
+        try:
+            if text_attr(file, "format") == "zcu.experiment-data":
+                return load_legacy(file)
+            attrs = root_attrs(file)
+            variables = known_group(file, "vars")
+            documents = known_group(file, "docs")
+            opaque = known_group(file, "groups")
+            result: dict[str, Variable] = {}
+            for name in node_names(variables):
+                name_segment(name)
+                values, axes = variable_parts(known_group(variables, name), arrays=True)
+                result[name] = Variable(
+                    np.asarray(values[()]), axes, text_attr(values, "unit")
+                )
+            docs = {}
+            for name in node_names(documents):
+                name_segment(name)
+                docs[name] = read_doc(documents, name)
+            image = file.id.get_file_image() if len(opaque) else b""
+            groups = {}
+            for name in node_names(opaque):
+                name_segment(name)
+                groups[name] = GroupSource(image, f"/groups/{name}")
+            return Container(result, docs, groups, attrs)
+        except ValueError as error:
+            raise FormatError(f"{path}: {error}") from error
+
+
+def inspect(path: Path) -> ContainerInfo:
+    """Read header and var/doc names and schemas without loading any arrays.
+
+    Coordinate arrays are empty in returned axes. Documents are not decoded, so
+    inspect is not a promise that load will succeed. Legacy headers and variable
+    schemas are supported. Malformed schema raises FormatError; I/O propagates.
+    """
+    from .legacy_native import inspect_legacy
+
+    with h5.File(path, "r") as file:
+        try:
+            if text_attr(file, "format") == "zcu.experiment-data":
+                return inspect_legacy(file)
+            attrs = root_attrs(file)
+            variables = known_group(file, "vars")
+            documents = known_group(file, "docs")
+            groups = known_group(file, "groups")
+            return ContainerInfo(
+                {
+                    name: variable_schema(known_group(variables, name))
+                    for name in node_names(variables)
+                },
+                node_names(documents),
+                node_names(groups),
+                attrs,
+            )
+        except ValueError as error:
+            raise FormatError(f"{path}: {error}") from error

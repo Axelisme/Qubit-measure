@@ -62,6 +62,8 @@ physical models, evolution and sampling.
 
 ## 實驗介面與資料
 
+`artifacts.AnalysisDocument` 擁有 analysis JSON 信封。`to_doc()` 回傳可放進通用容器 `docs/analysis` 的有限 JSON object，容器不解釋其鍵。既有 artifact encoder 仍產 `analysis/<pane>.json`，不改 SaveLayout 或 ledger。選用 AnalysisDocument 時不載入 artifact saver。
+
 - `records.py` 的 `RunRecord` 將 nullable cfg 與純 Result 配對。可選 `labber_metadata` 保存載入檔案的 comment、tags、project、user 與 creation_time；未捕捉時為 None。Typed `restore_run`、`load_run`、`load_run_with_metadata` 與 core `from_stored` 都沿此欄位保留 metadata，不改各入口原有 tuple 含義。建立時複製 cfg 與 Labber metadata，隔離 caller 之後對輸入的修改；record 內 cfg、Result 與 metadata 仍可修改。`interfaces.py` 的 `RecordExperiment` 定義 run／save／load，`SynchronousExperiment` 另加同步 analyze，不要求 interactive 實驗提供 analyze。
 - `base.py` 的 `PersistableExperiment` 透過 `AXES_SPEC` 提供 stateless `save(source, destination)`／`load(source)`，路徑使用本機 `Path`，公開介面不提供 server_ip／port。保存接明確 `RunRecord`，cfg 缺失時拒絕。載入回傳 `RunRecord`。`save` 是單檔 Labber 匯出，`load` 讀 native `data.h5` 並透過公開 `from_stored` 還原 typed record。歷史 cfg 不相容時發出 `CfgUnavailableWarning` 並保留有效資料，缺 cfg envelope 或壞資料仍拒絕。只有 Labber 的舊檔須先用既有 `migrations/` 工具離線轉換，不提供 fallback。核心不保存上次結果；NotebookExperiment 管理各實驗的便利引用，NotebookAdapter 只綁定可重用環境。
 - `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，提供同源 cfg 與 SI payload 給 native、Labber writer，並帶出 grouped spec 的 Labber layout。Preparation 不做 I/O，保留 raw comment、single/grouped representation，驗證 typed cfg/result、schema 與 shape，不增加 Labber common-grid 限制。`PersistableExperiment.persistence_spec()` 公開 instance 的保存宣告，缺宣告明確失敗。`load_run_with_metadata` 讀回 typed record 與完整歷史 RunMetadata，延續 run 身分、時間、completion、context、provenance 與 device snapshot；舊 `load_run` 仍回 record／snapshot tuple。
