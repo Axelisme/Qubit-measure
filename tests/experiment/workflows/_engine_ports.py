@@ -77,5 +77,3 @@ class RecordingBar(TQDMProgressBar):
     def close(self) -> None:
         self.closed = True
         super().close()
-
-

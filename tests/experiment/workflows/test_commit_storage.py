@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ConfigDict, TypeAdapter
-
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.workflows import saved_run
@@ -40,7 +39,11 @@ type Rig = tuple[w.Engine[int], w.RunPaths]
 @pytest.fixture
 def rig(tmp_path: Path) -> Iterator[Rig]:
     plots = Plots(NonPresentingHost())
-    engine = w.Engine(w.EnginePorts(plots, RecordingBar, ManualClock(), context=7, devices=RecordingDevices()))
+    engine = w.Engine(
+        w.EnginePorts(
+            plots, RecordingBar, ManualClock(), context=7, devices=RecordingDevices()
+        )
+    )
     yield engine, w.RunPaths(tmp_path / "metadata", tmp_path / "data")
     plots.finish()
     plots.release()
@@ -48,17 +51,30 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
 
 def execute(rig: Rig, script: w.WorkflowScript[Plan, Knobs, None, int]) -> None:
     engine, paths = rig
-    engine.start(script, plan=Plan(), tunables=Knobs(), paths=paths, identity=w.RunIdentity(
-        "run", SoftwareProvenance(
-            software_versions={}, git_commit=None, git_dirty=None,
-            qick_version=None, soc_fingerprint=None, hostname="offline",
+    engine.start(
+        script,
+        plan=Plan(),
+        tunables=Knobs(),
+        paths=paths,
+        identity=w.RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
         ),
-    ))
+    )
     status = engine.execute("run")
     assert status.lifecycle == "done", status.reason
 
 
-def test_allocation_order_is_independent_of_commit_order_and_duplicate_is_rejected(rig: Rig) -> None:
+def test_allocation_order_is_independent_of_commit_order_and_duplicate_is_rejected(
+    rig: Rig,
+) -> None:
     _engine, paths = rig
     allocated: list[Path] = []
 
@@ -77,16 +93,26 @@ def test_allocation_order_is_independent_of_commit_order_and_duplicate_is_reject
 
     execute(rig, script)
     records = saved_run.read_records(paths.metadata_root, Record)
-    assert [(record.commit_seq, record.directory.name, record.record.index) for record in records] == [
-        (1, "000002", 2), (2, "000001", 1), (3, "000004", 4)
+    assert [
+        (record.commit_seq, record.directory.name, record.record.index)
+        for record in records
+    ] == [(1, "000002", 2), (2, "000001", 1), (3, "000004", 4)]
+    assert allocated == [
+        paths.data_root / "commits/000001",
+        paths.data_root / "commits/000002",
     ]
-    assert allocated == [paths.data_root / "commits/000001", paths.data_root / "commits/000002"]
     assert (allocated[0] / "raw.bin").read_bytes() == b"first"
     assert (paths.data_root / "commits/000003/notes.txt").read_text() == "uncommitted"
-    assert [record.directory.name for record in records] == ["000002", "000001", "000004"]
+    assert [record.directory.name for record in records] == [
+        "000002",
+        "000001",
+        "000004",
+    ]
 
 
-def test_commit_dirs_is_lazy_and_zip_allocates_only_the_authored_values(rig: Rig) -> None:
+def test_commit_dirs_is_lazy_and_zip_allocates_only_the_authored_values(
+    rig: Rig,
+) -> None:
     _engine, paths = rig
     counts: list[int] = []
 
@@ -94,16 +120,21 @@ def test_commit_dirs_is_lazy_and_zip_allocates_only_the_authored_values(rig: Rig
     async def script(env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Knobs]) -> None:
         directories = env.commit_dirs()
         counts.append(len(tuple((paths.data_root / "commits").glob("*"))))
-        for value, directory in zip(plan.values, directories):
+        for value, directory in zip(plan.values, directories, strict=False):
             await env.commit(Record(index=value), directory)
         counts.append(len(tuple((paths.data_root / "commits").glob("*"))))
 
     execute(rig, script)
     assert counts == [0, 2]
-    assert [record.record.index for record in saved_run.read_records(paths.metadata_root, TypeAdapter(Record))] == [7, 8]
+    assert [
+        record.record.index
+        for record in saved_run.read_records(paths.metadata_root, TypeAdapter(Record))
+    ] == [7, 8]
 
 
-def test_record_schema_and_envelope_are_persisted_once_per_record_type(rig: Rig) -> None:
+def test_record_schema_and_envelope_are_persisted_once_per_record_type(
+    rig: Rig,
+) -> None:
     _engine, paths = rig
 
     @w.workflow("schema", "Publish model schema with each distinct record type")
@@ -126,7 +157,9 @@ def test_record_schema_and_envelope_are_persisted_once_per_record_type(rig: Rig)
     assert first["started"]["commit_seq"] == 0
 
 
-def test_typed_reader_rejects_wrong_type_and_bad_fields_but_raw_preserves_json(rig: Rig) -> None:
+def test_typed_reader_rejects_wrong_type_and_bad_fields_but_raw_preserves_json(
+    rig: Rig,
+) -> None:
     _engine, paths = rig
 
     @w.workflow("reader", "Read only declared committed record envelopes")
@@ -142,7 +175,9 @@ def test_typed_reader_rejects_wrong_type_and_bad_fields_but_raw_preserves_json(r
     source.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="record.json"):
         saved_run.read_records(paths.metadata_root, Record)
-    assert saved_run.read_records_raw(paths.metadata_root)[0].record.value == {"index": "not an integer"}
+    assert saved_run.read_records_raw(paths.metadata_root)[0].record.value == {
+        "index": "not an integer"
+    }
 
 
 def test_foreign_directories_do_not_publish_records(rig: Rig, tmp_path: Path) -> None:
@@ -158,4 +193,7 @@ def test_foreign_directories_do_not_publish_records(rig: Rig, tmp_path: Path) ->
 
     execute(rig, script)
     assert len(engine.records("run")) == 1
-    assert [record.record.index for record in saved_run.read_records(paths.metadata_root, Record)] == [1]
+    assert [
+        record.record.index
+        for record in saved_run.read_records(paths.metadata_root, Record)
+    ] == [1]

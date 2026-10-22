@@ -100,10 +100,13 @@ def test_async_commits_heterogeneous_records_and_tracks_every_live_revision(
         except AttributeError as error:
             pytest.fail(f"Saved-run reading must expose committed records: {error}")
         assert [point.record.value for point in saved] == [
-            {"first": 3, "latest": 8}, {"value": 8}
+            {"first": 3, "latest": 8},
+            {"value": 8},
         ]
         first = json.loads((paths.data_root / "commits/000001/record.json").read_text())
-        second = json.loads((paths.data_root / "commits/000002/record.json").read_text())
+        second = json.loads(
+            (paths.data_root / "commits/000002/record.json").read_text()
+        )
         assert first["started"]["revisions"] == [0, 1]
         assert second["started"]["revisions"] == [1]
         summary = saved_run.read_summary(paths.metadata_root)

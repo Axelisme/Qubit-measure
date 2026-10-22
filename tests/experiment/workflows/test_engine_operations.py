@@ -5,17 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Event, Thread, Timer
-from time import sleep
 
 import pytest
 from pydantic import BaseModel, ConfigDict
-
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import saved_run
-from zcu_tools.experiment import workflows as w
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
@@ -53,23 +51,36 @@ type Rig = tuple[w.Engine[int], w.RunPaths, RecordingDevices]
 def rig(tmp_path: Path) -> Iterator[Rig]:
     plots = Plots(NonPresentingHost())
     devices = RecordingDevices()
-    engine = w.Engine(w.EnginePorts(plots, RecordingBar, ManualClock(), context=7, devices=devices))
+    engine = w.Engine(
+        w.EnginePorts(plots, RecordingBar, ManualClock(), context=7, devices=devices)
+    )
     paths = w.RunPaths(tmp_path / "metadata", tmp_path / "data")
     yield engine, paths, devices
     plots.finish()
     plots.release()
 
 
-def start(engine: w.Engine[int], paths: w.RunPaths, script: w.WorkflowScript[Plan, Tunables, Summary | None, int]) -> None:
+def start(
+    engine: w.Engine[int],
+    paths: w.RunPaths,
+    script: w.WorkflowScript[Plan, Tunables, Summary | None, int],
+) -> None:
     engine.start(
         script,
         plan=Plan(),
         tunables=Tunables(),
         paths=paths,
-        identity=w.RunIdentity("run", SoftwareProvenance(
-            software_versions={}, git_commit=None, git_dirty=None,
-            qick_version=None, soc_fingerprint=None, hostname="offline",
-        )),
+        identity=w.RunIdentity(
+            "run",
+            SoftwareProvenance(
+                software_versions={},
+                git_commit=None,
+                git_dirty=None,
+                qick_version=None,
+                soc_fingerprint=None,
+                hostname="offline",
+            ),
+        ),
     )
 
 
@@ -95,13 +106,15 @@ def until(predicate: Callable[[], bool], label: str) -> None:
     try:
         while not predicate():
             assert not expired.is_set(), f"Timed out awaiting {label}"
-            sleep(0)
+            expired.wait(0.001)
     finally:
         timer.cancel()
         timer.join()
 
 
-def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(rig: Rig) -> None:
+def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(
+    rig: Rig,
+) -> None:
     engine, paths, _devices = rig
     ready, entered = Event(), Event()
     outcomes: list[tuple[int, bool]] = []
@@ -109,11 +122,15 @@ def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(rig:
     later_stops: list[bool] = []
 
     @w.workflow("stop", "Preserve cooperative partial results")
-    async def script(env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]) -> Summary:
+    async def script(
+        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
+    ) -> Summary:
         def first(ctx: CallContext) -> int:
             entered.set()
             ready.set()
-            assert ctx.stop_signal.event.wait(30), "Stop must reach the active operation"
+            assert ctx.stop_signal.event.wait(30), (
+                "Stop must reach the active operation"
+            )
             return 4
 
         first_result = await env.call(first)
@@ -147,20 +164,26 @@ def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(rig:
     assert saved_run.read_summary(paths.metadata_root) is None
 
 
-def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(rig: Rig) -> None:
+def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
+    rig: Rig,
+) -> None:
     engine, paths, _devices = rig
     ready, entered = Event(), Event()
     calls: list[int] = []
     delivered: list[int] = []
 
     @w.workflow("pause", "Resume the same suspended request")
-    async def script(env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]) -> None:
+    async def script(
+        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
+    ) -> None:
         def acquire(ctx: CallContext) -> int:
             calls.append(ctx.epoch)
             if len(calls) == 1:
                 entered.set()
                 ready.set()
-                assert ctx.stop_signal.event.wait(30), "Pause must reach the active operation"
+                assert ctx.stop_signal.event.wait(30), (
+                    "Pause must reach the active operation"
+                )
                 return -1
             assert not ctx.stop_signal.is_set()
             return 42
@@ -176,7 +199,12 @@ def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(r
         assert ready.wait(30), "The worker must enter its operation or settle"
         assert entered.is_set(), statuses
         engine.pause("run")
-        until(lambda: (status := engine.status()) is not None and status.lifecycle == "paused", "paused operation")
+        until(
+            lambda: (
+                (status := engine.status()) is not None and status.lifecycle == "paused"
+            ),
+            "paused operation",
+        )
         assert delivered == []
         engine.resume("run")
         thread.join(30)
@@ -196,14 +224,19 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     answers: list[Reply | None] = []
 
     @w.workflow("questions", "Require an explicit answer for each question")
-    async def script(env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]) -> None:
+    async def script(
+        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
+    ) -> None:
         answers.append(await env.ask(Approval(label="first")))
         answers.append(await env.ask(Approval(label="second")))
 
     start(engine, paths, script)
     thread, statuses = worker(engine, ready)
     try:
-        until(lambda: engine.pending_question("run") is not None or bool(statuses), "first question")
+        until(
+            lambda: engine.pending_question("run") is not None or bool(statuses),
+            "first question",
+        )
         first = engine.pending_question("run")
         assert first is not None, statuses
         before = engine.status()
@@ -212,7 +245,13 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
         assert rejected.value.pending_request_id == first.request_id
         assert engine.status() == before
         engine.answer("run", Reply(approved=True), request_id=first.request_id)
-        until(lambda: (pending := engine.pending_question("run")) is not None and pending.request_id != first.request_id, "second question")
+        until(
+            lambda: (
+                (pending := engine.pending_question("run")) is not None
+                and pending.request_id != first.request_id
+            ),
+            "second question",
+        )
         second = engine.pending_question("run")
         assert second is not None
         with pytest.raises(w.QuestionMismatch) as duplicate:
@@ -230,13 +269,17 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     assert answers == [Reply(approved=True), Reply(approved=False)]
 
 
-def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(rig: Rig) -> None:
+def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
+    rig: Rig,
+) -> None:
     engine, paths, devices = rig
     records: list[tuple[int, int]] = []
     cfg = Cfg(value=3)
 
     @w.workflow("experiment", "Return a native RunRecord from async run")
-    async def script(env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]) -> None:
+    async def script(
+        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
+    ) -> None:
         def experiment(run: w.Run[Cfg]) -> int:
             run.cfg.value = 8
             return run.cfg.value + 1
