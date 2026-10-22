@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-23，mux fine timing 候選
+**Last updated:** 2026-10-23，mux seed diagnostics
 
 # Measure domain support
 
@@ -23,7 +23,7 @@ Fine 缺 slot 時，只有完整 group 的 kappa 都有效才填候選。mixer_f
 trig_offset 取全部 resonators.ext.time_of_fly 最大值加 ringup，length 取 trig_offset + ro_length。
 任一 kappa 缺值時四欄留空；任一 frequency 缺值時 mixer_freq 留空；任一 time_of_fly 缺值時 trig_offset／length 留空。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源，不擴充共用 metadata API。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。只有推導 timing 與 gain 0.1 標為 uncalibrated，ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。

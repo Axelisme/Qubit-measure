@@ -206,20 +206,30 @@ def test_root_slot_expression_overrides_require_input(
 
 def test_seed_metadata_returns_new_form_and_later_call_replaces_metadata() -> None:
     original = bound_form(Template("pulse"))
-    assert callable(getattr(original, "with_seed_metadata", None)), "Forms need a metadata copy operation"
+    assert callable(getattr(original, "with_seed_metadata", None)), (
+        "Forms need a metadata copy operation"
+    )
     env = environment()
     original_input = original.default_input(env)
-    first = original.with_seed_metadata({
-        ("probe", "module", "gain"): FieldMeta(calibration="uncalibrated"),
-        ("probe", "module", "freq"): FieldMeta(calibration="uncalibrated"),
-    })
-    second = first.with_seed_metadata({
-        ("probe", "module", "gain"): FieldMeta(calibration="measured"),
-    })
+    first = original.with_seed_metadata(
+        {
+            ("probe", "module", "gain"): FieldMeta(calibration="uncalibrated"),
+            ("probe", "module", "freq"): FieldMeta(calibration="uncalibrated"),
+        }
+    )
+    second = first.with_seed_metadata(
+        {
+            ("probe", "module", "gain"): FieldMeta(calibration="measured"),
+        }
+    )
     assert first is not original and second is not first
-    original_rows = {row.path: row for row in original.diagnostics(original_input, env, None)}
+    original_rows = {
+        row.path: row for row in original.diagnostics(original_input, env, None)
+    }
     first_rows = {row.path: row for row in first.diagnostics(original_input, env, None)}
-    second_rows = {row.path: row for row in second.diagnostics(original_input, env, None)}
+    second_rows = {
+        row.path: row for row in second.diagnostics(original_input, env, None)
+    }
     assert original_rows[("probe", "module", "gain")].uncalibrated is None
     assert first_rows[("probe", "module", "gain")].uncalibrated is True
     assert first_rows[("probe", "module", "freq")].uncalibrated is True
@@ -229,7 +239,9 @@ def test_seed_metadata_returns_new_form_and_later_call_replaces_metadata() -> No
 
 
 @pytest.mark.parametrize("copy", [False, True])
-def test_seed_diagnostics_preserve_slot_origin_without_inventing_calibration(copy: bool) -> None:
+def test_seed_diagnostics_preserve_slot_origin_without_inventing_calibration(
+    copy: bool,
+) -> None:
     form = bound_form(Slot("Q.pulses.probe", copy=copy))
     assert callable(getattr(form, "diagnostics", None)), "Forms need source diagnostics"
     env = environment()

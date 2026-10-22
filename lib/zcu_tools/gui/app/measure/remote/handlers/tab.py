@@ -301,6 +301,7 @@ def h_tab_describe_cfg(
     """
     from ..form_description import describe_form
     from ..form_errors import cfg_error_to_remote
+    from ..form_observation import diagnostic_rows
 
     raw = params["path"]
     if not isinstance(raw, list):
@@ -318,7 +319,10 @@ def h_tab_describe_cfg(
         segments.append(part)
     path = tuple(segments)
     try:
-        return dict(describe_form(adapter.cfg_lookup(str(params["tab_id"])), path))
+        resource = adapter.cfg_lookup(str(params["tab_id"]))
+        observed: dict[str, object] = dict(describe_form(resource, path))
+        observed["diagnostics"] = diagnostic_rows(resource.diagnostics())
+        return observed
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     except FormPathError as exc:

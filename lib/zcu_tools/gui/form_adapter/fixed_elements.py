@@ -4,6 +4,7 @@ Core only calls the neutral input-change contract. This adapter capability
 assigns domain meaning to named list elements; widgets and transports do not.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, Self, get_args, get_origin
 
@@ -276,9 +277,14 @@ class FixedElementsForm(FormModel):
     fixed_elements: ClassVar[tuple[FixedElements, ...]] = ()
 
     @classmethod
-    def default_input(cls, env: FormEnv) -> FormInput[Self]:
-        """Build fresh defaults, rejecting duplicate names with their raw indices."""
-        input = super().default_input(env)
+    def default_input(
+        cls, env: FormEnv, *, defaults: Mapping[str, JsonValue] | None = None
+    ) -> FormInput[Self]:
+        """Build fresh defaults, rejecting duplicate names with their raw indices.
+
+        defaults optionally supplies already-built raw defaults, as in FormModel.
+        """
+        input = super().default_input(env, defaults=defaults)
         for declaration in cls.fixed_elements:
             declaration.check_declaration(cls)
             declaration.check_unique_names(input.data)

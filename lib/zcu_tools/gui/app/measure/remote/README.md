@@ -26,8 +26,7 @@ not declare MCP tools and does not own stdio transport.
   `rpc.catalog` projection uses those same entries; handler refs are resolved
   only by dispatch.
 - [`events.py`](events.py)：domain payload type to wire event serializer mapping.
-- [`form_observation.py`](form_observation.py)：tab Form input/values/errors projection and
-  the shared path-array edit decoder.
+- [`form_observation.py`](form_observation.py)：tab Form input/values/errors、全表 diagnostics 投影，以及共用 path-array edit decoder。
 - [`form_description.py`](form_description.py)：single-layer Form description and field observation。
 - [`form_errors.py`](form_errors.py)：將 measure 的 CfgPreconditionError 轉譯為 remote 錯誤；
   來源 provenance 與 precondition 型別由 services/form_contracts.py 擁有。
@@ -163,6 +162,8 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 帶佔位符的 role 使用固定 capture 的同名 resolved aliases。例如 qub_probe 要先在 Aliases 綁定 qubit。Name 的 component 不決定 alias；缺必要 alias 時回 invalid_params 並指名要綁定的名稱。`context.set_parameter(path="MG12.module.readout", value="MG12.readout.mux_ro")` 可建立缺失的 module slot，也可用 MG12.module 整份 mapping 寫入。回覆的 before 是原始 slot 值，不 materialize module。
 
 ## Form commands
+
+`tab.get_cfg` 與 `tab.describe_cfg` 的 `diagnostics` 都涵蓋完整表單，包括未參與或未在 picker 顯示的 tone。每列保存 canonical path、目前 message，以及原始 name／index。Seed_source 是初值 expression、slot、template 或作者來源說明。Seed_status 的 missing／available／literal 是 Open／Reset 的事實，Refresh 和手動補值不改寫它。Uncalibrated 只投影作者的 seed metadata，未宣告則為 null，不從缺值或數值推論。全表 diagnostics 合併 preview 與 lowered cfg errors，describe 的局部 errors 保持原契約。Owner 為 `Form.diagnostics` 與 `TabFormResource.diagnostics`，remote 不另建缺值規則。
 
 `tab.run_cfg_command(tab_id, path, name)` 呼叫目前 active path 公開的 Form command。Path 是既有 canonical model-field 字串陣列。Description 的掛載欄位 commands 帶 name、label、target 與 inputs，sweep 指令掛在 sweep row 而非座標或採樣葉欄位；remote 只投影，不求值或換算。成功回 input／values／errors，失敗不改 input。Unknown command 回 invalid_params/form_errors，inactive path 回 invalid_params/form_path。控制身份、busy、lifetime 與 mutation guard 沿既有 resource.run_command。任意 provider/declaration ValueError 不被重分類為 command rejection。
 

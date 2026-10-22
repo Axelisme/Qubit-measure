@@ -29,7 +29,11 @@ class DiagnosticAdapter(SampleAdapter):
             {
                 "sweep": Range.between(1.0, 2.0, expts=3),
                 "tones": [
-                    {"name": f"Q{i + 1}", "frequency": Expr(f"Q{i + 1}.freq"), "gain": 0.1}
+                    {
+                        "name": f"Q{i + 1}",
+                        "frequency": Expr(f"Q{i + 1}.freq"),
+                        "gain": 0.1,
+                    }
                     for i in range(6)
                 ],
                 "participants": ["Q1"],
@@ -53,8 +57,12 @@ def test_cfg_diagnostics_include_every_original_tone_and_seed_without_mutation(
             params["path"] = ["tones", 0, "frequency"]
         reply = rpc.call(method, params)
         assert reply["ok"], reply
-        assert "diagnostics" in reply["result"], "Cfg reads must include all-tone diagnostics"
-        diagnostics = {tuple(row["path"]): row for row in reply["result"]["diagnostics"]}
+        assert "diagnostics" in reply["result"], (
+            "Cfg reads must include all-tone diagnostics"
+        )
+        diagnostics = {
+            tuple(row["path"]): row for row in reply["result"]["diagnostics"]
+        }
         for i in range(6):
             row = diagnostics[("tones", i, "frequency")]
             assert row == {
@@ -74,12 +82,16 @@ def test_cfg_diagnostics_include_every_original_tone_and_seed_without_mutation(
         last = next(row for row in updated if row["path"] == ["tones", 5, "frequency"])
         assert last["message"] is None
         assert last["seed_source"] == "Q6.freq"
-        assert last["seed_status"] == "missing", "Editing does not rewrite seed provenance"
+        assert last["seed_status"] == "missing", (
+            "Editing does not rewrite seed provenance"
+        )
     finally:
         fixture.ctrl.tab_control.close_tab(tab)
 
 
-def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(form_rpc) -> None:
+def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
+    form_rpc,
+) -> None:
     fixture, existing, rpc = form_rpc
     initial = rpc.call("tab.get_cfg", {"tab_id": existing})
     assert "diagnostics" in initial["result"], "Cfg reads must expose seed diagnostics"
@@ -100,12 +112,15 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(form
                     "participants": ["B"],
                 },
                 fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
-            ).with_seed_metadata({
-                ("tones", 0, "gain"): FieldMeta(
-                    description="Synthetic amplitude candidate", calibration="uncalibrated"
-                ),
-                ("tones", 1, "gain"): FieldMeta(calibration="measured"),
-            })
+            ).with_seed_metadata(
+                {
+                    ("tones", 0, "gain"): FieldMeta(
+                        description="Synthetic amplitude candidate",
+                        calibration="uncalibrated",
+                    ),
+                    ("tones", 1, "gain"): FieldMeta(calibration="measured"),
+                }
+            )
 
     fixture.registry.register("seed-metadata", SeedMetadataAdapter)
     tab = fixture.ctrl.new_tab("seed-metadata")
@@ -115,7 +130,9 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(form
         assert rows[("tones", 0, "frequency")]["seed_source"] == "6000 + 1"
         assert rows[("tones", 0, "frequency")]["seed_status"] == "available"
         assert rows[("tones", 0, "gain")]["uncalibrated"] is True
-        assert rows[("tones", 0, "gain")]["seed_source"] == "Synthetic amplitude candidate"
+        assert (
+            rows[("tones", 0, "gain")]["seed_source"] == "Synthetic amplitude candidate"
+        )
         assert rows[("tones", 1, "gain")]["uncalibrated"] is False
         assert rows[("tones", 2, "frequency")]["seed_status"] == "missing"
         assert rows[("tones", 2, "frequency")]["uncalibrated"] is None

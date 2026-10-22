@@ -227,7 +227,12 @@ contain label/value and commands, not fields; the owner reports selected.
 Select by writing the option's whole value once. A single ordinary wrapper may
 be flattened in children, but paths still include it. Ref options have no children.
 Describe replies include current local input_present/input/value and Form preview
-errors from one owner turn. For lowered cfg errors use get_cfg or Run admission.
+errors from one owner turn. For lowered cfg errors use get_cfg or Run admission. get_cfg and describe_cfg
+also return full-form diagnostics for every original tone, independent of picker
+or describe path. Each row carries path/message, name/index, seed_source,
+seed_status (missing/available/literal at Open/Reset), and author-declared
+uncalibrated (true/false/null for unknown). Filling a field does not rewrite its
+seed provenance, and missing input never implies uncalibrated.
 Recipe tab.read makes one atomic read_recipe_field RPC per call from fixed
 sources. Its locked flag includes selection_fixed, fixed and readonly.
 Ordinary strings are literal; expressions use {expr: text}, complex uses the

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from types import UnionType
-from typing import Annotated, Union, get_args, get_origin
+from typing import Annotated, Literal, Union, get_args, get_origin
 
 from pydantic.fields import FieldInfo
 
@@ -39,6 +39,9 @@ class FieldMeta:
     element_label:
         Name of a string field used to label model-list elements, or None to
         display their original indexes. Does not change identity or ordering.
+    calibration:
+        Author-declared seed status: measured, uncalibrated, or None for unknown.
+        Does not infer calibration from field values or missing input.
     """
 
     label: str | None = None
@@ -48,11 +51,14 @@ class FieldMeta:
     group: str | None = None
     readonly: bool = False
     element_label: str | None = None
+    calibration: Literal["measured", "uncalibrated"] | None = None
 
     def __post_init__(self) -> None:
-        """Reject an empty presentation group with ValueError."""
+        """Reject an empty group or unknown calibration declaration with ValueError."""
         if self.group == "":
             raise ValueError("group must be non-empty or None")
+        if self.calibration not in (None, "measured", "uncalibrated"):
+            raise ValueError("calibration must be measured, uncalibrated or None")
 
 
 def get_field_meta(field: FieldInfo) -> FieldMeta | None:

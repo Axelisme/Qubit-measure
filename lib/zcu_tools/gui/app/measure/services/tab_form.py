@@ -32,6 +32,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form_adapter import (
     ElementsObservation,
+    FieldDiagnostic,
     Form,
     FormContext,
     LogicalEdit,
@@ -194,6 +195,23 @@ class TabFormResource:
         if isinstance(result, FormErrors):
             return result
         return self._form.to_cfg(result, self._sources.env)
+
+    def diagnostics(self) -> tuple[FieldDiagnostic, ...]:
+        """Return all current canonical errors and seed facts across every element.
+
+        Merges preview and lowered cfg errors, without capture, defaults, edits
+        or UI selection. Unknown calibration stays None. Revocation raises the
+        same RESOURCE_GONE precondition as other reads.
+        """
+        self._require_open()
+        preview = self.preview()
+        result = self.result()
+        messages = dict(preview.errors.messages) if preview.errors else {}
+        if isinstance(result, FormErrors):
+            messages.update(result.messages)
+        return self._form.diagnostics(
+            self.input, self._sources.env, FormErrors(messages) if messages else None
+        )
 
     def accept(self) -> AcceptedFormConfig:
         """Accept only the current valid cfg without a new source capture.
@@ -441,6 +459,7 @@ class TabFormResource:
             sources = self._capture(aliases)
             form = self._make_form(FormContext(sources.env.parameters))
             current = self._state.input
+            form.seed_sources = self._form.seed_sources
             state = FormState(
                 FormInput(form.model, current.data, selections=current.selections)
             )

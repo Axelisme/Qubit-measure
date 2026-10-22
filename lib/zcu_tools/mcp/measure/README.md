@@ -240,7 +240,7 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 只讀 metadata，不建立 context observation。
 `ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
 
-即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力，不能取代 `get_cfg` 的完整 cfg 診斷。Run admission 仍會檢查目前表單與動態條件。
+即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力。兩個入口另回全表 `diagnostics`，不受目前 tone picker 或 describe path 限制。每列有 canonical `path`、目前的 `message`、原始 `name`／`index`、`seed_source`、`seed_status` 與 `uncalibrated`。`message=null` 表示該列沒有目前錯誤。`seed_status` 的 missing／available／literal 描述 Open／Reset 的初值來源，之後補值不改寫這項來源事實。`uncalibrated` 只讀作者宣告，true 表示未校準候選，false 表示 measured，未知為 null。缺值不等於未校準。Describe 的局部 `errors` 仍只含 Form preview errors，全表 diagnostics 也包含 lowered cfg errors。Run admission 仍會檢查目前表單與動態條件。
 
 全域 status 列 GUI operations 與本 MCP session 非終態 executions。
 `terminal_count` 計算所有本地終態 execution，包含 standalone analysis。
