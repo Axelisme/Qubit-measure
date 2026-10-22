@@ -1,22 +1,27 @@
 """Environment capabilities and retained displays through an async author."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import pytest
 from qick import QickConfig
+from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.workflows import (
     Engine,
     EnginePorts,
     Live,
     MissingCapability,
+    OperationFacts,
     WorkflowEnv,
 )
+from zcu_tools.experiment.workflows.env import Displays, EnvHooks
 
-from ._engine_fakes import START, Plan, Point, Rig, Tunables
+from ._engine_fakes import START, Plan, Point, Rig, Tunables, completed
 
 
 @pytest.fixture
@@ -24,6 +29,93 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
     rig = Rig(tmp_path)
     yield rig
     rig.close()
+
+
+class PauseOnCompletionHost(ScriptHost):
+    """Control the real host's return boundary before env classifies completion.
+
+    The adapter only pauses after the host has sampled the first complete result.
+    It preserves that result, so the env sees a stale epoch with no stop bit.
+    """
+
+    async def call[T](self, fn: Callable[[CallContext], T]) -> CallResult[T]:
+        """Delegate execution, then Pause once before returning the same result."""
+        result = await super().call(fn)
+        if self.epoch == 0:
+            self.pause()
+        return result
+
+
+def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call(
+    rig: Rig,
+) -> None:
+    host = PauseOnCompletionHost()
+    at_boundary = Event()
+    facts: list[OperationFacts] = []
+    calls: list[CallContext] = []
+    deliveries: list[int] = []
+
+    hooks = EnvHooks(
+        new_commit_dir=lambda: pytest.fail("This script does not allocate directories"),
+        commit=lambda record, directory: pytest.fail("This script does not commit"),
+        boundary=at_boundary.set,
+        stopping=lambda: False,
+        experiment_failed=lambda name, reason, error: pytest.fail(reason),
+        question=lambda phase: pytest.fail("This script does not ask"),
+        next_attempt=lambda: (1, len(facts) + 1),
+        operation_finished=facts.append,
+        device_setup=lambda name, cfg: pytest.fail(
+            "This script does not set up devices"
+        ),
+    )
+    env = WorkflowEnv(
+        START,
+        EnginePorts(rig.plots, rig.progress, rig.clock, context=7),
+        host,
+        Displays(rig.progress),
+        hooks,
+    )
+
+    def acquire(ctx: CallContext) -> int:
+        calls.append(ctx)
+        assert not ctx.stop_signal.is_set()
+        return len(calls)
+
+    async def script() -> None:
+        first = completed(await env.call(acquire))
+        assert not first.partial_result
+        assert first.facts is facts[0]
+        assert first.facts.stopped is first.partial_result
+        deliveries.append(first.value)
+        second = completed(await env.call(acquire))
+        assert not second.partial_result
+        assert second.facts is facts[1]
+        assert second.facts.stopped is second.partial_result
+        deliveries.append(second.value)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(host.run, script())
+        future.add_done_callback(lambda done: at_boundary.set())
+        try:
+            # The paused completion reaches the boundary, or worker failure wakes us.
+            assert at_boundary.wait(30), (
+                "The completed operation must reach its boundary"
+            )
+            assert not future.done(), future.result()
+            assert deliveries == []
+            assert host.epoch == 1
+            host.resume()
+            future.result(timeout=30)
+        finally:
+            host.cancel()
+            future.result(timeout=30)
+            host.close()
+
+    assert deliveries == [1, 2]
+    assert [ctx.epoch for ctx in calls] == [0, 1]
+    assert [fact.outcome for fact in facts] == ["completed", "completed"]
+    assert [(fact.iteration, fact.attempt) for fact in facts] == [(1, 1), (1, 2)]
+    assert all(not ctx.stop_signal.is_set() for ctx in calls)
 
 
 def test_original_start_context_and_injected_handles_are_shared(rig: Rig) -> None:

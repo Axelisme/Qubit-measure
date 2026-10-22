@@ -295,6 +295,19 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
     assert status["status"]["lifecycle"] == "done"
     records = result(rpc, "workflow.records", run_id="native")["records"]
     assert records[0]["encoded_record"]["value"] == {"value": 3 if explicit else 9}
+    operation = records[0]["operations"][0]
+    assert (operation["kind"], operation["iteration"], operation["attempt"]) == (
+        "wait_until",
+        1,
+        1,
+    )
+    assert operation["stopped"] is False
+    assert operation["outcome"] == "completed"
+    assert operation["reason"] is None
+    assert operation["device_snapshot"] is None
+    native = controller.workflow_control().records("native")[0].operations[0]
+    assert operation["started_at"] == native.started_at.isoformat()
+    assert operation["finished_at"] == native.finished_at.isoformat()
     assert result(rpc, "workflow.records", run_id="native", since=1)["records"] == []
     assert result(rpc, "workflow.figures", run_id="native")["names"] == ["trend"]
     png = result(rpc, "workflow.figure", run_id="native", name="trend")

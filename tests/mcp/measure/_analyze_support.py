@@ -11,9 +11,8 @@ from typing import Any
 
 import pytest
 from zcu_tools.mcp.core.stdio_server import run_stdio_loop
-from zcu_tools.mcp.measure.recipe import RecipeDefinition
+from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 
-from ._pipeline_recipe import PIPELINE
 from ._support import (
     MeasureClient,
     RpcResponder,
@@ -43,7 +42,7 @@ def analysis_client(
     responder: RpcResponder | None = None,
     *,
     writeback: Mapping[str, object] | None = None,
-    recipes: Sequence[RecipeDefinition] = (PIPELINE,),
+    recipes: Sequence[RecipeDeclaration] = (),
 ) -> MeasureClient:
     """Build the analysis seam with a confirmed empty draft unless supplied."""
     client = make_client(tmp_path, responder, recipes=recipes)

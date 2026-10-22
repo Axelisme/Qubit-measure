@@ -381,6 +381,8 @@ invariant failure不被降級；unexpected dispatch測試另確認controller err
 新增 request handler 或修改分類時，直接審閱 catch 範圍與 method entry 的靜態宣告，
 再用公開 request／reply 測試確認對外錯誤碼。
 
+`tests/tools/test_check_script_awaits.py` 在公開 check_sources／main(argv) 接縫驗證 await guardrail，以合成 source 與 tmp_path fixture 測允許、拒絕、helper 檢查及 receipt。不 import lab、不掃 repo 靜態定義，也不啟動 Python 子程序測自家入口。
+
 `tests/mcp/measure/`擁有measure MCP tool assembly、guard、operation、timeout、bundle、
 view product及lifecycle／stdio行為。每個fixture建立自己的session／bridge／tool table，
 透過recording Transport觀察RPC，不patch server globals或私有helpers。

@@ -92,7 +92,7 @@ def setup_client(
             "device_setup",
             {"name": "fake_flux", "cfg": {"value": 1, "value_unit": "native"}},
         ),
-        ("recipe_guide", {"recipe": "pipeline"}),
+        ("recipe_guide", {"adapter": "lookback"}),
     ],
 )
 def test_setup_requires_existing_connection_without_attaching_replacement_gui(
@@ -103,7 +103,8 @@ def test_setup_requires_existing_connection_without_attaching_replacement_gui(
     clients.append(client)
     if prior_connection:
         assert (
-            client.call("recipe_guide", {"recipe": "pipeline"})["recipe"] == "pipeline"
+            client.call("recipe_guide", {"adapter": "lookback"})["adapter"]
+            == "lookback"
         )
     client.context.bridge.disconnect()
     replacement = WireTransport(gui)
@@ -510,18 +511,12 @@ def test_value_quantization_is_observed_not_invented_as_a_failure(setup_client):
     assert result.data["after"]["device"]["info"]["value"] == 1.01
 
 
-@pytest.mark.parametrize(
-    "recipe,adapter",
-    [
-        ("pipeline", "lookback"),
-    ],
-)
 def test_recipe_guide_queries_authoritative_adapter_and_returns_native_object(
-    setup_client, recipe, adapter
+    setup_client,
 ):
     client, gui = setup_client
-    assert client.call("recipe_guide", {"recipe": recipe}) == {
-        "recipe": recipe,
+    adapter = "lookback"
+    assert client.call("recipe_guide", {"adapter": adapter}) == {
         "adapter": adapter,
         "guide": gui.guide,
     }
@@ -532,10 +527,10 @@ def test_recipe_guide_queries_authoritative_adapter_and_returns_native_object(
     )
 
 
-def test_unknown_recipe_is_rejected_without_querying_gui(setup_client):
+def test_missing_adapter_is_rejected_without_querying_gui(setup_client):
     client, _ = setup_client
-    with pytest.raises(ValueError, match="unknown recipe"):
-        client.call("recipe_guide", {"recipe": "unknown"})
+    with pytest.raises(ValueError, match="adapter"):
+        client.call("recipe_guide", {})
     assert client.transport.sent == []
 
 
@@ -554,7 +549,7 @@ def test_recipe_guide_retains_native_query_errors(setup_client, code, reason):
         "error": {"code": code, "reason": reason, "message": "query failure"},
     }
     with pytest.raises(RuntimeError) as error:
-        client.call("recipe_guide", {"recipe": "pipeline"})
+        client.call("recipe_guide", {"adapter": "lookback"})
     assert getattr(error.value, "code", None) == code
     assert getattr(error.value, "reason", None) == (
         "gui_handler_timeout" if code == "timeout" else reason

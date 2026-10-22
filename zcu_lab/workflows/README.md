@@ -2,6 +2,8 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
+**Last updated:** 2026-10-22
+
 - `coherence_fluxdep/`：逐個 flux 點校準並量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
 - `overnight/`：在固定 flux 下按固定間隔量測 T1 與 Hahn echo，不做 feedback。
@@ -49,3 +51,14 @@ Stop 讓 operation 正常回傳 partial result。Failed 表示 Schedule acquisit
 
 要回到過去某點，開新 run 並切 plan 範圍。History 初值用 `saved_run.read_records`
 從上一個 run 讀回，再在作者函式中初始化。框架不提供步驟回退或自動回灌 history。
+
+## Async await guardrail
+
+作者可寫 `await env.run(...)` 或 `await helper(env, cfg)`。
+Helper 必須解析到 zcu_lab 內的函式定義，可用 def 或 async def，不能只靠函式名稱像 helper 就放行。
+所有 lab async def 統一只 await env／tab／session 的呼叫或 lab 內定義的 helper，helper 可再呼叫 helper。
+Quality gate 全掃 async def 本文，不依 decorator 或可達性選集。
+在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 即使不 await 也拒絕，包含 async with TaskGroup()。
+其他 async with／async for 不另禁。
+AST 檢查不追蹤 assignment aliases、動態分派與包裝，不是 type checker。
+共用 host 與控制命令的邊界見 [ADR-0075](../../docs/adr/0075-agent-interface-layers.md#async-協作與控制命令)。

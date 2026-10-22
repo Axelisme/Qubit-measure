@@ -39,8 +39,8 @@ from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, Writeba
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
 
+    from .contracts import WritebackValues
     from .control import WritebackPane
-    from .service import WritebackValues
 
 logger = logging.getLogger(__name__)
 

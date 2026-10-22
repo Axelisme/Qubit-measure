@@ -118,6 +118,12 @@ def _host_window(
     try:
         yield ctrl, window
     finally:
+        # close() drains but does not cancel a retained Ask/wait after an assertion
+        # failure. Release each live invocation before waiting for owner delivery.
+        control = ctrl.workflow_control()
+        for tab in control.tabs():
+            if tab.busy and tab.run_id is not None:
+                control.stop(tab.run_id)
         ctrl.close()
         if not destroyed.is_set():
             window.deleteLater()
@@ -501,8 +507,22 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     _ask_shot(driver, tmp_path, "ask-03-opened")
     assert driver.tabs("Plan").captions == ("Plan", "Tunables")
     driver.click("Start")
-    # Start submitted a retained invocation that must yield its synthetic question.
-    qt_until(lambda: _status(driver, "paused"), label="Ask pause")
+    # Start must yield its question. Badge and pane project separate snapshots;
+    # native paused alone does not establish that both have rendered the Ask.
+    qt_until(
+        lambda: (
+            _status(driver, "paused")
+            and any(
+                w.object_name == "workflow.badge" and "等待回答" in w.text
+                for w in driver.visible().widgets
+            )
+            and any(
+                w.object_name == "workflow.ask" and "authored evidence" in w.text
+                for w in driver.visible().widgets
+            )
+        ),
+        label="Ask pane and badge presentation",
+    )
     _ask_shot(driver, tmp_path, "ask-04-question")
     assert driver.tabs("Ask").current == "Ask", "Pending question must select Ask"
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
@@ -518,16 +538,32 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     assert driver.tabs("Ask").current == "Ask"
     if cancel:
         driver.click("Stop")
-        # Stop releases the retained Ask; delivery ends this same run.
+        # Stop releases Ask; Start becomes available after terminal owner delivery,
+        # which may follow the native cancelled status.
         qt_until(
-            lambda: _status(driver, "cancelled"), label="Ask cancellation delivery"
+            lambda: (
+                _status(driver, "cancelled")
+                and any(
+                    w.text == "Start" and w.enabled for w in driver.visible().widgets
+                )
+            ),
+            label="Ask cancellation and Start presentation",
         )
     else:
         driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
         _ask_shot(driver, tmp_path, "ask-08-answer-edited")
         driver.click("Answer")
-        # Answer releases the coroutine to its terminal return.
-        qt_until(lambda: _status(driver, "done"), label="answer terminal delivery")
+        # Answer releases the coroutine. Native done can precede owner delivery;
+        # the next Start also requires that delivery to release the RUN lease.
+        qt_until(
+            lambda: (
+                _status(driver, "done")
+                and any(
+                    w.text == "Start" and w.enabled for w in driver.visible().widgets
+                )
+            ),
+            label="answer completion and Start presentation",
+        )
     _ask_shot(driver, tmp_path, "ask-09-retained-exchange")
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
     assert not driver.observe("Answer").enabled

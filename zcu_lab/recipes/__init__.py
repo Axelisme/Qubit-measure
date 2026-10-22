@@ -1,7 +1,5 @@
 """Explicit user recipe declarations supplied only by composition roots."""
 
-from zcu_tools.mcp.measure.recipe import RecipeDefinition
-
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .cpmg import DEFINITION as CPMG
 from .lookback import DEFINITION as LOOKBACK
@@ -25,7 +23,7 @@ from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
 from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM
 
-RECIPES: tuple[RecipeDefinition, ...] = (
+RECIPES = (
     LOOKBACK,
     MIST_POWER_TRACE,
     MIST_DRIVE_FREQUENCY,

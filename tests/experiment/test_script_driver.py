@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
 if TYPE_CHECKING:
     from zcu_tools.core.script_protocol import (
         OperationResult,
-        OperationStatus,
         ScriptRequest,
     )
 
@@ -28,12 +27,12 @@ def deliver_cancelled(operation: object) -> None:
 
     if not isinstance(operation, SyntheticOperation):
         raise TypeError("Unknown synthetic operation")
-    operation.delivery = OperationResult("cancelled", None)
+    operation.delivery = OperationResult("completed", None, partial_result=True)
 
 
-@pytest.mark.parametrize("status", ["completed", "cancelled", "failed"])
+@pytest.mark.parametrize("status", ["completed", "failed"])
 def test_wait_delivers_terminal_outcome_and_resumes_only_with_none(
-    status: OperationStatus,
+    status: Literal["completed", "failed"],
 ) -> None:
     from zcu_tools.core.script_protocol import OperationResult, Wait
     from zcu_tools.experiment.script_driver import ScriptDriver
@@ -156,47 +155,16 @@ def test_inherited_question_accepts_subclass_of_declared_answer() -> None:
     assert driver.result is answer
 
 
-def test_signal_delivery_occurs_at_yield_boundaries_in_order() -> None:
-    from zcu_tools.core.script_protocol import Signal, Wait
-    from zcu_tools.experiment.script_driver import ScriptDriver
-
-    op = SyntheticOperation()
-    events: list[str] = []
-
-    def script() -> Generator[ScriptRequest, None, None]:
-        events.append("before yield")
-        driver.signal(Signal("stop"))
-        assert events == ["before yield"]
-        yield Wait(op)
-        events.append("resumed")
-
-    driver = ScriptDriver(
-        script(),
-        deliver_cancelled=deliver_cancelled,
-        on_signal=lambda signal: events.append(signal.kind),
-    )
-    driver.signal(Signal("pause"))
-    assert events == []
-    driver.advance()
-    assert events == ["before yield", "pause", "stop"]
-    assert driver.status == "waiting"
-    driver.signal(Signal("finish_early"))
-    assert events == ["before yield", "pause", "stop"]
-    driver.advance()
-    assert events == ["before yield", "pause", "stop", "finish_early"]
-
-
 @pytest.mark.parametrize("boundary", ["wait", "ask"])
-@pytest.mark.parametrize("operation_status", ["completed", "cancelled"])
+@pytest.mark.parametrize("operation_status", ["completed", "failed"])
 def test_cancel_resumes_author_and_cancels_later_requests_without_starting_work(
-    boundary: str, operation_status: OperationStatus
+    boundary: str, operation_status: Literal["completed", "failed"]
 ) -> None:
     from zcu_tools.core.script_protocol import (
         Answer,
         Ask,
         OperationResult,
         Question,
-        Signal,
         Wait,
     )
     from zcu_tools.experiment.script_driver import ScriptDriver
@@ -226,12 +194,12 @@ def test_cancel_resumes_author_and_cancels_later_requests_without_starting_work(
     # Host has cancelled and drained existing work, including a completion race.
     terminal = OperationResult(operation_status, 7)
     op.delivery = terminal
-    driver.signal(Signal("cancel"))
+    driver.cancel()
     assert observed == []
     driver.advance()
     assert observed == [
         terminal if boundary == "wait" else None,
-        OperationResult("cancelled", None),
+        OperationResult("completed", None, partial_result=True),
         None,
     ]
     assert deliveries == [later]
@@ -243,14 +211,14 @@ def test_cancel_resumes_author_and_cancels_later_requests_without_starting_work(
 
 
 def test_cancel_requested_during_execution_waits_until_yield() -> None:
-    from zcu_tools.core.script_protocol import Signal, Wait
+    from zcu_tools.core.script_protocol import Wait
     from zcu_tools.experiment.script_driver import ScriptDriver
 
     events: list[str] = []
 
     def script() -> Generator[ScriptRequest, None, None]:
         try:
-            driver.signal(Signal("cancel"))
+            driver.cancel()
             events.append("still executing")
             yield Wait(SyntheticOperation())
             events.append("cancelled resume")
@@ -264,7 +232,7 @@ def test_cancel_requested_during_execution_waits_until_yield() -> None:
 
 
 def test_cancel_does_not_resume_active_wait_until_host_terminal_delivery() -> None:
-    from zcu_tools.core.script_protocol import OperationResult, Signal, Wait
+    from zcu_tools.core.script_protocol import OperationResult, Wait
     from zcu_tools.experiment.script_driver import ScriptDriver
 
     operation = SyntheticOperation()
@@ -276,13 +244,13 @@ def test_cancel_does_not_resume_active_wait_until_host_terminal_delivery() -> No
 
     driver = ScriptDriver(script(), deliver_cancelled=deliver_cancelled)
     driver.advance()
-    driver.signal(Signal("cancel"))
+    driver.cancel()
     driver.advance()
     assert driver.status == "waiting"
     assert received == []
-    operation.delivery = OperationResult("cancelled", 4)
+    operation.delivery = OperationResult("completed", 4, partial_result=True)
     driver.advance()
-    assert received == [OperationResult("cancelled", 4)]
+    assert received == [OperationResult("completed", 4, partial_result=True)]
     assert driver.status == "cancelled"
 
 
@@ -290,7 +258,7 @@ def test_cancel_does_not_resume_active_wait_until_host_terminal_delivery() -> No
 def test_cancelled_delivery_owner_must_supply_cancelled_terminal_result(
     invalid_delivery: str | None,
 ) -> None:
-    from zcu_tools.core.script_protocol import OperationResult, Signal, Wait
+    from zcu_tools.core.script_protocol import OperationResult, Wait
     from zcu_tools.experiment.script_driver import ScriptDriver
 
     operation = SyntheticOperation()
@@ -301,11 +269,11 @@ def test_cancelled_delivery_owner_must_supply_cancelled_terminal_result(
             operation.delivery = OperationResult("completed", 3)
 
     def script() -> Generator[ScriptRequest, None, None]:
-        driver.signal(Signal("cancel"))
+        driver.cancel()
         yield Wait(operation)
 
     driver = ScriptDriver(script(), deliver_cancelled=broken_owner)
-    with pytest.raises(RuntimeError, match="cancelled.*delivery"):
+    with pytest.raises(RuntimeError, match="partial.*delivery"):
         driver.advance()
     assert driver.status == "failed"
 
