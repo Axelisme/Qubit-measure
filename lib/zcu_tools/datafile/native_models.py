@@ -128,7 +128,9 @@ class SoftwareProvenance:
 class RunMetadata:
     """Run identity, progress and immutable historical input to native saving.
 
-    run_id is the UTC timestamp plus six-character random identity.
+    run_id is an experiment UTC timestamp plus six-character random identity,
+    or a workflow operation ID: 32 lowercase hex digits, six-digit iteration and
+    positive attempt without leading zeros, separated by hyphens.
     experiment is the declaring spec tag, never derived from a filename.
     started_at and finished_at are UTC ISO or None when historical evidence
     is absent. Normal acquisition always supplies started_at.
