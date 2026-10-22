@@ -6,8 +6,8 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
-from matplotlib.figure import Figure
 import zcu_tools.experiment as experiment
+from matplotlib.figure import Figure
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
@@ -38,7 +38,8 @@ def test_only_expected_analysis_work_failure_is_classified(qapp, phase, expected
     state.get_tab("tab1").adapter = adapter
     error = (
         experiment.AnalysisFailed("insufficient fitting data")
-        if expected else RuntimeError("broken analysis")
+        if expected
+        else RuntimeError("broken analysis")
     )
     if phase == "work":
         adapter.analyze.side_effect = error
@@ -51,16 +52,18 @@ def test_only_expected_analysis_work_failure_is_classified(qapp, phase, expected
     )
     assert bg.last_work is not None
     assert bg.last_on_error is not None and bg.last_on_done is not None
-    try:
-        value = bg.last_work()
-    except Exception as failure:
-        bg.last_on_error(failure)
+    if phase == "work":
+        with pytest.raises(type(error)) as failure:
+            bg.last_work()
+        bg.last_on_error(failure.value)
     else:
-        bg.last_on_done(value)
+        bg.last_on_done(bg.last_work())
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert outcome.error == str(error)
-    assert outcome.failure_kind == ("analysis" if expected and phase == "work" else None)
+    assert outcome.failure_kind == (
+        "analysis" if expected and phase == "work" else None
+    )
 
 
 @pytest.mark.parametrize("has_run_source", [True, False])

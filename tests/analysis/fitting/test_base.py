@@ -187,21 +187,25 @@ def test_dual_gaussian_gmm_scales_are_sorted_sample_counts(
 
 def test_fit_func_reports_real_optimizer_nonconvergence() -> None:
     x = np.linspace(0.0, 3.0, 12)
-    with pytest.raises(Exception) as failure:
+    with pytest.raises(Exception, match="Optimal parameters not found") as failure:
         fit_func(
-            x, np.exp(-x),
+            x,
+            np.exp(-x),
             lambda x, amplitude, rate: amplitude * np.exp(-rate * x),
-            init_p=[8.0, 0.1], maxfev=1,
+            init_p=[8.0, 0.1],
+            maxfev=1,
         )
     assert isinstance(failure.value, experiment.AnalysisFailed)
     assert isinstance(failure.value.__cause__, RuntimeError)
 
 
 def test_fit_func_reports_insufficient_observations() -> None:
-    with pytest.raises(Exception) as failure:
+    with pytest.raises(Exception, match="Insufficient observations") as failure:
         fit_func(
-            np.array([0.0]), np.array([1.0]),
-            lambda x, slope, offset: slope * x + offset, init_p=[1.0, 0.0],
+            np.array([0.0]),
+            np.array([1.0]),
+            lambda x, slope, offset: slope * x + offset,
+            init_p=[1.0, 0.0],
         )
     assert isinstance(failure.value, experiment.AnalysisFailed)
 

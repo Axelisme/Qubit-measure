@@ -12,16 +12,24 @@ from ._script_recipe_support import Inputs, Report, SyntheticGui, start
 from ._support import make_client
 
 
+@pytest.fixture
+def gui_fork():
+    with (
+        Scope("run") as root,
+        root.branch("schedule") as first,
+        root.branch("schedule") as second,
+        first.branch("acquire") as left,
+        second.branch("acquire") as right,
+    ):
+        yield root, left, right
+
+
 @pytest.mark.parametrize("selector", ["acquire", "acquire#1"])
 def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
-    tmp_path: Path, selector: str
+    tmp_path: Path, selector: str, gui_fork
 ) -> None:
     gui = SyntheticGui()
-    root = Scope("run")
-    first = root.branch("schedule")
-    second = root.branch("schedule")
-    left = first.branch("acquire")
-    right = second.branch("acquire")
+    root, left, right = gui_fork
     waiting, released = Event(), Event()
     prefix = "recipe:synthetic/operation#1"
     paths = [f"{prefix}/schedule#1/acquire#1", f"{prefix}/schedule#2/acquire#1"]
@@ -55,8 +63,8 @@ def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
+    execution = start(client, "synthetic")
     try:
-        execution = start(client, "synthetic")
         # The submitted Run necessarily enters operation.await before it can finish.
         assert waiting.wait(30)
         execution_id = execution.snapshot().execution
@@ -64,7 +72,10 @@ def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
         assert status["active_path"] == prefix
         assert status["live_paths"] == paths
         rejected = client.call("cancel", {"execution": execution_id, "scope": selector})
-        assert (rejected.data["cancelled"], rejected.data["reason"]) == (False, "ambiguous")
+        assert (rejected.data["cancelled"], rejected.data["reason"]) == (
+            False,
+            "ambiguous",
+        )
         assert rejected.data["candidates"] == paths
         assert rejected.data["active_path"] == prefix
         assert not left.cancelled and not right.cancelled
@@ -78,8 +89,3 @@ def test_recipe_projects_fork_leaves_candidates_and_exact_selector(
         released.set()
         execution.join()
         client.context.session.close()
-        right.release()
-        left.release()
-        second.release()
-        first.release()
-        root.release()
