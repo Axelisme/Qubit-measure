@@ -318,7 +318,10 @@ def test_refresh_retains_seed_metadata_and_sources_until_reset() -> None:
 
     def make_form(ctx: FormContext) -> Form[ScalarCore]:
         form = Form(ScalarCore, {"amount": Expr("general.ext.amount")})
-        if ctx.parameters is not None and ctx.parameters.value("general.ext.amount") == 2.0:
+        if (
+            ctx.parameters is not None
+            and ctx.parameters.value("general.ext.amount") == 2.0
+        ):
             return form.with_seed_metadata(
                 {
                     ("amount",): FieldMeta(
