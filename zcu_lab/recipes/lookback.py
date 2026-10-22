@@ -17,7 +17,6 @@ from .helpers import (
     choose_frequency,
     report_number,
     retain_scalar,
-    select_or_disable,
 )
 
 
@@ -51,13 +50,13 @@ class LookbackInputs(FormModel):
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
     )
-    use_reset: str | Literal["off"] = Field(
+    use_reset: Literal["off"] = Field(
         "off",
-        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+        description="Only off is supported: the lookback Form hides reset and does not require a reset slot.",
     )
-    init_pulse_ref: str | Literal["off"] = Field(
+    init_pulse_ref: Literal["off"] = Field(
         "off",
-        description="Initialization library key, or off to disable preparation. Omission disables it; null is rejected.",
+        description="Only off is supported: the lookback Form hides the initialization pulse.",
     )
     frequency_mhz: float | None = Field(
         None,
@@ -105,7 +104,7 @@ class LookbackSummary(BaseModel):
 async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackReport:
     """Capture the readout pulse's arrival and ADC time envelope.
 
-    Apply optional reset/init pulses, then read out at a fixed frequency.
+    Read out at a fixed frequency without reset or initialization pulses.
     Primary estimates the trigger offset from the rising signal envelope.
     Ask before applying the timing proposal, then save raw trace and analysis.
 
@@ -123,8 +122,6 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
         reuse=inputs.reuse_tab_id,
     )
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
-    select_or_disable(tab, ("modules", "init_pulse"), inputs.init_pulse_ref)
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
