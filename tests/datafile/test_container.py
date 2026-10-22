@@ -247,6 +247,33 @@ def test_legacy_native_converts_to_container_and_rewrites_major_three(
         np.testing.assert_array_equal(file["groups/legacy/future"], [8, 9])
 
 
+def test_opaque_group_references_remain_readable_after_rewrite(tmp_path: Path) -> None:
+    source = tmp_path / "opaque.h5"
+    with h5py.File(source, "w") as file:
+        group = file.create_group("extension")
+        target = group.create_dataset("values", data=[7, 9])
+        group.attrs["target"] = target.ref
+    path = tmp_path / "container.h5"
+    datafile.save(path, replace(_container(), groups={"extension": datafile.GroupSource(source, "/extension")}))
+    loaded = datafile.load(path)
+    source.unlink()
+    datafile.save(path, loaded, replace=True)
+    with h5py.File(path, "r") as file:
+        reference = file["groups/extension"].attrs["target"]
+        assert reference, "opaque group object references must survive copying"
+        np.testing.assert_array_equal(file[reference], [7, 9])
+
+
+def test_null_root_extension_roundtrips_as_json_scalar(tmp_path: Path) -> None:
+    path = tmp_path / "null.h5"
+    container = replace(_container(), attrs=datafile.ContainerAttrs("3.0", "test", None, {"nullable": None}))
+    try:
+        datafile.save(path, container)
+    except ValueError as error:
+        pytest.fail(f"JSON null is a supported root scalar: {error}")
+    assert datafile.load(path).attrs.extra == {"nullable": None}
+
+
 def test_unsupported_major_and_nonfinite_wire_json(tmp_path: Path) -> None:
     path = tmp_path / "bad.h5"
     datafile.save(path, replace(_container(), docs={"note": {}}))
