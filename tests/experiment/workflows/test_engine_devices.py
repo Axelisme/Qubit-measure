@@ -1,35 +1,31 @@
-"""Each env.run captures fixed native device evidence under the RUN lease."""
+"""Device capture, core RunContext and explicit setup through async Engine."""
 
+import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Self
 
 import pytest
-from zcu_tools.datafile import JsonObject
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment.workflows import (
-    Done,
-    Engine,
-    EnginePorts,
-    Run,
-    Step,
-    WorkflowEnv,
-)
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.workflows import Engine, EnginePorts, Live, WorkflowEnv
 
-from ._engine_fakes import Cfg, Plan, Rig, State, Tunables
+from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed
 
 
 @pytest.fixture
-def rig(tmp_path: Path) -> Rig:
-    return Rig(tmp_path)
+def rig(tmp_path: Path) -> Iterator[Rig]:
+    rig = Rig(tmp_path)
+    yield rig
+    rig.close()
 
 
 class SnapshotDriver(FakeDevice):
-    """Connected in-memory driver with observable reads and I/O failure."""
+    """Anonymous memory driver with observable reads and I/O failures."""
 
     info_model = FakeDeviceInfo
 
     def __new__(cls) -> Self:
-        """Keep this test driver's no-argument constructor anonymous."""
         return super().__new__(cls)
 
     def __init__(self) -> None:
@@ -44,69 +40,72 @@ class SnapshotDriver(FakeDevice):
         return super().get_info()
 
 
-def test_each_env_run_captures_all_drivers_before_callback_and_keeps_fixed_data(
-    rig: Rig,
-) -> None:
+def test_each_env_run_reads_all_drivers_before_core_callback(rig: Rig) -> None:
     selected, unused = SnapshotDriver(), SnapshotDriver()
     selected.set_value(0.1)
     unused.set_value(0.2)
     rig.devices.drivers.update(flux=selected, unused=unused)
-    captured: list[dict[str, JsonObject]] = []
+    callbacks: list[int] = []
 
-    def acquire(run: Run[Cfg]) -> int:
-        assert (selected.reads, unused.reads) == (len(captured) + 1,) * 2
-        before = dict(run.device_snapshot)
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        assert (selected.reads, unused.reads) == (len(callbacks) + 1,) * 2
+        assert context.devices == {"flux": selected, "unused": unused}
         selected.set_value(0.9)
         unused.set_value(0.8)
-        assert run.device_snapshot == before
-        captured.append(before)
+        callbacks.append(1)
         return 1
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         for _ in range(2):
-            yield from env.run(acquire, Cfg(dev={"flux": "flux"}))
-        return Done()
+            completed(await env.run(acquire, Cfg(dev={"flux": "flux"})))
+        await env.commit(Point(value=2))
 
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "done"
-    assert (selected.reads, unused.reads, rig.devices.captures) == (2, 2, 2)
-    assert captured[0]["flux"]["value"] == 0.1
-    assert captured[0]["unused"]["value"] == 0.2
-    assert captured[1]["flux"]["value"] == 0.9
-    assert captured[1]["unused"]["value"] == 0.8
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert (selected.reads, unused.reads) == (2, 2)
+    assert callbacks == [1, 1]
+    document = json.loads(
+        (rig.paths.data_root / "commits/000001/record.json").read_text()
+    )
+    operations = document["operations"]
+    journal_operations = [
+        event["operation"]
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert journal_operations == operations
+    assert [operation["kind"] for operation in operations] == ["run", "run"]
+    assert operations[0]["device_snapshot"]["flux"]["value"] == 0.1
+    assert operations[0]["device_snapshot"]["unused"]["value"] == 0.2
+    assert operations[1]["device_snapshot"]["flux"]["value"] == 0.9
+    assert operations[1]["device_snapshot"]["unused"]["value"] == 0.8
 
 
-def test_snapshot_read_failure_fails_run_before_callback_and_save(rig: Rig) -> None:
+def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
     broken = SnapshotDriver()
     broken.error = OSError("unused driver read failed")
     rig.devices.drivers["unused"] = broken
     callbacks: list[str] = []
 
-    def acquire(_run: Run[Cfg]) -> int:
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
         callbacks.append("acquire")
         return 1
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        yield from env.run(acquire, Cfg())
-        return Done()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.run(acquire, Cfg())
 
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert status.reason == "OSError: unused driver read failed"
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert final.reason == "OSError: unused driver read failed"
     assert callbacks == []
     assert broken.reads == 1
     assert list(rig.paths.data_root.rglob("*.h5")) == []
-    ended = next(event for event in rig.events() if event["kind"] == "run_ended")
-    assert "OSError" in str(ended)
 
 
 @pytest.mark.parametrize("missing", [True, False], ids=["missing", "explicit-empty"])
-def test_env_run_distinguishes_missing_devices_from_explicit_empty_port(
+def test_env_run_distinguishes_missing_devices_from_empty_port(
     rig: Rig, missing: bool
 ) -> None:
     rig.engine = Engine(
@@ -120,47 +119,64 @@ def test_env_run_distinguishes_missing_devices_from_explicit_empty_port(
     )
     callbacks: list[str] = []
 
-    def acquire(run: Run[Cfg]) -> int:
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
         callbacks.append("acquire")
-        assert run.device_snapshot == {}
+        assert context.devices == {}
         return 1
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        yield from env.run(acquire, Cfg())
-        return Done()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.run(acquire, Cfg())
 
-    rig.start(step)
-    started = rig.engine.status()
-    assert started is not None and started.lifecycle == "running"
-    status = rig.engine.execute("run")
+    rig.start(script)
+    final = rig.engine.execute("run")
     if missing:
-        assert status.lifecycle == "failed"
-        assert status.reason is not None and "devices" in status.reason
+        assert final.lifecycle == "failed"
+        assert "Missing workflow capability: devices" in str(final.reason)
         assert callbacks == []
     else:
-        assert status.lifecycle == "done"
+        assert final.lifecycle == "done", final.reason
         assert callbacks == ["acquire"]
-        assert rig.devices.captures == 1
 
 
-def test_live_cfg_read_is_synchronous_and_complete_setup_is_journaled(rig: Rig) -> None:
-    observed: list[object] = []
-    cfg = FakeDeviceInfo(address="memory", value=0.25, rampstep=0.05, output="on")
+@pytest.mark.parametrize("uses_device", [False, True])
+def test_role_names_are_resolved_only_when_core_callback_uses_device(
+    rig: Rig,
+    uses_device: bool,
+) -> None:
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        if uses_device:
+            _ = context.devices[cfg.dev["flux"]]
+        return 1
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        observed.append(env.get_device_cfg("flux"))
-        yield from env.setup_device("flux", cfg)
-        return Done()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.run(acquire, Cfg(dev={"flux": "unavailable"}))
 
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "done", status.reason
-    assert len(observed) == 1 and isinstance(observed[0], FakeDeviceInfo)
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == ("failed" if uses_device else "done"), final.reason
+    if uses_device:
+        assert final.reason == "KeyError: 'unavailable'"
+    assert rig.devices.values == []
+
+
+def test_live_cfg_getter_is_detached_and_setup_preserves_complete_model(
+    rig: Rig,
+) -> None:
+    driver = SnapshotDriver()
+    driver.set_value(0.1)
+    rig.devices.drivers["flux"] = driver
+    cfg = FakeDeviceInfo(address=driver.address, value=0.25, rampstep=0.05, output="on")
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        actual = env.get_device_cfg("flux")
+        assert isinstance(actual, FakeDeviceInfo)
+        assert actual.value == 0.1
+        actual.value = 99
+        assert env.get_device_cfg("flux").model_dump()["value"] == 0.1
+        completed(await env.setup_device("flux", cfg))
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
     assert rig.devices.values == [("flux", 0.25)]
-    setup = next(event for event in rig.events() if event["kind"] == "device_setup")
-    assert setup["name"] == "flux"
-    assert setup["cfg"] == cfg.model_dump(mode="json")
+    assert rig.devices.configs == [cfg]

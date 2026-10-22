@@ -9,11 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
-    Done,
-    Next,
+    Live,
     RevisionConflict,
     RunIdentity,
-    Step,
     WorkflowEnv,
     workflow,
 )
@@ -22,7 +20,7 @@ from zcu_tools.experiment.workflows.tunables import TunableValues
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
-from ._engine_fakes import Plan, Rig, State
+from ._engine_fakes import Plan, Point, Rig
 
 
 class Gate(BaseModel):
@@ -50,15 +48,12 @@ class Tunables(BaseModel):
 def rig(tmp_path: Path) -> Rig:
     rig = Rig(tmp_path)
 
-    @workflow("whole-model", plan=Plan, tunables=Tunables, init=rig.init)
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index == plan.count:
-            return Done()
-        yield from env.wait_until(env.started_at + timedelta(seconds=1))
-        state.index += 1
-        return Next(tun.reps, state)
+    @workflow("whole-model", "Whole-model live updates")
+    async def step(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        for _ in range(plan.count):
+            captured = tun.current
+            await env.wait_until(env.started_at + timedelta(seconds=1))
+            await env.commit(Point(value=captured.reps))
 
     rig.engine.start(
         step,
@@ -210,24 +205,22 @@ def test_current_step_keeps_capture_and_next_step_uses_whole_replacement(
     assert rig.engine.execute("run").lifecycle == "done"
     assert [
         (r.revision, r.encoded_record.value) for r in rig.engine.records("run")
-    ] == [(0, 2), (1, 8)]
-    first = (rig.paths.data_root / "iter/000001/record.json").read_text()
-    assert '"reps":2' in first.replace(" ", "")
+    ] == [(0, {"value": 2}), (1, {"value": 8})]
+    assert rig.engine.records("run")[0].revisions == (0,)
+    assert rig.engine.records("run")[1].revisions == (1,)
 
 
 def start_native[T: BaseModel](rig: Rig, model_type: type[T], values: T) -> None:
     """Start a native declaration without converting or trusting its model."""
 
-    @workflow("startup", plan=Plan, tunables=model_type, init=rig.init)
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: T, state: State
-    ) -> Step[State, int]:
-        del env, plan, tun, state
-        yield from ()
-        return Done()
+    async def step(env: WorkflowEnv[int], plan: Plan, tun: Live[T]) -> None:
+        del env, plan, tun
 
+    # Supply the concrete model to the public annotation-driven declaration.
+    step.__annotations__["tun"] = Live[model_type]
+    declared = workflow("startup", "Validate complete tunables on start")(step)
     rig.engine.start(
-        step,
+        declared,
         plan=Plan(),
         tunables=values,
         paths=rig.paths,
