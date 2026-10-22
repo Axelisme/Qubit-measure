@@ -244,6 +244,14 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
             engine.answer("run", Reply(approved=True), request_id="stale")
         assert rejected.value.pending_request_id == first.request_id
         assert engine.status() == before
+        with pytest.raises(w.QuestionMismatch) as stale_parse:
+            engine.parse_answer("run", {"approved": "invalid"}, request_id="stale")
+        assert stale_parse.value.pending_request_id == first.request_id
+        parsed = engine.parse_answer(
+            "run", {"approved": True}, request_id=first.request_id
+        )
+        assert parsed == Reply(approved=True)
+        assert engine.status() == before
         engine.answer("run", Reply(approved=True), request_id=first.request_id)
         until(
             lambda: (
