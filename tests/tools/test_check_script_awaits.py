@@ -89,6 +89,22 @@ def test_uniform_rule_allows_framework_calls_and_real_lab_helpers() -> None:
     assert check_script_awaits.check_sources(sources) == ()
 
 
+def test_lab_helpers_defined_with_def_can_be_awaited() -> None:
+    sources = {
+        "zcu_lab/workflows/demo.py": (
+            "from zcu_lab.helpers import helper\n"
+            "def local_helper(env):\n"
+            "    return env.run(cfg)\n"
+            "async def run(env):\n"
+            "    await local_helper(env)\n"
+            "    await helper(env)\n"
+        ),
+        "zcu_lab/helpers.py": "def helper(env):\n    return env.run(cfg)\n",
+    }
+
+    assert check_script_awaits.check_sources(sources) == ()
+
+
 def test_unreferenced_helpers_are_checked_without_decorators_or_reachability() -> None:
     sources = {
         "zcu_lab/helpers.py": (
