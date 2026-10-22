@@ -3,15 +3,10 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
-import numpy as np
-
-from zcu_tools.datafile import (
-    RunMetadata,
-    RunSnapshot,
-    StoredRun,
-)
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.records import RunRecord
 
 if TYPE_CHECKING:
@@ -65,13 +60,12 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         source: RunRecord[T_Config, T_Result],
         destination: Path,
         *,
-        metadata: RunMetadata,
         replace: bool = False,
     ) -> None:
         """Save native data with this instance's explicit persistence declaration.
 
-        source.cfg must be present. metadata is historical run/snapshot/provenance
-        evidence, never recaptured from live state. Destination and replace policy
+        source.cfg and source.metadata must be present. Historical evidence is
+        never recaptured from live state. Destination and replace policy
         belong to the caller; conflicts raise FileExistsError, malformed records
         raise ValueError or TypeError and I/O errors propagate. Existing save()
         remains the separate Labber entry, with no format guessing.
@@ -82,7 +76,6 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
             source,
             destination,
             spec=self.persistence_spec(),
-            metadata=metadata,
             replace=replace,
         )
 
@@ -91,18 +84,18 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
     ) -> tuple[RunRecord[T_Config, T_Result], RunSnapshot]:
         """Read native typed data and its historical snapshot using this spec.
 
-        Read once without a full file image. Invalid native format, tag, variable
+        Read once through the Container reader. Invalid format, tag, variable
         or cfg envelope fails with a located validation error; I/O errors
         propagate. Incompatible typed cfg warns and returns cfg=None with valid
         data. Do not guess a legacy format or mutate this instance.
-        Use datafile's generic image seam for unknown-field lossless rewrites.
+        Retain the generic Container for unknown-field lossless rewrites.
         """
         from .native_persistence import load_run
 
         return load_run(source, spec=self.persistence_spec())
 
     def from_stored(
-        self, stored: StoredRun
+        self, stored: Container
     ) -> "RestoredRun[RunRecord[T_Config, T_Result]]":
         """Restore already-read native data with this instance's declared spec.
 
@@ -135,41 +128,24 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         ValueError; existing paths raise FileExistsError and I/O
         errors propagate. This entry neither selects a path nor writes native.
         """
-        from zcu_tools.datafile import (
-            ExperimentPayload,
-            LabberMetadata,
-            LabberPayload,
-            format_ext,
-            write_labber,
-        )
-        from zcu_tools.experiment.utils import make_labber_cfg_snapshot
+        from dataclasses import replace
 
-        spec = self.persistence_spec()
-        if isinstance(spec, GroupedAxesSpec):
-            spec.save(source, destination, comment=comment, tag=tag)
-            return
-        result = source.result
+        from zcu_tools.datafile import encode_labber_comment, format_ext, write_labber
 
-        cfg = source.cfg
-        if cfg is None:
-            raise ValueError("RunRecord.cfg is None; cannot save without configuration")
+        from .native_persistence import prepare_run_data
 
-        axes = [
-            (ax.label, ax.unit, np.asarray(getattr(result, ax.field_name)) * ax.scale)
-            for ax in spec.axes
-        ]
-        z = (spec.z.label, spec.z.unit, np.asarray(getattr(result, spec.z.field_name)))
-
-        payload = ExperimentPayload(
-            variables={spec.data_variable: LabberPayload(z, axes=axes)},
-            metadata=LabberMetadata(tags=tag or spec.tag),
-            representation="single",
+        prepared = prepare_run_data(
+            source, spec=self.persistence_spec(), comment=comment or ""
         )
         write_labber(
             Path(format_ext(str(destination))),
-            payload,
-            cfg=make_labber_cfg_snapshot(cfg, schema_version=spec.cfg_schema_version),
-            comment=comment,
+            prepared.container,
+            metadata=replace(
+                prepared.labber_metadata,
+                comment=encode_labber_comment(prepared.cfg.values, comment),
+                tags=[tag] if tag is not None else prepared.labber_metadata.tags,
+            ),
+            grouped_layout=prepared.labber_layout,
         )
 
     def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
@@ -183,6 +159,6 @@ class PersistableExperiment(Generic[T_Result, T_Config]):
         migrations tools; there is no legacy fallback. save remains a separate
         Labber export, not the inverse of this entry.
         """
-        from zcu_tools.datafile import load_run_data
+        from .native_persistence import load_run_with_metadata
 
-        return self.from_stored(load_run_data(source)).record
+        return load_run_with_metadata(source, spec=self.persistence_spec())

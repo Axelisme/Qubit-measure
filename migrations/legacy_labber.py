@@ -1,96 +1,139 @@
-"""Explicit legacy Labber import for the offline storage migration caller."""
+"""Explicit legacy Labber import for offline storage migration."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import h5py
+import numpy as np
 from zcu_tools.datafile import (
-    ExperimentPayload,
+    Axis,
+    Container,
+    ContainerAttrs,
+    GroupSource,
+    LabberMetadata,
     LabberPayload,
-    VariableSchema,
+    Variable,
     cast_labber_values,
     load_grouped_labber_data,
     load_labber_logs,
-    validate_experiment_payload,
-    validate_labber_payload,
 )
 from zcu_tools.datafile.grouped import GROUPED_VERSION_ATTR
 
 
-def load_legacy_labber_payload(
-    source: Path, *, schema: tuple[VariableSchema, ...]
-) -> ExperimentPayload:
-    """Read supported legacy Labber layouts using an explicit disk schema.
+@dataclass(frozen=True, kw_only=True)
+class LegacyAxisSchema:
+    """Declared historical axis name, unit and disk dtype, without coordinate values."""
 
-    source is an exact existing Labber file; schema names its experiment's
-    variables, axes, signal labels, SI/discrete units and numeric dtypes.
-    Marked grouped files use the canonical/streaming grouped reader; unmarked
-    files map schema order explicitly to root, Log_2, Log_3 and so on. Log count,
-    signal/axis labels, units and shapes must match, including independent grids.
-    No filename or channel guesses, unit conversion or runtime fallback occurs.
-    Return a schema-validated generic payload with source metadata preserved.
-    Numeric reader containers are cast through the Labber dtype contract.
-    Unsupported layout/schema raises ValueError; filesystem errors propagate.
-    This migration-only entry never modifies source.
+    name: str
+    unit: str
+    dtype: np.dtype[np.generic]
+
+
+@dataclass(frozen=True, kw_only=True)
+class LegacyVariableSchema:
+    """One historical log's explicit identity and inner-first channel declaration.
+
+    variable is the output variable name. axes supplies ordered labels/units and
+    dtypes, not shape or values. signal_name/unit/dtype identifies the legacy
+    measured channel. These declarations never infer names or convert units.
+    """
+
+    variable: str
+    axes: tuple[LegacyAxisSchema, ...]
+    signal_name: str
+    signal_unit: str
+    signal_dtype: np.dtype[np.generic]
+
+
+def load_legacy_labber_payload(
+    source: Path, *, schema: tuple[LegacyVariableSchema, ...]
+) -> tuple[Container, LabberMetadata]:
+    """Read legacy Labber with explicit identities, returning (container, metadata).
+
+    Marked files use their saved variable identities. Unmarked logs map to schema
+    order: root, Log_2, Log_3, etc. Check counts, labels, units, shape and numeric
+    dtype before converting inner-first axes to NumPy order. Do not infer names,
+    units or cfg. Source remains unchanged. Labber metadata is returned separately;
+    groups/labber retains the detached original, including per-trace timestamps.
+    Missing/mismatched declarations raise ValueError; I/O errors propagate.
     """
     if not schema:
         raise ValueError(f"{source}: missing disk schema")
     with h5py.File(source, "r") as file:
         grouped = GROUPED_VERSION_ATTR in file.attrs
+        image = file.id.get_file_image()
     if grouped:
         loaded = load_grouped_labber_data(
             str(source), required_variables=[item.variable for item in schema]
         )
-        variables = loaded.variables
+        variables = {str(name): payload for name, payload in loaded.variables.items()}
         metadata = loaded.metadata
     else:
         logs = load_labber_logs(str(source))
         if len(logs) != len(schema):
             raise ValueError(
-                f"{source}: log count {len(logs)} cannot identify multiple "
-                f"variables in schema of length {len(schema)}"
+                f"{source}: log count {len(logs)} cannot identify multiple variables in schema of length {len(schema)}"
             )
         variables = {
             item.variable: log.payload for item, log in zip(schema, logs, strict=True)
         }
         metadata = logs[0].metadata
-        grouped = len(logs) > 1
+    converted: dict[str, Variable] = {}
     for item in schema:
-        validate_labber_payload(
-            variables[item.variable], schema=item, context=f"{source}/{item.variable}"
-        )
-    converted = {
-        item.variable: LabberPayload(
-            (
-                variables[item.variable].data.name,
-                variables[item.variable].data.unit,
+        payload = variables[item.variable]
+        context = f"{source}/{item.variable}"
+        _validate_payload(payload, item, context)
+        axes = tuple(
+            Axis(
+                actual.name,
+                actual.unit,
                 cast_labber_values(
-                    variables[item.variable].z,
-                    item.signal_dtype,
-                    context=f"{source}/{item.variable}",
+                    actual.values, declared.dtype, context=f"{context}/{actual.name}"
                 ),
-            ),
-            [
-                (
-                    actual.name,
-                    actual.unit,
-                    cast_labber_values(
-                        actual.values,
-                        declared.dtype,
-                        context=f"{source}/{item.variable}/{actual.name}",
-                    ),
-                )
-                for actual, declared in zip(
-                    variables[item.variable].axes, item.axes, strict=True
-                )
-            ],
-            timestamps=variables[item.variable].timestamps,
+            )
+            for actual, declared in zip(payload.axes, item.axes, strict=True)
         )
-        for item in schema
-    }
-    payload = ExperimentPayload(
-        variables=converted,
-        metadata=metadata,
-        representation="grouped" if grouped else "single",
+        converted[item.variable] = Variable(
+            cast_labber_values(payload.z, item.signal_dtype, context=context),
+            tuple(reversed(axes)),
+            payload.data.unit,
+        )
+    container = Container(
+        converted,
+        {},
+        {"labber": GroupSource(image, "/")},
+        ContainerAttrs("3.0", "migrations.legacy_labber", None, {}),
     )
-    validate_experiment_payload(payload, schema=schema)
-    return payload
+    return container, metadata
+
+
+def _validate_payload(
+    payload: LabberPayload, schema: LegacyVariableSchema, context: str
+) -> None:
+    if len(payload.axes) != len(schema.axes):
+        raise ValueError(f"{context}: axis count mismatch")
+    shape: list[int] = []
+    for actual, expected in zip(payload.axes, schema.axes, strict=True):
+        if actual.name != expected.name:
+            raise ValueError(
+                f"{context}: axis label {actual.name!r}; expected {expected.name!r}"
+            )
+        if actual.unit != expected.unit:
+            raise ValueError(
+                f"{context}: axis unit {actual.unit!r}; expected {expected.unit!r}"
+            )
+        array = np.asarray(actual.values)
+        if array.ndim != 1:
+            raise ValueError(f"{context}: expected 1D axis")
+        cast_labber_values(array, expected.dtype, context=context)
+        shape.append(len(array))
+    if payload.data.name != schema.signal_name:
+        raise ValueError(
+            f"{context}: signal label {payload.data.name!r}; expected {schema.signal_name!r}"
+        )
+    if payload.data.unit != schema.signal_unit:
+        raise ValueError(
+            f"{context}: signal unit {payload.data.unit!r}; expected {schema.signal_unit!r}"
+        )
+    if np.asarray(payload.z).shape != tuple(reversed(shape)):
+        raise ValueError(f"{context}: signal shape mismatch")

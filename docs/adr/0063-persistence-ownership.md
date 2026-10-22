@@ -13,7 +13,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 ### 保存目的與 owner
 
 - App memento 保存偏好和工作狀態，不是量測備份。各 app 擁有 schema、version、capture／restore 和觸發時機；`gui.session.persistence.SingleFileCaretaker` 提供單檔 I/O、格式錯誤的 default degradation 與 atomic replace。Measure framework 只在 lifecycle close 保存 Qt 視窗尺寸與左面板寬度，不保存或還原 domain session。SoC、device、entry／point、tabs／input 的檔案與重開政策由啟動腳本擁有，見 [[0064]]；setup／point 的 aliases.yaml 仍由 resources.entry 擁有。shared caretaker 不規定 close-only，也不訂閱高頻事件代替 app 決策。
-- Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有通用檔案格式與讀寫，不反向依賴 experiment。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
+- Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有 [[0080]] 的通用容器格式與讀寫，不反向依賴 experiment。Container 只認 vars、docs、groups；cfg、metadata 的具名型別、編碼與驗證由 experiment 擁有。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
 - 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameters` 的 2.0 header、metadata 讀寫與 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
@@ -66,9 +66,9 @@ Workflow 的兩側目錄都使用 `workflows/<workflow名>_<run_id>/`，保留�
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
 
-Native `zcu.experiment-data` 新檔寫 2.1。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造，也不加遷移來源標記。正常量測路徑仍必填開始時間，只產生已知完成狀態。2.1 的 started_at attr 必填，以空字串編碼 None；completion attr 以 unknown 編碼未知。缺失 attr、非法型別與非法時間仍拒絕。
+舊 Native `zcu.experiment-data` 2.1 的歷史欄位規則如下；新檔由 [[0080]] 的 zcu.container 3.0 保存，欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造，也不加遷移來源標記。正常量測路徑仍必填開始時間，只產生已知完成狀態。2.1 的 started_at attr 必填，以空字串編碼 None；completion attr 以 unknown 編碼未知。缺失 attr、非法型別與非法時間仍拒絕。
 
-Reader 接受 2.0 與同 major 的後續 minor。2.0 仍要求已知 started_at 與 complete／partial／stopped，不接受 2.1 的新值。保真 image 寫回一律使用 max(來源版本, 2.1)：2.0 不論有無新值都升為 2.1，future-minor 保留原版本。單一版本規則避免依欄位值條件升版，讓寫回結果可預測。
+同一個容器 reader 長期接受舊 major 2，轉成 Container 後寫回一律使用 3.0，不再提供 major-2 writer。來源完整子樹以 opaque groups/legacy 保留。同 major-3 的 forward minor 與未知內容在 load、修改、save 往返時保留，不降版。格式解碼由 [[0080]] 擁有，實驗欄位是否合法由 experiment 的文件 schema 驗證。
 
 GUI Load 與共用 typed loader 保留未知歷史值，不把 unknown 改成 complete。Workflow `load_trace` 是 complete-only 分析入口：None＋complete 可載入，unknown 與 partial／stopped 同樣拒絕，因為未知完成度不能證明 acquisition 完整。Notebook 仍只載入 RunRecord，不把載入資料變成 acquisition evidence。現有前端不顯示或排序這兩個 metadata 欄位，本格式變更不新增 UI。
 
@@ -78,11 +78,11 @@ GUI Load 與共用 typed loader 保留未知歷史值，不把 unknown 改成 co
 
 兩路每台只呼叫一次 get_info。任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。
 
-Native writer 沿既有 `/device` 保存 snapshot，dataset 的 shape 是 `()`，內容為 UTF-8 JSON。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時不建 dataset，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 的儲存欄位。YOKO 的 `value_unit` 是 A 或 V，與 current／voltage mode 一致；Fake 是 native。Value 與 rampstep 沿該單位保存。RF 頻率為 Hz，功率為 dBm，不加 `value_unit`。Snapshot 不另造單位欄位或換算值。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
+Experiment 將 snapshot 寫入 Container 的 `docs/metadata.device_snapshot`。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時寫 JSON null，空 mapping 則寫 `{}`。舊 native 2.x 的 `/device` 由 legacy reader 映入相同欄位。單位沿各 DeviceInfo 的儲存欄位。YOKO 的 `value_unit` 是 A 或 V，與 current／voltage mode 一致；Fake 是 native。Value 與 rampstep 沿該單位保存。RF 頻率為 Hz，功率為 dBm，不加 `value_unit`。Snapshot 不另造單位欄位或換算值。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
 
-Labber 成功後，保存編排才更新最近成功的 labber_path；本次失敗保留此前連結。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
+Labber 成功後，保存編排將 labber_path 放入 SaveReport 與 saved ledger 事件，不寫入 RunMetadata。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
 
-`datafile.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式。`experiment.artifacts` 定義 ArtifactItem 與固定 DataItem／FigureItem／AnalysisItem。一次 SaveArtifact 包含多個 items，`save_artifacts` 依種類選 native／Labber／PNG／JSON，逐項編碼一次，對等目的地共用 bytes。
+`experiment.artifacts.AnalysisDocument` 與 encoder 擁有窗格 JSON 格式，信封也可由 to_doc 表達為 [[0080]] 的 docs/analysis。現有 artifact 仍寫 analysis/<pane>.json，SaveLayout 與 ledger 不改。`experiment.artifacts` 定義 ArtifactItem 與固定 DataItem／FigureItem／AnalysisItem。一次 SaveArtifact 包含多個 items，`save_artifacts` 依種類選 native／Labber／PNG／JSON，逐項編碼一次，對等目的地共用 bytes。
 
 DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer 準備失敗只使對應 data outputs 失敗，同選集的圖與分析仍嘗試保存。每次呼叫回傳最新 SaveReport 並追加 saved；ledger 失敗向外傳遞，不 retry 或 rollback。共用核心不依賴 GUI 或 Qt，由 `.importlinter` 的 `artifacts-core-no-ui` contract 檢查。
 
@@ -90,13 +90,13 @@ DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer
 
 GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
-GUI Native Load 由 LoadService 呼叫 datafile.load_run_data 讀成 StoredRun 並比對 experiment tag，再交 adapter.restore(stored)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 StoredRun 保留原 run_id、時間、completion 和最近成功 Labber path，不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
+GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion 與 Labber 子欄位，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
 
-使用者於 2026-10-16 選擇「A」，採用修改文件、不新增 GUI 入口的方案。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun。GUI 不提供原始 cfg 檢視入口，不擴大本次範圍。
+使用者於 2026-10-16 選擇「A」，採用修改文件、不新增 GUI 入口的方案。原始 cfg 保存在 native 資料檔，透過公開 datafile.load 離線讀取 Container 的 docs/cfg。GUI 不提供原始 cfg 檢視入口，不擴大本次範圍。
 
 相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
 
-Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。Datafile 的 `read_run_metadata` 共用 native 解碼，只驗 metadata／cfg envelope，不讀量測 arrays，也不保證整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
+Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。Experiment 的 `read_run_metadata` 透過 datafile.read_doc 只讀並驗證 metadata，不讀 cfg 或量測 arrays，也不保證整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
 
 使用者於 2026-10-20 確認檔案清單與成功 Load 分開：「我以為只要是data.h5就可以看到，能不能Load另說」。對清單完全不讀 ledger、顯示欄位只從檔案 metadata 讀取的方案回覆：「可以」。
 

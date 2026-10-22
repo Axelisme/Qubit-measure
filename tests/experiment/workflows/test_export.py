@@ -5,29 +5,37 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-import h5py as h5
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import (
+    Axis as ContainerAxis,
+)
+from zcu_tools.datafile import (
+    Container,
     DataVariable,
-    RunSnapshot,
+    LabberMetadata,
+    Variable,
+    load,
     load_grouped_labber_data,
-    load_run_data,
-    save_run_data,
+    save,
 )
 from zcu_tools.experiment import AxesSpec, Axis, ExpCfgModel, ZSpec
+from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot
+from zcu_tools.experiment.native_persistence import (
+    PreparedRunData,
+    metadata_from_container,
+)
 from zcu_tools.experiment.workflows import RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.artifacts import RunManifest
 from zcu_tools.experiment.workflows.export import (
-    PreparedFluxdepExport,
     load_trace,
     validate_destinations,
     write_outputs,
 )
 
 from tests._filesystem import symlink_or_skip
-from tests._native_support import native_cfg, native_metadata, native_payload
+from tests._native_support import native_cfg, native_container, native_metadata
 
 
 @pytest.mark.parametrize("completion", ["complete", "unknown"])
@@ -48,11 +56,24 @@ def test_trace_requires_known_completion_but_not_known_start_time(
         data_variable=DataVariable("readout"),
     )
     path = tmp_path / "trace.h5"
-    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
-    with h5.File(path, "r+") as file:
-        file.attrs["format_version"] = "2.1"
-        file.attrs["started_at"] = ""
-        file.attrs["completion"] = completion
+    metadata = native_metadata().model_copy(
+        update={"started_at": None, "completion": completion}
+    )
+    container = native_container(metadata=metadata)
+    save(
+        path,
+        replace(
+            container,
+            docs={
+                **container.docs,
+                "cfg": {
+                    "values": {},
+                    "cfg_type": "ExpCfgModel",
+                    "schema_version": "1.0",
+                },
+            },
+        ),
+    )
     if completion == "unknown":
         with pytest.raises(
             ValueError, match="Expected complete test/native acquisition"
@@ -69,11 +90,174 @@ def test_trace_requires_known_completion_but_not_known_start_time(
         np.testing.assert_array_equal(trace.axes[0].values, [4e9, 5e9])
 
 
+@dataclass
+class SyntheticTraceResult:
+    frequency: np.ndarray
+    flux: np.ndarray
+    signal: np.ndarray
+
+
+@pytest.fixture
+def trace_spec() -> AxesSpec[SyntheticTraceResult, ExpCfgModel]:
+    return AxesSpec(
+        axes=(Axis("frequency", "frequency", "Hz"), Axis("flux", "Flux", "V")),
+        z=ZSpec("signal", "signal", "V"),
+        result_type=SyntheticTraceResult,
+        cfg_type=ExpCfgModel,
+        tag="test/native",
+        data_variable=DataVariable("readout"),
+    )
+
+
+@pytest.fixture
+def stopped_trace() -> Container:
+    container = native_container(
+        metadata=native_metadata().model_copy(update={"completion": "stopped"})
+    )
+    return replace(
+        container,
+        vars={
+            "readout": Variable(
+                np.array([[1 + 2j, 3 - 4j, 5j], [6 + 7j, complex(np.nan, np.nan), 9j]]),
+                (
+                    ContainerAxis("Flux", "V", np.array([0.1, 0.2])),
+                    ContainerAxis("frequency", "Hz", np.array([4e9, 5e9, 6e9])),
+                ),
+                "V",
+            )
+        },
+        docs={
+            **container.docs,
+            "cfg": {"values": {}, "cfg_type": "ExpCfgModel", "schema_version": "1.0"},
+        },
+    )
+
+
+def test_trace_rejects_stopped_by_default(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+) -> None:
+    path = tmp_path / "stopped.h5"
+    save(path, stopped_trace)
+    with pytest.raises(
+        ValueError, match="Expected complete test/native acquisition"
+    ) as error:
+        load_trace(tmp_path, path.name, trace_spec)
+    assert str(path) in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "completion,allow_stopped",
+    [("complete", False), ("complete", True), ("stopped", True)],
+)
+def test_trace_completion_policy_preserves_raw_values_and_inner_first_axes(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+    completion: str,
+    allow_stopped: bool,
+) -> None:
+    path = tmp_path / "trace.h5"
+    metadata = native_metadata().model_copy(update={"completion": completion})
+    save(
+        path,
+        replace(
+            stopped_trace,
+            docs={**stopped_trace.docs, "metadata": metadata.model_dump(mode="json")},
+        ),
+    )
+    try:
+        trace = load_trace(tmp_path, path.name, trace_spec, allow_stopped=allow_stopped)
+    except (TypeError, ValueError) as error:
+        pytest.fail(
+            f"Explicit allow_stopped={allow_stopped} must load {completion} raw data: {error}"
+        )
+    np.testing.assert_array_equal(
+        trace.z, [[1 + 2j, 3 - 4j, 5j], [6 + 7j, complex(np.nan, np.nan), 9j]]
+    )
+    assert trace.z.shape == (2, 3)
+    assert trace.data.unit == "V"
+    assert [(axis.name, axis.unit) for axis in trace.axes] == [
+        ("frequency", "Hz"),
+        ("Flux", "V"),
+    ]
+    np.testing.assert_array_equal(trace.axes[0].values, [4e9, 5e9, 6e9])
+    np.testing.assert_array_equal(trace.axes[1].values, [0.1, 0.2])
+
+
+@pytest.mark.parametrize("completion", ["partial", "unknown"])
+@pytest.mark.parametrize("allow_stopped", [False, True])
+def test_trace_never_allows_partial_or_unknown(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+    completion: str,
+    allow_stopped: bool,
+) -> None:
+    path = tmp_path / "incomplete.h5"
+    metadata = native_metadata().model_copy(update={"completion": completion})
+    save(
+        path,
+        replace(
+            stopped_trace,
+            docs={**stopped_trace.docs, "metadata": metadata.model_dump(mode="json")},
+        ),
+    )
+    with pytest.raises(ValueError, match="Expected complete") as error:
+        load_trace(tmp_path, path.name, trace_spec, allow_stopped=allow_stopped)
+    assert str(path) in str(error.value)
+
+
+@pytest.mark.parametrize("allow_stopped", [False, True])
+@pytest.mark.parametrize(
+    "invalid,diagnosis",
+    [
+        ("tag", "test/native acquisition"),
+        ("unit", "signal unit"),
+        ("missing", "missing variables"),
+        ("empty", "Empty acquisition"),
+    ],
+)
+def test_trace_completion_policy_keeps_validation_and_source_diagnostics(
+    tmp_path: Path,
+    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    stopped_trace: Container,
+    allow_stopped: bool,
+    invalid: str,
+    diagnosis: str,
+) -> None:
+    path = tmp_path / "invalid.h5"
+    metadata = native_metadata().model_copy(
+        update={"completion": "stopped" if allow_stopped else "complete"}
+    )
+    if invalid == "tag":
+        metadata = metadata.model_copy(update={"experiment": "test/other"})
+    variable = stopped_trace.vars["readout"]
+    if invalid == "unit":
+        variable = replace(variable, unit="A")
+    elif invalid == "empty":
+        variable = replace(
+            variable,
+            values=np.empty((0, 3), dtype=complex),
+            axes=(ContainerAxis("Flux", "V", np.array([])), variable.axes[1]),
+        )
+    container = replace(
+        stopped_trace,
+        vars={} if invalid == "missing" else {"readout": variable},
+        docs={**stopped_trace.docs, "metadata": metadata.model_dump(mode="json")},
+    )
+    save(path, container)
+    with pytest.raises(ValueError, match=diagnosis) as error:
+        load_trace(tmp_path, path.name, trace_spec, allow_stopped=allow_stopped)
+    assert str(path) in str(error.value)
+
+
 def inputs(
     tmp_path: Path,
     lifecycle: Literal["done", "cancelled", "failed"] = "done",
     run_id: str | None = None,
-) -> tuple[RunManifest, PreparedFluxdepExport, RunSnapshot]:
+) -> tuple[RunManifest, PreparedRunData, RunSnapshot]:
     metadata = native_metadata()
     now = datetime(2026, 10, 12, tzinfo=UTC)
     manifest = TypeAdapter(RunManifest).validate_python(
@@ -94,8 +278,10 @@ def inputs(
         }
     )
     manifest.roots.data_root.mkdir(parents=True)
-    payload = replace(native_payload(), representation="grouped")
-    return manifest, PreparedFluxdepExport(payload, native_cfg()), metadata.snapshot
+    prepared = PreparedRunData(
+        native_container(), native_cfg(), LabberMetadata(), "independent"
+    )
+    return manifest, prepared, metadata.snapshot
 
 
 @pytest.mark.parametrize(
@@ -124,16 +310,22 @@ def test_saved_export_roundtrip_overwrite_and_new_labber(
         assert labber.path is not None
         assert labber.path.name == f"synthetic_a1b2c3_{sequence}.hdf5"
         assert native.path is not None
-        stored = load_run_data(native.path)
-        assert stored.metadata.completion == completion
-        assert stored.metadata.snapshot == snapshot
-        assert stored.metadata.experiment == "synthetic"
-        assert stored.metadata.provenance == manifest.identity.provenance
-        assert stored.cfg == prepared.cfg
+        stored = load(native.path)
+        assert metadata_from_container(stored).completion == completion
+        assert metadata_from_container(stored).snapshot == snapshot
+        assert metadata_from_container(stored).experiment == "synthetic"
+        assert (
+            metadata_from_container(stored).provenance == manifest.identity.provenance
+        )
+        assert (
+            TypeAdapter(CfgSnapshot).validate_python(stored.docs["cfg"]) == prepared.cfg
+        )
         restored = load_grouped_labber_data(str(labber.path))
-        for name, trace in prepared.payload.variables.items():
-            np.testing.assert_array_equal(stored.payload.variables[name].z, trace.z)
-            np.testing.assert_array_equal(restored.variables[name].z, trace.z)
+        for name, variable in prepared.container.vars.items():
+            np.testing.assert_array_equal(stored.vars[name].values, variable.values)
+            np.testing.assert_array_equal(
+                restored.variables[DataVariable(name)].z, variable.values
+            )
     assert attempts[0][0].path == attempts[1][0].path
     assert attempts[0][1].path != attempts[1][1].path
 
@@ -184,7 +376,7 @@ def test_opaque_workflow_id_keeps_native_writer_rejection_and_labber_success(
         native.status == "failed"
         and native.path == manifest.roots.data_root / "merged.h5"
     )
-    assert native.error and "run_id" in native.error and "UTC timestamp" in native.error
+    assert native.error and "run_id" in native.error
     assert native.path is not None
     assert not native.path.exists()
     assert labber.status == "saved" and labber.path is not None and labber.error is None

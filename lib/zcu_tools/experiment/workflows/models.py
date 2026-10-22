@@ -10,7 +10,8 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.datafile import JsonObject
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.script_host import PendingQuestion
 
 type Lifecycle = Literal[

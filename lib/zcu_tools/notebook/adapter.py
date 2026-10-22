@@ -11,7 +11,7 @@ from typing import Any, Generic, TypeVar
 
 from matplotlib.figure import Figure
 
-from zcu_tools.datafile import AnalysisDocument, format_ext, reserve_labber_filepath
+from zcu_tools.datafile import format_ext, reserve_labber_filepath
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.acquisition import (
     AcquisitionEvidence,
@@ -19,6 +19,7 @@ from zcu_tools.experiment.acquisition import (
     capture_software_provenance,
     new_run_id,
 )
+from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.interfaces import (

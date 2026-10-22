@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from zcu_tools.device import DeviceManager, FakeDevice
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -555,7 +556,9 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
         # A non-serializable result stays in State; the operational projection
         # identifies replacements without requiring its payload on the wire.
         fx.state.update_tab_loaded_result(
-            tab_id, object(), "loaded.h5", metadata=historical_metadata()
+            tab_id,
+            replace(RunRecord(None, object()), metadata=historical_metadata()),
+            "loaded.h5",
         )
         observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert observed["result_state"] == {
@@ -565,7 +568,9 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             "source_operation_id": None,
         }
         fx.state.update_tab_loaded_result(
-            tab_id, object(), "loaded.h5", metadata=historical_metadata()
+            tab_id,
+            replace(RunRecord(None, object()), metadata=historical_metadata()),
+            "loaded.h5",
         )
         replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert replacement["result_state"]["revision"] == 2

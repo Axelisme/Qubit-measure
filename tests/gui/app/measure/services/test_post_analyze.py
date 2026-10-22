@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
@@ -57,7 +58,7 @@ def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
         tab_id,
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result(tab_id, object())
+    state.update_tab_result(tab_id, RunRecord(None, object()))
     if with_analyze:
         state.update_tab_analyze(tab_id, object(), None)
     return state
@@ -113,7 +114,7 @@ def _make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result("tab2", object())
+    state.update_tab_result("tab2", RunRecord(None, object()))
     state.update_tab_analyze("tab2", object(), None)
     return state
 

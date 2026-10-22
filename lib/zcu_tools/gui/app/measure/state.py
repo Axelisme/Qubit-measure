@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
-from zcu_tools.datafile import RunMetadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -65,7 +65,7 @@ T_AnalyzeResult = TypeVar("T_AnalyzeResult")
 # prepare a complete replacement, and State swaps the carrier on the owner thread.
 # WritebackService remains the owner of the opaque draft itself.
 @dataclass
-class RunPaneState(Generic[T_Result]):
+class RunPaneState:
     """One result and its historical acquisition evidence.
 
     result is the adapter-owned record or None. source_path identifies loaded
@@ -83,10 +83,9 @@ class RunPaneState(Generic[T_Result]):
     target; Save still checks this capability against file history.
     """
 
-    result: T_Result | None = None
+    result: RunRecord[Any, Any] | None = None
     source_path: str | None = None
     source_operation_id: int | None = None
-    metadata: RunMetadata | None = None
     confirmed_run_id: str | None = None
     parameters: ParameterContext | None = None
     storage: PointStorageBinding | None = None
@@ -181,7 +180,7 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     cfg: TabFormResource
 
     # Canonical pane-owned resources.
-    run: RunPaneState[T_Result] = field(default_factory=lambda: RunPaneState())
+    run: RunPaneState = field(default_factory=lambda: RunPaneState())
     analysis: AnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams] = field(
         default_factory=lambda: AnalysisPaneState()
     )
@@ -363,7 +362,7 @@ class State(SessionState):
     def _replace_run_pane(
         self,
         tab_id: str,
-        pane: RunPaneState[Any],
+        pane: RunPaneState,
     ) -> RetiredPaneResources:
         """Commit one complete run replacement and invalidate its dependents.
 
@@ -399,7 +398,7 @@ class State(SessionState):
     def replace_run_pane(
         self,
         tab_id: str,
-        pane: RunPaneState[Any],
+        pane: RunPaneState,
     ) -> RetiredPaneResources:
         """Atomically replace Run and clear Analysis/Post resources."""
         return self._replace_run_pane(tab_id, pane)
@@ -407,7 +406,7 @@ class State(SessionState):
     def swap_run_pane(
         self,
         tab_id: str,
-        pane: RunPaneState[Any],
+        pane: RunPaneState,
     ) -> RetiredPaneResources:
         """Alias for :meth:`replace_run_pane` used by lifecycle services."""
         return self.replace_run_pane(tab_id, pane)
@@ -426,10 +425,9 @@ class State(SessionState):
     def update_tab_result(
         self,
         tab_id: str,
-        result: object,
+        result: RunRecord[Any, Any],
         *,
         source_operation_id: int | None = None,
-        metadata: RunMetadata | None = None,
         parameters: ParameterContext | None = None,
     ) -> RetiredPaneResources:
         """Replace result/evidence together and invalidate dependent panes.
@@ -449,7 +447,6 @@ class State(SessionState):
             RunPaneState(
                 result=result,
                 source_operation_id=source_operation_id,
-                metadata=metadata,
                 parameters=parameters,
                 storage=None if parameters is None else parameters.storage,
             ),
@@ -458,10 +455,9 @@ class State(SessionState):
     def update_tab_loaded_result(
         self,
         tab_id: str,
-        result: object,
+        result: RunRecord[Any, Any],
         source_path: str,
         *,
-        metadata: RunMetadata,
         parameters: ParameterContext | None = None,
         storage: PointStorageBinding | None = None,
     ) -> RetiredPaneResources:
@@ -487,7 +483,6 @@ class State(SessionState):
             RunPaneState(
                 result=result,
                 source_path=source_path,
-                metadata=metadata,
                 parameters=parameters,
                 storage=storage,
             ),
@@ -692,19 +687,12 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.get_tab(tab_id)
-        metadata = tab.run.metadata
+        metadata = None if tab.run.result is None else tab.run.result.metadata
         if metadata is None:
             raise ValueError("Save report requires historical RunMetadata")
         tab.artifacts.apply_report(report)
         if any(item.status == "saved" for item in report.outputs):
             tab.run.confirmed_run_id = report.run_id
-        for item in report.outputs:
-            if (
-                item.key.section == "run"
-                and item.output.format == "labber"
-                and item.status == "saved"
-            ):
-                tab.run.metadata = replace(metadata, labber_path=str(item.output.path))
         self.version.bump(f"tab:{tab_id}:save")
 
     def get_artifact_snapshots(
@@ -715,11 +703,9 @@ class State(SessionState):
         return self.get_tab(tab_id).artifacts.snapshot()
 
     @staticmethod
-    def _save_layout(
-        run: RunPaneState[T_Result], *, experiment: str
-    ) -> SaveLayout | None:
+    def _save_layout(run: RunPaneState, *, experiment: str) -> SaveLayout | None:
         """Plan against this result's source, never tab birth or live selection."""
-        metadata = run.metadata
+        metadata = None if run.result is None else run.result.metadata
         storage = run.storage
         if metadata is None or storage is None:
             return None

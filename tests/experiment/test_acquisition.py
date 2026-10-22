@@ -9,10 +9,10 @@ from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
-from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment import (
     AcquisitionEvidence,
+    SoftwareProvenance,
     acquisition,
     capture_software_provenance,
     new_run_id,

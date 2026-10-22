@@ -7,9 +7,10 @@ from zcu_tools.gui.app.measure.artifacts import ArtifactHandover
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
-    from zcu_tools.datafile import StoredRun
+    from zcu_tools.datafile import Container
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.native_persistence import RestoredRun
+    from zcu_tools.experiment.records import RunRecord
     from zcu_tools.plotting.plots import Plots
 
 from zcu_tools.gui.app.measure.writeback import WritebackItem
@@ -48,8 +49,8 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
     Keeping the framework side generic-free is deliberate: the GUI handles
     every adapter as an opaque ``ExpAdapterProtocol``. Analyze/writeback
     results remain opaque. cfg is the output of this adapter's own Form;
-    the framework does not check its type. Run handles also stay opaque, including
-    when native acquisition evidence is captured. Results
+    the framework does not check its type. Run and restore return a RunRecord
+    envelope; its cfg and Result stay adapter-owned black boxes. Results
     cross Qt ``Signal(object)`` boundaries as plain objects. The cross-method type linkage that pyright
     checks lives entirely inside a single concrete adapter via the generic
     ``BaseAdapter[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]``.
@@ -108,14 +109,14 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
         cfg: Any,
         *,
         context: RunContext,
-    ) -> Any:
+    ) -> RunRecord[Any, Any]:
         """Execute detached resolved inputs; never resolve from live context.
 
         req provides accepted device/SoC inputs; cfg is this adapter's validated
         Form output, forwarded unchanged, and context owns this acquisition's plots and stop signal.
-        Return an adapter-owned opaque handle. With experiment_tag set and a
-        saved tab origin, the framework captures native evidence independently
-        of that handle's type. Otherwise it does not manufacture metadata.
+        Return a RunRecord wrapping the adapter-owned cfg and Result. With
+        experiment_tag set and a saved tab origin, the framework installs native
+        evidence in record.metadata. Otherwise it does not manufacture metadata.
         Saving consumes ArtifactHandover content, never inferred cfg/result fields.
         Acquisition errors follow the operation's terminal policy: without
         accepted user cancellation they fail the operation. Accepted cancellation
@@ -123,13 +124,13 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
         """
         ...
 
-    def restore(self, stored: StoredRun) -> RestoredRun[object]:
+    def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
         """Restore framework-read native data admitted for this experiment tag.
 
-        Return an opaque adapter-owned record and cfg_issue: None means typed cfg
+        Return a RunRecord with historical metadata and cfg_issue: None means typed cfg
         is available; a nonempty string explains why it is unavailable. Valid
         data may load successfully without cfg. Do not inspect current inputs,
-        read files or recapture history; the framework uses stored.metadata.
+        read files or recapture history; the framework uses record.metadata.
         Raise NotImplementedError for unsupported restoration and ValueError for
         invalid experiment data; other core failures propagate before replacement.
         """

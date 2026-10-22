@@ -18,9 +18,10 @@ from typing import Literal
 
 from pydantic import TypeAdapter
 
-from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.datafile import JsonObject
 from zcu_tools.device import DeviceMapping
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.program.v2.simulation import SimulationSoc
 from zcu_tools.resources.entry import new_run_id as generate_run_id
 

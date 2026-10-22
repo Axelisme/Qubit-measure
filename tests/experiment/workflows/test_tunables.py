@@ -6,7 +6,7 @@ from threading import RLock
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.workflows import (
     Actor,
     Live,

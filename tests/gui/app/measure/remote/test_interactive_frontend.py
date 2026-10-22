@@ -22,6 +22,7 @@ from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateReques
 from zcu_tools.resources.entry import component_registry
 
 from tests.gui.app.measure._components import register_all as register_components
+from tests.gui.app.measure._record_support import require_record
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 from ._helpers import mcp_client, open_client
@@ -205,7 +206,7 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         "synthetic/magnitude",
         native_source=tmp_path / "source.h5" if terminal == "done" else None,
     )
-    source = fx.state.get_tab(tab_id).run.metadata
+    source = require_record(fx.state.get_tab(tab_id).run).metadata
     captured = fx.state.get_tab(tab_id).run.parameters
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
@@ -359,7 +360,7 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
     tab_id, _, widget = start_mounted(
         fx, window, "synthetic/magnitude", native_source=tmp_path / "source.h5"
     )
-    source = fx.state.get_tab(tab_id).run.metadata
+    source = require_record(fx.state.get_tab(tab_id).run).metadata
     captured = fx.state.get_tab(tab_id).run.parameters
     assert source is not None and source.snapshot.point is not None
     assert captured is not None

@@ -7,7 +7,8 @@ from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal
 
-from zcu_tools.datafile import AnalysisDocument, StoredRun
+from zcu_tools.datafile import Container
+from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
@@ -469,7 +470,7 @@ class BaseAdapter(
         cfg: T_Cfg,
         *,
         context: RunContext,
-    ) -> T_Result:
+    ) -> RunRecord[Any, Any]:
         """Pass this adapter's validated Form output to its core unchanged.
 
         req supplies admission inputs; context owns acquisition dependencies.
@@ -479,7 +480,7 @@ class BaseAdapter(
         del req
         return self.exp_cls().run(cfg, context=context)
 
-    def restore(self, stored: StoredRun) -> RestoredRun[T_Result]:
+    def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
         """Restore already-read native data through the core's from_stored contract.
 
         stored contains validated generic data and original history, not current
@@ -561,8 +562,8 @@ class BaseAdapter(
     def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
         """Hand over a typed RunRecord under the framework-assigned data key.
 
-        This default supports core record adapters. Opaque adapters override it
-        to unwrap their own handle and return framework content. Preparation
+        The envelope carries metadata while cfg and Result stay adapter-owned.
+        Adapters with custom data mapping override this handover. Preparation
         failures, including missing cfg, become failed data outputs. A non-record
         raises TypeError, which Save isolates the same way. No paths, format
         selection, metadata capture or I/O occurs. Arrays remain shared; do not

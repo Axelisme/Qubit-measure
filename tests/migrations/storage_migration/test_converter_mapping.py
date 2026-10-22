@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.datafile import JsonObject, load_run_data
+from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import FieldView
 
@@ -22,6 +22,7 @@ from migrations.storage_migration import (
     load_run_evidence,
     migrate_storage,
 )
+from tests.migrations.storage_migration.containers import read_migrated
 from tests.migrations.storage_migration.fakes import (
     assert_difference,
     manifest_path,
@@ -179,7 +180,7 @@ def test_historical_parameters_remain_evidence_and_unresolved_sources_stay_pendi
     assert manifest["evidence"] == raw
     if origin == "manual":
         assert len(report.converted_files) == 1
-        stored = load_run_data(report.converted_files[0].destination)
+        stored = read_migrated(report.converted_files[0].destination)
         assert stored.metadata.snapshot.entry_name == evidence.snapshot.entry_name
         assert stored.cfg == evidence.cfg
         assert len(report.moved_labber_files) == 1

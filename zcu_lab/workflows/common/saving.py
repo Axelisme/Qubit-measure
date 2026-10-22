@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from zcu_tools.datafile import RunMetadata, RunSnapshot
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.workflows import Completed, RunIdentity
+from zcu_tools.experiment.workflows import Completed, RunIdentity, record_with_metadata
 
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqExp, FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiExp, LenRabiResult
@@ -43,19 +43,10 @@ def save_native[Cfg: ExpCfgModel, Result](
     destination is an exact new filename whose parent exists. Native schema,
     metadata, collision and I/O errors propagate; no overwrite or retry occurs.
     """
-    facts = source.facts
-    metadata = RunMetadata(
-        run_id=f"{identity.run_id}-{facts.iteration:06d}-{facts.attempt}",
-        experiment=spec.tag,
-        started_at=facts.started_at.isoformat(),
-        finished_at=facts.finished_at.isoformat(),
-        completion="stopped" if source.partial_result else "complete",
-        labber_path=None,
-        snapshot=snapshot,
-        provenance=identity.provenance,
-        device_snapshot=facts.device_snapshot,
+    record = record_with_metadata(
+        source, identity=identity, experiment_tag=spec.tag, snapshot=snapshot
     )
-    save_run(source.value, destination, spec=spec, metadata=metadata)
+    save_run(record, destination, spec=spec)
 
 
 def save_frequency(

@@ -2,11 +2,13 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
+from pydantic import TypeAdapter
 from qtpy.QtCore import QMetaObject, Qt
 from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -59,10 +61,21 @@ class LoadAdapter(OldAdapter):
 
     experiment_tag: ClassVar[str | None] = "test/load"
 
-    def restore(self, stored: StoredRun) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
-        cfg = None if stored.cfg.values["gain"] == 2.0 else RuntimeCfg(knob=42)
+    def restore(self, stored: Container) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
+        cfg = (
+            None
+            if TypeAdapter(CfgSnapshot)
+            .validate_python(stored.docs["cfg"])
+            .values["gain"]
+            == 2.0
+            else RuntimeCfg(knob=42)
+        )
         return RestoredRun(
-            RunRecord(cfg=cfg, result=Result("native")),
+            RunRecord(
+                cfg=cfg,
+                result=Result("native"),
+                metadata=metadata_from_container(stored),
+            ),
             "cfg unavailable" if cfg is None else None,
         )
 
@@ -164,7 +177,7 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     assert window.get_view_snapshot()["active_tab_id"] == focused
 
     def reject_load(
-        self: LoadAdapter, stored: StoredRun
+        self: LoadAdapter, stored: Container
     ) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
         raise LoadDataError("bad data", reason_code="invalid_data_file")
 
