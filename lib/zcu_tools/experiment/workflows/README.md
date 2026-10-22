@@ -22,7 +22,7 @@
 
 `Engine.start` 驗證與保存啟動資料，不執行作者。宿主在一個 worker 呼叫一次 `Engine.execute`。這個呼叫透過共用 `experiment.script_host.ScriptHost` 推進整個 coroutine，包含 Pause 與 Ask 的等待。控制命令只通知同一個 worker，不另排 execute、answer 或 drain segment。新 run 必須等原 worker 的 finally 與 executor 都結束。
 
-`await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示 operation token 在完成時已 set。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
+`await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示 operation 或已完成 descendant 在完成時曾被取消。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
 
 `await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 必須是 ExpCfgModel。每個 attempt 建立既有 RunContext，借用 soc、soccfg、env.plots 與 connected drivers，並使用當次 operation token。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
 
@@ -54,7 +54,7 @@ Record 信封保存 commit_seq、配置目錄、UTC 時間、record 型別名、
 
 每次實際 executor attempt 都追加 flattened `operation_finished` JSONL event。它包含 call_seq 與 operation；seq、time、run_id 是既有 journal 欄位。`OperationFacts` 欄位為 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason 與 stopped。
 
-Kind 是 run、call、setup_device 或 wait_until。Iteration 從 1 起，成功 commit 才推進，配置目錄不推進。Attempt 在 iteration 中從 1 起，成功 commit 後重置。Stopped 是完成時的 operation stop bit，與交付的 partial_result 相同，不從後來的 Stop 或 Pause 狀態推導。只有 run 有呼叫前的 device snapshot，其餘是 None。Outcome 是 completed、partial、discarded、failed 或 raised。Pause discard 與重試各留一筆，例外也留事實，不改原始例外分類。
+Kind 是 run、call、setup_device 或 wait_until。Iteration 從 1 起，成功 commit 才推進，配置目錄不推進。Attempt 在 iteration 中從 1 起，成功 commit 後重置。Stopped 是完成時 operation 自己的 stop bit，不從 descendant 取消或後來的 Stop、Pause 狀態推導。Partial_result 獨立記錄 operation 或已完成 descendant 的取消，因此 partial_result=True 不代表 stopped=True。只有 run 有呼叫前的 device snapshot，其餘是 None。Outcome 是 completed、partial、discarded、failed 或 raised。Pause discard 與重試各留一筆，例外也留事實，不改原始例外分類。
 
 Commit 的 operations 按 attempt 順序列出同一結構。未 commit 的操作只留 journal。Snapshot 固定在操作前，後續量測、driver mutation 或 Save 不重新讀取或覆寫它。
 

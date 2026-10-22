@@ -51,14 +51,15 @@ class CallResult[T]:
 
     result is fn's unchanged payload. epoch is the attempt's starting epoch.
     partial_result snapshots cancellation of the operation or its completed
-    descendant scopes, not the payload's own data completeness. Snapshot and
-    pause have one lock ordering; pause after this snapshot cannot retroactively
-    mark natural completion.
+    descendant scopes, not the payload's own data completeness. stopped snapshots
+    only the operation token's own stop bit. Both facts and pause have one lock
+    ordering; pause after this snapshot cannot retroactively mark completion.
     """
 
     result: T
     epoch: int
     partial_result: bool
+    stopped: bool
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,9 @@ class ScriptHost:
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
-                return CallResult(value, context.epoch, token.partial_result)
+                return CallResult(
+                    value, context.epoch, token.partial_result, token.is_set()
+                )
 
         try:
             return await loop.run_in_executor(None, invoke)

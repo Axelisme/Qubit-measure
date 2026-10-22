@@ -195,7 +195,9 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         for event in rig.events()
         if event["kind"] == "operation_finished"
     ]
-    assert [(fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts] == [
+    assert [
+        (fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts
+    ] == [
         (1, 1, "failed" if failed else "partial", False),
         (1, 2, "completed", False),
     ]
