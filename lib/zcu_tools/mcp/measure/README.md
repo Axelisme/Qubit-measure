@@ -147,7 +147,11 @@ Script root 沒有序號，`script#1` 或 script 配 expected 都回 sequence mi
 回覆保留 execution/workflow snapshot，另帶 `cancelled/reason/active_path`。
 Reason 是 `scope cancellation requested`、`scope not active`、`sequence mismatch`，
 recipe 另有 `no run in progress`。合法但不在路徑上的 scope 或 stale 序號是拒絕資料，不是 tool error。
-`cancelled=True` 只證明已 set token，不證明工作或 cleanup 已 drain，終局仍讀 wait/status。
+`cancelled=True` 表示命令已被 owner 接受，不證明工作或 cleanup 已 drain，終局仍讀 wait/status。
+Workflow 裸 `script` 且 `expected=None` 先由 Stop owner lock 寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
+這個分支的 accepted ack 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。
+Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。
+帶序號或 expected 的 script 與其他 scope 直接由 host 核對。Terminal workflow 對合法 scope 回 scope not active，錯誤語法仍回 invalid_params。
 
 Script scope 設根 token，當前與後續 Run 都會啟動並返回 partial。
 Analyze、ask_writeback、session.ask 無結果時 raise 普通 `RecipeCancelled`，

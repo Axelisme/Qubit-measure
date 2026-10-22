@@ -20,6 +20,16 @@ from ._script_recipe_support import (
 from ._support import make_client
 
 
+async def run_twice(
+    session: RecipeSession, inputs: Inputs, partials: list[bool]
+) -> Report:
+    """Record two GUI Run completions using each test's own transport and list."""
+    tab = session.open_tab("synthetic")
+    partials.append((await tab.run()).partial_result)
+    partials.append((await tab.run()).partial_result)
+    return Report(count=inputs.count)
+
+
 @pytest.mark.parametrize("scope", ["acquire", "schedule"])
 def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
     tmp_path: Path, scope: str
@@ -63,10 +73,7 @@ def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
 
     @recipe("synthetic", "Cancel a GUI-owned scope, then run again")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        tab = session.open_tab("synthetic")
-        partials.append((await tab.run()).partial_result)
-        partials.append((await tab.run()).partial_result)
-        return Report(count=inputs.count)
+        return await run_twice(session, inputs, partials)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
@@ -132,15 +139,15 @@ def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
 
     @recipe("synthetic", "Keep fine cancellation bound to the observed Run")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        tab = session.open_tab("synthetic")
-        partials.append((await tab.run()).partial_result)
-        partials.append((await tab.run()).partial_result)
-        return Report(count=inputs.count)
+        return await run_twice(session, inputs, partials)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
+    execution = None
     try:
         execution = start(client, "synthetic")
-        assert waiting.wait(3), "The second Run must be active"
+        # The submitted two-Run author reaches this responder for operation 2.
+        # Its arrival, not elapsed time, establishes which handle is active.
+        assert waiting.wait(30), "The second Run must enter its await responder"
         first, second = execution.snapshot().details
         path = "script/iteration#1/operation#2/schedule#1/acquire#1"
         stale = client.call("cancel", {"op": first.op, "scope": scope, "expected": 1})
@@ -159,7 +166,12 @@ def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
         assert scoped_requests == [2]
     finally:
         released.set()
-        client.context.session.close()
+        try:
+            if execution is not None:
+                execution.join()
+                assert execution.snapshot().error is None, execution.snapshot().error
+        finally:
+            client.context.session.close()
 
 
 def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
@@ -170,10 +182,7 @@ def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
 
     @recipe("synthetic", "Observe GUI completion independently of control intent")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        tab = session.open_tab("synthetic")
-        partials.append((await tab.run()).partial_result)
-        partials.append((await tab.run()).partial_result)
-        return Report(count=inputs.count)
+        return await run_twice(session, inputs, partials)
 
     client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
     try:

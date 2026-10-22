@@ -162,9 +162,9 @@ def test_terminal_cancel_returns_typed_refusal(
     assert result.reason == "scope not active"
     assert result.active_path == final.active_path
     assert rig.events() == before
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unknown stop scope label"):
         rig.engine.cancel("run", "unknown")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="expected must be a positive integer"):
         rig.engine.cancel("run", "script", expected=True)
 
 
@@ -269,7 +269,7 @@ def test_script_cancel_io_failure_preserves_failed_and_original_cause(
         pending(rig)
         with monkeypatch.context() as patch:
             patch.setattr(Path, "open", fail_open)
-            with pytest.raises(OSError) as caught:
+            with pytest.raises(OSError, match="Stop .* storage failed") as caught:
                 rig.engine.cancel("run", "script")
         assert caught.value is cause
         final = future.result(timeout=30)

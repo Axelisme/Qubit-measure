@@ -35,7 +35,9 @@ Schedule acquire failure 回 Failed，作者決定重試、繼續或 return。�
 Pause set 當前 operation token、推進 epoch 並關閉 gate，不 set iteration token。被打斷且 stale 的 partial attempt 記為 discarded。Resume 後重跑同一個 callable 與原 capture，作者不會提前收到該 partial。已自然完成的結果等 Resume 後交付，不重跑。
 
 `Engine.cancel(run_id, scope, expected=None)` 沿共用 host 核對 label 或 label#N，回 CancelResult，不等待 cleanup。Acquire 只停一次取得，Schedule 停該段後續取得，iteration 停本輪且 commit 後下一輪正常，run 是當前 operation 的別名。Status 回 active_path。例如 `engine.cancel("run-id", "acquire", expected=3)` 拒絕不是第 3 次的 acquire，不停止父 scope。
-GUI Stop 與 `Engine.stop` set script 根，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
+裸 `script` 且 `expected=None` 的 ack 由 Stop owner lock 決定。Owner 先寫 StopRequested／manifest 並 latch，再呼叫 host.cancel 原子設 root，持久化不進 control callback。`cancelled=True` 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。帶序號或 expected 的 script 與其他 scope 直接由 host 核對，不寫 Stop 意圖。Terminal lifecycle 對合法請求回 `cancelled=False, reason="scope not active"`，錯誤語法仍 raise ValueError。
+
+GUI Stop 與 `Engine.stop` 沿同一 owner 記錄 Stop，再通知 host 設 script 根，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
 
 ## 作者範例
 

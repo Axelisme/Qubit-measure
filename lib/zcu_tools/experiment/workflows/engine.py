@@ -126,9 +126,13 @@ class Engine[C]:
     ) -> CancelResult:
         """Acknowledge a matching live scope; stale run IDs raise RunMismatch.
 
-        scope/expected use ScriptHost's label or label#N contract. Script requests
-        retain Stop lifecycle/journal semantics; narrower requests leave the
-        workflow running. Acknowledgement does not wait for cleanup.
+        scope/expected use ScriptHost's label or label#N contract. Bare script
+        Stop is accepted when the owner records and latches it, then signals a
+        still-live host. Acceptance survives host exit before owner finalization.
+        Numbered script and other scopes use the host's atomic match/set; narrower
+        requests leave the workflow running. Valid terminal requests return a
+        typed scope-not-active refusal; invalid syntax raises ValueError. Storage
+        errors propagate and fail the run. No acknowledgement waits for cleanup.
         """
         return self._current(run_id).cancel(scope, expected=expected)
 

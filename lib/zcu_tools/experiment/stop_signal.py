@@ -16,7 +16,10 @@ ScopeLabel: TypeAlias = Literal[
 class CancelResult:
     """Acknowledged scope request, not a promise that work has drained.
 
-    cancelled is True only when the target token was set. reason is scope
+    cancelled means the owner accepted the request, not that work drained.
+    Token owners atomically match/set the target. Workflow bare script Stop
+    instead records and latches intent before signaling a still-live host;
+    acceptance survives host exit before owner finalization. reason is scope
     cancellation requested, scope not active, sequence mismatch, or the recipe
     admission refusal no run in progress. active_path is the path at the check.
     """
