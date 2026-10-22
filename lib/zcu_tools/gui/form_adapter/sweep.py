@@ -14,7 +14,9 @@ from zcu_tools.gui.form import (
     FormCommandSnapshot,
     FormModel,
     InputCommand,
+    InputDefault,
     field_error,
+    static_defaults,
 )
 
 
@@ -329,9 +331,14 @@ class StepCenter(FormModel):
         return _step_count(self.span, self.step)
 
 
+def _fresh_sweep() -> JsonValue:
+    return static_defaults(LinRange)
+
+
 type SweepInput = Annotated[
     LinRange | CenterSpan | StepRange | StepCenter,
     Field(discriminator="kind"),
     Display(selector=False),
+    InputDefault(_fresh_sweep),
 ]
-"""Four active sweep branches shared by generated and hand-authored forms."""
+"""Four sweep branches; fresh handwritten fields start with Range + Expts defaults."""
