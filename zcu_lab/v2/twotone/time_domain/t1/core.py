@@ -132,7 +132,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                 (len(lengths),),
                 on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
             )
-            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 cfg = sched.cfg
                 modules = cfg.modules
                 length_sweep = cfg.sweep.length
@@ -164,7 +164,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
                 (len(lengths),),
                 on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
             )
-            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 cfg = sched.cfg
                 modules = cfg.modules
 
@@ -312,7 +312,7 @@ class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 
@@ -466,7 +466,7 @@ class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithTo
         )
 
         # 2. Scan gains on the host; sweep tone duration inside each program.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
                 modules = cfg.modules

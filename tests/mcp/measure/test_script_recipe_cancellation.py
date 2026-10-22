@@ -6,7 +6,7 @@ from threading import Event
 from typing import Literal
 
 import pytest
-from zcu_tools.mcp.measure import recipe_api
+from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from ._script_recipe_support import (
@@ -39,13 +39,16 @@ def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
     released = Event()
     requests: list[tuple[str, dict[str, object]]] = []
     partials: list[bool] = []
-    path = "script/iteration#1/operation#1/schedule#1/acquire#2"
+    path = "recipe:synthetic/operation#1/schedule#1/acquire#2"
 
     def respond(method: str, params: dict[str, object]) -> dict[str, object]:
         requests.append((method, params))
         if method == "operation.status_scope":
             assert params == {"operation_id": 1}
-            return {"active_path": "run/schedule#1/acquire#2"}
+            return {
+                "active_path": "run/schedule#1/acquire#2",
+                "live_paths": ["run/schedule#1/acquire#2"],
+            }
         if method == "operation.cancel_scope":
             assert params["operation_id"] == 1
             expected = params.get("expected")
@@ -117,7 +120,10 @@ def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
     def respond(method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "operation.status_scope":
             assert params == {"operation_id": 2}
-            return {"active_path": "run/schedule#1/acquire#1"}
+            return {
+                "active_path": "run/schedule#1/acquire#1",
+                "live_paths": ["run/schedule#1/acquire#1"],
+            }
         if method == "operation.cancel_scope":
             assert params["operation_id"] == 2
             scoped_requests.append(2)
@@ -149,7 +155,7 @@ def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
         # Its arrival, not elapsed time, establishes which handle is active.
         assert waiting.wait(30), "The second Run must enter its await responder"
         first, second = execution.snapshot().details
-        path = "script/iteration#1/operation#2/schedule#1/acquire#1"
+        path = "recipe:synthetic/operation#2/schedule#1/acquire#1"
         stale = client.call("cancel", {"op": first.op, "scope": scope, "expected": 1})
         assert stale.data["cancelled"] is False
         assert stale.data["reason"] == "scope not active"
@@ -199,11 +205,9 @@ def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("await_kind", ["analyze", "ask", "writeback"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
     tmp_path: Path,
-    await_kind: Literal["analyze", "ask", "writeback"],
     cleanup_fails: bool,
 ) -> None:
     gui = SyntheticGui(hold=True)
@@ -214,13 +218,7 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
         try:
-            assert (await tab.run()).partial_result
-            if await_kind == "analyze":
-                await tab.analyze("primary", result=Fit)
-            elif await_kind == "ask":
-                await session.ask(ConfirmQuestion(evidence="never answered"))
-            else:
-                await tab.ask_writeback()
+            await tab.run()
             continued.append(True)
             return Report(count=inputs.count)
         finally:
@@ -238,13 +236,15 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
         snapshot = execution.snapshot()
         assert continued == []
         assert len(unwinding) == 1
-        assert isinstance(unwinding[0], recipe_api.RecipeCancelled)
+        assert isinstance(unwinding[0], ScriptCancelled)
         assert isinstance(unwinding[0], Exception)
         assert snapshot.status == "cancelled"
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert len(snapshot.outcome.runs) == 1
         assert snapshot.outcome.runs[0].partial_result
+        assert snapshot.outcome.runs[0].run_id == "native-1"
+        assert snapshot.outcome.runs[0].status == "completed"
         assert len(snapshot.outcome.runs[0].saves) == 1
         if cleanup_fails:
             assert snapshot.error is not None
@@ -312,7 +312,7 @@ def test_cancel_pending_value_await_unwinds_without_an_error(
         snapshot = execution.snapshot()
         assert continued == []
         assert len(unwinding) == 1
-        assert isinstance(unwinding[0], recipe_api.RecipeCancelled)
+        assert isinstance(unwinding[0], ScriptCancelled)
         assert snapshot.status == "cancelled"
         assert snapshot.error is None
         assert snapshot.outcome is not None

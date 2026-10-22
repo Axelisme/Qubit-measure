@@ -231,14 +231,14 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
         )
 
         # Sweep only the named DC source; a disabled source leaves devices untouched.
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
                 if cfg.dc_device is not None:
                     set_flux(
                         context.devices[cfg.dc_device],
                         dc_value,
                         unit=cfg.dc_unit,
-                        stop=context.cancel_signal,
+                        stop=context.scope.stop,
                     )
                 for branch, branch_step in dc_step.scan("branch", [0, 1]):
                     for delay, step in branch_step.scan("delay", delays.tolist()):

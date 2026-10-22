@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.program.v2 import ProgramV2Cfg
 
@@ -18,7 +18,7 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
     init_cfg = _cfg(reps=5, rounds=7)
 
     with Schedule(
-        init_cfg, SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+        init_cfg, SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
     ) as sched:
         builder = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
@@ -42,7 +42,7 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
     assert program.rounds == 7
 
     with Schedule(
-        init_cfg, SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+        init_cfg, SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
     ) as sched:
         fresh_program = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
@@ -60,7 +60,7 @@ def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
     init_cfg = {"reps": 3, "rounds": 4, "experiment_only": "ignored"}
 
     with Schedule(
-        init_cfg, SignalBuffer((1,), dtype=np.float64), stop=StopSignal()
+        init_cfg, SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
     ) as sched:
         program = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
@@ -80,7 +80,7 @@ def test_program_builder_rejects_cfg_without_program_fields() -> None:
     with Schedule(
         {"experiment_only": "ignored"},
         SignalBuffer((1,), dtype=np.float64),
-        stop=StopSignal(),
+        scope=Scope("run"),
     ) as sched:
         builder = sched.prog_builder(
             "soc", "soccfg", program_cls=FakeProgram, marker="kw"
@@ -102,7 +102,7 @@ def test_program_builder_accepts_cfg_override() -> None:
     with Schedule(
         {"reps": 1, "rounds": 1},
         SignalBuffer((1,), dtype=np.float64),
-        stop=StopSignal(),
+        scope=Scope("run"),
     ) as sched:
         program = (
             sched.prog_builder(
@@ -124,7 +124,7 @@ def test_program_builder_accepts_cfg_override() -> None:
 def test_schedule_requires_explicit_modules():
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         builder = sched.prog_builder("soc", "soccfg", marker="x")
         try:
             builder.build()

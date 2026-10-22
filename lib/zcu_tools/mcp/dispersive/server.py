@@ -55,6 +55,7 @@ from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
 # tolerated: Readonly assembly needs standalone lib setup and qtpy preflight first.
 from zcu_tools.mcp.core.readonly_server import (  # noqa: E402
     READONLY_MCP_VERSION,
+    ReadonlyServer,
     build_readonly_server,
 )
 
@@ -66,15 +67,16 @@ _SERVER_INSTRUCTIONS = """\
 Observe a live dispersive-fit-gui (fluxonium dispersive-shift analysis) over a TCP socket.
 
 This bridge is READ-ONLY: the USER drives the analysis in the GUI (load the
-fluxonium fit from params.json, load a one-tone spectrum, preprocess it, manually
+fluxonium predictor from the opened entry, load a one-tone spectrum, preprocess it, manually
 tune the coupling g and resonator frequency bare_rf until the predicted lines match
-the spectrum, and export the dispersive section). The agent's job is to watch and
+the spectrum, and export the entry-scoped dispersive file). The agent's job is to watch and
 report current state — there are no load / preprocess / tune / export tools, because
 the tuning and the judgement of when it matches need the user's eye on the plot.
 
-The fit inputs come from fluxdep-gui: dispersive reads the ``fluxdep_fit`` section of
-params.json (EJ/EC/EL + flux alignment) and writes a ``dispersive`` section
-(g, bare_rf). Run fluxdep-gui first if the inputs are missing.
+The fit inputs come from fluxdep-gui: choose a file under result/<entry>/predictors/
+(EJ/EC/EL + affine flux alignment). Export writes dispersive/<component>.json
+(g, bare_rf), and only fields declared by the component kind. There is no legacy
+params.json reader. project_root contains result/ and Database/.
 
 Getting started:
   1. dispersive_launch opens a GUI subprocess for the user (auto-connects the bridge).
@@ -86,9 +88,10 @@ Getting started:
 Read tools (all pure queries):
   - dispersive_state_check → {has_project, has_fit_inputs, has_onetone,
     has_preprocess, has_result} — how far the user has taken the pipeline.
-  - dispersive_project_info → {chip_name, qub_name, result_dir, data_root}.
+  - dispersive_project_info → {entry, component, predictor, result_root,
+    result_path, predictors_path, dispersive_path} (nullable before opening an entry).
   - dispersive_fit_inputs_info → {has_inputs, params:{EJ,EC,EL} or null, flux_half,
-    flux_int, flux_period, bare_rf_seed} — the fluxdep_fit handoff.
+    flux_bias, flux_period, bare_rf_seed} — the selected predictor handoff.
   - dispersive_preprocess_status → {has_preprocess, n_flux, n_freq, edelay}.
   - dispersive_fit_result → {has_result, g, bare_rf, res_dim} — the user's
     accepted tuning result.
@@ -111,13 +114,69 @@ _CONFIG = MCPBridgeConfig(
     run_script_name="run_dispersive_gui.py",
 )
 
+
+def build_server(config: MCPBridgeConfig, repo_root: Path) -> ReadonlyServer:
+    """Assemble read-only queries and entry-aware GUI launch tools.
+
+    config supplies transport identity, port and caller-owned log/PID paths.
+    repo_root locates scripts/run_dispersive_gui.py and defaults project_root.
+    Construction does not launch or connect. Launch accepts project_root, entry
+    and optional component, forwards them to the GUI CLI and propagates bridge
+    process/transport failures. Invalid argument types raise ValueError.
+    """
+    server = build_readonly_server(
+        config, METHOD_SPECS, repo_root, "dispersive-fit-gui"
+    )
+
+    def launch(arguments: dict[str, object]) -> str:
+        extra_args: list[str] = []
+        for name in ("project_root", "entry", "component"):
+            value = arguments.get(name)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a nonblank string")
+            extra_args.extend(("--" + name.replace("_", "-"), value))
+        if arguments.get("component") is not None and arguments.get("entry") is None:
+            raise ValueError("component requires entry")
+        port = arguments.get("port", config.default_port)
+        if type(port) is not int:
+            raise ValueError("port must be an integer")
+        token = arguments.get("token")
+        if token is not None and not isinstance(token, str):
+            raise ValueError("token must be a string")
+        auto_connect = arguments.get("auto_connect", True)
+        if not isinstance(auto_connect, bool):
+            raise ValueError("auto_connect must be a boolean")
+        return server.bridge.launch(
+            repo_root, port, token, auto_connect=auto_connect, extra_args=extra_args
+        )
+
+    tool = server.tools[config.tool_prefix + "launch"]
+    tool["handler"] = launch
+    tool["description"] = (
+        "Launch a new dispersive GUI for an entry and optional fluxonium component. "
+        "project_root contains result/ and Database/ and defaults to the repository. "
+        "Omit entry to choose it in the GUI. Analysis queries remain read-only."
+    )
+    tool["inputSchema"]["properties"].update(
+        {
+            "project_root": {
+                "type": "string",
+                "description": "Project containing result/ and Database/",
+            },
+            "entry": {"type": "string", "description": "Existing Result entry name"},
+            "component": {
+                "type": "string",
+                "description": "Fluxonium setup component; defaults to qubit alias",
+            },
+        }
+    )
+    return server
+
+
 # lib/zcu_tools/mcp/dispersive -> repo root
-_SERVER = build_readonly_server(
-    _CONFIG,
-    METHOD_SPECS,
-    repo_root=Path(__file__).parents[4],
-    gui_name="dispersive-fit-gui",
-)
+_SERVER = build_server(_CONFIG, Path(__file__).parents[4])
 
 # Module-level aliases preserved for tests that patch the bridge / inspect tools.
 _BRIDGE = _SERVER.bridge

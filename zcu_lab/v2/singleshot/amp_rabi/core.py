@@ -204,7 +204,7 @@ class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
             dtype=np.complex128,
             on_update=update_view,
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.qub_pulse.set_param(
                 "gain", sweep2param("gain", sched.cfg.sweep.gain)

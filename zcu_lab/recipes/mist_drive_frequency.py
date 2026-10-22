@@ -22,10 +22,15 @@ class MistDriveFrequencyInputs(FormModel):
 
 
 class MistDriveFrequencyReport(FormModel):
-    """Completed mist drive frequency results; cancellation returns no report."""
+    """MIST drive frequency results and failure reason; cancellation returns no report."""
 
     analysis_completed: bool = Field(
         description="Whether the default baseline-subtracted response map completed."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -46,8 +51,9 @@ async def mist_drive_frequency(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     """
     if len(inputs.freq_range) != 2 or len(inputs.gain_range) != 2:
         raise ValueError("freq_range and gain_range must each contain two endpoints")
@@ -75,7 +81,12 @@ async def mist_drive_frequency(
     await tab.run()
     try:
         # Analyze the acquisition with the GUI parameters.
-        await tab.analyze("primary", result=MistDriveFrequencySummary)
+        analysis = await tab.analyze("primary", result=MistDriveFrequencySummary)
+        if analysis.result is None:
+            return MistDriveFrequencyReport(
+                analysis_completed=False,
+                analysis_failure=analysis.reason,
+            )
         tab.preview()
         return MistDriveFrequencyReport(analysis_completed=True)
     finally:

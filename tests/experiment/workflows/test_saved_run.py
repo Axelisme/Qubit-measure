@@ -60,7 +60,7 @@ def test_typed_reader_runs_model_validators_and_preserves_source_and_identity(
     point = model.model_validate({"value": 2})
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        await env.commit(point)
+        env.commit(point)
 
     try:
         rig.start(script)
@@ -88,12 +88,11 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
     rig = Rig(tmp_path)
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        uncommitted = env.new_commit_dir()
-        (uncommitted / "native.h5").write_text("leftover is not a record")
-        later = env.new_commit_dir()
-        earlier = env.new_commit_dir()
-        await env.commit(Point(value=2), earlier)
-        await env.commit(Point(value=1), later)
+        with env.child("point") as uncommitted:
+            (uncommitted.dir / "native.h5").write_text("leftover is not a record")
+        with env.child("point") as later, env.child("point") as earlier:
+            earlier.commit(Point(value=2))
+            later.commit(Point(value=1))
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -110,7 +109,7 @@ def test_typed_reader_orders_commits_and_ignores_uncommitted_native_files(
 ) -> None:
     records = read_records(rig.paths.metadata_root, adapter)
     assert tuple(row.record for row in records) == (Point(value=2), Point(value=1))
-    assert [row.directory.name for row in records] == ["000003", "000002"]
+    assert [row.directory.name for row in records] == ["point-000003", "point-000002"]
     assert [row.commit_seq for row in records] == [1, 2]
     assert all(row.record_path == row.directory / "record.json" for row in records)
 
@@ -118,17 +117,17 @@ def test_typed_reader_orders_commits_and_ignores_uncommitted_native_files(
 def test_missing_committed_file_does_not_invent_data_from_native_files(
     rig: Rig,
 ) -> None:
-    missing = rig.paths.data_root / "commits/000003/record.json"
+    missing = rig.paths.data_root / "point-000003/record.json"
     missing.unlink()
     records = read_records(rig.paths.metadata_root, Point)
     assert tuple(row.record for row in records) == (Point(value=1),)
-    assert tuple(row.directory.name for row in records) == ("000002",)
+    assert tuple(row.directory.name for row in records) == ("point-000002",)
 
 
 def test_reader_type_mismatch_names_source_and_raw_reader_retains_json(
     rig: Rig,
 ) -> None:
-    source = rig.paths.data_root / "commits/000003/record.json"
+    source = rig.paths.data_root / "point-000003/record.json"
     with pytest.raises(ValueError, match="Expected record type") as caught:
         read_records(rig.paths.metadata_root, OtherPoint)
     assert str(source) in str(caught.value)
@@ -141,7 +140,7 @@ def test_reader_type_mismatch_names_source_and_raw_reader_retains_json(
 def test_reader_validation_failure_names_source_without_validating_raw_json(
     rig: Rig,
 ) -> None:
-    source = rig.paths.data_root / "commits/000003/record.json"
+    source = rig.paths.data_root / "point-000003/record.json"
     document = json.loads(source.read_text())
     document["record"]["value"] = {"value": "invalid integer"}
     source.write_text(json.dumps(document))
@@ -168,7 +167,7 @@ def test_malformed_record_and_wrong_workflow_name_source(rig: Rig) -> None:
     with pytest.raises(ValueError, match="Expected workflow") as caught:
         read_manifest(rig.paths.metadata_root, "other")
     assert "manifest.json" in str(caught.value)
-    source = rig.paths.data_root / "commits/000003/record.json"
+    source = rig.paths.data_root / "point-000003/record.json"
     source.write_text("not json")
     with pytest.raises(ValueError, match="JSON") as caught:
         read_records_raw(rig.paths.metadata_root)
@@ -182,4 +181,4 @@ def test_native_reference_cannot_escape_commit_directory(
     rig: Rig, filename: str
 ) -> None:
     with pytest.raises(ValueError, match="Invalid workflow-relative filename"):
-        native_path(rig.paths.data_root / "commits/000003", filename)
+        native_path(rig.paths.data_root / "point-000003", filename)

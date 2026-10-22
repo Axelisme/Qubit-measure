@@ -31,7 +31,8 @@ Pi2 使用 Length-Rabi 的 phase-aware fitted duration，不取 pi duration 除�
 ## 獨立校準與 point
 
 `calibrate_frequency`、`calibrate_rabi`、`calibrate_readout` 可分別用 await 呼叫。
-`CalibrationInputs` 固定共用的 drive、pulse-backed readout 與 captured policy。
+`CalibrationInputs` 固定共用的 drive、pulse-backed readout、point_index 與 captured policy。
+Helper 收 Scope，需要 workflow 圖時明收 plots: Plots，不另收 env。
 三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
 Frequency 在接受時立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時更新 pi/pi2。
 Readout 只在本點 Rabi 接受後執行。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
@@ -45,11 +46,13 @@ Frequency widening 保存每個 Completed attempt 的引用，fit 拒絕也保�
 Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
-Carry 與 lifetime history 是 async 函式的區域變數。作者以 `await env.commit(point, d)` 提交完整點。
+Carry 與 lifetime history 是 async 函式的區域變數。每點先建可變 point_record，欄位尚未取得時為 None。
+主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
 Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準與區域變數不重做。
-Stop 讓 operation 回傳 partial result。作者先保存每個 Completed 的 raw，再檢查 partial_result。
-Partial 回 rejected、reason=stopped，不進擬合或接受，不更新 accepted history。Frequency 仍依 widening 次序嘗試，其餘階段保留依賴與 commit 流程。之後的 operation 以已停止的 token 啟動。
-分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 明示的 non-convergence fallback warning 與 scipy 非有限 array 錯誤也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
+子層取消讓 operation 回 partial。作者先保存 Completed raw，再檢查 partial_result，保留原有拒絕原因，不進擬合或接受。
+量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
+根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
+分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
 Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。完整資料的投影、fit 選擇、接受門檻與 history 政策不變。
 沒有 stage checkpoint、原始檔 reader、檔案追蹤或 rollback 保證。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
 
@@ -63,7 +66,8 @@ MIST partial 先保存 mist.h5，再回 success=False、reason=stopped，gain_fi
 
 `overnight` 維持固定 flux、有限 T1→Hahn-echo pair、固定開始間隔與無 feedback。
 它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
-每個 Completed member 先保存 raw，partial 不擬合並記 reason=stopped。預期 fit failure 記 reason 且 lifetime/error 為 None。兩者都繼續另一 member 並提交 pair。
+每個 Completed member 先保存 raw，partial 不擬合並記原有原因。預期 fit failure 記 reason 且 lifetime/error 為 None。
+目前 iteration 未取消時才開始另一 member。取消的 pair 留 status="skipped" 與已取得欄位，再進下一點。
 下一 pair 在 max(now, previous actual start + interval) 開始，不做 catch-up bursts。
 Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop 保留既有 commits。
 區域變數 `trend_points` 保留具名 scalar pair tuple，不保存 Figure 或 axes。
@@ -75,9 +79,9 @@ Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop �
 
 ## Native、裝置與前端邊界
 
-作者以 `d = env.new_commit_dir()` 或 `zip(plan.fluxes, env.commit_dirs(), strict=False)` 配置 absolute 保存目錄。
-目錄在 data root 的 `commits/<六位配置序號>/` 下。配置序號不等於 commit 序號。
-Workflow 在 env.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
+作者用 zip(plan.fluxes, env.iterations()) 取得每點的 Scope，第一次用 iteration.dir 才建 absolute 保存目錄。
+目錄是 data root 下的 iteration-000001，nested child 再按 label 與 sequence 鏡射。Commit 序號另按提交順序增加。
+Workflow 在 iteration.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
 Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
 Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間與 device snapshot。
 Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，不捕捉新事實。

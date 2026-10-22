@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_qubit_freq
 from zcu_tools.plotting.plots import Plots
 
@@ -74,6 +75,7 @@ def analyze_frequency(
             )
             outcome = MuxFreqFit(index, freq, ferr, width, werr, quality)
         except (
+            AnalysisFailed,
             ValueError,
             RuntimeError,
             ArithmeticError,

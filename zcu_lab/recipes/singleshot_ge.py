@@ -54,7 +54,7 @@ class SingleshotGEInputs(FormModel):
 
 
 class SingleshotGEReport(FormModel):
-    """Completed singleshot ge results; cancellation returns no report."""
+    """Single-shot GE results and failure reason; cancellation returns no report."""
 
     fidelity: float | None = Field(
         description="Ground/excited discrimination fidelity; null means not estimable."
@@ -73,6 +73,11 @@ class SingleshotGEReport(FormModel):
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -119,8 +124,9 @@ async def singleshot_ge(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     # Select the captured sources before editing measurement fields.
@@ -160,7 +166,27 @@ async def singleshot_ge(
     try:
         # Fit IQ clouds before deriving Post diagnostics.
         primary = await tab.analyze("primary", result=GESummary)
+        if primary.result is None:
+            return SingleshotGEReport(
+                fidelity=None,
+                theta=None,
+                threshold=None,
+                ge_radius=None,
+                confusion=[],
+                writeback_applied=False,
+                analysis_failure=primary.reason,
+            )
         analysis = await tab.analyze("post", result=GEPostSummary)
+        if analysis.result is None:
+            return SingleshotGEReport(
+                fidelity=report_number(primary.result.fidelity),
+                theta=report_number(primary.result.theta),
+                threshold=report_number(primary.result.threshold),
+                ge_radius=None,
+                confusion=[],
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

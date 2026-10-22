@@ -117,10 +117,11 @@ class FluxLine(Values):
 
 
 class ReadoutSource(Values):
-    """gen_ch: nonnegative generator index reserved for one pulse (not mux).
+    """gen_ch: nonnegative generator index reserved for incident readout.
 
     input_per_gain: finite signed incident field sqrt(photons/ns)/gain.
     Program supplies pulse envelope, carrier and phase; no implicit readout.
+    The environment planner chooses pulse or coherent mux interpretation.
     """
 
     gen_ch: Index
@@ -148,7 +149,7 @@ class Resonator(Values):
 
 
 class Readout(Values):
-    """drive: single incident pulse route; resonator: one physical cavity.
+    """drive: one incident generator route; resonator: one physical cavity.
 
     adc: one logical receiver with gain/phase/offset and two-sided noise PSD.
     ADC and generator indices are separate namespaces; equal indices are valid.
@@ -199,8 +200,9 @@ class SingleFluxoniumSettings(Values):
     format: exactly 'zcu.single-fluxonium'; version: strict integer 1. chip:
     single circuit and temperature. dc_bias: one offset and live DC source.
     drive_line: one microwave line. flux_line: one large-amplitude fast-flux
-    line. readout: one pulse generator/cavity/ADC. numerics: explicit basis and
-    solver choices, optional seed/pacing. All sections are required.
+    line, or None/omitted for a DC-only circuit with no pulsed flux route.
+    readout: one pulse generator/cavity/ADC. numerics: explicit basis and
+    solver choices, optional seed/pacing. All sections except flux_line are required.
 
     Unknown fields, nonfinite numbers, colliding source names or generator
     indices are rejected. Counts derive from maximum bound channel index + 1;
@@ -213,7 +215,7 @@ class SingleFluxoniumSettings(Values):
     chip: Chip
     dc_bias: DCBias
     drive_line: DriveLine
-    flux_line: FluxLine
+    flux_line: FluxLine | None = None
     readout: Readout
     numerics: Numerics
 
@@ -232,6 +234,8 @@ class SingleFluxoniumSettings(Values):
             ("drive_line", self.drive_line),
             ("flux_line", self.flux_line),
         ):
+            if line is None:
+                continue
             if line.name in names:
                 raise ValueError(f"{field}.name: duplicate source name")
             if line.gen_ch in channels:

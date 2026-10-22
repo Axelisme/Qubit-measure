@@ -23,14 +23,14 @@ def dialog(qapp):
 
 def test_default_path_under_result_dir(dialog):
     assert dialog.export_path() == os.path.join(
-        "result", "unknown_chip", "unknown_qubit", "data", "fluxdep", "spectrums.hdf5"
+        "result", "unknown_chip", "unknown_qubit", "fluxdep", "spectrums.hdf5"
     )
 
 
 def test_default_path_from_project_result_dir(qapp):
     d = ExportSpectrumsDialog(os.path.join("result", "Q5_2D", "Q1"))
     assert d.export_path() == os.path.join(
-        "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
+        "result", "Q5_2D", "Q1", "fluxdep", "spectrums.hdf5"
     )
     d.deleteLater()
 

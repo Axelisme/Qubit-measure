@@ -9,7 +9,6 @@ import pytest
 from zcu_tools.analysis.fluxdep.models import PointsData
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.state import (
     PROJECT_VERSION_KEY,
     SELECTION_VERSION_KEY,
@@ -412,64 +411,9 @@ def test_paths_that_drop_a_filter_mask_drop_its_brush(change: str):
 
 def test_set_project_bumps_project():
     st = FluxDepState()
-    st.set_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
+    st.set_project(None)
     assert st.version.get(PROJECT_VERSION_KEY) == 1
-    assert st.project.chip_name == "Q5_2D"
-
-
-def test_project_info_derives_paths_from_names():
-    import os
-
-    # unset result_dir / data_root are derived from chip/qubit in __post_init__
-    p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1")
-    assert p.result_dir == os.path.join("result", "Q5_2D", "Q1")
-    # raw spectra live under Database/, not result/ (cf. measure-gui save layout)
-    assert p.data_root == os.path.join("Database", "Q5_2D", "Q1")
-
-
-def test_project_info_default_names_derive_unknown_paths():
-    import os
-
-    # a bare ProjectInfo still has concrete (never empty) paths
-    p = ProjectInfo()
-    assert p.result_dir == os.path.join("result", "unknown_chip", "unknown_qubit")
-    assert p.data_root == os.path.join("Database", "unknown_chip", "unknown_qubit")
-
-
-def test_project_info_explicit_paths_override_derivation():
-    # a provided path is kept as the user's override, not re-derived
-    p = ProjectInfo(
-        chip_name="Q5_2D",
-        qub_name="Q1",
-        result_dir="/custom/out",
-        data_root="/custom/raw",
-    )
-    assert p.result_dir == "/custom/out"
-    assert p.data_root == "/custom/raw"
-
-
-def test_project_info_root_dir_anchors_derived_defaults():
-    import os
-
-    # root_dir (the repo root, injected by the entry script) anchors the derived
-    # defaults there instead of leaving them relative to cwd — the .bat-launcher
-    # fix: a launcher that cd's into scripts/ must not scope defaults under scripts/.
-    root = os.path.join(os.sep, "repo")
-    p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir=root)
-    assert p.result_dir == os.path.join(root, "result", "Q5_2D", "Q1")
-    assert p.data_root == os.path.join(root, "Database", "Q5_2D", "Q1")
-
-
-def test_project_info_empty_root_dir_keeps_relative_default():
-    import os
-
-    # No injection (tests / direct runs from the repo root) → the legacy
-    # cwd-relative default, so nothing regresses.
-    p = ProjectInfo(chip_name="Q5_2D", qub_name="Q1", root_dir="")
-    assert p.result_dir == os.path.join("result", "Q5_2D", "Q1")
-
-
-# --- FitState (v2) ---------------------------------------------------------
+    assert st.project is None
 
 
 def test_set_fit_params_bumps_and_clears_result():

@@ -1,8 +1,10 @@
 """Pulse-readout initial values and captured analysis names for a wide survey."""
 
+from collections.abc import Sequence
 from math import isfinite
 
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.session.types import ParameterContext
 
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 
@@ -33,6 +35,27 @@ def initial_resonators(ctx: FormContext) -> list[str]:
         if not isinstance(name, str):
             raise ValueError("$mux.resonators must contain strings")
         names.append(name)
+    frequencies = resonator_frequencies(parameters, names)
+    if frequencies is None:
+        return names
+    return [
+        name
+        for _, name in sorted(
+            zip(frequencies, names, strict=True), key=lambda item: item[0]
+        )
+    ]
+
+
+def resonator_frequencies(
+    parameters: ParameterContext, names: Sequence[str]
+) -> list[float] | None:
+    """Read captured MHz in name order, or None if any frequency is absent/null.
+
+    parameters is the fixed Open/Reset or Run/Load capture. Every set frequency
+    must be finite numeric MHz (not bool), even if another name is missing;
+    invalid values raise ValueError and source errors propagate unchanged.
+    No sorting, live lookup or source mutation occurs.
+    """
     frequencies: list[float] = []
     missing_frequency = False
     for name in names:
@@ -48,14 +71,7 @@ def initial_resonators(ctx: FormContext) -> list[str]:
         ):
             raise ValueError(f"{name}.freq must be finite MHz to seed resonator order")
         frequencies.append(float(value))
-    if missing_frequency:
-        return names
-    return [
-        name
-        for _, name in sorted(
-            zip(frequencies, names, strict=True), key=lambda item: item[0]
-        )
-    ]
+    return None if missing_frequency else frequencies
 
 
 def make_form(ctx: FormContext) -> Form[RangeFindCfg]:

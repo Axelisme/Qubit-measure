@@ -24,11 +24,18 @@ jupyter:
     version: 3.9.25
 ---
 
-**Readers:** operator, lab-author. Select spectral lines, fit fluxonium parameters and save the fitted flux calibration.
+**Readers:** operator, lab-author. Select spectral lines, fit fluxonium parameters and export an entry-local predictor.
+
+Set the entry name and component name below. The component must have kind
+`qubit/fluxonium` in the entry setup. This notebook does not choose from aliases.
+It writes the predictor, declared setup fields and analysis ledger in separate steps.
+It does not save Database output or read the old two-level params.json.
+The [fluxdep GUI](../../lib/zcu_tools/gui/app/fluxdep/README.md) uses the same artifact format.
 
 ```python
 %load_ext autoreload
 import os
+import json
 from pathlib import Path
 from pprint import pprint
 import numpy as np
@@ -36,7 +43,12 @@ import numpy as np
 %autoreload 2
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 import zcu_tools.notebook.analysis.fluxdep as zf
-from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
+from zcu_lab.components import register_all
+from zcu_tools.resources.entry import ResultEntry, component_registry, snapshot
+from zcu_tools.resources.predictor_file import (
+    PredictorFile, PredictorSource, load_predictor_file, save_predictor_file,
+)
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.analysis.fluxdep.io import dump_spectrums, load_spectrums
 from zcu_tools.analysis.fluxdep.models import SpectrumResult, TransitionDict
 from zcu_tools.notebook.utils import savefig
@@ -45,15 +57,27 @@ import zcu_lab.v2 as ze
 ```
 
 ```python
-chip_name = "Q5_2D"
-qub_name = "Q1"
+project_root = Path("../..").resolve()
+entry_name = "fluxonium-analysis"
+component = "Q1"  # Set the exact component name from this entry, not an alias.
+register_all(component_registry)
+entry = ResultEntry.open(
+    entry_name,
+    result_root=project_root / "result",
+    database_root=project_root / "Database",
+)
+component_model = snapshot(entry.setup).components[component]
+if component_model.kind != "qubit/fluxonium":
+    raise ValueError(f"Expected qubit/fluxonium, got {component_model.kind!r}")
 
 flux_half = None
 flux_int = None
 flux_period = None
 spectrums = dict[str, SpectrumResult]()
 
-result_dir = f"../../result/{chip_name}/{qub_name}"
+result_dir = entry.result_path
+fluxdep_dir = result_dir / "fluxdep"
+fluxdep_dir.mkdir(exist_ok=True)
 image_dir = f"{result_dir}/image/fluxdep_fit"
 web_dir = f"{result_dir}/web/fluxdep_fit"
 os.makedirs(image_dir, exist_ok=True)
@@ -61,12 +85,16 @@ os.makedirs(web_dir, exist_ok=True)
 ```
 
 ```python
-loadpath = f"{result_dir}/params.json"
-fluxdep_result = QubitParams(loadpath, readonly=True).require_fluxdep_fit()
+loadpath = entry.predictors_path / f"{component}.json"
+predictor_file = load_predictor_file(loadpath)
+if not isinstance(predictor_file.params, FluxoniumParams):
+    raise ValueError("Select a fluxonium predictor")
+predictor = predictor_file.params.build_predictor()
 
-flux_half = fluxdep_result.flux_half
-flux_int = fluxdep_result.flux_int
-flux_period = fluxdep_result.flux_period
+# Interactive alignment uses effective device coordinates, including stored bias.
+flux_half = predictor.flux_half - predictor.flux_bias
+flux_period = predictor.flux_period
+flux_int = flux_half + 0.5 * flux_period
 ```
 
 # Load Spectrum
@@ -144,13 +172,13 @@ spectrums.keys()
 # Save & Load
 
 ```python
-processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
-dump_spectrums(processed_spect_path, spectrums, mode="x")
+processed_spect_path = fluxdep_dir / "spectrums.hdf5"
+dump_spectrums(str(processed_spect_path), spectrums, mode="x")
 ```
 
 ```python
-processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
-spectrums = load_spectrums(processed_spect_path)
+processed_spect_path = fluxdep_dir / "spectrums.hdf5"
+spectrums = load_spectrums(str(processed_spect_path))
 spectrums.keys()
 ```
 
@@ -325,27 +353,43 @@ fig.write_html(f"{web_dir}/spect_fit.html", include_plotlyjs="cdn")
 fig.write_image(f"{image_dir}/spect_fit.png", format="png")
 ```
 
-# Save Parameters
+# Save predictor and setup
 
 ```python
-savepath = f"{result_dir}/params.json"
-params_file = QubitParams(savepath)
-params_file.ensure_project(ParamsProject(chip_name, qub_name))
-params_file.set_fluxdep_fit(
-    FluxDepFit(
-        EJ=sp_params[0],
-        EC=sp_params[1],
-        EL=sp_params[2],
-        flux_half=flux_half,
-        flux_int=flux_int,
-        flux_period=flux_period,
-        plot_transitions=plot_transitions,
-    )
+savepath = entry.predictors_path / f"{component}.json"
+savepath.parent.mkdir(parents=True, exist_ok=True)
+save_predictor_file(
+    savepath,
+    PredictorFile(
+        model="fluxonium",
+        params=FluxoniumParams(
+            EJ=sp_params[0], EC=sp_params[1], EL=sp_params[2],
+            flux_half=flux_half, flux_period=flux_period, flux_bias=0.0,
+        ),
+        flux_unit=None,
+        source=PredictorSource(run_id=None, created_at=None),
+    ),
 )
+entry.setup.refresh()
+component_model = snapshot(entry.setup).components[component]
+values = dict(
+    EJ=sp_params[0], EC=sp_params[1], EL=sp_params[2],
+    flux_half=flux_half, flux_int=flux_int, flux_period=flux_period,
+)
+with entry.setup.edit() as draft:
+    for field, value in values.items():
+        if field in type(component_model).model_fields:
+            draft.set(f"{component}.{field}", float(value))
+analysis_id = entry.record_analysis(
+    "fluxdep", run_ids=[],
+    summary={"component": component, "predictor": str(savepath)},
+    record={"plot_transitions": json.loads(json.dumps(plot_transitions))},
+)
+analysis_id
 ```
 
 ```python
-savepath = f"{result_dir}/data/fluxdep/selected_points.npz"
+savepath = fluxdep_dir / "selected_points.npz"
 
 np.savez(savepath, fluxs=s_fluxs, freqs=s_freqs, selected=s_selected)
 ```

@@ -40,7 +40,7 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
         (len(gains),),
         on_update=lambda samples: plot.update(gains, mist_signal2real(samples)),
     )
-    with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+    with Schedule(cfg, buffer, scope=context.scope) as sched:
         modules = sched.cfg.modules
         gain_sweep = sched.cfg.sweep.gain
         modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))

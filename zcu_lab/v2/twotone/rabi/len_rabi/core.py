@@ -122,7 +122,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 (len(lengths),),
                 on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
             )
-            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 modules = sched.cfg.modules
                 length_sweep = sched.cfg.sweep.length
                 modules.qub_pulse.set_param(
@@ -165,7 +165,7 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
                 lengths, rabi_signal2real(average_round(data))
             ),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for length, step in rep.scan("length", length_values):
                     modules = step.cfg.modules

@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** agent。Fluxdep MCP 的控制流程、工具與診斷契約。
 
@@ -51,7 +51,7 @@ The server exposes 13 analysis tools, 3 control tools and 3 lifecycle tools, for
 | Analysis | `fluxdep_fit_result` | Recorded params, inputs and freshness; images only for fresh quality-bearing results. |
 | Analysis | `fluxdep_export_spectrums` | Sampled checkpoint, including empty completed spectra, without Filter masks. |
 | Analysis | `fluxdep_spectrum_load_processed` | Restore checkpoint; reject all conflicting names before publication. |
-| Analysis | `fluxdep_fit_export_params` | Fresh params.json handoff; native path, full-precision params and calibration source. |
+| Analysis | `fluxdep_fit_export_params` | Predictor/setup/ledger export; native path, params, calibration source and analysis ID. |
 
 Command parameters, numeric ranges and transition formulas are in each tool's
 description. The agent does not manage open/cancel, context IDs, search tokens or
@@ -71,7 +71,12 @@ socket identity after authentication and wire checks. Owner auto-acquires unlock
 Local; a GUI lock or another online holder still permits connection. The reply
 contains native `control` (`holder`, `locked`, `online`, `me`), project paths,
 published spectrum stages/drafts and fit freshness. An optional project supplies
-only chip/qubit names; GUI computes `result_dir` and `data_root`. Wire mismatch
+`project_root`, `entry` and optional `component`. GUI opens `project_root/result/entry`
+and defaults the component to the setup qubit alias. The project receipt contains
+result_root, entry, component, result_path and predictors_path. Unconfigured
+fields are null. GUI validates entry and component kind; MCP does not derive paths
+from chip/qubit names. Launch uses the same
+project_root, entry and component inputs. Wire mismatch
 still rejects the connection, but versions are not part of the agent receipt. `readonly` never acquires, even when its
 label matches the holder. Omitted label/mode retain the prior choices on reconnect;
 launch supports the same choices, including a later attach after auto_connect=false.
@@ -168,12 +173,12 @@ with points/residual/per_transition null, and attach no image. Neither state
 creates zero statistics or reads the current cloud. Stage finish tools project
 native invalidated labels without rebuilding the dependency graph.
 
-`fluxdep_fit_export_params(savepath?)` calls only `fit.export_params`. Omission
-uses the GUI project's default params.json; an explicit string names a GUI-local
-destination. The GUI merges the fit while preserving independent sections. The
-reply contains `savepath`, full-precision GHz `params` with EJ/EC/EL, and
-`alignment_from`, the actual first aligned spectrum used for calibration, including
-zero-point spectra. This is the export source, not alignment inheritance provenance.
+`fluxdep_fit_export_params()` calls only `fit.export_params`. The GUI writes
+`predictors/<component>.json` in the opened entry, updates declared setup fields
+and records analysis in its ledger. No arbitrary path override is accepted.
+The reply contains `savepath`, full-precision GHz `params` with EJ/EC/EL,
+`component`, `analysis_id`, and `alignment_from`, the actual first aligned
+spectrum used for calibration, including zero-point spectra. This is the export source, not alignment inheritance provenance.
 MCP projects the native receipt without reading fit/spectrum state again, rounding
 params, inferring the source or requesting an image. The GUI refuses stale fits
 with `fit_stale` before I/O. Native readiness, control and I/O failures propagate

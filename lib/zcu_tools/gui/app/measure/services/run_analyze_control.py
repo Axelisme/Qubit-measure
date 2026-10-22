@@ -110,6 +110,7 @@ class RunAnalyzeControlPort(Protocol):
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
     def cancel_run(self) -> bool: ...
     def status_scope(self, operation_id: int) -> str: ...
+    def live_paths_scope(self, operation_id: int) -> list[str]: ...
     def cancel_scope(
         self, operation_id: int, scope: str, *, expected: int | None = None
     ) -> CancelResult: ...
@@ -266,6 +267,10 @@ class RunAnalyzeControlFacet:
     def status_scope(self, operation_id: int) -> str:
         """Read one active Run's path; stale handles return an empty path."""
         return self._run.status_scope(operation_id)
+
+    def live_paths_scope(self, operation_id: int) -> list[str]:
+        """Read all active Run leaf paths; stale handles return an empty list."""
+        return self._run.live_paths_scope(operation_id)
 
     def cancel_scope(
         self, operation_id: int, scope: str, *, expected: int | None = None

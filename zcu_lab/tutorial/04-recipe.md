@@ -56,8 +56,9 @@ async def power_map(
     """Acquire the tab's frequency/gain map without fitting or writeback.
 
     Inputs select only this Reset's qubit alias. Form defaults supply the scan
-    and pulses. Invalid calibration or cfg fails Run. Cooperative Run stop
-    retains partial data; finally saves the available Run on this worker.
+    and pulses. Invalid calibration or cfg fails Run. A child Run stop returns
+    partial data, then finally saves it on this worker. Root cancellation drains
+    the Run and raises before this Save finalizer; the partial stays in the tab.
     """
     # Capture the requested aliases without changing the global table.
     if inputs.target is not None and not inputs.target.strip():
@@ -95,19 +96,37 @@ Author API 與來源語意見 [recipe 與 execution](../../lib/zcu_tools/mcp/mea
 
 FIT adapter 的 Run 後可使用以下流程。
 `FitSummary` 與 `Report` 由作者按 owner summary 宣告，框架以 TypeAdapter 驗證，不補欄位。
+此例的 Report 包含 nullable value、writeback_applied 與 nullable analysis_failure。
 
 ```python
 await tab.run()
 try:
     analysis = await tab.analyze("primary", result=FitSummary)
+    if analysis.result is None:
+        return Report(
+            value=None,
+            writeback_applied=False,
+            analysis_failure=analysis.reason,
+        )
     decision = await tab.ask_writeback()
+    writeback_applied = False
     if decision.accepted:
         receipt = tab.accept_writeback(decision.items)
         receipt.raise_for_error()
-    return Report(value=analysis.result.value)
+        writeback_applied = bool(receipt.items)
+    return Report(
+        value=analysis.result.value,
+        writeback_applied=writeback_applied,
+        analysis_failure=None,
+    )
 finally:
     tab.save()
 ```
+
+預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
+每次 Analyze 後先檢查 result，再解參照估計或開始下一個分析。
+失敗時回報 analysis_failure，不詢問或接受 writeback，也不跑相依的 Post。
+Post 失敗時保留已成功的 Primary 估計。程式錯誤仍 raise，不轉成分析失敗值。
 
 Analyze 不自動保存。`tab.save()` 同步保存 raw 與全部已完成階段的 artifacts，沒有 Save handle 要 await。
 如果要先保住 raw，可以在 Run 後再額外 Save 一次。
@@ -117,9 +136,13 @@ Analyze 不自動保存。`tab.save()` 同步保存 raw 與全部已完成階段
 不要以 decision.accepted 宣稱已寫入。Owner 先核對兩個 stages 的捕捉 revision，任何 draft 改動或替換都在第一筆寫入前拒絕。
 
 Run scope cancel 使 Run 回 partial，之後步驟仍繼續。
-Script scope cancel 讓無結果的 Analyze／ask_writeback／session.ask raise 普通 `RecipeCancelled`。
-三個 await 都回非 Optional 結果，不用 None 表示取消，也不加 require-value helper。
-作者不 catch、不寫取消分支，finally 仍在同一 worker 保存已有結果。
+取消 recipe 根則讓下一個 call／ask await raise 普通 `ScriptCancelled`。
+進行中的 Run 先合作 drain，保留 run_id、partial 與完成事實，再 raise。
+Analyze／ask_writeback／session.ask 回非 Optional 物件，不用 None 表示根取消。
+AnalysisResult.result 為 null 是分析失敗值，與根取消的例外不同。
+作者不 catch 根取消，已進入 try 的 finally 仍在同一 worker 同步保存已有結果。
+範例的 `await tab.run()` 在 try 外，根取消在此 raise 不會進入 Save finalizer。
+Drained partial 留在 tab，交由 agent 決定是否另行保存。
 Runtime 回 cancelled、report=null 與 runs，這個普通例外不記成 error。
 作者 task 不會收到 `asyncio.CancelledError`，真正的 owner 或 cleanup 例外仍保留診斷。
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
@@ -15,32 +14,12 @@ from zcu_tools.gui.app.dispersive.event_bus import (
     PreprocessChangedPayload,
 )
 from zcu_tools.gui.app.dispersive.state import DispersiveState
-from zcu_tools.resources.qubit_params import FluxDepFit, ParamsProject, QubitParams
+from zcu_tools.resources.dispersive_file import load_dispersive_file
 
 
-def _params_json(tmp_path):
-    path = str(tmp_path / "params.json")
-    params = QubitParams(path)
-    params.ensure_project(ParamsProject("Q1", "Q1"))
-    params.set_fluxdep_fit(
-        FluxDepFit(
-            EJ=4.0,
-            EC=1.0,
-            EL=0.5,
-            flux_half=0.5,
-            flux_int=1.0,
-            flux_period=2.0,
-            plot_transitions={"r_f": 5.3},
-        )
-    )
-    return path
-
-
-def test_full_pipeline(tmp_path, onetone_hdf5):
+def test_full_pipeline(analysis_target, onetone_hdf5):
     onetone_path, *_ = onetone_hdf5
-    params_path = _params_json(tmp_path)
-
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    state = DispersiveState(analysis_target)
     bus = EventBus()
     events = []
     for ptype in (
@@ -53,7 +32,7 @@ def test_full_pipeline(tmp_path, onetone_hdf5):
     ctrl = Controller(state, bus)
 
     # 1. load fit inputs
-    ctrl.load_fit_inputs(params_path)
+    ctrl.load_fit_inputs("fit.json")
     assert state.fit_inputs is not None
     assert "FitInputsLoadedPayload" in events
 
@@ -79,18 +58,20 @@ def test_full_pipeline(tmp_path, onetone_hdf5):
     assert state.disp_fit.g == 0.06 and state.disp_fit.bare_rf == 5.3
     assert "DispFitChangedPayload" in events
 
-    # 6. export preserves fluxdep_fit
-    ctrl.export_params(params_path)
-    saved = QubitParams(params_path, readonly=True)
-    assert saved.get_dispersive_fit() is not None
-    assert saved.require_fluxdep_fit().params == (4.0, 1.0, 0.5)
+    # 6. export publishes an entry-scoped dispersive artifact.
+    ctrl.export_params()
+    saved = load_dispersive_file(analysis_target.resource.dispersive_path / "q1.json")
+    assert saved.params.g == 0.06
+    assert saved.params.bare_rf == 5.3
 
 
-def test_predict_flux_axis_updates_when_preprocess_changes(tmp_path, onetone_hdf5):
+def test_predict_flux_axis_updates_when_preprocess_changes(
+    analysis_target, onetone_hdf5
+):
     onetone_path, *_ = onetone_hdf5
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    state = DispersiveState(analysis_target)
     ctrl = Controller(state)
-    ctrl.load_fit_inputs(_params_json(tmp_path))
+    ctrl.load_fit_inputs("fit.json")
     ctrl.load_onetone(onetone_path)
     result = ctrl.preprocess()
     np.testing.assert_array_equal(ctrl.predict_flux_axis(), result.sp_fluxs)

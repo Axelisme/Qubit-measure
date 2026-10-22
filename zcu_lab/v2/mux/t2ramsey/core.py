@@ -53,7 +53,7 @@ from zcu_lab.v2.mux.t2ramsey import MuxT2RamseyExp
 
 core = MuxT2RamseyExp()
 result = core.run(cfg, context=context)
-context.cancel_signal.raise_if_error()
+context.scope.stop.raise_if_error()
 source = RunRecord(cfg=cfg, result=result)
 outcomes = core.analyze(source, core.Options(fit_phase=True), plots=analysis_plots)
 ```
@@ -121,6 +121,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -248,7 +249,7 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 viewer.update(times, np.abs(data[row]))
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals, scope=context.scope) as sched:
             # 3. Join each x90 stage so the common wait follows its longest pulse.
             length = sweep2param("length", cfg.delay)
             builder = (
@@ -343,6 +344,7 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                     ),
                 )
             except (
+                AnalysisFailed,
                 ValueError,
                 RuntimeError,
                 ArithmeticError,

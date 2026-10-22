@@ -146,7 +146,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(gains, calc_populations(data).T),
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
             modules = run_cfg.modules
             gain_sweep = run_cfg.sweep.gain

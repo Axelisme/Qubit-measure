@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -124,7 +124,7 @@ same facet. Workflow tab close never drains the session or disconnects hardware.
 
 `gui.launcher` is the import-light CLI edge companion for runtime launchers. It
 declares shared logging/control flags and converts parser output into
-`GuiLaunchOptions`. Analysis project flags and `ProjectInfo` conversion belong to
+`GuiLaunchOptions`. Analysis entry flags and `AnalysisTarget` opening belong to
 `app.analysis_project.launcher`. The shared `gui.launcher` avoids importing Qt,
 matplotlib or app modules at module import time. Runtime initializes the explicit
 plot host, shutdown callback and mathtext support after QApplication exists;
@@ -143,17 +143,18 @@ status or error message) calls `make_label_selectable(label)` from the same
 module, so users can select and copy it with the mouse. Labels for field names,
 hints, placeholders and decoration stay unselectable.
 
-## Project / Result Scope
+## Entry selection
 
 Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
 再透過 ContextService 選取或建立 Working Point。Entry discovery 由 resources owner
 列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
 不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
 
-Fluxdep／dispersive 的 `ProjectInfo`、`ProjectDialog`、`ResultScopeManager`、
-project CLI 與 RPC 投影由 [`app.analysis_project`](app/analysis_project/README.md)
-共用過渡 owner 擁有。它保留 chip／qubit 與 `result/**/params.json` 的資料流，
-不是 Measure 的 entry binding。共用 GUI 不依賴此分析 owner。
+Fluxdep／dispersive 的 `AnalysisEntry`、`AnalysisTarget`、`EntryDialog`、
+entry CLI 與 RPC 投影由 [`app.analysis_project`](app/analysis_project/README.md)
+擁有。它開啟既有 entry，從 setup 選 fluxonium component，不使用 chip／qubit
+兩級目錄或 params.json。分析 app 不執行 Database Save。
+Measure 的 entry binding 仍由 session 擁有。共用 GUI 不依賴此分析 owner。
 
 ## Shared session dialogs (`session/ui/`)
 

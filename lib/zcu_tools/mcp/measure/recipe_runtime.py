@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from threading import RLock
@@ -12,16 +13,19 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter
 
-from zcu_tools.experiment.script_host import CallContext, ScriptHost
+from zcu_tools.experiment import ScriptCancelled
+from zcu_tools.experiment.scope import Scope, parse_cancel_scope
+from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.stop_signal import (
     CancelResult,
-    StopSignal,
-    parse_cancel_scope,
 )
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
-from zcu_tools.mcp.measure.analysis_execution import InvalidAnalysisValue
+from zcu_tools.mcp.measure.analysis_execution import (
+    ExecutionPhase,
+    InvalidAnalysisValue,
+)
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
@@ -31,7 +35,6 @@ from zcu_tools.mcp.measure.recipe_api import (
     FormSelector,
     FormSource,
     FormValue,
-    RecipeCancelled,
     RecipeRun,
     RecipeTab,
     RunResult,
@@ -49,6 +52,24 @@ from zcu_tools.mcp.measure.recipe_form import (
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+
+
+@dataclass(frozen=True)
+class ScopeProjection:
+    """Recipe/GUI path observation, not a cross-process atomic snapshot.
+
+    active_path is the single chain from the root through the first fork.
+    live_paths lists every live leaf's full composite path, including the root
+    when no descendants live. GUI run roots are omitted from composite paths.
+    """
+
+    active_path: str
+    live_paths: list[str]
+
+
+class _ScopeReply(BaseModel):
+    active_path: str
+    live_paths: list[str]
 
 
 class _ResultState(BaseModel):
@@ -90,10 +111,22 @@ class _Started(BaseModel):
     interactive: bool = False
 
 
+class _OperationError(BaseModel):
+    reason: str
+    message: str
+
+
 class _Completion(BaseModel):
     reason: Literal["completed", "timeout"]
     status: Literal["finished", "cancelled", "failed"] | None = None
-    error: str | None = None
+    error: str | _OperationError | None = None
+    failure_kind: Literal["analysis"] | None = None
+
+    @property
+    def error_message(self) -> str:
+        if isinstance(self.error, _OperationError):
+            return self.error.message
+        return self.error or "Operation failed"
 
 
 class _Candidate(BaseModel):
@@ -108,7 +141,6 @@ class _DestinationContext(BaseModel):
 
 
 class _Preview(BaseModel):
-    revision: int | None
     has_draft: bool
     items: tuple[_Candidate, ...]
     destination_context: _DestinationContext
@@ -150,12 +182,35 @@ class RecipeRuntime:
         self._run_ops: dict[str, int] = {}
         self._analysis_ops: dict[tuple[str, str], int] = {}
         self._candidates: dict[str, tuple[tuple[WritebackItem, str], ...]] = {}
-        self._writeback_revisions: dict[tuple[str, str], int] = {}
         self._pending_analysis: PendingAnalysis | None = None
         self._on_change = on_change
         self._images: list[PngImage] = []
-        self._run_token: StopSignal | None = None
+        self._run_scope: Scope | None = None
         self._run_handle: int | None = None
+        self._failures: list[tuple[Exception, ExecutionPhase]] = []
+
+    def failure_phase(self, error: Exception) -> ExecutionPhase:
+        """Read the phase of this exact runtime failure, or operation for author errors.
+
+        Error identity survives author finally/cleanup and catches. Successful
+        cleanup cannot relabel an earlier failure; a new author error is not
+        classified using an unrelated, previously caught runtime failure.
+        """
+        with self._lock:
+            for failure, phase in reversed(self._failures):
+                if failure is error:
+                    return phase
+            return "operation"
+
+    @contextmanager
+    def _failure_phase(self, phase: ExecutionPhase) -> Generator[None]:
+        try:
+            yield
+        except Exception as error:
+            # Preserve the original exception so author-side recovery still works.
+            with self._lock:
+                self._failures.append((error, phase))
+            raise
 
     def runs(self) -> tuple[RecipeRun, ...]:
         """Read immutable acquisition/save facts in execution order, without RPCs."""
@@ -167,54 +222,82 @@ class RecipeRuntime:
         with self._lock:
             return deepcopy(tuple(self._details))
 
+    def scope_status(self) -> ScopeProjection:
+        """Read the local tree and project descendants of its exact GUI Run.
+
+        Local binding/path reads share the host control sequence. The GUI
+        observes its own tree under its lock. Released handles contribute no
+        tail; transport errors propagate without reconnecting or inventing paths.
+        """
+
+        def local() -> tuple[int | None, str | None, ScopeProjection]:
+            return (
+                self._run_handle,
+                None if self._run_scope is None else self._run_scope.path,
+                ScopeProjection(self.host.active_path, self.host.live_paths),
+            )
+
+        try:
+            handle, prefix, paths = self.host.control(local)
+        except RuntimeError:
+            return ScopeProjection(self.host.active_path, self.host.live_paths)
+        if handle is None or prefix is None:
+            return paths
+        reply = _ScopeReply.model_validate(
+            self._tools.gui.read_internal(
+                "operation.status_scope", {}, operation_handle=handle
+            )
+        )
+        leaves: list[str] = []
+        for path in paths.live_paths:
+            if path == prefix and reply.live_paths:
+                leaves.extend(
+                    self._scope_path(prefix, leaf) for leaf in reply.live_paths
+                )
+            else:
+                leaves.append(path)
+        active = paths.active_path
+        if active == prefix:
+            active = self._scope_path(prefix, reply.active_path)
+        return ScopeProjection(active, leaves)
+
     @property
     def active_path(self) -> str:
-        """Project local scopes plus the current GUI Run's descendant tail.
-
-        This is two process-local observations, not an atomic cross-process
-        snapshot. A released/missing handle contributes no GUI tail. Transport
-        failures propagate rather than reconnecting or inventing a path.
-        """
-        try:
-            handle, prefix = self.host.control(
-                lambda: (self._run_handle, self.host.active_path)
-            )
-        except RuntimeError:
-            return self.host.active_path
-        if handle is None:
-            return prefix
-        reply = self._tools.gui.read_internal(
-            "operation.status_scope", {}, operation_handle=handle
-        )
-        tail = TypeAdapter(str).validate_python(reply["active_path"], strict=True)
-        return self._scope_path(prefix, tail)
+        """Read the unique composite chain through the first live fork."""
+        return self.scope_status().active_path
 
     def cancel(
         self,
-        scope: str = "script",
+        scope: str = "recipe",
         *,
         expected: int | None = None,
         op: int | None = None,
     ) -> CancelResult:
-        """Cancel local scopes or delegate schedule/acquire to the exact GUI Run.
+        """Cancel a local scope or delegate fine/full-path selectors to its Run.
 
-        run retains Run-only admission; operation targets any local operation.
-        Fine scopes require an active tab.run handle; an explicit op must
-        match that handle in the control loop. GUI rejection facts are unchanged; only the acknowledgement path gets the local scope prefix.
-        Neither check nor path projection is atomic across the two processes.
+        run keeps Run-only admission. Fine selectors and composite full paths
+        bind to the current tab.run handle; an explicit op must match it.
+        Preserve GUI refusal reasons and project paths/candidates, without
+        claiming that either acknowledgement proves cleanup has completed.
         """
         label, _sequence = parse_cancel_scope(scope, expected)
-        if label not in {"schedule", "acquire", "run"}:
+        full_path = "/" in label
+        if label not in {"schedule", "acquire", "run"} and not full_path:
             return self.host.cancel(scope, expected=expected)
 
-        def local() -> CancelResult | tuple[int | None, str]:
+        def local() -> CancelResult | tuple[int | None, str, str]:
             if op is not None and self._run_handle != op:
                 return CancelResult(False, "scope not active", self.host.active_path)
-            if self._run_token is None:
+            run = self._run_scope
+            if run is None:
+                if full_path:
+                    return self.host.cancel(scope, expected=expected)
                 return CancelResult(False, "no run in progress", self.host.active_path)
             if label == "run":
                 return self.host.cancel(scope, expected=expected)
-            return self._run_handle, self.host.active_path
+            if full_path and not scope.startswith(run.path + "/"):
+                return self.host.cancel(scope, expected=expected)
+            return self._run_handle, run.path, self.host.active_path
 
         try:
             target = self.host.control(local)
@@ -224,24 +307,34 @@ class RecipeRuntime:
             if op is not None and target.reason == "scope not active":
                 return replace(target, active_path=self.active_path)
             return target
-        handle, prefix = target
+        handle, prefix, local_path = target
         if handle is None:
-            return CancelResult(False, "no run in progress", prefix)
+            return CancelResult(False, "no run in progress", local_path)
+        selector = "run/" + scope[len(prefix) + 1 :] if full_path else scope
         reply = self._tools.gui.read_internal(
             "operation.cancel_scope",
-            {"scope": scope, "expected": expected},
+            {"scope": selector, "expected": expected},
             operation_handle=handle,
         )
         result = TypeAdapter(CancelResult).validate_python(reply)
-        return replace(result, active_path=self._scope_path(prefix, result.active_path))
+        active = (
+            self._scope_path(prefix, result.active_path)
+            if local_path == prefix
+            else local_path
+        )
+        return replace(
+            result,
+            active_path=active,
+            candidates=[self._scope_path(prefix, path) for path in result.candidates],
+        )
 
     @staticmethod
     def _scope_path(prefix: str, gui_path: str) -> str:
         tail = gui_path.partition("/")[2]
         return f"{prefix}/{tail}" if tail else prefix
 
-    def _retain_run(self, token: StopSignal, handle: int | None = None) -> None:
-        self._run_token = token
+    def _retain_run(self, scope: Scope, handle: int | None = None) -> None:
+        self._run_scope = scope
         self._run_handle = handle
 
     def images(self) -> tuple[PngImage, ...]:
@@ -377,31 +470,45 @@ class RecipeRuntime:
         )
 
     async def run(self, tab: str, adapter: str) -> RunResult:
-        """Always invoke Run and drain cooperative cancellation, retaining partial data."""
+        """Retain Run completion before root cancellation raises at the await.
+
+        tab is the opened GUI locator; adapter is its registered catalog name.
+        Descendant interruption returns partial data. Root cancellation prevents
+        new acquisition; in-flight acquisition drains first. Genuine errors raise.
+        """
         with self._lock:
             index = len(self._runs)
             self._runs.append(RecipeRun(tab, adapter, None))
             self._details.append(RecipeRunDetail(tab, adapter))
+
+        def retain(completion: CallResult[RunResult]) -> None:
+            # The author-worker hook runs before the host raises root cancellation.
+            result = completion.result
+            with self._lock:
+                self._runs[index] = replace(
+                    self._runs[index],
+                    run_id=result.run_id,
+                    partial_result=result.partial_result,
+                )
+                self._details[index] = replace(
+                    self._details[index], run_id=result.run_id
+                )
+
         try:
             completion = await self.host.call(
-                lambda ctx: self._acquire(tab, index, ctx)
+                lambda ctx: self._acquire(tab, index, ctx),
+                on_completed=retain,
             )
+        except ScriptCancelled:
+            raise
         except Exception:
             with self._lock:
                 self._runs[index] = replace(self._runs[index], status="failed")
             raise
         finally:
-            self._run_token = None
+            self._run_scope = None
             self._run_handle = None
-        result = completion.result
-        with self._lock:
-            self._runs[index] = replace(
-                self._runs[index],
-                run_id=result.run_id,
-                partial_result=result.partial_result,
-            )
-            self._details[index] = replace(self._details[index], run_id=result.run_id)
-        return result
+        return completion.result
 
     async def analyze[T](
         self,
@@ -420,27 +527,31 @@ class RecipeRuntime:
             )
         finally:
             self._publish_analysis(None)
-        summary = completion.result
-        return AnalysisResult(TypeAdapter(result).validate_python(summary))
+        with self._failure_phase("result_read"):
+            analysis = completion.result
+            if analysis.status == "failed":
+                return AnalysisResult(None, status="failed", reason=analysis.reason)
+            return AnalysisResult(TypeAdapter(result).validate_python(analysis.result))
 
     def save(self, tab: str) -> SaveResult:
         """Save fixed Run raw then all completed artifacts and retain the whole attempt."""
-        op = self._run_ops[tab]
-        reports: list[SaveReport] = []
-        try:
-            for method, extra in (
-                ("tab.save_data", {}),
-                ("tab.save_artifacts", {"artifacts": "all"}),
-            ):
-                reply = self._tools.gui.send_gui_rpc(
-                    method, {"tab_id": tab, **extra}, run_operation_handle=op
-                )
-                reports.append(TypeAdapter(SaveReport).validate_python(reply))
-        except Exception:
-            if reports:
-                self._record_save(tab, reports, failed=True)
-            raise
-        return self._record_save(tab, reports)
+        with self._failure_phase("image_save"):
+            op = self._run_ops[tab]
+            reports: list[SaveReport] = []
+            try:
+                for method, extra in (
+                    ("tab.save_data", {}),
+                    ("tab.save_artifacts", {"artifacts": "all"}),
+                ):
+                    reply = self._tools.gui.send_gui_rpc(
+                        method, {"tab_id": tab, **extra}, run_operation_handle=op
+                    )
+                    reports.append(TypeAdapter(SaveReport).validate_python(reply))
+            except Exception:
+                if reports:
+                    self._record_save(tab, reports, failed=True)
+                raise
+            return self._record_save(tab, reports)
 
     def _record_save(
         self, tab: str, reports: list[SaveReport], *, failed: bool = False
@@ -477,62 +588,63 @@ class RecipeRuntime:
 
     def preview(self, tab: str, pane: Literal["run", "analysis", "post"]) -> None:
         """Capture one explicitly selected PNG into execution reply memory."""
-        if pane not in ("run", "analysis", "post"):
-            raise ValueError("Unknown preview pane")
-        subtab = "post_analysis" if pane == "post" else pane
-        reply = self._tools.gui.send_gui_rpc(
-            "tab.get_figure",
-            {"tab_id": tab, "subtab_id": subtab},
-            run_operation_handle=self._run_ops[tab],
-        )
-        encoded = TypeAdapter(str).validate_python(reply["png_b64"])
-        self._images.append(validated_png(base64.b64decode(encoded, validate=True)))
+        with self._failure_phase("figure_read"):
+            if pane not in ("run", "analysis", "post"):
+                raise ValueError("Unknown preview pane")
+            subtab = "post_analysis" if pane == "post" else pane
+            reply = self._tools.gui.send_gui_rpc(
+                "tab.get_figure",
+                {"tab_id": tab, "subtab_id": subtab},
+                run_operation_handle=self._run_ops[tab],
+            )
+            encoded = TypeAdapter(str).validate_python(reply["png_b64"])
+            self._images.append(validated_png(base64.b64decode(encoded, validate=True)))
 
     def writeback_proposal(self, tab: str) -> WritebackProposal:
         """Capture candidates from completed stages; labels are preview-time display only."""
-        retained: list[tuple[WritebackItem, str]] = []
-        for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
-            op = self._analysis_ops.get((tab, stage))
-            if op is None:
-                continue
-            preview = _Preview.model_validate(
-                self._tools.gui.send_gui_rpc(
-                    "tab.writeback_preview",
-                    {"tab_id": tab, "subtab_id": pane},
-                    operation_handle=op,
-                )
-            )
-            if preview.has_draft:
-                if preview.revision is None:
-                    raise GuiRpcError(
-                        "Writeback draft has no revision", reason="incompatible_wire"
+        with self._failure_phase("writeback_read"):
+            retained: list[tuple[WritebackItem, str]] = []
+            for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
+                op = self._analysis_ops.get((tab, stage))
+                if op is None:
+                    continue
+                preview = _Preview.model_validate(
+                    self._tools.gui.send_gui_rpc(
+                        "tab.writeback_preview",
+                        {"tab_id": tab, "subtab_id": pane},
+                        operation_handle=op,
                     )
-                self._writeback_revisions[(tab, stage)] = preview.revision
-            for candidate in preview.items if preview.has_draft else ():
-                item = WritebackItem(
-                    candidate.target_name,
-                    WritebackDestination(
-                        candidate.actual_path, preview.destination_context.active_label
-                    ),
-                    candidate.proposed,
-                    None,
-                    "primary" if stage == "primary" else "post",
                 )
-                retained.append((item, candidate.id))
-        # Author-visible YamlValue mappings must not edit retained acceptance evidence.
-        self._candidates[tab] = deepcopy(tuple(retained))
-        proposal = WritebackProposal(tuple(item for item, _ in retained))
-        with self._lock:
-            index = self._detail_index(tab)
-            self._details[index] = replace(
-                self._details[index], writeback=deepcopy(proposal)
-            )
-        return proposal
+                for candidate in preview.items if preview.has_draft else ():
+                    item = WritebackItem(
+                        candidate.target_name,
+                        WritebackDestination(
+                            candidate.actual_path,
+                            preview.destination_context.active_label,
+                        ),
+                        candidate.proposed,
+                        None,
+                        "primary" if stage == "primary" else "post",
+                    )
+                    retained.append((item, candidate.id))
+            # Author-visible YamlValue mappings must not edit retained acceptance evidence.
+            self._candidates[tab] = deepcopy(tuple(retained))
+            proposal = WritebackProposal(tuple(item for item, _ in retained))
+            with self._lock:
+                index = self._detail_index(tab)
+                self._details[index] = replace(
+                    self._details[index], writeback=deepcopy(proposal)
+                )
+            return proposal
 
     def accept_writeback(
         self, tab: str, items: Sequence[WritebackItem]
     ) -> WritebackReceipt:
-        """Validate captured candidates before writing; preserve confirmed stage prefixes."""
+        """Select captured IDs, then write current owner draft values/destinations.
+
+        Receipt items are the original captured candidates for confirmed IDs,
+        not snapshots of actual written values. Preserve confirmed stage prefixes.
+        """
         captured = self._candidates.get(tab, ())
         chosen = tuple(items)
         if len({item.name for item in chosen}) != len(chosen) or any(
@@ -550,7 +662,6 @@ class RecipeRuntime:
                 stages.append(
                     {
                         "subtab_id": pane,
-                        "expected_revision": self._writeback_revisions[(tab, stage)],
                         "ids": ids,
                     }
                 )
@@ -597,11 +708,13 @@ class RecipeRuntime:
             raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
         return snapshots[0]
 
-    def _await(self, op: int, ctx: CallContext) -> _Completion:
+    def _await(
+        self, op: int, ctx: CallContext, *, analysis: bool = False
+    ) -> _Completion:
         stopped = False
         while True:
             began = time.monotonic()
-            if ctx.stop_signal.is_set() and not stopped:
+            if ctx.scope.stop.is_set() and not stopped:
                 self._tools.gui.read_internal(
                     "operation.cancel", {}, operation_handle=op
                 )
@@ -612,8 +725,10 @@ class RecipeRuntime:
             completion = _Completion.model_validate(reply)
             if completion.reason == "completed":
                 if completion.status == "failed":
+                    if analysis and completion.failure_kind == "analysis":
+                        return completion
                     raise GuiRpcError(
-                        completion.error or "Operation failed",
+                        completion.error_message,
                         reason="operation_failed",
                     )
                 if completion.status not in ("finished", "cancelled"):
@@ -625,7 +740,7 @@ class RecipeRuntime:
             if stopped:
                 time.sleep(delay)
             else:
-                ctx.stop_signal.event.wait(delay)
+                ctx.scope.stop.event.wait(delay)
 
     def _detail_index(self, tab: str) -> int:
         return next(
@@ -635,7 +750,7 @@ class RecipeRuntime:
         )
 
     def _acquire(self, tab: str, index: int, ctx: CallContext) -> RunResult:
-        self.host.control(lambda: self._retain_run(ctx.stop_signal))
+        self.host.control(lambda: self._retain_run(ctx.scope))
         conditions = field_observation(
             self._tools.send_gui_rpc(
                 "tab.read_recipe_field", {"tab_id": tab, "path": []}
@@ -647,7 +762,7 @@ class RecipeRuntime:
             self._tools.send_gui_rpc("tab.run_start", {"tab_id": tab})
         )
         self._run_ops[tab] = started.handle
-        self.host.control(lambda: self._retain_run(ctx.stop_signal, started.handle))
+        self.host.control(lambda: self._retain_run(ctx.scope, started.handle))
         with self._lock:
             self._details[index] = replace(self._details[index], op=started.handle)
         self._analysis_ops.pop((tab, "primary"), None)
@@ -672,9 +787,9 @@ class RecipeRuntime:
 
     def _analyze(
         self, tab: str, stage: str, ctx: CallContext, *, interactive: bool
-    ) -> object:
-        if ctx.stop_signal.is_set():
-            raise RecipeCancelled("Script cancelled before analysis")
+    ) -> AnalysisResult[object]:
+        if ctx.scope.cancelled:
+            return AnalysisResult(None, status="failed", reason="Analysis cancelled")
         run = self._run_ops[tab]
         primary = self._analysis_ops[(tab, "primary")] if stage == "post" else None
         started = _Started.model_validate(
@@ -699,31 +814,36 @@ class RecipeRuntime:
                 tab, "primary" if stage == "primary" else "post", started.handle
             )
             self.host.control(lambda: self._publish_analysis(pending))
-        completion = self._await(started.handle, ctx)
-        if completion.status == "cancelled":
-            raise RecipeCancelled("Analysis cancelled before delivering a result")
-        reply = self._tools.gui.send_gui_rpc(
-            "tab.get_analyze_result"
-            if stage == "primary"
-            else "tab.get_post_analyze_result",
-            {"tab_id": tab},
-            operation_handle=started.handle,
-        )
-        summary = TypeAdapter(YamlValue).validate_python(reply["summary"])
-        invalid = TypeAdapter(tuple[InvalidAnalysisValue, ...]).validate_python(
-            reply["invalid"]
-        )
-        captured = RecipeAnalysisDetail(
-            "primary" if stage == "primary" else "post",
-            started.handle,
-            summary,
-            invalid,
-        )
-        with self._lock:
-            index = self._detail_index(tab)
-            detail = self._details[index]
-            self._details[index] = replace(
-                detail, analyses=(*detail.analyses, captured)
+        completion = self._await(started.handle, ctx, analysis=True)
+        if completion.status == "failed":
+            return AnalysisResult(
+                None, status="failed", reason=completion.error_message
             )
-        self._analysis_ops[(tab, stage)] = started.handle
-        return summary
+        if completion.status == "cancelled":
+            return AnalysisResult(None, status="failed", reason="Analysis cancelled")
+        with self._failure_phase("result_read"):
+            reply = self._tools.gui.send_gui_rpc(
+                "tab.get_analyze_result"
+                if stage == "primary"
+                else "tab.get_post_analyze_result",
+                {"tab_id": tab},
+                operation_handle=started.handle,
+            )
+            summary = TypeAdapter(YamlValue).validate_python(reply["summary"])
+            invalid = TypeAdapter(tuple[InvalidAnalysisValue, ...]).validate_python(
+                reply["invalid"]
+            )
+            captured = RecipeAnalysisDetail(
+                "primary" if stage == "primary" else "post",
+                started.handle,
+                summary,
+                invalid,
+            )
+            with self._lock:
+                index = self._detail_index(tab)
+                detail = self._details[index]
+                self._details[index] = replace(
+                    detail, analyses=(*detail.analyses, captured)
+                )
+            self._analysis_ops[(tab, stage)] = started.handle
+            return AnalysisResult(summary)

@@ -167,7 +167,7 @@ class ConditionalPhaseExp(
         m = cfg.modules
         target = m.x90_f1 if cfg.target == "f1" else m.x90_f2
         spectator = m.x180_f2 if cfg.target == "f1" else m.x180_f1
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for branch, branch_step in sched.scan("branch", [0, 1]):
                 for quadrature, projection_step in branch_step.scan(
                     "quadrature", [0, 1]

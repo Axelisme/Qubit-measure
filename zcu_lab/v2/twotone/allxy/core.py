@@ -225,7 +225,7 @@ class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
                 allxy_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
 
             # Derive Y rotations from X calibrations and retain an identity time slot.

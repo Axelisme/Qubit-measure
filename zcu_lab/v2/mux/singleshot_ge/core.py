@@ -66,7 +66,7 @@ plots and closes owned devices.
 Completed preparations survive cancellation or acquisition error. A missing
 preparation remains NaN across every tone and shot. An incomplete first round is
 not accepted as a complete preparation. After run, call
-`context.cancel_signal.raise_if_error()` before reporting success. Then inspect
+`context.scope.stop.raise_if_error()` before reporting success. Then inspect
 `is_set()` to distinguish cancellation from completion. The signal retains an
 acquisition error's cause even when run returns useful partial data. Validation
 and build errors propagate. The caller records completion separately; a saved
@@ -138,7 +138,7 @@ from zcu_lab.v2.mux.singleshot_ge import MuxGEExp
 core = MuxGEExp()
 result = core.run(config, context=context)
 source = RunRecord(config, result)
-context.cancel_signal.raise_if_error()
+context.scope.stop.raise_if_error()
 # Preserve stopped/partial status in caller metadata; do not infer it from IQ.
 core.save_run(source, native_path, metadata=metadata)
 restored, device_snapshot = core.load_run(native_path)
@@ -459,7 +459,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         the two rows mean probe off/on, not guaranteed pure ground/excited states.
         Use one round with reps=shots, leaving config unchanged.
         context supplies hardware, stop signal and live IQ scatter plots. Missing
-        preparations remain NaN; check context.cancel_signal.raise_if_error()
+        preparations remain NaN; check context.scope.stop.raise_if_error()
         before reporting success. Invalid config or program builds raise.
         """
         # 1. Use one raw-shot round and preserve the requested participant order.
@@ -490,7 +490,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
                 )
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("probe on", [False, True]):
                 # 3. Start tone branches together; read out after the longest one.
                 # Init runs in both preparations, probe only in the second.

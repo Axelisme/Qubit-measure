@@ -14,6 +14,6 @@ independently, so the constants live beside the app's own RemoteControlAdapter.
 
 from __future__ import annotations
 
-WIRE_VERSION = 5  # project.info exposes data_root instead of the ambiguous old name
+WIRE_VERSION = 6  # entry/component projection and predictor affine inputs
 
-GUI_VERSION = 7  # shared ProjectInfo data-root naming
+GUI_VERSION = 8  # entry/predictor selection and component artifact export

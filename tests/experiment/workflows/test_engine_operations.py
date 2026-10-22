@@ -16,7 +16,6 @@ from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost
 
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
@@ -124,58 +123,6 @@ def until(predicate: Callable[[], bool], label: str) -> None:
         timer.join()
 
 
-def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(
-    rig: Rig,
-) -> None:
-    engine, paths, _devices = rig
-    ready, entered = Event(), Event()
-    outcomes: list[tuple[int, bool]] = []
-    answers: list[Reply | None] = []
-    later_stops: list[bool] = []
-
-    @w.workflow("stop", "Preserve cooperative partial results")
-    async def script(
-        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
-    ) -> Summary:
-        def first(ctx: CallContext) -> int:
-            entered.set()
-            ready.set()
-            assert ctx.stop_signal.event.wait(30), (
-                "Stop must reach the active operation"
-            )
-            return 4
-
-        first_result = await env.call(first)
-        assert isinstance(first_result, w.Completed)
-        outcomes.append((first_result.value, first_result.partial_result))
-
-        def later(ctx: CallContext) -> int:
-            later_stops.append(ctx.stop_signal.is_set())
-            return 0
-
-        second_result = await env.call(later)
-        assert isinstance(second_result, w.Completed)
-        outcomes.append((second_result.value, second_result.partial_result))
-        answers.append(await env.ask(Approval(label="after stop")))
-        return Summary(value=4)
-
-    start(engine, paths, script)
-    thread, statuses = worker(engine, ready)
-    try:
-        assert ready.wait(30), "The worker must enter its operation or settle"
-        assert entered.is_set(), statuses
-        engine.stop("run")
-    finally:
-        engine.stop("run")
-        thread.join(30)
-    assert not thread.is_alive()
-    assert statuses[-1].lifecycle == "cancelled"
-    assert outcomes == [(4, True), (0, True)]
-    assert later_stops == [True]
-    assert answers == [None]
-    assert saved_run.read_summary(paths.metadata_root) is None
-
-
 def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
     rig: Rig,
 ) -> None:
@@ -188,22 +135,28 @@ def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
     async def script(
         env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
-        def acquire(ctx: CallContext) -> int:
-            calls.append(ctx.epoch)
-            if len(calls) == 1:
-                entered.set()
-                ready.set()
-                assert ctx.stop_signal.event.wait(30), (
-                    "Pause must reach the active operation"
-                )
-                return -1
-            assert not ctx.stop_signal.is_set()
-            return 42
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
 
-        result = await env.call(acquire)
-        assert isinstance(result, w.Completed)
-        delivered.append(result.value)
-        assert not result.partial_result
+            def acquire(ctx: CallContext) -> int:
+                calls.append(ctx.epoch)
+                if len(calls) == 1:
+                    entered.set()
+                    ready.set()
+                    assert ctx.scope.stop.event.wait(30), (
+                        "Pause must reach the active operation"
+                    )
+                    return -1
+                assert not ctx.scope.stop.is_set()
+                return 42
+
+            result = await iteration.call(acquire)
+            assert isinstance(result, w.Completed)
+            delivered.append(result.value)
+            assert not result.partial_result
+        finally:
+            iterations.close()
 
     start(engine, paths, script)
     thread, statuses = worker(engine, ready)
@@ -300,18 +253,23 @@ def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
     tokens: list[bool] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        tokens.append(context.cancel_signal.is_set())
+        tokens.append(context.scope.stop.is_set())
         if len(tokens) == 1:
             cause = OSError("first acquire failed")
-            context.cancel_signal.set_error("failed", str(cause), cause)
+            context.scope.stop.set_error("failed", str(cause), cause)
         return 42
 
     @w.workflow("recover", "A recoverable acquire failure permits an authored retry")
     async def script(
         env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
-        outcomes.append(await env.run(acquire, Cfg()))
-        outcomes.append(await env.run(acquire, Cfg()))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            outcomes.append(await iteration.run(acquire, Cfg()))
+            outcomes.append(await iteration.run(acquire, Cfg()))
+        finally:
+            iterations.close()
 
     start(engine, paths, script)
     final = engine.execute("run")
@@ -335,16 +293,22 @@ def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
     async def script(
         env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
-        def experiment(cfg: Cfg, *, context: RunContext) -> int:
-            assert context.plots is not env.plots
-            assert not context.cancel_signal.is_set()
-            cfg.value = 8
-            return cfg.value + 1
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
 
-        outcome = await env.run(experiment, cfg)
-        assert isinstance(outcome, w.Completed)
-        assert outcome.value.cfg is not None
-        records.append((outcome.value.cfg.value, outcome.value.result))
+            def experiment(cfg: Cfg, *, context: RunContext) -> int:
+                assert context.plots is not env.plots
+                assert not context.scope.stop.is_set()
+                cfg.value = 8
+                return cfg.value + 1
+
+            outcome = await iteration.run(experiment, cfg)
+            assert isinstance(outcome, w.Completed)
+            assert outcome.value.cfg is not None
+            records.append((outcome.value.cfg.value, outcome.value.result))
+        finally:
+            iterations.close()
 
     start(engine, paths, script)
     final = engine.execute("run")

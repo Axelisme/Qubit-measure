@@ -11,7 +11,8 @@ from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunSnapshot
-from zcu_tools.experiment.stop_signal import CancelResult, StopSignal
+from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.experiment.workflows import (
     Actor,
     CommittedRecord,
@@ -56,7 +57,7 @@ class WorkflowRunPort(Protocol):
     def resume(self, run_id: str) -> int: ...
     def stop(self, run_id: str) -> RunStatus | None: ...
     def cancel(
-        self, run_id: str, scope: str = "script", *, expected: int | None = None
+        self, run_id: str, scope: str = "workflow", *, expected: int | None = None
     ) -> CancelResult: ...
     def pending_question(self, run_id: str) -> PendingQuestion | None: ...
     def answer(
@@ -286,7 +287,7 @@ class WorkflowTab[C]:
             session.soccfg,
             plots,
             self._services.device.get_connected_devices(),
-            StopSignal(),
+            Scope("run"),
         )
         identity = RunIdentity(
             run_id,

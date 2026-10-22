@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.event_bus import EventBus, ProjectChangedPayload
 from zcu_tools.gui.app.dispersive.state import (
@@ -11,7 +10,7 @@ from zcu_tools.gui.app.dispersive.state import (
 )
 
 
-def test_setup_project_writes_state_and_emits_event():
+def test_setup_project_writes_state_and_emits_event(analysis_target):
     state = DispersiveState()
     bus = EventBus()
     seen = []
@@ -19,9 +18,9 @@ def test_setup_project_writes_state_and_emits_event():
     ctrl = Controller(state, bus)
 
     before = state.version.get(PROJECT_VERSION_KEY)
-    ctrl.setup_project(ProjectInfo(chip_name="ChipA", qub_name="Q1"))
+    ctrl.setup_project(analysis_target)
 
-    assert state.project.chip_name == "ChipA"
+    assert state.project is analysis_target
     assert state.version.get(PROJECT_VERSION_KEY) > before
     assert seen == [True]
 

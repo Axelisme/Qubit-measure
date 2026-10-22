@@ -25,16 +25,17 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
     "project.info": MethodSpec(
         5.0,
-        "Read the current project info (chip_name, qub_name, result_dir, data_root).",
+        "Read the opened entry, component and derived Result paths; null before opening.",
         readonly=True,
     ),
     "project.setup": MethodSpec(
         5.0,
-        "Apply chip/qubit identity. The GUI derives result_dir and data_root "
-        "from its project root; paths are outputs, not accepted inputs.",
+        "Open an existing entry under project_root/result and select its fluxonium "
+        "component. Omitted component uses the setup qubit alias.",
         params=(
-            ParamSpec("chip_name", JsonType.STRING),
-            ParamSpec("qub_name", JsonType.STRING),
+            ParamSpec("project_root", JsonType.STRING),
+            ParamSpec("entry", JsonType.STRING),
+            ParamSpec("component", JsonType.STRING, required=False),
         ),
     ),
     # Spectrum collection
@@ -263,10 +264,9 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "fit.export_params": MethodSpec(
         30.0,
-        "Export the current fit result. Optional savepath "
-        "defaults to params.json in the project result directory. Merge with "
-        "independent sections and use the first aligned spectrum's calibration.",
-        params=(ParamSpec("savepath", JsonType.STRING, required=False),),
+        "Write predictors/<component>.json, update declared setup energy/alignment "
+        "fields and record analysis in the opened entry. Uses the first aligned "
+        "spectrum. Writes can partially succeed; no rollback or retry.",
     ),
     # Domain resource versions remain available as read-only bookkeeping.
     "resources.versions": MethodSpec(

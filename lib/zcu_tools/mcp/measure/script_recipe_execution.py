@@ -7,6 +7,7 @@ import time
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 from math import isfinite
 from threading import Condition, Event, Thread, current_thread
 from typing import Literal
@@ -15,18 +16,20 @@ from uuid import uuid4
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.experiment import ScriptCancelled
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.experiment.script_host import ScriptStatus
-from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.mcp.core.reply import ToolReply
+from zcu_tools.mcp.measure.analysis_execution import ExecutionPhase
 from zcu_tools.mcp.measure.recipe_api import (
-    RecipeCancelled,
     RecipeDeclaration,
     RecipeOutcome,
 )
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 from zcu_tools.mcp.measure.recipe_details import RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_host import RecipeHost, RecipeHostFactory
-from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis
+from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis, ScopeProjection
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 logger = logging.getLogger(__name__)
@@ -35,10 +38,15 @@ SCRIPT_TERMINAL = frozenset({"completed", "cancelled", "failed", "needs_paramete
 
 @dataclass(frozen=True)
 class ScriptRecipeError:
-    """Original unhandled failure; type is its class name, message is its diagnostic."""
+    """Unhandled failure: class name, human diagnostic and attempted action phase.
+
+    phase uses ExecutionPhase; unclassified author/Run errors are operation.
+    message is str(exception), without a formatted traceback.
+    """
 
     type: str
     message: str
+    phase: ExecutionPhase = "operation"
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,7 @@ class ScriptRecipeSnapshot:
     missing lists authored parameter paths only at needs_parameters terminal;
     that state has no outcome/error and releases registry admission.
     active_path is the detached local host path; status adds the live GUI tail.
+    finished_at is the UTC ISO-8601 terminal publication time, or None while live.
     """
 
     execution: str
@@ -83,7 +92,8 @@ class ScriptRecipeSnapshot:
     cancel_requested: bool = False
     missing: tuple[str, ...] = ()
     details: tuple[RecipeRunDetail, ...] = ()
-    active_path: str = "script"
+    active_path: str = "recipe"
+    finished_at: str | None = None
 
 
 class ScriptRecipeExecution:
@@ -125,7 +135,7 @@ class ScriptRecipeExecution:
                 details=self._host.runtime.details() if self._host is not None else (),
                 active_path=self._host.scheduler.active_path
                 if self._host is not None
-                else "script",
+                else "recipe",
             )
 
     def wait(self, timeout: float) -> ToolReply:
@@ -209,16 +219,25 @@ class ScriptRecipeExecution:
             }
         )
 
+    def scope_status(self) -> ScopeProjection:
+        """Read composite active_path and structured live_paths without driving code."""
+        with self._condition:
+            host = self._host
+        if host is None:
+            path = f"recipe:{self._definition.name}"
+            return ScopeProjection(path, [path])
+        return host.runtime.scope_status()
+
     @property
     def active_path(self) -> str:
         """Read local scopes plus the active GUI Run tail, without driving author code."""
         with self._condition:
             host = self._host
-        return "script" if host is None else host.runtime.active_path
+        return "recipe" if host is None else host.runtime.active_path
 
     def cancel(
         self,
-        scope: str = "script",
+        scope: str = "recipe",
         *,
         expected: int | None = None,
         op: int | None = None,
@@ -236,19 +255,19 @@ class ScriptRecipeExecution:
             host = self._host
             terminal = self._progress.status in SCRIPT_TERMINAL
             if terminal or host is None:
-                accepted = not terminal and label == "script" and sequence is None
+                accepted = not terminal and label == "recipe" and sequence is None
                 reason = (
                     "scope cancellation requested"
                     if accepted
                     else "sequence mismatch"
-                    if label == "script" and sequence is not None
+                    if label == "recipe" and sequence is not None
                     else "scope not active"
                     if op is not None
                     else "no run in progress"
                     if label in {"run", "schedule", "acquire"}
                     else "scope not active"
                 )
-                result = CancelResult(accepted, reason, "script")
+                result = CancelResult(accepted, reason, "recipe")
                 if accepted:
                     self._cancelled.set()
                     self._progress = replace(self._progress, cancel_requested=True)
@@ -257,7 +276,7 @@ class ScriptRecipeExecution:
         if result is None:
             assert host is not None
             result = host.runtime.cancel(scope, expected=expected, op=op)
-            if result.cancelled and label == "script":
+            if result.cancelled and label == "recipe":
                 with self._condition:
                     self._cancelled.set()
                     self._progress = replace(self._progress, cancel_requested=True)
@@ -308,7 +327,7 @@ class ScriptRecipeExecution:
         error: Exception | None = None
         try:
             inputs = self._definition.inputs.model_validate(self._arguments)
-            host = self._host_factory(self._tools, self._changed)
+            host = self._host_factory(self._tools, self._changed, self._definition.name)
             with self._condition:
                 self._host = host
             if self._cancelled.is_set():
@@ -316,7 +335,7 @@ class ScriptRecipeExecution:
             report = host.scheduler.run(
                 self._definition.coroutine(host.session, inputs)
             )
-        except RecipeCancelled as failure:
+        except ScriptCancelled as failure:
             error = failure
         except RecipeNeedsParameters as failure:
             error = failure
@@ -328,7 +347,7 @@ class ScriptRecipeExecution:
     def _finish(self, report: BaseModel | None, error: Exception | None) -> None:
         host = self._host
         cancelled = (
-            isinstance(error, RecipeCancelled)
+            isinstance(error, ScriptCancelled)
             or self._cancelled.is_set()
             or (host is not None and host.scheduler.status == "cancelled")
         )
@@ -342,6 +361,7 @@ class ScriptRecipeExecution:
                     self._progress,
                     status="needs_parameters",
                     phase="terminal",
+                    finished_at=datetime.now(timezone.utc).isoformat(),
                     pending_question=None,
                     missing=tuple(item.parameter for item in error.missing),
                     outcome=None,
@@ -354,10 +374,17 @@ class ScriptRecipeExecution:
                 self._progress,
                 status=status,
                 phase="terminal",
+                finished_at=datetime.now(timezone.utc).isoformat(),
                 pending_question=None,
                 outcome=RecipeOutcome(status, None if cancelled else report, runs),
-                error=ScriptRecipeError(type(error).__name__, str(error))
-                if error is not None and not isinstance(error, RecipeCancelled)
+                error=ScriptRecipeError(
+                    type(error).__name__,
+                    str(error),
+                    host.runtime.failure_phase(error)
+                    if host is not None
+                    else "operation",
+                )
+                if error is not None and not isinstance(error, ScriptCancelled)
                 else None,
             )
             self._condition.notify_all()

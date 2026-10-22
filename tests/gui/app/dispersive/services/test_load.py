@@ -12,7 +12,7 @@ def _inputs() -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
         flux_half=0.5,
-        flux_int=1.0,
+        flux_bias=0.0,
         flux_period=2.0,
         bare_rf_seed=5.3,
     )

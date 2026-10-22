@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -50,12 +50,19 @@ named `TransitionRates`與errors、兩組fitted populations、local initial popu
 foundation提供的單一global covariance與diagnostics；singleshot、tone/sweep及overnight
 callers不解包positional per-trace covariance。
 
-`analysis.fitting.base.fit_func` 保留既有 `curve_fit` 失敗時回退 `init_p` 的
-contract，但會發出 `RuntimeWarning`，讓 caller 能辨識 fallback 與成功擬合。
-固定參數只在至少一個參數非 `None` 時啟用。
-`FitParameters` 描述既有的兩種容器：正常 optimizer 回傳 ndarray，fixed 或 fallback
-回傳 list。`FitResult` 將此 parameter vector 與 covariance 配對。直接透傳的 wrappers
-沿用此契約；wrapper 自己組出的 tuple 保持原樣，不做統一容器轉換。
+`analysis.fitting.base.fit_func` 的 curve_fit optimizer 不收斂時 raise
+`analysis.failure.AnalysisFailed`，保留 backend cause，不再以初猜冒充 fit。
+已知 init_p 的自由參數數目時，資料不足也 raise AnalysisFailed。
+Model callback 自己的例外保留原型別與物件，不降級成預期 fit 失敗。
+固定參數只在至少一個參數非 None 時啟用。
+FitParameters 的正常 optimizer 輸出為 ndarray，還原固定參數後為 list；FitResult 將參數與 covariance 配對。
+
+這個分類涵蓋共用 fit_func，以及委派它的 exponential、cosine／damped cosine、
+Gaussian、Lorentzian、sinc、multi-decay 與 resonance phase fitting。
+例如 GUI 的 mux T1 analyze 經 fit_decay／fitexp 進這條路徑。
+GUI 只在 analyze work 的 AnalysisFailed 標 failure_kind="analysis"，recipe 才交 failed 值。
+Record 或 writeback 的錯誤仍 raise。Shared／singleshot 的 iminuit diagnostics、
+resonance joint-refinement 自己的 fallback 不在這次分類內，不能視為所有 backend 已統一。
 
 Lorentzian family fitting 以 median baseline 判斷初始 peak/dip 方向，避免
 qubit-frequency peak 或 dip 靠近掃描邊界時被左右端點平均誤判成反向寬曲線。

@@ -10,7 +10,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、五層、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
@@ -38,7 +38,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 captured writeback revision 提交、recipe 推導 owner、共用 async host、await guardrail、scope 控制、workflow Stop owner acknowledgement 與取消後 finally／runs。Workflow 的 operation 原語與 live tunables 生效點見 0062。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 current-draft writeback 提交、recipe 推導 owner、共用 async host、await guardrail、顯式 Scope 與 selector 歧義、live_paths 跨 process 投影、workflow Stop owner acknowledgement、根 ScriptCancelled 與 analyze failed 值。Workflow 的 operation 原語與 live tunables 生效點見 0062。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation 與 async host answer 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 

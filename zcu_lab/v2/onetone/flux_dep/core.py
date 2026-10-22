@@ -136,7 +136,7 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
             context.devices[cfg.flux_dev],
             dev_values[0],
             unit=cfg.flux_unit,
-            stop=context.cancel_signal,
+            stop=context.scope.stop,
             progress=True,
         )
 
@@ -157,14 +157,14 @@ class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
                 fluxdep_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 cfg = step.cfg
                 set_flux(
                     context.devices[cfg.flux_dev],
                     step.value,
                     unit=cfg.flux_unit,
-                    stop=context.cancel_signal,
+                    stop=context.scope.stop,
                     progress=False,
                 )
                 modules = cfg.modules

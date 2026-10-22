@@ -39,6 +39,8 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.adapters.qt_progress_transport import QtProgressTransport
 from zcu_tools.gui.session.services.progress import ProgressService
 
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
@@ -853,10 +855,21 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
     widget.resize(1600, 1000)
     widget.show()
     try:
-        widget.show_tab("search")
-        named(widget, QPushButton, "fluxdep.fit.search").click()
-        assert runner.quiesce()
-        qapp.processEvents()
+        driver = ComponentDriver(widget)
+        driver.click(object_name="fluxdep.fit.stage.search")
+        driver.screenshot(tmp_path / "search-ready.png")
+        driver.click(object_name="fluxdep.fit.search")
+        # The submitted search delivers its result and diagnostic on the Qt owner.
+        qt_until(
+            lambda: (
+                driver.observe(object_name="fluxdep.fit.status").text.startswith("EJ=")
+                and {"EJ", "EC", "EL"}.issubset(
+                    {axis.xlabel for axis in driver.plots().axes}
+                )
+            ),
+            label="successful search diagnostic",
+        )
+        driver.screenshot(tmp_path / "search-finished.png")
         figure = widget.figures["diagnostic"]
         qapp.processEvents()
         widget.resize(1200, 800)
@@ -864,6 +877,7 @@ def test_search_diagnostic_axis_labels_clear_the_next_subplot_after_resize(
         canvas = figure.canvas
         assert isinstance(canvas, FigureCanvasQTAgg)
         canvas.draw()
+        driver.screenshot(tmp_path / "search-resized.png")
         renderer = canvas.get_renderer()
         by_label = {axes.get_xlabel(): axes for axes in figure.axes}
         for label, below in (("EJ", "EC"), ("EC", "EL")):

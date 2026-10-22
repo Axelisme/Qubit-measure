@@ -143,7 +143,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                     freqs1, freqs2, dual_reset_signal2real(data.T)
                 ),
             )
-            with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 for freq2, step in sched.scan("freq2", freqs2.tolist()):
                     modules = step.cfg.modules
                     modules.tested_reset.set_param("freq2", freq2)
@@ -177,7 +177,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
                 freqs1, freqs2, dual_reset_signal2real(data)
             ),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
                 "freq1", sweep2param("freq1", sched.cfg.sweep.freq1)
