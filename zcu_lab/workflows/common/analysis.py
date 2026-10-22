@@ -1,5 +1,7 @@
 """common analysis helpers for lab workflows."""
 
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,6 +13,7 @@ from zcu_tools.analysis.fitting import (
     fit_qubit_freq,
     fit_rabi,
 )
+from zcu_tools.experiment.workflows import Failed
 
 from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult, rabi_signal2real
@@ -79,21 +82,72 @@ class DecayFit:
     quality: FitQuality
 
 
-def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
+def validate_fit_trace(
+    coordinates: NDArray[np.float64], signals: NDArray[np.complex128]
+) -> Failed | None:
+    """Check a native 1-D trace before IQ projection, without changing samples.
+
+    coordinates are the finite sweep coordinates in the caller's native units.
+    Mismatched, empty or non-1-D arrays and nonfinite coordinates raise ValueError
+    as structural/configuration errors. Nonfinite measured IQ returns Failed
+    with a diagnostic; otherwise return None. Callers retain their own grid,
+    sample-count and detune requirements. No fit or acceptance decision occurs.
+    """
+    if coordinates.ndim != 1 or signals.ndim != 1 or coordinates.shape != signals.shape:
+        raise ValueError("Fit coordinates and signals must have matching 1-D shape")
+    if coordinates.size == 0 or not np.isfinite(coordinates).all():
+        raise ValueError("Fit coordinates must be nonempty and finite")
+    if not np.isfinite(signals).all():
+        return Failed("Fit failed: measured signals contain NaN or infinity")
+    return None
+
+
+def fit_or_failed[T](fit: Callable[[], T]) -> T | Failed:
+    """Run one native fit, isolating only NaN data and non-convergence.
+
+    fit is a zero-argument callable that invokes the caller's chosen fitter.
+    Return its value unchanged on success. The native fitter's explicit
+    non-convergence fallback warning and scipy's nonfinite-array ValueError
+    become Failed(reason). Other warnings retain their normal handling; all
+    other exceptions, including configuration/shape ValueErrors, propagate.
+    This shared boundary serves spectroscopy, Rabi and lifetime analysis; it
+    does not mask data, change optimizer options or impose acceptance gates.
+    """
+    fallback = "fit_func failed; returning init_p fallback with infinite covariance"
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=fallback, category=RuntimeWarning)
+        try:
+            return fit()
+        except RuntimeWarning as exc:
+            if not str(exc).startswith(fallback):
+                raise
+            return Failed(f"Fit failed: {exc}")
+        except ValueError as exc:
+            if str(exc) != "array must not contain infs or NaNs":
+                raise
+            return Failed(f"Fit failed: {exc}")
+
+
+def analyze_qubit_freq(result: FreqResult) -> FrequencyFit | Failed:
     """Fit the spectroscopy trace to estimate the qubit resonance and linewidth.
 
     result uses MHz coordinates and complex128 signals of matching shape.
     Reuse the native background-removal/magnitude projection without skipping
     or masking observations. Return estimate, error, FWHM and residual curves.
     Do not mutate result or acquire, plot, save, or apply an acceptance threshold.
-    Native projection/fitting errors and optimizer warnings propagate; native
-    fallback values remain distinguishable through errors/quality.
+    Return Failed(reason) for nonfinite measured IQ or the expected fit
+    failures documented by fit_or_failed. Structural/configuration errors and
+    unexpected projection/fitter errors propagate; no samples are replaced.
     """
+    failure = validate_fit_trace(result.freqs, result.signals)
+    if failure is not None:
+        return failure
     # Remove the native background, then fit the complete resonance trace.
     observed = qubfreq_signal2real(result.signals)
-    frequency, error, width, width_error, fitted, _optimizer = fit_qubit_freq(
-        result.freqs, observed, type="lor"
-    )
+    fit = fit_or_failed(lambda: fit_qubit_freq(result.freqs, observed, type="lor"))
+    if isinstance(fit, Failed):
+        return fit
+    frequency, error, width, width_error, fitted, _optimizer = fit
     # The workflow uses public estimates/errors, not positional optimizer vectors.
     quality = compute_fit_quality(observed, fitted, {}, None)
     return FrequencyFit(
@@ -107,7 +161,7 @@ def analyze_qubit_freq(result: FreqResult) -> FrequencyFit:
     )
 
 
-def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
+def analyze_len_rabi(result: LenRabiResult) -> RabiFit | Failed:
     """Fit Rabi oscillations to estimate phase-aware pi and pi/2 durations.
 
     result uses microsecond coordinates and complex128 signals of matching
@@ -116,13 +170,20 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
     traces whose first sample is nonzero.
     Return pi and pi/2 durations, propagated uncertainties and residual curves.
     Do not skip/mask data, mutate result or acquire, plot, save, or accept a fit.
-    Native projection/fitting errors and optimizer warnings propagate.
+    Nonfinite measured IQ and fit_or_failed's expected fit failures return
+    Failed(reason). Structural/configuration and unexpected errors propagate.
     """
+    failure = validate_fit_trace(result.lengths, result.signals)
+    if failure is not None:
+        return failure
     # Rotate IQ to the signal axis, then fit oscillations with free phase.
     observed = rabi_signal2real(result.signals)
-    pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit_rabi(
-        result.lengths, observed, decay=False, init_phase=None
+    fit = fit_or_failed(
+        lambda: fit_rabi(result.lengths, observed, decay=False, init_phase=None)
     )
+    if isinstance(fit, Failed):
+        return fit
+    pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit
     quality = compute_fit_quality(observed, fitted, {}, None)
     return RabiFit(
         float(pi_length),
@@ -135,18 +196,25 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit:
     )
 
 
-def analyze_t1(result: T1Result) -> DecayFit:
+def analyze_t1(result: T1Result) -> DecayFit | Failed:
     """Fit population decay to estimate the energy-relaxation lifetime.
 
     result uses microsecond coordinates and complex128 signals of matching
     1-D shape. Reuse the native real-axis rotation without skipping/masking.
     Return decay constant, marginal uncertainty and residual curves. Do not
     mutate result or acquire, plot, save, or apply an acceptance threshold.
-    Native projection/fitting errors and optimizer warnings propagate.
+    Nonfinite measured IQ and fit_or_failed's expected fit failures return
+    Failed(reason). Structural/configuration and unexpected errors propagate.
     """
+    failure = validate_fit_trace(result.times, result.signals)
+    if failure is not None:
+        return failure
     # Rotate IQ to the signal axis, then fit a single exponential.
     observed = t1_signal2real(result.signals)
-    lifetime, error, fitted, _optimizer = fit_decay(result.times, observed)
+    fit = fit_or_failed(lambda: fit_decay(result.times, observed))
+    if isinstance(fit, Failed):
+        return fit
+    lifetime, error, fitted, _optimizer = fit
     # Preserve the native estimate and error; residual diagnostics do not refit.
     quality = compute_fit_quality(observed, fitted, {}, None)
     return DecayFit(float(lifetime), float(error), observed, fitted, quality)
