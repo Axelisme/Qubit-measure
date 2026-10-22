@@ -106,7 +106,7 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
             record = completed(await scope.run(acquire, cfg, name="T1"))
             assert record.value.result == 8
             assert cfg.value == 7
-            await scope.setup_device("flux", FakeDeviceInfo(value=0.25))
+            await scope.setup_device("flux", FakeDeviceInfo(address="memory", value=0.25))
             await scope.wait_until(env.started_at + timedelta(seconds=2))
             await scope.commit(Collection(value=record.value.result))
 
