@@ -49,7 +49,7 @@ from zcu_tools.mcp.core.bridge import McpBridge, MCPBridgeConfig
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.assembly import build_measure_tools
-from zcu_tools.mcp.measure.recipe import RecipeDefinition
+from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -479,7 +479,7 @@ def mcp_client(
     tmp_path: Path,
     *,
     request: pytest.FixtureRequest | None = None,
-    recipes: Sequence[RecipeDefinition] = (),
+    recipes: Sequence[RecipeDeclaration] = (),
 ) -> tuple[McpBridge, Callable[[str, dict[str, Any]], dict[str, Any]]]:
     """Build a fixed-session MCP caller for the test-owned loopback GUI.
 

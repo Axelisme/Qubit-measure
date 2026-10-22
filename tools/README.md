@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。Repo 品質檢查的 CLI、輸出與比較機制。
 
@@ -8,7 +8,7 @@
 離線 Migration CLI 位於 `migrations/migrate_storage.py`，以 `python -m migrations.migrate_storage` 執行，不接量測啟動流程。執行 legacy 遷移、處理 pending／resume 或修改 component kind 前，讀 [Agent 離線遷移說明書](../docs/storage-migration.md)。
 
 本目錄的檢查是同一個形狀：純函式加上一個回傳 exit code 的 `main()`，把 JSON receipt 輸出到
-stdout。`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
+stdout。`check_script_awaits.py`、`check_file_size.py`、`check_test_capabilities.py`、`check_test_path_correspondence.py`
 另把人類可讀的違規行輸出到 stderr；`check_suppressions.py` 只計量不判定，在 stderr 列出使用量最多的
 抑制（最多 20 筆）並固定 exit 0；`check_ratchet.py` 與
 `check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`gate.py` 是給人看的入口，輸出純文字。
@@ -35,7 +35,7 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 ```
 
 `gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
-`lint-imports`、然後 ratchet。
+`lint-imports`、lab script await guardrail、然後 ratchet。
 
 省略 `--base` 時回報現況，列出全樹的絕對數字：
 
@@ -94,6 +94,31 @@ uv run --no-sync -- pytest -n auto --dist=worksteal
 
 `--dist=worksteal` 維持 command-level，因 parity intentionally disables pytest plugin autoload；
 不設定 pytest 全域預設，因此未帶旗標的 `pytest -n auto` 語意不變。
+
+## Lab script await guardrail
+
+`check_script_awaits.py` 全掃 `zcu_lab/` 所有 async def，不 import 或執行 lab。
+`check_sources(sources)` 接受 repo-relative path 到 source string 的 mapping，
+回具名 Violation(path, line, target)，line 從 1 起算。
+`main(argv)` 可用 `--root` 指定合成 fixture repo，stdout 回 violation_count／violations，
+stderr 列 path／line／target；無違規 exit 0，違規 exit 1，讀取或語法失敗 exit 2。
+Quality gate 以絕對檢查執行，不是可容忍新增違規的計數比較。
+Status 模式也列目前違規數。
+
+所有 recipe、workflow 與 helper 共用一條規則。
+Await 目標必須是 env／tab／session 呼叫，或解析到 lab 內定義的函式呼叫。
+目標函式可用 def 或 async def 定義，工具不推導回傳型別。
+工具解析直接的絕對／相對 import，不因外部函式名稱像 helper 就放行。
+Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集，不識別 decorator 或做 reachability。
+在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 不論有無 await 都拒絕，
+包含未 await 的 create_task 與 async with TaskGroup()。
+其他 async with／async for 不另禁。
+
+這是 ADR-0075 的漸進式 AST guardrail，不是 type checker 或 sandbox。
+框架 receiver 以 env／tab／session 字面名稱辨認，不驗證其 runtime 型別。
+Assignment aliases、動態分派、包裝與轉匯出不追蹤，可能造成漏報或拒絕合法 helper。
+出現實際失敗類別再擴充，不藉此新增作者排程 API。
+同 process 合成 source／fixture 驗證在 `tests/tools/test_check_script_awaits.py`。
 
 ## 品質快照與熱點報表
 

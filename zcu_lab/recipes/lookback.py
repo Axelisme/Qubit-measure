@@ -1,22 +1,28 @@
 """Readout arrival-time trace and proposed ADC trigger timing."""
 
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
-    RecipeDefinition,
-    RecipeGenerator,
-    RecipeNeedsParameters,
+from typing import Literal
+
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.mcp.measure.recipe_api import (
     RecipeSession,
     RecipeTab,
-    ask,
+    recipe,
 )
+from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 
-from .helpers import apply_frequency, choose_frequency, retain_scalar
+from .helpers import (
+    FrequencyCalibration,
+    apply_frequency,
+    choose_frequency,
+    report_number,
+    retain_scalar,
+    select_or_disable,
+)
 
 
 def _set_readout_timing(
-    tab: RecipeTab,
-    readout_length_us: float | None,
-    trigger_offset_us: float | None,
+    tab: RecipeTab, readout_length_us: float | None, trigger_offset_us: float | None
 ) -> None:
     """Keep omitted key values and provenance; convert only for explicit edits."""
     for field, value in (
@@ -24,139 +30,133 @@ def _set_readout_timing(
         (("modules", "readout", "trig_offset"), trigger_offset_us),
     ):
         if value is not None:
-            tab.use_inline(("modules", "readout"))
-            tab.set(field, value, source="explicit")
+            tab.select(("modules", "readout"), inline=True)
+            tab.set(field, value)
         else:
             retain_scalar(tab, field)
 
 
-# tolerated: Public lookback keywords must match the handwritten input_schema.
-def lookback(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    use_reset: str | None = None,
-    init_pulse_ref: str | None = None,
-    frequency_mhz: float | None = None,
-    readout_length_us: float | None = None,
-    trigger_offset_us: float | None = None,
-    rounds: int | None = None,
-) -> RecipeGenerator:
+class LookbackInputs(FormModel):
+    """Inputs for lookback; all units and null policies are declared per field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    use_reset: str | Literal["off"] = Field(
+        "off",
+        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    )
+    init_pulse_ref: str | Literal["off"] = Field(
+        "off",
+        description="Initialization library key, or off to disable preparation. Omission disables it; null is rejected.",
+    )
+    frequency_mhz: float | None = Field(
+        None,
+        description="Readout frequency in MHz; explicit wins, then an explicitly selected readout library, then $resonator.freq.",
+    )
+    readout_length_us: float | None = Field(
+        None, description="ADC acquisition window in us; null keeps the GUI value."
+    )
+    trigger_offset_us: float | None = Field(
+        None, description="ADC trigger offset in us; null keeps the GUI value."
+    )
+    rounds: int | None = Field(
+        None, description="Averaging round count; null keeps the GUI value."
+    )
+
+
+class LookbackReport(FormModel):
+    """Completed lookback results; cancellation returns no report."""
+
+    trigger_offset_us: float | None = Field(
+        description="Proposed ADC trigger offset in us; null means not estimable."
+    )
+    writeback_applied: bool = Field(
+        description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+
+class LookbackSummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    predict_offset: float | None = Field(
+        description="Owner predict_offset in us; null retains an unavailable estimate."
+    )
+
+
+@recipe(
+    "lookback",
+    description="Capture readout arrival timing in lookback; analyze, ask before writeback, and save.",
+)
+async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackReport:
     """Capture the readout pulse's arrival and ADC time envelope.
 
     Apply optional reset/init pulses, then read out at a fixed frequency.
     Primary estimates the trigger offset from the rising signal envelope.
-    Save the raw trace and analysis, then ask before applying the timing proposal.
+    Ask before applying the timing proposal, then save raw trace and analysis.
 
-    session is driver-supplied. target overrides the qubit alias for this Reset;
-    None uses global aliases. reuse_tab_id resets a named idle Lookback tab.
-    readout_ref selects a library module; None retains its GUI selection.
-    None disables reset/init_pulse; named references select those modules.
-    Explicit frequency_mhz wins, in MHz. Otherwise an explicit readout_ref may
-    supply frequency, then resonator calibration. Timing inputs use us:
-    readout_length_us sets the window and trigger_offset_us its offset.
-    rounds is an averaging count. Other None values retain GUI defaults.
-    Missing frequency reports needs_parameters; invalid cfg/native failures
-    propagate. Cancellation stops later steps; skipped writeback changes nothing.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Select readout and optional state preparation.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "lookback",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    tab.use_library(("modules", "readout"), readout_ref)
-    if use_reset is None:
-        tab.disable_library(("modules", "reset"))
-    else:
-        tab.use_library(("modules", "reset"), use_reset)
-    if init_pulse_ref is None:
-        tab.disable_library(("modules", "init_pulse"))
-    else:
-        tab.use_library(("modules", "init_pulse"), init_pulse_ref)
-
-    # 2. Resolve readout frequency and set the ADC timing window.
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
+    select_or_disable(tab, ("modules", "init_pulse"), inputs.init_pulse_ref)
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        frequency_mhz,
-        calibration="$resonator.freq",
-        prefer_library=readout_ref is not None,
-        required="frequency_mhz",
+        session,
+        inputs.frequency_mhz,
+        calibration=FrequencyCalibration(
+            path="$resonator.freq",
+            required="frequency_mhz",
+            prefer_library=inputs.readout_ref is not None,
+        ),
     )
     if frequency.missing:
         raise RecipeNeedsParameters(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline(("modules", "readout"))
+        tab.select(("modules", "readout"), inline=True)
         apply_frequency(tab, frequency.edit)
-    _set_readout_timing(tab, readout_length_us, trigger_offset_us)
-    tab.set(("rounds",), rounds, source="explicit")
+    _set_readout_timing(tab, inputs.readout_length_us, inputs.trigger_offset_us)
+    tab.set(("rounds",), inputs.rounds)
 
-    # 3. Acquire and save the raw time trace.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        # Analyze the acquisition with the GUI parameters.
+        analysis = await tab.analyze("primary", result=LookbackSummary)
 
-    # 4. Estimate the signal arrival time for the ADC trigger.
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
+        # Write only the proposal items selected in the answer.
+        decision = await tab.ask_writeback()
+        writeback_applied = False
+        if decision.accepted:
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
+        return LookbackReport(
+            trigger_offset_us=report_number(analysis.result.predict_offset),
+            writeback_applied=writeback_applied,
+        )
+    finally:
+        tab.save()
 
-    # 5. Ask before applying the proposed calibration.
-    decision = yield from ask(run.propose_writeback())
-    if decision.status == "cancelled":
-        return
-    if decision.decision == "accepted":
-        tab.accept()
 
-
-DEFINITION = RecipeDefinition(
-    name="lookback",
-    description=(
-        "Run lookback once, save raw data, analyze and save figures. "
-        "Wait up to 300 seconds; unfinished work continues by execution ID."
-    ),
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in (
-                    "reuse_tab_id",
-                    "readout_ref",
-                    "use_reset",
-                    "init_pulse_ref",
-                )
-            },
-            **{
-                name: {"type": ["number", "null"]}
-                for name in ("frequency_mhz", "readout_length_us", "trigger_offset_us")
-            },
-            "rounds": {"type": ["integer", "null"]},
-        },
-    },
-    run=lookback,
-    adapter_name="lookback",
-    summary_parameters=(
-        SummaryParameter("frequency_mhz", ("modules", "readout", "freq"), "MHz"),
-        SummaryParameter(
-            "readout_length_us", ("modules", "readout", "ro_length"), "us"
-        ),
-        SummaryParameter(
-            "trigger_offset_us", ("modules", "readout", "trig_offset"), "us"
-        ),
-        SummaryParameter("rounds", ("rounds",)),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("use_reset", ("modules", "reset")),
-        SummaryParameter("init_pulse_ref", ("modules", "init_pulse")),
-    ),
-    summary_estimates=(
-        SummaryEstimate("predict_offset", ("predict_offset",), unit="us"),
-    ),
-)
+DEFINITION = lookback

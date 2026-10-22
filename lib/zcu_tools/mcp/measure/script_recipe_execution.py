@@ -1,4 +1,4 @@
-"""Worker lifetime and detached progress for declarations using ScriptDriver."""
+"""Worker lifetime and detached progress for async recipe declarations."""
 
 from __future__ import annotations
 
@@ -12,25 +12,29 @@ from threading import Condition, Event, Thread, current_thread
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from zcu_tools.core.script_protocol import Answer, Operation, Question, Signal, Wait
-from zcu_tools.experiment.script_driver import ScriptDriver, ScriptStatus
+from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.experiment.script_host import CancelScope, ScriptStatus
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.recipe_api import (
+    RecipeCancelled,
     RecipeDeclaration,
     RecipeOutcome,
 )
+from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
+from zcu_tools.mcp.measure.recipe_details import RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_host import RecipeHost, RecipeHostFactory
+from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 logger = logging.getLogger(__name__)
-SCRIPT_TERMINAL = frozenset({"completed", "cancelled", "failed"})
+SCRIPT_TERMINAL = frozenset({"completed", "cancelled", "failed", "needs_parameters"})
 
 
 @dataclass(frozen=True)
 class ScriptRecipeError:
-    """The original failure's class name and diagnostic, without invented status."""
+    """Original unhandled failure; type is its class name, message is its diagnostic."""
 
     type: str
     message: str
@@ -38,13 +42,13 @@ class ScriptRecipeError:
 
 @dataclass(frozen=True)
 class ScriptPendingQuestion:
-    """Asked evidence and its discoverable reply contract, in separate namespaces.
+    """An explicit handoff, with evidence separate from response metadata.
 
-    question_type is the authored class name. question retains its named fields;
-    answer_schema is that Question's declared Answer JSON schema, including field
-    descriptions. Authored names never collide with these envelope metadata.
+    request_id uniquely identifies this ask. question_type is its authored class
+    name. question retains evidence; answer_schema describes only reply fields.
     """
 
+    request_id: str
     question_type: str
     question: Question[Answer]
     answer_schema: dict[str, JsonValue]
@@ -52,34 +56,39 @@ class ScriptPendingQuestion:
 
 @dataclass(frozen=True)
 class ScriptRecipeSnapshot:
-    """Local execution facts; reading never drives code or sends GUI requests.
+    """Immutable local progress, without driving author code or sending RPCs.
 
-    execution is session-local, recipe is the injected tool name. status follows
-    ScriptDriver, phase distinguishes preparation from yielded work and terminal.
-    pending_question is only the explicit unanswered Ask, never hidden analysis.
-    outcome exists only at terminal and preserves the authored report object.
-    error retains an uncaught host/script failure. cancel_requested records intent.
+    execution is session-local; recipe is its declaration name. status follows
+    the shared scheduler; phase separates preparation/waiting/paused/terminal.
+    pending_question exists only at explicit ask. pending_analysis identifies
+    the GUI-owned interactive operation while status is interactive; no second
+    runner is started. outcome exists at terminal;
+    cancelled outcomes suppress report, retaining all runs and any error.
+    cancel_requested records script-stop intent, not completion of GUI cleanup.
+    details retains detached per-Run conditions, analyses and explicit proposals.
+    missing lists authored parameter paths only at needs_parameters terminal;
+    that state has no outcome/error and releases registry admission.
     """
 
     execution: str
     recipe: str
-    status: ScriptStatus = "running"
+    status: ScriptStatus | Literal["needs_parameters", "interactive"] = "running"
     phase: Literal["preparing", "waiting", "paused", "terminal"] = "preparing"
     pending_question: ScriptPendingQuestion | None = None
+    pending_analysis: PendingAnalysis | None = None
     outcome: RecipeOutcome[BaseModel] | None = None
     error: ScriptRecipeError | None = None
     cancel_requested: bool = False
+    missing: tuple[str, ...] = ()
+    details: tuple[RecipeRunDetail, ...] = ()
 
 
 class ScriptRecipeExecution:
-    """Own one shared driver and worker, admitted by RecipeExecutions.
+    """Own one author worker and the production shared async host.
 
-    Inputs validate before host_factory binds a session. Only this worker drives
-    authored code. Public control/answer calls serialize through the condition;
-    invalid answers never reserve or resume. cancel drains active work then
-    resumes author-owned cleanup; close abandons it for host teardown. join drains
-    the worker, including the host-owned pending operation. No timeout
-    supplies a default answer or cancels work.
+    Inputs validate before the factory binds a GUI. Controls are acknowledged by
+    the scheduler, never by running author code on the caller thread. Teardown
+    cooperatively stops and drains operations; finally remains on this worker.
     """
 
     def __init__(
@@ -95,33 +104,29 @@ class ScriptRecipeExecution:
         self._arguments = deepcopy(dict(arguments))
         self._host_factory = host_factory
         self._host: RecipeHost | None = None
-        self._driver: ScriptDriver[BaseModel | None] | None = None
         self._condition = Condition()
         self._cancelled = Event()
-        self._closed = Event()
-        self._active: Operation[object] | None = None
-        self._answer: Answer | None = None
         self._progress = ScriptRecipeSnapshot(f"recipe-{uuid4()}", definition.name)
         self._worker = Thread(target=self._run, daemon=True)
         try:
             self._worker.start()
         except (RuntimeError, OSError) as error:
-            logger.exception("Script recipe worker could not start")
-            self._fail(error)
+            self._finish(None, error)
 
     def snapshot(self) -> ScriptRecipeSnapshot:
-        """Read immutable local progress, retaining the authored report identity."""
+        """Read detached progress; report identity is retained, questions are copied."""
         with self._condition:
             return replace(
                 self._progress,
                 pending_question=deepcopy(self._progress.pending_question),
+                details=self._host.runtime.details() if self._host is not None else (),
             )
 
     def wait(self, timeout: float) -> ToolReply:
-        """Wait at most 300 seconds for an unanswered question or terminal outcome.
+        """Wait up to 300 seconds for an explicit handoff or terminal result.
 
-        timeout must be finite and nonnegative. A timeout returns current progress
-        without changing the generator or its operation. Failure marks is_error.
+        timeout must be finite/nonnegative. Expiry only returns current progress;
+        it never cancels work, supplies an answer, or reconnects to the GUI.
         """
         if not isfinite(timeout) or timeout < 0:
             raise ValueError("timeout must be finite and nonnegative")
@@ -130,201 +135,208 @@ class ScriptRecipeExecution:
             self._condition.wait_for(
                 lambda: (
                     self._progress.status in SCRIPT_TERMINAL
-                    or self._progress.status == "paused"
+                    or self._progress.status in ("paused", "interactive")
                 ),
                 min(timeout, 300.0),
             )
+            host = self._host
             return ToolReply(
-                {**asdict(self._progress), "elapsed_s": time.monotonic() - began},
+                {**asdict(self.snapshot()), "elapsed_s": time.monotonic() - began},
+                images=host.runtime.images() if host is not None else (),
                 is_error=self._progress.status == "failed",
             )
 
     def answer(self, mapping: Mapping[str, object]) -> ToolReply:
-        """Validate named wire fields, reserve a pending Ask, then wait for handoff.
+        """Deliver {request_id, answer} after validating the exact pending question.
 
-        Parsing uses ScriptDriver's single Question/Answer inference owner.
-        Invalid answers leave progress paused; duplicate/non-question calls raise
-        RuntimeError. Authored continuation runs only on the original worker.
+        Late/duplicate IDs and absent questions return accepted=False, reason
+        and pending_request_id, without consuming a question. Invalid fields or
+        writeback choices raise and preserve the request. The shared host owns
+        validation and delivery. Accepted answers return at the next handoff or
+        terminal, without author-thread reentry.
         """
+        if set(mapping) != {"request_id", "answer"}:
+            raise ValueError("Answers require exactly request_id and answer")
+        request_id = TypeAdapter(str).validate_python(mapping["request_id"])
+        if not request_id:
+            raise ValueError("request_id must be nonempty")
+        answer = TypeAdapter(dict[str, object]).validate_python(mapping["answer"])
         with self._condition:
-            driver = self._driver
-            if driver is None or self._progress.status != "paused":
-                raise RuntimeError("No pending question to answer")
-            self._answer = driver.parse_answer(mapping)
-            self._progress = replace(
-                self._progress,
-                status="running",
-                pending_question=None,
-                phase="preparing",
+            host = self._host
+            terminal = self._progress.status in SCRIPT_TERMINAL
+        if host is None or terminal or host.scheduler.pending_question is None:
+            return self._rejected_answer(None)
+
+        def deliver() -> ToolReply | None:
+            pending = host.scheduler.pending_question
+            if pending is None or pending.request_id != request_id:
+                return self._rejected_answer(pending.request_id if pending else None)
+            host.scheduler.answer(request_id, answer)
+            return None
+
+        try:
+            rejected = host.scheduler.control(deliver)
+        except RuntimeError:
+            if host.scheduler.status in SCRIPT_TERMINAL:
+                return self._rejected_answer(None)
+            raise
+        if rejected is not None:
+            return rejected
+        # The acknowledgement precedes author continuation. Wait must not return
+        # the old question while the loop is about to clear its Future.
+        with self._condition:
+            self._condition.wait_for(
+                lambda: (
+                    self._progress.pending_question is None
+                    or self._progress.pending_question.request_id != request_id
+                )
             )
-            self._condition.notify_all()
         return self.wait(300.0)
 
-    def cancel(self) -> ToolReply:
-        """Request cancel once; drain active work before resuming author cleanup.
+    @staticmethod
+    def _rejected_answer(pending_request_id: str | None) -> ToolReply:
+        return ToolReply(
+            {
+                "accepted": False,
+                "reason": "No pending question for this request id",
+                "pending_request_id": pending_request_id,
+            }
+        )
 
-        Terminal executions are unchanged. The reply records intent, not a
-        fabricated terminal result. Host cancellation errors propagate.
+    def cancel(self, *, scope: CancelScope = "script") -> ToolReply:
+        """Acknowledge script or current Run stop, without fabricating completion.
+
+        Script cancellation is retained even during initial binding; run scope is
+        a no-op without an active operation. Subsequent operations still start,
+        inheriting stop only for script scope. Terminal progress is unchanged.
         """
+        if scope not in ("script", "run"):
+            raise ValueError("scope must be script or run")
         with self._condition:
-            if (
-                self._progress.status not in SCRIPT_TERMINAL
-                and not self._cancelled.is_set()
-            ):
+            if self._progress.status in SCRIPT_TERMINAL:
+                if scope == "run":
+                    return ToolReply(
+                        {
+                            **asdict(self.snapshot()),
+                            "cancelled": False,
+                            "reason": "no run in progress",
+                        }
+                    )
+                return ToolReply(asdict(self.snapshot()))
+            if scope == "script":
                 self._cancelled.set()
                 self._progress = replace(self._progress, cancel_requested=True)
-                try:
-                    if self._active is not None and self._host is not None:
-                        self._host.cancel(self._active)
-                finally:
-                    self._condition.notify_all()
-            return ToolReply(asdict(self._progress))
-
-    def finish_early(self) -> ToolReply:
-        """Reject early finish until a concrete operation host defines that policy."""
-        raise ValueError("Script recipe finish_early is not bound")
+            host = self._host
+        if scope == "run":
+            cancelled = host.runtime.cancel_run() if host is not None else False
+            return ToolReply(
+                {
+                    **asdict(self.snapshot()),
+                    "cancelled": cancelled,
+                    "reason": "run cancellation requested"
+                    if cancelled
+                    else "no run in progress",
+                }
+            )
+        if host is not None:
+            host.scheduler.cancel(scope=scope)
+        return ToolReply(asdict(self.snapshot()))
 
     def close(self) -> None:
-        """Abandon author continuation for teardown; call join to drain it.
-
-        Active work is cancelled and drained before worker-owned driver.close.
-        Finally runs without promising a response to any further yield.
-        """
-        with self._condition:
-            self._closed.set()
-            self.cancel()
+        """Request cooperative script cancellation; join drains the original worker."""
+        self.cancel()
 
     def join(self) -> None:
-        """Drain the worker; never join recursively from authored code."""
+        """Join the author worker and its executor drain, avoiding recursive join."""
         if self._worker.ident is not None and self._worker is not current_thread():
             self._worker.join()
 
-    def _publish(self, driver: ScriptDriver[BaseModel | None]) -> None:
-        question = driver.pending_question
-        answer = driver.pending_answer_type()
+    def _changed(self) -> None:
+        host = self._host
+        if host is None:
+            return
+        request = host.scheduler.pending_question
         pending = (
             ScriptPendingQuestion(
-                type(question).__name__, question, answer.model_json_schema()
+                request.request_id,
+                type(request.question).__name__,
+                request.question,
+                request.answer_type.model_json_schema(),
             )
-            if question is not None and answer is not None
+            if request is not None
             else None
         )
+        analysis = host.runtime.pending_analysis
         with self._condition:
-            status = driver.status
-            self._progress = replace(
-                self._progress,
-                status=status,
-                phase="terminal"
-                if status in SCRIPT_TERMINAL
-                else "paused"
-                if status == "paused"
-                else "waiting"
-                if status == "waiting"
-                else "preparing",
-                pending_question=pending,
-            )
-            self._condition.notify_all()
+            if self._progress.status not in SCRIPT_TERMINAL:
+                self._progress = replace(
+                    self._progress,
+                    status="paused"
+                    if pending
+                    else "interactive"
+                    if analysis
+                    else "running",
+                    pending_analysis=analysis,
+                    phase="paused" if pending else "waiting",
+                    pending_question=pending,
+                )
+                self._condition.notify_all()
 
     def _run(self) -> None:
+        report: BaseModel | None = None
+        error: Exception | None = None
         try:
             inputs = self._definition.inputs.model_validate(self._arguments)
-            host = self._host_factory(self._tools)
-            driver = ScriptDriver(
-                self._definition.generator(host.session, inputs),
-                on_signal=host.on_signal,
-                deliver_cancelled=host.deliver_cancelled,
-            )
+            host = self._host_factory(self._tools, self._changed)
             with self._condition:
                 self._host = host
-                self._driver = driver
-            self._drive(driver, host)
-            status = driver.status
-            if status not in ("completed", "cancelled", "failed"):
-                raise RuntimeError("Script driver did not reach terminal")
-            runs = host.runs()
+            if self._cancelled.is_set():
+                host.scheduler.cancel()
+            report = host.scheduler.run(
+                self._definition.coroutine(host.session, inputs)
+            )
+        except RecipeCancelled as failure:
+            error = failure
+        except RecipeNeedsParameters as failure:
+            error = failure
+        except Exception as failure:
+            logger.exception("Script recipe execution failed")
+            error = failure
+        self._finish(report, error)
+
+    def _finish(self, report: BaseModel | None, error: Exception | None) -> None:
+        host = self._host
+        cancelled = (
+            isinstance(error, RecipeCancelled)
+            or self._cancelled.is_set()
+            or (host is not None and host.scheduler.status == "cancelled")
+        )
+        status = (
+            "cancelled" if cancelled else "failed" if error is not None else "completed"
+        )
+        runs = host.runtime.runs() if host is not None else ()
+        if isinstance(error, RecipeNeedsParameters) and not cancelled:
             with self._condition:
                 self._progress = replace(
                     self._progress,
-                    status=status,
+                    status="needs_parameters",
                     phase="terminal",
                     pending_question=None,
-                    outcome=RecipeOutcome(status, driver.result, runs),
+                    missing=tuple(item.parameter for item in error.missing),
+                    outcome=None,
+                    error=None,
                 )
                 self._condition.notify_all()
-        except Exception as error:
-            logger.exception("Script recipe execution failed")
-            self._close_failed_driver(error)
-            self._fail(error)
-
-    def _close_failed_driver(self, error: Exception) -> None:
-        # A host failure happens outside driver.advance; close only after the
-        # host's wait has drained, before publishing terminal/admitting new work.
-        driver = self._driver
-        if driver is None or driver.status in ("completed", "cancelled"):
             return
-        try:
-            driver.close()
-        except Exception as cleanup_error:
-            logger.exception("Script cleanup also failed")
-            error.add_note(f"Script cleanup failed: {cleanup_error}")
-
-    def _drive(self, driver: ScriptDriver[BaseModel | None], host: RecipeHost) -> None:
-        if self._closed.is_set():
-            driver.close()
-            return
-        if self._cancelled.is_set():
-            driver.signal(Signal("cancel"))
-        driver.advance()
-        while driver.status not in SCRIPT_TERMINAL:
-            self._publish(driver)
-            request = driver.pending_request
-            if isinstance(request, Wait):
-                with self._condition:
-                    self._active = request.op
-                    if self._cancelled.is_set():
-                        host.cancel(request.op)
-                try:
-                    host.wait(request.op, self._cancelled)
-                    if request.op.delivery is None:
-                        raise RuntimeError(
-                            "Recipe host wait returned without terminal delivery"
-                        )
-                finally:
-                    with self._condition:
-                        self._active = None
-            elif driver.status == "paused":
-                with self._condition:
-                    self._condition.wait_for(
-                        lambda: self._answer is not None or self._cancelled.is_set()
-                    )
-                    answer = self._answer
-                    self._answer = None
-                if answer is not None and not self._cancelled.is_set():
-                    driver.answer(answer)
-                    continue
-            if self._closed.is_set():
-                driver.close()
-            else:
-                if self._cancelled.is_set():
-                    driver.signal(Signal("cancel"))
-                driver.advance()
-
-    def _fail(self, error: Exception) -> None:
-        host = self._host
-        runs = ()
-        if host is not None:
-            try:
-                runs = host.runs()
-            except Exception as capture_error:
-                logger.exception("Could not capture recipe acquisition history")
-                error.add_note(f"Run capture failed: {capture_error}")
         with self._condition:
             self._progress = replace(
                 self._progress,
-                status="failed",
+                status=status,
                 phase="terminal",
                 pending_question=None,
-                outcome=RecipeOutcome("failed", None, runs),
-                error=ScriptRecipeError(type(error).__name__, str(error)),
+                outcome=RecipeOutcome(status, None if cancelled else report, runs),
+                error=ScriptRecipeError(type(error).__name__, str(error))
+                if error is not None and not isinstance(error, RecipeCancelled)
+                else None,
             )
             self._condition.notify_all()

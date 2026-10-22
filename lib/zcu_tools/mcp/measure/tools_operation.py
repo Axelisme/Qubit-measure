@@ -14,7 +14,7 @@ from zcu_tools.mcp.measure.execution_reply import (
     project_control,
     project_execution,
 )
-from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
@@ -24,20 +24,9 @@ def _execution_status(
     """Project a local recipe or standalone execution without reconnecting."""
     if key.startswith("recipe-"):
         snapshot = asdict(ctx.session.recipes.get(key).snapshot())
-        definition = next(
-            item
-            for item in ctx.session.recipes.definitions
-            if item.name == snapshot["recipe"]
-        )
-        return project_execution(
-            snapshot,
-            definition=definition,
-            recipes=ctx.session.recipes.definitions,
-            detail=detail,
-        )
+        return project_execution(snapshot, detail=detail)
     return project_execution(
         asdict(ctx.session.executions.get(key).snapshot()),
-        recipes=ctx.session.recipes.definitions,
         detail=detail,
     )
 
@@ -82,9 +71,6 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     execution_snapshots = [
         asdict(item) for item in ctx.session.executions.snapshots()
     ] + [asdict(item) for item in ctx.session.recipes.snapshots()]
-    definitions = {
-        definition.name: definition for definition in ctx.session.recipes.definitions
-    }
     return {
         "entry": entry,
         "soc": soc,
@@ -96,11 +82,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
         "executions": [
-            project_execution(
-                item,
-                definition=definitions[item["recipe"]] if "recipe" in item else None,
-                recipes=ctx.session.recipes.definitions,
-            )
+            project_execution(item)
             for item in execution_snapshots
             if item["phase"] != "terminal"
         ],
@@ -158,20 +140,11 @@ def _wait_tool(
             else ctx.session.executions.get(key)
         )
         reply = execution.wait(timeout)
-        definition = (
-            next(
-                item
-                for item in ctx.session.recipes.definitions
-                if item.name == reply.data["recipe"]
-            )
-            if key.startswith("recipe-")
-            else None
-        )
-        data = project_execution(
-            reply.data, definition=definition, recipes=ctx.session.recipes.definitions
-        )
+        data = project_execution(reply.data)
         return ToolReply(
-            {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
+            data
+            if key.startswith("recipe-")
+            else {**data, "elapsed_s": max(0.0, time.monotonic() - start)},
             reply.images,
             # Accepted failures remain outcome data; interactive delivery errors
             # still flag the failed handoff without rewriting the native outcome.
@@ -229,9 +202,19 @@ def cancel(
     else:
         op = _operation_id(arguments)
         execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
+    scope = arguments.get("scope", "script")
+    if scope not in ("script", "run"):
+        raise ValueError("scope must be script or run")
     if execution is not None:
-        reply = execution.cancel()
+        if isinstance(execution, ScriptRecipeExecution):
+            reply = execution.cancel(scope=scope)
+        elif scope == "run":
+            raise ValueError("scope=run requires a recipe execution")
+        else:
+            reply = execution.cancel()
         return ToolReply(project_control(reply.data), is_error=reply.is_error)
+    if scope == "run":
+        raise ValueError("scope=run requires a recipe execution")
     op = _operation_id(arguments)
     ctx = ctx.bound()
     response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
@@ -241,23 +224,6 @@ def cancel(
         "status": response["status"],
         "cancel_requested": True,
     }
-
-
-def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply:
-    """Stop only a recipe's Run, keeping usable partial results for its pipeline."""
-    if ("op" in arguments) == ("execution" in arguments):
-        raise ValueError("provide exactly one of op or execution")
-    if "execution" in arguments:
-        recipe = ctx.session.recipes.get(_execution_id(arguments))
-    else:
-        op = _operation_id(arguments)
-        recipe = ctx.session.recipes.for_op(op)
-        if recipe is None:
-            raise GuiRpcError(
-                f"No registered recipe for operation {op}", reason="unknown_operation"
-            )
-    reply = recipe.finish_early()
-    return ToolReply(project_control(reply.data), is_error=reply.is_error)
 
 
 def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
@@ -302,29 +268,19 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
                 ],
             },
         },
-        "finish_early": {
-            "handler": partial(finish_early, ctx),
-            "description": "Stop a recipe Run early and continue with usable partial data.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "op": {"type": "integer"},
-                    "execution": {"type": "string", "minLength": 1},
-                },
-                "oneOf": [
-                    {"required": ["op"], "not": {"required": ["execution"]}},
-                    {"required": ["execution"], "not": {"required": ["op"]}},
-                ],
-            },
-        },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Request cancellation of one operation or execution.",
+            "description": "Request script cancellation, or stop only the current recipe Run with scope=run. A run cancellation with no Run in progress is a no-op. Acknowledgement does not imply cleanup completed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "op": {"type": "integer"},
                     "execution": {"type": "string", "minLength": 1},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["script", "run"],
+                        "default": "script",
+                    },
                 },
                 "oneOf": [
                     {"required": ["op"], "not": {"required": ["execution"]}},

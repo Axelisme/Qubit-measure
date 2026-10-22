@@ -33,8 +33,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
+    from .contracts import WritebackValues
     from .control import WritebackPane
-    from .service import WritebackValues
 
 logger = logging.getLogger(__name__)
 

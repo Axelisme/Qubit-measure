@@ -1,17 +1,15 @@
-"""Shared script contracts for recipe drivers and workflow engines.
+"""Stateless script outcomes and typed question/answer contracts.
 
-These declarations perform no driving, I/O or source lookup. Operation protocol
-properties describe host implementations rather than executable defaults.
-Hosts deliver operation outcomes and answers through request-owned delivery,
-then advance the generator with None. Signals take effect only at yield
-boundaries. Scripts never poll a signal inbox in this version.
+These declarations perform no driving, I/O or source lookup. The async host
+owns control scheduling and Future delivery. Existing workflow generators still
+use the original Wait/Ask contracts until their async migration lands.
 """
 
 from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 type OperationStatus = Literal["completed", "cancelled", "failed"]
 """Terminal outcome: success, cooperative cancellation, or an operation failure."""
@@ -38,20 +36,53 @@ class Question[A: Answer](BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    def parse_answer(self, value: object) -> A:
+        """Decode a reply with the authored Answer model, without delivery or I/O."""
+        adapter = TypeAdapter[A](self.answer_type())
+        return adapter.validate_python(value)
+
+    def validate_answer(self, answer: Answer) -> None:
+        """Validate evidence-dependent choices before delivery; default accepts A.
+
+        Subclasses may reject unknown or modified choices with ValueError.
+        Validation must not write external state or perform the proposed action.
+        """
+
+    def answer_type(self) -> type[Answer]:
+        """Return the declared Answer model, including inherited Question bases.
+
+        An unparameterized Question raises TypeError rather than accepting
+        arbitrary reply fields. This reflection boundary retains the authored
+        generic pairing for both wire validation and typed async delivery.
+        """
+        for base in type(self).__mro__:
+            if not issubclass(base, Question):
+                continue
+            metadata = base.__pydantic_generic_metadata__
+            args = metadata["args"]
+            if metadata["origin"] is Question and args:
+                candidate = args[0]
+                if isinstance(candidate, type) and issubclass(candidate, Answer):
+                    return candidate
+        raise TypeError(
+            "Question must declare Question[AnswerSubclass] before answering"
+        )
+
 
 @dataclass(frozen=True)
 class OperationResult[T]:
     """One operation's detached terminal delivery.
 
-    status is completed, cancelled or failed. result is the operation's named
-    payload, or None when no payload exists; cancelled operations may retain
-    partial data. error is the original failure diagnostic for failed outcomes,
-    otherwise None. A completed result does not imply that data was saved.
+    status is completed or failed. result is the operation's named payload, or
+    None without data. partial_result reports cooperative interruption, not
+    script cancellation; completed partial results may retain usable data.
+    error is the failure diagnostic, otherwise None. Completed does not mean saved.
     """
 
-    status: OperationStatus
+    status: Literal["completed", "failed"]
     result: T | None
     error: str | None = None
+    partial_result: bool = False
 
 
 class Operation[T](Protocol):
@@ -107,22 +138,6 @@ class Ask[A: Answer](ScriptRequest):
 
     question: Question[A]
     delivery: A | None = None
-
-
-@dataclass(frozen=True)
-class Signal:
-    """One host-handled control notification, effective at a yield boundary.
-
-    kind is cancel, finish_early, pause, stop or tunables_apply. payload is None
-    for control-only kinds and a complete named tunables model for
-    tunables_apply. The host owns validation, ordering and tunables revisions.
-    cancel completes a pending Wait as cancelled. Pause and Stop retain the
-    workflow engine's lifecycle rules. No arbitrary author kinds or script
-    inbox-reading API are provided.
-    """
-
-    kind: Literal["cancel", "finish_early", "pause", "stop", "tunables_apply"]
-    payload: BaseModel | None = None
 
 
 type ScriptGenerator[R] = Generator[ScriptRequest, None, R]

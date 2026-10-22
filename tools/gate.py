@@ -59,6 +59,11 @@ class Check:
 # status view something people stop running.
 STATUS_CHECKS: Final = (
     Check("import contracts", ("lint-imports",)),
+    Check(
+        "script awaits",
+        (sys.executable, str(_TOOLS_DIR / "check_script_awaits.py")),
+        "violation_count",
+    ),
     Check("ruff", ("ruff", "check", "--output-format", "json", "."), "__len__"),
     Check(
         "file size",
@@ -141,6 +146,12 @@ def steps(base: str, files: tuple[str, ...], *, fix: bool) -> tuple[Step, ...]:
         )
         found.append(Step("ruff format", ("ruff", "format", *format_flags, *files)))
     found.append(Step("import contracts", ("lint-imports",)))
+    found.append(
+        Step(
+            "script awaits",
+            (sys.executable, str(_TOOLS_DIR / "check_script_awaits.py")),
+        )
+    )
     found.append(
         Step(
             "ratchet",

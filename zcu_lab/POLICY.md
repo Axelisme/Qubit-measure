@@ -2,6 +2,8 @@
 
 **讀者：** lab-author、agent。逐條核對 zcu_lab 的程式碼規則、檢查方式與契約來源。
 
+**Last updated:** 2026-10-22
+
 修改 `zcu_lab` 時逐條核對本頁。每條列出檢查方式與來源，細節以連結的文件為準。
 新增 component、實驗與 recipe 的步驟見 [tutorial](tutorial/README.md)。
 本頁不授權操作硬體，範例能載入不代表校準齊全或可以 Run。
@@ -15,7 +17,9 @@
 ## 2. 在 recipe 寫出操作流程
 
 Recipe 函式本體直接列出開 tab、設定、Run、Analyze 與 writeback 問答，不把整段流程藏進 helper。
-檢查：從 generator 本體依序指出實際採用的步驟，確認接受 writeback 後才呼叫 `accept()`。
+檢查：從 async 函式本體依序指出步驟，確認接受 writeback 後才呼叫 `accept_writeback(items)`。Inputs 用 FormModel 宣告，由框架產生 MCP JSON schema，不渲染 recipe inputs 的 GUI Form。
+作者不寫取消分支，Run scope 返回 partial，script cancel 的普通 RecipeCancelled 讓已有 Run 的 finally 同步 Save。Analyze／Ask await 回非 Optional，不能以 None 作取消判斷。
+所有 lab async def 只 await env／tab／session 呼叫或有 lab 定義的 async helper，helpers 本身同樣受檢查。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫即使不 await 也拒絕，其他 async with／async for 不另禁。Quality gate 執行 AST 檢查，不追蹤 assignment aliases、動態分派或包裝，不是 type checker。
 來源：[recipe 操作流程](v2/experiment-authoring.md#2-在-recipe-函式本體寫出操作流程)。
 
 ## 3. Docstring 先說量測與結果

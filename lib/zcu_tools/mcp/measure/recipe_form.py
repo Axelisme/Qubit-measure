@@ -96,41 +96,6 @@ class RecipeFormField:
     element: ElementIdentity | None = None
 
 
-@dataclass(frozen=True)
-class RecipeModuleValues:
-    """Detached field-local module value from the tab's fixed Reset capture.
-
-    value contains materialized module fields in their declared units. It is not
-    the full native cfg after to_cfg and excludes extras lowering. mode is key
-    or inline. source is the owner's display label: library:<actual-key> for
-    key mode or its inline module label. It is not a parsed field locator. Other invalid draft fields do not block this view;
-    invalid module fields raise instead of returning unavailable/empty values.
-    All containers are detached from input, library and retained observations.
-    """
-
-    value: dict[str, YamlValue]
-    mode: Literal["key", "inline"]
-    source: str
-
-
-def read_module_values(reply: Mapping[str, object]) -> RecipeModuleValues:
-    """Decode the owner's value/mode/source reply; malformed wire raises.
-
-    reply is a tab.read_module response, not a Form preview. No values are
-    materialized or repaired here; incompatible replies raise incompatible_wire.
-    """
-    mode = reply.get("mode")
-    source = reply.get("source")
-    if mode not in ("key", "inline") or not isinstance(source, str) or not source:
-        raise GuiRpcError("Invalid module origin", reason="incompatible_wire")
-    values = wire_object(reply.get("value"))
-    return RecipeModuleValues(
-        {name: wire_value(value) for name, value in values.items()},
-        "key" if mode == "key" else "inline",
-        source,
-    )
-
-
 def wire_object(value: object) -> dict[str, object]:
     """Validate an object received from the GUI without accepting bad keys."""
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
@@ -158,41 +123,6 @@ def field_observation(reply: Mapping[str, object]) -> RecipeFieldObservation:
         raise GuiRpcError(
             "Invalid Form description", reason="incompatible_wire"
         ) from error
-
-
-def directed_errors(
-    publication: Mapping[str, object], path: RecipeFieldPath
-) -> tuple[RecipeFormError, ...]:
-    """Decode errors at root, consuming ancestors, target or descendants.
-
-    publication is an owner edit reply with complete logical preview errors;
-    path is the edited logical field. Sibling failures do not affect this edit.
-    """
-    raw = publication.get("errors")
-    if not isinstance(raw, list):
-        raise GuiRpcError("Invalid Form errors", reason="incompatible_wire")
-    errors: list[RecipeFormError] = []
-    for item in raw:
-        error = wire_object(item)
-        segments = error.get("path")
-        message = error.get("message")
-        if (
-            not isinstance(segments, list)
-            or any(
-                not isinstance(part, (str, int)) or isinstance(part, bool)
-                for part in segments
-            )
-            or not isinstance(message, str)
-        ):
-            raise GuiRpcError("Invalid Form error", reason="incompatible_wire")
-        error_path = tuple(segments)
-        if (
-            not error_path
-            or error_path[: len(path)] == path
-            or path[: len(error_path)] == error_path
-        ):
-            errors.append(RecipeFormError(error_path, message))
-    return tuple(errors)
 
 
 def read_form_field(

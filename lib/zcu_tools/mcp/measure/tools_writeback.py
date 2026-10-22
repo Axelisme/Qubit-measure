@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from functools import partial
 
 from zcu_tools.mcp.core.stdio_server import ToolTable
-from zcu_tools.mcp.measure.recipe import WritebackReceipt
+from zcu_tools.mcp.measure.recipe_contracts import WritebackReceipt
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.writeback import write_current_draft
 

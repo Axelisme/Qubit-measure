@@ -14,6 +14,22 @@ from ._registry import RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "tab.writeback_accept",
+        "writeback:h_tab_writeback_accept",
+        MethodSpec(
+            10.0,
+            "Accept captured stages=[{subtab_id,expected_revision,ids}] in Primary then Post order. "
+            "The owner checks all draft revisions and IDs before any write. Stale or replaced "
+            "drafts fail with writeback_changed; no edits or writes occur. Returns "
+            "{status,written:[{subtab_id,ids}],error}, retaining only confirmed successful "
+            "prefixes on write failure, without retry or rollback. Does not edit the draft.",
+            (
+                required_string("tab_id"),
+                ParamSpec("stages", JsonType.JSON, required=True),
+            ),
+        ),
+    ),
+    method_entry(
         "tab.writeback_write",
         "writeback:h_tab_writeback_write",
         MethodSpec(
@@ -45,7 +61,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "List a pane's persistent writeback draft (pure read — not a dry-run; the "
             "draft was computed once at analyze time). Requires (tab_id, subtab_id) "
             "with closed values analysis|post_analysis. Returns "
-            "{has_draft, items, destination_context}; has_draft is false before any "
+            "{has_draft, revision, items, destination_context}; revision changes on draft edits "
+            "and replacement, and is null without a draft. has_draft is false before any "
             "analyze produced a draft; destination_context is the current active "
             "SessionEnv projection at reply time. Each item: id "
             "(<kind>-<n>, kind∈param|ml|sample), target_name (apply destination, "

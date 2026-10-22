@@ -1,214 +1,205 @@
 """Qubit drive-frequency sweep, transition fit and reviewed calibration."""
 
-from math import isfinite
+from typing import Literal
 
-from zcu_tools.mcp.measure.execution_reply import SummaryEstimate, SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
-    RecipeDefinition,
-    RecipeGenerator,
     RecipeNeedsParameters,
-    RecipeSession,
-    ask,
 )
 
 from .helpers import (
+    FrequencyCalibration,
     FrequencySweepCalibration,
+    FrequencySweepRange,
     apply_frequency,
     choose_frequency,
+    report_number,
     retain_scalar,
+    select_or_disable,
     set_frequency_sweep,
 )
 
 
-def _validate_inputs(
-    references: tuple[tuple[str, str | None], ...],
-    scalars: tuple[tuple[str, float | None], ...],
-    span_mhz: float | None,
-    points: int | None,
-) -> None:
-    """Reject unusable explicit inputs before any GUI preparation."""
-    for name, value in references:
-        if value is not None and not value.strip():
-            raise ValueError(f"{name} must be non-empty or null")
-    for name, value in scalars:
-        if value is not None and not isfinite(value):
-            raise ValueError(f"{name} must be finite or null")
-    if span_mhz is not None and span_mhz <= 0:
-        raise ValueError("span_mhz must be positive")
-    if points is not None and points < 2:
-        raise ValueError("points must be at least two")
+class TwotoneSpectrumInputs(FormModel):
+    """Inputs for twotone spectrum; all units and null policies are declared per
+    field."""
+
+    target: str | None = Field(
+        None,
+        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
+    )
+    reuse_tab_id: str | None = Field(
+        None,
+        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
+    )
+    readout_ref: str | None = Field(
+        None,
+        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    )
+    drive_ref: str | None = Field(
+        None,
+        description="Drive library key; null keeps the GUI selection. No pi calibration is required for this sweep.",
+    )
+    use_reset: str | Literal["off"] = Field(
+        "off",
+        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    )
+    center_mhz: float = Field(description="Sweep center in MHz.")
+    span_mhz: float = Field(
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2."
+    )
+    gain: float | None = Field(
+        None,
+        description="Fixed pulse amplitude in native gain units; null keeps the GUI value.",
+    )
+    pulse_length_us: float | None = Field(
+        None, description="Fixed drive pulse duration in us; null keeps the GUI value."
+    )
+    points: int = Field(
+        description="Sweep sample count; null keeps the GUI count when optional."
+    )
+    reps: int | None = Field(
+        None, description="Acquisition repetition count; null keeps the GUI value."
+    )
+    rounds: int | None = Field(
+        None, description="Averaging round count; null keeps the GUI value."
+    )
 
 
-# tolerated: Public qubit spectrum keywords must match the handwritten input_schema.
-def twotone_spectrum(  # noqa: PLR0913
-    session: RecipeSession,
-    *,
-    target: str | None = None,
-    reuse_tab_id: str | None = None,
-    readout_ref: str | None = None,
-    drive_ref: str | None = None,
-    use_reset: str | None = None,
-    center_mhz: float,
-    span_mhz: float,
-    gain: float | None = None,
-    pulse_length_us: float | None = None,
-    points: int,
-    reps: int | None = None,
-    rounds: int | None = None,
-) -> RecipeGenerator:
+class TwotoneSpectrumReport(FormModel):
+    """Completed twotone spectrum results; cancellation returns no report."""
+
+    frequency_mhz: float | None = Field(
+        description="Fitted transition frequency in MHz; null means not estimable."
+    )
+    frequency_err_mhz: float | None = Field(
+        description="Transition frequency uncertainty in MHz; null means not estimable."
+    )
+    linewidth_mhz: float | None = Field(
+        description="Fitted full linewidth in MHz; null means not estimable."
+    )
+    linewidth_err_mhz: float | None = Field(
+        description="Linewidth uncertainty in MHz; null means not estimable."
+    )
+    writeback_applied: bool = Field(
+        description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+
+class TwotoneSpectrumSummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    freq: float | None = Field(
+        description="Owner freq in MHz; null retains an unavailable estimate."
+    )
+
+    freq_err: float | None = Field(
+        description="Owner freq_err in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm: float | None = Field(
+        description="Owner fwhm in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm_err: float | None = Field(
+        description="Owner fwhm_err in MHz; null retains an unavailable estimate."
+    )
+
+
+@recipe(
+    "twotone_spectrum",
+    description="Run one two-tone spectrum and save raw data and Primary analysis.",
+)
+async def twotone_spectrum(
+    session: RecipeSession, inputs: TwotoneSpectrumInputs
+) -> TwotoneSpectrumReport:
     """Sweep qubit drive frequency to locate a transition.
 
-    Apply optional reset, a fixed-length/gain qubit pulse, then readout.
-    Primary fits the averaged IQ response to estimate transition frequency
-    and linewidth. Save raw data and analysis, then ask before applying it.
+    Apply optional reset, a fixed-length/gain qubit pulse, then readout. Primary
+    fits the averaged IQ response to estimate transition frequency and
+    linewidth. Ask before applying it, then save raw data and analysis.
 
-    session is driver-supplied. target overrides the qubit alias for this Reset;
-    None uses global aliases. reuse_tab_id resets an idle twotone/freq tab.
-    readout_ref/drive_ref select library modules; None retains GUI selections.
-    Readout frequency uses a valid library value, then resonator calibration.
-    None disables reset; use_reset selects its module. Required center_mhz and
-    positive span_mhz are finite MHz values; required points is an integer >=2.
-    gain is native amplitude; pulse_length_us is the fixed duration in us.
-    reps/rounds control averaging; other None values retain GUI defaults.
-    Blank references and invalid span/points fail before setup; missing
-    calibration reports needs_parameters. Invalid inputs/cfg/native failures
-    propagate. Cancellation stops later steps; skipped writeback changes nothing.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    Missing calibration raises RecipeNeedsParameters before Run.
     """
-    # 1. Validate inputs before selecting the measurement sources.
-    _validate_inputs(
-        (
-            ("reuse_tab_id", reuse_tab_id),
-            ("readout_ref", readout_ref),
-            ("drive_ref", drive_ref),
-            ("use_reset", use_reset),
-        ),
-        (
-            ("center_mhz", center_mhz),
-            ("span_mhz", span_mhz),
-            ("gain", gain),
-            ("pulse_length_us", pulse_length_us),
-        ),
-        span_mhz,
-        points,
-    )
-
-    # 2. Open/reset the tab and select the pulse libraries.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab(
         "twotone/freq",
-        aliases=None if target is None else {"qubit": target},
-        reuse=reuse_tab_id,
+        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    if use_reset is None:
-        tab.disable_library(("modules", "reset"))
-    else:
-        tab.use_library(("modules", "reset"), use_reset)
-    tab.use_library(("modules", "readout"), readout_ref)
-    tab.use_library(("modules", "qub_pulse"), drive_ref)
-
-    # 3. Set the drive sweep and resolve the fixed readout frequency.
-    # Report all missing sources together.
+    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
+    tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select(("modules", "qub_pulse"), ref=inputs.drive_ref)
     missing: list[MissingParameter] = []
     missing.extend(
         set_frequency_sweep(
             tab,
             ("sweep", "freq"),
             calibration=FrequencySweepCalibration("$qubit.freq", "$qubit.kappa", 3.0),
-            center_mhz=center_mhz,
-            span_mhz=span_mhz,
-            expts=points,
+            session=session,
+            scan=FrequencySweepRange(
+                center_mhz=inputs.center_mhz,
+                span_mhz=inputs.span_mhz,
+                expts=inputs.points,
+            ),
         )
     )
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        calibration="$resonator.freq",
-        required="readout_ref",
+        session,
+        calibration=FrequencyCalibration(
+            path="$resonator.freq", required="readout_ref"
+        ),
     )
     missing.extend(frequency.missing)
     if frequency.edit is not None:
-        tab.use_inline(("modules", "readout"))
+        tab.select(("modules", "readout"), inline=True)
         apply_frequency(tab, frequency.edit)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-
-    if gain is not None or pulse_length_us is not None:
-        tab.use_inline(("modules", "qub_pulse"))
-        tab.set(("modules", "qub_pulse", "gain"), gain, source="explicit")
+    if inputs.gain is not None or inputs.pulse_length_us is not None:
+        tab.select(("modules", "qub_pulse"), inline=True)
+        tab.set(("modules", "qub_pulse", "gain"), inputs.gain)
     else:
         retain_scalar(tab, ("modules", "qub_pulse", "gain"))
-    if pulse_length_us is not None:
-        tab.use_inline(("modules", "qub_pulse", "waveform"))
-        tab.set(("modules", "qub_pulse", "waveform", "length"), pulse_length_us)
+    if inputs.pulse_length_us is not None:
+        tab.select(("modules", "qub_pulse", "waveform"), inline=True)
+        tab.set(("modules", "qub_pulse", "waveform", "length"), inputs.pulse_length_us)
     else:
         retain_scalar(tab, ("modules", "qub_pulse", "waveform", "length"))
-    tab.set(("reps",), reps, source="explicit")
-    tab.set(("rounds",), rounds, source="explicit")
+    tab.set(("reps",), inputs.reps)
+    tab.set(("rounds",), inputs.rounds)
 
-    # 4. Acquire and save the raw IQ sweep.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        # Analyze the acquisition with the GUI parameters.
+        analysis = await tab.analyze("primary", result=TwotoneSpectrumSummary)
 
-    # 5. Fit the transition frequency and linewidth.
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
+        # Write only the proposal items selected in the answer.
+        decision = await tab.ask_writeback()
+        writeback_applied = False
+        if decision.accepted:
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
+        return TwotoneSpectrumReport(
+            frequency_mhz=report_number(analysis.result.freq),
+            frequency_err_mhz=report_number(analysis.result.freq_err),
+            linewidth_mhz=report_number(analysis.result.fwhm),
+            linewidth_err_mhz=report_number(analysis.result.fwhm_err),
+            writeback_applied=writeback_applied,
+        )
+    finally:
+        tab.save()
 
-    # 6. Ask before applying the proposed calibration.
-    decision = yield from ask(run.propose_writeback())
-    if decision.status == "cancelled":
-        return
-    if decision.decision == "accepted":
-        tab.accept()
 
-
-DEFINITION = RecipeDefinition(
-    name="twotone_spectrum",
-    description="Run one two-tone spectrum and save raw data and Primary analysis.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["center_mhz", "span_mhz", "points"],
-        "properties": {
-            "center_mhz": {"type": "number"},
-            "span_mhz": {"type": "number"},
-            "points": {"type": "integer"},
-            "target": {"type": ["string", "null"], "minLength": 1},
-            **{
-                name: {"type": ["string", "null"], "minLength": 1}
-                for name in ("reuse_tab_id", "readout_ref", "drive_ref", "use_reset")
-            },
-            **{
-                name: {"type": ["number", "null"]}
-                for name in ("gain", "pulse_length_us")
-            },
-            **{name: {"type": ["integer", "null"]} for name in ("reps", "rounds")},
-        },
-    },
-    run=twotone_spectrum,
-    adapter_name="twotone/freq",
-    summary_parameters=(
-        SummaryParameter(
-            "readout_frequency_mhz",
-            ("modules", "readout", "freq"),
-            "MHz",
-        ),
-        SummaryParameter("readout_ref", ("modules", "readout")),
-        SummaryParameter("use_reset", ("modules", "reset")),
-        SummaryParameter("reps", ("reps",)),
-        SummaryParameter("rounds", ("rounds",)),
-        SummaryParameter(
-            "pulse_length_us", ("modules", "qub_pulse", "waveform", "length"), "us"
-        ),
-        SummaryParameter("gain", ("modules", "qub_pulse", "gain")),
-        SummaryParameter("frequency_sweep", ("sweep", "freq"), "MHz"),
-        SummaryParameter("drive_ref", ("modules", "qub_pulse")),
-    ),
-    summary_estimates=(
-        SummaryEstimate("freq", ("freq",), ("freq_err",), "MHz"),
-        SummaryEstimate("fwhm", ("fwhm",), ("fwhm_err",), "MHz"),
-    ),
-)
+DEFINITION = twotone_spectrum

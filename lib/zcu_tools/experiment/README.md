@@ -6,9 +6,17 @@
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
-## Shared script driver
+## Shared async script host
 
-`script_driver.ScriptDriver` 非阻塞地驅動 `core.script_protocol` generator，供 workflow 與 recipe host 共用。Host 更新 operation delivery 後呼叫 `advance()`，或以 `answer()` 回答 pending question。Driver 只在 yield 邊界交付 Signal。Cancel 交回作者收尾，不關閉 generator。Host 先取消並 drain 正在進行的 operation，再保留其真實 delivery。Ask 取消後以 None resume。取消後的新 Wait 交給必填的 owner callback `deliver_cancelled`，不啟動工作；新 Ask 立即回 None。作者 return 後 status 為 cancelled，result 保留原回傳值；收尾拋錯為 failed。只有宿主 teardown 或丟棄 invocation 時才呼叫 `close()`，執行 finally 但不保證 yield 得到回應。公開 docstrings 定義單一 worker owner 的呼叫順序。
+`script_host.ScriptHost` 建構時不啟動 thread 或 loop。`run(coroutine)` 在呼叫它的 worker 執行一次作者 coroutine，完成 finally 與 executor drain 後返回或 raise，不能重用。`await call(fn)` 在 executor 執行 `fn(CallContext)`，回 `CallResult(result, epoch, partial_result)`。Context 提供本次 operation 的 StopSignal child 與起跑 epoch，停止的 token 仍啟動 fn，由 owner 合作返回 partial。作者 Task 不會被 cancel，finally 留在同一 worker。
+
+`await ask(question)` 以唯一 request id 等待具名 Answer，`answer(request_id, answer)` 驗證當前問題；錯誤、重複或遲到答案不消耗新問題。Host script cancel 以內部 None 釋放 Ask Future，recipe 便利層轉成普通 RecipeCancelled，作者 ask 不回 Optional。
+
+`control(fn)` 把數微秒級的 memory-only callback 排入與 cancel／pause／resume／answer 相同的 loop 序列，呼叫端等待回傳值或原例外。Fn 不 await、不阻塞、不 I/O，也不重入作者程式。Worker 上 inline 執行，foreign thread 經 call_soon_threadsafe 與 acknowledgement；run 前或 loop 關閉後 raise RuntimeError。`cancel(scope="script"|"run")` 只設 token，acknowledgement 不表示 operation 已 drain。Recipe runtime 另用 control 原子檢查當前 tab.run token，analysis／Ask／閒置時 run cancel 是 no-op。`close()` 合作 drain，off-worker 等到 coroutine／finally／executor 完成，worker 自己呼叫時只請求停止，不自等。
+
+Pause 只停止目前 operation、增加 epoch 並關 gate，不停止 iteration。Resume 只開 gate。CallResult 固定起跑 epoch 與 fn 完成時的 stop bit。Workflow env 決定是否丟棄 partial 並重跑相同 request；host 不重跑外部效果。Commit 等 gate 後更換 iteration child。Script cancel 打開 gate，使作者可收尾。
+
+`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳。`set_error()` 只在本 scope 記第一個錯誤並停止自己與子孫，不改祖先或兄弟的停止與錯誤狀態。`release()` 移除已完成 scope。原 `script_driver.ScriptDriver` 暫只服務尚未遷移的 workflow；其直接 `cancel()` 保留既有邊界語意，不提供控制訊息 inbox。
 
 ## Explicit simulation environments
 

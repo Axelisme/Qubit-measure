@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
@@ -12,6 +13,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
+from .contracts import WritebackAcceptance, WritebackSelection
 from .service import WritebackDraft
 
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
@@ -22,12 +24,21 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
 
     from ..services.guard import GuardService
-    from .service import (
-        WritebackEdit,
-        WritebackService,
-        WritebackValues,
-        WritebackWritten,
-    )
+    from .contracts import WritebackEdit, WritebackValues, WritebackWritten
+    from .service import WritebackService
+
+
+@dataclass(frozen=True)
+class CapturedWritebackPane:
+    """One pane's explicit acceptance at its preview revision.
+
+    subtab_id is analysis or post_analysis. expected_revision is the owner-issued
+    draft revision. ids are unique nonempty draft-local item IDs to write.
+    """
+
+    subtab_id: WritebackPane
+    expected_revision: int
+    ids: tuple[str, ...]
 
 
 class WritebackControlPort(Protocol):
@@ -83,6 +94,20 @@ class WritebackControlPort(Protocol):
     def write_writeback_for_pane(
         self, tab_id: str, pane: WritebackPane, changes: tuple[WritebackEdit, ...]
     ) -> list[WritebackWritten]: ...
+
+    def get_writeback_revision_for_pane(self, tab_id: str, pane: WritebackPane) -> int:
+        """Read the current active draft revision without changing it."""
+        ...
+
+    def accept_writeback(
+        self, tab_id: str, selections: tuple[CapturedWritebackPane, ...]
+    ) -> WritebackAcceptance:
+        """Admit and submit all selected panes synchronously, Primary then Post.
+
+        Return one applied-ID tuple per selection. Repeated/out-of-order panes
+        or stale drafts raise before writing. No retry or rollback on failure.
+        """
+        ...
 
     def get_context_version(self) -> int: ...
 
@@ -185,6 +210,46 @@ class WritebackControlFacet:
             return self._writeback.write_draft(draft, changes)
         finally:
             # Failed batches may have changed the shared draft's prefix.
+            self._emit_draft_changed(tab_id)
+
+    def get_writeback_revision_for_pane(self, tab_id: str, pane: WritebackPane) -> int:
+        """Read an active pane's draft revision; missing/inactive drafts raise."""
+        draft = self._draft_for_pane(tab_id, pane)
+        if not isinstance(draft, WritebackDraft):
+            raise InvalidInputError("unknown writeback draft")
+        return draft.revision
+
+    def accept_writeback(
+        self, tab_id: str, selections: tuple[CapturedWritebackPane, ...]
+    ) -> WritebackAcceptance:
+        """Validate all captured panes in one admitted owner call, then write.
+
+        See WritebackControlPort.accept_writeback for ordering and receipt rules.
+        Permission, idle and active draft checks apply before any submission.
+        """
+        self._guard.check_writeback(tab_id)
+        self._require_tab_idle(tab_id)
+        panes = tuple(selection.subtab_id for selection in selections)
+        if panes not in (
+            (),
+            ("analysis",),
+            ("post_analysis",),
+            ("analysis", "post_analysis"),
+        ):
+            raise InvalidInputError(
+                "Captured writeback panes must be unique, Primary then Post"
+            )
+        groups: list[WritebackSelection] = []
+        for selection in selections:
+            draft = self._draft_for_pane(tab_id, selection.subtab_id)
+            if not isinstance(draft, WritebackDraft):
+                raise InvalidInputError("unknown writeback draft")
+            groups.append(
+                WritebackSelection(draft, selection.expected_revision, selection.ids)
+            )
+        try:
+            return self._writeback.accept_drafts(tuple(groups))
+        finally:
             self._emit_draft_changed(tab_id)
 
     def get_writeback_values_for_pane(

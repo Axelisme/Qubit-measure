@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from ...core.script_protocol import Answer, Operation, Question, Signal, Wait
+from ...core.script_protocol import Answer, Operation, Question, Wait
 from ...device import BaseDeviceInfo
 from ...progress_bar import use_pbar_factory
 from ..script_driver import ScriptDriver
@@ -346,7 +346,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, S, R, C]:
             and driver.pending_question is not None
         ):
             # A retained Ask is resumed only here, outside the control lock.
-            driver.signal(Signal("cancel"))
+            driver.cancel()
             driver.advance()
             if driver.status != "cancelled":
                 raise RuntimeError("Cancelled workflow cleanup did not reach terminal")

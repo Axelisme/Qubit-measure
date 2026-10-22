@@ -23,7 +23,6 @@ from zcu_tools.mcp.core.control import ControlConnection
 from zcu_tools.mcp.core.rpc import GuiInvocationError
 
 if TYPE_CHECKING:
-    from zcu_tools.mcp.measure.recipe import RecipeDefinition
     from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
     from zcu_tools.mcp.measure.recipe_host import RecipeHostFactory
 
@@ -288,7 +287,7 @@ class MeasureMcpSession:
         self,
         config: MCPBridgeConfig,
         *,
-        recipes: Sequence[RecipeDefinition | RecipeDeclaration],
+        recipes: Sequence[RecipeDeclaration],
         recipe_host_factory: RecipeHostFactory | None = None,
         bridge: McpBridge | None = None,
         resolve_connect_port: ResolveConnectPortFn,

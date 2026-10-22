@@ -37,6 +37,14 @@ Shared transport primitives live in [`zcu_tools.gui.remote`](../../../remote/REA
 typed request/reply/error envelope, socket endpoint, owner-scheduler dispatch, and
 router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/wire.py).
 
+## Captured writeback
+
+`tab.writeback_preview` 回 owner draft revision，沒有 draft 時 revision 為 null。
+`tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, expected_revision, ids}` 清單。
+Owner 在同一次 dispatch 核對 Primary／Post 全部選定 revisions 與 IDs，任何 draft 改動或替換都回 `writeback_changed`，不開始寫入。
+通過後按 Primary、Post、各 pane 的候選順序寫入。回覆 `{status, written, error}`，written 以 pane 與穩定 item ID 記錄已確認成功前綴。
+第一次寫入失敗就停止，不 retry／rollback。單 pane `tab.writeback_set`／`tab.writeback_write` 仍編輯當前 draft。
+
 ## Workflow namespace
 
 `workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/records/figures/figure/answer`
