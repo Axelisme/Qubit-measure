@@ -2,119 +2,100 @@
 
 from math import isfinite
 
-from zcu_tools.mcp.measure.execution_reply import SummaryParameter
-from zcu_tools.mcp.measure.recipe import (
-    RecipeDefinition,
-    RecipeGenerator,
-    RecipeSession,
-)
+from pydantic import BaseModel, Field
+from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.form_adapter.sweep import LinRange
+from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from .helpers import set_flux_sweep, use_flux_device
 
 
-def mist_flux_dep(
-    session: RecipeSession,
-    *,
-    flux_device: str,
-    flux_unit: str,
-    flux_range: list[float],
-    gain_range: list[float],
-    points: int = 101,
-) -> RecipeGenerator:
+class MistFluxDepInputs(FormModel):
+    """Inputs for mist flux dep; all units and null policies are declared per
+    field."""
+
+    flux_device: str = Field(
+        description="Registered flux-device name; read only its cached snapshot, without connecting."
+    )
+    flux_unit: str = Field(
+        description="Exact cached device unit, including native; no coordinate conversion occurs."
+    )
+    flux_range: list[float] = Field(
+        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs."
+    )
+    gain_range: list[float] = Field(
+        description="Two finite distinct native gain endpoints in [-1, 1]."
+    )
+    points: int = Field(101, description="Sample count on each map axis, at least two.")
+
+
+class MistFluxDepReport(FormModel):
+    """Completed mist flux dep results; cancellation returns no report."""
+
+    analysis_completed: bool = Field(
+        description="Whether the default raw-coordinate baseline-difference map completed."
+    )
+
+
+class MistFluxDepSummary(BaseModel):
+    """Author view of owner summary fields; no missing values are invented."""
+
+    # This figure-only analysis exposes no scalar fields to the report.
+
+
+@recipe(
+    "mist_flux_dep",
+    description="Acquire one MIST flux/gain map with explicit native ranges; save raw and Primary without writeback.",
+)
+async def mist_flux_dep(
+    session: RecipeSession, inputs: MistFluxDepInputs
+) -> MistFluxDepReport:
     """Acquire and save one MIST map using the current global aliases.
 
-    session is driver-supplied. flux_device names a registered device; flux_unit
-    must exactly match its cached unit (A/V/native), without conversion.
-    flux_range and gain_range each contain two finite distinct endpoints;
-    gain endpoints lie in [-1, 1]. points is an integer >=2 for each axis.
-    The GUI's optional preparation, probe, readout and averaging defaults remain
-    editable before Run. This recipe does not reuse a tab or change aliases.
-
-    Invalid ranges/count raise ValueError before Open; cached-device/cfg errors
-    propagate before Run. Cancellation skips subsequent steps. Save raw IQ then
-    the default raw-coordinate Primary map; no writeback is proposed.
+    Inputs declare native units and GUI-retention policies. The session supplies
+    fixed Form sources. Return the typed report after completion.
+    The runtime owns cancellation. Owner, acquisition, save and analysis errors
+    propagate. Save raw data and completed artifacts once in the Run finalizer.
     """
-    # 1. Reject malformed ranges before opening the map.
-    for name, values in (("flux_range", flux_range), ("gain_range", gain_range)):
+    for name, values in (
+        ("flux_range", inputs.flux_range),
+        ("gain_range", inputs.gain_range),
+    ):
         if (
             len(values) != 2
-            or any(isinstance(value, bool) or not isfinite(value) for value in values)
+            or any((isinstance(value, bool) or not isfinite(value) for value in values))
             or values[0] == values[1]
         ):
             raise ValueError(f"{name} requires two finite distinct endpoints")
-    if any(abs(value) > 1 for value in gain_range):
+    if any((abs(value) > 1 for value in inputs.gain_range)):
         raise ValueError("gain_range endpoints must lie in [-1, 1]")
-    if isinstance(points, bool) or points < 2:
+    if isinstance(inputs.points, bool) or inputs.points < 2:
         raise ValueError("points must be an integer >=2")
-
-    # 2. Keep the captured pulse selections and set explicit native axes.
+    # Select the captured sources before editing measurement fields.
     tab = session.open_tab("mist/flux_dep")
-    use_flux_device(tab, flux_device, unit=flux_unit)
+    use_flux_device(tab, inputs.flux_device, unit=inputs.flux_unit)
     set_flux_sweep(
         tab,
         ("sweep", "flux"),
-        start=flux_range[0],
-        stop=flux_range[1],
-        expts=points,
+        start=inputs.flux_range[0],
+        stop=inputs.flux_range[1],
+        expts=inputs.points,
     )
-    tab.set_sweep(
+    tab.set(
         ("sweep", "gain"),
-        start=gain_range[0],
-        stop=gain_range[1],
-        expts=points,
-        sources={"start": "explicit", "stop": "explicit", "expts": "explicit"},
+        LinRange(
+            start=inputs.gain_range[0], stop=inputs.gain_range[1], n=inputs.points
+        ),
     )
 
-    # 3. Preserve raw response before producing the baseline-difference map.
-    result = yield from tab.run_step()
-    run = result.run
-    if result.status == "cancelled" or run is None:
-        return
-    run.save_raw()
-    analysis = yield from run.analyze_step("primary")
-    if analysis.status == "cancelled":
-        return
+    # Acquire before analysis; the finally block saves raw and artifacts.
+    await tab.run()
+    try:
+        # Analyze the acquisition with the GUI parameters.
+        await tab.analyze("primary", result=MistFluxDepSummary)
+        return MistFluxDepReport(analysis_completed=True)
+    finally:
+        tab.save()
 
 
-DEFINITION = RecipeDefinition(
-    name="mist_flux_dep",
-    description="Acquire one MIST flux/gain map with explicit native ranges; save raw and Primary without writeback.",
-    input_schema={
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["flux_device", "flux_unit", "flux_range", "gain_range"],
-        "properties": {
-            "flux_device": {"type": "string", "minLength": 1},
-            "flux_unit": {
-                "type": "string",
-                "description": "Exact cached device unit: A, V or native.",
-            },
-            **{
-                name: {
-                    "type": "array",
-                    "items": {"type": "number"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                }
-                for name in ("flux_range", "gain_range")
-            },
-            "points": {
-                "type": "integer",
-                "description": "At least 2 points per axis; defaults to 101.",
-            },
-        },
-    },
-    run=mist_flux_dep,
-    adapter_name="mist/flux_dep",
-    summary_parameters=(
-        SummaryParameter("flux_device", ("flux_dev",)),
-        SummaryParameter("flux_unit", ("flux_unit",)),
-        SummaryParameter("flux_sweep", ("sweep", "flux")),
-        SummaryParameter("gain_sweep", ("sweep", "gain")),
-        SummaryParameter("probe", ("modules", "probe_pulse")),
-        SummaryParameter("readout", ("modules", "readout")),
-        SummaryParameter("reps", ("reps",)),
-        SummaryParameter("rounds", ("rounds",)),
-    ),
-    summary_estimates=(),
-)
+DEFINITION = mist_flux_dep

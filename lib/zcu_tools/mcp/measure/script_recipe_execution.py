@@ -17,8 +17,13 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.script_host import CancelScope, ScriptStatus
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration, RecipeOutcome
+from zcu_tools.mcp.measure.recipe_api import (
+    RecipeCancelled,
+    RecipeDeclaration,
+    RecipeOutcome,
+)
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
+from zcu_tools.mcp.measure.recipe_details import RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_host import RecipeHost, RecipeHostFactory
 from zcu_tools.mcp.measure.recipe_runtime import PendingAnalysis
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
@@ -60,6 +65,7 @@ class ScriptRecipeSnapshot:
     runner is started. outcome exists at terminal;
     cancelled outcomes suppress report, retaining all runs and any error.
     cancel_requested records script-stop intent, not completion of GUI cleanup.
+    details retains detached per-Run conditions, analyses and explicit proposals.
     missing lists authored parameter paths only at needs_parameters terminal;
     that state has no outcome/error and releases registry admission.
     """
@@ -74,6 +80,7 @@ class ScriptRecipeSnapshot:
     error: ScriptRecipeError | None = None
     cancel_requested: bool = False
     missing: tuple[str, ...] = ()
+    details: tuple[RecipeRunDetail, ...] = ()
 
 
 class ScriptRecipeExecution:
@@ -112,6 +119,7 @@ class ScriptRecipeExecution:
             return replace(
                 self._progress,
                 pending_question=deepcopy(self._progress.pending_question),
+                details=self._host.runtime.details() if self._host is not None else (),
             )
 
     def wait(self, timeout: float) -> ToolReply:
@@ -133,7 +141,7 @@ class ScriptRecipeExecution:
             )
             host = self._host
             return ToolReply(
-                {**asdict(self._progress), "elapsed_s": time.monotonic() - began},
+                {**asdict(self.snapshot()), "elapsed_s": time.monotonic() - began},
                 images=host.runtime.images() if host is not None else (),
                 is_error=self._progress.status == "failed",
             )
@@ -141,17 +149,39 @@ class ScriptRecipeExecution:
     def answer(self, mapping: Mapping[str, object]) -> ToolReply:
         """Deliver {request_id, answer} after validating the exact pending question.
 
-        Late/duplicate IDs fail. Invalid named fields or writeback choices leave
-        the request pending. The shared host owns validation and worker delivery.
-        Return at the next handoff or terminal, without author-thread reentry.
+        Late/duplicate IDs and absent questions return accepted=False, reason
+        and pending_request_id, without consuming a question. Invalid fields or
+        writeback choices raise and preserve the request. The shared host owns
+        validation and delivery. Accepted answers return at the next handoff or
+        terminal, without author-thread reentry.
         """
+        if set(mapping) != {"request_id", "answer"}:
+            raise ValueError("Answers require exactly request_id and answer")
+        request_id = TypeAdapter(str).validate_python(mapping["request_id"])
+        if not request_id:
+            raise ValueError("request_id must be nonempty")
+        answer = TypeAdapter(dict[str, object]).validate_python(mapping["answer"])
         with self._condition:
             host = self._host
-        if host is None:
-            raise RuntimeError("No pending question to answer")
-        request_id = TypeAdapter(str).validate_python(mapping["request_id"])
-        answer = TypeAdapter(dict[str, object]).validate_python(mapping["answer"])
-        host.scheduler.answer(request_id, answer)
+            terminal = self._progress.status in SCRIPT_TERMINAL
+        if host is None or terminal or host.scheduler.pending_question is None:
+            return self._rejected_answer(None)
+
+        def deliver() -> ToolReply | None:
+            pending = host.scheduler.pending_question
+            if pending is None or pending.request_id != request_id:
+                return self._rejected_answer(pending.request_id if pending else None)
+            host.scheduler.answer(request_id, answer)
+            return None
+
+        try:
+            rejected = host.scheduler.control(deliver)
+        except RuntimeError:
+            if host.scheduler.status in SCRIPT_TERMINAL:
+                return self._rejected_answer(None)
+            raise
+        if rejected is not None:
+            return rejected
         # The acknowledgement precedes author continuation. Wait must not return
         # the old question while the loop is about to clear its Future.
         with self._condition:
@@ -162,6 +192,16 @@ class ScriptRecipeExecution:
                 )
             )
         return self.wait(300.0)
+
+    @staticmethod
+    def _rejected_answer(pending_request_id: str | None) -> ToolReply:
+        return ToolReply(
+            {
+                "accepted": False,
+                "reason": "No pending question for this request id",
+                "pending_request_id": pending_request_id,
+            }
+        )
 
     def cancel(self, *, scope: CancelScope = "script") -> ToolReply:
         """Acknowledge script or current Run stop, without fabricating completion.
@@ -174,7 +214,15 @@ class ScriptRecipeExecution:
             raise ValueError("scope must be script or run")
         with self._condition:
             if self._progress.status in SCRIPT_TERMINAL:
-                return ToolReply(asdict(self._progress))
+                if scope == "run":
+                    return ToolReply(
+                        {
+                            **asdict(self.snapshot()),
+                            "cancelled": False,
+                            "reason": "no run in progress",
+                        }
+                    )
+                return ToolReply(asdict(self.snapshot()))
             if scope == "script":
                 self._cancelled.set()
                 self._progress = replace(self._progress, cancel_requested=True)
@@ -247,6 +295,8 @@ class ScriptRecipeExecution:
             report = host.scheduler.run(
                 self._definition.coroutine(host.session, inputs)
             )
+        except RecipeCancelled as failure:
+            error = failure
         except RecipeNeedsParameters as failure:
             error = failure
         except Exception as failure:
@@ -256,8 +306,10 @@ class ScriptRecipeExecution:
 
     def _finish(self, report: BaseModel | None, error: Exception | None) -> None:
         host = self._host
-        cancelled = self._cancelled.is_set() or (
-            host is not None and host.scheduler.status == "cancelled"
+        cancelled = (
+            isinstance(error, RecipeCancelled)
+            or self._cancelled.is_set()
+            or (host is not None and host.scheduler.status == "cancelled")
         )
         status = (
             "cancelled" if cancelled else "failed" if error is not None else "completed"
@@ -284,7 +336,7 @@ class ScriptRecipeExecution:
                 pending_question=None,
                 outcome=RecipeOutcome(status, None if cancelled else report, runs),
                 error=ScriptRecipeError(type(error).__name__, str(error))
-                if error is not None
+                if error is not None and not isinstance(error, RecipeCancelled)
                 else None,
             )
             self._condition.notify_all()

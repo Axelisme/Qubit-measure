@@ -8,13 +8,15 @@
 
 ## Shared async script host
 
-`script_host.ScriptHost` 在 caller 指定的 worker 上執行作者 coroutine。Blocking `call(fn)` 使用 executor，每個 operation 都有獨立 StopSignal child；停止的 token 仍會啟動 fn 並交回 partial。作者 Task 不會被 cancel，finally 留在同一 worker。
+`script_host.ScriptHost` 建構時不啟動 thread 或 loop。`run(coroutine)` 在呼叫它的 worker 執行一次作者 coroutine，完成 finally 與 executor drain 後返回或 raise，不能重用。`await call(fn)` 在 executor 執行 `fn(CallContext)`，回 `CallResult(result, epoch, partial_result)`。Context 提供本次 operation 的 StopSignal child 與起跑 epoch，停止的 token 仍啟動 fn，由 owner 合作返回 partial。作者 Task 不會被 cancel，finally 留在同一 worker。
 
-`ask` 以唯一 request id 等待具名 Answer；錯誤、重複或遲到答案不消耗新問題。`control` 把數微秒級、無 I/O 的 memory callback 排入同一 loop 序列，呼叫端等待回傳值或原例外。`cancel`、Pause、Resume 與 answer 都有 acknowledgement，但不宣稱 operation 已 drain；`close` 合作 drain 後關閉 loop。
+`await ask(question)` 以唯一 request id 等待具名 Answer，`answer(request_id, answer)` 驗證當前問題；錯誤、重複或遲到答案不消耗新問題。Host script cancel 以內部 None 釋放 Ask Future，recipe 便利層轉成普通 RecipeCancelled，作者 ask 不回 Optional。
+
+`control(fn)` 把數微秒級的 memory-only callback 排入與 cancel／pause／resume／answer 相同的 loop 序列，呼叫端等待回傳值或原例外。Fn 不 await、不阻塞、不 I/O，也不重入作者程式。Worker 上 inline 執行，foreign thread 經 call_soon_threadsafe 與 acknowledgement；run 前或 loop 關閉後 raise RuntimeError。`cancel(scope="script"|"run")` 只設 token，acknowledgement 不表示 operation 已 drain。Recipe runtime 另用 control 原子檢查當前 tab.run token，analysis／Ask／閒置時 run cancel 是 no-op。`close()` 合作 drain，off-worker 等到 coroutine／finally／executor 完成，worker 自己呼叫時只請求停止，不自等。
 
 Pause 只停止目前 operation、增加 epoch 並關 gate，不停止 iteration。Resume 只開 gate。CallResult 固定起跑 epoch 與 fn 完成時的 stop bit。Workflow env 決定是否丟棄 partial 並重跑相同 request；host 不重跑外部效果。Commit 等 gate 後更換 iteration child。Script cancel 打開 gate，使作者可收尾。
 
-`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳。`set_error()` 只在本 scope 記第一個錯誤並停止自己與子孫，不改祖先或兄弟的停止與錯誤狀態。`release()` 移除已完成 scope。
+`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳。`set_error()` 只在本 scope 記第一個錯誤並停止自己與子孫，不改祖先或兄弟的停止與錯誤狀態。`release()` 移除已完成 scope。Workflow 已使用同一 host；舊 `script_driver.ScriptDriver` 與 generator protocol 的刪除由後續遷移票完成，不是相容入口。
 
 ## Explicit simulation environments
 

@@ -95,35 +95,32 @@ recovery delay and the delay-scan axis are shared, not per-qubit controls.
 
 ## Read conditions and results
 
-`actual` reports the selected tone fields for the complete list, including
-nonparticipants. Each recipe section below lists its reported conditions.
-Shared fields appear when the recipe has recorded a source for them. This includes
-fully explicit shared sweeps.
+Each recipe returns `status`, an authored `report` and `runs`.
+The report's `tones` list follows native analysis order. Each row carries its
+original `index`, captured `name`, fit estimates or a `failure` reason.
+For Q3/Q1, the first row has `index: 2`, not index 0. Use that original index
+in override paths. GE reports Primary `tones` and Post `post_tones` separately.
 
-Origins describe this recipe call:
+`writeback_applied` is true only when a completed receipt confirms applied items.
+A failed receipt ends the recipe with the owner diagnostic; finally Save still runs.
+It does not certify every fit or every saved format. `runs` identifies each tab,
+adapter and acquisition, with its operation status, partial flag and Save
+receipts. Full execution status also exposes owner conditions, summaries and
+writeback candidates. Read the tab's fixed capture to inspect unmeasured tones;
+the authored report does not recreate a separate complete-list `actual` table.
 
-- `explicit` means you supplied a value or library selection.
-- `derived` means the recipe supplied an expression or computed value.
-- `default` means it retained a tone field without a recorded recipe origin.
-
-A selected library pulse can have an explicit reference while its unedited gain
-has default origin. Default does not certify that a value is calibrated. Origins
-do not reconstruct how the Form obtained its initial values.
-
-Actual conditions identify each element by its original index and name.
-For Q3/Q1, `actual["tones/2/gain"].element` is `{index: 2, name: "Q3"}`.
-Estimates use measurement row order, so `estimates["tones/0/freq"].element`
-identifies 2/Q3 and `tones/1/freq` identifies 0/Q1. Use `element.index` for the
-original position. Do not use an estimate's row number as an override path.
+Field edits retain their supplied provenance. Expressions are labeled derived;
+literal overrides are explicit. Retained Form values are not evidence of a
+completed calibration.
 
 The combined `measurement` plot labels curves by original index and source name
 in participants order. Individual `measurement_i` and analysis `fit_i` plots use
 the original index `i`. Pulse scans show each qubit's actual scan coordinates.
 Delay scans show the common requested delay. GE shows probe-off/on shot traces.
 
-A failed fit reports its reason and quality diagnostics. An unavailable estimate
-is absent, not zero; an explicit null stays null. Full replies also contain the
-native analysis summary. Saved results keep the measured configuration and
+A failed fit reports its reason; the owner summary retains quality diagnostics.
+Nullable report estimates remain null when absent or nonfinite, never zero.
+Full replies also contain the native analysis summary. Saved results keep the measured configuration and
 names. Later Form edits, Reset or alias changes do not rewrite earlier reports.
 Load Data changes the analysis source without changing current Form inputs.
 
@@ -140,13 +137,12 @@ Choose each `tones[i].drive`. Use typed overrides to set MHz bounds at
 count. The scans advance together by point number, not through every combination
 of frequencies.
 
-`actual` reports each tone's drive reference, frequency, gain and sweep bounds
-and count, with the origins described above. Shared reported conditions are
-participants, reps, rounds and recovery delay. Successful `estimates` contain
-`freq` and `fwhm` in MHz with their errors. Inspect `measurement` and each
-`fit_i` for the peak and fit quality.
+Successful report rows contain `freq` and `fwhm` in MHz with their errors.
+Inspect `measurement` and each `fit_i` for the peak and fit quality.
+Check the fixed Run conditions for drive settings, sweep bounds, participants,
+reps, rounds and recovery delay.
 
-The recipe saves raw data and Primary analysis before asking about Apply.
+The recipe fits Primary, asks about Apply, then saves raw data and completed artifacts.
 Candidates update each successful qubit's `freq` and `kappa` and add a frequency
 sample at the captured bias. Review the destination, peak, linewidth and errors
 using the [Save and Apply procedure](#save-review-and-apply).
@@ -162,13 +158,11 @@ gain units and the point count at `tones[i].sweep.n`. Copy a referenced drive in
 All tone sweeps need equal point counts. Each scan point applies the corresponding
 gain to all participants before mux readout.
 
-`actual` reports each tone's drive reference, frequency, gain and gain-sweep
-bounds and count. Origins distinguish your edits from retained defaults.
-Shared reported conditions are participants, reps, rounds and recovery delay.
-Successful `estimates` contain `pi_gain` and `pi2_gain` with errors. Inspect the
-oscillations in `measurement` and the fitted curves in `fit_i`.
+Successful report rows contain `pi_gain` and `pi2_gain` with errors.
+Inspect the oscillations in `measurement` and the fitted curves in `fit_i`.
+Check drive settings and gain-sweep bounds in the fixed Run conditions.
 
-The recipe saves raw data and Primary analysis, then asks about pulse updates.
+The recipe fits Primary and asks about pulse updates. It saves raw data and completed artifacts after the decision.
 Candidates copy the measured pulse into `<qubit>.pulses.pi_amp` and
 `<qubit>.pulses.pi2_amp` with the fitted gains. Separate items update the x180/x90
 module slots and `ext.pi_product`. Review pulse shape, gain and each destination
@@ -186,13 +180,12 @@ both ramps. Arb waveforms are not supported for this scan. Set each
 All tones need equal point counts.
 The recipe does not stretch or crop a waveform to make it valid.
 
-`actual` reports each tone's drive reference, frequency, gain and length-sweep
-bounds and count, with recipe origins. Shared reported conditions are
-participants, reps, rounds and recovery delay. Successful `estimates` contain
-`pi_len` and `pi2_len` in us and `rabi_f` in MHz, with errors. Inspect
-`measurement` and `fit_i` for the oscillation period and fit quality.
+Successful report rows contain `pi_len` and `pi2_len` in us and `rabi_f`
+in MHz, with errors. Inspect `measurement` and `fit_i` for the oscillation
+period and fit quality. Check drive settings and length-sweep bounds in the
+fixed Run conditions.
 
-The recipe saves raw data and Primary analysis before asking about Apply.
+The recipe fits Primary, asks about Apply, then saves raw data and completed artifacts.
 Candidates include `ext.rabi_freq`, copied pi/pi2 pulses with fitted lengths,
 x180/x90 module slots and `ext.pi_product`. Check the flat_top ramps and all pulse
 and slot destinations in the [review step](#save-review-and-apply).
@@ -207,12 +200,11 @@ Select calibrated pi pulses at `tones[i].drive`. Set the shared us range with
 `["delays", "start"]`, `["delays", "stop"]` and `["delays", "n"]` overrides.
 There is one requested-delay axis for all participants.
 
-`actual` reports each tone's drive reference, frequency and gain with origins.
-Shared reported conditions include participants, reps, rounds, recovery delay
-and delay bounds and count. Successful `estimates` contain `t1` and background
-`t1b` in us with errors. Compare the decay in `measurement` with each `fit_i`.
+Successful report rows contain `t1` and optional second decay `t1b` in us
+with errors. Compare the decay in `measurement` with each `fit_i`.
+Check the shared delay range and pulse selections in the fixed Run conditions.
 
-The recipe saves raw data and Primary analysis, then asks about T1 updates.
+The recipe fits Primary and asks about T1 updates. It saves raw data and completed artifacts after the decision.
 Candidates update the captured qubit's `t1` and add a T1 sample at captured bias.
 Review the decay, error and destination before [Apply](#save-review-and-apply).
 [The T1 guide](../v2/mux/t1/guide.md) describes the shared-delay measurement.
@@ -226,13 +218,12 @@ Select x90 pulses at `tones[i].drive` and set each tone's `detune` in MHz.
 Set the common us range with `["delay", "start"]`, `["delay", "stop"]` and
 `["delay", "n"]`. The final x90 phase varies with detune and delay.
 
-`actual` reports each tone's drive reference, frequency, gain and nominal detune
-with origins. Shared reported conditions include participants, reps, rounds,
-recovery delay and delay bounds and count. Successful `estimates` contain `t2`
-in us and fitted `detune` in MHz with errors. Inspect `measurement` and `fit_i`
-for the fitted model, fringe rate and decay.
+Successful report rows contain `t2` in us and fitted `detune` in MHz with
+errors. Inspect `measurement` and `fit_i` for the fitted model, fringe rate and
+decay. Check nominal detune, pulse selections and the shared delay range in the
+fixed Run conditions.
 
-The recipe saves raw data and Primary analysis before asking about Apply.
+The recipe fits Primary, asks about Apply, then saves raw data and completed artifacts.
 Candidates update `t2r` and its sample at captured bias. A frequency correction
 requires a fringe fit, finite source carrier, finite actual detune and finite
 fitted fringe rate. Its value is source carrier + actual detune - fitted fringe
@@ -251,14 +242,13 @@ Select `tones[i].drive` for x90 and `tones[i].pi_pulse` for x180. Both pulses
 for one qubit use the same generator. Set each tone's `detune` in MHz and the
 shared us range at `["delay", "start"]`, `["delay", "stop"]` and `["delay", "n"]`.
 
-`actual` reports each tone's drive and pi-pulse references, frequencies and gains,
-plus nominal detune, with origins. Shared reported conditions include
-participants, reps, rounds, recovery delay and delay bounds and count.
-Successful `estimates` contain `t2` in us and fitted `detune` in MHz with errors.
-Inspect `measurement` and `fit_i` for the decay model and fit quality.
+Successful report rows contain `t2` in us and fitted `detune` in MHz with
+errors. Inspect `measurement` and `fit_i` for the decay model and fit quality.
+Check both pulse selections, nominal detune and shared delay range in the fixed
+Run conditions.
 
-The recipe saves raw data and Primary analysis, then asks about `t2e` and a T2E
-sample at captured bias. Echo does not propose a frequency correction.
+The recipe fits Primary, then asks about `t2e` and a T2E sample at captured bias.
+It saves raw data and completed artifacts after the decision. Echo does not propose a frequency correction.
 Review those coherence results before [Apply](#save-review-and-apply).
 [The Echo guide](../v2/mux/t2echo/guide.md) explains the two half-delays.
 
@@ -272,13 +262,12 @@ Select each probe pulse at `tones[i].drive` and set `["shots"]` to the number of
 shots per preparation. An optional init pulse runs in both preparations.
 The Form fixes reps and rounds at one. Shot pairing across tones remains intact.
 
-`actual` reports each tone's drive reference, frequency and gain with origins.
-Shared reported conditions include participants, reps, rounds, recovery delay
-and shots. Estimates include Primary `fidelity`, `theta`, `threshold` and `ge_s`,
-and Post `ge_radius`. Inspect the probe-off/on traces in `measurement`, Primary
-`fit_i` plots and Post `post_i` diagnostics.
+Primary report rows contain `fidelity`, `theta`, `threshold` and `ge_s`.
+Post rows contain `ge_radius`. Inspect the probe-off/on traces in `measurement`,
+Primary `fit_i` plots and Post `post_i` diagnostics. Check shot count and pulse
+selections in the fixed Run conditions.
 
-The recipe saves raw shots, Primary and Post before asking about Apply.
+The recipe fits Primary and Post before asking about Apply. It then saves raw shots and completed artifacts.
 Primary candidates update `ext.readout_cal.fidelity`, `sigma`, `g_center` and
 `e_center`. Post candidates update `radius` and the per-qubit 3x3
 `confusion_matrix`. This is not a four-state joint assignment calibration.
@@ -288,9 +277,12 @@ Review cluster separation and both analysis stages before
 
 ## Save, review and Apply
 
-After a completed Run, each recipe saves raw data, analyzes and saves Primary,
-then asks for a writeback decision. GE also analyzes and saves Post first.
-Inspect each artifact's save status and error. Recipe completion alone does not
+After Run, each recipe analyzes Primary and asks for a writeback decision.
+GE also analyzes Post before asking. On acceptance it applies the selected
+captured items. A single synchronous Save then writes raw data and all completed
+artifacts before returning. The Run's `finally` also saves available output if
+analysis or review raises. Analyze does not save automatically.
+Inspect each output's save status and error in `runs`. Recipe completion alone does not
 mean every requested output format saved successfully. Native `data.h5` is the
 source for Load Data. Ramsey and Echo exports keep IQ on the delay/tone grid and
 actual detune and source frequency on the tone-only grid in both native and
@@ -301,15 +293,16 @@ destination. Destinations come from that Run or Load's captured bindings.
 Current aliases cannot replace missing historical bindings. Failed or partially
 acquired rows do not produce candidates.
 
-Answering `skipped` writes nothing. Answering `accepted` applies all current
-draft items, Primary then Post, regardless of GUI checkboxes. The question does
-not freeze the draft. Edits or analysis changes made while it waits affect what
-acceptance writes. Do not change the draft while awaiting a decision.
+The pending question includes its request id and captured candidates. Answer
+with that request id, `accepted: true` and the selected unchanged `items`, or
+with `accepted: false` and an empty item list. The host rejects stale request
+ids and changed, unknown or duplicate candidates. Answering alone does not write.
+The recipe explicitly applies accepted items, Primary then Post. Analysis,
+preview and waiting for an answer do not write calibrations.
 
-For a subset of updates, skip the recipe's writeback question and use the GUI's
-Apply Selected controls to apply only the authorized items. Analysis, preview
-and waiting for an answer do not write calibrations.
-
-Cancellation stops later steps. Finish-early retains the experiment's partial
-data and save policy. A failed step reports its error without retrying the
-acquisition. Inspect saved data and artifact statuses before starting another run.
+`cancel(execution=..., scope="run")` stops only acquisition and retains partial
+data for subsequent analysis and Save. With no Run in progress it is a no-op.
+`scope="script"` ends the script as cancelled, with a null report and the run
+receipts. The recipe's finalizer still saves available output after Run.
+A failed step reports its error without retrying acquisition. Inspect saved data
+and artifact statuses before starting another run.
