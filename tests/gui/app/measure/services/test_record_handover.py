@@ -16,8 +16,10 @@ def test_run_publishes_acquisition_metadata_inside_the_record() -> None:
     result = SavingCore().run(cfg, context=None)
     adapter.run.return_value = RunRecord(cfg, result)
     history = native_metadata()
+    admitted = make_inputs(state, tab_id, adapter)
     inputs = replace(
-        make_inputs(state, tab_id, adapter),
+        admitted,
+        request=replace(admitted.request, soc=None, soccfg=None),
         snapshot=history.snapshot,
         experiment_tag=history.experiment,
     )
