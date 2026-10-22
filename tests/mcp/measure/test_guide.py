@@ -1,6 +1,5 @@
 """Markdown delivery from a registered adapter through RPC and MCP."""
 
-from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar
 
@@ -8,8 +7,6 @@ import pytest
 
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.app.measure.remote._helpers import Fixture, mcp_client
-
-from ._pipeline_recipe import PIPELINE
 
 
 @pytest.mark.parametrize("declared", [True, False])
@@ -32,12 +29,10 @@ def test_recipe_guide_delivers_markdown_from_registered_adapter(
         port,
         tmp_path,
         request=request,
-        recipes=(replace(PIPELINE, adapter_name="guide-test"),),
     )
     try:
         call("connect", {"port": port})
-        assert call("recipe_guide", {"recipe": "pipeline"}) == {
-            "recipe": "pipeline",
+        assert call("recipe_guide", {"adapter": "guide-test"}) == {
             "adapter": "guide-test",
             "guide": {
                 "markdown": markdown if declared else "(no guide written yet)",

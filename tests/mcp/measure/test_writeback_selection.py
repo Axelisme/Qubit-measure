@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from zcu_tools.mcp.measure.recipe import RecipeWritebackPreview
+from zcu_tools.mcp.measure.recipe_contracts import RecipeWritebackPreview
 from zcu_tools.mcp.measure.writeback import select_writeback_items
 
 

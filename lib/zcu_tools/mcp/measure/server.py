@@ -51,9 +51,6 @@ from zcu_tools.mcp.core.bridge import (  # noqa: E402
 # tolerated: Standalone lib-path setup and GUI dependency preflight must precede tool assembly.
 from zcu_tools.mcp.measure.assembly import build_measure_tools  # noqa: E402
 
-# tolerated: Standalone lib-path setup and GUI dependency preflight must precede recipe imports.
-from zcu_tools.mcp.measure.recipe import RecipeDefinition  # noqa: E402
-
 # tolerated: Standalone lib-path setup and GUI dependency preflight must precede session imports.
 from zcu_tools.mcp.measure.session import MeasureMcpSession  # noqa: E402
 
@@ -87,7 +84,8 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v117: holder/ref-free cfg integrated above the working-point and UI releases.
 # v122: predictor RPC uses entry-local filenames or independent inline params.
 # v123: actionable launch collisions and explicit raw-save analysis observations.
-MCP_VERSION = 123
+# v124: Async declarations, request-scoped answers, full owner evidence and scoped cancel.
+MCP_VERSION = 124
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.
@@ -97,7 +95,7 @@ also edit the GUI. Reconnection reloads its live catalog; incompatible wire
 versions fail before forwarding an action.
 
 For routine measurement, prefer the recipe matching the experimental goal.
-Read its tool schema and adapter guide through recipe_guide(recipe).
+Read its tool schema and adapter guide through recipe_guide(adapter).
 For analysis of existing data, use tab_analyze and tab_interact rather than
 starting another measurement. If tools are deferred by the client, discover
 the recipe or shared analysis/control tool first. Routine work and diagnosis
@@ -144,21 +142,21 @@ Inspect current state and confirmed files before deciding.
 
 Use global status for GUI operations, non-terminal executions and terminal count.
 Keep known execution IDs for later queries; global status does not embed history.
-status(execution) returns the shared execution summary without reconnecting.
-Read recipe-filled actual conditions, Primary/Post estimates, native summary and invalid paths,
-and every writeback candidate with its destination. run_id is the original Run
-identity from the captured Save report, including when all outputs fail. It is
-null only without a captured report; output status/error determines save success.
-Readonly tab snapshots keep confirmed identity: null until a persistent output
-succeeds. A Run or analysis step marked unknown may have started even without a
-returned handle.
-Recipe actual is a flat mapping of summary names to value/source/unit. Explicit
-scalar inputs and sweeps with all three sources explicit are omitted; mixed sweeps
-keep their full values and sources. All-explicit actual is {}. Summary and full
-use the same captured mapping and expose no cfg_ref, publication or raw input.
-Use status(execution, detail="full") for captured analysis/writeback detail without
-new RPCs or authority changes. Artifacts preserve producer sections, names, every member
-and all output paths, formats, statuses and errors. Synchronous tab.save_data and
+status(execution) reads local progress without reconnecting. Completed, failed
+and cancelled recipe summaries contain only status, authored report and runs.
+A failure's diagnostic is available in status(execution, detail="full").
+Nonterminal summaries include execution. A paused question supplies
+pending_question with request_id, evidence and answer_schema. Interactive
+analysis supplies pending={tab,stage,op}; complete that same GUI operation with
+tab_interact. Missing parameters return needs_parameters, missing paths and
+outcome=null, not a failed RecipeOutcome.
+Full recipe detail retains per-Run/tab/operation conditions from the owner's
+fixed Form observation, native analysis estimates and invalid paths, and explicit
+writeback candidates. Reading detail never reruns analysis, writes or saves.
+Runs retain acquisition run_id and every explicit Save attempt, even failed
+outputs. Output status/error, not run_id, determines save success.
+Standalone analysis retains its native summary and Save reports. Artifacts
+preserve producer sections, names, members, paths, formats, statuses and errors. Synchronous tab.save_data and
 tab.save_artifacts return the complete current report, not a Save handle. No Save
 await or snapshot reread is needed. Reserved destinations are not saved files.
 A resave replaces the selected artifacts with that attempt, not a saved prefix.
@@ -170,14 +168,15 @@ connection generation; execution IDs belong to this MCP server session and
 are not durable recovery tokens. After GUI reconnect, discover current handles
 through status; do not reuse an old op.
 
-For a registered recipe, finish_early stops acquisition and continues with
-usable partial results, raw saving and analysis. cancel takes precedence and
-starts no further analysis or save. For registered analysis it also stops
-further result reads. Already admitted non-cancellable saves settle with their
-true outcomes. Control replies report request facts and the separate gui_cancel
-receipt, not terminal results; use wait or status to confirm the outcome.
-Terminal executions are not rewritten. Unregistered cancel(op) uses the direct
-GUI hook and may report operation_failed for an already failed operation.
+cancel(execution, scope="script") requests cooperative script stop. The author
+continues cleanup; subsequent Runs inherit stop and return partial results.
+Synchronous edits and explicit saves still run. The terminal status is cancelled
+with report=null and retained runs. scope="run" stops only the current recipe
+acquisition; analysis and questions continue. Without a Run, it returns
+cancelled=false, reason="no run in progress". Acknowledgement is not cleanup
+completion; use wait/status. Standalone analysis cancellation stops its
+continuation. Unregistered cancel(op) uses the direct GUI operation hook.
+Terminal execution results are not rewritten.
 
 Library creation uses rpc_call(method="context.ml_create_from_role", params=...).
 List templates with context.ml_list_roles. Provide role_id and a new name such as
@@ -197,12 +196,12 @@ Select by writing the option's whole value once. A single ordinary wrapper may
 be flattened in children, but paths still include it. Ref options have no children.
 Describe replies include current local input_present/input/value and Form preview
 errors from one owner turn. For lowered cfg errors use get_cfg or Run admission.
-Recipe read_field makes one fresh describe_cfg RPC per call, not a cached read.
-Its locked flag is selection_fixed or fixed; inner choices may remain editable.
+Recipe tab.read makes one atomic read_recipe_field RPC per call from fixed
+sources. Its locked flag includes selection_fixed, fixed and readonly.
 Ordinary strings are literal; expressions use {expr: text}, complex uses the
 reversible __complex__ tag, and library keys are actual keys. Read description
 options in order; do not infer choices from unions. Invalid input remains editable.
-Tag leaves are not Recipe read_field paths.
+Generated tag leaves are not recipe logical paths.
 Inline leaf paths include module. use_inline runs the owner's guarded to_inline
 command against fixed library capture, not a private copy path.
 Edit unique model-field leaf paths;
@@ -222,10 +221,12 @@ any write, using current IDs rather than proposal IDs. It does not answer recipe
 apply_writeback stops on the first error and reports confirmed
 progress without retry or rollback. Inspect proposals and the destination first.
 
-When a recipe is awaiting_answer, answer(recipe=<execution ID>,
-decision=accepted/skipped) resumes it. Answer is not a write or permission.
-Only the recipe's explicit tab.accept writes. writeback.receipts lists actual
-confirmed writes and failed prefixes. Only one nonterminal recipe is admitted.
+When a recipe is paused, answer(execution, request_id, answer) supplies named
+fields described by pending_question.answer_schema. request_id is required.
+Stale or absent requests return accepted=false, reason and pending_request_id
+(null without a pending request). Rejection does not consume the question.
+Answer is not a write or permission; only explicit tab.accept_writeback writes.
+Only one nonterminal recipe is admitted.
 
 tab_interact without payload reads committed state and available commands.
 Send payload={command,args} for one action. Later owner-loop commits win.
@@ -271,8 +272,8 @@ def _setup_logging() -> None:
     )
 
 
-def main(*, recipes: Sequence[RecipeDefinition | RecipeDeclaration]) -> None:
-    """Run the stdio server with explicitly supplied handwritten definitions.
+def main(*, recipes: Sequence[RecipeDeclaration]) -> None:
+    """Run the stdio server with explicitly supplied async declarations.
 
     recipes is the composition root's immutable declaration sequence. Invalid
     definitions fail during session assembly, before GUI operations. On EOF/error,

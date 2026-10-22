@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import time
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from threading import RLock
 from typing import Literal
@@ -16,6 +17,7 @@ from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
+from zcu_tools.mcp.measure.analysis_execution import InvalidAnalysisValue
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
@@ -25,6 +27,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     FormSelector,
     FormSource,
     FormValue,
+    RecipeCancelled,
     RecipeRun,
     RecipeTab,
     RunResult,
@@ -34,6 +37,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     WritebackProposal,
     WritebackReceipt,
 )
+from zcu_tools.mcp.measure.recipe_details import RecipeAnalysisDetail, RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_form import (
     field_observation,
     field_path,
@@ -129,6 +133,7 @@ class RecipeRuntime:
         self.host = host
         self._lock = RLock()
         self._runs: list[RecipeRun] = []
+        self._details: list[RecipeRunDetail] = []
         self._run_ops: dict[str, int] = {}
         self._analysis_ops: dict[tuple[str, str], int] = {}
         self._candidates: dict[str, tuple[tuple[WritebackItem, str], ...]] = {}
@@ -141,6 +146,11 @@ class RecipeRuntime:
         """Read immutable acquisition/save facts in execution order, without RPCs."""
         with self._lock:
             return tuple(self._runs)
+
+    def details(self) -> tuple[RecipeRunDetail, ...]:
+        """Read detached per-Run owner evidence; never query, analyze, write or save."""
+        with self._lock:
+            return deepcopy(tuple(self._details))
 
     def cancel_run(self) -> bool:
         """Atomically check and stop only the active acquisition on the host loop.
@@ -302,8 +312,11 @@ class RecipeRuntime:
         with self._lock:
             index = len(self._runs)
             self._runs.append(RecipeRun(tab, adapter, None))
+            self._details.append(RecipeRunDetail(tab, adapter))
         try:
-            completion = await self.host.call(lambda ctx: self._acquire(tab, ctx))
+            completion = await self.host.call(
+                lambda ctx: self._acquire(tab, index, ctx)
+            )
         except Exception:
             with self._lock:
                 self._runs[index] = replace(self._runs[index], status="failed")
@@ -317,6 +330,7 @@ class RecipeRuntime:
                 run_id=result.run_id,
                 partial_result=result.partial_result,
             )
+            self._details[index] = replace(self._details[index], run_id=result.run_id)
         return result
 
     async def analyze[T](
@@ -326,7 +340,7 @@ class RecipeRuntime:
         result: type[T],
         *,
         interactive: bool,
-    ) -> AnalysisResult[T] | None:
+    ) -> AnalysisResult[T]:
         """Await analysis without saving, then validate its exact public summary as T."""
         if stage not in ("primary", "post"):
             raise ValueError("stage must be primary or post")
@@ -337,11 +351,7 @@ class RecipeRuntime:
         finally:
             self._publish_analysis(None)
         summary = completion.result
-        return (
-            None
-            if summary is None
-            else AnalysisResult(TypeAdapter(result).validate_python(summary))
-        )
+        return AnalysisResult(TypeAdapter(result).validate_python(summary))
 
     def save(self, tab: str) -> SaveResult:
         """Save fixed Run raw then all completed artifacts and retain the whole attempt."""
@@ -434,7 +444,11 @@ class RecipeRuntime:
                 )
                 retained.append((item, candidate.id))
         self._candidates[tab] = tuple(retained)
-        return WritebackProposal(tuple(item for item, _ in retained))
+        proposal = WritebackProposal(tuple(item for item, _ in retained))
+        with self._lock:
+            index = self._detail_index(tab)
+            self._details[index] = replace(self._details[index], writeback=proposal)
+        return proposal
 
     def accept_writeback(
         self, tab: str, items: Sequence[WritebackItem]
@@ -509,12 +523,28 @@ class RecipeRuntime:
             else:
                 ctx.stop_signal.event.wait(delay)
 
-    def _acquire(self, tab: str, ctx: CallContext) -> RunResult:
+    def _detail_index(self, tab: str) -> int:
+        return next(
+            index
+            for index in range(len(self._details) - 1, -1, -1)
+            if self._details[index].tab == tab
+        )
+
+    def _acquire(self, tab: str, index: int, ctx: CallContext) -> RunResult:
         self.host.control(lambda: self._retain_run(ctx.stop_signal))
+        conditions = field_observation(
+            self._tools.send_gui_rpc(
+                "tab.read_recipe_field", {"tab_id": tab, "path": []}
+            )
+        )
+        with self._lock:
+            self._details[index] = replace(self._details[index], conditions=conditions)
         started = _Started.model_validate(
             self._tools.send_gui_rpc("tab.run_start", {"tab_id": tab})
         )
         self._run_ops[tab] = started.handle
+        with self._lock:
+            self._details[index] = replace(self._details[index], op=started.handle)
         self._analysis_ops.pop((tab, "primary"), None)
         self._analysis_ops.pop((tab, "post"), None)
         completion = self._await(started.handle, ctx)
@@ -539,7 +569,7 @@ class RecipeRuntime:
         self, tab: str, stage: str, ctx: CallContext, *, interactive: bool
     ) -> object:
         if ctx.stop_signal.is_set():
-            return None
+            raise RecipeCancelled("Script cancelled before analysis")
         run = self._run_ops[tab]
         primary = self._analysis_ops[(tab, "primary")] if stage == "post" else None
         started = _Started.model_validate(
@@ -566,7 +596,7 @@ class RecipeRuntime:
             self.host.control(lambda: self._publish_analysis(pending))
         completion = self._await(started.handle, ctx)
         if completion.status == "cancelled":
-            return None
+            raise RecipeCancelled("Analysis cancelled before delivering a result")
         reply = self._tools.gui.send_gui_rpc(
             "tab.get_analyze_result"
             if stage == "primary"
@@ -574,5 +604,21 @@ class RecipeRuntime:
             {"tab_id": tab},
             operation_handle=started.handle,
         )
+        summary = TypeAdapter(YamlValue).validate_python(reply["summary"])
+        invalid = TypeAdapter(tuple[InvalidAnalysisValue, ...]).validate_python(
+            reply["invalid"]
+        )
+        captured = RecipeAnalysisDetail(
+            "primary" if stage == "primary" else "post",
+            started.handle,
+            summary,
+            invalid,
+        )
+        with self._lock:
+            index = self._detail_index(tab)
+            detail = self._details[index]
+            self._details[index] = replace(
+                detail, analyses=(*detail.analyses, captured)
+            )
         self._analysis_ops[(tab, stage)] = started.handle
-        return reply["summary"]
+        return summary

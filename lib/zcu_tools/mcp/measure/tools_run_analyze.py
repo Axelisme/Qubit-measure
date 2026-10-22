@@ -43,7 +43,7 @@ def tab_analyze(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolReply
             handoff_interaction(ctx, execution)
     reply = execution.wait(0 if execution.snapshot().status == "interactive" else 2.0)
     return ToolReply(
-        project_execution(reply.data, recipes=ctx.session.recipes.definitions),
+        project_execution(reply.data),
         reply.images,
         reply.is_error,
     )
@@ -62,21 +62,8 @@ def tab_interact(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
         params["payload"] = payload
     reply = interact(ctx.bound(), params)
     if params.get("payload", {}).get("command") == "done":
-        definition = (
-            next(
-                item
-                for item in ctx.session.recipes.definitions
-                if item.name == reply.data["recipe"]
-            )
-            if "recipe" in reply.data
-            else None
-        )
         return ToolReply(
-            project_execution(
-                reply.data,
-                definition=definition,
-                recipes=ctx.session.recipes.definitions,
-            ),
+            project_execution(reply.data),
             reply.images,
             reply.is_error,
         )

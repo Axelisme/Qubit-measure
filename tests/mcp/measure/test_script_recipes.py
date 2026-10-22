@@ -5,147 +5,23 @@ from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 from zcu_tools.experiment.script_host import CancelScope
-from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
-from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
+from zcu_tools.mcp.measure.recipe_contracts import (
+    MissingParameter,
+    RecipeNeedsParameters,
+)
 
-from ._support import MeasureClient, make_client
-
-
-class Inputs(FormModel):
-    count: int = Field(description="Synthetic repetition count")
-
-
-class Report(BaseModel):
-    count: int
-
-
-class Fit(BaseModel):
-    estimate: float
-
-
-class SyntheticGui:
-    """A wire collaborator; no production recipe or instrument dependencies."""
-
-    def __init__(self, *, hold: bool = False) -> None:
-        self.hold = hold
-        self.started = Event()
-        self.cancelled = Event()
-        self.runs = 0
-
-    def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.new":
-            return {"tab_id": "tab-1"}
-        if method in {
-            "tab.reset_cfg",
-            "tab.edit_recipe_fields",
-            "tab.select_recipe_module",
-        }:
-            return {"errors": [], "changed": True}
-        return self._operation(method, params)
-
-    def _operation(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.run_start":
-            self.runs += 1
-            self.started.set()
-            return {"operation_id": self.runs}
-        if method in {"tab.analyze", "tab.post_analyze"}:
-            return {"operation_id": 100}
-        if method == "operation.await":
-            if (
-                self.hold
-                and params["operation_id"] != 100
-                and not self.cancelled.is_set()
-            ):
-                return {"reason": "timeout"}
-            return {
-                "reason": "completed",
-                "status": "cancelled"
-                if self.cancelled.is_set() and params["operation_id"] != 100
-                else "finished",
-            }
-        if method in {"tab.cancel", "tab.analyze_cancel", "operation.cancel"}:
-            self.cancelled.set()
-            return {"status": "requested"}
-        return self._snapshots(method, params)
-
-    def _snapshots(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.snapshot":
-            return {
-                "tabs": [
-                    {
-                        "tab_id": "tab-1",
-                        "adapter_name": "synthetic",
-                        "interaction": {"is_running": False, "is_analyzing": False},
-                        "raw_data": {"run_id": f"native-{self.runs}", "saved": False},
-                        "result_state": {
-                            "available": True,
-                            "source_operation_id": self.runs,
-                        },
-                    }
-                ]
-            }
-        return self._artifacts(method, params)
-
-    def _artifacts(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.writeback_preview":
-            return {
-                "has_draft": True,
-                "items": [
-                    {
-                        "id": "param-0",
-                        "target_name": "Q1.freq",
-                        "actual_path": "Q1.freq",
-                        "proposed": 3.5,
-                        "current": 2.0,
-                        "stderr": None,
-                        "note": None,
-                        "kind": "parameter",
-                    }
-                ],
-                "destination_context": {"active_label": "preview-context"},
-            }
-        if method == "tab.writeback_write":
-            assert set(params) == {"tab_id", "subtab_id", "write"}
-            return {"written": [{"id": "param-0", "target": "Q1.freq"}]}
-        if method == "tab.get_analyze_result":
-            return {"summary": {"estimate": 3.5}, "invalid": []}
-        if method in {"tab.save_data", "tab.save_artifacts"}:
-            section = "measurement_data" if method == "tab.save_data" else "analysis"
-            return {
-                "run_id": f"native-{self.runs}",
-                "artifacts": {
-                    section: {
-                        "results": {
-                            "status": "Saved",
-                            "members": {
-                                "data": [
-                                    {
-                                        "format": "data_h5"
-                                        if method == "tab.save_data"
-                                        else "json",
-                                        "path": "/synthetic/output",
-                                        "status": "saved",
-                                        "error": None,
-                                    }
-                                ]
-                            },
-                        }
-                    }
-                },
-            }
-        raise AssertionError(f"Unexpected GUI request: {method}")
-
-
-def start(client: MeasureClient, name: str, count: int = 9) -> ScriptRecipeExecution:
-    """Start through the shared registry, asserting the declaration route."""
-    execution = client.context.session.recipes.start(
-        client.context, name, {"count": count}
-    )
-    assert isinstance(execution, ScriptRecipeExecution)
-    return execution
+from ._script_recipe_support import (
+    ConfirmQuestion,
+    Fit,
+    Inputs,
+    Report,
+    SyntheticGui,
+    start,
+)
+from ._support import make_client
 
 
 def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
@@ -222,10 +98,10 @@ def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
             partial.append((await tab.run()).partial_result)
             if scope == "script":
                 partial.append((await tab.run()).partial_result)
-                assert await tab.analyze("primary", result=Fit) is None
-            else:
-                fit = await tab.analyze("primary", result=Fit)
-                assert fit is not None
+                await tab.analyze("primary", result=Fit)
+                raise AssertionError("Cancelled analysis resumed author")
+            fit = await tab.analyze("primary", result=Fit)
+            assert fit is not None
             return Report(count=inputs.count)
         finally:
             threads.append(get_ident())
@@ -334,8 +210,10 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         client.context.session.close()
 
 
+@pytest.mark.parametrize("summary", [{"estimate": 3.5}, None])
 def test_analysis_summary_missing_authored_field_fails_without_repair(
     tmp_path: Path,
+    summary: dict[str, float] | None,
 ) -> None:
     class RequiredFit(BaseModel):
         absent: float
@@ -347,7 +225,14 @@ def test_analysis_summary_missing_authored_field_fails_without_repair(
         await tab.analyze("primary", result=RequiredFit)
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    gui = SyntheticGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.get_analyze_result":
+            return {"summary": summary, "invalid": []}
+        return gui.respond(method, params)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)
@@ -355,7 +240,11 @@ def test_analysis_summary_missing_authored_field_fails_without_repair(
         assert snapshot.status == "failed"
         assert snapshot.error is not None
         assert snapshot.error.type == "ValidationError"
-        assert "absent" in snapshot.error.message
+        assert (
+            "absent" in snapshot.error.message
+            if summary is not None
+            else "RequiredFit" in snapshot.error.message
+        )
     finally:
         client.context.session.close()
 
@@ -597,6 +486,316 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         outcome = execution.snapshot().outcome
         assert outcome is not None and outcome.status == "completed"
     finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
+def test_recipe_tool_default_returns_only_authored_outcome(
+    tmp_path: Path, terminal: str
+) -> None:
+    @recipe("synthetic", "Return a typed report")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        if terminal == "failed":
+            raise ValueError("synthetic failure")
+        if terminal == "cancelled":
+            await session.ask(ConfirmQuestion(evidence="cancel here"))
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    try:
+        if terminal == "cancelled":
+            execution = start(client, "synthetic")
+            execution.wait(3)
+            client.call("cancel", {"execution": execution.snapshot().execution})
+            execution.join()
+            reply = client.call("wait", {"execution": execution.snapshot().execution})
+        else:
+            reply = client.call("synthetic", {"count": "12"})
+        assert reply.data == {
+            "status": terminal,
+            "report": {"count": 12} if terminal == "completed" else None,
+            "runs": [],
+        }
+    finally:
+        client.context.session.close()
+
+
+def test_full_recipe_status_retains_run_conditions_analysis_and_writeback(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.get_analyze_result":
+            return {
+                "summary": {"estimate": 3.5},
+                "invalid": [{"path": "uncertainty", "reason": "unavailable"}],
+            }
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Capture detail without implicit saving")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        tab.writeback_proposal()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        before = list(client.transport.sent)
+        full = client.call(
+            "status", {"execution": execution.snapshot().execution, "detail": "full"}
+        )
+        detail = full.get("details")
+        assert detail, (
+            "Full status must retain owner conditions, analysis and candidates"
+        )
+        run = detail[0]
+        assert (run["tab"], run["adapter"], run["run_id"]) == (
+            "tab-1",
+            "synthetic",
+            "native-1",
+        )
+        assert run["conditions"]["value"] == {"count": 9}
+        assert run["analyses"][0]["summary"] == {"estimate": 3.5}
+        assert run["analyses"][0]["invalid"] == [
+            {"path": "uncertainty", "reason": "unavailable"}
+        ]
+        assert run["writeback"]["items"][0]["destination"]["path"] == "Q1.freq"
+        assert client.transport.sent == before
+        assert not any(method.startswith("tab.save") for method, _ in before)
+    finally:
+        client.context.session.close()
+
+
+def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    summary = {
+        "estimate": 3.5,
+        "stderr": 0.125,
+        "unit": "native",
+        "element": {"index": 2, "name": "Q3"},
+    }
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.get_analyze_result":
+            return {
+                "summary": summary,
+                "invalid": [{"path": "secondary", "reason": "non_finite"}],
+            }
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Retain the analysis owner's native estimate facts")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        full = client.call(
+            "status", {"execution": execution.snapshot().execution, "detail": "full"}
+        )
+        detail = full["details"][0]
+        assert (detail["tab"], detail["run_id"], detail["op"]) == (
+            "tab-1",
+            "native-1",
+            1,
+        )
+        analysis = detail["analyses"][0]
+        assert (analysis["stage"], analysis["op"]) == ("primary", 2)
+        assert analysis["summary"] == {
+            "estimate": 3.5,
+            "stderr": 0.125,
+            "unit": "native",
+            "element": {"index": 2, "name": "Q3"},
+        }
+        assert analysis["invalid"] == [{"path": "secondary", "reason": "non_finite"}]
+        summary["estimate"] = 99
+        assert (
+            client.call("status", {"execution": full["execution"], "detail": "full"})[
+                "details"
+            ][0]["analyses"][0]["summary"]["estimate"]
+            == 3.5
+        )
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("answer_state", ["stale", "none"])
+def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
+    tmp_path: Path, answer_state: str
+) -> None:
+    @recipe("synthetic", "Confirm one request only")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        answer = await session.ask(ConfirmQuestion(evidence="first"))
+        assert answer is not None and answer.accepted
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        pending = execution.snapshot().pending_question
+        assert pending is not None
+        key = execution.snapshot().execution
+        if answer_state == "none":
+            execution.answer(
+                {"request_id": pending.request_id, "answer": {"accepted": True}}
+            )
+        reply = client.call(
+            "answer",
+            {"execution": key, "request_id": "old-id", "answer": {"accepted": True}},
+        )
+        assert reply.data == {
+            "accepted": False,
+            "reason": "No pending question for this request id",
+            "pending_request_id": pending.request_id
+            if answer_state == "stale"
+            else None,
+        }
+        if answer_state == "stale":
+            assert execution.snapshot().pending_question == pending
+            answered = client.call(
+                "answer",
+                {
+                    "execution": key,
+                    "request_id": pending.request_id,
+                    "answer": {"accepted": True},
+                },
+            )
+            assert answered.data == {
+                "status": "completed",
+                "report": {"count": 9},
+                "runs": [],
+            }
+    finally:
+        client.context.session.close()
+
+
+def test_mcp_answer_requires_request_id_before_delivery(tmp_path: Path) -> None:
+    @recipe("synthetic", "Keep malformed answers pending")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        await session.ask(ConfirmQuestion(evidence="first"))
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        with pytest.raises(ValueError, match="request_id"):
+            client.call(
+                "answer",
+                {
+                    "execution": execution.snapshot().execution,
+                    "answer": {"accepted": True},
+                },
+            )
+        assert execution.snapshot().pending_question is not None
+    finally:
+        client.context.session.close()
+
+
+def test_mcp_run_cancel_without_run_returns_noop_ack(tmp_path: Path) -> None:
+    @recipe("synthetic", "Keep explicit question pending")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        await session.ask(ConfirmQuestion(evidence="no run"))
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        pending = execution.snapshot().pending_question
+        reply = client.call(
+            "cancel", {"execution": execution.snapshot().execution, "scope": "run"}
+        )
+        assert reply.data.get("cancelled") is False
+        assert reply.data["reason"] == "no run in progress"
+        assert execution.snapshot().pending_question == pending
+    finally:
+        client.context.session.close()
+
+
+def test_mcp_missing_parameters_does_not_create_failed_outcome(tmp_path: Path) -> None:
+    @recipe("synthetic", "Report missing authored input")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        raise RecipeNeedsParameters((MissingParameter("frequency", "Provide MHz"),))
+
+    client = make_client(tmp_path, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {"count": 9})
+        assert reply.data == {
+            "status": "needs_parameters",
+            "missing": ["frequency"],
+            "outcome": None,
+        }
+    finally:
+        client.context.session.close()
+
+
+def test_mcp_interactive_wait_and_status_project_same_pending_owner(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    finished = Event()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.analyze":
+            return {"operation_id": 100, "interactive": True}
+        if (
+            method == "operation.await"
+            and params["operation_id"] == 100
+            and not finished.is_set()
+        ):
+            return {"reason": "timeout"}
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Hand off the same GUI analysis operation")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit, interactive=True)
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {"count": 9})
+        key = reply.data["execution"]
+        assert reply.data.get("pending") == {
+            "tab": "tab-1",
+            "stage": "primary",
+            "op": 2,
+        }
+        assert reply.data["status"] == "interactive"
+        assert client.call("status", {"execution": key}) == reply.data
+        assert client.call("wait", {"execution": key, "timeout": 1}).data == reply.data
+        finished.set()
+        client.context.session.recipes.get(key).join()
+        assert client.call("status", {"execution": key}) == {
+            "status": "completed",
+            "report": {"count": 9},
+            "runs": [
+                {
+                    "tab": "tab-1",
+                    "adapter": "synthetic",
+                    "run_id": "native-1",
+                    "status": "completed",
+                    "partial_result": False,
+                    "saves": [],
+                }
+            ],
+        }
+    finally:
+        finished.set()
         client.context.session.close()
 
 
