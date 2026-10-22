@@ -24,7 +24,7 @@ from zcu_tools.experiment.workflows import (
     RunStatus,
     TunablesSnapshot,
 )
-from zcu_tools.experiment.workflows.declaration import WorkflowStep
+from zcu_tools.experiment.workflows.declaration import WorkflowScript
 from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
@@ -199,9 +199,9 @@ class WorkflowController[F: FormModel, C]:
         run = self._run
         return run is not None and run.phase not in {"paused", "terminal"}
 
-    def start[P: BaseModel, T: BaseModel, S, R](
+    def start[P: BaseModel, T: BaseModel, Summary: BaseModel | None](
         self,
-        step: WorkflowStep[P, T, S, R, C],
+        script: WorkflowScript[P, T, Summary, C],
         **inputs: Unpack[WorkflowStartInputs[P, T, F, C]],
     ) -> int:
         """Publish prepared binding and submit native startup once via Runner.
@@ -243,7 +243,7 @@ class WorkflowController[F: FormModel, C]:
                 return None
             engine = Engine(replace(ports, progress=factory))
             status = engine.start(
-                step, plan=plan, tunables=tunables, paths=paths, identity=identity
+                script, plan=plan, tunables=tunables, paths=paths, identity=identity
             )
             with self._lock:
                 binding.accept(engine)

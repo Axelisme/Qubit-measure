@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import EnginePorts, RunIdentity, RunPaths
-from zcu_tools.experiment.workflows.declaration import WorkflowStep, workflow_definition
+from zcu_tools.experiment.workflows.declaration import WorkflowScript, workflow_definition
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
 
 from .workflow_run import WorkflowController
@@ -94,19 +94,18 @@ class Attachment[C](Protocol):
 class WorkflowAttachment[
     P: BaseModel,
     T: BaseModel,
-    S,
-    R,
+    Summary: BaseModel | None,
     FP: FormModel,
     FT: FormModel,
     C,
 ]:
     """Register a workflow with independent plan/tunables forms for the generic host.
 
-    P/T/S/R are native plan, tunables, carry state and record types. C is the
+    P/T/Summary are native plan, tunables and optional summary types. C is the
     opaque workflow context; the host only passes the seed into EnginePorts.
     FP/FT are independent FormModel declarations, not native numeric models.
 
-    step is a callable already declared with @workflow. plan_model/knobs_model
+    script is a coroutine already declared with @workflow. plan_model/knobs_model
     are its current plan/tunables form classes. plan_to_cfg(form, env, snapshot)
     converts an FP instance using only the fixed FormEnv and historical
     RunSnapshot; return native P or consuming-field FormErrors. knobs_to_cfg(form)
@@ -117,16 +116,16 @@ class WorkflowAttachment[
     These fields must all describe one coherent source revision. Constructor does
     not evaluate forms, invoke converters or acquire resources.
 
-    Build WorkflowAttachment(step=my_step, plan_model=PlanForm,
+    Build WorkflowAttachment(script=my_script, plan_model=PlanForm,
     knobs_model=TunablesForm, plan_to_cfg=PlanForm.to_cfg,
     knobs_to_cfg=TunablesForm.to_cfg, seed=my_seed), then pass a nonempty ordered
     list of these registrations to WorkflowControlFacet.configure(...).
-    Different native plan/state/record types remain paired inside prepare's
+    Different native plan/tunables/summary types remain paired inside prepare's
     closures; registrations in one host share C. No export/presentation callback,
     run, storage owner or live source is retained.
     """
 
-    step: WorkflowStep[P, T, S, R, C]
+    script: WorkflowScript[P, T, Summary, C]
     plan_model: type[FP]
     knobs_model: type[FT]
     plan_to_cfg: Callable[[FP, FormEnv, RunSnapshot], P | FormErrors]
@@ -136,7 +135,7 @@ class WorkflowAttachment[
     @property
     def name(self) -> str:
         """Return the name from the existing public native declaration."""
-        return workflow_definition(self.step).name
+        return workflow_definition(self.script).name
 
     def _plan(
         self, form: FormModel, env: FormEnv, snapshot: RunSnapshot
@@ -194,7 +193,7 @@ class WorkflowAttachment[
                 FormState(accepted_input), capture, identity.run_id, to_cfg=self._knobs
             )
             return controller.start(
-                self.step,
+                self.script,
                 plan=native_plan,
                 tunables=native_tunables,
                 paths=paths,
