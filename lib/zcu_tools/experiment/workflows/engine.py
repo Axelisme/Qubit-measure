@@ -122,14 +122,14 @@ class Engine[C]:
         return self._current(run_id).stop()
 
     def cancel(
-        self, run_id: str, scope: str = "script", *, expected: int | None = None
+        self, run_id: str, scope: str = "workflow", *, expected: int | None = None
     ) -> CancelResult:
         """Acknowledge a matching live scope; stale run IDs raise RunMismatch.
 
-        scope/expected use ScriptHost's label or label#N contract. Bare script
-        Stop is accepted when the owner records and latches it, then signals a
-        still-live host. Acceptance survives host exit before owner finalization.
-        Numbered script and other scopes use the host's atomic match/set; narrower
+        scope defaults to the workflow root; scope/expected use Scope selectors.
+        Bare workflow Stop is accepted when the owner records and latches it,
+        then signals a still-live host. Acceptance survives host exit before owner
+        finalization. Numbered workflow and other scopes use atomic match/set; narrower
         requests leave the workflow running. Valid terminal requests return a
         typed scope-not-active refusal; invalid syntax raises ValueError. Storage
         errors propagate and fail the run. No acknowledgement waits for cleanup.
