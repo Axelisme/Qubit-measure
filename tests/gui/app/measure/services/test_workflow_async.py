@@ -21,7 +21,9 @@ from ._workflow_harness import StartHarness
 def retained_ask(qapp, tmp_path):
     harness = StartHarness()
     entry = ResultEntry.create(
-        "synthetic", result_root=tmp_path / "result", database_root=tmp_path / "database"
+        "synthetic",
+        result_root=tmp_path / "result",
+        database_root=tmp_path / "database",
     )
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
@@ -39,8 +41,10 @@ def retained_ask(qapp, tmp_path):
     try:
         # The submitted author reaches Ask without any external release.
         qt_until(
-            lambda: (status := control.status("question-run")) is not None
-            and status.pending is not None,
+            lambda: (
+                (status := control.status("question-run")) is not None
+                and status.pending is not None
+            ),
             label="author pending Ask",
         )
         yield control, harness, author, tab, token, worker
@@ -57,7 +61,9 @@ def retained_ask(qapp, tmp_path):
 def test_pending_request_is_answerable_before_worker_return(retained_ask, tmp_path):
     control, harness, author, tab, token, worker = retained_ask
     question = control.pending_question("question-run")
-    assert question is not None, "Ask must be answerable while execute retains its worker"
+    assert question is not None, (
+        "Ask must be answerable while execute retains its worker"
+    )
     assert question["request_id"]
     assert question["question_type"] == "Choose"
     assert question["question"] == {"question_type": "authored evidence", "point": 4}
@@ -71,9 +77,10 @@ def test_pending_request_is_answerable_before_worker_return(retained_ask, tmp_pa
     assert worker.is_alive()
     assert control.tabs()[0].operation_id == token
     assert not control.close(tab)
-    assert control.answer(
-        "question-run", {"value": 23}, request_id=question["request_id"]
-    ) == token
+    assert (
+        control.answer("question-run", {"value": 23}, request_id=question["request_id"])
+        == token
+    )
     worker.join(30)  # The accepted answer permits the submitted author to return.
     assert not worker.is_alive()
     assert control.tabs()[0].operation_id == token, "Only owner delivery releases RUN"
@@ -89,7 +96,7 @@ def test_pending_request_is_answerable_before_worker_return(retained_ask, tmp_pa
     assert terminal.value.pending_request_id is None
     journal = next(tmp_path.rglob("journal.jsonl"))
     assert [
-        event["payload"]["request_id"]
+        event["request_id"]
         for event in map(json.loads, journal.read_text().splitlines())
         if event["kind"] == "question_answered"
     ] == [question["request_id"]]

@@ -41,10 +41,16 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
     devices.drivers["flux"] = FakeDevice(address="memory", fast_mode=True)
     plots = Plots(NonPresentingHost())
     board = white_noise()
-    engine = w.Engine(w.EnginePorts(
-        plots, RecordingBar, clock, devices=devices,
-        soc=board.soc, soccfg=board.soccfg,
-    ))
+    engine = w.Engine(
+        w.EnginePorts(
+            plots,
+            RecordingBar,
+            clock,
+            devices=devices,
+            soc=board.soc,
+            soccfg=board.soccfg,
+        )
+    )
     paths = w.RunPaths(tmp_path / "metadata", tmp_path / "data")
     contexts: list[RunContext] = []
     cfg = Cfg()
@@ -77,11 +83,21 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
 
     try:
         engine.start(
-            script, plan=Plan(), tunables=Tunables(), paths=paths,
-            identity=w.RunIdentity("run", SoftwareProvenance(
-                software_versions={}, git_commit=None, git_dirty=None,
-                qick_version=None, soc_fingerprint=None, hostname="offline",
-            )),
+            script,
+            plan=Plan(),
+            tunables=Tunables(),
+            paths=paths,
+            identity=w.RunIdentity(
+                "run",
+                SoftwareProvenance(
+                    software_versions={},
+                    git_commit=None,
+                    git_dirty=None,
+                    qick_version=None,
+                    soc_fingerprint=None,
+                    hostname="offline",
+                ),
+            ),
         )
         status = engine.execute("run")
         assert status.lifecycle == "done", status.reason
@@ -93,7 +109,11 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
             [(op["kind"], op["attempt"], op["outcome"]) for op in row["operations"]]
             for row in envelopes
         ] == [
-            [("call", 1, "completed"), ("run", 2, "completed"), ("wait_until", 3, "completed")],
+            [
+                ("call", 1, "completed"),
+                ("run", 2, "completed"),
+                ("wait_until", 3, "completed"),
+            ],
             [("setup_device", 1, "completed"), ("run", 2, "completed")],
         ]
         first_run = envelopes[0]["operations"][1]
@@ -101,11 +121,20 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
         assert first_run["device_snapshot"]["flux"]["value"] == 0
         assert second_run["device_snapshot"]["flux"]["value"] == 7
         assert first_run["started_at"] == START.isoformat().replace("+00:00", "Z")
-        assert first_run["finished_at"] == (START + timedelta(seconds=2)).isoformat().replace("+00:00", "Z")
+        assert first_run["finished_at"] == (
+            START + timedelta(seconds=2)
+        ).isoformat().replace("+00:00", "Z")
         assert first_run["reason"] is None
         assert envelopes[0]["operations"][0]["device_snapshot"] is None
-        journal = [json.loads(line) for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()]
-        attempts = [event["payload"]["operation"] for event in journal if event["kind"] == "operation_finished"]
+        journal = [
+            json.loads(line)
+            for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()
+        ]
+        attempts = [
+            event["operation"]
+            for event in journal
+            if event["kind"] == "operation_finished"
+        ]
         assert attempts[:3] == envelopes[0]["operations"]
         assert attempts[3:5] == envelopes[1]["operations"]
         assert (attempts[5]["kind"], attempts[5]["attempt"]) == ("run", 1)

@@ -13,8 +13,8 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.script_host import CallContext
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -56,8 +56,13 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
     board = white_noise()
     engine = w.Engine(
         w.EnginePorts(
-            plots, RecordingBar, ManualClock(), context=7, devices=devices,
-            soc=board.soc, soccfg=board.soccfg,
+            plots,
+            RecordingBar,
+            ManualClock(),
+            context=7,
+            devices=devices,
+            soc=board.soc,
+            soccfg=board.soccfg,
         )
     )
     paths = w.RunPaths(tmp_path / "metadata", tmp_path / "data")
