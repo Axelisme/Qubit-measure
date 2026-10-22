@@ -12,6 +12,8 @@ from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -51,8 +53,12 @@ type Rig = tuple[w.Engine[int], w.RunPaths, RecordingDevices]
 def rig(tmp_path: Path) -> Iterator[Rig]:
     plots = Plots(NonPresentingHost())
     devices = RecordingDevices()
+    board = white_noise()
     engine = w.Engine(
-        w.EnginePorts(plots, RecordingBar, ManualClock(), context=7, devices=devices)
+        w.EnginePorts(
+            plots, RecordingBar, ManualClock(), context=7, devices=devices,
+            soc=board.soc, soccfg=board.soccfg,
+        )
     )
     paths = w.RunPaths(tmp_path / "metadata", tmp_path / "data")
     yield engine, paths, devices
@@ -288,9 +294,11 @@ def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
     async def script(
         env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
-        def experiment(run: w.Run[Cfg]) -> int:
-            run.cfg.value = 8
-            return run.cfg.value + 1
+        def experiment(cfg: Cfg, *, context: RunContext) -> int:
+            assert context.plots is env.plots
+            assert not context.cancel_signal.is_set()
+            cfg.value = 8
+            return cfg.value + 1
 
         outcome = await env.run(experiment, cfg)
         assert isinstance(outcome, w.Completed)
