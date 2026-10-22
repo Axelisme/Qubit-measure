@@ -221,6 +221,42 @@ def test_drive_affects_only_its_own_cavity_with_global_dc_live_refresh():
         assert env.soc.binding.capture_snapshot().values == (("flux_bias", 0.2),)
 
 
+@pytest.mark.parametrize("output", ["integrated", "deferred_raw", "decimated"])
+def test_different_sweep_sizes_do_not_reuse_cavity_noise(output):
+    document = six_document()
+    # Pulse ADC6 uses Q1's receiver, even when its frequency selects cavity 1.
+    document["qubits"]["Q1"]["readout"]["adc"]["noise_psd_adc2_ns"] = [
+        [100, 0],
+        [0, 100],
+    ]
+    with environment(document) as env:
+        # Both acquires give cavity 1 a single-point partition starting at 0.
+        # Extra points visit cavity 0, so only the total request size changes.
+        long = pulse_program(env, [FREQUENCIES[1], *([FREQUENCIES[0]] * 12)])
+        short = pulse_program(env, [FREQUENCIES[1]])
+        if output == "decimated":
+            first = long.acquire_decimated(env.soc, progress=False)
+            second = short.acquire_decimated(env.soc, progress=False)
+        else:
+            first = long.acquire(env.soc, progress=False)
+            second = short.acquire(env.soc, progress=False)
+
+    # Raw materialization must keep its distinct identity after the next acquire
+    # and backend close, not borrow a live RNG or the most recent request.
+    if output == "deferred_raw":
+        first, second = long.get_raw(), short.get_raw()
+    assert first is not None and second is not None
+    if output == "integrated":
+        first_point = np.asarray(first[0]).reshape(13, -1, 2)[0]
+        next_point = np.asarray(second[0]).reshape(1, -1, 2)[0]
+    else:
+        first_point = np.asarray(first[0]).reshape(256, 13, -1, 2)[:, 0]
+        next_point = np.asarray(second[0]).reshape(256, 1, -1, 2)[:, 0]
+    assert not np.array_equal(first_point, next_point), (
+        "independent acquires must not reuse the same cavity receiver noise"
+    )
+
+
 def test_equidistant_readout_tone_fails_before_any_round_result():
     document = six_document()
     document["qubits"]["Q1"]["readout"]["resonator"]["frequency_ghz"] = 6.8
