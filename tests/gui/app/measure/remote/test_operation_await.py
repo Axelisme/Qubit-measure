@@ -97,7 +97,8 @@ def test_finished_returns_reason_and_status():
 def test_failed_returns_status_error_and_classification(failure_kind):
     ctrl = _ctrl(
         AwaitResult(
-            reason="completed", outcome=OperationOutcome("failed", "hardware boom", failure_kind)
+            reason="completed",
+            outcome=OperationOutcome("failed", "hardware boom", failure_kind),
         )
     )
     assert _HANDLER(ctrl, {"operation_id": 7, "timeout": 5.0}) == {

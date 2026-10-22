@@ -6,7 +6,6 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from zcu_tools.experiment.script_host import CancelScope
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
@@ -330,7 +329,7 @@ def test_run_cancel_during_analysis_does_not_stop_analysis(tmp_path: Path) -> No
         tab = session.open_tab("synthetic")
         await tab.run()
         fit = await tab.analyze("primary", result=Fit)
-        assert fit is not None and fit.result.estimate == 3.5
+        assert fit.result is not None and fit.result.estimate == 3.5
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
@@ -399,7 +398,7 @@ def test_interactive_analysis_hands_off_then_continues_after_owner_completion(
         tab = session.open_tab("synthetic")
         await tab.run()
         fit = await tab.analyze("primary", result=Fit, interactive=True)
-        assert fit is not None and fit.result.estimate == 3.5
+        assert fit.result is not None and fit.result.estimate == 3.5
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))

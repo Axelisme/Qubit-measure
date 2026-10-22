@@ -381,7 +381,9 @@ def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tm
     driver.click("Stop")
     qt_until(lambda: _status(driver, "cancelled"), label="scope root cancelled")
     _shot(driver, tmp_path, "scope-03-cancelled")
-    assert driver.observe(object_name="workflow.active_path").text == "workflow:synthetic"
+    assert (
+        driver.observe(object_name="workflow.active_path").text == "workflow:synthetic"
+    )
 
 
 def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):
