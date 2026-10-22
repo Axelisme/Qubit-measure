@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-21，Single-fluxonium settings 與共用 simulation YAML/schema
+**Last updated:** 2026-10-23，Single／six-fluxonium settings 與共用 simulation YAML/schema
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -15,6 +15,7 @@
   reconstruction. Numeric manifests stay opaque and are verified by their numeric
   owner. Normal waveform assets and data.h5
   policies do not change. This module does not import program or simulate.
+- [`six_fluxonium/`](six_fluxonium/README.md) reads six independent circuit materials with one global DC source and fixed mux/pulse routes.
 - [`single_fluxonium/`](single_fluxonium/README.md) reads immutable single-qubit YAML with microwave, fast-flux and single-cavity routes. `simulation_schema.py` and `yaml.py` share neutral physical records and safe YAML decoding with FTF.
 - [`ftf/`](ftf/README.md) 讀取 immutable FTF YAML，擁有具名欄位、units、limits、接線與 noise PSD 的 field-path 診斷，不依賴 simulate、device 或 program。
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。

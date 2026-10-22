@@ -47,6 +47,8 @@ def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:
 def test_ideal_flux_platforms_use_levels_without_artificial_ramps() -> None:
     planner = importlib.import_module("zcu_tools.experiment.single_fluxonium.template")
     config = settings()
+    if config.flux_line is None:
+        raise AssertionError("pulsed fixture requires a bound fast-flux line")
     config = config.model_copy(
         update={"flux_line": config.flux_line.model_copy(update={"tau_ns": 0})}
     )
