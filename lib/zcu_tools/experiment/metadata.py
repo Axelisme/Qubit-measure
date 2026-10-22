@@ -20,6 +20,10 @@ from pydantic import (
 
 from zcu_tools.datafile import JsonObject, LabberMetadata
 
+_RUN_ID_PATTERN = (
+    r"^(?:[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}|[0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*)$"
+)
+
 
 @dataclass(frozen=True, kw_only=True)
 class CfgSnapshot:
@@ -80,8 +84,11 @@ class SoftwareProvenance:
 class RunMetadata(BaseModel):
     """Historical identity and acquisition facts stored in docs/metadata.
 
-    run_id is a UTC timestamp plus six-character identity, optionally followed
-    by a workflow's six-digit commit sequence and numeric attempt.
+    run_id must fully match one of two ASCII grammars:
+    experiment [0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}, or workflow operation
+    [0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*. The latter keeps the complete workflow
+    root, six-digit iteration and positive attempt without leading zeros.
+    These grammars do not validate calendar semantics.
     experiment is the declaration's tag.
     started_at/finished_at are UTC ISO timestamps or None for absent evidence.
     completion is complete, partial, stopped or unknown, not a save status.
@@ -98,9 +105,7 @@ class RunMetadata(BaseModel):
         frozen=True, allow_inf_nan=False, revalidate_instances="always"
     )
 
-    run_id: str = Field(
-        pattern=r"^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}(?:-[0-9]{6}-[0-9]+)?$"
-    )
+    run_id: str = Field(pattern=_RUN_ID_PATTERN)
     experiment: str = Field(min_length=1)
     started_at: str | None
     finished_at: str | None
@@ -146,13 +151,18 @@ def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
 
 
 def validate_run_id(run_id: str) -> None:
-    """Validate ordinary acquisition YYYYMMDDTHHMMSSZ-six_alphanumerics tokens.
+    """Accept exactly one of the experiment or workflow operation ID grammars.
 
-    Invalid strings raise ValueError naming run_id; nonstrings raise TypeError.
-    This acquisition-token check does not constrain workflow identities
-    or infer calendar semantics or acquisition evidence from the token.
+    run_id must fully match [0-9]{8}T[0-9]{6}Z-[a-z0-9]{6} for an experiment,
+    or [0-9a-f]{32}-[0-9]{6}-[1-9][0-9]* for a workflow operation. The workflow
+    form preserves its lowercase hex root, six-digit iteration and positive
+    attempt without leading zeros. No calendar semantics are inferred.
+    Return None for valid strings without changing them. Invalid strings raise
+    ValueError naming run_id; nonstrings raise TypeError.
     """
-    if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}", run_id) is None:
+    if re.fullmatch(_RUN_ID_PATTERN, run_id) is None:
         raise ValueError(
-            "/: run_id must be a UTC timestamp plus six-character identity"
+            "/: run_id must be an experiment timestamp with six-character identity "
+            "or a workflow's 32-character lowercase hex root, six-digit iteration "
+            "and positive attempt without leading zeros"
         )
