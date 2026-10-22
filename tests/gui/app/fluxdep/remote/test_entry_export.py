@@ -61,6 +61,8 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
         name="calibrated", spec_type="TwoTone",
         raw={"dev_values": np.array([0., 1.]), "fluxs": np.array([0., .5]),
              "freqs": np.array([4., 5.]), "signals": np.ones((2, 2), dtype=complex)},
+        # Empty sampled sources still supply the first committed calibration.
+        points={"dev_values": np.array([]), "fluxs": np.array([]), "freqs": np.array([])},
         flux_half=0.7, flux_int=1.7, flux_period=2., aligned=True,
     ))
     route_harness.ctrl.state.set_fit_result((5.123456789, 1.2, 0.4))
