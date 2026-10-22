@@ -13,7 +13,15 @@ from zcu_tools.experiment.script_host import PendingQuestion
 
 from .declaration import WorkflowScript, workflow_definition
 from .execution import WorkflowRun
-from .models import Actor, CommittedRecord, RunIdentity, RunMismatch, RunPaths, RunStatus, TunablesSnapshot
+from .models import (
+    Actor,
+    CommittedRecord,
+    RunIdentity,
+    RunMismatch,
+    RunPaths,
+    RunStatus,
+    TunablesSnapshot,
+)
 from .ports import EnginePorts
 
 
@@ -31,7 +39,9 @@ class _RunView(Protocol):
     def answer(self, answer: Answer, *, request_id: str) -> RunStatus: ...
     def pending_question(self) -> PendingQuestion | None: ...
     def parse_answer(self, mapping: Mapping[str, object]) -> Answer: ...
-    def update_tunables(self, tunables: BaseModel, expected_revision: int, actor: Actor) -> TunablesSnapshot: ...
+    def update_tunables(
+        self, tunables: BaseModel, expected_revision: int, actor: Actor
+    ) -> TunablesSnapshot: ...
     def status(self) -> RunStatus: ...
     def tunables(self) -> TunablesSnapshot: ...
     def records(self, since: int) -> tuple[CommittedRecord, ...]: ...

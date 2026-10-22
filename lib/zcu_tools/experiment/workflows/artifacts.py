@@ -1,4 +1,4 @@
-"""Engine-owned manifest, journal and best-effort invocation summaries."""
+"""Journal, manifest, allocated commit directories and atomic JSON publication."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
@@ -16,37 +16,24 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.utils import atomic_replace
 
-from .journal import (
-    IterationResult,
-    IterationStarted,
-    JournalPayload,
-    RunMetadata,
-    RunStarted,
-    StepCommitted,
-    StepDiscarded,
-    StepFailed,
-    StepFinished,
-)
-from .models import (
-    CommittedRecord,
-    EncodedRecord,
-    Lifecycle,
-    RunIdentity,
-    RunPaths,
-)
+from .journal import JournalPayload, RecordCommitted, RunMetadata, RunStarted
+from .models import EncodedRecord, Lifecycle, RunIdentity, RunPaths
 from .ports import Clock
+
+_logger = logging.getLogger(__name__)
+_json_adapter = TypeAdapter(JsonValue)
 
 
 @dataclass(frozen=True)
 class RunManifest:
-    """Run entry document, not a checkpoint or point-record store.
+    """Run entry metadata, not a checkpoint or original-data inventory.
 
-    identity/workflow/plan/initial_tunables/roots retain startup
-    provenance. roots and journal are absolute paths; journal locates JSONL.
-    started_at is the original UTC start;
-    updated_at is the last lifecycle change, ended_at is None until terminal.
-    lifecycle uses the Engine lifecycle enum; reason is diagnostic or None.
-    format and format_version identify this document's schema.
+    identity/workflow/plan/initial_tunables preserve startup values. roots are
+    absolute and journal names JSONL. started_at/updated_at are UTC; ended_at is
+    None before terminal. lifecycle/reason summarize control. record_schemas
+    maps each committed model's qualified type name to its JSON schema once.
+    Schemas are informational; readers do not validate against them.
+    format/version identify this manifest document.
     """
 
     identity: RunIdentity
@@ -60,32 +47,43 @@ class RunManifest:
     ended_at: datetime | None
     lifecycle: Lifecycle
     reason: str | None
+    record_schemas: dict[str, JsonValue] = field(default_factory=dict)
     format: Literal["zcu-workflow-run"] = field(default="zcu-workflow-run", init=False)
     format_version: Literal[1] = field(default=1, init=False)
 
 
 @dataclass(frozen=True)
-class _IterationInputs:
-    """Detached input summary captured before user code can mutate tunables.
+class RecordStarted:
+    """Commit-scope evidence: call_seq, prior commit_seq and read-order revisions."""
 
-    identity/workflow/plan retain the run's startup values. tunables contains
-    this call's complete ordinary JSON values. started retains the journal
-    invocation identity; its directory is omitted from the input JSON summary.
-    No workflow state or experiment cfg/results are retained here.
+    call_seq: int
+    commit_seq: int
+    revisions: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class RecordEnvelope:
+    """One persisted commit, independent of its directory allocation number.
+
+    run_id/workflow bind the manifest. commit_seq orders committed records.
+    directory is data-root-relative commits/<allocation number>. committed_at
+    is UTC. started retains scope identity and actual tunables reads.
+    record_type keys the informational manifest schema. record is encoded JSON.
+    format/version identify the record file schema.
     """
 
-    identity: RunIdentity
+    run_id: str
     workflow: str
-    plan: JsonValue
-    tunables: JsonValue
-    started: IterationStarted
-
-
-_logger = logging.getLogger(__name__)
-_inputs_adapter = TypeAdapter(_IterationInputs)
-_payload_adapter = TypeAdapter(JournalPayload)
-_manifest_adapter = TypeAdapter(RunManifest)
-_json_adapter = TypeAdapter(JsonValue)
+    commit_seq: int
+    directory: str
+    committed_at: datetime
+    started: RecordStarted
+    record_type: str
+    record: EncodedRecord
+    format: Literal["zcu-workflow-record"] = field(
+        default="zcu-workflow-record", init=False
+    )
+    format_version: Literal[2] = field(default=2, init=False)
 
 
 def _json_object[T](value: T, adapter: TypeAdapter[T]) -> dict[str, JsonValue]:
@@ -98,7 +96,6 @@ def _json_object[T](value: T, adapter: TypeAdapter[T]) -> dict[str, JsonValue]:
 
 
 def _json_line(value: dict[str, JsonValue]) -> str:
-    # Necessary provenance must fail, not inherit the record encoder's fallback.
     return json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n"
 
 
@@ -107,37 +104,24 @@ def _check_utc(value: datetime) -> None:
         raise ValueError("Artifact timestamps must be timezone-aware UTC")
 
 
-def _relative_path(value: str) -> None:
-    path = PurePosixPath(value)
-    if (
-        not value
-        or path.is_absolute()
-        or PureWindowsPath(value).drive
-        or ".." in path.parts
-        or "\\" in value
-    ):
-        raise ValueError("Artifact references must be relative paths without '..'")
-
-
-def _check_event_paths(event: JournalPayload) -> None:
-    if isinstance(event, (IterationStarted, IterationResult, CommittedRecord)):
-        _relative_path(event.iteration_dir)
+def _write_atomic(destination: Path, payload: dict[str, JsonValue]) -> None:
+    temporary = destination.with_name(f".{destination.stem}-{uuid4().hex}.tmp.json")
+    with temporary.open("x", encoding="utf-8", newline="\n") as writer:
+        line = _json_line(payload)
+        if writer.write(line) != len(line):
+            raise OSError("Artifact write was incomplete")
+        writer.flush()
+    atomic_replace(temporary, destination)
 
 
 class RunArtifacts:
-    """Create and maintain one run's metadata and iteration directories.
+    """Own framework JSON only; never discover or inspect authored raw files.
 
-    metadata contains detached, validated startup provenance. clock supplies
-    timezone-aware UTC. control_lock must be the Engine's shared RLock, also
-    used for revision capture and control publication. All appends use it.
-
-    Construction resolves roots to absolute paths, rejects existing or
-    overlapping roots, creates both roots, writes a running manifest and a
-    run_started line. No workflow init or hardware executes here. Failures
-    propagate and retain any directories/files already created.
-
-    This package-internal I/O seam is not exported by the workflow barrel.
-    The Engine owns lifecycle transitions and state publication after I/O.
+    metadata supplies detached startup evidence. clock returns aware UTC. lock
+    is the Engine control lock, shared by allocation, journal and publication.
+    Construction rejects existing/overlapping roots and persists startup. All
+    I/O failures propagate except best-effort committed record.json output.
+    No fsync/crash resume, file rollback or hardware ownership is provided.
     """
 
     def __init__(
@@ -146,42 +130,44 @@ class RunArtifacts:
         roots = RunPaths(
             metadata.roots.metadata_root.resolve(), metadata.roots.data_root.resolve()
         )
-        _check_utc(metadata.started_at)
         self._check_roots(roots)
-        metadata = deepcopy(replace(metadata, roots=roots))
+        _check_utc(metadata.started_at)
         self._clock = clock
         self._lock = control_lock
         self._paths = roots
         self._run_id = metadata.identity.run_id
         self._seq = 0
+        self._allocation_seq = 0
+        self._allocated: set[Path] = set()
+        self._committed: set[Path] = set()
         self._journal_broken = False
         self._manifest = RunManifest(
-            identity=metadata.identity,
-            workflow=metadata.workflow,
-            plan=metadata.plan,
-            initial_tunables=metadata.tunables,
-            roots=roots,
-            journal=self.journal_path,
-            started_at=metadata.started_at,
-            updated_at=metadata.started_at,
-            ended_at=None,
-            lifecycle="running",
-            reason=None,
+            deepcopy(metadata.identity),
+            metadata.workflow,
+            deepcopy(metadata.plan),
+            deepcopy(metadata.tunables),
+            roots,
+            self.journal_path,
+            metadata.started_at,
+            metadata.started_at,
+            None,
+            "running",
+            None,
         )
-        # Encode mandatory fields before creating either run directory.
-        _json_line(_json_object(self._manifest, _manifest_adapter))
+        payload = _json_object(self._manifest, TypeAdapter(RunManifest))
+        _json_line(payload)
         roots.metadata_root.mkdir(parents=True, exist_ok=False)
         roots.data_root.mkdir(parents=True, exist_ok=False)
-        self._write_manifest(self._manifest)
+        _write_atomic(roots.metadata_root / "manifest.json", payload)
         self.journal_path.touch(exist_ok=False)
         self.append(
             RunStarted(
-                identity=metadata.identity,
-                workflow=metadata.workflow,
-                plan=metadata.plan,
-                tunables=metadata.tunables,
-                roots=roots,
-                started_at=metadata.started_at,
+                deepcopy(metadata.identity),
+                metadata.workflow,
+                deepcopy(metadata.plan),
+                deepcopy(metadata.tunables),
+                roots,
+                metadata.started_at,
             )
         )
 
@@ -196,28 +182,24 @@ class RunArtifacts:
 
     @property
     def paths(self) -> RunPaths:
-        """Return the normalized absolute run roots (an immutable path pair)."""
+        """Return immutable normalized absolute run paths."""
         return self._paths
 
     @property
     def journal_path(self) -> Path:
-        """Return the absolute UTF-8 journal.jsonl path in metadata_root."""
+        """Return metadata_root/journal.jsonl, never an authored file path."""
         return self._paths.metadata_root / "journal.jsonl"
 
     def append(self, event: JournalPayload) -> None:
-        """Append and flush one typed event with the next contiguous sequence.
+        """Append/flush one typed payload with contiguous sequence and UTC time.
 
-        The common envelope adds format_version=1, seq, run_id, and UTC time.
-        event path references must be relative, without '..'. Serialization
-        errors propagate without writing or consuming a sequence. Write/flush
-        failures propagate and poison further appends, since a partial line may
-        exist. No fsync or crash-recovery guarantee is provided.
+        Encoding errors consume no sequence. A failed/short write poisons later
+        appends because a partial line may remain; no recovery is attempted.
         """
         with self._lock:
             if self._journal_broken:
                 raise RuntimeError("Journal is unusable after an I/O failure")
-            _check_event_paths(event)
-            payload = _json_object(event, _payload_adapter)
+            payload = _json_object(event, TypeAdapter(JournalPayload))
             now = self._clock.now()
             _check_utc(now)
             payload.update(
@@ -227,170 +209,124 @@ class RunArtifacts:
                 time=now.isoformat(),
             )
             line = _json_line(payload)
-            self._append_line(line)
+            try:
+                with self.journal_path.open(
+                    "a", encoding="utf-8", newline="\n"
+                ) as writer:
+                    if writer.write(line) != len(line):
+                        raise OSError("Journal write was incomplete")
+                    writer.flush()
+            except OSError:
+                self._journal_broken = True
+                raise
             self._seq += 1
 
-    def _append_line(self, line: str) -> None:
-        try:
-            with self.journal_path.open("a", encoding="utf-8", newline="\n") as writer:
-                if writer.write(line) != len(line):
-                    raise OSError("Journal write was incomplete")
-                writer.flush()
-        except OSError:
-            # A short/failed write cannot safely be followed by a failure event.
-            self._journal_broken = True
-            raise
-
     def set_lifecycle(self, lifecycle: Lifecycle, reason: str | None = None) -> None:
-        """Replace the manifest for a lifecycle change, preserving startup data.
-
-        lifecycle is the Engine-selected new state; transition policy belongs
-        to Engine. The same state raises ValueError. Terminal states set
-        ended_at to clock.now(); other states use None. Only successful replace
-        updates this store's manifest. Errors retain temporary files and
-        propagate; the Engine must report failure and append it if possible.
-        """
+        """Atomically replace lifecycle metadata; same-state changes raise ValueError."""
         with self._lock:
             if lifecycle == self._manifest.lifecycle:
                 raise ValueError("Manifest updates require a lifecycle change")
             now = self._clock.now()
             _check_utc(now)
-            terminal = lifecycle in ("done", "cancelled", "aborted", "stopped", "failed")
             manifest = replace(
                 self._manifest,
-                updated_at=now,
-                ended_at=now if terminal else None,
                 lifecycle=lifecycle,
                 reason=reason,
+                updated_at=now,
+                ended_at=now if lifecycle in ("done", "cancelled", "failed") else None,
             )
-            self._write_manifest(manifest)
-            self._manifest = manifest
+            self._publish_manifest(manifest)
 
-    def _write_manifest(self, manifest: RunManifest) -> None:
-        line = _json_line(_json_object(manifest, _manifest_adapter))
-        temporary = self._paths.metadata_root / f".manifest-{uuid4().hex}.tmp.json"
-        with temporary.open("x", encoding="utf-8", newline="\n") as writer:
-            if writer.write(line) != len(line):
-                raise OSError("Manifest write was incomplete")
-            writer.flush()
-        atomic_replace(temporary, self._paths.metadata_root / "manifest.json")
+    def _publish_manifest(self, manifest: RunManifest) -> None:
+        _write_atomic(
+            self._paths.metadata_root / "manifest.json",
+            _json_object(manifest, TypeAdapter(RunManifest)),
+        )
+        self._manifest = manifest
 
-    def capture_record(
-        self, started: IterationStarted, tunables: BaseModel
-    ) -> _IterationInputs | None:
-        """Capture this invocation's inputs without writing a pending document.
+    def new_commit_dir(self) -> Path:
+        """Allocate/create the next six-digit commits directory, independent of commits.
 
-        Called before workflow code receives its tunables. JSON projection
-        failures are logged and disable only this invocation's summary.
+        Each call allocates a distinct directory. Failed creation does not
+        consume a number. Allocation does not write a record or switch scopes.
         """
-        try:
-            values = _json_adapter.validate_python(
-                tunables.model_dump(mode="json", by_alias=False, warnings="error")
-            )
-            return _IterationInputs(
-                self._manifest.identity,
-                self._manifest.workflow,
-                self._manifest.plan,
-                values,
-                started,
-            )
-        except Exception:
-            _logger.exception("Cannot capture workflow iteration record inputs")
-            return None
+        with self._lock:
+            number = self._allocation_seq + 1
+            directory = self._paths.data_root / "commits" / f"{number:06d}"
+            directory.mkdir(parents=True, exist_ok=False)
+            self._allocated.add(directory)
+            self._allocation_seq = number
+            return directory
 
-    def save_record(
-        self,
-        iteration: IterationArtifacts,
-        inputs: _IterationInputs | None,
-        result: StepCommitted | StepFinished | StepDiscarded | StepFailed,
+    def prepare_commit(self, directory: Path | None) -> Path:
+        """Allocate when None; otherwise reject foreign/already-committed directories."""
+        with self._lock:
+            if directory is None:
+                return self.new_commit_dir()
+            directory = directory.resolve()
+            if directory not in self._allocated:
+                raise ValueError(
+                    f"Commit directory was not allocated by this run: {directory}"
+                )
+            if directory in self._committed:
+                raise ValueError(f"Commit directory is already committed: {directory}")
+            return directory
+
+    def register_record(self, record: BaseModel) -> str:
+        """Publish each qualified model's JSON schema once and return its name.
+
+        A reused name with a different schema raises ValueError. Schema and
+        manifest I/O errors propagate before any record is committed.
+        """
+        with self._lock:
+            model = type(record)
+            name = f"{model.__module__}.{model.__qualname__}"
+            schema = _json_adapter.validate_python(model.model_json_schema())
+            schemas = self._manifest.record_schemas
+            if name in schemas:
+                if schemas[name] != schema:
+                    raise ValueError(f"Record schema changed for {name}")
+                return name
+            self._publish_manifest(
+                replace(self._manifest, record_schemas={**schemas, name: schema})
+            )
+            return name
+
+    def publish_record(
+        self, directory: Path, event: RecordCommitted, started: RecordStarted
     ) -> None:
-        """Save a summary only after the Engine has journaled its result.
+        """Journal/flush a commit, then best-effort write its matching record.json.
 
-        The journal remains the sole commit authority. Summary serialization
-        and I/O failures are logged and isolated from state and lifecycle.
+        The caller holds the same lock through in-memory record publication.
+        Record output errors are logged; the flushed journal remains authority.
+        Authored files are not inspected or rolled back.
         """
-        if inputs is None:
-            return
-        try:
-            payload = _json_object(inputs, _inputs_adapter)
-            started = _json_object(inputs.started, _payload_adapter)
-            del started["iteration_dir"]
-            payload.update(
-                format="zcu-workflow-iteration",
-                format_version=2,
-                started=started,
-                result=_json_object(result, _payload_adapter),
+        with self._lock:
+            self.append(event)
+            self._committed.add(directory)
+            envelope = RecordEnvelope(
+                self._run_id,
+                self._manifest.workflow,
+                event.commit_seq,
+                event.directory,
+                event.committed_at,
+                started,
+                event.record_type,
+                event.encoded_record,
             )
-            iteration.save_record(payload)
-        except Exception:
-            _logger.exception(
-                "Cannot save workflow iteration record for %s", iteration.iteration_dir
-            )
+            try:
+                _write_atomic(
+                    directory / "record.json",
+                    _json_object(envelope, TypeAdapter(RecordEnvelope)),
+                )
+            except Exception:
+                _logger.exception(
+                    "Cannot save committed workflow record in %s", directory
+                )
 
     def save_summary(self, summary: EncodedRecord) -> None:
-        """Atomically write an encoded done return to metadata_root/summary.json.
-
-        The execution owner calls this only for a non-None done return. Errors
-        propagate, retaining any temporary files; no journal line is added here.
-        """
-        payload = _json_object(summary, TypeAdapter(EncodedRecord))
-        temporary = self._paths.metadata_root / f".summary-{uuid4().hex}.tmp.json"
-        temporary.write_text(_json_line(payload), encoding="utf-8")
-        atomic_replace(temporary, self._paths.metadata_root / "summary.json")
-
-    def new_iteration(self, call_seq: int) -> IterationArtifacts:
-        """Create iter/<call_seq>/ and return its summary-writing seam.
-
-        call_seq is a positive invocation number, not a commit or flux index.
-        It is padded to at least six digits and never wraps. Existing invocation
-        directories are rejected; partially created directories remain on error.
-        This operation does not append iteration_started or commit anything.
-        """
-        if type(call_seq) is not int or call_seq <= 0:
-            raise ValueError("call_seq must be a positive integer")
-        relative = f"iter/{call_seq:06d}"
-        root = self._paths.data_root / relative
-        root.mkdir(parents=True, exist_ok=False)
-        return IterationArtifacts(root, relative)
-
-
-class IterationArtifacts:
-    """Write Engine-owned summaries in one newly allocated invocation root.
-
-    root is absolute; iteration_dir is the data-root-relative journal reference.
-    Workflow-owned files are neither inspected nor tracked by this owner.
-    """
-
-    def __init__(self, root: Path, iteration_dir: str) -> None:
-        _relative_path(iteration_dir)
-        if not root.is_absolute():
-            raise ValueError("Iteration root must be absolute")
-        self._root = root
-        self._iteration_dir = iteration_dir
-
-    @property
-    def iteration_dir(self) -> str:
-        """Return the data-root-relative invocation reference, iter/<call_seq>."""
-        return self._iteration_dir
-
-    @property
-    def root(self) -> Path:
-        """Return the existing absolute invocation root exposed to the workflow."""
-        return self._root
-
-    def save_record(self, payload: dict[str, JsonValue]) -> None:
-        """Atomically publish a finished invocation's JSON summary.
-
-        payload is the Engine-owned input/result envelope, not workflow state.
-        Write and close a unique same-directory temporary before replace.
-        Errors propagate to RunArtifacts' best-effort isolation; temporary
-        files remain for diagnosis. Only transient Windows sharing/lock errors
-        are retried for up to 0.5 seconds; this is not a checkpoint.
-        """
-        line = _json_line(payload)
-        temporary = self._root / f".record-{uuid4().hex}.tmp.json"
-        with temporary.open("x", encoding="utf-8", newline="\n") as writer:
-            if writer.write(line) != len(line):
-                raise OSError("Iteration record write was incomplete")
-            writer.flush()
-        atomic_replace(temporary, self._root / "record.json")
+        """Atomically write a non-None done return; output errors propagate."""
+        _write_atomic(
+            self._paths.metadata_root / "summary.json",
+            _json_object(summary, TypeAdapter(EncodedRecord)),
+        )

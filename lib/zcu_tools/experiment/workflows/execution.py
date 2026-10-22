@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import replace
 from pathlib import Path
 from threading import RLock
+from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
@@ -15,19 +15,18 @@ from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.script_host import PendingQuestion, ScriptHost
 from zcu_tools.progress_bar import use_pbar_factory
 
-from .artifacts import RunArtifacts
+from .artifacts import RecordStarted, RunArtifacts
 from .declaration import WorkflowDefinition
 from .encoding import encode_record
 from .env import Displays, EnvHooks, WorkflowEnv
 from .journal import (
     ExperimentFailed,
-    IterationStarted,
     Paused,
     PauseRequested,
+    RecordCommitted,
     Resumed,
     RunEnded,
     RunMetadata,
-    StepCommitted,
     StopRequested,
     TunablesChanged,
     describe_error,
@@ -87,11 +86,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._records: list[CommittedRecord] = []
         self._revisions: list[int] = []
 
-    def start(self, plan: P, tunables: T, paths: RunPaths, identity: RunIdentity) -> None:
+    def start(
+        self, plan: P, tunables: T, paths: RunPaths, identity: RunIdentity
+    ) -> None:
         """Revalidate/copy models and persist startup without executing the author."""
-        self._plan = deepcopy(self._definition.plan.model_validate(
-            plan.model_dump(mode="python"), by_name=True, by_alias=False
-        ))
+        self._plan = deepcopy(
+            self._definition.plan.model_validate(
+                plan.model_dump(mode="python"), by_name=True, by_alias=False
+            )
+        )
         self._tunables = TunableValues(
             self._definition.tunables, tunables, self._lock, self._append_tunables
         )
@@ -101,7 +104,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             RunMetadata(
                 self._identity,
                 self._definition.name,
-                TypeAdapter(JsonValue).validate_python(self._plan.model_dump(mode="json")),
+                TypeAdapter(JsonValue).validate_python(
+                    self._plan.model_dump(mode="json")
+                ),
                 self._tunables.snapshot().values,
                 paths,
                 self._started_at,
@@ -122,7 +127,11 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
 
     def reserve_execution(self) -> None:
         """Reserve the run's only worker entry while Engine holds the lock."""
-        if self._executing or self._call_seq is not None or self._lifecycle in _TERMINAL:
+        if (
+            self._executing
+            or self._call_seq is not None
+            or self._lifecycle in _TERMINAL
+        ):
             raise InvalidRunState("execute", self._lifecycle)
         self._executing = True
 
@@ -157,7 +166,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             self._host,
             self._displays,
             EnvHooks(
-                self._iteration_dir,
+                self._artifacts.new_commit_dir,
                 self._commit,
                 self._boundary,
                 self._stopping,
@@ -165,22 +174,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._question_boundary,
             ),
         )
-        return await self._definition.script(env, deepcopy(self._plan), Live(self._read_tunables))
+        return await self._definition.script(
+            env, deepcopy(self._plan), Live(self._read_tunables)
+        )
 
     def _new_iteration(self) -> None:
-        self._call_seq = 1 if self._call_seq is None else self._call_seq + 1
-        self._iteration = self._artifacts.new_iteration(self._call_seq)
-        captured = self._tunables.capture()
-        self._started = IterationStarted(
-            self._call_seq, self._commit_seq, captured.revision, self._iteration.iteration_dir
-        )
+        self._call_seq = self._commit_seq + 1
+        self._scope_revision = self._tunables.revision
         self._revisions = []
         self._run_no = 0
-        self._inputs = self._artifacts.capture_record(self._started, captured.model)
-        self._artifacts.append(self._started)
-
-    def _iteration_dir(self) -> Path:
-        return self._iteration.root
 
     def _read_tunables(self) -> T:
         with self._lock:
@@ -189,22 +191,26 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._revisions.append(captured.revision)
             return captured.model
 
-    def _commit(self, record: BaseModel) -> None:
+    def _commit(self, record: BaseModel, directory: Path | None) -> None:
         with self._lock:
-            event = StepCommitted(
+            directory = self._artifacts.prepare_commit(directory)
+            record_type = self._artifacts.register_record(record)
+            revisions = tuple(self._revisions)
+            event = RecordCommitted(
                 self._commit_seq + 1,
-                self._started.call_seq,
-                self._started.revision,
+                self._commit_seq + 1,
+                self._scope_revision,
                 encode_record(record),
-                self._iteration.iteration_dir,
-                tuple(self._revisions),
+                directory.relative_to(self._artifacts.paths.data_root).as_posix(),
+                self._ports.clock.now(),
+                revisions,
+                record_type,
             )
-            self._artifacts.append(event)
-            inputs = None if self._inputs is None else replace(
-                self._inputs,
-                started=replace(self._started, revisions=tuple(self._revisions)),
+            self._artifacts.publish_record(
+                directory,
+                event,
+                RecordStarted(self._commit_seq + 1, self._commit_seq, revisions),
             )
-            self._artifacts.save_record(self._iteration, inputs, event)
             self._records.append(event)
             self._commit_seq += 1
             self._new_iteration()
@@ -216,16 +222,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._artifacts.set_lifecycle("paused")
                 self._lifecycle = "paused"
 
-    def _question_boundary(self, waiting: bool) -> None:
+    def _question_boundary(self, phase: Literal["waiting", "answered"]) -> None:
         with self._lock:
             if self._lifecycle in ("stopping", "failed"):
                 return
-            if waiting and self._lifecycle != "paused":
+            if phase == "waiting" and self._lifecycle != "paused":
                 self._artifacts.append(Paused(self._call_seq, self._commit_seq))
                 self._artifacts.set_lifecycle("paused")
                 self._lifecycle = "paused"
-            elif not waiting and self._lifecycle == "paused":
-                self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
+            elif phase == "answered" and self._lifecycle == "paused":
+                self._artifacts.append(
+                    Resumed(self._commit_seq, self._tunables.revision)
+                )
                 self._artifacts.set_lifecycle("running")
                 self._lifecycle = "running"
 
@@ -233,12 +241,20 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         with self._lock:
             return self._stop_requested
 
-    def _experiment_failed(self, experiment: str, reason: str, cause: BaseException) -> None:
+    def _experiment_failed(
+        self, experiment: str, reason: str, cause: BaseException
+    ) -> None:
         with self._lock:
             self._run_no += 1
-            self._artifacts.append(ExperimentFailed(
-                self._started.call_seq, self._run_no, experiment, reason, describe_error(cause)
-            ))
+            self._artifacts.append(
+                ExperimentFailed(
+                    self._commit_seq + 1,
+                    self._run_no,
+                    experiment,
+                    reason,
+                    describe_error(cause),
+                )
+            )
 
     def pause(self) -> RunStatus:
         """Record Pause intent, then acknowledge host control outside the lock."""
@@ -247,7 +263,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 return self.status()
             if self._lifecycle != "running":
                 raise InvalidRunState("pause", self._lifecycle)
-            self._artifacts.append(PauseRequested(self._ports.clock.now(), self._call_seq))
+            self._artifacts.append(
+                PauseRequested(self._ports.clock.now(), self._call_seq)
+            )
             self._artifacts.set_lifecycle("pausing")
             self._lifecycle = "pausing"
         self._host.pause()
@@ -269,7 +287,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         with self._lock:
             if self._lifecycle in _TERMINAL or self._stop_requested:
                 return self.status()
-            self._artifacts.append(StopRequested(self._ports.clock.now(), self._call_seq))
+            self._artifacts.append(
+                StopRequested(self._ports.clock.now(), self._call_seq)
+            )
             self._artifacts.set_lifecycle("stopping")
             self._lifecycle = "stopping"
             self._stop_requested = True
@@ -296,7 +316,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         """
         pending = self.pending_question()
         if pending is None or pending.request_id != request_id:
-            raise QuestionMismatch(request_id, None if pending is None else pending.request_id)
+            raise QuestionMismatch(
+                request_id, None if pending is None else pending.request_id
+            )
         try:
             self._host.answer(request_id, answer)
         except ValueError as error:
@@ -308,12 +330,16 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             raise
         return self.status()
 
-    def update_tunables(self, tunables: BaseModel, expected_revision: int, actor: Actor) -> TunablesSnapshot:
+    def update_tunables(
+        self, tunables: BaseModel, expected_revision: int, actor: Actor
+    ) -> TunablesSnapshot:
         """Replace one whole model after its journal append succeeds."""
         with self._lock:
             if self._lifecycle not in ("running", "pausing", "paused"):
                 raise InvalidRunState("update_tunables", self._lifecycle)
-            return self._tunables.update(tunables, expected_revision=expected_revision, actor=actor)
+            return self._tunables.update(
+                tunables, expected_revision=expected_revision, actor=actor
+            )
 
     def _append_tunables(self, event: TunablesChanged) -> None:
         self._artifacts.append(event)
@@ -325,9 +351,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             saved_summary = lifecycle == "done" and summary is not None
             if saved_summary:
                 self._artifacts.save_summary(encode_record(summary))
-            self._artifacts.append(RunEnded(
-                lifecycle, None, self._call_seq, self._commit_seq, summary=saved_summary
-            ))
+            self._artifacts.append(
+                RunEnded(
+                    lifecycle,
+                    None,
+                    self._call_seq,
+                    self._commit_seq,
+                    summary=saved_summary,
+                )
+            )
             self._artifacts.set_lifecycle(lifecycle)
             self._lifecycle = lifecycle
 
@@ -336,9 +368,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             self._lifecycle = "failed"
             self._reason = f"{type(error).__name__}: {error}"
             try:
-                self._artifacts.append(RunEnded(
-                    "failed", self._reason, self._call_seq, self._commit_seq
-                ))
+                self._artifacts.append(
+                    RunEnded("failed", self._reason, self._call_seq, self._commit_seq)
+                )
                 self._artifacts.set_lifecycle("failed", self._reason)
             except Exception:
                 _logger.exception("Cannot persist workflow failure diagnostics")
@@ -347,9 +379,15 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         """Read detached records/progress counters and the current pending request."""
         with self._lock:
             return RunStatus(
-                self.run_id, self._definition.name, self._lifecycle,
-                self._call_seq, self._commit_seq, self._tunables.revision,
-                self._reason, self._displays.snapshot(), self.pending_question(),
+                self.run_id,
+                self._definition.name,
+                self._lifecycle,
+                self._call_seq,
+                self._commit_seq,
+                self._tunables.revision,
+                self._reason,
+                self._displays.snapshot(),
+                self.pending_question(),
             )
 
     def tunables(self) -> TunablesSnapshot:
@@ -361,4 +399,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         if type(since) is not int or since < 0:
             raise ValueError("since must be a nonnegative integer")
         with self._lock:
-            return deepcopy(tuple(record for record in self._records if record.commit_seq > since))
+            return deepcopy(
+                tuple(record for record in self._records if record.commit_seq > since)
+            )

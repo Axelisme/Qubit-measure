@@ -1,169 +1,45 @@
-"""Typed Engine summaries for offline workflow-specific conversion tools."""
+"""Read framework commit datasets without interpreting authored native files."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PureWindowsPath
-from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
-from zcu_tools.experiment.workflows import (
-    EncodedRecord,
-    Lifecycle,
-    RunIdentity,
-    RunPaths,
-)
-from zcu_tools.experiment.workflows.journal import ErrorInfo
-
-
-class SavedManifest(BaseModel):
-    """Fixed startup identity/plan/roots and known UTC lifecycle times.
-
-    identity is the run ID/software provenance; workflow the declaration name;
-    plan and initial_tunables are startup JSON captures. roots identifies the
-    metadata and data directories. started_at/updated_at/ended_at are UTC times,
-    with ended_at=None before termination. lifecycle is an Engine lifecycle value;
-    reason is its optional terminal diagnosis.
-    journal is retained only as a schema field; tools never open it. format and
-    version must match the Engine document. Roots must be absolute and distinct.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    format: Literal["zcu-workflow-run"]
-    format_version: Literal[1]
-    identity: RunIdentity
-    workflow: str
-    plan: JsonValue
-    initial_tunables: JsonValue
-    roots: RunPaths
-    journal: Path
-    started_at: datetime
-    updated_at: datetime
-    ended_at: datetime | None
-    lifecycle: Lifecycle
-    reason: str | None
-
-
-class SavedStarted(BaseModel):
-    """Invocation identity in an iteration_started envelope.
-
-    kind is the fixed event tag; call_seq is the positive invocation number,
-    commit_seq the number of prior commits, and revision the tunable capture
-    revision. Counts and revision are nonnegative.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["iteration_started"]
-    call_seq: int = Field(gt=0)
-    commit_seq: int = Field(ge=0)
-    revision: int = Field(ge=0)
-    revisions: tuple[int, ...]
-
-
-class SavedResult(BaseModel):
-    """Common result identity and data-root-relative iteration reference.
-
-    call_seq is a positive invocation number; revision is its nonnegative
-    tunable revision; iteration_dir names iter/<at least six decimal digits>.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    call_seq: int = Field(gt=0)
-    revision: int = Field(ge=0)
-    iteration_dir: str
-
-
-class SavedCommit(SavedResult):
-    """Committed point: kind=step_committed, positive commit_seq, encoded_record.
-
-    encoded_record is the Engine record encoding; readers require mode=json and
-    no encoding error before validating it through the caller's point adapter.
-    Identity/reference fields follow SavedResult.
-    """
-
-    kind: Literal["step_committed"]
-    commit_seq: int = Field(gt=0)
-    encoded_record: EncodedRecord
-    revisions: tuple[int, ...]
-
-
-class SavedFinished(SavedResult):
-    """Nonpoint terminal result: kind=step_finished, outcome=done or aborted.
-
-    reason is an optional workflow diagnosis; identity fields follow SavedResult.
-    """
-
-    kind: Literal["step_finished"]
-    outcome: Literal["done", "aborted"]
-    reason: str | None
-
-
-class SavedDiscarded(SavedResult):
-    """Discarded invocation: kind=step_discarded, reason=pause or stop.
-
-    No point is committed; identity/reference fields follow SavedResult.
-    """
-
-    kind: Literal["step_discarded"]
-    reason: Literal["pause", "stop"]
-
-
-class SavedFailed(SavedResult):
-    """Unexpected failure: kind=step_failed and error carries ErrorInfo.
-
-    No point is committed; identity/reference fields follow SavedResult.
-    """
-
-    kind: Literal["step_failed"]
-    error: ErrorInfo
-
-
-class SavedIteration(BaseModel):
-    """Engine summary with format=zcu-workflow-iteration and format_version=1.
-
-    identity/workflow/plan repeat the manifest's fixed startup values. tunables
-    is this invocation's ordinary JSON capture; started identifies its revision
-    and sequence; result discriminates committed/finished/discarded/failed.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    format: Literal["zcu-workflow-iteration"]
-    format_version: Literal[2]
-    identity: RunIdentity
-    workflow: str
-    plan: JsonValue
-    tunables: JsonValue
-    started: SavedStarted
-    result: Annotated[
-        SavedCommit | SavedFinished | SavedDiscarded | SavedFailed,
-        Field(discriminator="kind"),
-    ]
+from .artifacts import RecordEnvelope, RunManifest
+from .models import EncodedRecord
 
 
 @dataclass(frozen=True)
-class SavedPoint[P]:
-    """A caller-validated point and its exact source summary.
+class SavedRecord[P]:
+    """One committed row and its exact authored-data directory.
 
-    point has the caller's P type; record_path is the source record.json Path.
-    directory exposes its invocation root, not a discovery policy.
+    commit_seq is publication order, not the allocated directory number.
+    committed_at is UTC. revisions contains actual reads in deduplicated order.
+    record_type is the qualified authored model name. directory is the absolute
+    allocated commit directory; record_path is its framework record.json.
+    call_seq identifies the commit scope. record is caller-validated P or the
+    unvalidated EncodedRecord returned by read_records_raw.
     """
 
-    point: P
+    commit_seq: int
+    committed_at: datetime
+    revisions: tuple[int, ...]
+    record_type: str
+    directory: Path
     record_path: Path
-
-    @property
-    def directory(self) -> Path:
-        """Return this record's invocation root, never a filename-discovery root."""
-        return self.record_path.parent
+    call_seq: int
+    record: P
 
 
 def read_summary(run: Path) -> EncodedRecord | None:
-    """Read the author's encoded return from the exact metadata run directory.
+    """Read summary.json from the exact metadata run directory.
 
-    A missing summary.json means no persisted return and yields None. A missing
-    run directory raises FileNotFoundError; a nondirectory raises
-    NotADirectoryError. Malformed data raises ValueError naming summary.json.
-    Other I/O errors propagate. No journal or native data files are inspected.
+    Missing file yields None. Missing/nondirectory run raises
+    FileNotFoundError/NotADirectoryError. Malformed JSON/model raises ValueError
+    naming summary.json. Other I/O errors propagate. No journal/native file scan.
     """
     directory = run.resolve(strict=True)
     if not directory.is_dir():
@@ -179,16 +55,17 @@ def read_summary(run: Path) -> EncodedRecord | None:
         raise ValueError(f"{source}: {error}") from error
 
 
-def read_manifest(run: Path, workflow: str) -> SavedManifest:
-    """Read run/manifest.json and reject wrong workflow/roots/UTC identity.
+def read_manifest(run: Path, workflow: str | None = None) -> RunManifest:
+    """Read manifest.json, verifying roots, UTC times and optional workflow name.
 
-    run is the exact metadata directory. Malformed data raises ValueError naming
-    the source; I/O errors propagate. Nothing is written or read from journal.
+    run is the exact metadata directory. Missing/I/O errors propagate; malformed
+    metadata raises ValueError naming its source. record_schemas is information
+    only, not a validator or dynamic-type registry.
     """
     source = run.resolve() / "manifest.json"
     try:
-        manifest = SavedManifest.model_validate_json(source.read_text(encoding="utf-8"))
-        if manifest.workflow != workflow:
+        manifest = TypeAdapter(RunManifest).validate_json(source.read_bytes())
+        if workflow is not None and manifest.workflow != workflow:
             raise ValueError(f"Expected workflow {workflow}, got {manifest.workflow}")
         roots = manifest.roots
         if (
@@ -203,112 +80,158 @@ def read_manifest(run: Path, workflow: str) -> SavedManifest:
             or roots.metadata_root in roots.data_root.parents
         ):
             raise ValueError("data_root must be absolute, distinct and non-overlapping")
-        for time in (manifest.started_at, manifest.updated_at, manifest.ended_at):
-            if time is not None and time.utcoffset() != timedelta(0):
+        for value in (manifest.started_at, manifest.updated_at, manifest.ended_at):
+            if value is not None and value.utcoffset() != timedelta(0):
                 raise ValueError("Manifest times must be timezone-aware UTC")
     except ValueError as error:
         raise ValueError(f"{source}: {error}") from error
     return manifest
 
 
-def _read_iteration(manifest: SavedManifest, source: Path) -> SavedIteration:
-    """Read a summary and validate its manifest and invocation references.
+def _read_record(manifest: RunManifest, source: Path) -> RecordEnvelope:
+    try:
+        envelope = TypeAdapter(RecordEnvelope).validate_json(source.read_bytes())
+        if (
+            envelope.run_id != manifest.identity.run_id
+            or envelope.workflow != manifest.workflow
+        ):
+            raise ValueError("Record identity differs from manifest")
+        if envelope.directory != f"commits/{source.parent.name}":
+            raise ValueError("Record directory reference differs from its location")
+        if (
+            envelope.commit_seq <= 0
+            or envelope.started.commit_seq != envelope.commit_seq - 1
+        ):
+            raise ValueError("Invalid commit sequence")
+        if envelope.started.call_seq <= 0:
+            raise ValueError("Invalid commit scope")
+        revisions = envelope.started.revisions
+        if any(revision < 0 for revision in revisions) or len(set(revisions)) != len(
+            revisions
+        ):
+            raise ValueError("Invalid read-order tunables revisions")
+        if envelope.committed_at.utcoffset() != timedelta(0):
+            raise ValueError("Commit time must be timezone-aware UTC")
+        if envelope.record_type not in manifest.record_schemas:
+            raise ValueError("Record type has no manifest schema information")
+    except ValueError as error:
+        raise ValueError(f"{source}: {error}") from error
+    return envelope
 
-    Validate every result classification, not just commits. I/O and validation
-    errors propagate for read_points to retain the source path and cause.
+
+def read_records_raw(run: Path) -> tuple[SavedRecord[EncodedRecord], ...]:
+    """Read all available committed envelopes, sorted by commit_seq, without model validation.
+
+    Uncommitted allocated directories lack record.json and contribute no row.
+    Authored native files are never listed/parsed to create records. Missing run
+    or manifest raises; an empty run yields (). Malformed envelopes, duplicate
+    commit sequence or wrong identity/reference raise source-named ValueError.
+    Journal is not read; lost record files cannot be reconstructed here.
     """
-    saved = SavedIteration.model_validate_json(source.read_text(encoding="utf-8"))
-    result = saved.result
-    if (
-        saved.identity != manifest.identity
-        or saved.workflow != manifest.workflow
-        or saved.plan != manifest.plan
-    ):
-        raise ValueError("Iteration identity/workflow/plan differs from manifest")
-    directory_name = source.parent.name
-    if (
-        saved.started.call_seq != int(directory_name)
-        or result.call_seq != saved.started.call_seq
-        or result.revision != saved.started.revision
-        or result.iteration_dir != f"iter/{directory_name}"
-    ):
-        raise ValueError("Iteration invocation identity/reference mismatch")
-    return saved
-
-
-def read_points[P](
-    manifest: SavedManifest, adapter: TypeAdapter[P]
-) -> tuple[tuple[SavedPoint[P], ...], tuple[Path, ...]]:
-    """Read each iteration's summary; list missing record.json without recovery.
-
-    adapter is the workflow's named point type. Only structured step_committed
-    results are consumed. Validate identities, plan and invocation references
-    even for discarded/failed/finished results. Source-named ValueErrors reject
-    malformed/degraded input; I/O errors propagate. If summaries are missing
-    and no usable committed points remain, raise ValueError listing every missing
-    path, even when noncommit summaries exist. Otherwise return points and missing
-    paths together. No native file scan occurs.
-    """
-    points: list[SavedPoint[P]] = []
-    missing: list[Path] = []
-    commits: set[int] = set()
-    root = manifest.roots.data_root / "iter"
+    manifest = read_manifest(run)
+    root = manifest.roots.data_root / "commits"
+    if not root.exists():
+        return ()
+    records: list[SavedRecord[EncodedRecord]] = []
+    sequences: set[int] = set()
     for directory in sorted(root.iterdir()):
         if (
             not directory.is_dir()
             or not directory.name.isdecimal()
             or len(directory.name) < 6
         ):
-            raise ValueError(f"{directory}: invalid iteration directory")
+            continue
         source = directory / "record.json"
         if not source.exists():
-            missing.append(source)
             continue
-        try:
-            saved = _read_iteration(manifest, source)
-            result = saved.result
-            if not isinstance(result, SavedCommit):
-                continue
-            if (
-                result.commit_seq != saved.started.commit_seq + 1
-                or result.commit_seq in commits
-            ):
-                raise ValueError("Invalid or duplicate commit sequence")
-            commits.add(result.commit_seq)
-            if (
-                result.encoded_record.mode != "json"
-                or result.encoded_record.error is not None
-            ):
-                raise ValueError("Requires structured, non-degraded point record")
-            points.append(
-                SavedPoint(adapter.validate_python(result.encoded_record.value), source)
+        envelope = _read_record(manifest, source)
+        if envelope.commit_seq in sequences:
+            raise ValueError(
+                f"{source}: duplicate commit sequence {envelope.commit_seq}"
             )
-        except ValueError as error:
-            raise ValueError(f"{source}: {error}") from error
-    if missing and not points:
-        raise ValueError(
-            "No iteration records available; missing record.json:\n"
-            + "\n".join(str(path) for path in missing)
+        sequences.add(envelope.commit_seq)
+        records.append(
+            SavedRecord(
+                envelope.commit_seq,
+                envelope.committed_at,
+                envelope.started.revisions,
+                envelope.record_type,
+                directory,
+                source,
+                envelope.started.call_seq,
+                envelope.record,
+            )
         )
-    return tuple(points), tuple(missing)
+    return tuple(sorted(records, key=lambda record: record.commit_seq))
+
+
+def read_records[P: BaseModel](
+    run: Path, record: type[P] | TypeAdapter[P]
+) -> tuple[SavedRecord[P], ...]:
+    """Read a homogeneous run as caller-supplied model instances, ordered by commit_seq.
+
+    record is a BaseModel class or its TypeAdapter. Qualified type names must
+    match; degraded encoding or field validation raises ValueError naming the
+    record.json source. Use read_records_raw for heterogeneous runs. Manifest
+    schemas remain informational, and no jsonschema dependency is required.
+    """
+    adapter = record if isinstance(record, TypeAdapter) else TypeAdapter(record)
+    expected = _record_type(adapter)
+    rows: list[SavedRecord[P]] = []
+    for source in read_records_raw(run):
+        try:
+            if source.record_type != expected:
+                raise ValueError(
+                    f"Expected record type {expected}, got {source.record_type}"
+                )
+            encoded = source.record
+            if encoded.mode != "json" or encoded.error is not None:
+                raise ValueError("Record does not contain structured JSON")
+            value = adapter.validate_python(encoded.value)
+        except ValueError as error:
+            raise ValueError(f"{source.record_path}: {error}") from error
+        rows.append(
+            SavedRecord(
+                source.commit_seq,
+                source.committed_at,
+                source.revisions,
+                source.record_type,
+                source.directory,
+                source.record_path,
+                source.call_seq,
+                value,
+            )
+        )
+    return tuple(rows)
+
+
+def _record_type[P: BaseModel](adapter: TypeAdapter[P]) -> str:
+    # Pydantic's public model core schema retains the actual class, unlike JSON title overrides.
+    schema = adapter.core_schema
+    model = schema.get("cls")
+    if not isinstance(model, type) or not issubclass(model, BaseModel):
+        raise TypeError("read_records requires a single BaseModel type or TypeAdapter")
+    return f"{model.__module__}.{model.__qualname__}"
 
 
 def native_path(directory: Path, filename: str) -> Path:
-    """Resolve a named point reference inside its invocation, rejecting escapes.
+    """Resolve an authored relative reference beneath its record directory.
 
-    No candidate scanning or filename inference occurs; invalid references raise
-    ValueError naming the directory and supplied filename.
+    Absolute paths, parent traversal and Windows drives raise ValueError. The
+    target need not exist; the caller owns native format parsing and errors.
     """
-    path = Path(filename)
+    relative = Path(filename)
     if (
         not filename
-        or path.is_absolute()
+        or relative.is_absolute()
         or PureWindowsPath(filename).drive
+        or ".." in relative.parts
         or "\\" in filename
-        or ".." in path.parts
     ):
-        raise ValueError(f"{directory}/{filename}: invalid native reference")
-    resolved = (directory / path).resolve()
+        raise ValueError(f"Invalid workflow-relative filename: {filename!r}")
+    resolved = (directory / relative).resolve()
     if not resolved.is_relative_to(directory.resolve()):
-        raise ValueError(f"{directory}/{filename}: native reference escapes iteration")
+        raise ValueError(
+            f"Workflow filename escapes its commit directory: {filename!r}"
+        )
     return resolved

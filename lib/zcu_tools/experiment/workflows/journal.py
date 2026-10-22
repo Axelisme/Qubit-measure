@@ -1,4 +1,4 @@
-"""Typed payloads for the engine-owned journal, not a second host API."""
+"""Named payloads appended by the workflow execution/storage owner."""
 
 from __future__ import annotations
 
@@ -9,19 +9,14 @@ from typing import Literal
 
 from pydantic import JsonValue, SerializeAsAny
 
-from ...device import BaseDeviceInfo
+from zcu_tools.device import BaseDeviceInfo
+
 from .models import Actor, CommittedRecord, RunIdentity, RunPaths
 
 
 @dataclass(frozen=True)
 class RunMetadata:
-    """Detached startup provenance used for the manifest and first journal line.
-
-    identity is host-supplied provenance. workflow is the declared name. plan
-    and tunables are complete, validated JSON model projections at revision 0.
-    roots are absolute run directories.
-    started_at is the original timezone-aware UTC start time.
-    """
+    """Startup identity, declaration, detached plan/tunables, roots and UTC start."""
 
     identity: RunIdentity
     workflow: str
@@ -33,36 +28,22 @@ class RunMetadata:
 
 @dataclass(frozen=True)
 class RunStarted(RunMetadata):
-    """Startup metadata; kind is run_started and revision is always zero."""
+    """Revision-zero startup event; kind is run_started and revision is zero."""
 
     kind: Literal["run_started"] = field(default="run_started", init=False)
     revision: Literal[0] = field(default=0, init=False)
 
 
 @dataclass(frozen=True)
-class IterationStarted:
-    """Invocation provenance before workflow code runs.
+class RecordCommitted(CommittedRecord):
+    """CommittedRecord's journal representation, tagged record_committed."""
 
-    call_seq counts step calls from 1. commit_seq is the number already
-    committed, initially zero. revision is captured for this call.
-    iteration_dir is the data-root-relative iter/<call_seq> directory.
-    """
-
-    call_seq: int
-    commit_seq: int
-    revision: int
-    iteration_dir: str
-    revisions: tuple[int, ...] = ()
-    kind: Literal["iteration_started"] = field(default="iteration_started", init=False)
+    kind: Literal["record_committed"] = field(default="record_committed", init=False)
 
 
 @dataclass(frozen=True)
 class DeviceSetup:
-    """One completed setup attempt: requested name and all typed cfg fields.
-
-    cfg retains the selected Info subclass in its JSON projection; the journal
-    does not interpret settings, units, limits or hardware readback.
-    """
+    """Completed device invocation, with requested name and full typed cfg."""
 
     name: str
     cfg: SerializeAsAny[BaseDeviceInfo]
@@ -71,7 +52,7 @@ class DeviceSetup:
 
 @dataclass(frozen=True)
 class ErrorInfo:
-    """Original error diagnostics: qualified type name, message, and traceback."""
+    """Original error evidence: qualified type, message and chained traceback."""
 
     type: str
     message: str
@@ -79,11 +60,7 @@ class ErrorInfo:
 
 
 def describe_error(error: BaseException) -> ErrorInfo:
-    """Capture the original error and chained traceback without replacing it.
-
-    error is the cause selected by the engine's failure policy. Diagnostic
-    formatting failures propagate; they cannot be treated as record degradation.
-    """
+    """Capture the original error and chain; diagnostic formatting errors raise."""
     error_type = type(error)
     return ErrorInfo(
         type=f"{error_type.__module__}.{error_type.__qualname__}",
@@ -94,12 +71,10 @@ def describe_error(error: BaseException) -> ErrorInfo:
 
 @dataclass(frozen=True)
 class ExperimentFailed:
-    """Recoverable Schedule failure without a Result.
+    """Recoverable acquire failure without partial Result data.
 
-    call_seq and run_no identify the invocation and effect, each counted from 1.
-    run_no is diagnostic only: it does not imply saving, existence or a path.
-    experiment names the callback. reason is the Schedule diagnostic; error
-    preserves the original cause.
+    call_seq identifies the commit scope. run_no counts experiment requests in
+    that scope. experiment names the callback. reason/error retain its cause.
     """
 
     call_seq: int
@@ -111,61 +86,8 @@ class ExperimentFailed:
 
 
 @dataclass(frozen=True)
-class StepCommitted(CommittedRecord):
-    """Journal-authoritative Next record; inherited fields retain their meaning."""
-
-    kind: Literal["step_committed"] = field(default="step_committed", init=False)
-
-
-@dataclass(frozen=True)
-class IterationResult:
-    """Invocation output reference shared by non-commit outcomes.
-
-    call_seq counts calls from 1; revision is the call's captured tunables
-    revision. iteration_dir is relative to data_root.
-    """
-
-    call_seq: int
-    revision: int
-    iteration_dir: str
-
-
-@dataclass(frozen=True)
-class StepFinished(IterationResult):
-    """Terminal workflow return: outcome is done/aborted, reason is diagnostic.
-
-    done uses reason=None; aborted uses the workflow's nonempty reason.
-    Neither outcome creates a point record.
-    """
-
-    outcome: Literal["done", "aborted"]
-    reason: str | None
-    kind: Literal["step_finished"] = field(default="step_finished", init=False)
-
-
-@dataclass(frozen=True)
-class StepDiscarded(IterationResult):
-    """Cancelled invocation; reason is pause or stop, not a failure cause."""
-
-    reason: Literal["pause", "stop"]
-    kind: Literal["step_discarded"] = field(default="step_discarded", init=False)
-
-
-@dataclass(frozen=True)
-class StepFailed(IterationResult):
-    """Failed invocation; error preserves the engine-selected original cause."""
-
-    error: ErrorInfo
-    kind: Literal["step_failed"] = field(default="step_failed", init=False)
-
-
-@dataclass(frozen=True)
 class TunablesChanged:
-    """One complete validated native tunables snapshot attributed to actor.
-
-    revision_before/after identify consecutive versions. tunables contains all
-    new model fields as detached JSON, including nested models and lists.
-    """
+    """Whole-model update: actor, consecutive revisions and complete new JSON."""
 
     actor: Actor
     revision_before: int
@@ -176,10 +98,7 @@ class TunablesChanged:
 
 @dataclass(frozen=True)
 class ControlRequest:
-    """Requested control time and current invocation, or None before any call.
-
-    requested_at is timezone-aware UTC. call_seq counts invocations from 1.
-    """
+    """Control requested_at UTC, and current commit-scope call_seq or None."""
 
     requested_at: datetime
     call_seq: int | None
@@ -187,21 +106,21 @@ class ControlRequest:
 
 @dataclass(frozen=True)
 class PauseRequested(ControlRequest):
-    """Pause request; kind is pause_requested, not proof of producer shutdown."""
+    """Pause intent, tagged pause_requested; not proof of operation drain."""
 
     kind: Literal["pause_requested"] = field(default="pause_requested", init=False)
 
 
 @dataclass(frozen=True)
 class StopRequested(ControlRequest):
-    """Stop request; kind is stop_requested, not proof of producer shutdown."""
+    """Explicit Stop intent, tagged stop_requested; author cleanup may still run."""
 
     kind: Literal["stop_requested"] = field(default="stop_requested", init=False)
 
 
 @dataclass(frozen=True)
 class Paused:
-    """Producer has stopped; call_seq may be None, commit_seq counts commits."""
+    """Reached suspension boundary: current call_seq and published commit_seq."""
 
     call_seq: int | None
     commit_seq: int
@@ -210,10 +129,7 @@ class Paused:
 
 @dataclass(frozen=True)
 class Resumed:
-    """Continuation of a paused run under the host's retained RUN lease.
-
-    commit_seq counts existing commits; revision is the next call's version.
-    """
+    """Accepted continuation, retaining commit_seq and latest tunables revision."""
 
     commit_seq: int
     revision: int
@@ -222,13 +138,14 @@ class Resumed:
 
 @dataclass(frozen=True)
 class RunEnded:
-    """Terminal summary without a state snapshot.
+    """Terminal lifecycle, reason, counters and summary-file presence.
 
-    lifecycle is done/aborted/stopped/failed. reason is diagnostic or None.
-    call_seq is None before any invocation; commit_seq counts committed Nexts.
+    lifecycle is done/cancelled/failed. reason is optional diagnostic text.
+    call_seq identifies the last commit scope or None; commit_seq counts records.
+    summary is True only when a non-None done return was written to summary.json.
     """
 
-    lifecycle: Literal["done", "cancelled", "aborted", "stopped", "failed"]
+    lifecycle: Literal["done", "cancelled", "failed"]
     reason: str | None
     call_seq: int | None
     commit_seq: int
@@ -238,17 +155,13 @@ class RunEnded:
 
 type JournalPayload = (
     RunStarted
-    | IterationStarted
-    | ExperimentFailed
+    | RecordCommitted
     | DeviceSetup
-    | StepCommitted
-    | StepFinished
-    | StepDiscarded
-    | StepFailed
+    | ExperimentFailed
     | TunablesChanged
     | PauseRequested
+    | StopRequested
     | Paused
     | Resumed
-    | StopRequested
     | RunEnded
 )

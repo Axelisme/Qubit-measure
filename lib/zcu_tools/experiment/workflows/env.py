@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -44,7 +45,9 @@ class Displays:
     def pbar(self, desc: str, total: int) -> BaseProgressBar:
         """Return a named bar, requiring a consistent nonnegative integer total."""
         if not desc.strip() or type(total) is not int or total < 0:
-            raise ValueError("Progress requires a nonempty name and nonnegative integer total")
+            raise ValueError(
+                "Progress requires a nonempty name and nonnegative integer total"
+            )
         with self._lock:
             if desc not in self._bars:
                 self._bars[desc] = self._progress(total=total, desc=desc)
@@ -56,7 +59,10 @@ class Displays:
     def snapshot(self) -> tuple[ProgressSnapshot, ...]:
         """Read display snapshots, not evidence of committed iteration records."""
         with self._lock:
-            return tuple(ProgressSnapshot(name, bar.total, bar.n) for name, bar in self._bars.items())
+            return tuple(
+                ProgressSnapshot(name, bar.total, bar.n)
+                for name, bar in self._bars.items()
+            )
 
     def close(self) -> None:
         """Close all retained bars after authored and executor work has drained."""
@@ -74,12 +80,12 @@ class EnvHooks:
     callback name, reason and original acquisition cause.
     """
 
-    iteration_dir: Callable[[], Path]
-    commit: Callable[[BaseModel], None]
+    new_commit_dir: Callable[[], Path]
+    commit: Callable[[BaseModel, Path | None], None]
     boundary: Callable[[], None]
     stopping: Callable[[], bool]
     experiment_failed: Callable[[str, str, BaseException], None]
-    question: Callable[[bool], None]
+    question: Callable[[Literal["waiting", "answered"]], None]
 
 
 class WorkflowEnv[C]:
@@ -120,14 +126,23 @@ class WorkflowEnv[C]:
             raise MissingCapability("context")
         return self._ports.context
 
-    @property
-    def iteration_dir(self) -> Path:
-        """Return the current existing absolute iteration root for authored files.
+    def new_commit_dir(self) -> Path:
+        """Allocate/create a new absolute commits/<six-digit number> directory.
 
-        Commit advances this root. The Engine does not track or roll back files
-        written by the author, including files left by interrupted operations.
+        Numbers follow allocation order, independently of successful commits.
+        Allocation does not commit a record or change the iteration token. Raw
+        files in unused directories remain author-owned and are never parsed.
         """
-        return self._hooks.iteration_dir()
+        return self._hooks.new_commit_dir()
+
+    def commit_dirs(self) -> Iterator[Path]:
+        """Lazily allocate one new directory per next(), without an upper bound.
+
+        Put authored values first in zip(values, env.commit_dirs()) so exhausting
+        those values does not allocate an unused extra directory.
+        """
+        while True:
+            yield self.new_commit_dir()
 
     @property
     def soc(self) -> object:
@@ -155,6 +170,7 @@ class WorkflowEnv[C]:
         naturally completed attempts wait for Resume without being repeated.
         Stop does not throw CancelledError, and does not suppress later calls.
         """
+
         def invoke(ctx: CallContext) -> T | Failed:
             value = fn(ctx)
             error = ctx.stop_signal.error
@@ -228,7 +244,9 @@ class WorkflowEnv[C]:
         """Live-read detached typed settings; name/I/O errors propagate."""
         return self.devices.get_device_cfg(name)
 
-    async def setup_device(self, name: str, cfg: BaseDeviceInfo) -> Completed[None] | Failed:
+    async def setup_device(
+        self, name: str, cfg: BaseDeviceInfo
+    ) -> Completed[None] | Failed:
         """Apply a captured full settings model with cooperative operation stop.
 
         The device owner revalidates fields and enforces limits. Errors propagate
@@ -248,7 +266,9 @@ class WorkflowEnv[C]:
         """
         if target.tzinfo is None or target.utcoffset() is None:
             raise ValueError("Wait target must be timezone-aware")
-        return await self.call(lambda ctx: self._ports.clock.wait_until(target, ctx.stop_signal))
+        return await self.call(
+            lambda ctx: self._ports.clock.wait_until(target, ctx.stop_signal)
+        )
 
     async def ask[A: Answer](self, question: Question[A]) -> A | None:
         """Await one request-id-bound answer, or None after explicit Stop.
@@ -258,24 +278,26 @@ class WorkflowEnv[C]:
         No new worker segment is created when a caller delivers the answer.
         """
         self._hooks.boundary()
-        self._hooks.question(True)
+        self._hooks.question("waiting")
         try:
             return await self._host.ask(question)
         finally:
-            self._hooks.question(False)
+            self._hooks.question("answered")
 
-    async def commit[R: BaseModel](self, record: R) -> None:
+    async def commit(self, record: BaseModel, d: Path | None = None) -> None:
         """Commit one typed record, then advance iteration storage and scope.
 
-        Only BaseModel instances are accepted. Journal append/flush precedes
-        publication. record.json is best effort, not a crash checkpoint. Commit
-        waits at the pause gate; explicit Stop permits authored cleanup commits.
-        Uncommitted work never creates a point record.
+        record must be a BaseModel. d is a directory allocated by this run;
+        None allocates a fresh one. Foreign or already committed d raises
+        ValueError without publishing a record. Journal append/flush precedes
+        publication; record.json is best effort, not a crash checkpoint. Commit
+        waits at the pause gate; Stop permits authored cleanup commits. Files
+        left in uncommitted allocated directories remain without a record.
         """
         _validate_model(record, BaseModel, "Workflow record")
         self._hooks.boundary()
         await self._host.wait_until_resumed()
-        self._hooks.commit(record)
+        self._hooks.commit(record, d)
         await self._host.commit()
 
     @property
