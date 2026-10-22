@@ -1,5 +1,7 @@
 """Generic container public API and HDF5 wire contracts."""
 
+from __future__ import annotations
+
 from dataclasses import replace
 from pathlib import Path
 
