@@ -201,7 +201,7 @@ class WorkflowEnv[C](InitEnv[C]):
         """
         request = DeviceEffect(name, cfg)
         yield Wait(request)
-        if request.delivery is not None and request.delivery.status == "cancelled":
+        if request.delivery is not None and request.delivery.partial_result:
             return
         if not request.done:
             raise RuntimeError("Engine did not complete the device effect")
@@ -215,7 +215,7 @@ class WorkflowEnv[C](InitEnv[C]):
         """
         request = WaitEffect(target)
         yield Wait(request)
-        if request.delivery is not None and request.delivery.status == "cancelled":
+        if request.delivery is not None and request.delivery.partial_result:
             return
         if not request.done:
             raise RuntimeError("Engine did not complete the wait effect")

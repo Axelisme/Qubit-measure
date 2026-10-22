@@ -1,6 +1,5 @@
 """Non-blocking, single-owner driving for workflow and recipe generators."""
 
-from collections import deque
 from collections.abc import Callable, Mapping
 from typing import Literal
 
@@ -14,7 +13,6 @@ from zcu_tools.core.script_protocol import (
     Question,
     ScriptGenerator,
     ScriptRequest,
-    Signal,
     Wait,
 )
 
@@ -50,13 +48,9 @@ class ScriptDriver[R]:
     updates op.delivery, then calls advance(); the driver never blocks or starts
     work. Every generator resume sends None, never an operation result or answer.
 
-    Use one owner thread and serialize calls. signal() may also be called by
-    executing script code or the signal callback; it only queues notifications.
-    Other driving calls must not re-enter. Signals take effect at yielded Wait
-    or Ask boundaries, including a currently suspended request. Non-cancel signals
-    go to on_signal in FIFO order; that host callback owns pause/stop/tunables
-    policy and validation. It must not drive this driver recursively. No script
-    inbox or exception injection exists.
+    Use one owner thread and serialize calls. cancel() only records intent;
+    it never drives author code. Other driving calls must not reenter. Controls
+    become effective at request boundaries, without exception injection.
 
     Cancel resumes the author at a boundary. The host first cancels and drains
     an active Wait, preserving its real delivery, including partial or a completed
@@ -74,26 +68,23 @@ class ScriptDriver[R]:
         self,
         generator: ScriptGenerator[R],
         *,
-        on_signal: Callable[[Signal], None] | None = None,
         deliver_cancelled: Callable[[Operation[object]], None],
     ) -> None:
-        """Take ownership of generator; on_signal handles non-cancel controls.
+        """Take ownership of the workflow generator.
 
-        Without on_signal, submitting a non-cancel signal raises ValueError.
         Operation handles and their resources remain owned by the host.
         deliver_cancelled fills an unstarted operation's cancelled delivery on
         this worker. It must not start work, block or re-enter this driver.
         """
         self._generator = generator
-        self._on_signal = on_signal
         self._deliver_cancelled = deliver_cancelled
-        self._signals: deque[Signal] = deque()
         self._status: ScriptStatus = "running"
         self._pending: ScriptRequest | None = None
         self._result: R | None = None
         self._error: Exception | None = None
         self._driving = False
         self._cancelled = False
+        self._cancel_requested = False
         self._new_request = False
 
     @property
@@ -125,17 +116,15 @@ class ScriptDriver[R]:
         """Return the original driving/cleanup exception on failure, else None."""
         return self._error
 
-    def signal(self, signal: Signal) -> None:
-        """Queue a control for the next yield boundary without running code.
+    def cancel(self) -> None:
+        """Request cooperative cancellation at the next request boundary.
 
-        Raise RuntimeError after termination, or ValueError for a non-cancel
-        signal when no host callback was supplied. Cancel does not require one.
+        This never advances author code. The existing workflow owner must drain
+        an active operation before advance. Terminal scripts reject new controls.
         """
         if self._status in ("completed", "cancelled", "failed"):
-            raise RuntimeError("Cannot signal a terminal script")
-        if signal.kind != "cancel" and self._on_signal is None:
-            raise ValueError("Non-cancel signals require an on_signal host callback")
-        self._signals.append(signal)
+            raise RuntimeError("Cannot cancel a terminal script")
+        self._cancel_requested = True
 
     def pending_answer_type(self) -> type[Answer] | None:
         """Read the pending Ask's declared model without delivery or driving.
@@ -213,7 +202,7 @@ class ScriptDriver[R]:
     def advance(self) -> None:
         """Run until undelivered Wait/Ask or terminal; repeat pending polls safely.
 
-        Drain queued signals only after a yield. Ready requests resume with None.
+        Apply cancellation only after a yield. Ready requests resume with None.
         Terminal calls do nothing. Re-entry raises RuntimeError. Unsupported
         yielded requests raise TypeError and fail the script. Script and callback
         exceptions are recorded as failed and re-raised without wrapping.
@@ -262,20 +251,12 @@ class ScriptDriver[R]:
     def _finish(self, status: ScriptStatus) -> None:
         self._status = status
         self._pending = None
-        self._signals.clear()
-
-    def _dispatch_signals(self) -> None:
-        while self._signals:
-            signal = self._signals.popleft()
-            if signal.kind == "cancel":
-                self._cancelled = True
-            elif self._on_signal is not None:
-                self._on_signal(signal)
 
     def _drive(self) -> None:
         while True:
             if self._pending is not None:
-                self._dispatch_signals()
+                if self._cancel_requested:
+                    self._cancelled = True
                 request = self._pending
                 if self._cancelled:
                     if isinstance(request, Ask):
@@ -283,9 +264,9 @@ class ScriptDriver[R]:
                     elif self._new_request and isinstance(request, Wait):
                         self._deliver_cancelled(request.op)
                         delivery = request.op.delivery
-                        if delivery is None or delivery.status != "cancelled":
+                        if delivery is None or not delivery.partial_result:
                             raise RuntimeError(
-                                "Owner must supply cancelled operation delivery"
+                                "Owner must supply partial operation delivery"
                             )
                 self._new_request = False
                 if not self._ready():

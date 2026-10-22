@@ -117,7 +117,7 @@ def deliver_cancelled(operation: object, run_id: str) -> None:
         raise TypeError("Use yield from env.<effect>(...); unknown effect request")
     if isinstance(operation, RunEffect):
         operation.outcome = Cancelled(run_id)
-    operation.delivery = OperationResult("cancelled", None)
+    operation.delivery = OperationResult("completed", None, partial_result=True)
 
 
 def dispatch_effect(effect: Effect, executor: EffectExecutor) -> None:
