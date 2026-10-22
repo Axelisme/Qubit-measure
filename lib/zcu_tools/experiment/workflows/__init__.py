@@ -25,5 +25,6 @@ from .models import (
     RunStatus,
     TunablesSnapshot,
 )
+from .plotting import WorkflowPlots
 from .ports import Clock, DevicePort, EnginePorts, ProgressFactory
 from .tunables import Live

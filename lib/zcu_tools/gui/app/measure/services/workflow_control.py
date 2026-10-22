@@ -13,6 +13,7 @@ from zcu_tools.experiment.workflows import (
     RunMismatch,
     RunStatus,
     TunablesSnapshot,
+    WorkflowPlots,
 )
 from zcu_tools.gui.form import (
     FormDescription,
@@ -27,7 +28,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.plotting.figure_export import render_figure_png
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.plotting.plots import PlotHost, Plots
+from zcu_tools.plotting.plots import PlotHost
 
 from .workflow_attachment import Attachment
 from .workflow_run import PendingQuestion, QuestionExchange
@@ -335,7 +336,7 @@ class WorkflowControlFacet:
         """Attach a driving PlotHost while idle; caller retains it through delivery."""
         self._tabs[tab_id].set_plot_host(host)
 
-    def plots(self, tab_id: str) -> Plots | None:
+    def plots(self, tab_id: str) -> WorkflowPlots | None:
         """Read retained native presentation for a driving widget; None before Start."""
         return self._tabs[tab_id].plots
 
@@ -343,7 +344,7 @@ class WorkflowControlFacet:
         """Read retained names for an accepted run; no rendering or hardware I/O."""
         tab = self._run_tab(run_id)
         tab.tunables(run_id)
-        return () if tab.plots is None else tuple(tab.plots)
+        return () if tab.plots is None else tuple(tab.plots.figures())
 
     def figure_png(self, run_id: str, name: str) -> bytes:
         """Render a named retained figure on owner; unknown name raises KeyError."""
@@ -351,7 +352,7 @@ class WorkflowControlFacet:
         tab.tunables(run_id)
         if tab.plots is None:
             raise RuntimeError("Run plots have been released")
-        return render_figure_png(tab.plots[name])
+        return render_figure_png(tab.plots.figures()[name])
 
     def pending_question(self, run_id: str) -> PendingQuestion | None:
         """Read a detached question/type/schema envelope, or None outside Ask.

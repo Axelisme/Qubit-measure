@@ -181,6 +181,15 @@ not whichever question is pending at click time. Submitted is not acceptance.
 Stop releases Ask with None on its existing worker. Control I/O failure retains
 its original cause and fails after worker cleanup. Only terminal owner delivery
 settles the operation and releases RUN.
+The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
+same-host operation Plots and finishes before returning or being discarded.
+`WorkflowFigures` groups workflow figures and the current operation in its
+selector. Pane and MCP read `WorkflowPlots.figures()`: workflow names stay
+unchanged and operation names are `operation/<name>`. Workflow registration
+rejects that prefix. A new attempt releases and replaces the whole operation
+group. Terminal runs retain the latest group; replacement Start and close
+release both groups without destroying retained Figures.
+
 Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow

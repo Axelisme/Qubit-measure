@@ -45,6 +45,10 @@ fit = analyze_t1(outcome.value.result)
 `await env.commit(point, d)`。Point 必須是 Pydantic BaseModel。
 框架不解析原始檔，commit 前後都可寫入作者自己的檔案。
 
+每次 env.run attempt 使用獨立的 operation Plots。Pause retry 可以重建同名 measurement，workflow 趨勢圖仍留在 env.plots。Pane 與 MCP 以 operation/<name> 顯示目前 attempt，新 attempt 整組替換舊圖。Workflow 圖名不可使用 operation/ 前綴。
+
+Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。Coherence 的 decay 使用 Result.times/signals，fit 與 summary 使用同一份結果及接受值 history。MIST 的 gain.png 使用 Result 的實際 gains/signals 與既有 mist_signal2real，map.png 使用保留的 traces。這些保存不讀 operation 圖或更動科學序列。
+
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
 Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。
 兩種情況都不重跑整個 workflow。

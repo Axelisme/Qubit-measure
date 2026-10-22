@@ -10,9 +10,9 @@ from typing import Protocol
 from qick import QickConfig
 
 from ...device import BaseDeviceInfo, DeviceMapping
-from ...plotting.plots import Plots
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
+from .plotting import WorkflowPlots
 
 
 class DevicePort(Protocol):
@@ -76,8 +76,10 @@ type ProgressFactory = Callable[..., BaseProgressBar]
 class EnginePorts[C]:
     """Capabilities owned and injected by the host.
 
-    ``plots`` is the host-owned Plots whose commands synchronously dispatch
-    artists to its PlotHost owner. The host stops execution before finish/release.
+    ``plots`` owns workflow trends and the latest independent operation group.
+    Its commands synchronously dispatch artists to the same PlotHost owner.
+    env.run finishes each operation; the host stops execution before finishing
+    workflow plots and releasing both presentations.
     ``progress`` accepts the existing
     make_pbar arguments and returns BaseProgressBar, including runtime bars.
     Do not use make_pbar itself as this factory; use a concrete backend factory.
@@ -88,7 +90,7 @@ class EnginePorts[C]:
     adapter, or None. The engine never connects or disconnects these handles.
     """
 
-    plots: Plots
+    plots: WorkflowPlots
     progress: ProgressFactory
     clock: Clock
     context: C | None = None

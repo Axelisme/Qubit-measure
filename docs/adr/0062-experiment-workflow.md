@@ -102,7 +102,7 @@ Framework 只提供 `env.plots` live plot 工具，不知道趨勢圖、具體 c
 
 使用者在 2026-10-12 更正：「1workflow框架不可以有calibrated認知或是overnight判斷，沒不用畫趨勢圖」與「我說的趨勢圖是workflow不知道趨勢圖，他只是準備可以liveplot的工具，讓workflow決定要畫什麼以及什麼時候更新」。這不是取消趨勢圖，而是將 live 繪圖的資料與更新責任交給 workflow。
 
-Measure 的 headless workflow owner 管理 native Plots 生命週期，Qt pane 顯示圖像，remote 使用共用 PNG renderer。它們不讀 records 來重畫科學趨勢，也不持有繪圖 cursor。Pause 保留 Plots，producer 返回與 terminal delivery 後才 finish，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
+Measure 的 headless workflow owner 管理 native Plots 生命週期，Qt pane 顯示圖像，remote 使用共用 PNG renderer。它們不讀 records 來重畫科學趨勢，也不持有繪圖 cursor。Workflow 層 env.plots 跨 Pause 與 iteration 保留。每次 env.run attempt 以同 host 的獨立 operation Plots 組新的 RunContext，返回、丟棄與失敗先 finish。新 attempt release 並整組替換舊 operation，terminal 保留最新一組。Pane 與 MCP 讀相同兩群投影，operation 名稱為 operation/<name>。Replacement Start 與 close 釋放兩組 presentation，不銷毀 caller 保留的 Figures。名稱與 lifetime 邊界見 [[0069]]。
 
 框架不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure、Engine 提交通知或 committed journal reader。Workflow 實作者若要保存 commit 目錄內的圖，在自己的 workflow 程式內處理。使用者可自行從 record.json 或 native 資料重畫。
 
