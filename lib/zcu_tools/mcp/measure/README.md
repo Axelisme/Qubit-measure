@@ -60,11 +60,15 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 ## Recipe 與 execution
 
-`recipe_api.py` 提供 `@recipe`／`RecipeDeclaration` 與 `RecipeOutcome`。Inputs schema 來自作者的 model，report 保留作者的回傳值，runs 由 host 收集。`RecipeSession`／`RecipeTab` 便利方法仍是 raise stubs；舊 `recipe.py` 路徑繼續可用。兩種宣告共用同一 registry 的 busy／closed admission，不另建執行清單。
+`recipe_api.py` 提供 `@recipe` 與 `async def (session, inputs: FormModel) -> Report`。作者 await `tab.run()`、`tab.analyze(..., result=T)` 或 `session.ask(...)`；Form 編輯、寫回與單一 `tab.save()` 同步執行。Save 依序保存 raw data 與全部 completed artifacts，保留每次 owner report；analyze 不自動保存。`runs` 記錄每個 tab、adapter、run_id、operation status、partial 與 Save 收據。
 
-`script_recipe_execution.py` 以共用 `experiment.script_driver.ScriptDriver` 驅動新宣告。`recipe_host.py` 綁定 session、operation 的 wait／cancel／drain 與 acquisition history。未綁定的操作明確失敗，不建立 GUI 或硬體連線。Status 的 pending question 分開保留 authored evidence、Question 名稱與 Answer schema。`answer(execution, answer)` 依該 schema 驗證具名模型後續跑，舊 `answer(recipe, decision)` 契約不變。
+`script_recipe_execution.py` 使用 production `experiment.script_host.ScriptHost`，不另建 asyncio runner。`recipe_runtime.py` 擁有固定 GUI binding、wire 解碼、合作取消與 operation source；`recipe_host.py` 只組合 scheduler、runtime 與 author session。Question 的 request id、evidence 與 Answer schema 分開回報。Runtime answer 必須帶目前 request id，拒絕不消耗問題。
 
-新 `RecipeDeclaration` path 的 cancel 由作者收尾。正在進行的 Wait 先經 host.cancel 與 terminal drain，再以真實 operation.delivery resume，保留 partial 或 completed race。Ask 取消以 delivery=None resume。取消後的新 Wait 只呼叫 `RecipeHost.deliver_cancelled` 填 cancelled delivery，不啟動工作；新 Ask 立即以 None resume。作者 return 後 `RecipeOutcome.status` 為 cancelled，report 保留回傳值；收尾拋錯則為 failed。Session／host teardown 才呼叫 driver.close，finally 會跑，但不保證後續 yield 得到回應。舊 `RecipeDefinition` path 的取消契約不變。
+Script cancel 設根 token；當前與後續 Run 都會啟動並回 partial，之後分析或 Ask 可回 None。作者 return 或 raise 後終態仍為 cancelled，report 為 None，runs 與原例外保留。Run scope 只原子停止正在取得資料的 token；analysis、Ask 或閒置時回 no-op，不誤停下一個 operation。缺參在 Run 前以 needs_parameters 終態列出具名 paths，outcome 為 None，釋放 admission。
+
+`session.context.read(key)` 直接讀取 session-global `value.read`，不需先開 tab。`tab.read(path)` 讀該 tab 固定 Form capture。讀取與候選的 YamlValue mapping 保持 owner 結構；作者需要 model 時自行 TypeAdapter 解碼。寫入仍接受具名 model 與 Expr，不放寬成任意 dict。Analysis 以作者指定的 T 驗證 owner summary，不補欄位。Interactive analysis 以公開 PendingAnalysis(tab, stage, op) 提前 handoff；GUI owner 完成同一 operation 後，原 await 繼續，不建立第二個 runner。
+
+以下 `RecipeDefinition`／author handles 路徑仍服務尚未遷移的舊 recipes；它和新宣告共用 busy／closed admission，不是新 async API 的便利方法。
 
 `recipe.py` 是正式 author import surface，保留 Session 準備與 definition，直接 re-export 同一個 RecipeTab class 及原有契約與 handles。`recipe_tab.py` 擁有 RecipeTab 的欄位編輯與 Run 準備。`recipe_contracts.py` 擁有共用 input schema、資料 carriers、missing-parameter、writeback 收據與 detached snapshots，供 input codec、writeback 與 handles 直接引用。`recipe_handles.py` 擁有 Run／analysis／question handles、共用 binding state 與 yield-from envelope，集中 completion、保存、取消及 lifetime 協調。含 RecipeRun annotation 的 step result 與 RecipeRun 留在同一 owner。
 

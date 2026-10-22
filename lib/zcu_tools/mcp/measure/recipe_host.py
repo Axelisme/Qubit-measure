@@ -1,74 +1,42 @@
-"""Host binding for script operations, separate from recipe convenience methods."""
+"""Production recipe composition over the shared cooperative async host."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from threading import Event
-from typing import TYPE_CHECKING
 
-from zcu_tools.core.script_protocol import Operation, Signal
-from zcu_tools.mcp.measure.recipe_api import RecipeRun, RecipeSession
-
-if TYPE_CHECKING:
-    from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-
-
-def _unbound_wait(operation: Operation[object], cancellation: Event) -> None:
-    raise NotImplementedError(
-        f"No recipe operation host is bound for {operation.name!r}"
-    )
-
-
-def _unbound_cancel(operation: Operation[object]) -> None:
-    raise NotImplementedError(
-        f"No recipe cancellation host is bound for {operation.name!r}"
-    )
-
-
-def _unbound_deliver_cancelled(operation: Operation[object]) -> None:
-    raise NotImplementedError(
-        f"No recipe cancelled delivery owner is bound for {operation.name!r}"
-    )
-
-
-def _no_runs() -> tuple[RecipeRun, ...]:
-    return ()
-
-
-def _unsupported_signal(signal: Signal) -> None:
-    raise ValueError(f"Recipe host does not support {signal.kind!r}")
+from zcu_tools.experiment.script_host import ScriptHost
+from zcu_tools.mcp.measure.recipe_api import RecipeSession
+from zcu_tools.mcp.measure.recipe_runtime import RecipeRuntime
+from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 
 @dataclass(frozen=True)
 class RecipeHost:
-    """Bind one execution's session and operation lifetime to the shared driver.
+    """One execution's scheduler, injected author session and GUI runtime.
 
-    session is injected into the authored generator. wait runs on its sole worker;
-    it must populate operation.delivery and drain terminal work before returning,
-    including when cancellation is set. cancel may run on the controlling thread
-    concurrently with wait and must request cancellation, not fabricate delivery.
-    deliver_cancelled runs on the worker for each new Wait after script cancel;
-    it fills cancelled delivery without starting work. It is distinct from cancel,
-    which only requests cancellation of already active work. runs returns ordered
-    acquisition facts, never save receipts. on_signal handles
-    non-cancel controls at yield boundaries on the worker, without re-entering it.
-    Default callbacks reject unbound operations and controls; runs is empty.
-    This seam hides operation ownership and lets synthetic hosts avoid GUI I/O.
+    scheduler runs on the caller's worker. session is passed to the authored
+    coroutine. runtime owns RPC decoding, cooperative operation drain, runs and
+    explicit previews. Hosts are constructed only after inputs validate.
     """
 
+    scheduler: ScriptHost
     session: RecipeSession
-    wait: Callable[[Operation[object], Event], None] = _unbound_wait
-    cancel: Callable[[Operation[object]], None] = _unbound_cancel
-    deliver_cancelled: Callable[[Operation[object]], None] = _unbound_deliver_cancelled
-    runs: Callable[[], tuple[RecipeRun, ...]] = _no_runs
-    on_signal: Callable[[Signal], None] = _unsupported_signal
+    runtime: RecipeRuntime
 
 
-type RecipeHostFactory = Callable[[MeasureToolContext], RecipeHost]
-"""Construct one binding after inputs validate, on the execution's worker."""
+type RecipeHostFactory = Callable[[MeasureToolContext, Callable[[], None]], RecipeHost]
+"""Bind one execution on its worker; the second argument notifies progress changes."""
 
 
-def stub_recipe_host(_tools: MeasureToolContext) -> RecipeHost:
-    """Return the unimplemented convenience session without connecting to a GUI."""
-    return RecipeHost(RecipeSession())
+def create_recipe_host(
+    tools: MeasureToolContext, on_change: Callable[[], None]
+) -> RecipeHost:
+    """Bind the current GUI once and compose its runtime with the production host.
+
+    This can perform the initial connection. Source/transport errors propagate;
+    the bound runtime never reconnects or retries an uncertain mutation.
+    """
+    scheduler = ScriptHost(on_change=on_change)
+    runtime = RecipeRuntime(tools, scheduler, on_change=on_change)
+    return RecipeHost(scheduler, RecipeSession(runtime), runtime)

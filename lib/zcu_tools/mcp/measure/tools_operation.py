@@ -14,6 +14,7 @@ from zcu_tools.mcp.measure.execution_reply import (
     project_control,
     project_execution,
 )
+from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
@@ -256,6 +257,8 @@ def finish_early(ctx: MeasureToolContext, arguments: dict[str, Any]) -> ToolRepl
             raise GuiRpcError(
                 f"No registered recipe for operation {op}", reason="unknown_operation"
             )
+    if isinstance(recipe, ScriptRecipeExecution):
+        raise ValueError("Async recipes use cancel(scope=run), not finish_early")
     reply = recipe.finish_early()
     return ToolReply(project_control(reply.data), is_error=reply.is_error)
 

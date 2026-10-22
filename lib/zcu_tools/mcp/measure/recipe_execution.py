@@ -48,7 +48,7 @@ from zcu_tools.mcp.measure.recipe import (
 )
 from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.recipe_capture import RecipeActual
-from zcu_tools.mcp.measure.recipe_host import RecipeHostFactory, stub_recipe_host
+from zcu_tools.mcp.measure.recipe_host import RecipeHostFactory, create_recipe_host
 from zcu_tools.mcp.measure.recipe_inputs import RecipeInputs
 from zcu_tools.mcp.measure.script_recipe_execution import (
     SCRIPT_TERMINAL,
@@ -716,7 +716,7 @@ class RecipeExecutions:
         self._closed = closed
         self._lock = Lock()
         self._definitions: dict[str, RecipeDefinition | RecipeDeclaration] = {}
-        self._host_factory = host_factory or stub_recipe_host
+        self._host_factory = host_factory or create_recipe_host
         self._inputs: dict[str, RecipeInputs] = {}
         self._executions: dict[str, RecipeExecution | ScriptRecipeExecution] = {}
         self._tools: MeasureToolContext | None = None

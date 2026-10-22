@@ -6,9 +6,15 @@
 
 `experiment/` 定義實驗介面、Result 與保存資料之間的映射，以及實驗 cfg 的支援機制。這個位置不表示其現有程式碼均與 QICK 無關。`cfg_assembler.py` 提供 Run mapping 的共用值型別，`utils/sweep.py` 使用 `program.v2` 的 `SweepCfg`。程式指令的建構與 acquire 由 [program/v2](../program/v2/README.md) 及 [experiment/v2/runtime](v2/runtime/README.md) 接合。
 
-## Shared script driver
+## Shared async script host
 
-`script_driver.ScriptDriver` 非阻塞地驅動 `core.script_protocol` generator，供 workflow 與 recipe host 共用。Host 更新 operation delivery 後呼叫 `advance()`，或以 `answer()` 回答 pending question。Driver 只在 yield 邊界交付 Signal。Cancel 交回作者收尾，不關閉 generator。Host 先取消並 drain 正在進行的 operation，再保留其真實 delivery。Ask 取消後以 None resume。取消後的新 Wait 交給必填的 owner callback `deliver_cancelled`，不啟動工作；新 Ask 立即回 None。作者 return 後 status 為 cancelled，result 保留原回傳值；收尾拋錯為 failed。只有宿主 teardown 或丟棄 invocation 時才呼叫 `close()`，執行 finally 但不保證 yield 得到回應。公開 docstrings 定義單一 worker owner 的呼叫順序。
+`script_host.ScriptHost` 在 caller 指定的 worker 上執行作者 coroutine。Blocking `call(fn)` 使用 executor，每個 operation 都有獨立 StopSignal child；停止的 token 仍會啟動 fn 並交回 partial。作者 Task 不會被 cancel，finally 留在同一 worker。
+
+`ask` 以唯一 request id 等待具名 Answer；錯誤、重複或遲到答案不消耗新問題。`control` 把數微秒級、無 I/O 的 memory callback 排入同一 loop 序列，呼叫端等待回傳值或原例外。`cancel`、Pause、Resume 與 answer 都有 acknowledgement，但不宣稱 operation 已 drain；`close` 合作 drain 後關閉 loop。
+
+Pause 只停止目前 operation、增加 epoch 並關 gate，不停止 iteration。Resume 只開 gate。CallResult 固定起跑 epoch 與 fn 完成時的 stop bit。Workflow env 決定是否丟棄 partial 並重跑相同 request；host 不重跑外部效果。Commit 等 gate 後更換 iteration child。Script cancel 打開 gate，使作者可收尾。
+
+`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳，第一個錯誤往上傳。`release()` 移除已完成 scope。原 `script_driver.ScriptDriver` 暫只服務尚未遷移的 workflow；其直接 `cancel()` 保留既有邊界語意，不提供控制訊息 inbox。
 
 ## Explicit simulation environments
 
