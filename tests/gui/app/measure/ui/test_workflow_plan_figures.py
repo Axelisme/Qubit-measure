@@ -1,0 +1,271 @@
+"""Plan editing and figure availability through registered synthetic workflows."""
+
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Annotated
+
+import numpy as np
+import pytest
+from pydantic import BaseModel, ConfigDict, Field
+from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.experiment.workflows import Done, InitEnv, Step, WorkflowEnv, workflow
+from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
+from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.ui.main_window import MainWindow
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.form import Display, FormModel
+from zcu_tools.gui.form_adapter import LinRange, SweepInput
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
+from zcu_tools.gui.session.types import SessionEnv
+
+from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleRun
+
+
+class Plan(FormModel):
+    fluxes: list[float] = Field(default_factory=lambda: [0.0])
+
+
+class SweepPlan(FormModel):
+    fluxes: Annotated[SweepInput, Display(label="Fluxes", selector=False)] = Field(
+        default_factory=LinRange
+    )
+
+
+class FluxAdapter(SampleAdapter):
+    def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> SampleRun:
+        values = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
+        viewer = context.plots.liveplot_1d(
+            "flux trace", "Flux", f"fluxes={values.tolist()}"
+        )
+        viewer.update(values, values)
+        return super().run(req, cfg, context=context)
+
+
+class Tunables(FormModel):
+    gain: float = 1.0
+
+
+class NativePlan(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    fluxes: list[float]
+
+
+class NativeTunables(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    gain: float
+
+
+def _init(env: InitEnv[None], plan: NativePlan) -> None:
+    return None
+
+
+@workflow("flux-list", plan=NativePlan, tunables=NativeTunables, init=_init)
+def _plot_fluxes(
+    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: None
+) -> Step[None, None]:
+    if plan.fluxes:
+        viewer = env.plots.liveplot_1d("flux trace", "Flux", f"fluxes={plan.fluxes}")
+        values = np.asarray(plan.fluxes)
+        viewer.update(values, values * tun.gain)
+    yield from env.wait_until(env.started_at)
+    return Done()
+
+
+@workflow("flux-sweep", plan=NativePlan, tunables=NativeTunables, init=_init)
+def _plot_sweep(
+    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: None
+) -> Step[None, None]:
+    values = np.asarray(plan.fluxes)
+    viewer = env.plots.liveplot_1d("flux trace", "Flux", f"fluxes={plan.fluxes}")
+    viewer.update(values, values * tun.gain)
+    yield from env.wait_until(env.started_at)
+    return Done()
+
+
+@pytest.fixture
+def plan_window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
+    registry = Registry()
+    registry.register("sweep-experiment", FluxAdapter)
+    ctrl = Controller(
+        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        registry,
+        None,
+        BaseEventBus(),
+        project_root=str(tmp_path),
+        progress_transport=DirectProgressTransport(),
+    )
+    ctrl.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                step=_plot_fluxes,
+                plan_model=Plan,
+                knobs_model=Tunables,
+                plan_to_cfg=lambda form, env, snapshot: NativePlan(fluxes=form.fluxes),
+                knobs_to_cfg=lambda form: NativeTunables(gain=form.gain),
+                seed=lambda plan, form: None,
+            ),
+            WorkflowAttachment(
+                step=_plot_sweep,
+                plan_model=SweepPlan,
+                knobs_model=Tunables,
+                plan_to_cfg=lambda form, env, snapshot: NativePlan(
+                    fluxes=np.linspace(
+                        form.fluxes.start, form.fluxes.stop, form.fluxes.n
+                    ).tolist()
+                ),
+                knobs_to_cfg=lambda form: NativeTunables(gain=form.gain),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    ctrl.setup_control.new_entry(EntryRequest("plan-ui"))
+    ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
+    board = white_noise()
+    ctrl.install_soc(board.soc, board.soccfg)
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
+    ctrl.add_view(window)
+    window.refresh_context_panel()
+    window.show()
+    qapp.processEvents()
+    try:
+        yield window
+    finally:
+        ctrl.close()
+        window.dispose()
+
+
+def _snapshot(driver: ComponentDriver, root: Path, name: str) -> None:
+    driver.screenshot(root / f"{name}.png")
+    (root / f"{name}.txt").write_text(repr(driver.visible()), encoding="utf-8")
+
+
+def _open(driver: ComponentDriver, root: Path, name: str = "flux-list") -> None:
+    driver.click(object_name="workflow.toggle")
+    _snapshot(driver, root, "01-workflows")
+    driver.select_menu("New Tab ▾", (name,))
+    _snapshot(driver, root, "02-plan")
+
+
+def _done(driver: ComponentDriver) -> bool:
+    return driver.observe(object_name="workflow.status").text == "done"
+
+
+def test_plan_float_list_edit_errors_and_native_lowering(plan_window, tmp_path):
+    driver = ComponentDriver(plan_window)
+    _open(driver, tmp_path)
+    driver.enter_text(object_name="form.input.fluxes", value="[invalid]")
+    _snapshot(driver, tmp_path, "03-invalid-json")
+    invalid = driver.observe(object_name="form.input.fluxes")
+    assert invalid.text == "[invalid]"
+    assert "Invalid JSON" in driver.observe(object_name="form.row.fluxes").tooltip
+    driver.click("Start")
+    _snapshot(driver, tmp_path, "04-start-refused")
+    assert "Invalid JSON" in driver.observe(object_name="workflow.message").text
+    driver.enter_text(object_name="form.input.fluxes", value="[0.1, 0.2, 0.3]")
+    _snapshot(driver, tmp_path, "05-three-values")
+    edited = driver.observe(object_name="form.input.fluxes")
+    assert edited.text == "[0.1, 0.2, 0.3]"
+    assert "Invalid JSON" not in driver.observe(object_name="form.row.fluxes").tooltip
+    driver.click("Start")
+    qt_until(lambda: _done(driver), label="finite float-list run")
+    _snapshot(driver, tmp_path, "06-native-values-plotted")
+    axes = driver.plots().axes
+    assert len(axes) == 1
+    assert axes[0].ylabel == "fluxes=[0.1, 0.2, 0.3]"
+    assert axes[0].visible_curves == 1
+
+
+def test_sweep_fluxes_edit_errors_and_lowering_match_experiment(plan_window, tmp_path):
+    driver = ComponentDriver(plan_window)
+    _open(driver, tmp_path, "flux-sweep")
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "03-expanded-fluxes")
+    assert any(
+        widget.object_name == "form.input.fluxes.start"
+        for widget in driver.visible().widgets
+    ), "Fluxes must expand into editable sweep coordinates"
+    driver.enter_text(object_name="form.input.fluxes.start", value="0.1")
+    _snapshot(driver, tmp_path, "04-start")
+    driver.enter_text(object_name="form.input.fluxes.stop", value="0.3")
+    _snapshot(driver, tmp_path, "05-stop")
+    driver.enter_text(object_name="form.input.fluxes.n", value="0")
+    _snapshot(driver, tmp_path, "06-invalid-count")
+    assert (
+        "greater than or equal to 1"
+        in driver.observe(object_name="form.row.fluxes.n").tooltip
+    )
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "06a-collapsed-invalid")
+    driver.click("Start")
+    _snapshot(driver, tmp_path, "07-invalid-start-refused")
+    assert (
+        "greater than or equal to 1"
+        in driver.observe(object_name="workflow.message").text
+    )
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "07a-reopened-invalid")
+    driver.enter_text(object_name="form.input.fluxes.n", value="3")
+    _snapshot(driver, tmp_path, "08-valid-count")
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "08a-collapsed-valid")
+    driver.click("Start")
+    qt_until(lambda: _done(driver), label="finite sweep workflow")
+    _snapshot(driver, tmp_path, "09-lowered-sweep")
+    workflow_axes = driver.plots().axes
+    assert len(workflow_axes) == 1
+    assert workflow_axes[0].ylabel == "fluxes=[0.1, 0.2, 0.3]"
+    driver.click(object_name="workflow.toggle")
+    _snapshot(driver, tmp_path, "10-experiments")
+    driver.select_menu("New Tab ▾", ("sweep-experiment",))
+    _snapshot(driver, tmp_path, "11-experiment-form")
+    driver.click(object_name="form.fold.sweep")
+    _snapshot(driver, tmp_path, "12-expanded-experiment-sweep")
+    for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
+        driver.enter_text(object_name=f"form.input.sweep.{field}", value=value)
+        _snapshot(driver, tmp_path, f"13-experiment-{field}")
+    driver.click("Run")
+    qt_until(
+        lambda: (
+            any(w.text == "Run" and w.enabled for w in driver.visible().widgets)
+            and bool(driver.plots().axes)
+        ),
+        label="finite experiment run terminal delivery",
+    )
+    _snapshot(driver, tmp_path, "14-experiment-lowered-sweep")
+    assert driver.plots().axes == workflow_axes
+
+
+def test_figure_selector_appears_with_figures_and_hides_after_release(
+    plan_window, tmp_path
+):
+    driver = ComponentDriver(plan_window)
+    _open(driver, tmp_path)
+    assert not driver.observe(object_name="workflow.figures.selector").visible
+    driver.click("Start")
+    qt_until(lambda: _done(driver), label="finite figure-producing run")
+    _snapshot(driver, tmp_path, "03-figure-arrived")
+    selector = driver.observe(object_name="workflow.figures.selector")
+    assert selector.visible
+    assert selector.text == "flux trace"
+    driver.enter_text(object_name="form.input.fluxes", value="[]")
+    _snapshot(driver, tmp_path, "04-empty-plan")
+    driver.click("Start")
+    qt_until(lambda: _done(driver), label="finite plot-free replacement run")
+    _snapshot(driver, tmp_path, "05-figures-released")
+    assert not driver.observe(object_name="workflow.figures.selector").visible
+    assert driver.plots().axes == ()
