@@ -49,7 +49,7 @@ def build_registry() -> tuple[Attachment[Calibrated], ...]:
     registry.add(mist_fluxdep)
     registry.add(overnight)
     coherence = WorkflowAttachment(
-        step=coherence_fluxdep,
+        script=coherence_fluxdep,
         plan_model=CoherencePlanForm,
         knobs_model=CoherenceTunablesForm,
         plan_to_cfg=CoherencePlanForm.to_cfg,
@@ -57,7 +57,7 @@ def build_registry() -> tuple[Attachment[Calibrated], ...]:
         seed=calibrated_seed,
     )
     mist = WorkflowAttachment(
-        step=mist_fluxdep,
+        script=mist_fluxdep,
         plan_model=MISTPlanForm,
         knobs_model=MISTTunablesForm,
         plan_to_cfg=MISTPlanForm.to_cfg,
@@ -67,7 +67,7 @@ def build_registry() -> tuple[Attachment[Calibrated], ...]:
         ),
     )
     monitoring = WorkflowAttachment(
-        step=overnight,
+        script=overnight,
         plan_model=OvernightPlanForm,
         knobs_model=OvernightTunablesForm,
         plan_to_cfg=OvernightPlanForm.to_cfg,

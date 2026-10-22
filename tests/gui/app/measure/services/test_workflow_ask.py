@@ -229,10 +229,11 @@ def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     else:
         assert author.deliveries == [(None, author.deliveries[0][1])]
         assert author.deliveries[0][1] != get_ident()
-        assert author.cancelled_followups == [
-            Completed(None, partial_result=True),
-            None,
-        ]
+        followup, answer = author.cancelled_followups
+        assert isinstance(followup, Completed)
+        assert followup.value is None
+        assert followup.partial_result is True
+        assert answer is None
     assert control.tabs()[0].operation_id == token
     assert run_lease_presence(harness) == lease
     assert not control.close(tab)

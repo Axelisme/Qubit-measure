@@ -11,7 +11,7 @@ from pydantic import JsonValue, SerializeAsAny
 
 from zcu_tools.device import BaseDeviceInfo
 
-from .models import Actor, CommittedRecord, OperationFact, RunIdentity, RunPaths
+from .models import Actor, CommittedRecord, OperationFacts, RunIdentity, RunPaths
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class OperationFinished:
     """Actual attempt evidence in commit scope call_seq, tagged operation_finished."""
 
     call_seq: int
-    operation: OperationFact
+    operation: OperationFacts
     kind: Literal["operation_finished"] = field(
         default="operation_finished", init=False
     )

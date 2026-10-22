@@ -415,11 +415,11 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
     payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "failed"
-    assert payload.error_message == "RuntimeError: builder boom"
+    assert payload.error_message == "builder boom"
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == "failed"
-    assert outcome.error == "RuntimeError: builder boom"
+    assert outcome.error == "builder boom"
     assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
 
