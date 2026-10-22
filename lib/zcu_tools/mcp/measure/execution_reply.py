@@ -204,7 +204,16 @@ def _script_execution(
     if detail == "full":
         return {**projected, **failure}
     if status == "needs_parameters":
-        return {"status": status, "missing": projected["missing"], "outcome": None}
+        return {
+            "status": status,
+            "missing": projected["missing"],
+            "outcome": None,
+            **(
+                {"parameter_errors": projected["parameter_errors"]}
+                if projected.get("parameter_errors")
+                else {}
+            ),
+        }
     outcome = projected.get("outcome")
     if isinstance(outcome, dict):
         return {

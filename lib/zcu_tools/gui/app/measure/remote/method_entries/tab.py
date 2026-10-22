@@ -54,8 +54,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "require select_recipe_module; no content write crosses ref ancestors. "
             "Structural/source/guard rejection commits no prefix. Returns changed "
             "and complete logical Form preview errors; invalid ordinary drafts "
-            "remain installed. Empty batches still require mutation authority.",
-            (required_string("tab_id"), ParamSpec("edits", JsonType.ARRAY)),
+            "remain installed by default. require_valid=true preflights the complete "
+            "detached candidate through native cfg validation; invalid candidates "
+            "return changed=false and all errors without installation. Empty batches "
+            "still require mutation authority and can preflight current input.",
+            (
+                required_string("tab_id"),
+                ParamSpec("edits", JsonType.ARRAY),
+                ParamSpec(
+                    "require_valid", JsonType.BOOLEAN, required=False, default=False
+                ),
+            ),
         ),
     ),
     method_entry(
