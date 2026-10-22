@@ -106,7 +106,83 @@ streams. Startup performs no numerical warmup.
 
 ## Acceptance timings
 
-GUI acceptance has not yet supplied wall times for this environment. Record
-`onetone/range_find`, `mux/onetone_fine`, `mux/twotone_spectrum` and `mux/t1`
-Run wall times here after the offscreen walkthrough. File loading and startup
-assembly alone do not establish visible dips or a qubit response.
+The 2026-10-23 offscreen walkthrough loaded this environment's `startup.py`
+into the measure GUI with the production experiment catalog and backend.
+The window showed `six-fluxonium-demo / initial` and `Startup complete`.
+The device list contained only the connected `flux_bias` FakeDevice.
+No hardware connection or remote-control socket was opened.
+A separate call to the public launcher `main(argv)` loaded the same script,
+showed the window, then closed through GUI shutdown and returned exit code 0.
+
+The walkthrough prepared inputs through the public Form resources, then clicked
+Run with `ComponentDriver`. It selected each mux Run figure through its visible
+picker and saved both the GUI screenshot and the plotted curve.
+This checks startup and real adapter execution. It does not check every manual
+form-editing action, Analyze, Writeback or Save.
+
+All four Runs below ran in one process on heavy-slot CPUs 4 and 5 on an Intel
+Core Ultra 7 258V, with BLAS limited to one thread and a 4,000,000,000-byte
+address-space limit. Timing starts before the Run click and ends when Run is
+available again with a visible curve. It includes compilation, acquisition and
+Qt presentation, but excludes input preparation, screenshots, analysis and saving.
+These are workload examples, not a speed comparison between experiments.
+
+| Experiment | Requested sweep | Reps / rounds | Run wall time, s |
+| --- | --- | ---: | ---: |
+| `onetone/range_find` | 6900 to 7600 MHz, 300 points | 64 / 1 | 5.358448 |
+| `mux/onetone_fine` | Common offset -3 to 3 MHz, 41 points, all six tones | 64 / 1 | 12.762754 |
+| `mux/twotone_spectrum` | Per-qubit starting estimate +/-5 MHz, 41 joint points, Q1 through Q6 | 16384 / 1 | 4.051492 |
+| `mux/t1` | 0 to 100 us, 31 joint delays, Q1 through Q6 | 16384 / 1 | 11.602649 |
+
+The shared current stayed at 0 A. Every Run used 1 us recovery, a 2 us readout
+pulse, a 0.9 us ADC window and a 1 us trigger offset. The pulse-route survey
+used gain 0.05. Mux readout used gain 0.1 per tone and mixer frequency 7200 MHz.
+The fine scan started from the template's bare cavity frequencies. Subsequent
+qubit Runs used the acquired fine-scan minima as readout frequencies.
+
+Both qubit experiments used 0.5 us constant drive pulses. Circuit eigenvalues
+and charge matrix elements supplied starting frequency and amplitude estimates,
+not measured calibration. The frequency sweep then acquired a response before
+its strongest complex-IQ feature supplied the T1 drive frequency. Exact working
+frequencies and gains belong to the walkthrough record, not the entry template.
+No pulse library or qubit calibration was written back.
+
+### Observed signals and limits
+
+The range survey showed six separated dips near the six cavity bands. Their
+sampled magnitude prominences were 18.81, 4.80, 12.70, 25.51, 7.80 and 6.43 a.u.
+A 1 a.u. prominence threshold separated those dips from small baseline noise.
+The six fine-scan figures each showed a dip, with magnitude spans of 72.14 to
+85.64 a.u. Every acquired array was finite.
+
+Q1 and Q6 supplied the qubit-response acceptance evidence. In spectroscopy,
+the central five-point mean differed from the combined first and last eight
+points by -0.909 and +5.604 a.u. The corresponding edge standard deviations
+were 0.0605 and 0.1296 a.u. The GUI showed a central dip for Q1 and a peak for
+Q6. In the T1 Run, the last five-point mean minus the first five-point mean
+was +0.473 and -3.836 a.u. Their magnitude-versus-delay Spearman correlations
+were +0.9891 and -0.9964. A relaxation response can rise or fall in magnitude;
+the readout transfer function determines its sign.
+
+The initial 64-rep qubit pilot had too much shot scatter for this judgment.
+A nonzero curve span alone did not establish a qubit signal. At 16384 reps,
+Q4's magnitude response remained small and non-monotone, and Q5's T1 magnitude
+trace did not resolve a relaxation trend. This walkthrough does not certify
+six calibrated transitions, pi-pulse fidelity, fitted T1 values or basis
+convergence. The 100 us delay window need not reach the equilibrium baseline.
+QICK emitted potential ADC crosstalk warnings for some tone spacings. Those
+warnings do not establish physical crosstalk in these independent models.
+
+### Memory and acquire-only evidence
+
+A separate production-default six-tone acquisition used native cutoff 40 and
+21 retained levels for every qubit, 64 reps, one round and 1 us pulse and ADC
+windows. It reached peak RSS 436424 KiB, or 446898176 bytes. Cold acquisition
+took 2.862611 s and the next warm acquisition took 0.202839 s. Both include
+0.2 s pacing and ran consecutively in one heavy-slot call on CPUs 6 and 7.
+Startup performed no warmup. These numbers describe acquire-only work and do
+not replace the GUI Run times above.
+
+The four-Run GUI process reached peak RSS 1195284 KiB, or 1223970816 bytes.
+Both observed peaks were below 4 GB. Neither figure guarantees the same memory
+use after increasing point counts, truncations or retained GUI figures.

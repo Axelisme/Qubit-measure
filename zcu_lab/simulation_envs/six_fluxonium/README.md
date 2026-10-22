@@ -23,7 +23,12 @@ uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
 ```
 
 For an agent's offline acceptance run, set `QT_QPA_PLATFORM=offscreen` before
-launch. MCP can select the same script when it launches a new GUI:
+launch and follow the repository's heavy-slot and memory limits. Use
+`--no-control` to disable the remote socket when no MCP session is needed.
+Pass `--project-root <existing-directory>` and set `ZCU_TOOLS_CACHE_DIR` to a
+separate absolute cache path to avoid reopening another session's entry or
+layout. These options do not authorize hardware access.
+MCP can select the same script when it launches a new GUI:
 
 ```python
 connect(launch="new", script="<checkout>/zcu_lab/simulation_envs/six_fluxonium/startup.py")
@@ -71,6 +76,20 @@ alias selects only one. Each qubit uses its own offset and flux-per-current
 coefficient from the [settings guide](field-guide.md#dc-and-control-units).
 Reopen or Reset a form after changing its source values or aliases.
 Do not treat the physical YAML's parameters as a measured calibration.
+
+The template intentionally leaves calibration-dependent inputs incomplete.
+For `range_find`, supply the absolute frequency sweep, readout waveform length
+and trigger offset. The initial trigger expression has no measured
+`resonator.ext.time_of_fly` to read. For blank mux readout, supply mixer frequency,
+pulse length and ADC window, then review the trigger offset and all six tones.
+A qubit experiment also needs valid inputs for every tone, including tones
+excluded from Participants. Inspect form diagnostics before Run.
+
+The [walkthrough settings and timings](field-guide.md#acceptance-timings) give
+one acquired offscreen example. Its 64-rep qubit pilot was too noisy to establish
+a response; the accepted qubit Runs used 16384 reps. Start with a short scan,
+then choose averaging from the observed contrast and scatter. A finite curve
+or nonzero span alone is not a calibration result.
 
 Only terminal readout is supported. Earlier readout-generator pulses are outside
 the single-cavity model's supported sequence. The six cavities do not form a
