@@ -493,6 +493,31 @@ def test_builder_backend_cleanup_rejects_later_work_but_leaves_drivers_owned():
         env.devices.close_all_devices()
 
 
+def test_dc_only_single_source_acquires_without_a_fast_flux_route():
+    values = physical_settings().model_dump(mode="json")
+    values["flux_line"] = None
+    try:
+        config = parse_single_fluxonium(values)
+    except ValueError as error:
+        pytest.fail(f"DC-only material must admit an explicitly unbound flux line: {error}")
+    env = single_fluxonium(config)
+    try:
+        readout = PulseReadoutCfg(
+            gen_ch=0, ro_ch=0, nqz=1, freq=7000, gain=0.1,
+            waveform=ConstWaveformCfg(length=0.024), ro_length=0.016,
+        )
+        program = ModularProgramV2(
+            env.soccfg, ProgramV2Cfg(reps=8), modules=[readout.build("ro")]
+        )
+        average = program.acquire(env.soc, progress=False)
+        assert average is not None and np.linalg.norm(average[0]) > 1
+        assert program.get_raw() is not None
+    finally:
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
+
+
 def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
     env = single_fluxonium(physical_settings())
     source = SingleFluxoniumSource(physical_settings(), env.devices)
