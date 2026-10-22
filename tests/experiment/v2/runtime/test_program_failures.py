@@ -73,19 +73,19 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
 
     signal = StopSignal()
     buffer = SignalBuffer((1,), on_update=update, update_interval=None)
-    with Schedule(make_flow_cfg(rounds=1), buffer, stop=signal) as schedule:
-        builder = schedule.prog_builder("soc", "soccfg", program_cls=Program).add(
-            FakeModule("readout")
-        )
-        acquire = (
-            builder.build_and_acquire_decimated
-            if decimated
-            else builder.build_and_acquire
-        )
-        with pytest.raises(RuntimeError, match=f"broken {failure_site}") as caught:
+    with pytest.raises(RuntimeError, match=f"broken {failure_site}") as caught:
+        with Schedule(make_flow_cfg(rounds=1), buffer, stop=signal) as schedule:
+            builder = schedule.prog_builder("soc", "soccfg", program_cls=Program).add(
+                FakeModule("readout")
+            )
+            acquire = (
+                builder.build_and_acquire_decimated
+                if decimated
+                else builder.build_and_acquire
+            )
             acquire(raw2signal_fn=convert, options=AcquireOptions(retry=2))
-        assert caught.value is cause
-        assert schedule.outcome.status == "completed"
-        assert signal.error is None
-        assert builds == [1]
-        assert acquires == ([] if failure_site == "build" else [1])
+    assert caught.value is cause
+    assert schedule.outcome.status == "completed"
+    assert signal.error is None
+    assert builds == [1]
+    assert acquires == ([] if failure_site == "build" else [1])
