@@ -31,6 +31,7 @@ from .models import (
     OperationKind,
     OperationOutcome,
     ProgressSnapshot,
+    RunIdentity,
 )
 from .ports import DevicePort, EnginePorts, ProgressFactory
 
@@ -43,11 +44,12 @@ def _validate_model(value: object, model: type[BaseModel], label: str) -> None:
 class RunFunction[Cfg: ExpCfgModel, Result](Protocol):
     """Core experiment callable, including bound Experiment.run methods.
 
-    cfg is an owned, mutable experiment configuration. context provides borrowed
-    hardware, plots, drivers and the cooperative operation cancellation token.
+    cfg is an owned, mutable experiment configuration passed positionally; its
+    parameter name is unrestricted. context provides borrowed hardware, plots,
+    drivers and the cooperative operation cancellation token.
     """
 
-    def __call__(self, cfg: Cfg, *, context: RunContext) -> Result: ...
+    def __call__(self, cfg: Cfg, /, *, context: RunContext) -> Result: ...
 
 
 @dataclass
@@ -133,9 +135,11 @@ class EnvHooks:
 class WorkflowEnv[C]:
     """One async author's capabilities, commit allocation and operations.
 
-    started_at is aware UTC. ports borrows native handles without connecting or
-    copying them. host owns loop/executor and scope tokens. displays retains
-    bars. hooks delegates persistence/control to the Engine execution owner.
+    started_at is aware UTC. identity is the existing host-supplied RunIdentity,
+    detached on construction and access; no new provenance is captured. ports
+    borrows native handles without connecting or copying them. host owns
+    loop/executor and scope tokens. displays retains bars. hooks delegates
+    persistence/control to the Engine execution owner.
     Authors use env.call for blocking work, env.ask for decisions, and explicit
     env.commit for records. Missing capabilities raise at use, not at Start.
     """
@@ -147,10 +151,13 @@ class WorkflowEnv[C]:
         host: ScriptHost,
         displays: Displays,
         hooks: EnvHooks,
+        *,
+        identity: RunIdentity,
     ) -> None:
         if started_at.utcoffset() != timedelta(0):
             raise ValueError("Workflow start must be timezone-aware UTC")
         self._started_at = started_at
+        self._identity = deepcopy(identity)
         self._ports = ports
         self._host = host
         self._displays = displays
@@ -160,6 +167,11 @@ class WorkflowEnv[C]:
     def started_at(self) -> datetime:
         """Return the original aware UTC run start, unchanged by Resume."""
         return self._started_at
+
+    @property
+    def identity(self) -> RunIdentity:
+        """Return detached startup identity/provenance, unchanged across operations."""
+        return deepcopy(self._identity)
 
     @property
     def context(self) -> C:

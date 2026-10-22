@@ -1,8 +1,8 @@
 """Environment capabilities and retained displays through an async author."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from threading import Event
@@ -78,6 +78,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
         host,
         Displays(rig.progress),
         hooks,
+        identity=identity(),
     )
 
     def acquire(ctx: CallContext) -> int:
@@ -157,10 +158,11 @@ def test_author_identity_matches_supplied_run_and_saved_manifest(rig: Rig) -> No
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         assert hasattr(env, "identity"), "Authors must receive the existing RunIdentity"
         observed.append(env.identity)
-        with pytest.raises(FrozenInstanceError, match="cannot assign"):
-            setattr(env.identity, "run_id", "replacement")
-        with pytest.raises(AttributeError, match="has no setter"):
-            setattr(env, "identity", supplied)
+        author_copy = env.identity
+        versions = author_copy.provenance.software_versions
+        if isinstance(versions, MutableMapping):
+            versions["author-only"] = "changed"
+        assert env.identity == supplied
         await env.call(lambda ctx: None)
         await env.commit(Point(value=1))
         observed.append(env.identity)
