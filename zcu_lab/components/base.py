@@ -66,9 +66,6 @@ class BuiltinComponent(ComponentSchema):
     ext: YamlMap = Field(
         default_factory=dict, description="Extra values without a fixed schema."
     )
-    wiring: WiringSchema = Field(
-        default_factory=WiringSchema, description="Hardware channel wiring."
-    )
     module: dict[str, str] = Field(
         default_factory=dict,
         description="Module slots: slot name to a module library key.",
