@@ -21,12 +21,13 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
     RunStatus,
     TunablesSnapshot,
+    WorkflowPlots,
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState, FormWritePath
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.plotting.plots import NonPresentingHost, PlotHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost, PlotHost
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
 from zcu_tools.resources.entry.save_layout import workflow_roots
 
@@ -83,7 +84,7 @@ class WorkflowTabPort(Protocol):
     @property
     def run(self) -> WorkflowRunPort: ...
     @property
-    def plots(self) -> Plots | None: ...
+    def plots(self) -> WorkflowPlots | None: ...
     @property
     def busy(self) -> bool: ...
     @property
@@ -126,7 +127,7 @@ class WorkflowTab[C]:
         self._services = services
         self._changed = changed
         self._host: PlotHost = NonPresentingHost()
-        self.plots: Plots | None = None
+        self.plots: WorkflowPlots | None = None
         self.error: str | None = None
         self.run = WorkflowController[FormModel, C](
             services.runner, f"workflow:{id(self)}", on_finished=self._finished
@@ -279,7 +280,7 @@ class WorkflowTab[C]:
             workflow=self.name,
             run_id=run_id,
         )
-        plots = Plots(self._host)
+        plots = WorkflowPlots(self._host)
         context = RunContext(
             session.soc,
             session.soccfg,

@@ -69,6 +69,9 @@ returns form_errors with path/message rows. Unexpected producer failures retain
 controller_error. No retry or rollback follows an error or transport timeout.
 Figures and committed records remain readable after terminal delivery. Names
 and status do not render; figure returns png_b64 for validated MCP image delivery.
+Figures use the pane's same WorkflowPlots projection: workflow names stay
+unchanged, current-operation names are operation/<name>. A new attempt replaces
+the whole operation group; terminal delivery retains the latest group.
 Status includes `pending_question`, a
 `{request_id, question_type, question, answer_schema}` envelope or null outside
 Ask. Native status also projects pending_request_id and active_path.

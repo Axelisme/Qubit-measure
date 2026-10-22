@@ -86,6 +86,11 @@ MCP 直接呼叫同一 facet，不經 pane 或 toggle。讓 service 透過 pane 
 Pane 關閉先取得 owner 同意，再釋放自己的訂閱、timer 與 children。被拒絕時
 保留 pane。最後一個 workflow pane 關閉也不 disconnect 硬體或 drain session。
 純 figure widgets 留在 UI，native Plots 的生命週期由 headless owner 管理。
+Workflow pane 的圖選單分 workflow 與目前 operation 兩群。Headless owner 的
+`WorkflowPlots.figures()` 同時提供 pane 與 MCP 的名稱投影，operation 名稱為
+`operation/<name>`。新 attempt release 並整組替換舊 operation，workflow 趨勢圖
+跨 iteration 保留。Terminal 保留最新 operation，replacement Start 與 close
+release 兩組 presentation。獨立集合與同 host fork 的邊界見 [[0069]]。
 
 Facet 的 pending_question 提供固定 question_type/question/answer_schema envelope，
 問題 authored fields 只在 question 內。Engine/driver 擁有 schema 推導與答案轉換。

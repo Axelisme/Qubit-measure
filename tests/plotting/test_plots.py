@@ -744,3 +744,28 @@ def test_movie_captures_updated_frame_and_closes_on_owner(
         recorder.grab_frame()
     plots.release()
     assert host.released == attached
+
+
+def test_fork_shares_host_but_has_independent_membership_and_lifetime() -> None:
+    host = RecordingHost()
+    parent = Plots(host)
+    parent.liveplot_1d("measurement", "x", "y")
+    child = parent.fork()
+    viewer = child.liveplot_1d("measurement", "x", "y")
+    child.liveplot_1d("operation/nested", "x", "y")
+    assert child["measurement"] is not parent["measurement"]
+    assert host.presented == [
+        parent["measurement"],
+        child["measurement"],
+        child["operation/nested"],
+    ]
+    child.finish()
+    with pytest.raises(RuntimeError, match="finished"):
+        viewer.update(np.array([0.0]), np.array([1.0]))
+    child.release()
+    parent.liveplot_1d("trend", "x", "y")
+    with pytest.raises(ValueError, match="another figure"):
+        parent.liveplot_1d("measurement", "x", "y")
+    assert host.released == [child["measurement"], child["operation/nested"]]
+    parent.finish()
+    parent.release()

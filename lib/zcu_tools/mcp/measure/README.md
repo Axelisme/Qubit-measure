@@ -271,6 +271,8 @@ Submitted 不表示已接受，錯型答案不記入 answer。整個 coroutine �
 Pause、Ask、Resume 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
 並執行清理，terminal owner delivery 才釋放 RUN。
 
+Figures 與 GUI pane 使用相同投影。Workflow 圖名維持 `<name>`，目前 operation 圖名為 `operation/<name>`。新 attempt 整組替換 operation 圖，terminal 保留最新一組。Workflow 層登記圖名時拒絕 `operation/` 前綴。
+
 Records 依 commit_seq 查詢，包含配置 directory、committed_at、實際讀過的 revisions、
 record_type 與 operations。配置目錄順序不等於 commit 順序。Operation facts 包含
 kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、

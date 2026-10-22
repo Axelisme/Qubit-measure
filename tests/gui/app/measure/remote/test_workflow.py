@@ -24,6 +24,7 @@ from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._operation_plots import attachment as plot_attachment
 from tests.gui.app.measure._workflow_ask import AskAuthor, Decision
 from tests.mcp.measure._support import make_client
 
@@ -252,6 +253,62 @@ def test_mcp_status_retains_accepted_exchange_after_answer(workflow_rpc, tmp_pat
             "state": "answered",
         }
         assert status["pending_question"] is None
+    finally:
+        client.context.session.close()
+
+
+def test_mcp_operation_projection_replaces_the_whole_set(workflow_rpc, tmp_path):
+    controller, rpc = workflow_rpc
+    control = controller.workflow_control()
+    control.configure((plot_attachment(),))
+    client = make_client(tmp_path, lambda method, params: result(rpc, method, **params))
+    try:
+        tab = client.call("workflow_open", {"name": "operation-plots"})["tab_id"]
+        client.call("workflow_start", {"tab_id": tab, "run_id": "plots"})
+        for stage, expected in (
+            (1, ["trend", "operation/measurement", "operation/diagnostic"]),
+            (2, ["trend", "operation/measurement"]),
+        ):
+            qt_until(
+                lambda: (
+                    control.pending_question("plots") is not None
+                    or not control.tabs()[0].busy
+                ),
+                label=f"operation {stage} question or terminal delivery",
+            )
+            status = client.call("workflow_status", {"run_id": "plots"})
+            assert status["pending_question"] is not None, status
+            assert status["pending_question"]["question"]["point"] == stage
+            assert (
+                client.call("workflow_figures", {"run_id": "plots"})["names"]
+                == expected
+            )
+            for name in expected:
+                reply = client.call(
+                    "workflow_figure", {"run_id": "plots", "name": name}
+                )
+                assert reply.images[0].data.startswith(b"\x89PNG\r\n\x1a\n")
+            client.call(
+                "workflow_answer",
+                {
+                    "run_id": "plots",
+                    "request_id": status["pending_question"]["request_id"],
+                    "answer": {"value": stage},
+                },
+            )
+            qt_until(
+                lambda stage=stage: (
+                    (question := control.pending_question("plots")) is None
+                    or question["question"]["point"] != stage
+                ),
+                label=f"operation {stage} answer consumed",
+            )
+        qt_until(lambda: not control.tabs()[0].busy, label="plot terminal delivery")
+        assert client.call("workflow_figures", {"run_id": "plots"})["names"] == [
+            "trend",
+            "operation/measurement",
+        ]
+        assert client.call("workflow_close", {"tab_id": tab})["closed"]
     finally:
         client.context.session.close()
 

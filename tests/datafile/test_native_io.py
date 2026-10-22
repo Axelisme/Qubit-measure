@@ -22,6 +22,7 @@ from zcu_tools.datafile import (
     SoftwareProvenance,
     VariableSchema,
     load_run_data,
+    read_run_metadata,
     save_labber_data,
     save_run_data,
     validate_cfg_snapshot,
@@ -88,6 +89,95 @@ def test_cfg_snapshot_validation_preserves_unknown_nested_values(
     assert load_run_data(destination).cfg == before
 
 
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        pytest.param("20261006T010000Z-a1b2c3", id="experiment"),
+        pytest.param("20261022T235959Z-z9a0b1", id="experiment-alphanumeric"),
+        pytest.param("0123456789abcdef0123456789abcdef-000001-1", id="workflow"),
+        pytest.param(
+            "00000000000000000000000000000000-000000-10",
+            id="workflow-zero-iteration",
+        ),
+        pytest.param(
+            "ffffffffffffffffffffffffffffffff-999999-123",
+            id="workflow-large-attempt",
+        ),
+    ],
+)
+def test_native_run_id_round_trip_preserves_identity_and_measurements(
+    tmp_path: Path, run_id: str
+) -> None:
+    metadata = replace(native_metadata(), run_id=run_id)
+    payload = native_payload()
+    destination = tmp_path / "opaque.h5"
+    try:
+        save_run_data(destination, payload, metadata, cfg=native_cfg())
+        restored = load_run_data(destination)
+        restored_metadata = read_run_metadata(destination)
+    except ValueError as error:
+        pytest.fail(f"Legal native run_id must round-trip: {error}")
+    assert restored.metadata == metadata
+    assert restored_metadata == metadata
+    assert restored.cfg == native_cfg()
+    recovered = restored.payload.variables[DataVariable("readout")]
+    original = payload.variables[DataVariable("readout")]
+    np.testing.assert_array_equal(recovered.z, original.z)
+    np.testing.assert_array_equal(recovered.axes[0].values, original.axes[0].values)
+    np.testing.assert_array_equal(recovered.timestamps, original.timestamps)
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        pytest.param("g" * 32 + "-000001-1", id="nonhex-prefix"),
+        pytest.param("A" * 32 + "-000001-1", id="uppercase-prefix"),
+        pytest.param("a" * 31 + "-000001-1", id="short-prefix"),
+        pytest.param("a" * 33 + "-000001-1", id="long-prefix"),
+        pytest.param("a" * 32 + "-00001-1", id="short-iteration"),
+        pytest.param("a" * 32 + "-0000001-1", id="long-iteration"),
+        pytest.param("a" * 32 + "-00000a-1", id="nonnumeric-iteration"),
+        pytest.param("a" * 32 + "-０００００１-1", id="unicode-iteration"),
+        pytest.param("a" * 32 + "--00001-1", id="negative-iteration"),
+        pytest.param("a" * 32 + "-000001-0", id="zero-attempt"),
+        pytest.param("a" * 32 + "-000001-01", id="leading-zero-attempt"),
+        pytest.param("a" * 32 + "-000001--1", id="negative-attempt"),
+        pytest.param("a" * 32 + "-000001-+1", id="signed-attempt"),
+        pytest.param("a" * 32 + "-000001-", id="missing-attempt"),
+        pytest.param("a" * 32 + "-000001-1.0", id="fractional-attempt"),
+        pytest.param("a" * 32 + "-000001-１", id="unicode-attempt"),
+        pytest.param("x" + "a" * 32 + "-000001-1", id="extra-prefix"),
+        pytest.param("a" * 32 + "-000001-1x", id="extra-suffix"),
+        pytest.param("a" * 32 + "-000001-1\n", id="trailing-newline"),
+        pytest.param("opaque-workflow", id="opaque-id"),
+        pytest.param("20261006T010000Z-A1b2c3", id="uppercase-experiment"),
+        pytest.param("20261006T010000Z-a1b2c3-extra", id="experiment-extra"),
+        pytest.param("20261006T010000Z-a1b2c3\n", id="experiment-newline"),
+    ],
+)
+def test_native_writer_and_readers_reject_malformed_run_id(
+    tmp_path: Path, run_id: str
+) -> None:
+    destination = tmp_path / "invalid.h5"
+    with pytest.raises(ValueError, match="run_id"):
+        save_run_data(
+            destination,
+            native_payload(),
+            replace(native_metadata(), run_id=run_id),
+            cfg=native_cfg(),
+        )
+    assert not destination.exists()
+
+    source = tmp_path / "historical.h5"
+    save_run_data(source, native_payload(), native_metadata(), cfg=native_cfg())
+    with h5.File(source, "r+") as file:
+        file.attrs["run_id"] = run_id
+    with pytest.raises(ValueError, match="run_id"):
+        load_run_data(source)
+    with pytest.raises(ValueError, match="run_id"):
+        read_run_metadata(source)
+
+
 def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
     tmp_path: Path,
 ) -> None:
@@ -111,7 +201,7 @@ def test_single_run_round_trip_preserves_si_arrays_and_historical_inputs(
 
     with h5.File(destination, "r") as file:
         assert file.attrs["format"] == "zcu.experiment-data"
-        assert file.attrs["format_version"] == "2.1"
+        assert file.attrs["format_version"] == "2.2"
         signal = hdf_dataset(file, "data/readout/signal")
         assert signal.attrs["units"] == "V"
         assert signal.id.get_type().get_member_name(0) == b"r"
@@ -150,7 +240,7 @@ def test_native_unknown_evidence_round_trips(
         pytest.fail(f"Legal historical evidence must round-trip: {error}")
     assert restored.metadata == metadata
     with h5.File(path, "r") as file:
-        assert file.attrs["format_version"] == "2.1"
+        assert file.attrs["format_version"] == "2.2"
         assert file.attrs["started_at"] == (started_at or "")
         assert file.attrs["completion"] == completion
 

@@ -4,24 +4,28 @@ from collections.abc import Callable
 
 from matplotlib.figure import Figure
 from qtpy.QtCore import Qt
+from qtpy.QtGui import QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QComboBox, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
+from zcu_tools.experiment.workflows import WorkflowPlots
 from zcu_tools.gui.plotting.container import FigureContainer
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.ports import OwnerScheduler
-from zcu_tools.plotting.plots import Plots
 
 
 class WorkflowFigures(QWidget):
     """Present named native figures with a selector, using the shared Qt plot host.
 
-    Construct on the GUI thread with the session owner and a read-only Plots
+    Construct on the GUI thread with the session owner and a read-only WorkflowPlots
     query for this tab. The producer must stop and release its plots before
     dispose or Qt deletion. No run, source capture or result data is owned here.
     """
 
     def __init__(
-        self, owner: OwnerScheduler, plots: Callable[[], Plots | None], parent: QWidget
+        self,
+        owner: OwnerScheduler,
+        plots: Callable[[], WorkflowPlots | None],
+        parent: QWidget,
     ) -> None:
         super().__init__(parent)
         self._plots = plots
@@ -29,6 +33,8 @@ class WorkflowFigures(QWidget):
         layout = QVBoxLayout(self)
         self._selector = QComboBox(self)
         self._selector.setObjectName("workflow.figures.selector")
+        self._choices = QStandardItemModel(self._selector)
+        self._selector.setModel(self._choices)
         self._selector.currentTextChanged.connect(self._select)
         layout.addWidget(self._selector)
         self._selector.hide()
@@ -50,14 +56,15 @@ class WorkflowFigures(QWidget):
         if plots is None:
             raise ValueError("This workflow tab has no retained plots")
         name = next(
-            (name for name, retained in plots.items() if retained is figure), None
+            (name for name, retained in plots.figures().items() if retained is figure),
+            None,
         )
         if name is None:
             raise ValueError("Figure is not retained by this workflow tab")
         self._host.present(figure)
         if name not in self._figures:
             self._figures[name] = figure
-            self._selector.addItem(name)
+            self._rebuild_selector(name)
         self._selector.setCurrentText(name)
         self._selector.setVisible(bool(self._figures))
 
@@ -71,13 +78,37 @@ class WorkflowFigures(QWidget):
         for name, retained in tuple(self._figures.items()):
             if retained is figure:
                 del self._figures[name]
-                self._selector.removeItem(self._selector.findText(name))
+        self._rebuild_selector(self._selector.currentText())
         self._selector.setVisible(bool(self._figures))
 
     def dispose(self) -> None:
         """Cancel this adapter's remaining redraws after the producer has stopped."""
         for figure in tuple(self._figures.values()):
             self.release(figure)
+
+    def _rebuild_selector(self, selected: str) -> None:
+        self._selector.blockSignals(True)
+        try:
+            self._choices.clear()
+            for title, operation in (("Workflow", False), ("Current operation", True)):
+                names = [
+                    name
+                    for name in self._figures
+                    if name.startswith("operation/") == operation
+                ]
+                if not names:
+                    continue
+                heading = QStandardItem(title)
+                heading.setEnabled(False)
+                self._choices.appendRow(heading)
+                for name in names:
+                    self._choices.appendRow(QStandardItem(name))
+            if selected not in self._figures:
+                selected = next(iter(self._figures), "")
+            self._selector.setCurrentText(selected)
+        finally:
+            self._selector.blockSignals(False)
+        self._select(selected)
 
     def _select(self, name: str) -> None:
         figure = self._figures.get(name)
