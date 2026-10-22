@@ -156,6 +156,14 @@ fixed Form observation, native analysis estimates and invalid paths, and explici
 writeback candidates. Reading detail never reruns analysis, writes or saves.
 Runs retain acquisition run_id and every explicit Save attempt, even failed
 outputs. Output status/error, not run_id, determines save success.
+Post result reads use the owner's start-receipt budget: 5 seconds plus 5 per
+measured tone, capped at 60 seconds; an absent budget uses 5 seconds.
+A result_read failure retains recovery with rpc, params, original op and stage.
+First read tab.snapshot and compare post_analysis_state.source_operation_id with
+recovery.params.operation_id. If different, report superseded and do not deliver
+the replacement as the old result. Otherwise rpc_call the supplied source-bound
+route; replacement races return result_superseded. Do not rerun analysis to
+recover a result read. GUI Post read handlers have a 60-second ceiling.
 Standalone analysis retains its native summary and Save reports. Artifacts
 preserve producer sections, names, members, paths, formats, statuses and errors. Synchronous tab.save_data and
 tab.save_artifacts return the complete current report, not a Save handle. No Save

@@ -41,6 +41,7 @@ def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
         has_analyze_result=has_analyze_result, post_params=post_params
     )
     ctrl.start_post_analyze.return_value = 77
+    ctrl.analysis_result_read_timeout_seconds.return_value = 5.0
     return ctrl
 
 
@@ -55,6 +56,12 @@ def test_start_with_primary_result_starts_op():
     res = _dispatch(ctrl, "tab.post_analyze", {"tab_id": "t", "updates": {}})
     assert res == {
         "operation_id": 77,
+        "result_read_timeout_seconds": 5.0,
+        "recovery": {
+            "rpc": "tab.get_post_analyze_result",
+            "params": {"tab_id": "t", "operation_id": 77},
+            "stage": "post",
+        },
         "interactive": False,
         "params": {},
         "invalidated_on_success": [],

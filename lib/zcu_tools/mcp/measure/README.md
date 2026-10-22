@@ -226,6 +226,11 @@ Terminal recipe summary 回 execution／status／report／runs。Status 另帶 a
 Failed 另帶 `failure: {phase, reason}`，full detail 也保留同一 failure 與原 error。
 Phase 在失敗動作處記錄：作者／Run／開 tab 為 operation，分析結果讀取與解碼為 result_read，
 Save 為 image_save，preview 為 figure_read，writeback 候選讀取為 writeback_read。
+Post 的 `result_read` 失敗另附 `recovery`，保留 owner 的唯讀 RPC、原生參數、stage 與當時 MCP `op`。
+先用 `tab.snapshot` 核對 `post_analysis_state.source_operation_id` 與 `recovery.params.operation_id`。
+相符後以 `rpc_call(method=recovery.rpc, params=recovery.params)` 讀回，不重跑分析。
+不相符表示結果已被替換，回報 superseded，不取用新結果代替舊結果。
+即使 snapshot 後發生替換，source-bound RPC 仍以 `result_superseded` 拒絕。
 Reason 是 `str(exception)`，不附格式化 traceback。作者 catch 後的新錯誤不沿用舊 phase，
 成功的 finally Save 也不覆蓋原失敗的 phase。
 Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operation status、
@@ -333,6 +338,9 @@ Standalone analysis execution 等原 GUI operation 完成，讀結果、保存 a
 再以原 opaque operation 讀一次 writeback preview。
 沒有圖也讀候選，Read 失敗保留已有 result、當次 Save report 與 image，回 writeback_read error。
 來源 superseded 不改讀新 pane，不 retry。
+Post start receipt 的 `result_read_timeout_seconds` 來自 owner，以 5 秒加每個 measured tone 5 秒計算，上限 60 秒。
+Standalone 與 recipe 使用同一欄位，缺欄時用 5 秒。GUI Post read handler 的 ceiling 是 60 秒。
+Post 結果讀取失敗時，execution 回覆保留同一份 `recovery`；依上方 Runtime 的 snapshot 與 source-bound RPC 步驟讀回。
 這個自動保存是 standalone 工具契約，不適用 recipe 的 `await tab.analyze()`；
 recipe 作者另外明確 `tab.save()`。
 

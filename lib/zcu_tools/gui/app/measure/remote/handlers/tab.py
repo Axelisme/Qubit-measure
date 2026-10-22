@@ -138,6 +138,7 @@ def tab_operation_state(
             "partial_result": snap.run.partial_result,
         },
         "analysis_state": {
+            "source_operation_id": snap.analysis.source_operation_id,
             "revision": versions.get(f"tab:{tab_id}:analyze", 0),
             "available": snap.analysis.result is not None,
             "has_figure": bool(snap.analysis.figures),
@@ -145,6 +146,7 @@ def tab_operation_state(
             "has_writeback_draft": snap.analysis.has_writeback_draft,
         },
         "post_analysis_state": {
+            "source_operation_id": snap.post_analysis.source_operation_id,
             "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
             "available": snap.post_analysis.result is not None,
             "has_figure": bool(snap.post_analysis.figures),

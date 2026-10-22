@@ -69,7 +69,10 @@ def test_post_read_timeout_returns_bound_recovery_without_reanalysis(
         else client.call("tab_analyze", {"tab": "tab-1", "stage": "post"})
     )
     assert reply.data["status"] == "failed"
-    assert reply.data.get("recovery") == {**RECOVERY, "op": 3 if recipe_mode else 1}
+    assert reply.data.get("recovery") == {
+        **RECOVERY,
+        "op": client.context.session.expose_operation(71),
+    }
     assert deadlines == [5.0 if seconds is None else seconds]
     execution = reply.data["execution"]
     for name in ("status", "wait"):

@@ -23,6 +23,8 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
 from zcu_tools.mcp.measure.analysis_execution import (
+    AnalysisReadPolicy,
+    AnalysisRecovery,
     ExecutionPhase,
     InvalidAnalysisValue,
 )
@@ -106,7 +108,7 @@ class _Snapshots(BaseModel):
     tabs: list[_TabSnapshot]
 
 
-class _Started(BaseModel):
+class _Started(AnalysisReadPolicy):
     handle: int
     interactive: bool = False
 
@@ -187,7 +189,9 @@ class RecipeRuntime:
         self._images: list[PngImage] = []
         self._run_scope: Scope | None = None
         self._run_handle: int | None = None
-        self._failures: list[tuple[Exception, ExecutionPhase]] = []
+        self._failures: list[
+            tuple[Exception, ExecutionPhase, AnalysisRecovery | None]
+        ] = []
 
     def failure_phase(self, error: Exception) -> ExecutionPhase:
         """Read the phase of this exact runtime failure, or operation for author errors.
@@ -197,19 +201,29 @@ class RecipeRuntime:
         classified using an unrelated, previously caught runtime failure.
         """
         with self._lock:
-            for failure, phase in reversed(self._failures):
+            for failure, phase, _recovery in reversed(self._failures):
                 if failure is error:
                     return phase
             return "operation"
 
+    def failure_recovery(self, error: Exception) -> AnalysisRecovery | None:
+        """Return the read-only route for this exact failure, without querying GUI."""
+        with self._lock:
+            for failure, _phase, recovery in reversed(self._failures):
+                if failure is error:
+                    return deepcopy(recovery)
+            return None
+
     @contextmanager
-    def _failure_phase(self, phase: ExecutionPhase) -> Generator[None]:
+    def _failure_phase(
+        self, phase: ExecutionPhase, *, recovery: AnalysisRecovery | None = None
+    ) -> Generator[None]:
         try:
             yield
         except Exception as error:
             # Preserve the original exception so author-side recovery still works.
             with self._lock:
-                self._failures.append((error, phase))
+                self._failures.append((error, phase, deepcopy(recovery)))
             raise
 
     def runs(self) -> tuple[RecipeRun, ...]:
@@ -821,12 +835,20 @@ class RecipeRuntime:
             )
         if completion.status == "cancelled":
             return AnalysisResult(None, status="failed", reason="Analysis cancelled")
-        with self._failure_phase("result_read"):
+        recovery: AnalysisRecovery | None = (
+            {**started.recovery, "op": started.handle}
+            if stage == "post" and started.recovery is not None
+            else None
+        )
+        with self._failure_phase("result_read", recovery=recovery):
             reply = self._tools.gui.send_gui_rpc(
                 "tab.get_analyze_result"
                 if stage == "primary"
                 else "tab.get_post_analyze_result",
                 {"tab_id": tab},
+                timeout_seconds=started.result_read_timeout_seconds
+                if stage == "post"
+                else None,
                 operation_handle=started.handle,
             )
             summary = TypeAdapter(YamlValue).validate_python(reply["summary"])

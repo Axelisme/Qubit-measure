@@ -1,11 +1,15 @@
 """Synthetic owner receipts and source-bound Post recovery through RPC."""
 
+from dataclasses import dataclass
+from typing import ClassVar
+
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     PostAnalyzeRequest,
+    PostAnalyzeResultBase,
     SessionEnv,
 )
 from zcu_tools.plotting.plots import Plots
@@ -22,10 +26,15 @@ from tests.gui.app.measure._synthetic import (
 from ._helpers import Fixture, call, open_client
 
 
+@dataclass
+class TonePostAnalysis(PostAnalyzeResultBase):
+    peak: float
+
+
 class ToneAdapter(SampleAdapter):
     """Declare a synthetic per-tone read cost without any lab definition."""
 
-    capabilities = AdapterCapabilities(
+    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False, post_analysis=True
     )
 
@@ -42,8 +51,8 @@ class ToneAdapter(SampleAdapter):
         req: PostAnalyzeRequest[SampleRun, SampleAnalysis, EmptyParams],
         *,
         plots: Plots,
-    ) -> SampleAnalysis:
-        return req.analyze_result
+    ) -> TonePostAnalysis:
+        return TonePostAnalysis(peak=req.analyze_result.peak)
 
 
 @pytest.mark.parametrize(("tones", "seconds"), [(0, 5), (1, 10), (6, 35), (20, 60)])

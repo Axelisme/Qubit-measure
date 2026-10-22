@@ -21,7 +21,7 @@ from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.experiment.script_host import ScriptStatus
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.mcp.core.reply import ToolReply
-from zcu_tools.mcp.measure.analysis_execution import ExecutionPhase
+from zcu_tools.mcp.measure.analysis_execution import AnalysisRecovery, ExecutionPhase
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeDeclaration,
     RecipeOutcome,
@@ -42,11 +42,13 @@ class ScriptRecipeError:
 
     phase uses ExecutionPhase; unclassified author/Run errors are operation.
     message is str(exception), without a formatted traceback.
+    recovery is the source-bound Post read route after delivery failure, else None.
     """
 
     type: str
     message: str
     phase: ExecutionPhase = "operation"
+    recovery: AnalysisRecovery | None = None
 
 
 @dataclass(frozen=True)
@@ -383,6 +385,7 @@ class ScriptRecipeExecution:
                     host.runtime.failure_phase(error)
                     if host is not None
                     else "operation",
+                    host.runtime.failure_recovery(error) if host is not None else None,
                 )
                 if error is not None and not isinstance(error, ScriptCancelled)
                 else None,

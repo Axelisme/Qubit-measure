@@ -289,6 +289,7 @@ def h_tab_post_analyze(
         if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
         else []
     )
+    read_timeout = control.analysis_result_read_timeout_seconds(tab_id)
     follow_tab(adapter, tab_id, "post_analysis")
     operation_id = control.start_post_analyze(
         tab_id,
@@ -298,6 +299,12 @@ def h_tab_post_analyze(
     )
     return {
         "operation_id": operation_id,
+        "result_read_timeout_seconds": read_timeout,
+        "recovery": {
+            "rpc": "tab.get_post_analyze_result",
+            "params": {"tab_id": tab_id, "operation_id": operation_id},
+            "stage": "post",
+        },
         "interactive": False,
         "params": dataclasses.asdict(updated),
         "invalidated_on_success": invalidated,

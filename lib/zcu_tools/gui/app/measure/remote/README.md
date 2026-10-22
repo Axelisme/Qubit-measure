@@ -258,6 +258,16 @@ Run 完成不保存 raw。RPC 呼叫 `tab.save_data` 才保存 raw；recipe work
 Saved 只反映 measurement_data 在 owner tracker 是否全部保存，不查檔案是否仍存在。
 保存 analysis 不會把 raw 的 saved 改成 true。原本頂層 run_id 仍只在至少一個持久輸出成功後出現。
 
+Post start receipts include `result_read_timeout_seconds` and a source-bound
+`recovery` RPC envelope. The owner budgets 5 seconds plus 5 per measured tone,
+capped at 60 seconds. The Post result handler ceiling is 60 seconds.
+After a result-read timeout, read `tab.snapshot` and compare
+`post_analysis_state.source_operation_id` with the recovery operation ID.
+Use the supplied `operation_id` with `tab.get_post_analyze_result`; a replaced
+pane returns `result_superseded`, including replacement after the snapshot.
+These reads never rerun analysis. Both analysis pane snapshots expose their
+native `source_operation_id`; MCP operation handles are separate identities.
+
 `tab.save_data` and `tab.save_artifacts` complete synchronously on the GUI owner
 thread. They return the current complete Save report with the original Run ID,
 even when every output fails, and every output path/status/error. Output statuses
