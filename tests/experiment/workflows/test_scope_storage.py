@@ -38,12 +38,12 @@ def test_nested_scopes_create_directories_lazily_and_commit_snapshots_once(rig: 
                 assert calibration.dir == rig.paths.data_root / "point-000001/calibration-000001"
                 assert calibration.dir.is_dir()
                 record = Collection(value=7)
-                await calibration.commit(record)
+                calibration.commit(record)
                 record.value = 99
                 with pytest.raises(ValueError, match="committed"):
-                    await calibration.commit(record)
-            await point.commit(Collection(value=8))
-        await env.commit(Collection(value=9))
+                    calibration.commit(record)
+            point.commit(Collection(value=8))
+        env.commit(Collection(value=9))
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -108,7 +108,7 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
             assert cfg.value == 7
             await scope.setup_device("flux", FakeDeviceInfo(address="memory", value=0.25))
             await scope.wait_until(env.started_at + timedelta(seconds=2))
-            await scope.commit(Collection(value=record.value.result))
+            scope.commit(Collection(value=record.value.result))
 
     rig.start(script)
     try:
@@ -136,6 +136,7 @@ def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(rig:
                 raise
             seen.append("delivered")
         finally:
+            env.commit(Collection(value=3))
             seen.append("finally")
 
     rig.start(script)
@@ -143,6 +144,7 @@ def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(rig:
     assert seen == ["cancelled", "finally"]
     assert final.lifecycle == "cancelled"
     assert final.reason is None
+    assert [record.encoded_record.value for record in rig.engine.records("run")] == [{"value": 3, "status": "collecting"}]
 
 
 def test_operation_facts_use_iteration_birth_not_commit_count(rig: Rig) -> None:
@@ -154,7 +156,7 @@ def test_operation_facts_use_iteration_birth_not_commit_count(rig: Rig) -> None:
             assert outcome.facts.iteration == iteration.sequence
             if value == 1:
                 continue
-            await iteration.commit(Collection(value=value))
+            iteration.commit(Collection(value=value))
 
     rig.start(script)
     final = rig.engine.execute("run")
