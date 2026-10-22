@@ -221,6 +221,57 @@ def test_fit_func_preserves_model_programming_errors() -> None:
     assert failure.value is error
 
 
+@pytest.mark.parametrize("method", ["lm", "trf", "dogbox"])
+def test_fit_func_preserves_jacobian_programming_errors(method: str) -> None:
+    error = RuntimeError("broken Jacobian")
+    x = np.linspace(0.0, 2.0, 5)
+
+    def jacobian(x, slope, intercept):
+        raise error
+
+    with pytest.raises(Exception) as failure:
+        fit_func(
+            x,
+            2.0 * x + 1.0,
+            lambda x, slope, intercept: slope * x + intercept,
+            init_p=[1.0, 0.0],
+            jac=jacobian,
+            method=method,
+        )
+    assert failure.value is error
+
+
+@pytest.mark.parametrize("jacobian_kind", ["analytic", "2-point", "3-point", "cs"])
+def test_fit_func_accepts_jacobians_and_forwards_optimizer_options(
+    jacobian_kind: str,
+) -> None:
+    x = np.linspace(0.0, 2.0, 5)
+    evaluated = []
+
+    def jacobian(x, slope, intercept):
+        evaluated.append((slope, intercept))
+        return np.column_stack((x, np.ones_like(x)))
+
+    params, covariance = fit_func(
+        x,
+        2.0 * x + 1.0,
+        lambda x, slope, intercept: slope * x + intercept,
+        init_p=[1.0, 0.0],
+        jac=jacobian if jacobian_kind == "analytic" else jacobian_kind,
+        method="trf",
+        sigma=np.full(x.size, 0.5),
+        absolute_sigma=True,
+        max_nfev=10,
+    )
+
+    np.testing.assert_allclose(params, [2.0, 1.0], atol=1e-7)
+    assert covariance.shape == (2, 2)
+    assert np.all(np.isfinite(covariance))
+    assert np.all(np.diag(covariance) > 0.0)
+    if jacobian_kind == "analytic":
+        assert evaluated
+
+
 def test_fit_func_all_none_fixedparams_matches_unfixed_fit():
     x = np.linspace(0.0, 2.0, 50)
     y = 2.0 * x + 1.0 + 0.02 * np.sin(3.0 * x)
