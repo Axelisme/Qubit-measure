@@ -10,7 +10,7 @@
 ## 準備輸入
 
 1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`、mux generator `wiring.gen_ch`，以及同序的各 tone ADC `wiring.ro_ch`。若已有 `readout/mux` library key，可把 module 槽 `module.readout` 指向它。完整 tones[i] 對應 resonators[i]，綁定依據是位置。
-2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Reset 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時使用 blank mux 範本加 group tones，generator 取自 `$mux.wiring.gen_ch`，第 i 個 tone 的 ADC 取自 `$mux.wiring.ro_ch[i]`，各 tone gain 填 0.1。這些是可編輯的初值，不代表硬體設定已確認。共同 trigger 增加最小 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。
+2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Reset 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時使用 blank mux 範本加 group tones，generator 取自 `$mux.wiring.gen_ch`，第 i 個 tone 的 ADC 從固定 capture 的 `group.wiring.ro_ch[i]` 取整數初值，各 tone gain 填 0.1。這些是可編輯的初值，不代表硬體設定已確認。共同 trigger 增加最小 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。
 3. 核對 generator、mixer、每個 tone 的 ADC channel、frequency、gain，以及共用播放長度、ADC window 和 trigger timing。範本的 scalar 初值只供編輯。Run 前由操作員確認硬體安全值。
 4. 可選已有的 readout/mux key，或用 Convert to inline 複製內容再修改。Tones 是單行 JSON，例如 `[{"freq":5980,"gain":0.1,"ro_ch":4,"label":"R1"},{"freq":6020,"gain":0.1,"ro_ch":5,"label":"R2"},{"freq":6040,"gain":0.1,"ro_ch":6}]`。此例只示範格式，硬體值須另行確認。
 5. Active tones 選 None 量全部，或輸入原始序號 JSON list。例如 `[0,2]` 量第一及第三個 tone，`[2,0]` 則依第三、第一的順序執行、畫圖與保存 columns。序號須為唯一、有效範圍內的整數。空 list、重複、越界、bool 或非整數會在 Run 診斷中報錯並阻擋執行。請查看診斷內容判斷問題欄位。

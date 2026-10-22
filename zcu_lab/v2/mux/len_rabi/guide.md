@@ -14,8 +14,9 @@ in readout order. Readout references the module slot `$mux.module.readout` when
 present, preserving the library's tones and scalar settings. Use a mux-family
 module with the full group tone count. If the slot is empty, Readout starts
 inline from the blank mux template with group calibration tones.
-The generator comes from `$mux.wiring.gen_ch`, and tone i's ADC channel comes
-from `$mux.wiring.ro_ch[i]`, in the group's resonator order. Each tone starts
+The generator comes from `$mux.wiring.gen_ch`. Tone i's ADC channel is an
+integer seed from the fixed capture's `group.wiring.ro_ch[i]`, in the group's
+resonator order. Each tone starts
 with gain 0.1. These values are editable initial inputs, not verified hardware
 settings. Complete the remaining required fields and confirm wiring, gain and
 timing before running.

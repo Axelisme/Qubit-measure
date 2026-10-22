@@ -28,9 +28,11 @@ def mux_readout_initial(
     preserving all stored tones and scalar settings. Without a slot, seed the
     blank template with each resonator's calibration frequency and name label,
     generator from $mux.wiring.gen_ch, tone ADCs from $mux.wiring.ro_ch in group
-    order, and gain 0.1. Wiring and frequency use Expr seeds. Missing/invalid
-    sources leave required input blank. The operator confirms wiring, gain and
-    timing before Run; durations remain unfilled. Missing capture, mux alias or
+    order, and gain 0.1. Generator and frequency use Expr seeds; tone ADCs
+    are detached integers from the captured group wiring because scalar Expr
+    does not support indexing. Missing/invalid Expr sources leave required input
+    blank. The operator confirms wiring, gain and timing before Run; durations
+    remain unfilled. Missing capture, mux alias or
     group/mux raises ValueError; other alias/source faults propagate.
 
     wait_for_ringup opts spectroscopy into an editable Open/Reset timing seed.
@@ -69,7 +71,7 @@ def mux_readout_initial(
             # Preserve the existing ringup-copy defaults; only blank input changes.
             tone.update({"gain": 0.1, "ro_ch": index})
         else:
-            tone.update({"gain": 0.1, "ro_ch": Expr(f"$mux.wiring.ro_ch[{index}]")})
+            tone.update({"gain": 0.1, "ro_ch": group.wiring.ro_ch[index]})
         tones.append(tone)
     seeds: dict[str, TemplateSeed] = {"tones": tones}
     if wait_for_ringup:
