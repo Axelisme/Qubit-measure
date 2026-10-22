@@ -20,8 +20,8 @@ from zcu_tools.gui.event_bus import BaseEventBus, BasePayload
 class DispersiveEvent(str, Enum):
     """Internal event identifiers for the dispersive analysis pipeline."""
 
-    PROJECT_CHANGED = "project_changed"  # project info (chip/qub/paths) changed
-    FIT_INPUTS_LOADED = "fit_inputs_loaded"  # fluxdep_fit read in from params.json
+    PROJECT_CHANGED = "project_changed"  # entry/component target changed
+    FIT_INPUTS_LOADED = "fit_inputs_loaded"  # entry predictor loaded
     ONETONE_LOADED = "onetone_loaded"  # a one-tone spectrum was loaded
     PREPROCESS_CHANGED = "preprocess_changed"  # the preprocessing result changed
     DISP_FIT_CHANGED = (

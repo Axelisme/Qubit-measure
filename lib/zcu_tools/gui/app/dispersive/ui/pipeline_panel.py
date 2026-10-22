@@ -7,14 +7,14 @@ competing for vertical space.
 
 The pipeline (each step enabled only once the prior completes — fast-fail UX):
 
-1. **Project & inputs** — load the fluxonium fit from params.json (the hard gate).
+1. **Entry & inputs** — choose an entry/component and fluxonium predictor.
 2. **Load one-tone** — browse + transpose a raw one-tone hdf5.
 3. **Preprocess** — run the (off-main) signal pipeline → the Preprocess tab.
 4. **Tune g / r_f** — drag the g / r_f sliders (or click "Auto tune" to let a scipy
    optimiser pre-fit them against the dropped sample-flux lines), then "Use these
    g/r_f" runs the predictor off-main, draws the Tune tab, and records the result (the
    accepted values are the final fit). The button is disabled while computing.
-5. **Export** — write the dispersive section back to params.json.
+5. **Export** — write the entry dispersive artifact and declared setup fields.
 
 The heavy work (preprocess, predict, auto-tune) runs off-main via the shared
 ``BackgroundRunner`` (pool strategy), calling only the pure ``compute_*`` /
@@ -34,9 +34,9 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import (
-    QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QProgressBar,
@@ -46,7 +46,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
-from zcu_tools.gui.app.analysis_project.project_dialog import ProjectDialog
+from zcu_tools.gui.app.analysis_project.entry_dialog import EntryDialog
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.services.viz import (
     SampleArtists,
@@ -173,12 +173,14 @@ class PipelinePanelWidget(QWidget):
     def _build_inputs_section(self) -> QWidget:
         # Buttons only — the loaded-inputs text shows in the shared info row below
         # (built by _build_info_row), so this box stays short.
-        box = QGroupBox("1. Project & fit inputs")
+        box = QGroupBox("1. Entry & predictor")
+        self._inputs_box = box
         layout = QVBoxLayout(box)
         row = QHBoxLayout()
-        project_btn = QPushButton("Project…")
+        project_btn = QPushButton("Entry…")
         project_btn.clicked.connect(self._on_project)
-        load_btn = QPushButton("Load params.json")
+        load_btn = QPushButton("Load predictor…")
+        self._load_inputs_btn = load_btn
         load_btn.clicked.connect(self._on_load_inputs)
         row.addWidget(project_btn)
         row.addWidget(load_btn)
@@ -218,7 +220,12 @@ class PipelinePanelWidget(QWidget):
         bar = QWidget()
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(4, 0, 4, 0)
-        self._inputs_label = QLabel("Load the fluxonium fit (fluxdep_fit) first.")
+        target = self._ctrl.state.project
+        caption = (
+            f"{target.entry} / {target.component}" if target else "Open an entry first."
+        )
+        self._inputs_label = QLabel(caption)
+        self._inputs_label.setObjectName("predictorInfo")
         make_label_selectable(self._inputs_label)
         self._inputs_label.setWordWrap(True)
         self._onetone_label = QLabel("(no one-tone loaded)")
@@ -232,7 +239,7 @@ class PipelinePanelWidget(QWidget):
         # its line + refreshes the sample dots live (cheap single-point predicts); only
         # "Use these g/r_f" runs the full off-main predictor, draws the dispersion
         # lines, and records the result (the manual tuning IS the final fit). Export
-        # (writing the dispersive section to params.json) lives at the bottom-right of
+        # (writing the entry dispersive artifact) lives at the bottom-right of
         # this section — it enables once a tuning has been accepted.
         self._tune_box = QGroupBox("4. Tune g / r_f  (drag to match, accept, export)")
         outer = QVBoxLayout(self._tune_box)
@@ -263,7 +270,7 @@ class PipelinePanelWidget(QWidget):
         self._export_label = QLabel("")
         make_label_selectable(self._export_label)
         bottom.addWidget(self._export_label)
-        self._export_btn = QPushButton("Export to params.json")
+        self._export_btn = QPushButton("Export dispersive")
         self._export_btn.clicked.connect(self._on_export)
         bottom.addWidget(self._export_btn)
         outer.addLayout(bottom)
@@ -291,6 +298,7 @@ class PipelinePanelWidget(QWidget):
         from qtpy.QtWidgets import QSlider
 
         slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setObjectName("couplingSlider")
         slider.setRange(_G_MIN_MHZ, _G_MAX_MHZ)  # 1 tick = 1 MHz
         slider.setValue(_G_DEFAULT_MHZ)
         slider.valueChanged.connect(self._on_g_slider)
@@ -306,6 +314,7 @@ class PipelinePanelWidget(QWidget):
         self._rf_lo_ghz = 5.0  # data freq span, set in _init_tune_view
         self._rf_hi_ghz = 6.0
         slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setObjectName("resonatorSlider")
         slider.setRange(0, _RF_TICKS)
         slider.setValue(_RF_TICKS // 2)
         slider.valueChanged.connect(self._on_rf_slider)
@@ -335,6 +344,7 @@ class PipelinePanelWidget(QWidget):
         has_onetone = st.onetone is not None
         has_preprocess = st.preprocess is not None
         has_result = st.disp_fit.has_result
+        self._load_inputs_btn.setEnabled(st.project is not None)
         self._load_box.setEnabled(has_inputs)
         self._preprocess_box.setEnabled(has_onetone)
         self._tune_box.setEnabled(has_preprocess)
@@ -359,16 +369,27 @@ class PipelinePanelWidget(QWidget):
         # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
         from qtpy.QtCore import Qt
 
-        dialog = ProjectDialog(
+        dialog = EntryDialog(
             self._ctrl.state.project,
             self,
-            db_label="One-tone dir",
             project_root=self._ctrl.get_project_root(),
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         def _on_accepted() -> None:
-            self._ctrl.setup_project(dialog.result_project())
+            target = dialog.selected_target()
+            if target is None:
+                return
+            self._ctrl.setup_project(target)
+            self._inputs_label.setText(f"{target.entry} / {target.component}")
+            self._onetone_label.setText("(no one-tone loaded)")
+            self._export_label.clear()
+            self._diag_figure.clear()
+            self._diag_canvas.draw_idle()
+            self._tune_canvas.figure.clear()
+            self._tune_canvas.redraw()
+            self._tune_artists = None
+            self._sync_enabled()
 
         dialog.accepted.connect(_on_accepted)
         self._project_dialog = dialog  # hold a reference so it is not GC'd while open
@@ -378,13 +399,14 @@ class PipelinePanelWidget(QWidget):
         dialog.open()
 
     def _on_load_inputs(self) -> None:
-        from .paths import params_dir
-
-        start = params_dir(self._ctrl.state.project)
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select params.json", start, filter="JSON (*.json);;All files (*)"
+        names = self._ctrl.list_predictors()
+        if not names:
+            self._warn("No predictors", "This entry has no predictor JSON files.")
+            return
+        path, accepted = QInputDialog.getItem(
+            self, "Select predictor", "Predictor file:", list(names), 0, False
         )
-        if not path:
+        if not accepted:
             return
         try:
             self._ctrl.load_fit_inputs(path)
@@ -396,8 +418,9 @@ class PipelinePanelWidget(QWidget):
         assert inputs is not None
         ej, ec, el = inputs.params
         self._inputs_label.setText(
-            f"EJ/EC/EL = {ej:.3f}/{ec:.3f}/{el:.3f} GHz · "
-            f"flux_half={inputs.flux_half:.4g} period={inputs.flux_period:.4g} · "
+            f"{path} · EJ/EC/EL = {ej:.3f}/{ec:.3f}/{el:.3f} GHz · "
+            f"half={inputs.flux_half:.4g} bias={inputs.flux_bias:.4g} "
+            f"period={inputs.flux_period:.4g} · "
             f"bare_rf seed={inputs.bare_rf_seed:.4f} GHz"
         )
         self._sync_enabled()
@@ -413,7 +436,7 @@ class PipelinePanelWidget(QWidget):
         from .load_dialog import LoadOnetoneDialog
         from .paths import raw_onetone_dir
 
-        start = raw_onetone_dir(self._ctrl.state.project)
+        start = raw_onetone_dir(self._ctrl.get_project_root())
         dialog = LoadOnetoneDialog(self, start_dir=start)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
@@ -779,7 +802,7 @@ class PipelinePanelWidget(QWidget):
         # tolerated: Keep arbitrary params write failures inside the Qt callback.
         except Exception as exc:  # noqa: BLE001
             self._warn(
-                "Export failed", friendly_io_message("Export", "params.json", exc)
+                "Export failed", friendly_io_message("Export", "dispersive file", exc)
             )
             return
         self._export_label.setText(f"Exported → {os.path.basename(path)}")
@@ -789,11 +812,13 @@ class PipelinePanelWidget(QWidget):
     def _begin_progress(self, bar: QProgressBar) -> None:
         """Show ``bar`` as a busy/indeterminate spinner (the compute is a black box)."""
         self._active_progress = bar
+        self._inputs_box.setEnabled(False)
         bar.setVisible(True)
         bar.setRange(0, 0)
 
     def _end_progress(self) -> None:
         """Hide the active progress bar."""
+        self._inputs_box.setEnabled(True)
         if self._active_progress is not None:
             self._active_progress.setVisible(False)
         self._active_progress = None

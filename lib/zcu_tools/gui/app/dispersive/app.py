@@ -2,8 +2,8 @@
 
 Wires State + Controller + MainWindow behind the shared GUI process runtime. Like
 fluxdep-gui there is no registry/role-catalog and no session-restore caretaker:
-the tool starts fresh (load params.json + a one-tone hdf5); the written
-``dispersive`` section of params.json is the only persisted artifact.
+the tool starts fresh with an entry target, predictor and one-tone hdf5.
+Export writes the entry dispersive artifact and kind-declared setup fields.
 
 When ``control`` is given, a read-only ``RemoteControlAdapter`` is started so an
 automation agent (or the MCP server) can *observe* the GUI over TCP; it is stopped
@@ -21,7 +21,7 @@ from zcu_tools.gui.runtime import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
 
@@ -34,7 +34,7 @@ class DispersiveGuiBehavior(GuiRuntimeBehavior):
 
     def __init__(
         self,
-        project: ProjectInfo | None = None,
+        project: AnalysisTarget | None = None,
         project_root: str | None = None,
     ) -> None:
         self._project = project

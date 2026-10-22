@@ -3,7 +3,7 @@
 Examples:
     uv run python run_dispersive_gui.py                       # opens control socket on port 8767
     uv run python run_dispersive_gui.py --no-control          # disable the remote-control socket
-    uv run python run_dispersive_gui.py --chip Q12_2D --qub Q1 --result-dir ../result/Q12_2D/Q1
+    uv run python run_dispersive_gui.py --project-root .. --entry demo --component Q1
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 from zcu_tools.gui.app.analysis_project.launcher import (
-    add_analysis_project_cli_options,
-    project_info_from_args,
+    add_analysis_entry_cli_options,
+    analysis_target_from_args,
 )
 from zcu_tools.gui.launcher import (
     add_runtime_cli_options,
@@ -40,7 +40,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "Use --no-control to disable the socket entirely."
         ),
     )
-    add_analysis_project_cli_options(parser, data_root_help="Raw one-tone root")
+    add_analysis_entry_cli_options(parser)
     return parser.parse_args(argv)
 
 
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     # scripts/, so its parent is the repo root) rather than cwd — a .bat launcher
     # does `cd /d "%~dp0"` into scripts/, which would otherwise scope defaults
     # under scripts/.
-    project_root = str(PROJECT_ROOT)
+    project_root = str(Path(args.project_root or PROJECT_ROOT).resolve())
 
     from zcu_tools.gui.app.dispersive.app import DispersiveGuiBehavior
     from zcu_tools.resources.entry import component_registry
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     return launch_gui_runtime(
         DispersiveGuiBehavior,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
-        project=project_info_from_args(args, project_root=project_root),
+        project=analysis_target_from_args(args, project_root=project_root),
         project_root=project_root,
     )
 

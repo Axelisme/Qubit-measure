@@ -22,14 +22,14 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     # Project
     "project.info": MethodSpec(
         5.0,
-        "Read the current project info (chip_name, qub_name, result_dir, data_root).",
+        "Read entry/component, selected predictor filename and result/predictor/dispersive paths.",
         readonly=True,
     ),
-    # Fluxonium fit inputs (the fluxdep_fit handoff dispersive reads)
+    # Selected predictor inputs
     "fit_inputs.info": MethodSpec(
         5.0,
-        "Read the fluxonium fit inputs loaded from params.json: {has_inputs, "
-        "params:{EJ,EC,EL} or null, flux_half, flux_int, flux_period, bare_rf_seed}.",
+        "Read selected predictor inputs: {has_inputs, "
+        "params:{EJ,EC,EL} or null, flux_half, flux_bias, flux_period, bare_rf_seed}.",
         readonly=True,
     ),
     # Preprocessing status

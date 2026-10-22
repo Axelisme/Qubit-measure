@@ -7,9 +7,9 @@ independently testable); the Controller calls a service and then emits the
 corresponding EventBus event so Views can react.
 
 It has only the dispersive single-flow pipeline actions: load fit inputs from
-params.json → load a one-tone spectrum → preprocess → manually tune g & bare_rf
+an entry predictor → load a one-tone spectrum → preprocess → manually tune g & bare_rf
 (``set_manual_fit`` records the accepted values — there is no auto-fit) → export the
-dispersive section back to params.json. ``predict_dispersive`` is a read for the
+entry dispersive artifact and declared setup fields. ``predict_dispersive`` is a read for the
 tuning figure (no State write, no event).
 """
 
@@ -21,7 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
     EventBus,
@@ -64,12 +64,19 @@ class Controller(BaseController[DispersiveState, EventBus]):
 
     # --- project ---------------------------------------------------------
 
-    def setup_project(self, project: ProjectInfo) -> None:
+    def setup_project(self, project: AnalysisTarget) -> None:
+        """Install a validated entry target and clear previous pipeline data."""
         self._state.set_project(project)
+        self._invalidate_predictor()
         self._emit(ProjectChangedPayload())
 
-    def load_fit_inputs(self, params_path: str | None = None) -> None:
-        self._project.load_fit_inputs(params_path)
+    def list_predictors(self) -> tuple[str, ...]:
+        """List opened entry predictor JSON filenames, without creating files."""
+        return self._project.list_predictors()
+
+    def load_fit_inputs(self, predictor: str) -> None:
+        """Load an entry-local predictor filename; invalid inputs leave state intact."""
+        self._project.load_fit_inputs(predictor)
         self._invalidate_predictor()
         self._emit(FitInputsLoadedPayload(has_inputs=True))
 
@@ -131,7 +138,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
 
         inputs = self._state.fit_inputs
         if inputs is None:
-            raise RuntimeError("no fluxonium fit inputs (load params.json first)")
+            raise RuntimeError("no fluxonium fit inputs (load a predictor first)")
         rf_0, rf_1 = predict_dispersive_at(inputs.params, fluxs, g, bare_rf)
         return rf_0, rf_1
 
@@ -155,7 +162,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
         inputs = self._state.fit_inputs
         pp = self._state.preprocess
         if inputs is None:
-            raise RuntimeError("no fluxonium fit inputs (load params.json first)")
+            raise RuntimeError("no fluxonium fit inputs (load a predictor first)")
         if pp is None:
             raise RuntimeError("no preprocessing result (run preprocessing first)")
         return auto_tune(
@@ -179,8 +186,9 @@ class Controller(BaseController[DispersiveState, EventBus]):
 
     # --- export ----------------------------------------------------------
 
-    def export_params(self, savepath: str | None = None) -> str:
-        return self._export.export_params(savepath)
+    def export_params(self) -> str:
+        """Write the accepted fit to the selected entry component artifact."""
+        return self._export.export_params()
 
     # --- predictor lifecycle (cache bound to params + flux axis) ---------
 
@@ -193,7 +201,7 @@ class Controller(BaseController[DispersiveState, EventBus]):
         inputs = self._state.fit_inputs
         pp = self._state.preprocess
         if inputs is None:
-            raise RuntimeError("no fluxonium fit inputs (load params.json first)")
+            raise RuntimeError("no fluxonium fit inputs (load a predictor first)")
         if pp is None:
             raise RuntimeError("no preprocessing result (run preprocessing first)")
         key = (inputs.params, id(pp))
