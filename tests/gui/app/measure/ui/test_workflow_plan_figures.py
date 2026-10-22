@@ -182,10 +182,8 @@ def _open(driver: ComponentDriver, root: Path, name: str = "flux-list") -> None:
 
 
 def _done(driver: ComponentDriver) -> bool:
-    return (
-        driver.observe(object_name="workflow.status").text == "done"
-        and driver.observe("Start").visible
-        and driver.observe("Start").enabled
+    return driver.observe(object_name="workflow.status").text == "done" and any(
+        w.text == "Start" and w.enabled for w in driver.visible().widgets
     )
 
 
