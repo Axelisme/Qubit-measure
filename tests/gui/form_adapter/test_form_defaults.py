@@ -204,6 +204,41 @@ def test_root_slot_expression_overrides_require_input(
     assert control_cfg.probe.phase == 0
 
 
+class EnvelopeNamedFields(ConfigBase):
+    """Ordinary fields can share the expression envelope's key."""
+
+    expr: str
+    gain: float
+
+
+class EnvelopeSeeds(ConfigBase):
+    """Real scalar envelopes remain single diagnostic leaves."""
+
+    amount: float
+    phase: complex
+
+
+def test_seed_diagnostics_distinguish_model_fields_from_scalar_envelopes() -> None:
+    env = FormEnv()
+    form = Form(EnvelopeNamedFields, {"expr": "label", "gain": 0.1})
+    input = form.default_input(env)
+    rows = {row.path: row for row in form.diagnostics(input, env, None)}
+    assert set(rows) == {("expr",), ("gain",)}
+    assert rows[("expr",)].seed_source is None
+    assert rows[("expr",)].seed_status == "literal"
+
+    scalar = Form(EnvelopeSeeds, {"amount": Expr("2 * 3"), "phase": 1 + 2j})
+    scalar_input = scalar.default_input(env)
+    scalar_rows = {
+        row.path: row for row in scalar.diagnostics(scalar_input, env, None)
+    }
+    assert set(scalar_rows) == {("amount",), ("phase",)}
+    assert scalar_rows[("amount",)].seed_source == "2 * 3"
+    assert scalar_rows[("amount",)].seed_status == "available"
+    assert scalar_rows[("phase",)].seed_source is None
+    assert scalar_rows[("phase",)].seed_status == "literal"
+
+
 def test_seed_metadata_returns_new_form_and_later_call_replaces_metadata() -> None:
     original = bound_form(Template("pulse"))
     assert callable(getattr(original, "with_seed_metadata", None)), (
