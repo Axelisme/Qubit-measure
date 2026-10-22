@@ -192,8 +192,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     background.run_work()
     pane = state.get_tab(tab_id).run
     assert require_record(pane).result is record.result
-    metadata = require_record(pane).metadata
-    assert metadata is not None
+    assert (metadata := require_record(pane).metadata) is not None
     assert metadata.completion == "stopped"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
