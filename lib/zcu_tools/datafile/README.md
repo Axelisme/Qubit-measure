@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。Native 與 Labber 檔案格式、讀寫與 metadata 契約。
 
@@ -12,7 +12,8 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 
 `resources.entry.SaveLayout` 決定一般 Save 的 `Database/<name>/runs/<experiment>_<run_id>/data.h5`，使用完整 run_id，實驗名中的 `/` 轉 `_`。Result 圖片副本與 workflow 雙側路徑也由 resources owner 計算，見 [entry 輸出位置](../resources/entry/README.md#輸出位置)。Labber 新檔名維持 `<experiment>_<id6>_<序號>.hdf5`；離線遷移保留舊 Labber 原名。Datafile writer 只寫 caller 的 exact path，不解析目錄名還原 run_id，也不決定 entry 的存在或改名。Run 身分仍以 `RunMetadata` 為準，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
-- `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.1。
+- `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.2。
+  2.2 新增 workflow operation 身分，原 experiment 身分仍有效。
   `RunMetadata.started_at` 可以是 UTC ISO 字串或 None，`completion` 接受
   complete／partial／stopped／unknown。None 與 unknown 表示歷史證據缺失，
   不從 run_id、檔名或檔案時間推算。正常量測仍提供開始時間與已知完成狀態。
@@ -31,7 +32,13 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
   Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
   `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
-- `validate_run_id` 檢查 native 身分 token：`YYYYMMDDTHHMMSSZ-` 加六個小寫 ASCII 英數字元。Native metadata 與離線 evidence 共用此規則。它不驗 calendar 語意，不從 ID 推導歷史 started_at；格式錯誤拋 ValueError，非字串拋 TypeError。
+- `validate_run_id` 僅接受兩種完整 native 身分 token。
+  Experiment 形態為 `[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}`。
+  Workflow operation 形態為 `[0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*`，
+  由 workflow run_id、六位 iteration 與無前導零的正整數 attempt 組成。
+  六位 iteration 可以為零。Native reader／writer 與離線 evidence 共用此規則。
+  驗證不檢查 calendar 語意，也不從 ID 推導歷史 started_at。
+  格式錯誤拋 ValueError，非字串拋 TypeError。
 - `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
   Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
   Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
@@ -53,7 +60,7 @@ facade。caller 優先從 package root import model 與 function。Facade 在 ca
 - Native loading 預設只投影已知內容。明示 `preserve_unknown=True` 才取得
   `NativeExtensions` detached HDF5 image。Generic caller 把 image 傳回 writer，
   保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。
-  寫回版本一律取 max(來源版本, 2.1)：2.0 即使沒有新未知值也升為 2.1，
+  寫回版本一律取 max(來源版本, 2.2)：2.0 與 2.1 即使沒有新值也升為 2.2，
   future-minor 保留原版本，不降版。
   Typed experiment tuple 不是 lossless rewrite envelope，也沒有 legacy fallback。
 

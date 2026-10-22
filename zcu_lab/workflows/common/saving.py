@@ -35,7 +35,8 @@ def save_native[Cfg: ExpCfgModel, Result](
     """Save a completed core record with its fixed workflow acquisition facts.
 
     source.value supplies cfg/result; source.facts supplies UTC boundaries,
-    iteration, attempt, stopped status and the pre-operation device snapshot.
+    iteration, attempt and the pre-operation device snapshot.
+    source.partial_result selects stopped completion when True, complete otherwise.
     identity is env.identity for that workflow run; snapshot is the caller's
     historical entry/point capture. spec supplies the experiment tag and native
     array mapping. Compose existing RunMetadata without capturing new facts.
@@ -48,7 +49,7 @@ def save_native[Cfg: ExpCfgModel, Result](
         experiment=spec.tag,
         started_at=facts.started_at.isoformat(),
         finished_at=facts.finished_at.isoformat(),
-        completion="stopped" if facts.stopped else "complete",
+        completion="stopped" if source.partial_result else "complete",
         labber_path=None,
         snapshot=snapshot,
         provenance=identity.provenance,
