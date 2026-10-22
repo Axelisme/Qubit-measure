@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-23, Numba import boundary
+**Last updated:** 2026-10-23, independent result and routing byte caps, Numba import boundary
 
 **讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -43,8 +43,9 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 
-`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=None)` owns a
-prepare cache and a separate exact-result memo. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
+`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=None,
+result_memo_bytes=None, routing_cache_bytes=None)` owns a prepare cache,
+a separate exact-result memo and routing facts. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
@@ -653,12 +654,15 @@ usage and requires fresh evolve. Selections, not raw monotonic counters, decide
 reuse. A different source, eviction or disabled residency also returns False.
 FTF therefore never assembles Engine geometry or knows algorithm cost rules.
 
-The result LRU charges arrays and metadata up to `min(64 MiB, cache_bytes)` in
-addition to the prepare budget. A separate routing-facts LRU charges immutable
-Python records and scalars up to `min(4 MiB, cache_bytes)`; weak source references
-do not retain models. Oversize facts stream without evicting resident entries.
+The result LRU charges arrays and metadata up to `result_memo_bytes` in addition
+to the prepare budget. None selects `min(64 MiB, cache_bytes)`.
+A separate routing-facts LRU charges immutable Python records and scalars up to
+`routing_cache_bytes`. None selects `min(4 MiB, cache_bytes)`.
+Explicit caps are independent nonnegative integer byte allowances, without a
+fixed upper bound. Weak source references do not retain models. Oversize facts stream without evicting resident entries.
 A working set exceeding capacity falls back to normal evolve, never stale routes.
-Zero disables residency in all caches. `close()` clears them.
+Zero disables residency in that cache. With auxiliary caps omitted, a zero
+prepare budget still disables all three caches. `close()` clears them.
 All Engines include the same per-allocation metadata estimate in retention
 charges. FTF production uses a 2 GiB unified resident/pending budget for arrays
 and estimated metadata, plus at most 64 MiB for results and 4 MiB for routing

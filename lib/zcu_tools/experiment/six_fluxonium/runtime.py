@@ -43,6 +43,7 @@ from zcu_tools.simulate.adc import (
     round_statistics,
     sample_traces,
 )
+from zcu_tools.simulate.evolution import Engine
 
 from .results import CavityRound, combine_integrated
 from .routing import RoutedGroup, route_request
@@ -91,6 +92,8 @@ class SixFluxoniumSource:
     settings: validated six-system material. devices: manager retaining the
     addressed global FakeDevice. Six SingleFluxoniumSources retain that exact
     driver, independent oscillator/evolution/ADC caches and physical parameters.
+    settings.numerics provides environment-wide prepare/result/routing byte caps;
+    each source receives one sixth, rounded down. ADC bytes apply per source.
     No joint Hilbert space or pulsed flux route is created. Call snapshot/execute
     only serially; close releases numeric resources but never caller devices.
     """
@@ -99,7 +102,16 @@ class SixFluxoniumSource:
         self.settings = settings
         self.sources = tuple(
             SingleFluxoniumSource(
-                _single_settings(settings, index, index, 0), devices, readout_kind="mux"
+                _single_settings(settings, index, index, 0),
+                devices,
+                readout_kind="mux",
+                engine=Engine(
+                    workers=1,
+                    cache_bytes=settings.numerics.prepare_cache_bytes // 6,
+                    result_memo_bytes=settings.numerics.result_memo_bytes // 6,
+                    routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
+                ),
+                readout_cache_bytes=settings.numerics.adc_cache_bytes,
             )
             for index in range(6)
         )

@@ -15,6 +15,25 @@ The host calls `close_backend()` after acquisitions drain, then closes its devic
 Backend close leaves the DC driver untouched. Delivered raw sources retain their
 noiseless ADC inputs after later acquisitions and backend close.
 
+## Cache budgets
+
+Top-level `numerics` sets residency caps in bytes for the whole environment.
+`prepare_cache_bytes` defaults to 256 MiB, `result_memo_bytes` to 64 MiB and
+`routing_cache_bytes` to 4 MiB. Each of the six independent Engines receives
+one sixth of each total, rounded down. At most five bytes per total remain unused.
+Prepare and memo keys include the complete physical model identity and numeric
+budget. Routing reuse also requires the same source instance.
+
+`adc_cache_bytes` defaults to 8 MiB per source and is not divided.
+The defaults therefore allow at most 372 MiB of cache residency across six
+sources, including estimated metadata. Zero disables the corresponding cache.
+All fields accept nonnegative integers, with no fixed upper bound.
+Oversized products still compute but do not remain resident. Cache eviction
+changes repeated work, not physical inputs, results or random streams.
+Models, active preparations, scratch and GUI/native allocations are outside
+these caps. They are not a process RSS limit.
+The single-fluxonium environment keeps its original per-source defaults.
+
 ## Routing and acquisition
 
 Mux generator 0 binds ADC0..5. Microwave generators 1..6 control Q1..Q6.
