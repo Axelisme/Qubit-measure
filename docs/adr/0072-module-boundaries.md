@@ -174,6 +174,8 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 ### 分析 app 的 entry/component owner
 
 2026-10-20 裁決：「新增 gui/app/analysis_project/ 共用過渡 owner」。
+2026-10-20 使用者裁決：「1B可以，2要，3讓migrations裡支援遷移，工具本身不兼容」，分析工具改開 ResultEntry 並選目標 component，舊資料由 migrations 遷移，工具不加相容層。
+2026-10-23 使用者裁決：「fluxdep／dispersive 維持 fluxonium 專用」。
 
 `gui.app.analysis_project` 集中 fluxdep／dispersive 共用的 AnalysisEntry、AnalysisTarget、
 EntryDialog、entry CLI 與 RPC 投影。AnalysisEntry 以 project_root 下的 result/ 與 Database/
