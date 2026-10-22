@@ -12,10 +12,12 @@ import zcu_tools.experiment as experiment
 from zcu_tools.datafile import DataVariable, LabberMetadata, load, save
 
 
-def historical_metadata() -> experiment.RunMetadata:
-    """Return fixed historical facts, including optional Labber input metadata."""
+def historical_metadata(
+    run_id: str = "20261006T010000Z-a1b2c3",
+) -> experiment.RunMetadata:
+    """Return historical facts for run_id, including Labber input metadata."""
     return experiment.RunMetadata(
-        run_id="20261006T010000Z-a1b2c3",
+        run_id=run_id,
         experiment="test/metadata",
         started_at=None,
         finished_at="2026-10-06T01:00:02Z",
@@ -64,6 +66,64 @@ def declaration() -> experiment.AxesSpec[Signal, experiment.ExpCfgModel]:
     )
 
 
+@pytest.mark.parametrize("entry", ["model", "validator"])
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "20261022T120000Z-ab12cd",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-3",
+        "00000000000000000000000000000000-000000-1",
+        "ffffffffffffffffffffffffffffffff-999999-1234567890",
+    ],
+)
+def test_run_identity_accepts_exact_experiment_or_workflow_id(
+    entry: str, run_id: str
+) -> None:
+    if entry == "model":
+        metadata = historical_metadata(run_id)
+        assert metadata.run_id == run_id
+        assert metadata.model_dump(mode="json")["run_id"] == run_id
+    else:
+        assert experiment.validate_run_id(run_id) is None
+
+
+@pytest.mark.parametrize("entry", ["model", "validator"])
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "",
+        "arbitrary-token",
+        "20261022T120000Z-ab12c",
+        "20261022T120000Z-ab12cde",
+        "20261022T120000Z-AB12CD",
+        "20261022T120000Z-ab12cd-000001-3",
+        "21ed5156dc9b441a8b5cda3cf26633f7",
+        "21ed5156dc9b441a8b5cda3cf26633f7-1-3",
+        "21ed5156dc9b441a8b5cda3cf26633f7-0000001-3",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-0",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-03",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001--1",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-+3",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-3.0",
+        "21ED5156DC9B441A8B5CDA3CF26633F7-000001-3",
+        "g1ed5156dc9b441a8b5cda3cf26633f7-000001-3",
+        "21ed5156dc9b441a8b5cda3cf26633f-000001-3",
+        "021ed5156dc9b441a8b5cda3cf26633f7-000001-3",
+        "21ed5156dc9b441a8b5cda3cf26633f7-０００００１-3",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-３",
+        " 20261022T120000Z-ab12cd",
+        "20261022T120000Z-ab12cd\n",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-3\n",
+        "prefix-21ed5156dc9b441a8b5cda3cf26633f7-000001-3",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-3-extra",
+    ],
+)
+def test_run_identity_rejects_other_strings(entry: str, run_id: str) -> None:
+    validate = historical_metadata if entry == "model" else experiment.validate_run_id
+    with pytest.raises(ValueError, match="run_id"):
+        validate(run_id)
+
+
 def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     metadata = historical_metadata()
     cfg = experiment.ExpCfgModel()
@@ -82,10 +142,17 @@ def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     assert record.metadata.labber.tags == ["offline"]
 
 
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "20261022T120000Z-ab12cd",
+        "21ed5156dc9b441a8b5cda3cf26633f7-000001-3",
+    ],
+)
 def test_native_round_trip_keeps_record_metadata_and_container_docs(
-    tmp_path: Path,
+    tmp_path: Path, run_id: str
 ) -> None:
-    metadata = historical_metadata()
+    metadata = historical_metadata(run_id)
     record = experiment.RunRecord(
         experiment.ExpCfgModel(),
         Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j])),
@@ -137,15 +204,26 @@ def test_native_load_rejects_invalid_metadata_with_source_path(
     experiment.save_run(record, path, spec=declaration())
     container = load(path)
     docs = dict(container.docs)
-    docs["metadata"][defect] = "invalid"
+    docs["metadata"][defect] = (
+        "20261022T120000Z-ab12cd-000001-3" if defect == "run_id" else "invalid"
+    )
     save(path, replace(container, docs=docs), replace=True)
     with pytest.raises(ValueError, match="metadata") as caught:
         experiment.load_run_with_metadata(path, spec=declaration())
     assert str(path) in str(caught.value)
 
 
-def test_native_save_validates_unchecked_metadata_updates(tmp_path: Path) -> None:
-    metadata = historical_metadata().model_copy(update={"completion": "invalid"})
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("completion", "invalid"),
+        ("run_id", "20261022T120000Z-ab12cd-000001-3"),
+    ],
+)
+def test_native_save_validates_unchecked_metadata_updates(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    metadata = historical_metadata().model_copy(update={field: value})
     record = experiment.RunRecord(
         experiment.ExpCfgModel(),
         Signal(np.array([4000.0]), np.array([1j])),
