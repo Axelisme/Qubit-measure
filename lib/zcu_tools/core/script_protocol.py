@@ -38,6 +38,24 @@ class Question[A: Answer](BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    def answer_type(self) -> type[A]:
+        """Return the declared Answer model, including inherited Question bases.
+
+        An unparameterized Question raises TypeError rather than accepting
+        arbitrary reply fields. This reflection boundary retains the authored
+        generic pairing for both wire validation and typed async delivery.
+        """
+        for base in type(self).__mro__:
+            if not issubclass(base, Question):
+                continue
+            metadata = base.__pydantic_generic_metadata__
+            args = metadata["args"]
+            if metadata["origin"] is Question and args:
+                candidate = args[0]
+                if isinstance(candidate, type) and issubclass(candidate, Answer):
+                    return candidate
+        raise TypeError("Question must declare Question[AnswerSubclass] before answering")
+
 
 @dataclass(frozen=True)
 class OperationResult[T]:
