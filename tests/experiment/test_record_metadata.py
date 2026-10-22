@@ -9,7 +9,7 @@ from uuid import UUID
 import numpy as np
 import pytest
 import zcu_tools.experiment as experiment
-from zcu_tools.datafile import LabberMetadata, load, save
+from zcu_tools.datafile import DataVariable, LabberMetadata, load, save
 
 
 def historical_metadata() -> experiment.RunMetadata:
@@ -60,6 +60,7 @@ def declaration() -> experiment.AxesSpec[Signal, experiment.ExpCfgModel]:
         result_type=Signal,
         cfg_type=experiment.ExpCfgModel,
         tag="test/metadata",
+        data_variable=DataVariable("signal"),
     )
 
 
