@@ -184,13 +184,15 @@ def test_interrupted_acquisition_preserves_saveable_partial(
     record = exp.run(SavingCfg())
     expected = np.array([1.0, np.nan, np.nan], dtype=np.complex128)
     assert record is exp.last_run
-    assert exp.acquisition_for(record).completion == "stopped"
-    np.testing.assert_allclose(record.result.signal, expected, equal_nan=True)
     assert core.context is not None
+    assert not core.context.cancel_signal.is_set()
+    assert core.context.cancel_signal.partial_result is True
     assert core.context.cancel_signal.error is not None
     assert core.context.cancel_signal.error.status == "interrupted"
     with pytest.raises(ScheduleOutcomeError):
         core.context.cancel_signal.raise_if_error()
+    assert exp.acquisition_for(record).completion == "stopped"
+    np.testing.assert_allclose(record.result.signal, expected, equal_nan=True)
     saved = exp.save_run(point, source=record)
     native = next(
         item.output.path
