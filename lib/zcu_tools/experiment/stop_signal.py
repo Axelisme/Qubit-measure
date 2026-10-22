@@ -46,8 +46,9 @@ class StopSignal:
     def child(self) -> StopSignal:
         """Attach a scope inheriting this scope's stop/error, including at birth.
 
-        Stop travels down, errors travel up. Call release when the operation
-        drains so completed work is not retained by the execution tree.
+        Stops travel down; errors stay on the scope that records them.
+        Call release when the operation drains so completed work is not retained
+        by the execution tree.
         """
         with self._lock:
             child = StopSignal()
@@ -86,14 +87,16 @@ class StopSignal:
         reason: str,
         exception: BaseException | None,
     ) -> None:
+        """Record this scope's first error and stop it and its descendants.
+
+        Ancestor and sibling stop/error state is unchanged. The stored error
+        retains status, reason and exception for raise_if_error().
+        """
         error = ScheduleOutcomeError(status, reason, exception)
         with self._lock:
-            scope: StopSignal | None = self
-            while scope is not None:
-                if scope._error is None:
-                    scope._error = error
-                scope.set()
-                scope = scope._parent
+            if self._error is None:
+                self._error = error
+            self.set()
 
     def raise_if_error(self) -> None:
         error = self.error
