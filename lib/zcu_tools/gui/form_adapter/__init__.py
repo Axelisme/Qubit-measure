@@ -2,6 +2,7 @@
 
 from ._modules import ModuleValues
 from .context import FormContext
+from .diagnostics import FieldDiagnostic, SeedSource
 from .elements import ElementObservation, ElementsObservation
 from .fixed_elements import FixedElements, FixedElementsForm
 from .form import Form, module_form

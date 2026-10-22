@@ -1,6 +1,7 @@
 """Translate core cfg declarations into Qt-free input models and typed cfgs."""
 
 from collections.abc import Callable, Mapping, Sequence
+from copy import copy
 from dataclasses import replace
 from types import MappingProxyType, new_class
 from typing import Literal
@@ -10,6 +11,7 @@ from pydantic.fields import FieldInfo
 
 from zcu_tools.cfg_model import (
     ConfigBase,
+    FieldMeta,
     FormNode,
     Template,
     TemplateDef,
@@ -35,6 +37,12 @@ from ._sections import PERSISTENT_SPECS, Section, SpecSection
 from ._seeds import supported_input, template_seed_tree
 from ._seeds import template_input as _template_input
 from ._types import members as _members
+from .diagnostics import (
+    FieldDiagnostic,
+    SeedSource,
+    capture_seed_sources,
+    field_diagnostics,
+)
 from .elements import ElementObservation, ElementsObservation
 from .fixed_elements import FixedElements, FixedElementsForm
 from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
@@ -83,6 +91,9 @@ class Form[C: ConfigBase]:
     core cfg Forms. Named mode supplies identity admission and participants
     validation, rejecting duplicate default names with indices. Slot mode fixes
     only an active list's length and leaves all element values editable.
+    seed_metadata maps canonical paths to author-declared source descriptions and
+    calibration. seed_sources retains the last default_input Open/Reset facts;
+    a host preserving input across Refresh must also preserve this mapping.
     """
 
     def __init__[E: BaseModel](
@@ -103,6 +114,8 @@ class Form[C: ConfigBase]:
             raise ValueError(f"field_order contains unknown fields: {sorted(unknown)}")
         if field_order and core_cfg in PERSISTENT_SPECS:
             raise ValueError("field_order is supported only for core-cfg Forms")
+        self.seed_metadata: Mapping[FormWritePath, FieldMeta] = MappingProxyType({})
+        self.seed_sources: Mapping[FormWritePath, SeedSource] = MappingProxyType({})
         self._core_cfg = core_cfg
         self._section: Section | SpecSection = (
             SpecSection(core_cfg, tree)
@@ -142,6 +155,21 @@ class Form[C: ConfigBase]:
                 raise ValueError("Fixed elements require a core cfg Form")
             self.model.fixed_elements = fixed_elements
 
+    def with_seed_metadata(
+        self, mapping: Mapping[FormWritePath, FieldMeta]
+    ) -> "Form[C]":
+        """Return a new Form with these canonical per-position seed descriptions.
+
+        Only forms authoring derived seed candidates need this call. mapping
+        supplies FieldMeta descriptions and calibration, without changing cfg,
+        input, sources or the original Form. A later call replaces the complete
+        mapping, it does not merge it. The new Form shares the declaration model
+        and bound templates; its metadata and future seed snapshots are separate.
+        """
+        form = copy(self)
+        form.seed_metadata = MappingProxyType(dict(mapping))
+        return form
+
     @property
     def core_cfg(self) -> type[C]:
         """Return the fixed validated cfg result type; the definition cannot retarget it."""
@@ -171,7 +199,28 @@ class Form[C: ConfigBase]:
         propagate. The shared core evaluates expression defaults once into direct
         input against this env. Unresolved or invalid defaults stay absent.
         """
-        return self.model.default_input(env)
+        raw = self.model.defaults(env)
+        input = self.model.default_input(env, defaults=raw)
+        self.seed_sources = MappingProxyType(
+            capture_seed_sources(raw, input.data, self._section.seed_origins())
+        )
+        return input
+
+    def diagnostics(
+        self, input: FormInput[FormModel], env: FormEnv, errors: FormErrors | None
+    ) -> tuple[FieldDiagnostic, ...]:
+        """Enrich all current fields and supplied errors with captured seed facts.
+
+        input must use this Form model; errors are the caller's current canonical
+        preview/lowered errors, or None. This does not validate or lower cfg.
+        Every model-list position is included, independent of participants or UI
+        selection. Seed facts come from default_input, never from edited values.
+        Unknown calibration stays None. No sources/defaults are recaptured.
+        """
+        self._check_logical_input(input)
+        return field_diagnostics(
+            input, env, errors, self.seed_sources, self.seed_metadata
+        )
 
     def _check_logical_input(self, input: FormInput[FormModel]) -> None:
         if not issubclass(input.model, self.model):

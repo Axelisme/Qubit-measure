@@ -49,6 +49,59 @@ from ._save_report_support import analysis_report
 from ._support import MeasureClient
 
 
+@pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize("replaced", [False, True])
+def test_analysis_reply_retains_named_source_and_presentation(
+    tmp_path, clients, stage, replaced
+):
+    pane = "analysis" if stage == "primary" else "post_analysis"
+    presentation = {
+        "run_id": "source-run",
+        "stage": stage,
+        "figure_names": [],
+        "figures_replaced": replaced,
+    }
+    summary = {
+        "tones": [
+            {"position": 2, "name": "Q3", "pi_gain": 0.3},
+            {"position": 4, "name": "Q5", "pi_gain": 0.5},
+        ]
+    }
+
+    def respond(method, params):
+        if method in {"tab.analyze", "tab.post_analyze"}:
+            return _start_reply({}, [])
+        if method == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if method in {"tab.get_analyze_result", "tab.get_post_analyze_result"}:
+            return {
+                **_result_reply(pane, [], {}),
+                "summary": summary,
+                "presentation": presentation,
+            }
+        if method == "tab.save_artifacts":
+            return asdict(analysis_report(pane))
+        raise AssertionError(method)
+
+    client = _client(tmp_path, clients, respond)
+    reply = client.call("tab_analyze", {"tab": "t", "stage": stage})
+    assert reply.data["status"] == "finished", reply.data
+    observed = reply.data["analysis"][stage]
+    assert observed.get("presentation") == presentation
+    assert observed["summary"] == summary
+    full = client.call(
+        "status", {"execution": reply.data["execution"], "detail": "full"}
+    )
+    assert full["result"]["presentation"] == presentation
+    presentation["figures_replaced"] = not replaced
+    assert (
+        client.call("status", {"execution": reply.data["execution"]})["analysis"][
+            stage
+        ]["presentation"]["figures_replaced"]
+        is replaced
+    )
+
+
 def release_pending_receipt(
     client: MeasureClient, pending: Event, *, close_session: bool
 ) -> None:

@@ -1,13 +1,15 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
 view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
-framework 只看 `ExpAdapterProtocol`。共用 `BaseAdapter` 住在 `adapter/base.py`。它宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
+framework 只看 `ExpAdapterProtocol`。
+Adapter 的 `analysis_result_tone_count` 從 captured Run／Load 宣告 measured tone 數，非 mux 預設為零。
+RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 Form 或猜 opaque result 結構。共用 `BaseAdapter` 住在 `adapter/base.py`。它宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
 
 ## Owners
 

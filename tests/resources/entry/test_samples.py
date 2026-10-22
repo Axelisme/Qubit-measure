@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from pydantic import JsonValue
 from zcu_tools.resources.entry import ResultEntry
 
 from tests._filesystem import symlink_or_skip
@@ -94,7 +95,7 @@ def test_samples_support_accepted_event_source(entry: ResultEntry) -> None:
 def test_samples_reject_missing_run_id_without_writing(entry: ResultEntry) -> None:
     samples = entry.samples("Q1")
     # Widen the callable only to exercise runtime rejection of invalid calls.
-    append: Callable[..., None] = samples.append
+    append: Callable[..., dict[str, JsonValue]] = samples.append
     with pytest.raises(TypeError, match="run_id"):
         append(dev_value=1.0, dev_unit="A")
     assert not (entry.result_path / "samples" / "Q1.jsonl").exists()

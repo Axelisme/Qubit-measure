@@ -66,8 +66,8 @@ class JsonlSampleTable:
         source: str = "manual",
         at: datetime | None = None,
         **fields: JsonValue,
-    ) -> None:
-        """Validate and append one row, creating parent directories if necessary.
+    ) -> dict[str, JsonValue]:
+        """Validate/append one row and return its detached complete JSON value.
 
         run_id identifies the acquisition (or an explicit legacy synthetic key).
         point names the acquisition point, or None if none is known. source is
@@ -89,6 +89,7 @@ class JsonlSampleTable:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as stream:
             stream.write(encoded)
+        return record.model_dump(mode="json")
 
     def _latest_records(self) -> dict[str, _SampleRecord]:
         """Return last whole validated rows per run_id in file-occurrence order.

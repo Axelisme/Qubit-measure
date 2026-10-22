@@ -7,6 +7,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     mux_readout_initial,
+    mux_readout_seed_metadata,
     mux_relax_delay,
 )
 
@@ -32,12 +33,13 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
         for name in names
     ]
     recovery = mux_relax_delay(ctx, names)
+    readout = mux_readout_initial(ctx)
     return Form(
         MuxT1Cfg,
         tree={
             "modules": {
                 "reset": Slot("$mux.module.reset"),
-                "readout": mux_readout_initial(ctx),
+                "readout": readout,
             },
             "tones": tones,
             "participants": list(names),
@@ -60,4 +62,4 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
             "reps",
             "rounds",
         ),
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

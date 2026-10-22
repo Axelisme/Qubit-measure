@@ -556,7 +556,11 @@ def test_shared_writeback_entry_uses_detached_saved_target(
     version = session.state.version.get("context")
     item = writeback.ParameterWriteback("general.description", "detached")
     evidence = writeback.WritebackEvidence(kind="test/fixed", origin="mcp")
-    event_id = session.control.apply_writeback(first, (item,), evidence=evidence)
+    result = session.control.apply_writeback(first, (item,), evidence=evidence)
+    event_id = result.event_id
+    assert [(item.path, item.value) for item in result.committed] == [
+        ("general.description", "detached")
+    ]
     assert session.entry.use_point("a").description == "detached"
     assert session.control.read_context().target == second
     assert session.state.version.get("context") == version
@@ -608,7 +612,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     from zcu_tools.resources.entry import writeback
 
     target = _select(session, "a")
-    event_id = session.control.apply_writeback(
+    result = session.control.apply_writeback(
         target,
         (
             writeback.SampleWriteback(
@@ -620,6 +624,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
             kind="test/sample", origin="gui", run_id="run-1"
         ),
     )
+    event_id = result.event_id
     event = session.entry.ledger.get(event_id).event
     row = session.entry.samples("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
@@ -633,15 +638,17 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
         "source": event_id,
     }
     assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
+    assert result.committed[0].value == expected
     assert session.control.read_sample(target, "Q1", "run-1") == expected
     assert session.control.read_sample(target, "Q1", "missing") is None
-    second_id = session.control.apply_writeback(
+    second = session.control.apply_writeback(
         session.control.read_context().target,
         (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
         evidence=writeback.WritebackEvidence(
             kind="test/sample", origin="gui", run_id="run-1"
         ),
     )
+    second_id = second.event_id
     second_row = session.entry.samples("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(
         session.entry.ledger.get(second_id).event.at

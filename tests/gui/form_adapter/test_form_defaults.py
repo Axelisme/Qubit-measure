@@ -8,6 +8,7 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
     Expr,
+    FieldMeta,
     FlatTopWaveformSpec,
     Hidden,
     PulseReadoutSpec,
@@ -201,6 +202,89 @@ def test_root_slot_expression_overrides_require_input(
     if isinstance(control_cfg, FormErrors):
         pytest.fail(str(control_cfg.messages))
     assert control_cfg.probe.phase == 0
+
+
+class EnvelopeNamedFields(ConfigBase):
+    """Ordinary fields can share the expression envelope's key."""
+
+    expr: str
+    gain: float
+
+
+class EnvelopeSeeds(ConfigBase):
+    """Real scalar envelopes remain single diagnostic leaves."""
+
+    amount: float
+    phase: complex
+
+
+def test_seed_diagnostics_distinguish_model_fields_from_scalar_envelopes() -> None:
+    env = FormEnv()
+    form = Form(EnvelopeNamedFields, {"expr": "label", "gain": 0.1})
+    input = form.default_input(env)
+    rows = {row.path: row for row in form.diagnostics(input, env, None)}
+    assert set(rows) == {("expr",), ("gain",)}
+    assert rows[("expr",)].seed_source is None
+    assert rows[("expr",)].seed_status == "literal"
+
+    scalar = Form(EnvelopeSeeds, {"amount": Expr("2 * 3"), "phase": 1 + 2j})
+    scalar_input = scalar.default_input(env)
+    scalar_rows = {row.path: row for row in scalar.diagnostics(scalar_input, env, None)}
+    assert set(scalar_rows) == {("amount",), ("phase",)}
+    assert scalar_rows[("amount",)].seed_source == "2 * 3"
+    assert scalar_rows[("amount",)].seed_status == "available"
+    assert scalar_rows[("phase",)].seed_source is None
+    assert scalar_rows[("phase",)].seed_status == "literal"
+
+
+def test_seed_metadata_returns_new_form_and_later_call_replaces_metadata() -> None:
+    original = bound_form(Template("pulse"))
+    assert callable(getattr(original, "with_seed_metadata", None)), (
+        "Forms need a metadata copy operation"
+    )
+    env = environment()
+    original_input = original.default_input(env)
+    first = original.with_seed_metadata(
+        {
+            ("probe", "module", "gain"): FieldMeta(calibration="uncalibrated"),
+            ("probe", "module", "freq"): FieldMeta(calibration="uncalibrated"),
+        }
+    )
+    second = first.with_seed_metadata(
+        {
+            ("probe", "module", "gain"): FieldMeta(calibration="measured"),
+        }
+    )
+    assert first is not original and second is not first
+    original_rows = {
+        row.path: row for row in original.diagnostics(original_input, env, None)
+    }
+    first_rows = {row.path: row for row in first.diagnostics(original_input, env, None)}
+    second_rows = {
+        row.path: row for row in second.diagnostics(original_input, env, None)
+    }
+    assert original_rows[("probe", "module", "gain")].uncalibrated is None
+    assert first_rows[("probe", "module", "gain")].uncalibrated is True
+    assert first_rows[("probe", "module", "freq")].uncalibrated is True
+    assert second_rows[("probe", "module", "gain")].uncalibrated is False
+    assert second_rows[("probe", "module", "freq")].uncalibrated is None
+    assert original.default_input(env).data == original_input.data
+
+
+@pytest.mark.parametrize("copy", [False, True])
+def test_seed_diagnostics_preserve_slot_origin_without_inventing_calibration(
+    copy: bool,
+) -> None:
+    form = bound_form(Slot("Q.pulses.probe", copy=copy))
+    assert callable(getattr(form, "diagnostics", None)), "Forms need source diagnostics"
+    env = environment()
+    input = form.default_input(env)
+    rows = {row.path: row for row in form.diagnostics(input, env, None)}
+    row = rows[("probe", "module", "gain") if copy else ("probe",)]
+    assert row.seed_source == "Q.pulses.probe"
+    assert row.seed_status == "available"
+    assert row.uncalibrated is None
+    assert input.data == form.default_input(env).data
 
 
 class OptionalCore(ConfigBase):

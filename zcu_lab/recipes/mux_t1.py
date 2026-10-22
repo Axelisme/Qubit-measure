@@ -156,7 +156,7 @@ async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
         )
     ]
     edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits)
+    tab.apply(edits, require_valid=True)
 
     # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()

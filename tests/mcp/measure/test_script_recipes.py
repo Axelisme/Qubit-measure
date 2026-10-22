@@ -6,7 +6,7 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
@@ -77,6 +77,84 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
             )["artifacts"]
             == "all"
         )
+    finally:
+        client.context.session.close()
+
+
+def test_apply_sends_all_indexed_edits_together_before_cfg_validation(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    edits = [FieldEdit(path=("rounds",), value=1)]
+    for index in range(6):
+        edits.extend(
+            [
+                FieldEdit(path=("tones", index, "start"), value=100.0 + index),
+                FieldEdit(path=("tones", index, "stop"), value=200.0 + index),
+            ]
+        )
+
+    @recipe("synthetic", "Fill a complete indexed cfg before validation")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        tab.apply(edits)
+        await tab.run()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        batches = [
+            params["edits"]
+            for method, params in client.transport.sent
+            if method == "tab.edit_recipe_fields"
+        ]
+        assert batches == [
+            [{"path": list(edit.path), "value": edit.value} for edit in edits]
+        ]
+        assert execution.snapshot().status == "completed"
+        assert gui.runs == 1
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("preflight", ["apply", "run"])
+def test_cfg_preflight_lists_all_indexed_errors_without_starting_run(
+    tmp_path: Path, preflight: str
+) -> None:
+    gui = SyntheticGui()
+    errors = [
+        {"path": ["tones", index, field], "message": "Field required"}
+        for index in range(6)
+        for field in ("start", "stop")
+    ]
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        reply = gui.respond(method, params)
+        if method in {"tab.edit_recipe_fields", "tab.read_recipe_field"}:
+            return {**reply, "errors": errors}
+        return reply
+
+    @recipe("synthetic", "Report all incomplete fields before acquisition")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        if preflight == "apply":
+            tab.apply([FieldEdit(path=("rounds",), value=1)], require_valid=True)
+        await tab.run()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        reply = client.call("synthetic", {"count": 9}).data
+        assert reply["status"] == "needs_parameters"
+        assert reply["missing"] == [
+            f"tones[{index}].{field}"
+            for index in range(6)
+            for field in ("start", "stop")
+        ]
+        assert reply["parameter_errors"] == errors
+        assert gui.runs == 0
     finally:
         client.context.session.close()
 
@@ -538,6 +616,12 @@ def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
     tmp_path: Path,
 ) -> None:
     gui = SyntheticGui()
+    presentation = {
+        "run_id": "native-1",
+        "stage": "primary",
+        "figure_names": ["fit_2"],
+        "figures_replaced": True,
+    }
     summary = {
         "estimate": 3.5,
         "stderr": 0.125,
@@ -549,6 +633,7 @@ def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
         if method == "tab.get_analyze_result":
             return {
                 "summary": summary,
+                "presentation": presentation,
                 "invalid": [{"path": "secondary", "reason": "non_finite"}],
             }
         return gui.respond(method, params)
@@ -575,6 +660,7 @@ def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
         )
         analysis = detail["analyses"][0]
         assert (analysis["stage"], analysis["op"]) == ("primary", 2)
+        assert analysis.get("presentation") == presentation
         assert analysis["summary"] == {
             "estimate": 3.5,
             "stderr": 0.125,

@@ -42,10 +42,10 @@ class RejectingContext(ContextService):
         value: YamlValue,
         *,
         metadata: YamlMap | None = None,
-    ) -> None:
+    ) -> YamlValue:
         if path == "general.ext.rejected":
             raise InvalidInputError("rejected fit", reason_code="fit_rejected")
-        super().set_parameter(target, path, value, metadata=metadata)
+        return super().set_parameter(target, path, value, metadata=metadata)
 
 
 class WritebackHarness:

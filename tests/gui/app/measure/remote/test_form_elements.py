@@ -1,9 +1,150 @@
 """Indexed module and fixed-element aggregate contracts through Form RPC."""
 
-from zcu_tools.cfg_model import Range
-from zcu_tools.gui.form_adapter import Form, FormContext
+from typing import Annotated
+
+import pytest
+from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta, Range
+from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
+
+
+class DiagnosticTone(ConfigBase):
+    name: str
+    frequency: float
+    gain: float
+
+
+class DiagnosticCfg(SampleCfg):
+    tones: Annotated[list[DiagnosticTone], FieldMeta(element_label="name")]
+    participants: list[str]
+
+
+class DiagnosticAdapter(SampleAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
+        del ctx
+        return Form(
+            DiagnosticCfg,
+            {
+                "sweep": Range.between(1.0, 2.0, expts=3),
+                "tones": [
+                    {
+                        "name": f"Q{i + 1}",
+                        "frequency": Expr(f"Q{i + 1}.freq"),
+                        "gain": 0.1,
+                    }
+                    for i in range(6)
+                ],
+                "participants": ["Q1"],
+            },
+            fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        )
+
+
+@pytest.mark.parametrize("method", ["tab.get_cfg", "tab.describe_cfg"])
+def test_cfg_diagnostics_include_every_original_tone_and_seed_without_mutation(
+    form_rpc, method: str
+) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("diagnostics", DiagnosticAdapter)
+    tab = fixture.ctrl.new_tab("diagnostics")
+    owner = fixture.ctrl.cfg_resources.lookup(tab)
+    before = owner.input.to_json()
+    try:
+        params: dict[str, object] = {"tab_id": tab}
+        if method == "tab.describe_cfg":
+            params["path"] = ["tones", 0, "frequency"]
+        reply = rpc.call(method, params)
+        assert reply["ok"], reply
+        assert "diagnostics" in reply["result"], (
+            "Cfg reads must include all-tone diagnostics"
+        )
+        diagnostics = {
+            tuple(row["path"]): row for row in reply["result"]["diagnostics"]
+        }
+        for i in range(6):
+            row = diagnostics[("tones", i, "frequency")]
+            assert row == {
+                "path": ["tones", i, "frequency"],
+                "message": "Field required",
+                "name": f"Q{i + 1}",
+                "index": i,
+                "seed_source": f"Q{i + 1}.freq",
+                "seed_status": "missing",
+                "uncalibrated": None,
+            }
+        assert diagnostics[("tones", 5, "gain")]["seed_status"] == "literal"
+        assert diagnostics[("tones", 5, "gain")]["uncalibrated"] is None
+        assert owner.input.to_json() == before
+        owner.write({("tones", 5, "frequency"): 6000.0})
+        updated = rpc.call(method, params)["result"]["diagnostics"]
+        last = next(row for row in updated if row["path"] == ["tones", 5, "frequency"])
+        assert last["message"] is None
+        assert last["seed_source"] == "Q6.freq"
+        assert last["seed_status"] == "missing", (
+            "Editing does not rewrite seed provenance"
+        )
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
+def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
+    form_rpc,
+) -> None:
+    fixture, existing, rpc = form_rpc
+    initial = rpc.call("tab.get_cfg", {"tab_id": existing})
+    assert "diagnostics" in initial["result"], "Cfg reads must expose seed diagnostics"
+
+    class SeedMetadataAdapter(SampleAdapter):
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
+            del ctx
+            return Form(
+                DiagnosticCfg,
+                {
+                    "sweep": Range.between(1.0, 2.0, expts=3),
+                    "tones": [
+                        {"name": "A", "frequency": Expr("6000 + 1"), "gain": 0.1},
+                        {"name": "B", "frequency": 6100.0, "gain": 0.2},
+                        {"name": "C", "frequency": Expr("missing.freq"), "gain": 0.3},
+                    ],
+                    "participants": ["B"],
+                },
+                fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+            ).with_seed_metadata(
+                {
+                    ("tones", 0, "gain"): FieldMeta(
+                        description="Synthetic amplitude candidate",
+                        calibration="uncalibrated",
+                    ),
+                    ("tones", 1, "gain"): FieldMeta(calibration="measured"),
+                }
+            )
+
+    fixture.registry.register("seed-metadata", SeedMetadataAdapter)
+    tab = fixture.ctrl.new_tab("seed-metadata")
+    try:
+        observed = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
+        rows = {tuple(row["path"]): row for row in observed["diagnostics"]}
+        assert rows[("tones", 0, "frequency")]["seed_source"] == "6000 + 1"
+        assert rows[("tones", 0, "frequency")]["seed_status"] == "available"
+        assert rows[("tones", 0, "gain")]["uncalibrated"] is True
+        assert (
+            rows[("tones", 0, "gain")]["seed_source"] == "Synthetic amplitude candidate"
+        )
+        assert rows[("tones", 1, "gain")]["uncalibrated"] is False
+        assert rows[("tones", 2, "frequency")]["seed_status"] == "missing"
+        assert rows[("tones", 2, "frequency")]["uncalibrated"] is None
+        assert rows[("tones", 2, "gain")]["uncalibrated"] is None
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.refresh_sources()
+        refreshed = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
+        assert refreshed == observed
+        local = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["tones", 1]})
+        assert local["result"]["diagnostics"] == observed["diagnostics"]
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rpc):

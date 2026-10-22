@@ -144,7 +144,9 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 
 ### 失敗、路徑與遷移邊界
 
-Run accept 先追加一筆 accepted，再逐項提交參數、library 或樣本。項目失敗以 `WritebackApplyError` 公開 accepted event_id、成功前綴 applied 與原始 cause，保留前項與事件，停止後項。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。GUI writeback 只接受 SavedPoint，未選點時在 append 前拒絕，提示先選或建立點，不自動建點或寫 point=null 樣本。一般 sample append 的 point 選填契約不受影響。
+Run accept 先追加一筆 accepted，再逐項提交參數、library 或樣本。Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。項目失敗以 `WritebackApplyError.result` 保留同份成功前綴，並公開 event_id、applied 與原始 cause，保留前項與事件，停止後項。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。GUI writeback 只接受 SavedPoint，未選點時在 append 前拒絕，提示先選或建立點，不自動建點或寫 point=null 樣本。一般 sample append 的 point 選填契約不受影響。
+
+2026-10-23 裁定：「resources／context 的 writeback executor 回具名結果：accepted event_id 加逐項 confirmed committed values」「值由實際寫入的 owner 當筆形成，GUI 只關聯 item ID／pane／目的地，不再整批後 readback、不用 proposal 冒充 actual」。Point／library setters 從當筆已提交的記憶體快照回傳隔離值，sample append 回傳當筆實際序列化的完整 row。Executor 依項目順序保留這些值，父／子路徑後續覆寫不改首筆收據。GUI 不重開目的地讀回。每個 batch 仍只追加一筆 accepted event，不增加 per-item callback、worker、retry、rollback 或第二次 readback。
 
 Memento JSON 損壞或不符 codec 格式時，共用 caretaker 回 fresh defaults，restore outcome 帶明確錯誤供 host 顯示。載入不移檔、不備份，也不新增保存保護狀態。Host 之後照原有時機保存。FormInput 的固定 data／selections 格式與遞迴還原見 [[0079]]，所有 caretaker hosts 共用格式失敗的處理。
 

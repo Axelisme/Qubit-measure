@@ -98,6 +98,11 @@ class DummyAdapter:
         del stored
         raise NotImplementedError("DummyAdapter does not load native runs")
 
+    def analysis_result_tone_count(self, result: object) -> int:
+        """Return zero measured tones for any captured non-mux Run/Load result."""
+        del result
+        return 0
+
     def analyze(self, req: AnalyzeRequest[object, DummyAnalyzeParams], *, plots: Plots):
         del req, plots
         return DummyAnalyzeResult()

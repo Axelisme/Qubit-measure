@@ -1,12 +1,99 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-21，單腔與雙腔 ADC、n 維 flux 線路
+**Last updated:** 2026-10-23，Numba 工具 import 與 basic 工具邊界
 
-**讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
+**讀者：** framework-dev。查閱數值模擬的責任邊界、快取契約與效能證據入口。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+## Measured performance and reproduction
+
+Call-local reuse of directional-loss operators and matrix elements reduced the
+fixed single-fluxonium flux scan's resident-warm acquisition wall time from
+5.718435 s to 4.505389 s, about 21%. CPU time fell from 5.654049 s to
+3.156055 s. The comparison used revisions `b19d249d` and `66729542`, one
+old/new pair with cProfile, 21 DC points × 41 frequencies and 100 repetitions.
+It retained production pacing, solver precision and physical settings. Complete
+cold and warm signals matched exactly. This does not establish a speedup for
+other environments or workloads.
+
+The source-namespaced Numba cache saved 5.5–17.4 s on the first acquisition in
+a new process when matching sources, dependencies and signatures already had
+machine code on disk. At revision `eef5edf5`, four separate empty-cache/disk-hit
+pairs covered single-fluxonium and FTF flux scans and amplitude Rabi. These
+acquisition timers excluded imports and environment construction and did not use
+cProfile. Each pair represents a possible first measurement after launching a
+GUI process. This is not GUI window startup time, and the four savings must not
+be added. Changed sources, versions or new signatures can still require compile.
+
+These scripts live in the separately retained `sim-bottleneck-opt` task evidence
+bundle, not in a fresh clone or an installed benchmark CLI. Its `scratch/`
+contains the following reproduction entry points:
+
+- `baseline/README.md` and `baseline/run.sh` define the original single/FTF
+  workloads through public experiment `run` and program acquire.
+- `warm-readout/implementation/report.md` describes copying the existing
+  `compare/run.sh` and inputs to a new evidence directory for the old/new pair.
+- `cold-cache/report.md` and `cold-cache/run.sh` define the two-fresh-process
+  comparison. Flux uses 21 × 41 points, reps 100; Rabi uses 41 gains, reps 200.
+- `six-baseline/README.md` and `six-baseline/launch.sh` define six-tone Rabi
+  and T1 plus the separate single-tone range and flux workloads.
+
+Use the original host with the saved evidence bundle, or preserve the bundle and
+adapt its host-specific paths before rerunning elsewhere. An orchestrator must
+provide a live worktree at each measurement's source revision with a locked
+quality environment. Set the script's lane override; archived lanes no longer
+exist. The evidence instructions preserve original configurations, cache state,
+heavy-slot coordination, single-thread limits and production pacing. Python
+entry points use `uv run --directory <live-lane> --no-sync --`. The bundle's
+`scratch/final-report.md` records the numbers, source manifests and limitations.
+No benchmark CLI is provided by this module.
+
+## Numba machine-code cache
+
+Importing `value2flux` or `flux2value` from `zcu_tools.simulate` requires only
+NumPy. This basic import does not load Numba or SciPy, scan simulator sources,
+access cache storage, or set Numba policy.
+
+The first import of `zcu_tools.simulate.evolution` or `zcu_tools.simulate.adc`
+selects one process-wide Numba cache directory before either tool creates
+its dispatchers or first compiles JIT code. Both entries import the same private
+bootstrap module. Python serializes its initialization and retains only a
+successful import, so multiple tools share one namespace without nesting it.
+A failed bootstrap propagates its error and is retried on the next tool import.
+Without `NUMBA_CACHE_DIR`, it uses `user_cache_root()/numba/<digest>/`.
+The shared root honors
+`ZCU_TOOLS_CACHE_DIR`. An existing `NUMBA_CACHE_DIR` becomes a parent:
+`<NUMBA_CACHE_DIR>/zcu-simulate-<digest>/`. Set overrides before the first
+Numba tool import. Changing them later requires a new process.
+
+The SHA-256 namespace includes every simulator `.py` file's relative name and
+contents, plus the Python, Numba, NumPy and SciPy versions. Changing an inline
+callee therefore selects a new namespace even when its cached caller is
+unchanged. Unreadable sources fail import rather than reuse unprotected code.
+Numba also checks its own ABI and CPU keys. This requires readable installed
+Python sources and assumes those sources remain fixed for the process lifetime.
+
+This sets the process-global `NUMBA_CACHE_DIR` and fixes
+`NUMBA_CACHE_LOCATOR_CLASSES` to Numba's built-in `UserProvidedCacheLocator`,
+replacing any caller-selected locators. It then reloads Numba configuration.
+Unavailable cache storage fails when a cached dispatcher is created instead of
+falling back to unnamespaced in-tree or user-wide code. Later-created Numba
+dispatchers in other packages also use the selected directory and locator policy;
+already-created dispatchers keep their existing cache locations.
+The namespace does not track other packages' sources, runtime monkeypatches,
+or changes to external native libraries. It does not make those packages'
+cross-module caches safe. Old namespaces remain on disk until the cache owner
+removes them; importing a Numba tool does not prune them.
+
+Existing `cache=True` dispatchers can load machine code on a later launch with
+matching sources, versions and signatures. This does not persist physical
+results, density matrices or noisy IQ. Engine model/prepare/result caches remain
+process-local and retain their existing lifetimes. ADC raw-path dispatchers with
+`cache=False` still compile in each process. No solver, kernel or precision
+policy changes.
 
 ## Evolution and explicit populations
 

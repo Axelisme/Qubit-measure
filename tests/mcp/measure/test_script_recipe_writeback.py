@@ -4,7 +4,9 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlValue
+from zcu_tools.gui.app.measure.writeback.submissions import WritebackCompleted
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeSession,
@@ -24,6 +26,46 @@ from ._script_recipe_support import (
     start,
 )
 from ._support import make_client
+
+
+def test_recipe_timeout_retains_owner_submission_for_receipt_query(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui()
+    receipts: list[WritebackReceipt] = []
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.writeback_begin":
+            return {"submission_id": "wb-recipe", "status": "pending"}
+        if method == "tab.writeback_accept":
+            raise RemoteError(ErrorCode.TIMEOUT, "handler budget expired")
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Keep uncertain acceptance identity")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.analyze("primary", result=Fit)
+        proposal = tab.writeback_proposal()
+        receipts.append(tab.accept_writeback(proposal.items))
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert getattr(receipt, "submission_id", None) == "wb-recipe"
+        assert receipt.status == "unknown"
+        assert getattr(receipt, "recovery", None) == {
+            "rpc": "tab.writeback_receipt",
+            "params": {"submission_id": "wb-recipe"},
+        }
+        assert receipt.error is not None
+        assert "Check status before deciding whether to resubmit" in receipt.error
+    finally:
+        client.context.session.close()
 
 
 def test_failed_receipt_raises_with_owner_diagnostic_and_finally_saves(
@@ -111,6 +153,62 @@ def writeback_gui(
     finally:
         for gui in owners:
             gui.owner.shutdown()
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_owner_submission_receipt_retains_prefix_and_rejects_duplicate_commit(
+    writeback_gui: Callable[[bool, bool], WritebackGui], partial: bool
+) -> None:
+    gui = writeback_gui(False, partial)
+    try:
+        begun = gui.respond("tab.writeback_begin", {"tab_id": "tab-1"})
+    except KeyError:
+        pytest.fail(
+            "Owner must allocate a queryable writeback submission before writes"
+        )
+    assert begun.get("status") == "pending"
+    identity = begun["submission_id"]
+    query = {"submission_id": identity}
+    assert gui.respond("tab.writeback_receipt", query)["completed"] == []
+    params = {
+        "tab_id": "tab-1",
+        "submission_id": identity,
+        "stages": [
+            {"subtab_id": "analysis", "ids": ["param-1"]},
+            {
+                "subtab_id": "post_analysis",
+                "ids": ["param-1", "param-2", "param-3"] if partial else ["param-1"],
+            },
+        ],
+    }
+    gui.respond("tab.writeback_accept", params)
+    receipt = gui.respond("tab.writeback_receipt", query)
+    assert receipt["status"] == ("failed" if partial else "completed")
+    completed = TypeAdapter(list[WritebackCompleted]).validate_python(
+        receipt["completed"]
+    )
+    assert [(row.subtab_id, row.item.id, row.item.value) for row in completed] == [
+        ("analysis", "param-1", 20.0),
+        ("post_analysis", "param-1", 30.0),
+    ]
+    assert [row.item.target for row in completed] == [
+        "general.ext.first",
+        "general.ext.second",
+    ]
+    assert all(row.item.destination["point"] == "point" for row in completed)
+    gui.respond(
+        "tab.writeback_set",
+        {
+            "tab_id": "tab-1",
+            "subtab_id": "analysis",
+            "id": "param-1",
+            "proposed_value": 999.0,
+        },
+    )
+    assert gui.respond("tab.writeback_receipt", query) == receipt
+    with pytest.raises(RemoteError, match="already submitted"):
+        gui.respond("tab.writeback_accept", params)
+    assert gui.read_context().value("general.ext.first") == 20.0
 
 
 @pytest.mark.parametrize("edit", ["target", "value", "module", "replacement"])

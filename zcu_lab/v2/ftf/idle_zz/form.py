@@ -3,7 +3,10 @@
 from zcu_tools.cfg_model import Range, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import mux_readout_initial
+from zcu_lab.v2._support.measure.mux_forms import (
+    mux_readout_initial,
+    mux_readout_seed_metadata,
+)
 
 from .._measure import captured_roles
 from .core import IdleZZCfg
@@ -20,6 +23,7 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
     only time sources are read; Run and historical analysis never consult it.
     """
     roles = captured_roles(ctx)
+    readout = mux_readout_initial(ctx)
     return Form(
         IdleZZCfg,
         tree={
@@ -29,11 +33,11 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
                 "x180_f2": Slot("$f2.module.x180", copy=True),
                 "x90_f1": Slot("$f1.module.x90", copy=True),
                 "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": mux_readout_initial(ctx),
+                "readout": readout,
             },
             "detune": None,
             "delay": Range.between(0, 10, expts=101),
             "dc_device": None,
             "dc_values": Range.between(0, 0, expts=1),
         },
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

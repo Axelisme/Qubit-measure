@@ -326,6 +326,16 @@ class BaseAdapter(
         """
         del req, cfg
 
+    def analysis_result_tone_count(self, result: T_Result) -> int:
+        """Return zero for non-mux results; mux adapters declare measured tones.
+
+        result is the captured Run/Load result. This query must not analyze,
+        access devices or read current Form inputs. Overrides return a
+        nonnegative integer used for result-read budgeting.
+        """
+        del result
+        return 0
+
     # -- analysis (raising no-op default; override when analysis != NONE) --
 
     def get_analyze_params(self, result: T_Result, ctx: SessionEnv) -> T_AnalyzeParams:
