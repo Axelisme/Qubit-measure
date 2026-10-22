@@ -23,7 +23,7 @@ from ._support import make_client
         ("workflow_stop", {"run_id": "run"}, "workflow.stop"),
         (
             "workflow_answer",
-            {"run_id": "run", "answer": {"yes": True}},
+            {"run_id": "run", "request_id": "question-1", "answer": {"yes": True}},
             "workflow.answer",
         ),
         (

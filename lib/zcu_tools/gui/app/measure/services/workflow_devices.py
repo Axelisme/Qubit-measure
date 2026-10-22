@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from zcu_tools.datafile import JsonObject
-from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.experiment.acquisition import capture_device_snapshot
+from zcu_tools.device import BaseDeviceInfo, DeviceMapping
 from zcu_tools.experiment.stop_signal import StopSignal
 
 if TYPE_CHECKING:
@@ -55,10 +52,10 @@ class SessionDevices:
         validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
         driver.setup(validated, progress=False, stop_event=cancel_signal.event)
 
-    def capture_snapshot(self) -> Mapping[str, JsonObject]:
-        """Capture all connected drivers before each env.run; zero devices returns {}.
+    def get_connected_devices(self) -> DeviceMapping:
+        """Borrow a detached driver mapping; lifecycle stays with DeviceService.
 
-        Worker-only read under the retained RUN lease; no GUI State update.
-        Native read/serialization errors propagate before the callback runs.
+        Read on the workflow worker under the retained RUN lease. Empty means
+        no connected devices. This accessor performs no hardware I/O or writes.
         """
-        return capture_device_snapshot(self._service.get_connected_devices())
+        return self._service.get_connected_devices()

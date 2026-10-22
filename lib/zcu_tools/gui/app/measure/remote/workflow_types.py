@@ -18,9 +18,10 @@ class EncodedRecordReply(TypedDict):
 class RecordReply(TypedDict):
     """One native committed point, with no inferred values or artist inspection.
 
-    commit_seq counts Next commits; call_seq counts invocations; revision is the
-    invocation's captured tunables version. encoded_record is the native summary.
-    iteration_dir is relative to data_root. Workflow file references belong to
+    commit_seq counts records; call_seq identifies the commit scope; revision is
+    its initial tunables version and revisions lists every version read in order.
+    encoded_record is the native record. directory is relative to data_root.
+    committed_at is UTC ISO text; record_type names the module-qualified model. Workflow file references belong to
     encoded_record, whose contents the framework does not interpret.
     """
 
@@ -28,7 +29,10 @@ class RecordReply(TypedDict):
     call_seq: int
     revision: int
     encoded_record: EncodedRecordReply
-    iteration_dir: str
+    directory: str
+    committed_at: str
+    revisions: list[int]
+    record_type: str
 
 
 class ProgressReply(TypedDict):
@@ -43,10 +47,11 @@ class NativeStatusReply(TypedDict):
     """JSON projection of RunStatus, with no inferred acceptance or completion.
 
     run_id/workflow identify the native run and declaration. lifecycle is running,
-    pausing, paused, stopping, done, aborted, stopped or failed. call_seq is the
-    last invocation or null; committed_seq counts successful Next commits.
+    pausing, paused, stopping, done, cancelled or failed. call_seq is the
+    current commit scope or null; committed_seq counts successful commits.
     revision is the native numeric tunables version. reason is a native diagnostic
     or null. progress is the list of native display snapshots, not commit proof.
+    pending_request_id names the exact answerable Ask, or null outside Ask.
     """
 
     run_id: str
@@ -57,6 +62,7 @@ class NativeStatusReply(TypedDict):
     revision: int
     reason: str | None
     progress: list[ProgressReply]
+    pending_request_id: str | None
 
 
 def project_record(record: CommittedRecord) -> RecordReply:
@@ -70,7 +76,10 @@ def project_record(record: CommittedRecord) -> RecordReply:
             "value": record.encoded_record.value,
             "error": record.encoded_record.error,
         },
-        "iteration_dir": record.iteration_dir,
+        "directory": record.directory,
+        "committed_at": record.committed_at.isoformat(),
+        "revisions": list(record.revisions),
+        "record_type": record.record_type,
     }
 
 
@@ -86,6 +95,9 @@ def project_status(status: RunStatus | None) -> NativeStatusReply | None:
         "committed_seq": status.committed_seq,
         "revision": status.revision,
         "reason": status.reason,
+        "pending_request_id": None
+        if status.pending is None
+        else status.pending.request_id,
         "progress": [
             {
                 "name": progress.name,

@@ -66,9 +66,7 @@ class AskAuthor:
                     self.cancelled_followups.append(
                         (await env.wait_until(env.started_at + timedelta(days=1)))
                     )
-                    self.cancelled_followups.append(
-                        (await env.ask(Choose(point=99)))
-                    )
+                    self.cancelled_followups.append((await env.ask(Choose(point=99))))
                     return
                 await env.commit(Native(value=answer.value))
             finally:

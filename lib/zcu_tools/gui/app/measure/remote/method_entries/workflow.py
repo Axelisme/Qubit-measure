@@ -124,9 +124,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     _entry(
         "answer",
-        "Submit an answer matching workflow.status pending_question.answer_schema. Returns the original pending operation_id; the worker retains the same RUN lease through terminal owner delivery. Invalid answers preserve the paused question.",
+        "Answer the exact pending_question.request_id using its answer_schema. Returns the original pending operation_id; the worker retains the same RUN lease through terminal owner delivery. Invalid answers preserve the paused question.",
         (
             _RUN,
+            required_string("request_id"),
             ParamSpec("answer", JsonType.JSON, required=False, omit_when_missing=True),
         ),
         operation=True,

@@ -361,7 +361,9 @@ class WorkflowControlFacet:
         """
         return self._run_tab(run_id).run.pending_question(run_id)
 
-    def answer(self, run_id: str, answer: Answer | JsonValue) -> int:
+    def answer(
+        self, run_id: str, answer: Answer | JsonValue, *, request_id: str
+    ) -> int:
         """Submit an Ask answer under the original operation token and RUN lease.
 
         JSON objects pass Engine.parse_answer before submission; invalid fields
@@ -371,6 +373,6 @@ class WorkflowControlFacet:
         stale targets raise RunMismatch. Return the same pending token as Start.
         Author code never runs on this owner thread. No Resume/Execute follows.
         """
-        result = self._run_tab(run_id).run.answer(run_id, answer)
+        result = self._run_tab(run_id).run.answer(run_id, answer, request_id=request_id)
         self._notify()
         return result

@@ -242,11 +242,12 @@ class WorkflowPane(QWidget):
         self._project_question(snapshot)
 
     def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:
-        pending = snapshot.pending_question is not None
-        if pending and (
-            not self._ask_pending or self._question_run_id != snapshot.run_id
+        question = snapshot.pending_question
+        pending = question is not None
+        if question is not None and (
+            not self._ask_pending or self._question_run_id != question["request_id"]
         ):
-            self._question_run_id = snapshot.run_id
+            self._question_run_id = question["request_id"]
             self._answer_input.setText("{}")
             self._subtabs.setCurrentWidget(self._ask_page)
         exchange = snapshot.last_exchange
@@ -319,7 +320,9 @@ class WorkflowPane(QWidget):
             self._control.stop(run_id)
         elif command == "Answer":
             answer = TypeAdapter(JsonValue).validate_json(self._answer_input.text())
-            self._control.answer(run_id, answer)
+            if self._question_run_id is None:
+                raise RuntimeError("No rendered question to answer")
+            self._control.answer(run_id, answer, request_id=self._question_run_id)
             self._message.setText("")
         elif command == "Apply":
             result = self._control.apply_tunables(
