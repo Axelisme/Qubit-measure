@@ -75,12 +75,11 @@ class WritebackValues:
 class WritebackSelection:
     """One captured draft submission, in caller-specified group order.
 
-    draft is an active owner handle. expected_revision is the preview revision.
-    ids lists explicit draft-local IDs, independent of GUI selection.
+    draft is an active owner handle. ids lists explicit draft-local IDs,
+    independent of GUI selection. Submission uses current values and destinations.
     """
 
     draft: WritebackDraft
-    expected_revision: int
     ids: tuple[str, ...]
 
 
@@ -90,7 +89,7 @@ class WritebackAcceptance:
 
     applied_ids has one tuple per submitted draft, in submission order; only
     confirmed writes appear. error is None on completion, otherwise the first
-    write failure diagnostic. Stale revisions and invalid IDs raise before writes.
+    write failure diagnostic. Invalid IDs raise before writes.
     """
 
     applied_ids: tuple[tuple[str, ...], ...]

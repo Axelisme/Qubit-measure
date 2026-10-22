@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -92,13 +92,15 @@ Status／wait 提前回 `status="interactive"`，GUI 完成同一 operation 後�
 
 `tab.writeback_proposal()` 捕捉 completed stages 的候選。
 `ask_writeback()` 等待經 evidence 驗證的 `WritebackAnswer`，回答不寫入。
-只有 `tab.accept_writeback(decision.items)` 寫入選定的 captured 候選。
-Unknown、重複或已變更的項目在第一筆寫入前拒絕。
-Recipe 將 preview 的 owner revisions 與選定 IDs 一次交給 `tab.writeback_accept`。
-Owner 在同一提交核對 Primary／Post 全部選定 drafts，任何 draft 改動或替換都在第一筆寫入前拒絕。
+只有 `tab.accept_writeback(decision.items)` 寫入選定 IDs 對應的 owner 當下 draft 值與目的地。
+Unknown、重複或經作者修改的 captured 項目在第一筆寫入前拒絕。
+Recipe 將選定 IDs 一次交給 `tab.writeback_accept`，不帶 `expected_revision`，preview 也不回 revision。
+Owner 在同一提交核對 Primary／Post 全部選定 IDs。問答期間的 draft 編輯或替換不觸發 stale 拒絕，也不還原舊 proposal。
+這沿用 GUI／MCP 的所有權模型，見 ADR-0075 的 2026-10-23 使用者裁定。
 單 pane L1 `tab.writeback_write` 仍編輯並寫入當前 draft，不供 recipe captured acceptance 使用。
 Primary 先於 Post，首錯停止，成功前綴保留，不 retry 或 rollback。
-`WritebackReceipt` 以 pane 與 owner item ID 關聯 confirmed items，不拿 alias 名稱比 concrete target。
+`WritebackReceipt.items` 是 owner 確認成功 ID 對應的原捕捉候選，不是寫入值快照。
+實際寫入值與目的地取 owner 當下 draft。Receipt 以 pane 與 owner item ID 關聯 confirmed items，不拿 alias 名稱比 concrete target。
 Proposal、receipt 與 full details 的 structured mappings 各自分離，不共用 retained acceptance evidence。
 作者原地修改 proposal 的 nested value 後接受，會在任何 owner write 前拒絕。
 作者可檢查收據或呼叫 `receipt.raise_for_error()`，不可將 decision.accepted 當作寫入成功。
@@ -210,7 +212,9 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 
 全域 status 的 entry 是 null 或 GUI entry.info 的 UUID、name、result_path、database_path，
 只讀 metadata，不建立 context observation。
-未 open entry 時 ready.missing 包含 entry。
+`ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
+
+即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力，不能取代 `get_cfg` 的完整 cfg 診斷。Run admission 仍會檢查目前表單與動態條件。
 全域 status 列 GUI operations 與本 MCP session 非終態 executions，
 終態只給數量及按 ID 查詢提示。
 `wait(op)` 只觀察 GUI operation，`wait(execution)` 等本地後續處理與當次 image 交付。
@@ -323,7 +327,7 @@ Primary 先於 Post，首錯停止，不 retry 或 rollback。
 not_started 與失敗 stage 的不確定性。
 
 Recipe 的 captured 問答與這個當前 draft 工具不同。
-Recipe 只在 `accept_writeback(items)` 寫入已捕捉且仍有效的候選，
+Recipe 只在 `accept_writeback(items)` 以已捕捉候選的 IDs 寫入當下 draft，
 回答本身不授權寫入。
 Destination.path 保留 owner actual_path，label 只作顯示。
 元素 index／name 由 lab owner 明確提供，framework 不從 row offset 或 participants 猜 identity。

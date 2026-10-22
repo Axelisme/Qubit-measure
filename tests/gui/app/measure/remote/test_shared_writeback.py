@@ -87,9 +87,6 @@ class WritebackHarness:
             ),
         )
 
-    def get_writeback_revision_for_pane(self, tab_id: str, pane: str) -> int:
-        return self.draft.revision
-
     def get_writeback_values_for_pane(
         self, tab_id: str, pane: str, *, session_id: str | None = None
     ):

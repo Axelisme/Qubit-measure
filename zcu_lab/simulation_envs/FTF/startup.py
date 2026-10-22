@@ -29,6 +29,8 @@ from zcu_lab.components.fluxonium import QubitSchema
 def startup(ctx: StartupContext) -> None:
     """Select ftf-demo/initial, seeding it from the template on first use.
 
+    The template binds f1=Q1, f2=Q2, coupler=coupler and mux=MG12 for FTF
+    forms. Existing entries keep their aliases; add missing roles in Aliases.
     The template seeds MG12 mux gen1 and ADCs [1, 2] in resonator order.
     The GUI is then ready for the user to open experiment tabs.
 
