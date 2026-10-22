@@ -247,6 +247,64 @@ def test_legacy_native_converts_to_container_and_rewrites_major_three(
         np.testing.assert_array_equal(file["groups/legacy/future"], [8, 9])
 
 
+@pytest.mark.parametrize("with_groups", [False, True])
+def test_future_extensions_survive_detached_edit_and_rewrite(
+    tmp_path: Path, with_groups: bool
+) -> None:
+    source = tmp_path / "future.h5"
+    datafile.save(source, replace(_container(), docs={"note": {"value": 1}}))
+    with h5py.File(source, "r+") as file:
+        file.attrs["format_version"] = "3.7"
+        file["docs"].attrs["future_namespace"] = "documents"
+        file["groups"].attrs["future_namespace"] = "opaque"
+        file["docs/note"].attrs["future_hint"] = np.array([3, 5], dtype="i2")
+        if with_groups:
+            group = file.create_group("groups/extension")
+            group.attrs["label"] = "preserved"
+            group.create_dataset("counts", data=[7, 9])
+    loaded = datafile.load(source)
+    source.unlink()
+    destination = tmp_path / "edited.h5"
+    datafile.save(destination, replace(loaded, docs={"note": {"value": 2}}))
+    assert datafile.read_doc(destination, "note") == {"value": 2}
+    with h5py.File(destination, "r") as file:
+        assert file.attrs["format_version"] == "3.7"
+        assert file["docs"].attrs.get("future_namespace") == "documents"
+        assert file["groups"].attrs.get("future_namespace") == "opaque"
+        np.testing.assert_array_equal(file["docs/note"].attrs["future_hint"], [3, 5])
+        if with_groups:
+            assert file["groups/extension"].attrs["label"] == "preserved"
+            np.testing.assert_array_equal(file["groups/extension/counts"], [7, 9])
+
+
+@pytest.mark.parametrize("target", ["groups/b/data", "vars/signal/values"])
+def test_detached_rewrite_preserves_canonical_reference_targets(
+    tmp_path: Path, target: str
+) -> None:
+    source = tmp_path / "references.h5"
+    variable = datafile.Variable(
+        np.array([1.0, 2.0]), (datafile.Axis("x", "s", np.array([0.0, 1.0])),), "V"
+    )
+    datafile.save(source, replace(_container(), vars={"signal": variable}))
+    with h5py.File(source, "r+") as file:
+        group = file.create_group("groups/a")
+        file.create_dataset("groups/b/data", data=[7, 9])
+        group.attrs["target"] = file[target].ref
+        group.create_dataset(
+            "references", data=[file[target].ref], dtype=h5py.ref_dtype
+        )
+    loaded = datafile.load(source)
+    source.unlink()
+    destination = tmp_path / "rewritten.h5"
+    changed = replace(variable, values=np.array([4.0, 8.0]))
+    datafile.save(destination, replace(loaded, vars={"signal": changed}))
+    with h5py.File(destination, "r") as file:
+        canonical = file[target]
+        assert file[file["groups/a"].attrs["target"]].id == canonical.id
+        assert file[_dataset(file, "groups/a/references")[0]].id == canonical.id
+        np.testing.assert_array_equal(file["vars/signal/values"], [4.0, 8.0])
+
+
 def test_opaque_group_references_remain_readable_after_rewrite(tmp_path: Path) -> None:
     source = tmp_path / "opaque.h5"
     with h5py.File(source, "w") as file:
