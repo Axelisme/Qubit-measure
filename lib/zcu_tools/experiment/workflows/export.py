@@ -45,21 +45,32 @@ class FluxdepExportOutput:
 
 
 def load_trace[R, C: ExpCfgModel](
-    directory: Path, filename: str, spec: AxesSpec[R, C] | GroupedAxesSpec[R, C]
+    directory: Path,
+    filename: str,
+    spec: AxesSpec[R, C] | GroupedAxesSpec[R, C],
+    *,
+    allow_stopped: bool = False,
 ) -> LabberPayload:
     """Load exactly the point-named native trace using its experiment declaration.
 
-    The filename must stay within the invocation directory. Wrong experiment,
-    incomplete acquisition, schema mismatch or empty data raises ValueError
-    naming that file. Public native reader I/O errors propagate. Return the
-    experiment's single LabberPayload in disk units; never re-fit or interpolate.
+    The filename must stay within the invocation directory. Only complete
+    acquisitions are accepted by default; allow_stopped=True also accepts stopped
+    raw traces, preserving NaN values. Partial and unknown acquisitions always
+    reject. Wrong experiment, disallowed completion, schema mismatch or empty
+    data raises ValueError naming that file. Public native reader I/O errors
+    propagate. Return the experiment's single LabberPayload in disk units with
+    inner-first axes; never re-fit, interpolate or transpose the values.
     """
     path = native_path(directory, filename)
     try:
         stored = load(path)
         metadata = metadata_from_container(stored)
-        if metadata.experiment != spec.tag or metadata.completion != "complete":
-            raise ValueError(f"Expected complete {spec.tag} acquisition")
+        completion_allowed = metadata.completion == "complete" or (
+            allow_stopped and metadata.completion == "stopped"
+        )
+        if metadata.experiment != spec.tag or not completion_allowed:
+            expected = "complete or stopped" if allow_stopped else "complete"
+            raise ValueError(f"Expected {expected} {spec.tag} acquisition")
         restore_run(stored, spec=spec)
         name = (
             str(spec.required_variables[0])

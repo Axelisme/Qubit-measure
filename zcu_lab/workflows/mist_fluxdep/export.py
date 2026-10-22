@@ -48,8 +48,10 @@ def prepare_export(
 ) -> PreparedRunData:
     """Assemble raw MIST response across flux and gain for offline analysis.
 
-    Completed partial traces retain their native reference with success=False.
-    They export raw IQ without contributing an acquisition-success value.
+    Stopped partial traces retain their native reference with success=False.
+    They export raw IQ, including NaN, without contributing an acquisition-success
+    value. Complete and stopped native acquisitions are accepted; other completion
+    states reject.
 
     Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
 
@@ -84,7 +86,10 @@ def prepare_export(
             if point.gain_file is None:
                 continue
             trace = load_trace(
-                saved.directory, point.gain_file, PowerDepExp().persistence_spec()
+                saved.directory,
+                point.gain_file,
+                PowerDepExp().persistence_spec(),
+                allow_stopped=True,
             )
             if not np.array_equal(trace.axes[0].values, gains):
                 raise ValueError("MIST gain grid differs from the fixed plan")
