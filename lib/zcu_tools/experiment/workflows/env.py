@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -20,7 +21,6 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar import BaseProgressBar
 
 from .models import (
@@ -33,7 +33,10 @@ from .models import (
     ProgressSnapshot,
     RunIdentity,
 )
+from .plotting import WorkflowPlots
 from .ports import DevicePort, EnginePorts, ProgressFactory
+
+_logger = logging.getLogger(__name__)
 
 
 def _validate_model(value: object, model: type[BaseModel], label: str) -> None:
@@ -328,13 +331,18 @@ class WorkflowEnv[C]:
         experiment accepts (cfg, *, context: RunContext), including a bound
         T1Exp().run. cfg must be an ExpCfgModel; other scans use raw env.call.
         Each attempt builds RunContext with this operation token and borrowed
-        soc/soccfg/plots/devices, captures device settings, then invokes the core
+        soc/soccfg/devices and fresh operation Plots on the workflow's same
+        presentation host, captures device settings, then invokes the core
         callable with a fresh deepcopy of cfg. Completed.value is RunRecord with
         callback-return cfg and result. Completed.facts carries the same
         OperationFacts as journal/commit, including the pre-call device snapshot,
         one-based successful commit scope (iteration), attempt and stopped bit.
         Schedule acquire failure returns Failed; other exceptions propagate.
-        Stop delivers a partial/empty record. Pause retries the captured cfg.
+        Stop delivers a partial/empty record. Pause retries the captured cfg
+        with a new plot collection. Each attempt finishes before delivery or
+        discard; the next attempt releases the previous presentation. A core
+        exception remains primary if finish also fails (cleanup adds a note).
+        A finish-only failure propagates instead of delivering Completed.
         Framework journal/commit envelopes retain attempt facts and snapshots;
         provenance stays in workflow startup metadata, not a per-operation identity.
         """
@@ -342,25 +350,39 @@ class WorkflowEnv[C]:
         captured = deepcopy(cfg)
 
         def invoke(ctx: CallContext, attempt: _Attempt) -> RunRecord[Cfg, Result]:
-            context = RunContext(
-                soc=self.soc,
-                soccfg=self._ports.soccfg,
-                plots=self.plots,
-                devices=self.devices.get_connected_devices(),
-                cancel_signal=ctx.stop_signal,
-            )
-            attempt.device_snapshot = capture_device_snapshot(context.devices)
-            current = deepcopy(captured)
-            result = experiment(current, context=context)
-            error = context.cancel_signal.error
-            if error is not None and error.status != "failed":
-                raise error from error.exception
-            if error is not None:
-                self._hooks.experiment_failed(
-                    getattr(experiment, "__qualname__", type(experiment).__name__),
-                    error.reason,
-                    error.exception or error,
+            plots = self.plots.start_operation()
+            try:
+                context = RunContext(
+                    soc=self.soc,
+                    soccfg=self._ports.soccfg,
+                    plots=plots,
+                    devices=self.devices.get_connected_devices(),
+                    cancel_signal=ctx.stop_signal,
                 )
+                attempt.device_snapshot = capture_device_snapshot(context.devices)
+                current = deepcopy(captured)
+                result = experiment(current, context=context)
+                error = context.cancel_signal.error
+                if error is not None and error.status != "failed":
+                    raise error from error.exception
+                if error is not None:
+                    self._hooks.experiment_failed(
+                        getattr(experiment, "__qualname__", type(experiment).__name__),
+                        error.reason,
+                        error.exception or error,
+                    )
+            except BaseException as error:
+                try:
+                    plots.finish()
+                except Exception as cleanup_error:
+                    _logger.exception(
+                        "Failed to finish operation plots after core failure"
+                    )
+                    error.add_note(
+                        f"Operation plot finish failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+                raise
+            plots.finish()
             return RunRecord(current, result)
 
         return await self._call("run", invoke)
@@ -433,8 +455,12 @@ class WorkflowEnv[C]:
         await self._host.commit()
 
     @property
-    def plots(self) -> Plots:
-        """Return shared injected Plots; its host owns artist thread/lifetime."""
+    def plots(self) -> WorkflowPlots:
+        """Return injected workflow trends, independent of each env.run attempt.
+
+        This collection persists across commits. The operation/ name prefix is
+        reserved for the pane/MCP projection and raises ValueError at registration.
+        """
         return self._ports.plots
 
     def pbar(self, desc: str, total: int) -> BaseProgressBar:
