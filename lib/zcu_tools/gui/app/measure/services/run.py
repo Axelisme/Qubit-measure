@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from zcu_tools.datafile import RunMetadata
+from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.acquisition import (
     capture_device_snapshot,

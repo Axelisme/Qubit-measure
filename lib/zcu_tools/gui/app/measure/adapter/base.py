@@ -7,7 +7,7 @@ from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal
 
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun
@@ -480,7 +480,7 @@ class BaseAdapter(
         del req
         return self.exp_cls().run(cfg, context=context)
 
-    def restore(self, stored: StoredRun) -> RestoredRun[T_Result]:
+    def restore(self, stored: Container) -> RestoredRun[T_Result]:
         """Restore already-read native data through the core's from_stored contract.
 
         stored contains validated generic data and original history, not current

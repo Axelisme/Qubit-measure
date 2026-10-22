@@ -7,7 +7,7 @@ from zcu_tools.gui.app.measure.artifacts import ArtifactHandover
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 if TYPE_CHECKING:
-    from zcu_tools.datafile import StoredRun
+    from zcu_tools.datafile import Container
     from zcu_tools.experiment.context import RunContext
     from zcu_tools.experiment.native_persistence import RestoredRun
     from zcu_tools.plotting.plots import Plots
@@ -123,7 +123,7 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
         """
         ...
 
-    def restore(self, stored: StoredRun) -> RestoredRun[object]:
+    def restore(self, stored: Container) -> RestoredRun[object]:
         """Restore framework-read native data admitted for this experiment tag.
 
         Return an opaque adapter-owned record and cfg_issue: None means typed cfg

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from zcu_tools.datafile import RunMetadata
+from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.artifacts import (
     AnalysisItem,
     ArtifactRef,

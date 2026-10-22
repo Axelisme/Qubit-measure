@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
-from zcu_tools.datafile import RunMetadata
+from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
