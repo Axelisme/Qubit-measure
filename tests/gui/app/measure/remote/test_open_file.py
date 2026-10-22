@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -43,10 +45,16 @@ class FileAdapter(OldAdapter):
     experiment_tag: ClassVar[str | None] = "test/load"
 
     def restore(self, stored: Container):
-        gain = stored.cfg.values["gain"]
+        gain = (
+            TypeAdapter(CfgSnapshot).validate_python(stored.docs["cfg"]).values["gain"]
+        )
         cfg = None if gain == 2.0 else LoadedCfg()
         return RestoredRun(
-            RunRecord(cfg=cfg, result=LoadedResult(gain)),
+            RunRecord(
+                cfg=cfg,
+                result=LoadedResult(gain),
+                metadata=metadata_from_container(stored),
+            ),
             "cfg unavailable" if cfg is None else None,
         )
 

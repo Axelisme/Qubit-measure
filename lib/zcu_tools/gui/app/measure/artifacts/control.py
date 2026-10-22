@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from zcu_tools.experiment.native_persistence import read_run_metadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
+from zcu_tools.experiment.native_persistence import read_run_metadata
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.services.context import ContextService
@@ -101,7 +101,7 @@ class SaveControlPort(Protocol):
 def _saved_run_info(path: Path) -> SavedRunInfo:
     try:
         metadata = read_run_metadata(path)
-    except (OSError, ValueError) as error:
+    except (KeyError, OSError, ValueError) as error:
         # Isolate a single unreadable file so selection still reaches Load errors.
         return SavedRunInfo("", None, "", None, path, metadata_error=str(error))
     return SavedRunInfo(

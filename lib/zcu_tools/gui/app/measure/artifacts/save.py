@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.artifacts import (
     AnalysisItem,
     ArtifactRef,
@@ -17,6 +16,7 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,

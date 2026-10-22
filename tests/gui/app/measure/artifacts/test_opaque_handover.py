@@ -1,6 +1,5 @@
-"""Registered opaque run handles cross Run, Analyze and synchronous Save unchanged."""
+"""RunRecord envelopes carry adapter-owned opaque Results through host handovers."""
 
-from tests.gui.app.measure._record_support import require_record
 import json
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -9,10 +8,10 @@ from typing import ClassVar, Literal
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load_run_data
-from zcu_tools.experiment.artifacts import AnalysisDocument
-from zcu_tools.experiment.artifacts import AnalysisItem, DataItem
+from zcu_tools.datafile import load
+from zcu_tools.experiment.artifacts import AnalysisDocument, AnalysisItem, DataItem
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -38,16 +37,19 @@ from zcu_tools.resources.entry import AcquiredPayload, ArtifactKey
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import PaneParams, PaneSummary
+from tests.gui.app.measure._record_support import require_record
 
 
 @dataclass
 class OpaqueRun:
     """Adapter-owned handle without the framework's historical cfg/result fields."""
 
-    source: RunRecord[SavingCfg, SavingResult]
+    source: SavingResult
 
 
-class OpaqueAdapter(BaseAdapter[SavingCfg, OpaqueRun, PaneSummary, PaneParams]):
+class OpaqueAdapter(
+    BaseAdapter[SavingCfg, RunRecord[SavingCfg, OpaqueRun], PaneSummary, PaneParams]
+):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, requires_soc=False, load_data=False
     )
@@ -58,24 +60,32 @@ class OpaqueAdapter(BaseAdapter[SavingCfg, OpaqueRun, PaneSummary, PaneParams]):
         del ctx
         return Form(SavingCfg, {})
 
-    def run(self, req: RunRequest, cfg: SavingCfg, *, context: RunContext) -> OpaqueRun:
-        return OpaqueRun(RunRecord(cfg, SavingCore().run(cfg, context=context)))
+    def run(
+        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, OpaqueRun]:
+        return RunRecord(cfg, OpaqueRun(SavingCore().run(cfg, context=context)))
 
     def analyze(
-        self, req: AnalyzeRequest[OpaqueRun, PaneParams], *, plots: Plots
+        self,
+        req: AnalyzeRequest[RunRecord[SavingCfg, OpaqueRun], PaneParams],
+        *,
+        plots: Plots,
     ) -> PaneSummary:
         _, axes = plots.subplots("fit")
         axes.plot(
-            req.run_result.source.result.frequency,
-            req.run_result.source.result.signal.real,
+            req.run_result.result.source.frequency,
+            req.run_result.result.source.signal.real,
         )
         return PaneSummary(17.0)
 
     def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
-        if not isinstance(result, OpaqueRun):
-            raise TypeError("Expected this adapter's opaque handle")
+        if not isinstance(result, RunRecord) or not isinstance(
+            result.result, OpaqueRun
+        ):
+            raise TypeError("Expected this adapter's record and opaque result")
+        source = RunRecord(result.cfg, result.result.source, metadata=result.metadata)
         return DataItem.from_run(
-            key, result.source, spec=SavingCore().persistence_spec(), comment=comment
+            key, source, spec=SavingCore().persistence_spec(), comment=comment
         )
 
     def analysis_item(
@@ -142,8 +152,8 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     # The admitted synthetic run returns; pump its terminal owner delivery.
     qt_until(lambda: not state.is_tab_busy(tab_id), label="opaque run terminal")
     tab = state.get_tab(tab_id)
-    assert isinstance(tab.run.result, OpaqueRun), (
-        "Native evidence must accept an opaque run handle"
+    assert isinstance(require_record(tab.run).result, OpaqueRun), (
+        "The record envelope must preserve the adapter's opaque Result"
     )
     handle = tab.run.result
     metadata = require_record(tab.run).metadata
@@ -178,10 +188,9 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
             for item in data
         )
     else:
-        stored = load_run_data(data[0].output.path)
-        assert stored.metadata.run_id == metadata.run_id
-        assert stored.metadata.snapshot == metadata.snapshot
-        assert stored.payload.metadata.comment == "opaque annotation"
+        stored = load(data[0].output.path)
+        assert metadata_from_container(stored).run_id == metadata.run_id
+        assert metadata_from_container(stored).snapshot == metadata.snapshot
     assert all(item.status == "saved" and item.output.path.is_file() for item in other)
     assert json.loads(
         next(

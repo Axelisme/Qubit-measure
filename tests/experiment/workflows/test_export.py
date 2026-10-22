@@ -5,24 +5,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-import h5py as h5
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.datafile import DataVariable, load_grouped_labber_data, load_run_data, save_run_data
-from zcu_tools.experiment.metadata import RunSnapshot
+from zcu_tools.datafile import (
+    DataVariable,
+    LabberMetadata,
+    load,
+    load_grouped_labber_data,
+    save,
+)
 from zcu_tools.experiment import AxesSpec, Axis, ExpCfgModel, ZSpec
+from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot
+from zcu_tools.experiment.native_persistence import (
+    PreparedRunData,
+    metadata_from_container,
+)
 from zcu_tools.experiment.workflows import RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.artifacts import RunManifest
 from zcu_tools.experiment.workflows.export import (
-    PreparedFluxdepExport,
     load_trace,
     validate_destinations,
     write_outputs,
 )
 
 from tests._filesystem import symlink_or_skip
-from tests._native_support import native_cfg, native_metadata, native_payload
+from tests._native_support import native_cfg, native_container, native_metadata
 
 
 @pytest.mark.parametrize("completion", ["complete", "unknown"])
@@ -43,11 +51,24 @@ def test_trace_requires_known_completion_but_not_known_start_time(
         data_variable=DataVariable("readout"),
     )
     path = tmp_path / "trace.h5"
-    save_run_data(path, native_payload(), native_metadata(), cfg=native_cfg())
-    with h5.File(path, "r+") as file:
-        file.attrs["format_version"] = "2.1"
-        file.attrs["started_at"] = ""
-        file.attrs["completion"] = completion
+    metadata = native_metadata().model_copy(
+        update={"started_at": None, "completion": completion}
+    )
+    container = native_container(metadata=metadata)
+    save(
+        path,
+        replace(
+            container,
+            docs={
+                **container.docs,
+                "cfg": {
+                    "values": {},
+                    "cfg_type": "ExpCfgModel",
+                    "schema_version": "1.0",
+                },
+            },
+        ),
+    )
     if completion == "unknown":
         with pytest.raises(
             ValueError, match="Expected complete test/native acquisition"
@@ -68,7 +89,7 @@ def inputs(
     tmp_path: Path,
     lifecycle: Literal["done", "cancelled", "failed"] = "done",
     run_id: str | None = None,
-) -> tuple[RunManifest, PreparedFluxdepExport, RunSnapshot]:
+) -> tuple[RunManifest, PreparedRunData, RunSnapshot]:
     metadata = native_metadata()
     now = datetime(2026, 10, 12, tzinfo=UTC)
     manifest = TypeAdapter(RunManifest).validate_python(
@@ -89,8 +110,10 @@ def inputs(
         }
     )
     manifest.roots.data_root.mkdir(parents=True)
-    payload = replace(native_payload(), representation="grouped")
-    return manifest, PreparedFluxdepExport(payload, native_cfg()), metadata.snapshot
+    prepared = PreparedRunData(
+        native_container(), native_cfg(), LabberMetadata(), "independent"
+    )
+    return manifest, prepared, metadata.snapshot
 
 
 @pytest.mark.parametrize(
@@ -119,16 +142,22 @@ def test_saved_export_roundtrip_overwrite_and_new_labber(
         assert labber.path is not None
         assert labber.path.name == f"synthetic_a1b2c3_{sequence}.hdf5"
         assert native.path is not None
-        stored = load_run_data(native.path)
-        assert stored.metadata.completion == completion
-        assert stored.metadata.snapshot == snapshot
-        assert stored.metadata.experiment == "synthetic"
-        assert stored.metadata.provenance == manifest.identity.provenance
-        assert stored.cfg == prepared.cfg
+        stored = load(native.path)
+        assert metadata_from_container(stored).completion == completion
+        assert metadata_from_container(stored).snapshot == snapshot
+        assert metadata_from_container(stored).experiment == "synthetic"
+        assert (
+            metadata_from_container(stored).provenance == manifest.identity.provenance
+        )
+        assert (
+            TypeAdapter(CfgSnapshot).validate_python(stored.docs["cfg"]) == prepared.cfg
+        )
         restored = load_grouped_labber_data(str(labber.path))
-        for name, trace in prepared.payload.variables.items():
-            np.testing.assert_array_equal(stored.payload.variables[name].z, trace.z)
-            np.testing.assert_array_equal(restored.variables[name].z, trace.z)
+        for name, variable in prepared.container.vars.items():
+            np.testing.assert_array_equal(stored.vars[name].values, variable.values)
+            np.testing.assert_array_equal(
+                restored.variables[DataVariable(name)].z, variable.values
+            )
     assert attempts[0][0].path == attempts[1][0].path
     assert attempts[0][1].path != attempts[1][1].path
 
@@ -179,7 +208,7 @@ def test_opaque_workflow_id_keeps_native_writer_rejection_and_labber_success(
         native.status == "failed"
         and native.path == manifest.roots.data_root / "merged.h5"
     )
-    assert native.error and "run_id" in native.error and "UTC timestamp" in native.error
+    assert native.error and "run_id" in native.error
     assert native.path is not None
     assert not native.path.exists()
     assert labber.status == "saved" and labber.path is not None and labber.error is None

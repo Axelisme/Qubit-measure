@@ -4,7 +4,9 @@ from typing import ClassVar
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -20,6 +22,7 @@ from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
+from tests.gui.app.measure._record_support import require_record
 
 from ._run_support import make_plots, make_run_service
 
@@ -30,7 +33,7 @@ class ChoiceCfg(ConfigBase):
     choice: str = "visible"
 
 
-class ChoiceAdapter(BaseAdapter[ChoiceCfg, str]):
+class ChoiceAdapter(BaseAdapter[ChoiceCfg, RunRecord[ExpCfgModel, str]]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, analysis=AnalysisMode.NONE, load_data=False
     )
@@ -48,10 +51,12 @@ class ChoiceAdapter(BaseAdapter[ChoiceCfg, str]):
         del req
         self.validated.append(cfg)
 
-    def run(self, req: RunRequest, cfg: ChoiceCfg, *, context: RunContext) -> str:
+    def run(
+        self, req: RunRequest, cfg: ChoiceCfg, *, context: RunContext
+    ) -> RunRecord[ExpCfgModel, str]:
         del req, context
         self.executed.append(cfg)
-        return "complete"
+        return RunRecord(None, "complete")
 
 
 @pytest.mark.parametrize("phase", ["guard", "run"])
@@ -95,7 +100,7 @@ def test_form_output_is_forwarded_without_rebuilding(phase: str) -> None:
         background.run_work()
         assert adapter.executed == [cfg]
         assert adapter.executed[0] is cfg
-        assert state.get_tab("choice").run.result == "complete"
+        assert require_record(state.get_tab("choice").run).result == "complete"
         service.release_view_plots("choice")
     assert cfg.model_dump() == {"choice": "edited"}
     assert factories == ["factory"]

@@ -1,6 +1,5 @@
 """Measure reload creates detached registries with the injected template catalog."""
 
-from dataclasses import replace
 import importlib
 import sys
 from pathlib import Path

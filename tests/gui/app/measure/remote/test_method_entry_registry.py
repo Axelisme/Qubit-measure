@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import pytest
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.measure.remote.handlers.operation import h_operation_await

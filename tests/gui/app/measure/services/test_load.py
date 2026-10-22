@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from tests.gui.app.measure._record_support import require_record
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -10,7 +9,7 @@ from matplotlib.figure import Figure
 from pydantic import Field, JsonValue
 from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, NoAnalyzeParams
 from zcu_tools.gui.app.measure.services.form_contracts import (
@@ -27,6 +26,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._load_support import historical_metadata, write_native_file
+from tests.gui.app.measure._record_support import require_record
 
 
 @pytest.fixture
@@ -82,15 +82,19 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
-    state.update_tab_result(tab_id, object(), parameters=q2, source_operation_id=91)
+    state.update_tab_result(
+        tab_id, RunRecord(None, object()), parameters=q2, source_operation_id=91
+    )
     state.set_context(replace(state.session_env, parameters=captured))
-    loaded: RunRecord[ExpCfgModel, object] = RunRecord(cfg=None, result=object())
+    loaded: RunRecord[ExpCfgModel, object] = RunRecord(
+        cfg=None, result=object(), metadata=historical_metadata()
+    )
     metadata = historical_metadata()
 
     def restore_and_rebind(
         stored: Container,
     ) -> RestoredRun[RunRecord[ExpCfgModel, object]]:
-        assert stored.metadata == metadata
+        assert metadata_from_container(stored) == metadata
         state.set_context(replace(state.session_env, parameters=q2))
         return RestoredRun(loaded, "cfg unavailable")
 
@@ -112,8 +116,12 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     missing_cfg: bool, native_path: str
 ) -> None:
     state, tab_id, adapter = _make_state()
-    stale_result = object()
-    loaded = RunRecord(cfg=None if missing_cfg else ExpCfgModel(), result=object())
+    stale_result = RunRecord(None, object())
+    loaded = RunRecord(
+        cfg=None if missing_cfg else ExpCfgModel(),
+        result=object(),
+        metadata=historical_metadata(),
+    )
     metadata = historical_metadata()
     issue = "cfg unavailable" if missing_cfg else None
     adapter.restore.return_value = RestoredRun(loaded, issue)
@@ -182,7 +190,7 @@ def test_load_preserves_authored_input_including_invalid_drafts(
     before = tab.cfg.input.data
     env = tab.cfg.env
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
-    loaded = RunRecord(RepeatsCfg(reps=40), object())
+    loaded = RunRecord(RepeatsCfg(reps=40), object(), historical_metadata())
     metadata = historical_metadata()
     adapter.restore.return_value = RestoredRun(loaded, None)
     service, _emit, _writeback = _service(state)
@@ -242,7 +250,7 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
 
 def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
     state, tab_id, adapter = _make_state()
-    old = object()
+    old = RunRecord(None, object())
     state.get_tab(tab_id).run.result = old
     adapter.restore.side_effect = ValueError("bad file")
     svc, _emit, writeback = _service(state)

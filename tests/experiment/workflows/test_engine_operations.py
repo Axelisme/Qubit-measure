@@ -9,10 +9,10 @@ from threading import Event, Thread, Timer
 import pytest
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.core.script_protocol import Answer, Question
-from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.simulation import white_noise

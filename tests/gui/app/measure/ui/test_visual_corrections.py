@@ -5,7 +5,6 @@ Observable Qt behavior tests — no prose or stylesheet-source assertions.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import dataclasses
 from collections.abc import Callable, Iterator
 from unittest.mock import MagicMock

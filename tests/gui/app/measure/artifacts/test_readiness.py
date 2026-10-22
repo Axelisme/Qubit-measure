@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.artifacts import SaveService
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
@@ -39,7 +40,7 @@ def _make_service(
             cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
-    state.update_tab_result("tab", object())
+    state.update_tab_result("tab", RunRecord(None, object()))
     return SaveService(state, bus, access=access), state
 
 

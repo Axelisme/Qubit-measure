@@ -1,6 +1,6 @@
 """Library entries edit through a generated Form at one fixed capture."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest

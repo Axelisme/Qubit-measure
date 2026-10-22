@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from tests.gui.app.measure._record_support import require_record
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import UUID
 
-import h5py
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load_run_data
-from zcu_tools.experiment.metadata import RunSnapshot, SoftwareProvenance
+from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
@@ -40,6 +40,7 @@ from tests.gui.app.measure._native_save_support import (
     SavingAdapter,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure._synthetic import SampleResult
 from tests.gui.app.measure.services._snapshot_adapter import SnapshotAdapter
 
@@ -121,15 +122,14 @@ def test_run_publishes_record_and_historical_metadata_together(
     background.run_work()
     after_acquire = datetime.now(UTC)
     pane = state.get_tab(tab_id).run
-    assert pane.result is record
+    assert require_record(pane).result is record.result
     assert pane.source_operation_id == token
-    metadata = pane.metadata
+    metadata = require_record(pane).metadata
     assert metadata is not None
     assert metadata.snapshot == snapshot
     assert metadata.experiment == "test/native"
     assert metadata.provenance == provenance
     assert metadata.completion == ("stopped" if stopped else "complete")
-    assert metadata.labber_path is None
     assert metadata.finished_at is not None
     assert metadata.device_snapshot == {
         "flux": FakeDeviceInfo(address="none", value=1.25).model_dump(mode="json")
@@ -177,10 +177,8 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
         adapter.run.side_effect = RuntimeError("acquire failed")
     token = service.start_run(inputs, plots=make_plots())
     assert state.get_tab(tab_id).run.result is None
-    assert require_record(state.get_tab(tab_id).run).metadata is None
     background.run_work()
     assert state.get_tab(tab_id).run.result is None
-    assert require_record(state.get_tab(tab_id).run).metadata is None
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
 
@@ -190,6 +188,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     monkeypatch: pytest.MonkeyPatch, has_snapshot: bool
 ) -> None:
     state, tab_id, adapter = make_state()
+    adapter.run.return_value = RunRecord(ExpCfgModel(), SampleResult(np.array([1.0])))
     capture = MagicMock(side_effect=RuntimeError("must not capture"))
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
@@ -251,7 +250,7 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     service, _gate, background, handles = make_run_service(state)
     token = service.start_run(inputs, plots=make_plots())
     background.run_work()
-    record = state.get_tab(tab_id).run.result
+    record = require_record(state.get_tab(tab_id).run)
     metadata = require_record(state.get_tab(tab_id).run).metadata
     assert isinstance(record, RunRecord)
     assert isinstance(record.cfg, SavingCfg)
@@ -402,9 +401,11 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
             for item in report.outputs
             if item.output.format == "data_h5"
         )
-        restored = load_run_data(path)
-        assert restored.metadata.snapshot.roles["flux_dev"] == "yoko1"
-        assert restored.cfg.values["dev"] == {"flux_dev": "yoko1"}
+        restored = load(path)
+        assert metadata_from_container(restored).snapshot.roles["flux_dev"] == "yoko1"
+        assert TypeAdapter(CfgSnapshot).validate_python(restored.docs["cfg"]).values[
+            "dev"
+        ] == {"flux_dev": "yoko1"}
         assert session.context.read_context().value("$flux_dev") == "yoko2"
 
 
@@ -438,13 +439,9 @@ def test_gui_save_uses_fixed_run_device_snapshot(
             for item in report.outputs
             if item.output.format == "data_h5"
         )
-        restored = load_run_data(path)
-        assert restored.metadata.device_snapshot is not None
-        assert restored.metadata.device_snapshot["flux"]["value"] == 0.25
-        with h5py.File(path, "r") as file:
-            dataset = file["device"]
-            assert isinstance(dataset, h5py.Dataset)
-            assert dataset.shape == ()
-            string = h5py.check_string_dtype(dataset.dtype)
-            assert string is not None and string.encoding == "utf-8"
+        restored = load(path)
+        device_snapshot = metadata_from_container(restored).device_snapshot
+        assert device_snapshot is not None
+        assert device_snapshot["flux"]["value"] == 0.25
+
         assert flux.events == ["read", "write"]

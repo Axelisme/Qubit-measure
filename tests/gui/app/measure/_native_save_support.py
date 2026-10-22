@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -191,7 +191,6 @@ def native_save_session(
         started_at="2026-10-08T00:00:00+00:00",
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
-        labber_path=None,
         snapshot=RunSnapshot(
             entry_id=storage.entry_id,
             entry_name=storage.entry_name,
@@ -216,7 +215,9 @@ def native_save_session(
             cfg=make_form(SavingAdapter.make_form(FormContext(None)), state=state),
         ),
     )
-    state.update_tab_result("tab", replace(record, metadata=metadata), parameters=captured)
+    state.update_tab_result(
+        "tab", replace(record, metadata=metadata), parameters=captured
+    )
     handles = OperationHandles()
     background = BackgroundRunner()
     service = SaveService(state, bus)

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -91,9 +92,9 @@ class DummyAdapter:
         context: RunContext,
     ):
         del req, cfg, context
-        return object()
+        return RunRecord(None, object())
 
-    def restore(self, stored: Container) -> RestoredRun[object]:
+    def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
         del stored
         raise NotImplementedError("DummyAdapter does not load native runs")
 

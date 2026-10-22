@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -523,7 +523,7 @@ class State(SessionState):
         self,
         tab_id: str,
         *,
-        result: RunRecord[Any, Any],
+        result: object,
         plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
@@ -615,7 +615,7 @@ class State(SessionState):
         self,
         tab_id: str,
         *,
-        result: RunRecord[Any, Any],
+        result: object,
         plots: Plots | None,
         params: object | None = None,
         writeback_draft: object | None = None,
@@ -703,9 +703,7 @@ class State(SessionState):
         return self.get_tab(tab_id).artifacts.snapshot()
 
     @staticmethod
-    def _save_layout(
-        run: RunPaneState, *, experiment: str
-    ) -> SaveLayout | None:
+    def _save_layout(run: RunPaneState, *, experiment: str) -> SaveLayout | None:
         """Plan against this result's source, never tab birth or live selection."""
         metadata = None if run.result is None else run.result.metadata
         storage = run.storage

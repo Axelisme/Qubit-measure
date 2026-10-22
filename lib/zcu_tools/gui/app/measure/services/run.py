@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.acquisition import (
     capture_device_snapshot,
@@ -16,6 +15,7 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
@@ -408,11 +408,14 @@ class RunService:
             completion = "stopped" if stop_event.is_set() else "complete"
             finished_at = datetime.now(UTC)
             if metadata is not None:
-                metadata = metadata.model_copy(update={
-                    "finished_at": finished_at.isoformat(),
-                    "completion": completion,
-                })
-            return replace(result, metadata=metadata)
+                metadata = metadata.model_copy(
+                    update={
+                        "finished_at": finished_at.isoformat(),
+                        "completion": completion,
+                    }
+                )
+                return replace(result, metadata=metadata)
+            return result
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(

@@ -7,7 +7,7 @@ from typing import ClassVar, TypeAlias
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import Container, load_run_data
+from zcu_tools.datafile import Container, load
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -79,7 +79,7 @@ class _InternalTypeErrorAdapter(_LoadAdapter):
 def stored(tmp_path: Path) -> Container:
     path = tmp_path / "data.h5"
     write_native_file(path)
-    return load_run_data(path)
+    return load(path)
 
 
 def test_base_adapter_load_reads_native_record_and_full_history(
@@ -89,7 +89,7 @@ def test_base_adapter_load_reads_native_record_and_full_history(
         session.save()
         path = session.native_data_path
 
-        restored = AnalysisSavingAdapter().restore(load_run_data(path))
+        restored = AnalysisSavingAdapter().restore(load(path))
         record = restored.record
 
         assert isinstance(record, RunRecord)

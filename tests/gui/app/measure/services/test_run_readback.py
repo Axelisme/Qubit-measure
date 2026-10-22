@@ -1,6 +1,5 @@
 """Measure terminal delivery refreshes observations, never acquisition evidence."""
 
-from tests.gui.app.measure._record_support import require_record
 from dataclasses import replace
 from pathlib import Path
 from threading import get_ident
@@ -8,9 +7,9 @@ from uuid import UUID
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import RunRequest
 from zcu_tools.gui.app.measure.registry import Registry
@@ -26,6 +25,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import make_form
+from tests.gui.app.measure._record_support import require_record
 
 from ._run_support import make_inputs, make_plots, make_state
 from ._snapshot_adapter import SnapshotAdapter
@@ -116,8 +116,8 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
             "failed" if fail_run else "finished"
         )
         assert not services.operation_gate.has_active("run")
-        metadata = require_record(state.get_tab(tab_id).run).metadata
         if not fail_run:
+            metadata = require_record(state.get_tab(tab_id).run).metadata
             assert metadata is not None and metadata.device_snapshot is not None
             assert metadata.device_snapshot["flux"]["value"] == 0.25
             assert metadata.device_snapshot["unused"]["value"] == 0.6

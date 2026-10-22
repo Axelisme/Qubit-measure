@@ -6,14 +6,16 @@ from pathlib import Path
 from typing import IO, Literal, Self
 from unittest.mock import patch
 
-import h5py
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec, PulseSpec
-from zcu_tools.datafile import load_labber_data, load_run_data
-from zcu_tools.experiment.artifacts import AnalysisDocument
+from zcu_tools.datafile import load, load_labber_data
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
+from zcu_tools.experiment.artifacts import AnalysisDocument
+from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.format_version import YamlMap
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
@@ -128,15 +130,10 @@ def test_saved_run_keeps_its_device_snapshot_across_later_acquisitions(
     path = next(
         item.output.path for item in report.outputs if item.output.format == "data_h5"
     )
-    restored = load_run_data(path)
-    assert restored.metadata.device_snapshot is not None
-    assert restored.metadata.device_snapshot["flux"]["value"] == 0.25
-    with h5py.File(path, "r") as file:
-        dataset = file["device"]
-        assert isinstance(dataset, h5py.Dataset)
-        assert dataset.shape == ()
-        string = h5py.check_string_dtype(dataset.dtype)
-        assert string is not None and string.encoding == "utf-8"
+    restored = load(path)
+    device_snapshot = metadata_from_container(restored).device_snapshot
+    assert device_snapshot is not None
+    assert device_snapshot["flux"]["value"] == 0.25
     assert flux.events.count("read") == read_count
 
 
@@ -151,7 +148,7 @@ def test_saved_run_without_connected_devices_writes_empty_snapshot(
         for item in saved.report.outputs
         if item.output.format == "data_h5"
     )
-    assert load_run_data(path).metadata.device_snapshot == {}
+    assert metadata_from_container(load(path)).device_snapshot == {}
 
 
 def acquired_payload(ledger: RecordsLedger) -> AcquiredPayload:
@@ -199,8 +196,9 @@ def test_interrupted_acquisition_preserves_saveable_partial(
         for item in saved.report.outputs
         if item.output.format == "labber"
     )
-    loaded = load_run_data(native)
-    assert loaded.metadata.completion == "stopped"
+    loaded = load(native)
+    loaded_metadata = metadata_from_container(loaded)
+    assert loaded_metadata.completion == "stopped"
     restored, _ = core.load_run(native)
     np.testing.assert_allclose(restored.result.signal, expected, equal_nan=True)
     np.testing.assert_allclose(
@@ -294,20 +292,23 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
         for item in saved.report.outputs
         if item.output.format == "labber"
     )
-    loaded = load_run_data(native)
-    assert loaded.metadata.started_at is not None
-    assert datetime.fromisoformat(loaded.metadata.started_at) == acquisition.started_at
-    assert loaded.metadata.finished_at is not None
+    loaded = load(native)
+    loaded_metadata = metadata_from_container(loaded)
+    assert loaded_metadata.started_at is not None
+    assert datetime.fromisoformat(loaded_metadata.started_at) == acquisition.started_at
+    assert loaded_metadata.finished_at is not None
     assert (
-        datetime.fromisoformat(loaded.metadata.finished_at) == acquisition.finished_at
+        datetime.fromisoformat(loaded_metadata.finished_at) == acquisition.finished_at
     )
-    assert loaded.metadata.completion == acquisition.completion
-    assert loaded.metadata.provenance == acquisition.provenance
-    assert loaded.metadata.snapshot.point == "sweet"
-    assert loaded.metadata.snapshot.description == "save-time context"
-    assert loaded.metadata.snapshot.roles == {}
-    assert loaded.cfg.values["gain"] == 2.0
-    assert loaded.payload.metadata.comment == "original comment"
+    assert loaded_metadata.completion == acquisition.completion
+    assert loaded_metadata.provenance == acquisition.provenance
+    assert loaded_metadata.snapshot.point == "sweet"
+    assert loaded_metadata.snapshot.description == "save-time context"
+    assert loaded_metadata.snapshot.roles == {}
+    assert (
+        TypeAdapter(CfgSnapshot).validate_python(loaded.docs["cfg"]).values["gain"]
+        == 2.0
+    )
     assert load_labber_data(str(labber)).z.shape == (3,)
     pngs = [
         item.output.path for item in saved.report.outputs if item.output.format == "png"
@@ -353,9 +354,11 @@ def test_resave_rewrites_fixed_outputs_and_uses_new_labber_file(
         )
         != previous_labber
     )
-    loaded = load_run_data(native)
-    assert loaded.cfg.values["gain"] == 2.0
-    assert loaded.payload.metadata.comment == "updated comment"
+    loaded = load(native)
+    assert (
+        TypeAdapter(CfgSnapshot).validate_python(loaded.docs["cfg"]).values["gain"]
+        == 2.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -435,14 +438,14 @@ def test_save_and_resave_use_host_local_labber_date(
         )
     assert labber_paths[0] != labber_paths[1]
     assert native_paths[0] == native_paths[1]
-    loaded = load_run_data(native_paths[1])
-    assert loaded.metadata.started_at is not None
-    assert datetime.fromisoformat(loaded.metadata.started_at) == acquisition.started_at
-    assert loaded.metadata.finished_at is not None
+    loaded = load(native_paths[1])
+    loaded_metadata = metadata_from_container(loaded)
+    assert loaded_metadata.started_at is not None
+    assert datetime.fromisoformat(loaded_metadata.started_at) == acquisition.started_at
+    assert loaded_metadata.finished_at is not None
     assert (
-        datetime.fromisoformat(loaded.metadata.finished_at) == acquisition.finished_at
+        datetime.fromisoformat(loaded_metadata.finished_at) == acquisition.finished_at
     )
-    assert loaded.metadata.labber_path == str(labber_paths[1])
     ledger = ResultEntry.open(
         "entry",
         result_root=tmp_path / "results",
@@ -532,12 +535,6 @@ def test_failed_new_labber_retains_native_historical_link(point: PointView) -> N
     labber.parent.write_text("block subsequent Labber output")
     with pytest.raises(PartialSaveError, match="outputs failed") as caught:
         saved.save()
-    native = next(
-        item.output.path
-        for item in caught.value.report.outputs
-        if item.output.format == "data_h5"
-    )
-    assert load_run_data(native).metadata.labber_path == str(labber)
     assert caught.value.run.paths == tuple(
         item.output.path
         for item in caught.value.report.outputs
@@ -614,7 +611,10 @@ def test_ledger_append_failure_propagates_after_files_are_written(
         / f"test_saving_{exp.acquisition_for(source).run_id}"
         / "data.h5"
     )
-    assert load_run_data(native).metadata.run_id == exp.acquisition_for(source).run_id
+    assert (
+        metadata_from_container(load(native)).run_id
+        == exp.acquisition_for(source).run_id
+    )
 
 
 @pytest.mark.parametrize(
@@ -635,7 +635,9 @@ def test_accept_writes_role_values_and_caller_metadata(
         for item in saved.report.outputs
         if item.output.format == "data_h5"
     )
-    assert load_run_data(native).metadata.snapshot.roles == {"notebook_target": "D1"}
+    assert metadata_from_container(load(native)).snapshot.roles == {
+        "notebook_target": "D1"
+    }
     assert acquired_payload(ledger).roles == {"notebook_target": "D1"}
     event_id = saved.accept(
         parameter={

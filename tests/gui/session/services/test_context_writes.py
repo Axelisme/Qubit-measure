@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal

@@ -6,10 +6,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from zcu_tools.datafile import LabberPayload, encode_labber_comment, load, save, write_labber
-from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
+from zcu_tools.datafile import (
+    LabberPayload,
+    encode_labber_comment,
+    load,
+    save,
+    write_labber,
+)
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
     metadata_from_container,
@@ -52,15 +58,18 @@ def load_trace[R, C: ExpCfgModel](
     try:
         stored = load(path)
         metadata = metadata_from_container(stored)
-        if (
-            metadata.experiment != spec.tag
-            or metadata.completion != "complete"
-        ):
+        if metadata.experiment != spec.tag or metadata.completion != "complete":
             raise ValueError(f"Expected complete {spec.tag} acquisition")
         restore_run(stored, spec=spec)
-        name = str(spec.required_variables[0]) if isinstance(spec, GroupedAxesSpec) else str(spec.data_variable)
+        name = (
+            str(spec.required_variables[0])
+            if isinstance(spec, GroupedAxesSpec)
+            else str(spec.data_variable)
+        )
         variable = stored.vars[name]
-        trace = LabberPayload((name, variable.unit, variable.values), list(reversed(variable.axes)))
+        trace = LabberPayload(
+            (name, variable.unit, variable.values), list(reversed(variable.axes))
+        )
         if not len(trace.z):
             raise ValueError("Empty acquisition")
     except ValueError as error:
@@ -133,12 +142,15 @@ def write_outputs(
             path = output.path
             path.parent.mkdir(parents=True, exist_ok=True)
             write_labber(
-                path, prepared.container,
+                path,
+                prepared.container,
                 metadata=replace(
                     prepared.labber_metadata,
-                    comment=encode_labber_comment(prepared.cfg.values, prepared.labber_metadata.comment),
+                    comment=encode_labber_comment(
+                        prepared.cfg.values, prepared.labber_metadata.comment
+                    ),
                 ),
-                grouped_layout=prepared.labber_layout
+                grouped_layout=prepared.labber_layout,
             )
             outputs.append(FluxdepExportOutput("labber", path, "saved", None))
         except Exception as error:

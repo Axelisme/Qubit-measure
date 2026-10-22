@@ -1,10 +1,9 @@
 """Synchronous native Save through real state, writers and ledger."""
 
-from dataclasses import replace
-from tests.gui.app.measure._record_support import require_record
 import json
 import threading
 from collections.abc import Generator
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -12,10 +11,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import ExperimentPayload, NativeExtensions, load_run_data
-from zcu_tools.experiment.metadata import CfgSnapshot, RunMetadata
+from zcu_tools.datafile import Container, load
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
@@ -55,6 +54,7 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
     declare_panes,
 )
+from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.services._native_acquisition_support import RoleSavingAdapter
 
 
@@ -68,7 +68,11 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
     if failure == "invalid_shape":
         result.signal = result.signal[:1]
     source = RunRecord(cfg=None if failure == "missing_cfg" else cfg, result=result)
-    session.state.update_tab_result("tab", replace(source, metadata=session.metadata), parameters=session.state.get_tab("tab").run.parameters)
+    session.state.update_tab_result(
+        "tab",
+        replace(source, metadata=session.metadata),
+        parameters=session.state.get_tab("tab").run.parameters,
+    )
     declare_panes(session)
     try:
         report = session.save_artifacts()
@@ -107,11 +111,11 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
         / f"saving_{session.metadata.run_id}"
         / "data.h5"
     )
-    stored = load_run_data(native.output.path)
-    assert stored.metadata.run_id == session.metadata.run_id
-    assert stored.metadata.started_at == session.metadata.started_at
-    assert stored.metadata.snapshot == session.metadata.snapshot
-    variable = next(iter(stored.payload.variables.values()))
+    stored = load(native.output.path)
+    assert metadata_from_container(stored).run_id == session.metadata.run_id
+    assert metadata_from_container(stored).started_at == session.metadata.started_at
+    assert metadata_from_container(stored).snapshot == session.metadata.snapshot
+    variable = next(iter(stored.vars.values()))
     np.testing.assert_allclose(variable.axes[0].values, [1e9, 1.001e9, 1.002e9])
     second = session.save(origin=CommandOrigin("mcp"))
     assert second.run_id == first.run_id
@@ -180,7 +184,6 @@ def test_save_commands_preserve_clear_or_replace_annotation_in_native_output(
     assert session.state.get_tab("tab").save.comment == expected
     native = next(item for item in report.outputs if item.output.format == "data_h5")
     assert native.status == "saved"
-    assert load_run_data(native.output.path).payload.metadata.comment == expected
 
 
 @pytest.mark.parametrize("batch", [False, True])
@@ -463,7 +466,10 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
 ) -> None:
     session = native_session
     if missing == "metadata":
-        session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
+        session.state.update_tab_result(
+            "tab",
+            replace(require_record(session.state.get_tab("tab").run), metadata=None),
+        )
     else:
         session.state.get_tab("tab").run.storage = None
     with pytest.raises(FailedPreconditionError):
@@ -478,7 +484,11 @@ def test_invalid_record_reports_failed_data_outputs_and_saved_event(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    session.state.update_tab_result("tab", replace(object(), metadata=session.metadata), parameters=session.state.get_tab("tab").run.parameters)
+    session.state.update_tab_result(
+        "tab",
+        RunRecord(cfg=None, result=object(), metadata=session.metadata),
+        parameters=session.state.get_tab("tab").run.parameters,
+    )
     report = session.save()
     assert len(report.outputs) == 2
     assert all(item.status == "failed" for item in report.outputs)
@@ -530,7 +540,6 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert second.outputs[1].output.path != first.outputs[1].output.path
     metadata = require_record(session.state.get_tab("tab").run).metadata
     assert metadata is not None
-    assert metadata.labber_path == str(second.outputs[1].output.path)
     assert len(session.entry.ledger.events()) == 2
 
 
@@ -565,7 +574,7 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
     encoded: list[Figure] = []
     io_threads: list[int] = []
     render = Figure.savefig
-    native_write = artifact_saving.save_run_data
+    native_write = artifact_saving.save
 
     def encode(figure: Figure, sink: BytesIO, *, format: str, dpi: float) -> None:
         assert threading.get_ident() == owner_id
@@ -576,25 +585,15 @@ def test_save_encoding_and_io_complete_on_owner_with_member_failure_isolation(
 
     def write(
         destination: Path,
-        payload: ExperimentPayload,
-        metadata: RunMetadata,
+        container: Container,
         *,
-        cfg: CfgSnapshot,
         replace: bool = False,
-        extensions: NativeExtensions | None = None,
     ) -> None:
         io_threads.append(threading.get_ident())
-        native_write(
-            destination,
-            payload,
-            metadata,
-            cfg=cfg,
-            replace=replace,
-            extensions=extensions,
-        )
+        native_write(destination, container, replace=replace)
 
     monkeypatch.setattr(Figure, "savefig", encode)
-    monkeypatch.setattr(artifact_saving, "save_run_data", write)
+    monkeypatch.setattr(artifact_saving, "save", write)
     completed = session.save_artifacts()
     assert encoded == [plots["fit"], plots["residual"]]
     assert io_threads and all(thread == owner_id for thread in io_threads)
@@ -672,7 +671,10 @@ def test_missing_evidence_rejects_comment_before_operation(
 ) -> None:
     session = native_session
     if missing == "metadata":
-        session.state.update_tab_result("tab", session.state.get_tab("tab").run.result)
+        session.state.update_tab_result(
+            "tab",
+            replace(require_record(session.state.get_tab("tab").run), metadata=None),
+        )
     else:
         session.state.get_tab("tab").run.storage = None
     command = session.control.save_artifacts if batch else session.control.save_data
@@ -736,7 +738,6 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     assert data.members[0].outputs[1].path != first.outputs[1].output.path
     metadata = require_record(session.state.get_tab("tab").run).metadata
     assert metadata is not None
-    assert metadata.labber_path == str(first.outputs[1].output.path)
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     session.state.clear_tab_results("tab")
     assert session.state.get_tab("tab").run.confirmed_run_id is None

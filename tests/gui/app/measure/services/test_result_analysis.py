@@ -1,11 +1,11 @@
 """Result-bound Primary/Post parameter preparation through TabService and State."""
 
-from tests.gui.app.measure._record_support import require_record
 from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -28,6 +28,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._record_support import require_record
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
@@ -67,10 +68,12 @@ def test_default_analysis_params_retain_result_source(
             cfg=MagicMock(),
         ),
     )
-    result = object()
+    result = RunRecord(None, object())
     metadata = historical_metadata()
     retired = (
-        state.update_tab_loaded_result("tab", replace(result, metadata=metadata), "native.h5", parameters=saved)
+        state.update_tab_loaded_result(
+            "tab", replace(result, metadata=metadata), "native.h5", parameters=saved
+        )
         if loaded
         else state.update_tab_result("tab", result, parameters=saved)
     )
@@ -97,7 +100,7 @@ def test_default_analysis_params_retain_result_source(
         assert saved.value("$source_qubit.rate") == 1.0
     if loaded:
         assert state.get_tab("tab").run.source_operation_id is None
-        assert require_record(state.get_tab("tab").run).metadata is metadata
+        assert require_record(state.get_tab("tab").run).metadata == metadata
         assert state.get_tab("tab").run.source_path == "native.h5"
 
 
@@ -130,7 +133,7 @@ def _make_source_state() -> State:
     state.add_tab(
         "tab1", Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock())
     )
-    state.update_tab_result("tab1", object())
+    state.update_tab_result("tab1", RunRecord(None, object()))
     return state
 
 
@@ -166,7 +169,7 @@ def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab("tab1")
-    state.update_tab_result("tab1", object(), parameters=captured)
+    state.update_tab_result("tab1", RunRecord(None, object()), parameters=captured)
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, background = _make_primary_service(state, EventBus(), writeback=writeback)
@@ -203,7 +206,7 @@ def test_interactive_writeback_retains_run_source_after_rebinding(
     state = _make_source_state()
     q1, q2 = result_sources
     captured = None if context_free else q1
-    state.update_tab_result("tab1", object(), parameters=captured)
+    state.update_tab_result("tab1", RunRecord(None, object()), parameters=captured)
     tab = state.get_tab("tab1")
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
@@ -241,7 +244,7 @@ def test_post_uses_run_source_for_request_and_writeback_after_rebinding(
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab("tab1")
-    run_result, primary_result = object(), object()
+    run_result, primary_result = RunRecord(None, object()), object()
     state.update_tab_result("tab1", run_result, parameters=captured)
     state.update_tab_analyze("tab1", primary_result, None)
     state.set_context(replace(state.session_env, parameters=q2))

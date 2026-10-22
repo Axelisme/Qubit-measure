@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from tests.gui.app.measure._record_support import require_record
 import socket
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -34,6 +33,7 @@ from tests.gui.app.measure._flux_adapter import (
     SpectrumCore,
     SpectrumResult,
 )
+from tests.gui.app.measure._record_support import require_record
 
 from ._helpers import Fixture, recv_response, send
 
@@ -79,7 +79,6 @@ def load_native_spectrum(
         started_at="2026-10-08T00:00:00+00:00",
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
-        labber_path=None,
         snapshot=RunSnapshot(
             entry_id=storage.entry_id,
             entry_name=storage.entry_name,

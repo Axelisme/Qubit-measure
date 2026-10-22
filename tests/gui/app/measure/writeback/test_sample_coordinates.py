@@ -1,6 +1,5 @@
 """Adapter-declared sample coordinates through analysis service entry points."""
 
-from tests.gui.app.measure._record_support import require_record
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
@@ -36,6 +35,7 @@ from tests.gui.app.measure._native_save_support import (
     PaneSummary,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_record
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -106,10 +106,17 @@ def test_analysis_uses_only_the_declared_sample_device_alias(
             )
         )
         tab.run.parameters = native.context.read_context()
-        require_record(tab.run).metadata = native.metadata.model_copy(update={'device_snapshot': {
-                "device_at_run": {"value": 0.00125, "value_unit": "A"},
-                "unrelated_device": {"value": 42.0, "value_unit": "V"},
-            }})
+        tab.run.result = replace(
+            require_record(tab.run),
+            metadata=native.metadata.model_copy(
+                update={
+                    "device_snapshot": {
+                        "device_at_run": {"value": 0.00125, "value_unit": "A"},
+                        "unrelated_device": {"value": 42.0, "value_unit": "V"},
+                    }
+                }
+            ),
+        )
         writeback = WritebackService(
             ContextControlFacet(context=native.context), arb_names=lambda: ()
         )
@@ -141,7 +148,10 @@ def test_analysis_uses_only_the_declared_sample_device_alias(
             )
         native.context.set_alias_rows((AliasRow("coordinate_source", "later_device"),))
         tab.run.parameters = native.context.read_context()
-        require_record(tab.run).metadata = native.metadata.model_copy(update={'device_snapshot': {}})
+        tab.run.result = replace(
+            require_record(tab.run),
+            metadata=native.metadata.model_copy(update={"device_snapshot": {}}),
+        )
         if stage == "interactive":
             assert analyze.finish_plugin("tab")
         else:

@@ -2,14 +2,13 @@
 
 import os
 from collections.abc import Iterator
-from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 import h5py as h5
 import pytest
 from qtpy.QtWidgets import QApplication, QPushButton, QTableWidget
-from zcu_tools.datafile import save_run_data
+from zcu_tools.datafile import save
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.app.measure.writeback import WritebackService
@@ -22,7 +21,7 @@ from zcu_tools.resources.entry import (
     SavedPayload,
 )
 
-from tests._native_support import native_cfg, native_payload
+from tests._native_support import native_container
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
@@ -47,8 +46,10 @@ def native_file(session: NativeSaveSession, *, completion: str = "complete") -> 
     path.parent.mkdir(parents=True)
     metadata = session.metadata
     if completion == "unknown":
-        metadata = metadata.model_copy(update={'started_at': None, 'finished_at': None, 'completion': "unknown"})
-    save_run_data(path, native_payload(), metadata, cfg=native_cfg())
+        metadata = metadata.model_copy(
+            update={"started_at": None, "finished_at": None, "completion": "unknown"}
+        )
+    save(path, native_container(metadata=metadata))
     return path
 
 
@@ -132,9 +133,9 @@ def test_query_metadata_and_load_validity_are_independent(
     else:
         with h5.File(path, "r+") as file:
             if fault == "invalid-metadata":
-                del file.attrs["experiment"]
+                del file["docs/metadata"]
             else:
-                del file["data"]
+                del file["vars"]
     rows = session.control.list_saved_runs()
     assert len(rows) == 1
     row = rows[0]
@@ -254,7 +255,7 @@ def test_unreadable_metadata_selection_uses_exact_path_without_inferred_identity
 ) -> None:
     path = native_file(session)
     with h5.File(path, "r+") as file:
-        del file.attrs["experiment"]
+        del file["docs/metadata"]
     (row,) = session.control.list_saved_runs()
     dialog = RunLoadDialog((row,), initial_point="", start_directory="")
     images = Path(os.environ.get("LOAD_FALLBACK_EVIDENCE", str(tmp_path / "images")))

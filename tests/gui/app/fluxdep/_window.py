@@ -7,7 +7,6 @@ assertion rather than as an attribute error.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, TypeVar

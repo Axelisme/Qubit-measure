@@ -1,6 +1,5 @@
 """Complete previews read current values at each draft's fixed destination."""
 
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 

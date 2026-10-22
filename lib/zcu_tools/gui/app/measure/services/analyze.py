@@ -108,6 +108,7 @@ class AnalyzeService(StagedAnalyzeService):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
+        metadata = None if tab.run.result is None else tab.run.result.metadata
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = AnalyzeRequest(
             run_result=tab.run.result,
@@ -122,12 +123,12 @@ class AnalyzeService(StagedAnalyzeService):
         adapter = tab.adapter
         captured_inputs = _AnalyzeCapture(
             run_result=req.run_result,
-            run_id=(None if tab.run.result is None else tab.run.result.metadata).run_id if (None if tab.run.result is None else tab.run.result.metadata) is not None else None,
-            experiment_name=(None if tab.run.result is None else tab.run.result.metadata).experiment
-            if (None if tab.run.result is None else tab.run.result.metadata) is not None
+            run_id=metadata.run_id if metadata is not None else None,
+            experiment_name=metadata.experiment
+            if metadata is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy((None if tab.run.result is None else tab.run.result.metadata).device_snapshot)
-            if (None if tab.run.result is None else tab.run.result.metadata) is not None
+            device_snapshot=deepcopy(metadata.device_snapshot)
+            if metadata is not None
             else None,
             context=ctx,
             adapter=adapter,
@@ -181,15 +182,16 @@ class AnalyzeService(StagedAnalyzeService):
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
         tab = self._state.get_tab(tab_id)
+        metadata = None if tab.run.result is None else tab.run.result.metadata
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
-            run_id=(None if tab.run.result is None else tab.run.result.metadata).run_id if (None if tab.run.result is None else tab.run.result.metadata) is not None else None,
-            experiment_name=(None if tab.run.result is None else tab.run.result.metadata).experiment
-            if (None if tab.run.result is None else tab.run.result.metadata) is not None
+            run_id=metadata.run_id if metadata is not None else None,
+            experiment_name=metadata.experiment
+            if metadata is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy((None if tab.run.result is None else tab.run.result.metadata).device_snapshot)
-            if (None if tab.run.result is None else tab.run.result.metadata) is not None
+            device_snapshot=deepcopy(metadata.device_snapshot)
+            if metadata is not None
             else None,
             context=ctx,
             adapter=tab.adapter,

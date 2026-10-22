@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.gui.app.measure._record_support import require_record
 import base64
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -23,6 +22,7 @@ from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateReques
 from zcu_tools.resources.entry import component_registry
 
 from tests.gui.app.measure._components import register_all as register_components
+from tests.gui.app.measure._record_support import require_record
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 from ._helpers import mcp_client, open_client

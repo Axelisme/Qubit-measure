@@ -3,6 +3,9 @@
 from uuid import UUID
 
 import h5py as h5
+import numpy as np
+from pydantic import TypeAdapter
+from zcu_tools.datafile import Axis, Container, ContainerAttrs, Variable
 from zcu_tools.experiment.metadata import (
     CfgSnapshot,
     RunMetadata,
@@ -64,4 +67,24 @@ def native_cfg() -> CfgSnapshot:
         values={"frequency": 5000.0, "nested": {"unknown": [None, True, 1.5]}},
         cfg_type="SyntheticCfg",
         schema_version="1.3",
+    )
+
+
+def native_container(*, metadata: RunMetadata | None = None) -> Container:
+    """Build one synthetic SI readout and its historical cfg/metadata documents."""
+    metadata = native_metadata() if metadata is None else metadata
+    return Container(
+        vars={
+            "readout": Variable(
+                np.array([1 + 2j, 3 - 4j]),
+                (Axis("frequency", "Hz", np.array([4e9, 5e9])),),
+                "V",
+            )
+        },
+        docs={
+            "cfg": TypeAdapter(CfgSnapshot).dump_python(native_cfg(), mode="json"),
+            "metadata": metadata.model_dump(mode="json"),
+        },
+        groups={},
+        attrs=ContainerAttrs("3.0", "synthetic-tests", "experiment-run", {}),
     )

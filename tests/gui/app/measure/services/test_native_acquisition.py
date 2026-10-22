@@ -1,6 +1,5 @@
 """Native run evidence publication, acquired ledger events and retained admission source."""
 
-from tests.gui.app.measure._record_support import require_record
 import logging
 from collections.abc import Generator
 from dataclasses import replace
@@ -9,9 +8,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load_run_data
-from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
@@ -51,6 +51,7 @@ from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     SavingAdapter,
 )
+from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure._synthetic import ALIAS_PRESET
 from tests.resources.entry.fakes import (
     register_fakes,
@@ -167,7 +168,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     assert outcome is not None and outcome.status == "finished"
     tab = session.state.get_tab("tab")
     metadata = require_record(tab.run).metadata
-    record = tab.run.result
+    record = require_record(tab.run)
     assert metadata is not None and record is not None and record.cfg is not None
     events = other.ledger.events()
     assert len(events) == 1
@@ -308,15 +309,15 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     assert parameters.value("$driver.rate") == 20.0
     report = services.save_control.save_data(tab_id, origin=origin)
     assert all(output.status == "saved" for output in report.outputs)
-    stored = load_run_data(
+    stored = load(
         next(
             output.output.path
             for output in report.outputs
             if output.output.format == "data_h5"
         )
     )
-    assert stored.metadata.snapshot == metadata.snapshot
-    assert stored.metadata.run_id == acquired.payload.run_id
+    assert metadata_from_container(stored).snapshot == metadata.snapshot
+    assert metadata_from_container(stored).run_id == acquired.payload.run_id
     assert [event.kind for event in storage.ledger.events()] == ["acquired", "saved"]
     assert not birth_storage.ledger.events()
 
@@ -376,7 +377,7 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     assert outcome is not None and outcome.status == "failed"
     assert outcome.error == terminal.error_message
     tab = session.state.get_tab("tab")
-    assert tab.run.result is not None
+    assert require_record(tab.run) is not None
     metadata = require_record(tab.run).metadata
     assert metadata is not None
     assert tab.run.source_operation_id == token
@@ -391,9 +392,9 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     saved = session.save()
     assert all(output.status == "saved" for output in saved.outputs)
     assert saved.run_id == metadata.run_id
-    stored = load_run_data(saved.outputs[0].output.path)
-    assert stored.metadata.started_at == metadata.started_at
-    assert stored.metadata.finished_at == metadata.finished_at
+    stored = load(saved.outputs[0].output.path)
+    assert metadata_from_container(stored).started_at == metadata.started_at
+    assert metadata_from_container(stored).finished_at == metadata.finished_at
     assert [event.kind for event in session.entry.ledger.events()] == ["saved"]
 
 

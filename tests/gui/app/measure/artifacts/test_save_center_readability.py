@@ -1,7 +1,7 @@
 """User-facing save evidence over real State, tracker reports and Qt widgets."""
 
-from dataclasses import replace
 from collections.abc import Generator
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +32,7 @@ from tests.gui.app.measure._native_save_support import (
     PaneSummary,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_record
 
 
 class _UndeclaredSavingAdapter(AnalysisSavingAdapter):
@@ -60,7 +61,11 @@ def saving_view(
         )
         tab_id = ctrl.new_tab("saving")
         original = session.state.get_tab("tab")
-        session.state.update_tab_result(tab_id, replace(original.run.result, metadata=session.metadata), parameters=original.run.parameters)
+        session.state.update_tab_result(
+            tab_id,
+            replace(require_record(original.run), metadata=session.metadata),
+            parameters=original.run.parameters,
+        )
         ctrl.update_tab_analyze_param_instance(tab_id, PaneParams())
         window = MainWindow(
             ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

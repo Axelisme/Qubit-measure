@@ -9,6 +9,7 @@ import pytest
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,
@@ -37,6 +38,7 @@ from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_record
 
 
 def test_tab_snapshot_is_single_pure_render_model() -> None:
@@ -55,7 +57,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             adapter_name="fake",
             adapter=MagicMock(),
             cfg=MagicMock(),
-            run=RunPaneState(result=object()),
+            run=RunPaneState(result=RunRecord(None, object())),
             analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
             save=SavePaneState(comment="draft note"),
         ),
@@ -200,7 +202,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
             adapter_name="ge",
             adapter=MagicMock(),
             cfg=MagicMock(),
-            run=RunPaneState(result=object()),
+            run=RunPaneState(result=RunRecord(None, object())),
             analysis=AnalysisPaneState(result=MagicMock()),
             post_analysis=PostAnalysisPaneState(
                 result=MagicMock(),
@@ -242,7 +244,7 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
             adapter_name="ge",
             adapter=adapter,
             cfg=MagicMock(),
-            run=RunPaneState(result=object()),
+            run=RunPaneState(result=RunRecord(None, object())),
             analysis=AnalysisPaneState(result=MagicMock()),  # primary result present
         ),
     )
@@ -271,7 +273,7 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
             adapter_name="ge",
             adapter=MagicMock(),
             cfg=MagicMock(),
-            run=RunPaneState(result=object()),
+            run=RunPaneState(result=RunRecord(None, object())),
             analysis=AnalysisPaneState(result=None),  # no primary analyze result
         ),
     )
@@ -309,10 +311,16 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    record = session.state.get_tab("tab").run.result
+    record = require_record(session.state.get_tab("tab").run)
     assert record is not None
     run = session.state.get_tab("tab").run
-    session.state.update_tab_loaded_result("tab", replace(record, metadata=session.metadata), "existing.hdf5", parameters=run.parameters, storage=run.storage)
+    session.state.update_tab_loaded_result(
+        "tab",
+        replace(record, metadata=session.metadata),
+        "existing.hdf5",
+        parameters=run.parameters,
+        storage=run.storage,
+    )
     snapshot = _native_snapshot(session)
 
     assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
@@ -362,15 +370,23 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
         _native_snapshot(session).artifacts[0].artifacts[0].status is SaveStatus.SAVED
     )
 
-    record = session.state.get_tab("tab").run.result
+    record = require_record(session.state.get_tab("tab").run)
     assert record is not None
     run = session.state.get_tab("tab").run
-    session.state.update_tab_result("tab", replace(record, metadata=session.metadata), parameters=run.parameters)
+    session.state.update_tab_result(
+        "tab", replace(record, metadata=session.metadata), parameters=run.parameters
+    )
     assert (
         _native_snapshot(session).artifacts[0].artifacts[0].status
         is SaveStatus.NOT_SAVED
     )
-    session.state.update_tab_loaded_result("tab", replace(record, metadata=session.metadata), "imported.hdf5", parameters=run.parameters, storage=run.storage)
+    session.state.update_tab_loaded_result(
+        "tab",
+        replace(record, metadata=session.metadata),
+        "imported.hdf5",
+        parameters=run.parameters,
+        storage=run.storage,
+    )
     loaded = _native_snapshot(session)
     assert loaded.run is not None and loaded.run.source_path == "imported.hdf5"
     assert loaded.artifacts[0].artifacts[0].status is SaveStatus.NOT_SAVED
