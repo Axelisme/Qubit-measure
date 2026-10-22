@@ -108,6 +108,10 @@ Operation 的完成型別只有 completed／failed，合作中止以 `partial_re
 
 主動命令只支援控制命令與步驟邊界的 workflow tunables。當前 step 保留 capture，要重做該步先 Pause、Apply、Resume，見 [[0062]]。不支援 Run 中即時資料或同時等待多個來源。使用者於 2026-10-16 裁定：「好，那先不支援c，做ab就好，順便把這討論紀錄到discussion」。採用 async 語法不放寬這個序列腳本邊界。
 
+#### 2026-10-22 裁定：Scope 成為顯式的 core 契約（已採用，待實作）
+
+使用者裁定：「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」「你認為signal是不是應該是顯式的？」「可以考慮讓scope成為zcu_lib/core的契約，讓core.py使用」「it.commit_dir可以對應到scope的層級與深度」。採用：experiment 層定義 `Scope`（`stop`、`cancelled`、`child(label)`、`dir`、`run`／`call`、`commit`），`RunContext.scope` 取代 `cancel_signal`，`Schedule(scope=)` 自建 schedule child、acquire 建 acquire child，driver／clock／program_builder 仍只收 bit；作者以 `with env.scope(label)` 與 `for item, iteration in zip(items, env.iterations())` 取得顯式 scope 物件，沒有「目前 scope」；路徑 `kind:name#seq`（根 `workflow:<名>`／`recipe:<名>`，`operation:<name>#N` 的 name 由呼叫端可選提供）；`scope.dir` 鏡射路徑、`scope.commit` 一個 scope 一次；根被取消以 `ScriptCancelled` 結束腳本，其下各層以值交付。推導與否決的選項見 [顯式 scope 契約討論](../discussions/2026-10-22-explicit-scope-contract.md)。本段取代上文「已知限制」中關於不同粒度中斷的描述；實作後由該 task 把本節其餘段落對齊。
+
 ### 層與層之間以共享狀態交接
 
 各層之間不靠 agent 搬運數值。下層寫入、上層讀取的是同一份共享狀態：
