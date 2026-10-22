@@ -9,6 +9,7 @@ returning. No control cancels the authored asyncio Task.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine, Mapping
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -22,7 +23,11 @@ from zcu_tools.core.script_protocol import Answer, Question
 
 from .stop_signal import StopSignal
 
-type ScriptStatus = Literal["ready", "running", "paused", "completed", "cancelled", "failed"]
+logger = logging.getLogger(__name__)
+
+type ScriptStatus = Literal[
+    "ready", "running", "paused", "completed", "cancelled", "failed"
+]
 type CancelScope = Literal["script", "run"]
 
 
@@ -142,7 +147,7 @@ class ScriptHost:
                     self._gate = asyncio.Event()
                     if not self._paused or self._root.is_set():
                         self._gate.set()
-                return runner.run(script)
+                return runner.run(self._execute(script))
         except BaseException as error:
             with self._lock:
                 self._error = error
@@ -151,12 +156,17 @@ class ScriptHost:
             with self._lock:
                 self._loop = None
                 self._status = (
-                    "cancelled" if self._root.is_set()
-                    else "failed" if self._error is not None else "completed"
+                    "cancelled"
+                    if self._root.is_set()
+                    else "failed"
+                    if self._error is not None
+                    else "completed"
                 )
                 self._iteration.release()
-            self._changed()
-            self._done.set()
+            try:
+                self._changed()
+            finally:
+                self._done.set()
 
     async def call[T](self, fn: Callable[[CallContext], T]) -> CallResult[T]:
         """Await fn(ctx) in an executor, always starting even with a stopped token.
@@ -204,7 +214,7 @@ class ScriptHost:
         self._changed()
         try:
             answer = await future
-            return None if answer is None else expected.model_validate(answer)
+            return None if answer is None else question.parse_answer(answer)
         finally:
             with self._lock:
                 self._pending = None
@@ -220,14 +230,24 @@ class ScriptHost:
         request. An Answer instance must match the declared model (subclasses
         allowed). Return acknowledges delivery, not subsequent author completion.
         """
+
         def deliver() -> None:
             pending, future = self._pending, self._answer
-            if pending is None or pending.request_id != request_id or future is None or future.done():
+            if (
+                pending is None
+                or pending.request_id != request_id
+                or future is None
+                or future.done()
+            ):
                 raise ValueError("No pending question for this request id")
-            if isinstance(answer, BaseModel) and not isinstance(answer, pending.answer_type):
+            if isinstance(answer, BaseModel) and not isinstance(
+                answer, pending.answer_type
+            ):
                 raise TypeError("Answer must match the question's declared model")
             parsed = pending.answer_type.model_validate(answer)
+            pending.question.validate_answer(parsed)
             future.set_result(parsed)
+
         self._command(deliver)
 
     async def commit(self) -> None:
@@ -258,6 +278,7 @@ class ScriptHost:
         CallResult with its starting epoch; workflow env owns discard/retry
         policy. New calls and commit wait for Resume. No author task is cancelled.
         """
+
         def apply() -> None:
             with self._lock:
                 self._paused = True
@@ -266,14 +287,17 @@ class ScriptHost:
                     self._active.set()
                 if self._gate is not None and not self._root.is_set():
                     self._gate.clear()
+
         self._command(apply, allow_idle=True)
 
     def resume(self) -> None:
         """Acknowledge opening the gate without changing epoch or scope tokens."""
+
         def apply() -> None:
             self._paused = False
             if self._gate is not None:
                 self._gate.set()
+
         self._command(apply, allow_idle=True)
 
     def cancel(self, *, scope: CancelScope = "script") -> None:
@@ -287,7 +311,10 @@ class ScriptHost:
         """
         if scope not in ("script", "run"):
             raise ValueError("scope must be script or run")
+
         def stop() -> None:
+            if self._done.is_set():
+                return
             if scope == "script":
                 self._root.set()
                 if self._gate is not None:
@@ -296,6 +323,7 @@ class ScriptHost:
                     self._answer.set_result(None)
             elif self._active is not None:
                 self._active.set()
+
         self._command(stop, allow_idle=True)
 
     def close(self) -> None:
@@ -308,9 +336,29 @@ class ScriptHost:
         """
         self.cancel()
         with self._lock:
-            running = self._loop is not None
+            running = self._owner is not None and not self._done.is_set()
         if running and get_ident() != self._owner:
             self._done.wait()
+
+    def control[T](self, fn: Callable[[], T]) -> T:
+        """Run one memory-only control on the owner loop and acknowledge its result.
+
+        fn must take only microseconds: no await, blocking, I/O or author-code
+        reentry. Owner-thread calls execute inline; foreign threads enqueue with
+        call_soon_threadsafe and wait for the result. Callback exceptions return
+        unchanged to the caller. Before run or after loop shutdown this raises
+        RuntimeError. This does not wait for an external operation to drain.
+        """
+        return self._command(fn)
+
+    async def _execute[T](self, script: Coroutine[object, object, T]) -> T:
+        try:
+            return await script
+        finally:
+            # Stop accepting commands before the loop's final drain. Previously
+            # accepted callbacks are queued before run_until_complete's stop.
+            with self._lock:
+                self._loop = None
 
     def _changed(self) -> None:
         if self._on_change is not None:
@@ -322,25 +370,26 @@ class ScriptHost:
             raise RuntimeError("Host await must run on its caller-owned worker loop")
         return loop
 
-    def _command(self, command: Callable[[], None], *, allow_idle: bool = False) -> None:
+    def _command[T](self, command: Callable[[], T], *, allow_idle: bool = False) -> T:
         with self._lock:
             loop = self._loop
             if loop is None:
-                if not allow_idle:
-                    raise RuntimeError("Script host has no active loop")
-                if not self._done.is_set():
-                    command()
-                return
+                if allow_idle:
+                    return command()
+                raise RuntimeError("Script host has no active loop")
             if get_ident() == self._owner:
-                command()
-                return
-            ack: Future[None] = Future()
+                return command()
+            ack: Future[T] = Future()
+
             def apply() -> None:
                 try:
-                    command()
-                except Exception as error:
+                    value = command()
+                except BaseException as error:
+                    # The control caller owns this failure, not the author task.
+                    logger.exception("Script control callback failed")
                     ack.set_exception(error)
                 else:
-                    ack.set_result(None)
+                    ack.set_result(value)
+
             loop.call_soon_threadsafe(apply)
-        ack.result()
+        return ack.result()
