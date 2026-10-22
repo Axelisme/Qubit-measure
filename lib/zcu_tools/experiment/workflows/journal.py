@@ -53,6 +53,17 @@ class OperationFinished:
 
 
 @dataclass(frozen=True)
+class QuestionAnswered:
+    """Accepted request ID with its original question and validated answer JSON."""
+
+    request_id: str
+    question_type: str
+    question: JsonValue
+    answer: JsonValue
+    kind: Literal["question_answered"] = field(default="question_answered", init=False)
+
+
+@dataclass(frozen=True)
 class DeviceSetup:
     """Completed device invocation, with requested name and full typed cfg."""
 
@@ -168,6 +179,7 @@ type JournalPayload = (
     RunStarted
     | RecordCommitted
     | OperationFinished
+    | QuestionAnswered
     | DeviceSetup
     | ExperimentFailed
     | TunablesChanged

@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Literal
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
@@ -26,6 +26,7 @@ from .journal import (
     OperationFinished,
     Paused,
     PauseRequested,
+    QuestionAnswered,
     RecordCommitted,
     Resumed,
     RunEnded,
@@ -89,6 +90,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._run_no = 0
         self._records: list[CommittedRecord] = []
         self._revisions: list[int] = []
+        self._accepted_answers: list[tuple[PendingQuestion, Answer]] = []
+        self._answer_lock = Lock()
 
     def start(
         self, plan: P, tunables: T, paths: RunPaths, identity: RunIdentity
@@ -154,7 +157,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             self._finish(summary)
         except Exception as error:
             _logger.exception("Workflow execution failed")
-            self._fail(error)
+            self._fail(self._pending_error or error)
         finally:
             self._displays.close()
             with self._lock:
@@ -240,6 +243,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
 
     def _boundary(self) -> None:
         with self._lock:
+            if self._pending_error is not None:
+                raise self._pending_error
             if self._lifecycle == "pausing":
                 self._artifacts.append(Paused(self._call_seq, self._commit_seq))
                 self._artifacts.set_lifecycle("paused")
@@ -247,6 +252,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
 
     def _question_boundary(self, phase: Literal["waiting", "answered"]) -> None:
         with self._lock:
+            self._flush_answers()
+            if self._pending_error is not None:
+                raise self._pending_error
             if self._lifecycle in ("stopping", "failed"):
                 return
             if phase == "waiting" and self._lifecycle != "paused":
@@ -281,41 +289,62 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
 
     def pause(self) -> RunStatus:
         """Record Pause intent, then acknowledge host control outside the lock."""
-        with self._lock:
-            if self._lifecycle == "pausing":
-                return self.status()
-            if self._lifecycle != "running":
-                raise InvalidRunState("pause", self._lifecycle)
-            self._artifacts.append(
-                PauseRequested(self._ports.clock.now(), self._call_seq)
-            )
-            self._artifacts.set_lifecycle("pausing")
-            self._lifecycle = "pausing"
+        try:
+            with self._lock:
+                if self._lifecycle == "pausing":
+                    return self.status()
+                if self._lifecycle != "running":
+                    raise InvalidRunState("pause", self._lifecycle)
+                self._artifacts.append(
+                    PauseRequested(self._ports.clock.now(), self._call_seq)
+                )
+                self._artifacts.set_lifecycle("pausing")
+                self._lifecycle = "pausing"
+        except InvalidRunState:
+            raise
+        except Exception as error:
+            self._control_failure(error)
+            raise
         self._host.pause()
         return self.status()
 
     def resume(self) -> RunStatus:
         """Open the existing worker's pause gate; an Ask requires an answer instead."""
-        with self._lock:
-            if self._lifecycle != "paused" or self._host.pending_question is not None:
-                raise InvalidRunState("resume", self._lifecycle)
-            self._artifacts.append(Resumed(self._commit_seq, self._tunables.revision))
-            self._artifacts.set_lifecycle("running")
-            self._lifecycle = "running"
+        try:
+            with self._lock:
+                if (
+                    self._lifecycle != "paused"
+                    or self._host.pending_question is not None
+                ):
+                    raise InvalidRunState("resume", self._lifecycle)
+                self._artifacts.append(
+                    Resumed(self._commit_seq, self._tunables.revision)
+                )
+                self._artifacts.set_lifecycle("running")
+                self._lifecycle = "running"
+        except InvalidRunState:
+            raise
+        except Exception as error:
+            self._control_failure(error)
+            raise
         self._host.resume()
         return self.status()
 
     def stop(self) -> RunStatus:
         """Latch explicit Stop and release an Ask/gate without waiting for drain."""
-        with self._lock:
-            if self._lifecycle in _TERMINAL or self._stop_requested:
-                return self.status()
-            self._artifacts.append(
-                StopRequested(self._ports.clock.now(), self._call_seq)
-            )
-            self._artifacts.set_lifecycle("stopping")
-            self._lifecycle = "stopping"
-            self._stop_requested = True
+        try:
+            with self._lock:
+                if self._lifecycle in _TERMINAL or self._stop_requested:
+                    return self.status()
+                self._artifacts.append(
+                    StopRequested(self._ports.clock.now(), self._call_seq)
+                )
+                self._artifacts.set_lifecycle("stopping")
+                self._lifecycle = "stopping"
+                self._stop_requested = True
+        except Exception as error:
+            self._control_failure(error)
+            raise
         self._host.cancel()
         return self.status()
 
@@ -343,9 +372,18 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         types/fields raise TypeError/ValidationError. Rejection publishes no
         answered fact or lifecycle change. No new worker segment is started.
         """
-        self._require_question(request_id)
-        try:
+
+        def deliver() -> None:
+            pending = self._require_question(request_id)
             self._host.answer(request_id, answer)
+            # The host ack guarantees validation and Future delivery. Keep this
+            # callback memory-only; the author boundary or caller flushes later.
+            accepted = (pending, answer.model_copy(deep=True))
+            with self._answer_lock:
+                self._accepted_answers.append(accepted)
+
+        try:
+            self._host.control(deliver)
         except ValueError as error:
             current = self.pending_question()
             if current is None or current.request_id != request_id:
@@ -353,21 +391,58 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                     request_id, None if current is None else current.request_id
                 ) from error
             raise
+        self._flush_answers()
         return self.status()
+
+    def _flush_answers(self) -> None:
+        with self._lock:
+            with self._answer_lock:
+                accepted = self._accepted_answers
+                self._accepted_answers = []
+            for pending, answer in accepted:
+                self._artifacts.append(
+                    QuestionAnswered(
+                        pending.request_id,
+                        type(pending.question).__name__,
+                        pending.question.model_dump(mode="json"),
+                        answer.model_dump(mode="json"),
+                    )
+                )
+
+    def _control_failure(self, error: Exception) -> None:
+        with self._lock:
+            if self._pending_error is None:
+                self._pending_error = error
+            self._reason = (
+                f"{type(self._pending_error).__name__}: {self._pending_error}"
+            )
+            self._lifecycle = "stopping" if self._executing else "failed"
+        # Acknowledgement may wait for the loop; never retain the Engine lock.
+        self._host.cancel()
 
     def update_tunables(
         self, tunables: BaseModel, expected_revision: int, actor: Actor
     ) -> TunablesSnapshot:
         """Replace one whole model after its journal append succeeds."""
-        with self._lock:
-            if self._lifecycle not in ("running", "pausing", "paused"):
-                raise InvalidRunState("update_tunables", self._lifecycle)
-            return self._tunables.update(
-                tunables, expected_revision=expected_revision, actor=actor
-            )
+        try:
+            with self._lock:
+                if self._lifecycle not in ("running", "pausing", "paused"):
+                    raise InvalidRunState("update_tunables", self._lifecycle)
+                return self._tunables.update(
+                    tunables, expected_revision=expected_revision, actor=actor
+                )
+        except Exception as error:
+            if self._pending_error is error:
+                self._control_failure(error)
+            raise
 
     def _append_tunables(self, event: TunablesChanged) -> None:
-        self._artifacts.append(event)
+        try:
+            self._artifacts.append(event)
+        except Exception as error:
+            if self._pending_error is None:
+                self._pending_error = error
+            raise
 
     def _finish(self, summary: Summary) -> None:
         _validate_summary(summary)

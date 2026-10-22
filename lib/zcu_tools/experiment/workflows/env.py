@@ -265,10 +265,8 @@ class WorkflowEnv[C]:
         try:
             value = fn(ctx, attempt)
             error = ctx.stop_signal.error
-            if error is not None:
-                if error.status == "failed":
-                    return Failed(error.reason)
-                raise error from error.exception
+            if error is not None and error.status == "failed":
+                return Failed(error.reason)
             return _Value(value)
         finally:
             attempt.finished_at = self._ports.clock.now()
@@ -326,7 +324,9 @@ class WorkflowEnv[C]:
             current = deepcopy(captured)
             result = experiment(current, context=context)
             error = context.cancel_signal.error
-            if error is not None and error.status == "failed":
+            if error is not None and error.status != "failed":
+                raise error from error.exception
+            if error is not None:
                 self._hooks.experiment_failed(
                     getattr(experiment, "__qualname__", type(experiment).__name__),
                     error.reason,

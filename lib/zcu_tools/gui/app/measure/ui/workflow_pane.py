@@ -42,6 +42,7 @@ from zcu_tools.gui.app.measure.services.workflow_borrower import WorkflowBorrowe
 from zcu_tools.gui.app.measure.services.workflow_control import (
     WorkflowTabSnapshot,
 )
+from zcu_tools.gui.app.measure.services.workflow_run import QuestionExchange
 from zcu_tools.gui.app.measure.services.workflow_tab import FormKind
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
@@ -284,31 +285,32 @@ class WorkflowPane(QWidget):
             self._answer_input.setText("{}")
             self._subtabs.setCurrentWidget(self._ask_page)
         if exchange is not None:
-            question = exchange.question
-            self._question_label.setText(
-                f"{question['question_type']}\n"
-                + json.dumps(question["question"], ensure_ascii=False, indent=2)
-            )
-            self._answer_schema.setText(
-                "Answer schema: "
-                + json.dumps(question["answer_schema"], ensure_ascii=False)
-            )
-            if exchange.answer is not None:
-                self._answer_input.setText(
-                    json.dumps(exchange.answer, ensure_ascii=False)
-                )
-            self._answer_status.setText(
-                {
-                    "waiting": "等待回答",
-                    "submitted": "回答已提交",
-                    "answered": "已回答",
-                    "cancelled": "提問已取消",
-                }[exchange.state]
-            )
+            self._show_exchange(exchange)
         self._ask_pending = pending
         enabled = self._writable and pending
         self._answer_input.setEnabled(enabled)
         self._answer_button.setEnabled(enabled)
+
+    def _show_exchange(self, exchange: QuestionExchange) -> None:
+        question = exchange.question
+        self._question_label.setText(
+            f"{question['question_type']}\n"
+            + json.dumps(question["question"], ensure_ascii=False, indent=2)
+        )
+        self._answer_schema.setText(
+            "Answer schema: "
+            + json.dumps(question["answer_schema"], ensure_ascii=False)
+        )
+        if exchange.answer is not None:
+            self._answer_input.setText(json.dumps(exchange.answer, ensure_ascii=False))
+        self._answer_status.setText(
+            {
+                "waiting": "等待回答",
+                "submitted": "回答已提交",
+                "answered": "已回答",
+                "cancelled": "提問已取消",
+            }[exchange.state]
+        )
 
     def focus_question(self) -> None:
         """Show the pending Ask after badge navigation, without submitting anything."""
