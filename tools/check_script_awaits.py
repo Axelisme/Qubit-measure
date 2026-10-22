@@ -60,7 +60,7 @@ def _definitions(tree: ast.AST, prefix: str) -> set[str]:
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.ClassDef)):
             qualified = f"{prefix}.{node.name}"
-            if isinstance(node, ast.AsyncFunctionDef):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 found.add(qualified)
             found.update(_definitions(node, qualified))
         else:
@@ -152,9 +152,10 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     """Check repo-relative Python sources beneath zcu_lab using one uniform rule.
 
     Every async function is checked, whether decorated, called or unused. Await
-    accepts env/tab/session calls or statically resolved lab async definitions.
-    Direct asyncio calls and create_task/gather/wait_for/TaskGroup are rejected
-    even without await. Other async contexts and iterators are not banned.
+    accepts env/tab/session calls or statically resolved lab function definitions,
+    whether defined with def or async def. Within async functions, direct asyncio
+    calls and create_task/gather/wait_for/TaskGroup are rejected even without await.
+    Other async contexts and iterators are not banned.
     Non-lab paths are ignored. SyntaxError propagates; source is never executed.
     Results are sorted by path and line. See the module docstring for limits.
     """

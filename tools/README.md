@@ -106,10 +106,11 @@ Quality gate 以絕對檢查執行，不是可容忍新增違規的計數比較�
 Status 模式也列目前違規數。
 
 所有 recipe、workflow 與 helper 共用一條規則。
-Await 目標必須是 env／tab／session 呼叫，或解析到 lab 內 async 定義的函式呼叫。
+Await 目標必須是 env／tab／session 呼叫，或解析到 lab 內定義的函式呼叫。
+目標函式可用 def 或 async def 定義，工具不推導回傳型別。
 工具解析直接的絕對／相對 import，不因外部函式名稱像 helper 就放行。
-Helper 本文也受檢查，未被呼叫的 async def 亦在選集，不識別 decorator 或做 reachability。
-明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 不論有無 await 都拒絕，
+Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集，不識別 decorator 或做 reachability。
+在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 不論有無 await 都拒絕，
 包含未 await 的 create_task 與 async with TaskGroup()。
 其他 async with／async for 不另禁。
 

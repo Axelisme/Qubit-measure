@@ -37,9 +37,10 @@ Form 路徑是 tuple，字串指欄位，整數指完整清單中的原始位置
 缺少必要校準時，在 Run 前 raise `RecipeNeedsParameters`。
 
 所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
-或靜態解析到 `zcu_lab` async 定義的 helper。Recipe 通常用 `tab.*` 與 `session.ask(...)`。
-Workflow 可寫 `await helper(env, cfg)`，helper 可再呼叫 helper，自己的本文也同樣受檢查。
-不要 await 外部 coroutine。`asyncio.*`、`create_task`、`gather`、
+或靜態解析到 `zcu_lab` 內定義的 helper，定義可用 def 或 async def。
+Recipe 通常用 `tab.*` 與 `session.ask(...)`。
+Workflow 可寫 `await helper(env, cfg)`，helper 可再呼叫 helper，自己的 async def 本文也同樣受檢查。
+不要 await 外部 coroutine。在 async def 內，`asyncio.*`、`create_task`、`gather`、
 `wait_for`、`TaskGroup` 的直接呼叫即使不 await 也拒絕，包含 async with TaskGroup()。
 其他 async with／async for 不另禁。Runtime 擁有 worker loop 與 operation 生命週期。
 Quality gate 的 `tools/check_script_awaits.py` 全掃 async def，不識別 decorator，

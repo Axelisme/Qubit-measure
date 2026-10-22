@@ -121,8 +121,8 @@ Runtime 回 cancelled、report=null 與 runs，這個普通例外不記成 error
 作者 task 不會收到 `asyncio.CancelledError`，真正的 owner 或 cleanup 例外仍保留診斷。
 
 所有 lab async def 的 await 都遵守同一條規則，只允許 env／tab／session 的呼叫，
-或靜態解析到 zcu_lab async 定義的 helper，helper 可以再呼叫 helper。
-明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫即使不 await 也拒絕。
+或靜態解析到 zcu_lab 內定義的 helper，定義可用 def 或 async def，helper 可以再呼叫 helper。
+在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫即使不 await 也拒絕。
 其他 async with／async for 不另禁。
 Quality gate 全掃 async def，不分 decorator、entry、helper 或可達性。
 AST 檢查不追蹤 assignment aliases、動態分派或包裝，不是 type checker。
