@@ -6,13 +6,19 @@
 
 ## GUI setup
 
-Bind `$mux` to a MuxGroup, then open `mux/len_rabi` from **New Tab**.
+Create a `kind: group/mux` component and bind scalar alias `mux` to it, then
+open `mux/len_rabi` from **New Tab**. Without this group and alias, opening the
+form reports an error.
 The captured parameter source must contain every qubit and its matching resonator
 in readout order. Readout references the module slot `$mux.module.readout` when
 present, preserving the library's tones and scalar settings. Use a mux-family
 module with the full group tone count. If the slot is empty, Readout starts
-inline from the blank mux template with group calibration tones. Complete all
-required fields and verify the hardware settings before running.
+inline from the blank mux template with group calibration tones.
+The generator comes from `$mux.wiring.gen_ch`, and tone i's ADC channel comes
+from `$mux.wiring.ro_ch[i]`, in the group's resonator order. Each tone starts
+with gain 0.1. These values are editable initial inputs, not verified hardware
+settings. Complete the remaining required fields and confirm wiring, gain and
+timing before running.
 
 The Tones picker selects the element to edit. Participants selects the qubits to
 run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON

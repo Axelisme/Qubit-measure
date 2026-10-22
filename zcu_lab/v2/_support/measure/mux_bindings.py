@@ -65,6 +65,28 @@ def validate_mux_bindings(parameters: ParameterContext | None) -> None:
             )
 
 
+def require_mux_group(parameters: ParameterContext | None) -> MuxGroupSchema:
+    """Return the group/mux bound to scalar alias mux in a fixed capture.
+
+    Missing capture, absent/unbound alias or a non-group target raises
+    ValueError with the required component kind and alias. Other alias and
+    source faults propagate. The capture is borrowed read-only.
+    """
+    requirement = "Mux forms require a group/mux component bound to alias mux"
+    if parameters is None:
+        raise ValueError(requirement)
+    try:
+        name = parameters.resolve_path("$mux")
+    except RoleResolutionError as exc:
+        if exc.reason in ("Unknown alias", "Alias is not bound", "Role is not bound"):
+            raise ValueError(requirement) from exc
+        raise
+    group = parameters.document().components.get(name)
+    if not isinstance(group, MuxGroupSchema):
+        raise ValueError(f"{requirement}; $mux={name!r} is not group/mux")
+    return group
+
+
 def require_mux_qubits(
     parameters: ParameterContext | None, tone_count: int | None = None
 ) -> tuple[str, ...]:
@@ -73,17 +95,12 @@ def require_mux_qubits(
     parameters must be a fixed Open/Reset or Run/Load capture with a bound mux
     group, complete qubits and matching resonators. tone_count, when supplied,
     is the full (not active) numeric readout size and must equal the binding
-    size. Missing capture/group/qubits or mismatches raise ValueError; alias
-    and source faults propagate. Never reads live files or guesses identity.
+    size. Missing capture/group/qubits or mismatches raise ValueError; other
+    alias and source faults propagate. Never reads live files or guesses identity.
     """
-    if parameters is None:
-        raise ValueError("Mux qubit experiments require a parameter capture")
-    name = parameters.resolve_path("$mux")
-    group = parameters.document().components.get(name)
-    if not isinstance(group, MuxGroupSchema):
-        raise ValueError(f"$mux={name!r}: expected group/mux")
+    group = require_mux_group(parameters)
     if group.qubits is None:
-        raise ValueError(f"$mux.qubits is missing in {name!r}")
+        raise ValueError("$mux.qubits is missing")
     validate_mux_bindings(parameters)
     if tone_count is not None and len(group.resonators) != tone_count:
         raise ValueError(
