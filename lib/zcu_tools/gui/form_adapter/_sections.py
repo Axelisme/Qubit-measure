@@ -476,7 +476,7 @@ class Section:
     def _sweep_defaults(self) -> dict[str, JsonValue]:
         """Select Range + Expts for fresh, otherwise unauthored sweep fields."""
         return {
-            name: static_defaults(LinRange)
+            name: {"kind": "linrange"}
             for name, info in self.core.model_fields.items()
             if name in self.model.model_fields and SweepCfg in _members(info.annotation)
         }

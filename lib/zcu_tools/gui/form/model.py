@@ -154,7 +154,7 @@ class InputConverter:
 
 @dataclass(frozen=True)
 class InputDefault:
-    """Supply raw JSON for a fresh field without a declared Pydantic default.
+    """Let adapters supply domain-informed fresh raw input, not value defaults.
 
     factory runs once per static_defaults call only when the field has neither
     a default nor a default_factory. Its detached finite JSON becomes authored

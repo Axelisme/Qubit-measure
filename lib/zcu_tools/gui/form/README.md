@@ -16,7 +16,7 @@ Description 的 options 只列 detached value、label 與 command name／label�
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。沒有初值宣告的必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
 
-`InputDefault(factory)` 是欄位或型別別名上的 fresh-input metadata。只有欄位沒有 Pydantic default 或 default_factory 時，`static_defaults` 才呼叫 factory，並複製其有限 JSON 結果。外層 metadata 覆蓋內層別名的宣告。它不改 Pydantic 值預設、驗證或已存在的 authored input；具體型別的初值由宣告者提供，Core 不猜選項。
+`InputDefault(factory)` 是 adapter 依領域知識填 fresh raw input 的管道，可放在欄位或型別別名。只有欄位沒有 Pydantic default 或 default_factory 時，`static_defaults` 才呼叫 factory，並複製其有限 JSON 結果。外層 metadata 覆蓋內層別名的宣告。它不改 Pydantic 值預設、驗證或已存在的 authored input；具體型別的初值由宣告者提供，Core 不猜選項。
 
 FormModel 的實例承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags。FormState 擁有 draft/base、batch write、branch switch、結果、差異與 recursive restore。宿主持有 Engine revision 與提交 policy。
 
@@ -46,7 +46,7 @@ Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例�
 
 `FormModel.default_input` 與 `FormInput` 在入口拒絕未標 tag 的 `str | Model` 欄位。ValueError 指出欄位路徑與不支援的形狀。檢查走過 nullable、alias 與所有 model branches，包含未啟用的分支；它不讀 captured sources。Key-or-inline input 必須使用明確的 tagged ref／inline union，不能靠 JSON 字串或物件型別選分支。持久 Spec 的 `str | Spec` 不改，生成器在 input 邊界投影成 tagged wrappers。
 
-Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gui.form_adapter.sweep` 擁有。Core 不辨識 sweep 型別或其 tag。
+Sweep 的四種數值 model、座標／採樣換算與 row command 宣告由 `gui.form_adapter.sweep` 擁有。座標與採樣值必填。未指定初值時，adapter 的 fresh input 只選 Range + Expts，不填數值。Core 不辨識 sweep 型別或其 tag。
 
 Module／library 的 tagged input、literal key 與 family 政策由 `gui.form_adapter` 擁有。Core 只讀普通 annotation、`Option` 與 `InputPolicy`，不以領域 subclass 判定行為。`InputPolicy(expression=False)` 放在 field 的 Annotated metadata，關閉 describe、decode/result 與 defaults evaluation 的 expression 能力。Restore 仍保留這些 invalid raw。True 不會替 Literal、enum、bool、choices 或混合 union 開啟原本不支援的能力。Write 仍保存普通 invalid draft，由 result 回報。
 

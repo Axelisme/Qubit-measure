@@ -8,6 +8,7 @@ from zcu_tools.gui.form import (
     Display,
     FormEnv,
     FormErrors,
+    FormInput,
     FormModel,
     FormState,
 )
@@ -36,7 +37,11 @@ def test_root_fixed_tag_is_hidden_without_changing_defaults_or_validation() -> N
         fixed: Literal[2] = 2
 
     env = FormEnv()
-    state = FormState(RangeForm.default_input(env))
+    state = FormState(
+        FormInput(
+            RangeForm, {"kind": "linrange", "start": 0, "stop": 1, "n": 3, "fixed": 2}
+        )
+    )
     fields = {field.path[-1]: field for field in state.describe((), env).children}
     assert fields["kind"].hidden and fields["kind"].fixed_value == "linrange"
     assert not fields["fixed"].hidden

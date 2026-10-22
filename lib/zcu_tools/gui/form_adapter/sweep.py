@@ -16,7 +16,6 @@ from zcu_tools.gui.form import (
     InputCommand,
     InputDefault,
     field_error,
-    static_defaults,
 )
 
 
@@ -229,9 +228,9 @@ class LinRange(FormModel):
 
     input_commands: ClassVar[tuple[InputCommand, ...]] = (_CENTER, _RANGE_STEP)
     kind: Annotated[Literal["linrange"], Display(hidden=True)] = "linrange"
-    start: float = 0.0
-    stop: float = 1.0
-    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
+    start: float
+    stop: float
+    n: Annotated[int, Display(label="Expts")] = Field(ge=1)
 
 
 class CenterSpan(FormModel):
@@ -245,7 +244,7 @@ class CenterSpan(FormModel):
     kind: Annotated[Literal["center"], Display(hidden=True)] = "center"
     center: float
     span: float
-    n: Annotated[int, Display(label="Expts")] = Field(default=3, ge=1)
+    n: Annotated[int, Display(label="Expts")] = Field(ge=1)
 
     @property
     def start(self) -> float:
@@ -332,7 +331,7 @@ class StepCenter(FormModel):
 
 
 def _fresh_sweep() -> JsonValue:
-    return static_defaults(LinRange)
+    return {"kind": "linrange"}
 
 
 type SweepInput = Annotated[
