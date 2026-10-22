@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.workflows import saved_run
@@ -95,16 +95,15 @@ def test_async_commits_heterogeneous_records_and_tracks_every_live_revision(
             {"first": 3, "latest": 8},
             {"value": 8},
         ]
-        manifest = saved_run.read_manifest(paths.metadata_root, "example")
-        saved, _missing = saved_run.read_points(
-            manifest, TypeAdapter(FirstRecord | SecondRecord)
-        )
-        assert [point.point for point in saved] == [
-            FirstRecord(first=3, latest=8),
-            SecondRecord(value=8),
+        try:
+            saved = saved_run.read_records_raw(paths.metadata_root)
+        except AttributeError as error:
+            pytest.fail(f"Saved-run reading must expose committed records: {error}")
+        assert [point.record.value for point in saved] == [
+            {"first": 3, "latest": 8}, {"value": 8}
         ]
-        first = json.loads((paths.data_root / "iter/000001/record.json").read_text())
-        second = json.loads((paths.data_root / "iter/000002/record.json").read_text())
+        first = json.loads((paths.data_root / "commits/000001/record.json").read_text())
+        second = json.loads((paths.data_root / "commits/000002/record.json").read_text())
         assert first["started"]["revisions"] == [0, 1]
         assert second["started"]["revisions"] == [1]
         summary = saved_run.read_summary(paths.metadata_root)
