@@ -24,7 +24,7 @@
 
 `await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示 operation token 在完成時已 set。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
 
-`await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 必須是 ExpCfgModel。每個 attempt 建立既有 RunContext，借用 soc、soccfg、env.plots 與 connected drivers，並使用當次 operation token。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
+`await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 是位置參數，名稱不限定；context 必須是具名 keyword-only 參數。cfg 必須是 ExpCfgModel。每個 attempt 建立既有 RunContext，借用 soc、soccfg、env.plots 與 connected drivers，並使用當次 operation token。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
 
 `DevicePort.get_connected_devices` 回 detached mapping，driver 生命週期仍屬宿主。DeviceMapping 集中異質 driver 的型別邊界。缺 devices capability 會 raise MissingCapability；確定沒有 device 時，宿主提供回空 mapping 的 port。Snapshot 讀取失敗阻止 core fn 執行。框架不依 cfg.dev 自動 setup 或預先解析角色。
 
@@ -36,6 +36,31 @@ Pause set 當前 operation token、推進 epoch 並關閉 gate，不 set iterati
 
 Stop set run scope，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
 
+## 作者範例
+
+序列相同時直接重用 core，或用 typed async helper 包裝它：
+
+```python
+async def run_t1(
+    env: WorkflowEnv[Calibrated], cfg: T1Cfg
+) -> Completed[RunRecord[T1Cfg, T1Result]] | Failed:
+    return await env.run(T1Exp().run, cfg)
+
+# Inside the authored workflow coroutine:
+for flux, d in zip(plan.fluxes, env.commit_dirs()):
+    outcome = await env.run(T1Exp().run, cfg)
+    # Equivalent when a helper adds lab-specific policy:
+    # outcome = await run_t1(env, cfg)
+    if isinstance(outcome, Failed):
+        continue
+    save_t1(outcome, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
+    await env.commit(Point(flux=flux), d)
+```
+
+範例中的 cfg、Point 與 saver 由 lab 定義。不同序列可以寫同簽名的同步 helper，再傳給 env.run。作者 async helper 仍只 await env／tab／session 或可靜態解析的 lab helper，不自行建立 asyncio task。Guardrail 的範圍見 [lab 教學](../../../../zcu_lab/workflows/README.md#async-await-guardrail)。
+
+要回到過去某點，開新 run、切 plan 範圍，用 saved_run reader 從上一個 run 初始化 history。Engine 不提供 cursor 回退或自動回灌。
+
 ## Commit 目錄與保存
 
 `env.new_commit_dir()` 每次建立新的 absolute `data_root/commits/<六位配置序號>/`。配置順序與 commit 順序獨立。`env.commit_dirs()` 每次 next 才配置，使用 `zip(values, env.commit_dirs())`，把有限 values 放前面，避免多配置一次。
@@ -46,7 +71,9 @@ Stop set run scope，往下傳到 iteration 與 operation。作者收到 `Comple
 
 成功 commit 先追加並 flush `record_committed` journal，再發布 in-memory records。`record.json` 以同目錄 temporary 加 replace 寫入；這份副本寫入失敗只記 log，已 flush 的 journal 仍是 commit 權威。它不是 checkpoint，不支援 crash resume 或 fsync 承諾。
 
-RunIdentity 的 software provenance 在 workflow 啟動時保存，manifest 與 run_started.identity 各留既有副本。每次 operation 不另建 provenance 或 run_id。
+`env.identity` 每次回 detached 的既有 startup RunIdentity，作者修改回傳值不影響 run。Software provenance 在 workflow 啟動時保存，manifest 與 run_started.identity 各留既有副本。每次 operation 不另建 provenance 或 run_id。
+
+Lab 的 `save_native(completed, destination, *, spec, snapshot, identity)` 顯式接收 env.identity。它從 Completed.value 取 RunRecord，以 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata。H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`，completion 由 stopped 推導，labber_path 為 None。這是既有 writer 的接線，不表示 RunRecord.metadata 或 datafile 通用容器已完成。
 
 Record 信封保存 commit_seq、配置目錄、UTC 時間、record 型別名、encoded record、本輪 revisions 與 operations。Manifest 為每種出現的 record model 保存一次 JSON schema。這些 schema 只提供資訊，不作 runtime validator。Record encoder 把非有限值改成 null，只有 authored record/summary 序列化可降級成 repr；必要 metadata 與 I/O failure 不使用這項降級。
 

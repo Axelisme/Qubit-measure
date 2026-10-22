@@ -161,6 +161,10 @@ defaults. Tunables Apply with an empty batch submits the current shared draft.
 live tunables and optional summary types. One Runner worker calls Engine.execute
 through terminal completion. Pause and Ask retain that worker, operation,
 progress and RUN lease. Resume and Answer signal it without another submission.
+Running and paused Apply both publish a complete tunables model and a new revision.
+The next tun.current read sees it; already captured operation cfg stays unchanged.
+Pause interrupts acquisition and retries only a stale partial after Resume, not
+an entire point. A naturally completed result waits for Resume without retry.
 
 `pending_question` returns the detached
 `{request_id, question_type, question, answer_schema}` envelope while that worker

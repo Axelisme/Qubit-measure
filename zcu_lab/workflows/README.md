@@ -35,12 +35,12 @@ fit = analyze_t1(outcome.value.result)
 可選的 async helper 只包裝相同呼叫，例如
 `async def run_t1(env, cfg): return await env.run(T1Exp().run, cfg)`。
 不要複製 core 的 pulse 序列。需要不同序列時，寫同步
-`def acquire(cfg, *, context: RunContext) -> Result`，再用
+`def acquire(cfg, *, context: RunContext) -> Result`，cfg 是位置參數且名稱不限定，context 是 keyword-only，再用
 `await env.run(acquire, cfg)` 呼叫。頻率校準保留自己的 init_pulse，因此使用自訂 callable。
 
 `Completed.value` 是 core 的 RunRecord，不重新組 cfg/result 信封。
 `Completed.facts` 是框架同時寫入 journal 與 commit 信封的 operation 事實。
-Saver 收 Completed、歷史 snapshot 與顯式 env.identity，不捕捉 evidence。
+`env.identity` 每次回 detached startup RunIdentity，保留原 run 的 software provenance。Saver 收 Completed、歷史 snapshot 與顯式 env.identity，不捕捉 evidence。它以 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata；RunRecord.metadata 與 datafile 通用容器仍未改造。
 每點先配置 `d = env.new_commit_dir()`，自行存 raw 或圖片，再
 `await env.commit(point, d)`。Point 必須是 Pydantic BaseModel。
 框架不解析原始檔，commit 前後都可寫入作者自己的檔案。

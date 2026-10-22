@@ -6,11 +6,13 @@ status: accepted
 
 **狀態：** accepted。
 
+**Last updated:** 2026-10-22，workflow async host 與 request_id
+
 ## 問題與選擇
 
 Qt 視窗、socket client 與 MCP agent 都能接觸同一個 GUI application。若每個入口另存可提交的狀態、複製 guard，或由共用 socket 層決定實驗方法，使用者與 agent 會依入口不同而看到不同結果。Remote 是 application 的 driving adapter；它呼叫同一批 owner 的查詢與命令，不建立第二份業務真相。Measure 的 `RemoteControlAdapter` 接在共用 endpoint 上，承接 Controller 的診斷並將請求送到 application owner。GUI 的草稿與互動分析 committed session 仍由其原 owner 持有；GUI-local pointer preview 不是遠端可提交的狀態。Qt 的 screenshot、dialog 和焦點是 frontend 能力。Agent 寫入後切換 tab／pane 的行為由 measure app 的 view 命令決定，不由 socket 或通用 MCP bridge 暗中決定。共用 application 狀態與前端邊界見 [[0067]]。
 
-Recipe 自動推導的 owner、generator 協作及取消結果見 [[0075]]；MCP call log 與 ledger 的分界見 [[0063]]。本篇維護傳輸與遠端投影，不複製這些規則。
+Recipe 自動推導的 owner、async 協作及取消結果見 [[0075]]；MCP call log 與 ledger 的分界見 [[0063]]。本篇維護傳輸與遠端投影，不複製這些規則。
 
 ## 分層與連線
 
@@ -115,14 +117,19 @@ Figures 使用同一 retained Plots，status 與 names 不 render。Figure 在 o
 以 shared renderer 產生 PNG，MCP 驗證 PNG 並附 image content，不在文字中保留
 base64，也不建立 preview 檔。Terminal records/figures 保留到 replacement 或 close。
 
-Workflow status 提供 pending_question 的 question_type/question/answer_schema
-固定 envelope；authored fields 只在 question 內。Engine/driver 擁有答案 schema
-與 JSON 轉換。Workflow answer 回原 operation_id，MCP 映射成 Start 的同一 pending
-handle。Engine.answer 是同步 execution segment，由 facet 排到 worker，保留同一
-operation／RUN lease 與 terminal delivery。RPC/UI owner thread 不 inline 推進
-generator，也不先回答再另呼叫 Resume。錯型保持 paused，不寫 Resumed；adapter
-只投影錯誤。Stop 純控制，retained Ask 另排 worker drain；控制 I/O 失敗仍 raise
-並完成 worker 收尾。終局 owner delivery 才釋放 RUN。這維持 [[0066]] 的 settlement。
+2026-10-22 依單一 async 腳本契約同步 workflow answer。Status 提供
+pending_question 的 request_id/question_type/question/answer_schema 固定 envelope，
+authored fields 只在 question 內。Engine 先比對 request_id，再驗答案 schema 與
+JSON 轉換。過期 ID 或無 pending 問題拒絕並回目前 pending_request_id，狀態不變，
+也不記 accepted answer。Workflow answer 回原 operation_id，MCP 映射成 Start 的
+同一 pending handle。
+
+共用 async host、answer Future 與 control 序列依 [[0075]] 的「Async 協作與控制命令」。
+整個 coroutine 只佔一個 worker，Resume／Answer／Stop 不另排 execution 或 drain segment。
+RPC/UI owner thread 不執行作者 coroutine。控制 I/O 失敗保留 cause，原 worker 完成
+finally 與 executor drain 後才交終局。原 owner terminal delivery 才釋放 operation
+與 RUN lease，維持 [[0066]] 的 settlement。狀態仍以公開 reads／polling 觀察，
+此變更不承諾 native lifecycle push 或 subscribe。
 
 ## 事件與錯誤
 

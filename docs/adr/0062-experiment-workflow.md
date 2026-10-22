@@ -4,15 +4,17 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-19，tunables 完整 model 提交與快照日誌
+**Last updated:** 2026-10-22，單一 async 腳本、operation facts 與 commit 目錄
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
 ## 問題與決策
 
-一個 workflow run 可以執行多個步驟，也可以在暫停後重做未提交的步驟。Worker 返回不代表 run 終局。若每次返回都終局 operation，宿主就必須另外保管 progress、目標身分與 Resume admission，並協調多處狀態。
+具名 workflow 是 `@workflow(name, description)` 宣告的單一 `async def (env, plan, tun: Live[Tunables]) -> Summary`。Plan、Tunables 與 Summary 從簽名推導，作者用區域變數保存 history，以 await 等待 operation、Ask 與 commit，以 return 結束。沒有 init、State 或 Next／Done／Aborted 步驟模型。非 None 的 BaseModel Summary 只在 done 時寫 summary.json，不算 commit，也不新增 GUI／MCP result 投影。
 
-具名 workflow 宣告 plan、tunables 與 init，步驟函式透過 env effects 執行實驗、操作裝置、畫圖與保存。Engine 迭代步驟並記錄結果，不決定具體實驗的校準接受度。Workflow 擁有 cfg 組裝、分析與正常步驟失敗的政策。非正常失敗的例外停止 run，不改標為 Pause。
+Pause 立即中斷當前 operation，保留作者等待中的 await。Resume 後只重跑同一 request 的 stale partial，不重跑 workflow 或已自然完成的結果。Running 與 paused 都可 Apply tunables；新值在下一次 `tun.current` 讀取生效，不追改已捕捉的 cfg。回到過去某點要開新 run、切 plan 範圍，並由作者用 saved_run reader 初始化 history。使用者於 2026-10-22 裁定：「好吧，你說服我了，採用你的建議，可以記錄進adr/discussion中」。選項比較見 [單一腳本討論](../discussions/2026-10-22-workflow-single-generator.md)。
+
+Workflow 擁有 cfg 組裝、分析、校準接受度與可恢復 Failed 的政策。Engine 擁有控制、operation 事實與 commit 保存。其他例外停止 run，不改標為 Pause。
 
 ## Capability 與 driver limits
 
@@ -20,27 +22,31 @@ Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 f
 
 裝置 limits 留在儀器 driver，不另外建立 workflow 宿主 limits policy。這讓各前端使用同一份領域檢查，而不是只有 workflow 被保護。Driver 失敗向外傳播，不 retry 或 clamp。使用者於 2026-10-08 說明：「儀器driver hardcode檢查，這樣最有保證且符合領域認知集中」，並確認既有 device 不需改動：「目前的device就已經可以了，為什麼要改device?」。
 
-Generator 協作、recipe 的取消結果與 workflow 的 agent yield 見 [[0075]]。2026-10-21 使用者裁定 Engine 底層改用與 recipe 共用的 `Wait`／`Ask`／`Signal` 協定，現有 `RunEffect`、`DeviceEffect`、`WaitEffect` 與 `env.run`／`env.setup_device`／`env.wait_until` 成為協定上的糖；`Ask` 使 run 進入 paused 並掛上問題，answer 經 Resume 送回；內建 Signal（cancel、finish_early、pause、stop、tunables apply）由 Engine 在 yield 邊界處理，腳本第一版不讀 inbox。原話：「Engine底層應該也要用Ask/Wait模式，其他都是糖」。一 run 一 operation、Pause／Resume、tunables revision、records 與 journal 不變。已採用、待實作；推導見 [三角色協定](../discussions/2026-10-21-three-role-protocol.md)。
+`env.call` 是唯一 operation 原語，`env.run`、`env.setup_device` 與 `env.wait_until` 是它的 typed 糖。作者直接 `await env.ask(question)`，Future 留在共用 async host 內部。Engine 使用 `experiment.script_host.ScriptHost`，控制命令、request_id 與 scope 樹依 [[0075]] 的「Async 協作與控制命令」，不另建協定。使用者於 2026-10-22 對「一個原語 env.call，env.run 是 Experiment 的 typed 糖」回覆「可以」。這取代舊 Effect 與 generator 協定。
 
-同日裁定 workflow 的執行基底維持 helper：只有 workflow 使用的實驗在其目錄內加 `workflow_helper.py` 與 `core.py` 並列，放該實驗給 workflow 用的 acquisition helper，pulse sequence 允許與 core 重複定義；workflow 不經 adapter Form、core.run 或 adapter analysis，共用 cfg model、`signal2real`、fit kernel 與 result 型別，分析政策與接受門檻自持。原話：「sequence重複定義兩次沒有什麼不好的。core一次，旁邊的檔案，可能叫workflow_helper.py一次」；「不要每個實驗，workflow需要的實驗就好」。承載改由 measure-gui 的 headless workflow owner 與 Qt driving pane 提供，見 [[0075]] 與 [Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
+序列相同時直接用 core.run，例如 `await env.run(T1Exp().run, cfg)`。自訂序列寫與 core 相同的 `(cfg, *, context: RunContext) -> Result` 同步 helper，cfg 是位置參數，其參數名稱不限定。作者也可用 async helper 包裝 env.run。分析政策與接受門檻仍由 workflow 擁有，不經 adapter Form 或 adapter analysis。使用者於 2026-10-22 裁定：「我會預期這個run_t1的接口與core的run一致，這樣我就可以按需直接用core的run，有客製化需求也可以獨立寫一個一樣接口的helper，而env. run的工作就是提供run的接口，最好是能復用Run類」「補充，我說的run_t1是你剛剛指的_acquire_t1」，並以「OK」確認採用計畫。
+
+`env.run` 建立既有 RunContext，借用 soc、soccfg、plots 與 connected drivers，使用 operation child token，在 worker 呼叫前捕捉 device snapshot，再以 cfg deepcopy 呼叫 fn。它回 `Completed[RunRecord[Cfg, Result]] | Failed`。Completed.value 是 RunRecord，Completed.facts 是 OperationFacts，與框架寫入 journal／該 commit 的 record.json 信封使用同一事實結構。Schedule acquire error 回 Failed，build、conversion、callback 與其他例外 raise。非 ExpCfgModel scan 用 env.call，不另造 workflow Run、buffer 或 schedule 糖。
+
+框架按每次實際 attempt 記 kind、iteration、attempt、時間、snapshot、outcome、reason 與 stopped，不新增 Acquired 或 operation run_id。Software provenance 按 workflow run 記錄，manifest 與既有 journal run_started.identity 副本保留，不逐 operation 複製。`env.identity` 提供 detached startup RunIdentity。Lab saver 顯式用 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata，不自行捕捉 AcquisitionEvidence。RunRecord.metadata 與 [[0080]] 的 datafile 改造仍待後續實作。使用者同日修正：「框架不應該知道run裡面是跑acquire或是其他」「workflow有需要run_id嗎？他沒有一次run的概念吧？只有commit的概念」。Measure headless owner 與 Qt pane 的分工仍依 [[0067]]。
 
 ## 表單 input 與 Engine 普通值
 
-FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、Apply、Discard 與 input 保存時機。Start 與 Apply 使用同一個宣告的 Form.to_cfg() 轉接。Apply 將完整 native tunables model 交給 Engine，不攤平表單路徑。Engine 依 workflow 宣告型別重新驗證完整 model，整體替換並增加一次 revision，不比對差異。相同值也建立新 revision。Engine 不求值或保存 expression。每次 Apply 的 journal 記一行 actor、revision_before／after 與完整新 tunables JSON，不記逐葉 old／new。Journal append 成功後才發布新值；stale revision、model error 或 append failure 不發布候選。當前 step 的 capture 不隨新 revision 改變，後續 step 或 Resume 才取最新值。
+FormInput 保存 expression 原文；宿主捕捉求值環境，決定 Start、Apply、Discard 與 input 保存時機。Start 與 Apply 使用同一個宣告的 Form.to_cfg() 轉接。Apply 將完整 native tunables model 交給 Engine，不攤平表單路徑。Engine 依 workflow 宣告型別重新驗證完整 model，整體替換並增加一次 revision，不比對差異。相同值也建立新 revision。Engine 不求值或保存 expression。每次 Apply 的 journal 記一行 actor、revision_before／after 與完整新 tunables JSON，不記逐葉 old／new。Journal append 成功後才發布新值；stale revision、model error 或 append failure 不發布候選。`tun.current` 每次讀取最新完整 model。已捕捉的 cfg 不隨新 revision 改變，Resume 重試仍使用原 capture；要套用新 cfg，由作者在下一次讀取後建立。
 
 持久 snapshot 的 plan 與 knobs 各存固定 FormInput data／selections JSON。啟動、source reload 與 RAM switching 共用 Core 的依名與形狀遞迴還原。新欄位用 defaults，無法還原的欄位或 selection 列 dropped 並顯示。還原不呼叫 converter 或 options hook。壞 JSON 或格式不符時顯錯並以 defaults 開啟，不備份。共用契約見 [[0079]]、[[0063]]。
 
 Workflow host 只有在 Engine 成功 publication 後才接受 input／base。失敗保留可修正的 draft，不以輸入已編輯推定 Engine 已接受。這避免 Engine 維護另一份 input 狀態，代價是 Engine journal 無法重建當時的 expression。Form／editor 的共用與宿主提交邊界見 [[0065]]，具體接線見 [measure workflow host](../../lib/zcu_tools/gui/app/measure/README.md#workflow-hosting)。使用者於 2026-10-16 以「都採用建議」確認將表單草稿的這些穩定邊界併入現行 ADR。
 
-使用者於 2026-10-18 裁定：「基本正確，但我認為不同比較不同，直接用就行了，也不用記錄。」選擇日誌格式時確認「甲乙都可以」。採完整快照保留更新者與 revision，不增加遞迴比對。List 隨完整 model 提交，不需要 native index path。Iteration record.json 的完整 tunables 格式不變，不增加舊 journal reader 或格式遷移。Form 的 typed path 編輯入口仍由宿主擁有，見 [[0079]]。依賴方向沿用 C8、C9、C18 與 form-core-no-ui-policy。
+使用者於 2026-10-18 裁定：「基本正確，但我認為不同比較不同，直接用就行了，也不用記錄。」選擇日誌格式時確認「甲乙都可以」。採完整快照保留更新者與 revision，不增加遞迴比對。List 隨完整 model 提交，不需要 native index path。Commit record.json 記本輪實際讀過的 tunables revision，去重並保留讀取順序，不只記最大 revision。不增加舊 journal reader 或格式遷移。Form 的 typed path 編輯入口仍由宿主擁有，見 [[0079]]。依賴方向沿用 C8、C9、C18 與 form-core-no-ui-policy。
 
 ## 一個 run 的 operation
 
 一個 run 從 Start 到終局使用同一個 OperationRunner operation 與 handle。Start 只 begin 一次。Controller 是 run 的單一 owner，GUI 與 RPC 使用同一個 target 核對與提交入口。Run binding 在通知前提交，pending target 不表示 native startup 已接受。未接受的 run 不能更新 tunables，也不能借用上一個 run 的 draft。
 
-Pause 丟棄當前未提交步驟，worker 返回。已提交 records、cursor、plan、form capture、accepted input、progress、handle 與本程序 RUN lease 都保留，不 settle。Paused 時可以修改 tunables。Resume 重用同一 handle 提交 worker，從 cursor 以最新 tunables 重做未提交步驟，不重做 init。
+宿主在一個 worker 呼叫一次 Engine.execute，整個 coroutine、Pause 與 Ask 都留在該 worker。Pause set 當前 operation child、增加 epoch 並關 gate，不停止 iteration。Stale partial 留 discarded 事實，Resume 開 gate 後 env 重跑同 request 與原 cfg；自然完成的完整結果只等 gate，不重跑。Plan、form capture、accepted input、progress、handle 與本程序 RUN lease 都保留，不 settle。Resume 與 Answer 不另排 worker segment。
 
-Complete、Stop 或 failure 只有一個終局入口。有 producer 時，必須等它返回並完成 owner delivery；無 producer 的 paused run 或同步 startup failure，由同一 owner 收尾。清理完成前不能 replacement Start。終局完成才 settle handle、清理 progress 與釋放 lease，清理失敗遵守 [[0066]] 的 best-effort 規則，不承諾跨 State、channel、檔案與硬體的原子交易。
+Complete、Stop 或 failure 只有一個終局入口。Stop 使進行中及之後的 operation 合作回 Completed(partial_result=True)，Ask 回 None，不向作者注入 CancelledError。宿主等待原 worker 的 finally、executor drain 與 owner delivery；同步 startup failure 也由同一 owner 收尾。清理完成前不能 replacement Start。終局完成才 settle handle、清理 progress 與釋放 lease，清理失敗遵守 [[0066]] 的 best-effort 規則，不承諾跨 State、channel、檔案與硬體的原子交易。
 
 本程序 RUN lease 在 paused 期間仍保留。它不仲裁其他 GUI process 的儀器操作。Measure-gui 在另一 process 執行實驗，不代表 workflows 的 cache 已刷新，也不保證儀器保持某個值。
 
@@ -48,13 +54,13 @@ Complete、Stop 或 failure 只有一個終局入口。有 producer 時，必須
 
 Start／Resume 不再讀取所有已連線裝置，也不在 journal 記錄 device snapshot。Start 表單直接使用 DeviceService 的公開 typed cached native mapping。Resume 只接受 run_id；健康 paused run 的提交失敗不建立新 operation，不清掉原 handle／lease。
 
-供 acquisition provenance 使用的 device 實際值由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.capture_snapshot 讀取所有 connected drivers，將固定 JSON 交給 Run，再由 native acquisition evidence 與 metadata 保存。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper；這個 run 前 capture 不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。
+供 acquisition provenance 使用的 device 實際值由每次 env.run 在同一 RUN lease 下、experiment callback 前捕捉。DevicePort.get_connected_devices 回 detached driver mapping，env.run 用它建 RunContext，再以 capture_device_snapshot 讀取全部 connected drivers。OperationFacts 保存這份固定 JSON，框架寫入 journal／commit 信封，lab saver 用它組裝既有 native metadata。讀取失敗使 run failed，不呼叫 experiment，不使用 cache fallback。缺 devices capability 不等於零 device，真正零 device 的 host 明確提供回傳 {} 的 port。SessionDevices 在 worker 借公開 driver mapping，getter 回 detached 的實際 Info 子類。完整 setup 用 selected driver.info_model 重新驗證 dump 後呼叫 driver.setup，傳同一 StopSignal 的 event。Journal 記錄 name 與完整 cfg；框架不認識 flux、unit 或 device 種類。使用者 set_flux 工具重用已交付的 check_flux_unit。Host capture 重用 native acquisition helper；這個 run 前 capture 不更新 GUI State。Device 接線與 Window 的 SessionServices 組裝已完成，不能據此宣稱完整 CP-B 或 integration 全綠。
 
 Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner 更新 cached DeviceInfo，供 dialog 觀察。這筆讀回不改寫 run 前固定 snapshot 或已保存 provenance，不讓 cache 成為 Run 的控制命令，也不改變 acquisition capture 的失敗與保存契約。活動快照與讀回的分工見 [[0076]]。
 
 共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。Coherence 的新 flux_dev default 在固定 capture 解析 $flux_dev 並保存 direct literal device name。缺 capture 或 unbound alias 保留 expression error input，由公開 form 指名 Invalid，不補造 device 或阻斷 panel；其他解析錯誤照常拋出。既有 direct draft 不隨 alias 修改，使用者仍能切 eval，合法 saved input 與 MIST defaults 不改。Source reload 與 input 保存由具體 GUI app 擁有，不授權硬體操作。
 
-各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 device effect 仍由 driver 設定值與驗證 limits。
+各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 setup_device 仍由 driver 設定值與驗證 limits。
 
 ## 獨立 workflow 轉換工具
 
@@ -74,9 +80,9 @@ Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flu
 
 使用者在 2026-10-12 裁定：「我以為一直都是框架一開始就給這個iter的儲存路徑，workflow內部自己決定在哪裡存什麼」與「你沒辦法阻止workflow 內部亂搞，也不該試圖保證不亂搞，這些機制都是過度工程」。本裁定將量測與保存分開，不維持舊暫存路徑及檔案發布介面。
 
-Engine 在每次 invocation 開始前建立 `data_root/iter/<至少六位 call_seq>/`。唯讀 `env.iteration_dir` 指向當輪已存在的 absolute 根目錄。屬性不可重綁，不限制 workflow 自行寫檔。Resume 重做未提交步驟時分配新的 call_seq 與目錄。
+`env.new_commit_dir()` 每次配置並建立新的 absolute `data_root/commits/<六位配置序號>/`。`env.commit_dirs()` 是惰性無限 generator，可用 `zip(plan.fluxes, env.commit_dirs())`，有限序列放前面。作者用 `await env.commit(record, d)` 提交到已配置的 d，省略 d 時自配。同 d 二次 commit raise。配置序號與 commit 序號分開，信封同時記錄，reader 按 commit 序號排序。配置目錄不換 iteration token，成功 commit 才換；未提交目錄與作者檔案保留，但沒有 record.json。
 
-`env.run` 只負責量測，保留 cfg deepcopy、device capture、Schedule、live callback、StopSignal 與失敗來源。`Completed` 只表示量測成功。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。校準保存仍由既有 native writer 處理。Frequency、Rabi、readout 各自回傳 frozen 具名結果，包含自己的 status、reason、accepted scalars 與 immutable 檔名引用。Frequency widening 保留全部 Completed attempts，fit 拒絕也保留 raw 檔名；Schedule Failed／skipped 不捏造檔名。Caller 將各 stage 結果放進 point record，不用整體校準成功收據丟掉前面已接受的值。框架不提供檔案清單，不預建量測或圖形子目錄，不追蹤、掃描或保證 workflow 檔案。
+`env.run` 只負責呼叫 core 同簽名 callable，保留 cfg deepcopy、device capture、live plots、StopSignal 與失敗來源。它不解讀 callable 內部的序列。`Completed` 只表示 operation 返回，partial_result 表示合作中止，不代表已保存。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。校準保存仍由既有 native writer 處理。Frequency、Rabi、readout 各自回傳 frozen 具名結果，包含自己的 status、reason、accepted scalars 與 immutable 檔名引用。Frequency widening 保留全部 Completed attempts，fit 拒絕也保留 raw 檔名；Schedule Failed／skipped 不捏造檔名。Caller 將各 stage 結果放進 point record，不用整體校準成功收據丟掉前面已接受的值。框架不提供檔案清單，不預建量測或圖形子目錄，不追蹤、掃描或保證 workflow 檔案。
 
 Workflow saver 例外停止 run，不改標為量測 `Failed`。Pause、Stop 或程序中斷可能留下未提交或寫一半的檔案，框架不清理、不承諾 rollback。Point record 的檔名也不保證檔案存在或完整，由讀取者處理缺資料。
 
@@ -84,7 +90,7 @@ Engine 仍擁有 manifest、journal 與 best-effort `record.json`。結果 journ
 
 ## Coherence 與部分校準結果
 
-具體 workflow 的 stage 隔離不改 Engine 的 whole-step 提交。Frequency 接受即更新自己的 history；Rabi 需要本點 frequency，readout 與 enabled lifetime 需要本點 frequency/Rabi。Readout 非接受時沿合法 seed／prior accepted 設定繼續量 lifetime，不用 prior frequency 或 pi 取代缺少的本點依賴。Carry 只在 step 副本中更新，由 Next 發布，Pause／Stop 仍丟棄整點，不增加 stage checkpoint。
+具體 workflow 的 stage 隔離不改每個 point 一次 commit 的邊界。Frequency 接受即更新自己的 history；Rabi 需要本點 frequency，readout 與 enabled lifetime 需要本點 frequency/Rabi。Readout 非接受時沿合法 seed／prior accepted 設定繼續量 lifetime，不用 prior frequency 或 pi 取代缺少的本點依賴。Carry 與 history 由作者 coroutine 的區域變數保存。Pause 只重試被打斷的 operation，不丟棄整點；Stop 讓作者處理 partial 並收尾，不增加 stage checkpoint。
 
 Coherence 固定 plan flags，按 T1、Ramsey、Echo 量 enabled 項目。三份 lifetime history 獨立，只有各自接受的值更新 delay grid。Point 的 measurements tuple 只含 enabled 結果；disabled 不用 null placeholder。各個 completed raw 都有明示用途的 relative native reference，讓轉換工具取得部分證據，而不從 acquisition 次序或目錄猜資料。
 
@@ -98,7 +104,7 @@ Framework 只提供 `env.plots` live plot 工具，不知道趨勢圖、具體 c
 
 Measure 的 headless workflow owner 管理 native Plots 生命週期，Qt pane 顯示圖像，remote 使用共用 PNG renderer。它們不讀 records 來重畫科學趨勢，也不持有繪圖 cursor。Pause 保留 Plots，producer 返回與 terminal delivery 後才 finish，replacement Start 與 close 釋放 presentation，不銷毀 caller 保留的 Figures。
 
-框架不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure、Engine 提交通知或 committed journal reader。Workflow 實作者若要保存 iter 內的圖，在自己的 workflow 程式內處理。使用者可自行從 record.json 或 native 資料重畫。
+框架不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure、Engine 提交通知或 committed journal reader。Workflow 實作者若要保存 commit 目錄內的圖，在自己的 workflow 程式內處理。使用者可自行從 record.json 或 native 資料重畫。
 
 Journal writer 與 Engine 提交順序不變。Iteration 檔案保存依上節由 workflow 擁有。現有具名圖 RPC、PNG renderer 與 Plots 工具也不變。依賴方向由 C18 與 trend-science-no-frontends contract 保護，科學投影不依賴 frontend admission。
 

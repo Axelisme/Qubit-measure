@@ -174,8 +174,9 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
     Build/run operations require an active owner scope and a configured default
     slot for acquisition. Build methods require at least one explicit module.
     Invalid scope, missing modules/slot or negative retry raises immediately.
-    build() propagates factory errors; build-and-acquire methods instead record
-    build failures on the Schedule after retry exhaustion.
+    All build methods propagate factory errors without retry. Retry applies only
+    to acquire on the same built program. Conversion and update callback errors
+    propagate without marking an acquire failure.
 
     All acquire methods write each converted completed round before checking
     stop_condition, then write the final converted result. Data-driven stop is
