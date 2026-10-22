@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from uuid import uuid4
 
 import h5py as h5
 import numpy as np
@@ -18,6 +19,7 @@ from .container_models import (
     Variable,
     VariableSchema,
 )
+from .container_references import retarget_references
 from .native_nodes import known_node
 
 _JSON = TypeAdapter(JsonObject)
@@ -163,6 +165,15 @@ def _write_array(group: h5.Group, name: str, array: np.ndarray) -> h5.Dataset:
     ):
         dataset[()] = array
         return dataset
+    if isinstance(dataset, h5.Dataset) and dataset.shape == array.shape:
+        # HDF5 dtype is immutable. Keep the old object live until refs move.
+        temporary = f".{name}-{uuid4().hex}"
+        replacement = group.create_dataset(temporary, data=array)
+        replacement.attrs.update(dataset.attrs)
+        retarget_references(dataset, replacement)
+        del group[name]
+        group.move(temporary, name)
+        return replacement
     if name in group:
         del group[name]
     return group.create_dataset(name, data=array)
