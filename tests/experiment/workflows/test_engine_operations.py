@@ -13,6 +13,7 @@ from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
@@ -286,6 +287,38 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     assert not thread.is_alive()
     assert statuses[-1].lifecycle == "done"
     assert answers == [Reply(approved=True), Reply(approved=False)]
+
+
+def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
+    rig: Rig,
+) -> None:
+    engine, paths, _devices = rig
+    outcomes: list[w.Completed[RunRecord[Cfg, int]] | w.Failed] = []
+    tokens: list[bool] = []
+
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        tokens.append(context.cancel_signal.is_set())
+        if len(tokens) == 1:
+            cause = OSError("first acquire failed")
+            context.cancel_signal.set_error("failed", str(cause), cause)
+        return 42
+
+    @w.workflow("recover", "A recoverable acquire failure permits an authored retry")
+    async def script(
+        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
+    ) -> None:
+        outcomes.append(await env.run(acquire, Cfg()))
+        outcomes.append(await env.run(acquire, Cfg()))
+
+    start(engine, paths, script)
+    final = engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert isinstance(outcomes[0], w.Failed)
+    assert outcomes[0].reason == "first acquire failed"
+    assert isinstance(outcomes[1], w.Completed), (
+        "A new operation must not inherit handled acquire failure"
+    )
+    assert tokens == [False, False]
 
 
 def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
