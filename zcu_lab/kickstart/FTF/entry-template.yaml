@@ -63,5 +63,7 @@ aliases:
     flux_dev: $qubit.flux_source
     qubit1: Q1
     qubit2: Q2
+    f1: Q1
+    f2: Q2
     coupler: coupler
     coupler_flux_dev: $coupler.flux_source
