@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import Display, FormModel
-from zcu_tools.gui.form_adapter import LinRange, SweepInput
+from zcu_tools.gui.form_adapter import Form, FormContext, LinRange, SweepInput
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -44,6 +44,12 @@ class SweepPlan(FormModel):
     )
 
 
+class RequiredSweepPlan(FormModel):
+    fluxes: Annotated[SweepInput, Display(label="Fluxes", selector=False)] = Field(
+        description="Ordered absolute device setpoints"
+    )
+
+
 class FluxAdapter(SampleAdapter):
     def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> SampleRun:
         values = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
@@ -52,6 +58,13 @@ class FluxAdapter(SampleAdapter):
         )
         viewer.update(values, values)
         return super().run(req, cfg, context=context)
+
+
+class RequiredFluxAdapter(FluxAdapter):
+    @staticmethod
+    def make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(SampleCfg, {})
 
 
 class Tunables(FormModel):
@@ -97,8 +110,21 @@ def _plot_sweep(
 
 @pytest.fixture
 def plan_window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
+    yield from _host_plan_window(qapp, tmp_path, required=False)
+
+
+@pytest.fixture
+def required_plan_window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
+    yield from _host_plan_window(qapp, tmp_path, required=True)
+
+
+def _host_plan_window(
+    qapp: QApplication, tmp_path: Path, *, required: bool
+) -> Iterator[MainWindow]:
     registry = Registry()
-    registry.register("sweep-experiment", FluxAdapter)
+    registry.register(
+        "sweep-experiment", RequiredFluxAdapter if required else FluxAdapter
+    )
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,
@@ -119,7 +145,7 @@ def plan_window(qapp: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
             ),
             WorkflowAttachment(
                 step=_plot_sweep,
-                plan_model=SweepPlan,
+                plan_model=RequiredSweepPlan if required else SweepPlan,
                 knobs_model=Tunables,
                 plan_to_cfg=lambda form, env, snapshot: NativePlan(
                     fluxes=np.linspace(
@@ -248,6 +274,51 @@ def test_sweep_fluxes_edit_errors_and_lowering_match_experiment(plan_window, tmp
     )
     _snapshot(driver, tmp_path, "14-experiment-lowered-sweep")
     assert driver.plots().axes == workflow_axes
+
+
+def test_required_sweep_without_default_is_editable_like_experiment(
+    required_plan_window, tmp_path
+):
+    driver = ComponentDriver(required_plan_window)
+    driver.select_menu("New Tab ▾", ("sweep-experiment",))
+    _snapshot(driver, tmp_path, "required-01-experiment")
+    driver.click(object_name="form.fold.sweep")
+    _snapshot(driver, tmp_path, "required-01a-expanded-experiment")
+    for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
+        driver.enter_text(object_name=f"form.input.sweep.{field}", value=value)
+        _snapshot(driver, tmp_path, f"required-02-experiment-{field}")
+    driver.click("Run")
+    qt_until(
+        lambda: (
+            any(w.text == "Run" and w.enabled for w in driver.visible().widgets)
+            and bool(driver.plots().axes)
+        ),
+        label="required experiment run terminal delivery",
+    )
+    _snapshot(driver, tmp_path, "required-03-experiment-result")
+    experiment_axes = driver.plots().axes
+    assert len(experiment_axes) == 1
+    assert experiment_axes[0].ylabel == "fluxes=[0.1, 0.2, 0.3]"
+    _open(driver, tmp_path, "flux-sweep")
+    _snapshot(driver, tmp_path, "required-04-workflow")
+    assert any(
+        widget.object_name == "form.fold.fluxes" for widget in driver.visible().widgets
+    ), "A required Fluxes sweep must offer editable coordinates without a preset"
+    if not any(
+        widget.object_name == "form.input.fluxes.start"
+        for widget in driver.visible().widgets
+    ):
+        driver.click(object_name="form.fold.fluxes")
+        _snapshot(driver, tmp_path, "required-04a-expanded-workflow")
+    for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
+        driver.enter_text(object_name=f"form.input.fluxes.{field}", value=value)
+        _snapshot(driver, tmp_path, f"required-05-workflow-{field}")
+    driver.click(object_name="form.fold.fluxes")
+    _snapshot(driver, tmp_path, "required-06-workflow-collapsed")
+    driver.click("Start")
+    qt_until(lambda: _done(driver), label="required sweep workflow terminal delivery")
+    _snapshot(driver, tmp_path, "required-07-workflow-result")
+    assert driver.plots().axes == experiment_axes
 
 
 def test_figure_selector_appears_with_figures_and_hides_after_release(
