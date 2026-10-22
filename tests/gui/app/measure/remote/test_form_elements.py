@@ -79,6 +79,58 @@ def test_cfg_diagnostics_include_every_original_tone_and_seed_without_mutation(
         fixture.ctrl.tab_control.close_tab(tab)
 
 
+def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(form_rpc) -> None:
+    fixture, existing, rpc = form_rpc
+    initial = rpc.call("tab.get_cfg", {"tab_id": existing})
+    assert "diagnostics" in initial["result"], "Cfg reads must expose seed diagnostics"
+
+    class SeedMetadataAdapter(SampleAdapter):
+        @staticmethod
+        def make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
+            del ctx
+            return Form(
+                DiagnosticCfg,
+                {
+                    "sweep": Range.between(1.0, 2.0, expts=3),
+                    "tones": [
+                        {"name": "A", "frequency": Expr("6000 + 1"), "gain": 0.1},
+                        {"name": "B", "frequency": 6100.0, "gain": 0.2},
+                        {"name": "C", "frequency": Expr("missing.freq"), "gain": 0.3},
+                    ],
+                    "participants": ["B"],
+                },
+                fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+                seed_metadata={
+                    ("tones", 0, "gain"): FieldMeta(
+                        description="Synthetic amplitude candidate", calibration="uncalibrated"
+                    ),
+                    ("tones", 1, "gain"): FieldMeta(calibration="measured"),
+                },
+            )
+
+    fixture.registry.register("seed-metadata", SeedMetadataAdapter)
+    tab = fixture.ctrl.new_tab("seed-metadata")
+    try:
+        observed = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
+        rows = {tuple(row["path"]): row for row in observed["diagnostics"]}
+        assert rows[("tones", 0, "frequency")]["seed_source"] == "6000 + 1"
+        assert rows[("tones", 0, "frequency")]["seed_status"] == "available"
+        assert rows[("tones", 0, "gain")]["uncalibrated"] is True
+        assert rows[("tones", 0, "gain")]["seed_source"] == "Synthetic amplitude candidate"
+        assert rows[("tones", 1, "gain")]["uncalibrated"] is False
+        assert rows[("tones", 2, "frequency")]["seed_status"] == "missing"
+        assert rows[("tones", 2, "frequency")]["uncalibrated"] is None
+        assert rows[("tones", 2, "gain")]["uncalibrated"] is None
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.refresh_sources()
+        refreshed = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
+        assert refreshed == observed
+        local = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["tones", 1]})
+        assert local["result"]["diagnostics"] == observed["diagnostics"]
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
 def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rpc):
     from tests.gui.form_adapter._indexed_models import indexed_env
 
