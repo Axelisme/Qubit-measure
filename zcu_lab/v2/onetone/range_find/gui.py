@@ -32,7 +32,7 @@ from .core import (
     RangeFindResult,
     ResonatorDip,
 )
-from .form import make_form
+from .form import make_form, resonator_frequencies
 
 RangeFindRun: TypeAlias = RunRecord[RangeFindCfg, RangeFindResult]
 
@@ -83,20 +83,25 @@ class RangeFindAnalysis(AnalyzeResultBase):
     dips contains name, absolute MHz and background-relative magnitude depth.
     writable contains only names present in the analysis capture. diagnostic
     explains omitted frequency proposals; None means every dip is writable.
+    identity_diagnostic warns that dip/component pairing needs confirmation when
+    captured frequencies do not establish strictly ascending name order. None
+    means that ordering has a finite captured frequency basis, not proven identity.
     """
 
     dips: tuple[ResonatorDip, ...]
     writable: tuple[str, ...]
     diagnostic: str | None
+    identity_diagnostic: str | None
 
     def to_summary_dict(self) -> dict[str, object]:
-        """Show each name, MHz frequency and depth, plus omitted-proposal reasons."""
+        """Show dip values, omitted-proposal reasons and pairing uncertainty."""
         return {
             "resonators": [
                 {"name": dip.name, "freq": dip.freq, "depth": dip.depth}
                 for dip in self.dips
             ],
             "writeback_diagnostic": self.diagnostic,
+            "identity_diagnostic": self.identity_diagnostic,
         }
 
 
@@ -158,18 +163,43 @@ class RangeFindAdapter(
         req supplies raw IQ, options and the fixed Run/Load parameter capture.
         plots receives the annotated fit. Missing capture/names still allow pure
         calculation but omit their proposals and explain why in the summary.
-        Invalid curves/options and insufficient dips raise ValueError.
+        Only finite, strictly ascending captured frequencies establish name order.
+        Otherwise summary and proposals flag unconfirmed pairing without blocking
+        analysis or reordering names. Set but invalid captured frequencies, invalid
+        curves/options and insufficient dips raise ValueError.
         """
-        dips = RangeFindExp().analyze(
-            req.run_result, req.analyze_params.to_options(), plots=plots
+        options = req.analyze_params.to_options()
+        components = (
+            req.parameters.document().components if req.parameters is not None else {}
         )
+        frequencies = (
+            resonator_frequencies(
+                req.parameters,
+                [name for name in options.resonators if name in components],
+            )
+            if req.parameters is not None
+            else None
+        )
+        identity_diagnostic = (
+            "dip 與元件身分配對待確認"
+            if frequencies is None
+            or len(frequencies) != len(options.resonators)
+            or any(
+                left >= right
+                for left, right in zip(frequencies, frequencies[1:], strict=False)
+            )
+            else None
+        )
+        dips = RangeFindExp().analyze(req.run_result, options, plots=plots)
         if req.parameters is None:
             return RangeFindAnalysis(
-                dips, (), "No Run/Load parameter capture; no frequency proposals"
+                dips,
+                (),
+                "No Run/Load parameter capture; no frequency proposals",
+                identity_diagnostic,
             )
         writable: list[str] = []
         missing: list[str] = []
-        components = req.parameters.document().components
         for dip in dips:
             if dip.name in components:
                 writable.append(dip.name)
@@ -180,7 +210,7 @@ class RangeFindAdapter(
             if missing
             else None
         )
-        return RangeFindAnalysis(dips, tuple(writable), diagnostic)
+        return RangeFindAnalysis(dips, tuple(writable), diagnostic, identity_diagnostic)
 
     def get_writeback_items(
         self, req: WritebackRequest[RangeFindRun, RangeFindAnalysis]
@@ -188,14 +218,23 @@ class RangeFindAdapter(
         """Propose one independently selectable <name>.freq MHz row per captured dip.
 
         req pairs the accepted analysis with its fixed source. No module, kappa
-        or electrical-delay rows are produced. This method never applies changes.
+        or electrical-delay rows are produced. Unconfirmed dip/component pairing
+        is carried from the analysis into every row description. The warning does
+        not disable selection or Apply. This method never applies changes.
         """
         if req.ctx.parameters is None:
             return []
         return [
             ParameterWriteback(
                 target_name=f"{dip.name}.freq",
-                description=f"Coarse dip frequency (MHz), depth {dip.depth:.6g} a.u.",
+                description=(
+                    f"Coarse dip frequency (MHz), depth {dip.depth:.6g} a.u."
+                    + (
+                        f"; {req.analyze_result.identity_diagnostic}"
+                        if req.analyze_result.identity_diagnostic is not None
+                        else ""
+                    )
+                ),
                 proposed_value=dip.freq,
             )
             for dip in req.analyze_result.dips
