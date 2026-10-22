@@ -70,6 +70,7 @@ def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     result = Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j]))
     record = experiment.RunRecord(cfg, result, metadata=metadata)
     assert record.metadata == metadata
+    assert record.metadata is not None
     assert record.metadata is not metadata
     assert record.cfg is not cfg
     assert record.result is result
