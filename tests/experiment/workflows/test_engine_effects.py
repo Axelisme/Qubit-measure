@@ -122,9 +122,88 @@ def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
     ]
     assert len(facts) == 1
     assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "failed")
-    assert facts[0].stopped is True
+    assert facts[0].stopped is False
     assert facts[0].reason == observed[0].reason
     assert facts[0].device_snapshot is None
+
+
+@pytest.mark.parametrize(
+    "failed", [False, True], ids=["schedule_cancel", "acquire_failure"]
+)
+def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
+    rig: Rig,
+    failed: bool,
+) -> None:
+    observed: list[Completed[int] | Failed] = []
+    attempts: list[int] = []
+
+    class Program:
+        cfg_model = ProgramV2Cfg(rounds=1)
+
+        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+            attempts.append(1)
+            raise OSError("readout disconnected")
+
+        acquire_decimated = acquire
+
+    def operation(ctx: CallContext) -> int:
+        with Schedule(Cfg(), SignalBuffer(1), stop=ctx.stop_signal) as schedule:
+            assert schedule.stop is not ctx.stop_signal, "Schedule must own a child"
+            if failed:
+                schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
+                    Program(),
+                    raw2signal_fn=lambda raw: raw,
+                    options=AcquireOptions(retry=1),
+                )
+            else:
+                schedule.set_stop()
+            assert not ctx.stop_signal.is_set()
+            assert ctx.stop_signal.error is None
+        return 99
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        observed.append(await env.call(operation))
+        observed.append(
+            await env.call(
+                lambda ctx: (
+                    0
+                    if ctx.stop_signal.partial_result
+                    or ctx.stop_signal.error is not None
+                    else 7
+                )
+            )
+        )
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    if failed:
+        assert isinstance(observed[0], Failed)
+        assert "readout disconnected" in observed[0].reason
+        assert attempts == [1, 1]
+    else:
+        first = completed(observed[0])
+        assert (first.value, first.partial_result) == (99, True)
+        assert first.facts.stopped is False
+        assert first.facts.outcome == "partial"
+    second = completed(observed[1])
+    assert (second.value, second.partial_result) == (7, False)
+    assert second.facts.stopped is False
+    assert second.facts.outcome == "completed"
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert [
+        (fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts
+    ] == [
+        (1, 1, "failed" if failed else "partial", False),
+        (1, 2, "completed", False),
+    ]
+    if not failed:
+        assert facts[0] == completed(observed[0]).facts
+    assert facts[1] == second.facts
 
 
 @pytest.mark.parametrize("source", ["outside", "other_signal"])
@@ -209,6 +288,12 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
     ]
     assert all(outcome.facts.stopped is outcome.partial_result for outcome in outcomes)
     assert all(outcome.facts.outcome == "partial" for outcome in outcomes)
+    journal_facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert journal_facts == [outcome.facts for outcome in outcomes]
 
 
 def test_wait_pause_retries_original_deadline_without_restarting_author(

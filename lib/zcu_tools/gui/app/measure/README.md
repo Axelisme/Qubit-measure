@@ -204,7 +204,7 @@ Recipe 的 logical read/edit/selector 命令也由 `TabFormResource` 擁有。Ad
 
 RunService 在 run 終局後請 DeviceService 背景讀回已連線儀器。成功台更新觀察 cache，失敗台保留既有值。這項讀回不改變 run 終局、settlement、lease 或 run 前固定的 acquisition snapshot。
 
-RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。`partial_result` 固定 worker 完成時的 Run root 完成事實，與 operation 終態及 metadata 是否存在無關。Snapshot 與 wire 的 result_state 交付同一 bool，new Run 或非 acquisition replacement 重設為 False。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
 Native Load 保留檔案 metadata。在相同 opened entry，Load 一次讀回歷史 point，
 固定檔案的 alias 名稱供分析與 WB。值是 Load 時的持久值，不重建未保存的原始參數版本。

@@ -20,6 +20,185 @@ from ._script_recipe_support import (
 from ._support import make_client
 
 
+async def run_twice(
+    session: RecipeSession, inputs: Inputs, partials: list[bool]
+) -> Report:
+    """Record two GUI Run completions using each test's own transport and list."""
+    tab = session.open_tab("synthetic")
+    partials.append((await tab.run()).partial_result)
+    partials.append((await tab.run()).partial_result)
+    return Report(count=inputs.count)
+
+
+@pytest.mark.parametrize("scope", ["acquire", "schedule"])
+def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
+    tmp_path: Path, scope: str
+) -> None:
+    gui = SyntheticGui(partial_first=True)
+    waiting = Event()
+    released = Event()
+    requests: list[tuple[str, dict[str, object]]] = []
+    partials: list[bool] = []
+    path = "script/iteration#1/operation#1/schedule#1/acquire#2"
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        requests.append((method, params))
+        if method == "operation.status_scope":
+            assert params == {"operation_id": 1}
+            return {"active_path": "run/schedule#1/acquire#2"}
+        if method == "operation.cancel_scope":
+            assert params["operation_id"] == 1
+            expected = params.get("expected")
+            accepted = expected is None or expected == (2 if scope == "acquire" else 1)
+            if accepted:
+                released.set()
+            return {
+                "cancelled": accepted,
+                "reason": "scope cancellation requested"
+                if accepted
+                else "sequence mismatch",
+                "active_path": "run/schedule#1/acquire#2",
+            }
+        if method == "operation.await" and params["operation_id"] == 1:
+            waiting.set()
+            return (
+                {"reason": "completed", "status": "finished"}
+                if released.is_set()
+                else {"reason": "timeout"}
+            )
+        if method == "operation.cancel":
+            released.set()
+            return {"status": "requested"}
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Cancel a GUI-owned scope, then run again")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        return await run_twice(session, inputs, partials)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        assert waiting.wait(30), "The first GUI operation must enter its await"
+        execution_id = execution.snapshot().execution
+        assert client.call("status", {"execution": execution_id})["active_path"] == path
+        rejected = client.call(
+            "cancel", {"execution": execution_id, "scope": scope, "expected": 99}
+        )
+        assert rejected.data["cancelled"] is False
+        assert rejected.data["reason"] == "sequence mismatch"
+        assert rejected.data["active_path"] == path
+        accepted = client.call("cancel", {"execution": execution_id, "scope": scope})
+        assert accepted.data["cancelled"] is True
+        assert accepted.data["active_path"] == path
+        execution.join()
+        assert execution.snapshot().status == "completed"
+        assert partials == [True, False]
+        assert [
+            params["operation_id"]
+            for method, params in requests
+            if method == "operation.cancel_scope"
+        ] == [1, 1]
+        assert not [method for method, _ in requests if method == "operation.cancel"]
+    finally:
+        released.set()
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("scope", ["acquire", "schedule"])
+def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
+    tmp_path: Path, scope: str
+) -> None:
+    gui = SyntheticGui()
+    waiting = Event()
+    released = Event()
+    scoped_requests: list[int] = []
+    partials: list[bool] = []
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.status_scope":
+            assert params == {"operation_id": 2}
+            return {"active_path": "run/schedule#1/acquire#1"}
+        if method == "operation.cancel_scope":
+            assert params["operation_id"] == 2
+            scoped_requests.append(2)
+            gui.cancelled.set()
+            released.set()
+            return {
+                "cancelled": True,
+                "reason": "scope cancellation requested",
+                "active_path": "run/schedule#1/acquire#1",
+            }
+        if method == "operation.await" and params["operation_id"] == 2:
+            waiting.set()
+            return (
+                {"reason": "completed", "status": "finished"}
+                if released.is_set()
+                else {"reason": "timeout"}
+            )
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Keep fine cancellation bound to the observed Run")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        return await run_twice(session, inputs, partials)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    execution = None
+    try:
+        execution = start(client, "synthetic")
+        # The submitted two-Run author reaches this responder for operation 2.
+        # Its arrival, not elapsed time, establishes which handle is active.
+        assert waiting.wait(30), "The second Run must enter its await responder"
+        first, second = execution.snapshot().details
+        path = "script/iteration#1/operation#2/schedule#1/acquire#1"
+        stale = client.call("cancel", {"op": first.op, "scope": scope, "expected": 1})
+        assert stale.data["cancelled"] is False
+        assert stale.data["reason"] == "scope not active"
+        assert stale.data["active_path"] == path
+        assert scoped_requests == []
+        assert not released.is_set()
+        accepted = client.call(
+            "cancel", {"op": second.op, "scope": scope, "expected": 1}
+        )
+        assert accepted.data["cancelled"] is True
+        execution.join()
+        assert execution.snapshot().status == "completed"
+        assert partials == [False, True]
+        assert scoped_requests == [2]
+    finally:
+        released.set()
+        try:
+            if execution is not None:
+                execution.join()
+                assert execution.snapshot().error is None, execution.snapshot().error
+        finally:
+            client.context.session.close()
+
+
+def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
+    tmp_path: Path,
+) -> None:
+    gui = SyntheticGui(partial_first=True)
+    partials: list[bool] = []
+
+    @recipe("synthetic", "Observe GUI completion independently of control intent")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        return await run_twice(session, inputs, partials)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        assert execution.snapshot().status == "completed"
+        assert partials == [True, False]
+        assert not [
+            method
+            for method, _ in client.transport.sent
+            if method == "operation.cancel_scope"
+        ]
+    finally:
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("await_kind", ["analyze", "ask", "writeback"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(

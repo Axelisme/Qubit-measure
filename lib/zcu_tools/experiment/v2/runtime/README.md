@@ -56,7 +56,7 @@ path，並觸發該 buffer 的 update hook。
 
 `outcome.py` 擁有完成狀態值與 exception reason 格式化。`Schedule` 擁有狀態轉換、stop token 與 partial buffer 的生命週期。`RunStatus`、`ScheduleOutcome` 仍可從既有 runtime 與 schedule 入口匯入。
 
-`Schedule` 是一次 run 的 scope：入口 deepcopy cfg、typed env、持有 `StopSignal`，並
+`Schedule` 是 run 內的 scope：入口 deepcopy cfg、typed env、持有 `StopSignal` child，並
 建立 host-side control flow。
 
 ```python
@@ -111,7 +111,7 @@ with Schedule(cfg, signals_buffer) as sched:
 
 `program_builder.py` 擁有完整的 QICK program 組裝與同步 acquire：`ProgramBuilder`、`ModuleFacade`、`AcquireOptions`、producer 型別契約與 raw conversion。`schedule.py` 保留 Schedule／Step、buffer／slot 與 run lifecycle。Builder 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome 與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
 
-`acquire_cancel.py` 擁有 acquire-local stop 與借用 run stop 的合成旗標，讓 data-driven early stop 不會改變 run outcome。
+`acquire_cancel.py` 合成 acquire child 的取消與作者的 data stop condition。Data stop 是正常完成，不設 scope event，也不標記 partial。
 
 - `build()` 建立並回傳 program。
 - `run_program(program)` 執行 caller 傳入的 integrated-acquire program。
@@ -138,11 +138,12 @@ with Schedule(cfg, signals_buffer) as sched:
 ## Stop 與 Retry
 
 - `StopSignal` 是唯一 stop token，定義於 `experiment.stop_signal`。Caller 每次 run 建立一個，
-  必須透過 `Schedule(..., stop=context.cancel_signal)` 顯式傳入。Runtime 使用這個明確 token。
-- `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 shared signal 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
+  透過 `Schedule(..., stop=context.cancel_signal)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
+- Child release 將第一個 error 與 partial 完成事實交到父 token，不設父 event。交付在 operation 層截止。GUI 的 run root 收到 Schedule error 後仍可用 `raise_if_error()` 轉成 failure。已完成 child 從 active tree 移除，不隨 run 長度累積。
+- `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 schedule child 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
 - `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
-  acquire-local composite `cancel_flag` 傳給 program acquire：它讀取 `StopSignal` 的 external
-  stop，但 `round_hook` 內的 data stop 只停止目前 program acquire，不會污染 `Schedule.outcome`。
+  composite `cancel_flag` 傳給 program acquire：它讀取 acquire child 的 external
+  stop，但 `round_hook` 內的 data stop 只結束目前 program acquire，不改變 `Schedule.outcome` 或 partial 完成事實。
   `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
   仍使用 `clear_stop()` 清除 stop flag 與 transient error cause。
 - `ProgramBuilder` 的 data-driven early stop 走 `AcquireOptions(stop_condition=...)`：internal
@@ -155,10 +156,7 @@ with Schedule(cfg, signals_buffer) as sched:
   目前已寫入 buffer / result tree 的 partial result 保留；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
-- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。這不改
-  `ProgramBuilder` 的 partial-result contract；它提供給持有同一個 RunContext 的 consumer（例如
-  measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把
-  runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
+- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。Schedule 結束時將 cause 交給 RunContext 的 token。Consumer（例如 measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把 runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
   清掉 stop flag 與 transient error cause。
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
@@ -177,7 +175,7 @@ with Schedule(cfg, signals_buffer) as sched:
 `test_schedule.py` 覆蓋 typed env 與 host scan/repeat/batch；`test_schedule_buffers.py` 覆蓋
 root buffer 註冊、child buffer 同步與 shape validation。`test_signal_buffer_flush.py` 覆蓋
 SignalBuffer 寫入通知、manual update 與 flush。
-`test_schedule_lifecycle.py` 覆蓋 context 使用邊界、shared stop token、host body 中斷的
+`test_schedule_lifecycle.py` 覆蓋 context 使用邊界、schedule child 的停止與錯誤交付、host body 中斷的
 partial/NaN 保存、其他 exception 傳播與 repeat stop。Runtime 案例重用 `_flow_cfg.py` 的
 cfg builder，共用 recording fake 放在 `_flow_fakes.py`，由最近的 conftest 還原每個案例的
 mutable fake state。案例經公開 Schedule／buffer／StopSignal 接縫驗證。

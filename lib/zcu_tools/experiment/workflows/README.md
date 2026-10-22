@@ -22,7 +22,7 @@
 
 `Engine.start` 驗證與保存啟動資料，不執行作者。宿主在一個 worker 呼叫一次 `Engine.execute`。這個呼叫透過共用 `experiment.script_host.ScriptHost` 推進整個 coroutine，包含 Pause 與 Ask 的等待。控制命令只通知同一個 worker，不另排 execute、answer 或 drain segment。新 run 必須等原 worker 的 finally 與 executor 都結束。
 
-`await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示交付的結果是否因合作中止而不完整。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
+`await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示 operation 或已完成 descendant 在完成時曾被取消。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
 
 `await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 是位置參數，名稱不限定；context 必須是具名 keyword-only 參數。cfg 必須是 ExpCfgModel。每個 attempt 建立新的 RunContext，借用 soc、soccfg 與 connected drivers，使用當次 operation token 及獨立的 operation Plots。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
 
@@ -34,7 +34,10 @@ Schedule acquire failure 回 Failed，作者決定重試、繼續或 return。�
 
 Pause set 當前 operation token、推進 epoch 並關閉 gate，不 set iteration token。被打斷且 stale 的 partial attempt 記為 discarded。Resume 後重跑同一個 callable 與原 capture，作者不會提前收到該 partial。已自然完成的結果等 Resume 後交付，不重跑。
 
-Stop set run scope，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
+`Engine.cancel(run_id, scope, expected=None)` 沿共用 host 核對 label 或 label#N，回 CancelResult，不等待 cleanup。Acquire 只停一次取得，Schedule 停該段後續取得，iteration 停本輪且 commit 後下一輪正常，run 是當前 operation 的別名。Status 回 active_path。例如 `engine.cancel("run-id", "acquire", expected=3)` 拒絕不是第 3 次的 acquire，不停止父 scope。
+裸 `script` 且 `expected=None` 的 ack 由 Stop owner lock 決定。Owner 先寫 StopRequested／manifest 並 latch，再呼叫 host.cancel 原子設 root，持久化不進 control callback。`cancelled=True` 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。帶序號或 expected 的 script 與其他 scope 直接由 host 核對，不寫 Stop 意圖。Terminal lifecycle 對合法請求回 `cancelled=False, reason="scope not active"`，錯誤語法仍 raise ValueError。
+
+GUI Stop 與 `Engine.stop` 沿同一 owner 記錄 Stop，再通知 host 設 script 根，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
 
 ## 作者範例
 
@@ -81,7 +84,7 @@ Record 信封保存 commit_seq、配置目錄、UTC 時間、record 型別名、
 
 每次實際 executor attempt 都追加 flattened `operation_finished` JSONL event。它包含 call_seq 與 operation；seq、time、run_id 是既有 journal 欄位。`OperationFacts` 欄位為 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason 與 stopped。
 
-Kind 是 run、call、setup_device 或 wait_until。Iteration 從 1 起，成功 commit 才推進，配置目錄不推進。Attempt 在 iteration 中從 1 起，成功 commit 後重置。Stopped 只記完成時 operation 自身 token 的控制意圖，不代表所有 descendant 的取消，也不從後來的 Stop 或 Pause 狀態推導。交付結果是否不完整以 Completed.partial_result 為準。只有 run 有呼叫前的 device snapshot，其餘是 None。Outcome 是 completed、partial、discarded、failed 或 raised。Pause discard 與重試各留一筆，例外也留事實，不改原始例外分類。
+Kind 是 run、call、setup_device 或 wait_until。Iteration 從 1 起，成功 commit 才推進，配置目錄不推進。Attempt 在 iteration 中從 1 起，成功 commit 後重置。Stopped 是完成時 operation 自己的 stop bit，不從 descendant 取消或後來的 Stop、Pause 狀態推導。Partial_result 獨立記錄 operation 或已完成 descendant 的取消，因此 partial_result=True 不代表 stopped=True。只有 run 有呼叫前的 device snapshot，其餘是 None。Outcome 是 completed、partial、discarded、failed 或 raised。Pause discard 與重試各留一筆，例外也留事實，不改原始例外分類。
 
 Commit 的 operations 按 attempt 順序列出同一結構。未 commit 的操作只留 journal。Snapshot 固定在操作前，後續量測、driver mutation 或 Save 不重新讀取或覆寫它。
 

@@ -17,7 +17,11 @@ from zcu_tools.experiment.acquisition import (
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.stop_signal import (
+    CancelResult,
+    StopSignal,
+    parse_cancel_scope,
+)
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabClosedPayload,
@@ -38,6 +42,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
+from ..state import RunPaneState
 from .guard import RunInputs
 from .operation_gate import OperationKind
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
@@ -73,6 +78,7 @@ class _RunOperation:
     adapter_name: str
     storage: PointStorageBinding | None
     parameters: ParameterContext | None
+    partial_result: bool = False
 
 
 class RunService:
@@ -117,6 +123,7 @@ class RunService:
         # active_token is set by begin() and cleared on the terminal path so the
         # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None
+        self._active_stop: StopSignal | None = None
         # Run plots are view-only, never part of the canonical pane or Save All.
         self._view_plots: dict[str, Plots] = {}
         self._bus.subscribe(TabClosedPayload, self._on_tab_closed)
@@ -179,6 +186,7 @@ class RunService:
                 result,
                 source_operation_id=self._active_token,
                 parameters=op.parameters,
+                partial_result=op.partial_result,
             )
         except Exception as error:
             logger.exception("Run result publication failed: tab_id=%r", op.tab_id)
@@ -243,6 +251,7 @@ class RunService:
     def _clear_running(self, tab_id: str) -> None:
         self._state.set_tab_running(tab_id, running=False)
         self._active_token = None
+        self._active_stop = None
 
     def _run_finished(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
         logger.info(
@@ -261,6 +270,10 @@ class RunService:
         logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
         # A cancelled run may still carry a partial result.
         if result is NO_RESULT:
+            retired = self._state.replace_run_pane(
+                op.tab_id, RunPaneState(partial_result=op.stop_signal.partial_result)
+            )
+            self._teardown_retired(retired)
             self._discard_plots(op, "Cancelled")
         elif not self._publish_run_result(op, result, settle):
             return
@@ -337,11 +350,10 @@ class RunService:
         # draft; cleanup happens only after the new empty panes are committed.
         self._prepare_tab_for_run(tab_id)
 
-        # A single StopSignal owns the Schedule-visible stop flag for this run.
-        # ``cancel_requested`` is separate: Schedule failures also set the stop
-        # flag to halt host loops, but they are not user cancellations.
+        # The run root receives completed Schedule errors without being stopped.
+        # ``cancel_requested`` records user intent separately from scope outcomes.
         stop_event = threading.Event()
-        stop_signal = StopSignal(stop_event)
+        stop_signal = StopSignal(stop_event, label="run")
         cancel_requested = threading.Event()
         adapter = inputs.adapter
         request = inputs.request
@@ -405,7 +417,8 @@ class RunService:
                 result = adapter.run(request, cfg, context=context)
                 stop_signal.raise_if_error()
             # Completion records acquisition progress, not later operation cancellation.
-            completion = "stopped" if stop_event.is_set() else "complete"
+            operation.partial_result = stop_signal.partial_result
+            completion = "stopped" if operation.partial_result else "complete"
             finished_at = datetime.now(UTC)
             if metadata is not None:
                 metadata = metadata.model_copy(
@@ -448,6 +461,7 @@ class RunService:
 
         # Started events are emitted only after begin() succeeds (ADR-0066).
         self._active_token = token
+        self._active_stop = stop_signal
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
@@ -456,6 +470,32 @@ class RunService:
     def active_token(self) -> int | None:
         """The token of the currently running operation, or None."""
         return self._active_token
+
+    def status_scope(self, operation_id: int) -> str:
+        """Read this active Run's labeled tree, or an empty path for a stale handle.
+
+        Call on the owner thread. The handle binds this observation to one Run;
+        it never falls through to the next Run's token.
+        """
+        signal = self._active_stop
+        if operation_id != self._active_token or signal is None:
+            return ""
+        return signal.active_path
+
+    def cancel_scope(
+        self, operation_id: int, scope: str, *, expected: int | None = None
+    ) -> CancelResult:
+        """Atomically match a scope in one active Run, without cancelling its owner.
+
+        Call on the owner thread. A stale/non-Run handle returns scope not active.
+        Scope syntax and sequence checks use the shared experiment resolver.
+        Descendant cancellation changes completion facts, not run Stop intent.
+        """
+        parse_cancel_scope(scope, expected)
+        signal = self._active_stop
+        if operation_id != self._active_token or signal is None:
+            return CancelResult(False, "scope not active", "")
+        return signal.cancel(scope, expected=expected)
 
     def cancel_run(self) -> bool:
         """Request cancellation of the active run; best-effort.

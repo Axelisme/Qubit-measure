@@ -142,8 +142,9 @@ Inspect current state and confirmed files before deciding.
 
 Use global status for GUI operations, non-terminal executions and terminal count.
 Keep known execution IDs for later queries; global status does not embed history.
-status(execution) reads local progress without reconnecting. Completed, failed
-and cancelled recipe summaries contain only status, authored report and runs.
+status(execution) reads progress and the live scope path without reconnecting.
+Completed, failed and cancelled recipe wait summaries contain only status,
+authored report and runs. Status adds active_path, including at terminal.
 A failure's diagnostic is available in status(execution, detail="full").
 Nonterminal summaries include execution. A paused question supplies
 pending_question with request_id, evidence and answer_schema. Interactive
@@ -171,11 +172,31 @@ through status; do not reuse an old op.
 cancel(execution, scope="script") requests cooperative script stop. The author
 continues cleanup; subsequent Runs inherit stop and return partial results.
 Synchronous edits and explicit saves still run. The terminal status is cancelled
-with report=null and retained runs. scope="run" stops only the current recipe
-acquisition; analysis and questions continue. Without a Run, it returns
-cancelled=false, reason="no run in progress". Acknowledgement is not cleanup
-completion; use wait/status. Standalone analysis cancellation stops its
-continuation. Unregistered cancel(op) uses the direct GUI operation hook.
+with report=null and retained runs. cancel accepts exactly one of execution,
+run_id (native workflow), or op. Narrow scopes preserve their parents:
+- acquire stops one acquisition; the next acquire in the same Schedule is clean.
+- schedule stops this Schedule and its later acquires; the next operation is clean.
+- iteration stops this iteration, including operations born stopped; commit starts
+  a clean iteration.
+- run stops the current operation. Recipe admits only an active tab.run; analysis
+  and questions continue. Workflow admits any operation. operation is its label.
+Without a recipe Run, run/schedule/acquire return cancelled=false with reason
+"no run in progress". Status includes active_path. For example,
+cancel(execution="recipe-...", scope="acquire", expected=3) accepts only acquire#3
+within the current GUI Run root. Sequences may restart in the next Run. For exact
+cross-Run targeting use cancel(op=17, scope="acquire", expected=3) with the observed
+Run handle; stale fine-scope op targets return "scope not active", never cancel
+the next Run. Generic cancel(op=17) retains script Stop behavior.
+Use a label or label#N, not the whole path. expected and N are positive integers,
+not bool, and must agree if both supplied. Unknown labels and malformed syntax
+are invalid_params. Inactive labels and stale numbers return cancelled=false,
+reason="scope not active" or "sequence mismatch", with the current active_path.
+Script root has no sequence, so script with expected or script#N is refused.
+Accepted requests return cancelled=true, reason="scope cancellation requested".
+This is not cleanup completion; use wait/status. Recipe schedule/acquire use the
+exact GUI Run handle; its active_path appends the GUI tail to local scopes.
+That projection is not atomic across processes. Standalone analysis cancellation
+stops its continuation. Unregistered cancel(op) keeps the direct GUI operation hook.
 Terminal execution results are not rewritten.
 
 Library creation uses rpc_call(method="context.ml_create_from_role", params=...).

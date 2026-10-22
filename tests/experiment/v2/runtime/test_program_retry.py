@@ -262,8 +262,9 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
             )
         )
         assert sched.outcome.status == "failed"
-        assert run_stop.error is not None
-        assert run_stop.error.status == "failed"
+        assert run_stop.error is None
+        assert sched.stop.error is not None
+        assert sched.stop.error.status == "failed"
 
     with pytest.raises(
         ScheduleOutcomeError, match="RuntimeError: permanent failure"
@@ -271,6 +272,7 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
         run_stop.raise_if_error()
 
     assert exc_info.value.exception is sched.outcome.exception
+    assert not run_stop.is_set()
     assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
 

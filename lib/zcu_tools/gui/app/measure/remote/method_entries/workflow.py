@@ -3,7 +3,7 @@
 from zcu_tools.gui.remote.method_spec import MethodSpec
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec
 
-from ._params import default_integer, optional_string, required_string
+from ._params import default_integer, optional_integer, optional_string, required_string
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 _TAB = required_string(
@@ -76,6 +76,20 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "Resume a delivered paused run in the worker under the same RUN lease and operation.",
         (_RUN,),
         operation=True,
+    ),
+    method_entry(
+        "workflow.cancel",
+        "workflow:h_workflow_cancel",
+        MethodSpec(
+            30.0,
+            "Match a live label or label#N and stop only that scope; acknowledgement is not drain.",
+            (
+                _RUN,
+                ParamSpec("scope", JsonType.STRING, required=False, default="script"),
+                optional_integer("expected"),
+            ),
+        ),
+        agent=AgentMethodPolicy(exposure="tool", tool_names=("cancel",)),
     ),
     _entry(
         "stop",

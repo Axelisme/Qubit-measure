@@ -21,14 +21,14 @@ from pydantic import BaseModel
 
 from zcu_tools.core.script_protocol import Answer, Question
 
-from .stop_signal import StopSignal
+from .stop_signal import CancelResult, StopSignal, parse_cancel_scope
 
 logger = logging.getLogger(__name__)
 
 type ScriptStatus = Literal[
     "ready", "running", "paused", "completed", "cancelled", "failed"
 ]
-type CancelScope = Literal["script", "run"]
+type CancelScope = str
 
 
 @dataclass(frozen=True)
@@ -50,14 +50,16 @@ class CallResult[T]:
     """One executor completion with an immutable control snapshot.
 
     result is fn's unchanged payload. epoch is the attempt's starting epoch.
-    partial_result snapshots the operation stop bit as fn completes, not the
-    payload's own data completeness. Snapshot and pause have one lock ordering;
-    pause after this snapshot cannot retroactively mark natural completion.
+    partial_result snapshots cancellation of the operation or its completed
+    descendant scopes, not the payload's own data completeness. stopped snapshots
+    only the operation token's own stop bit. Both facts and pause have one lock
+    ordering; pause after this snapshot cannot retroactively mark completion.
     """
 
     result: T
     epoch: int
     partial_result: bool
+    stopped: bool
 
 
 @dataclass(frozen=True)
@@ -87,8 +89,8 @@ class ScriptHost:
 
     def __init__(self, *, on_change: Callable[[], None] | None = None) -> None:
         self._on_change = on_change
-        self._root = StopSignal()
-        self._iteration = self._root.child()
+        self._root = StopSignal(label="script")
+        self._iteration = self._root.child(label="iteration")
         self._active: StopSignal | None = None
         self._epoch = 0
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -119,6 +121,11 @@ class ScriptHost:
         """Read the answerable request, or None before/after the explicit ask."""
         with self._lock:
             return self._pending
+
+    @property
+    def active_path(self) -> str:
+        """Read the labeled live scope path, starting at the script root."""
+        return self._root.active_path
 
     @property
     def epoch(self) -> int:
@@ -178,14 +185,16 @@ class ScriptHost:
         """
         loop = self._require_loop()
         await self.wait_until_resumed()
-        token = self._iteration.child()
+        token = self._iteration.child(label="operation")
         self._active = token
         context = CallContext(token, self._epoch)
 
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
-                return CallResult(value, context.epoch, token.is_set())
+                return CallResult(
+                    value, context.epoch, token.partial_result, token.is_set()
+                )
 
         try:
             return await loop.run_in_executor(None, invoke)
@@ -258,7 +267,7 @@ class ScriptHost:
         """
         await self.wait_until_resumed()
         self._iteration.release()
-        self._iteration = self._root.child()
+        self._iteration = self._root.child(label="iteration")
 
     async def wait_until_resumed(self) -> None:
         """Wait on the worker pause gate; script cancellation also opens it.
@@ -300,31 +309,31 @@ class ScriptHost:
 
         self._command(apply, allow_idle=True)
 
-    def cancel(self, *, scope: CancelScope = "script") -> None:
-        """Acknowledge cooperative script or current-operation stop on the loop.
+    def cancel(
+        self, scope: str = "script", *, expected: int | None = None
+    ) -> CancelResult:
+        """Match and stop a live scope on the loop, acknowledging without drain.
 
-        Script sets the root, releases a pending ask with None, and causes later
-        operations to inherit stop. Run sets only the active operation token;
-        subsequent calls are unaffected. No active run is a no-op. This method
-        never waits for operation drain and never cancels the author Task.
-        Before run, script cancellation is retained; after terminal it is a no-op.
+        scope is a label or label#N; expected optionally guards its birth number.
+        run aliases the current operation. A successful script request also opens
+        the gate and releases Ask with None. Other targets leave parents running.
+        Invalid syntax raises ValueError; inactive/stale targets return a refusal.
+        Before run, script stop is retained; terminal hosts refuse further stops.
         """
-        if scope not in ("script", "run"):
-            raise ValueError("scope must be script or run")
+        label, _sequence = parse_cancel_scope(scope, expected)
 
-        def stop() -> None:
+        def stop() -> CancelResult:
             if self._done.is_set():
-                return
-            if scope == "script":
-                self._root.set()
+                return CancelResult(False, "scope not active", self.active_path)
+            result = self._root.cancel(scope, expected=expected)
+            if result.cancelled and label == "script":
                 if self._gate is not None:
                     self._gate.set()
                 if self._answer is not None and not self._answer.done():
                     self._answer.set_result(None)
-            elif self._active is not None:
-                self._active.set()
+            return result
 
-        self._command(stop, allow_idle=True)
+        return self._command(stop, allow_idle=True)
 
     def close(self) -> None:
         """Request script stop and cooperatively drain before returning off-worker.

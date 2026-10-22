@@ -263,6 +263,7 @@ class LookbackGui:
                             "available": self.ran,
                             "revision": 1,
                             "source_operation_id": 71 if self.ran else None,
+                            "partial_result": False,
                         },
                     }
                 ]

@@ -15,7 +15,8 @@ from uuid import uuid4
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer, Question
-from zcu_tools.experiment.script_host import CancelScope, ScriptStatus
+from zcu_tools.experiment.script_host import ScriptStatus
+from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeCancelled,
@@ -68,6 +69,7 @@ class ScriptRecipeSnapshot:
     details retains detached per-Run conditions, analyses and explicit proposals.
     missing lists authored parameter paths only at needs_parameters terminal;
     that state has no outcome/error and releases registry admission.
+    active_path is the detached local host path; status adds the live GUI tail.
     """
 
     execution: str
@@ -81,6 +83,7 @@ class ScriptRecipeSnapshot:
     cancel_requested: bool = False
     missing: tuple[str, ...] = ()
     details: tuple[RecipeRunDetail, ...] = ()
+    active_path: str = "script"
 
 
 class ScriptRecipeExecution:
@@ -120,6 +123,9 @@ class ScriptRecipeExecution:
                 self._progress,
                 pending_question=deepcopy(self._progress.pending_question),
                 details=self._host.runtime.details() if self._host is not None else (),
+                active_path=self._host.scheduler.active_path
+                if self._host is not None
+                else "script",
             )
 
     def wait(self, timeout: float) -> ToolReply:
@@ -203,44 +209,59 @@ class ScriptRecipeExecution:
             }
         )
 
-    def cancel(self, *, scope: CancelScope = "script") -> ToolReply:
-        """Acknowledge script or current Run stop, without fabricating completion.
-
-        Script cancellation is retained even during initial binding; run scope is
-        a no-op without an active operation. Subsequent operations still start,
-        inheriting stop only for script scope. Terminal progress is unchanged.
-        """
-        if scope not in ("script", "run"):
-            raise ValueError("scope must be script or run")
+    @property
+    def active_path(self) -> str:
+        """Read local scopes plus the active GUI Run tail, without driving author code."""
         with self._condition:
-            if self._progress.status in SCRIPT_TERMINAL:
-                if scope == "run":
-                    return ToolReply(
-                        {
-                            **asdict(self.snapshot()),
-                            "cancelled": False,
-                            "reason": "no run in progress",
-                        }
-                    )
-                return ToolReply(asdict(self.snapshot()))
-            if scope == "script":
-                self._cancelled.set()
-                self._progress = replace(self._progress, cancel_requested=True)
             host = self._host
-        if scope == "run":
-            cancelled = host.runtime.cancel_run() if host is not None else False
-            return ToolReply(
-                {
-                    **asdict(self.snapshot()),
-                    "cancelled": cancelled,
-                    "reason": "run cancellation requested"
-                    if cancelled
-                    else "no run in progress",
-                }
-            )
-        if host is not None:
-            host.scheduler.cancel(scope=scope)
-        return ToolReply(asdict(self.snapshot()))
+        return "script" if host is None else host.runtime.active_path
+
+    def cancel(
+        self,
+        scope: str = "script",
+        *,
+        expected: int | None = None,
+        op: int | None = None,
+    ) -> ToolReply:
+        """Acknowledge one matching scope, retaining the execution snapshot.
+
+        Script stop survives initial binding. Run retains tab.run-only admission;
+        schedule/acquire delegate to its exact GUI handle. An op target must
+        still be that current handle; historical registry ownership cannot
+        retarget it. Other scopes use the local host resolver. Refusal never
+        cancels a later operation or script.
+        """
+        label, sequence = parse_cancel_scope(scope, expected)
+        with self._condition:
+            host = self._host
+            terminal = self._progress.status in SCRIPT_TERMINAL
+            if terminal or host is None:
+                accepted = not terminal and label == "script" and sequence is None
+                reason = (
+                    "scope cancellation requested"
+                    if accepted
+                    else "sequence mismatch"
+                    if label == "script" and sequence is not None
+                    else "scope not active"
+                    if op is not None
+                    else "no run in progress"
+                    if label in {"run", "schedule", "acquire"}
+                    else "scope not active"
+                )
+                result = CancelResult(accepted, reason, "script")
+                if accepted:
+                    self._cancelled.set()
+                    self._progress = replace(self._progress, cancel_requested=True)
+            else:
+                result = None
+        if result is None:
+            assert host is not None
+            result = host.runtime.cancel(scope, expected=expected, op=op)
+            if result.cancelled and label == "script":
+                with self._condition:
+                    self._cancelled.set()
+                    self._progress = replace(self._progress, cancel_requested=True)
+        return ToolReply({**asdict(self.snapshot()), **asdict(result)})
 
     def close(self) -> None:
         """Request cooperative script cancellation; join drains the original worker."""
