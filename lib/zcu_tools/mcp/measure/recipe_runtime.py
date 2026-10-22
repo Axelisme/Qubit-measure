@@ -458,11 +458,14 @@ class RecipeRuntime:
                     "primary" if stage == "primary" else "post",
                 )
                 retained.append((item, candidate.id))
-        self._candidates[tab] = tuple(retained)
+        # Author-visible YamlValue mappings must not edit retained acceptance evidence.
+        self._candidates[tab] = deepcopy(tuple(retained))
         proposal = WritebackProposal(tuple(item for item, _ in retained))
         with self._lock:
             index = self._detail_index(tab)
-            self._details[index] = replace(self._details[index], writeback=proposal)
+            self._details[index] = replace(
+                self._details[index], writeback=deepcopy(proposal)
+            )
         return proposal
 
     def accept_writeback(
@@ -515,12 +518,13 @@ class RecipeRuntime:
                 )
                 in confirmed
             )
-            receipt = WritebackReceipt(reply.status, applied, reply.error)
+            receipt = WritebackReceipt(reply.status, deepcopy(applied), reply.error)
         with self._lock:
             index = self._detail_index(tab)
             detail = self._details[index]
             self._details[index] = replace(
-                detail, writeback_receipts=(*detail.writeback_receipts, receipt)
+                detail,
+                writeback_receipts=(*detail.writeback_receipts, deepcopy(receipt)),
             )
         return receipt
 

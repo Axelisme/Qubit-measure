@@ -99,6 +99,8 @@ Owner 在同一提交核對 Primary／Post 全部選定 drafts，任何 draft �
 單 pane L1 `tab.writeback_write` 仍編輯並寫入當前 draft，不供 recipe captured acceptance 使用。
 Primary 先於 Post，首錯停止，成功前綴保留，不 retry 或 rollback。
 `WritebackReceipt` 以 pane 與 owner item ID 關聯 confirmed items，不拿 alias 名稱比 concrete target。
+Proposal、receipt 與 full details 的 structured mappings 各自分離，不共用 retained acceptance evidence。
+作者原地修改 proposal 的 nested value 後接受，會在任何 owner write 前拒絕。
 作者可檢查收據或呼叫 `receipt.raise_for_error()`，不可將 decision.accepted 當作寫入成功。
 Full details 的 writeback_receipts 保留每次接受的確認項目與錯誤，失敗後的 finally Save 仍執行。
 `WritebackDestination.path` 是 owner 原樣的 opaque actual_path，
