@@ -134,6 +134,7 @@ def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> N
     operation = iteration.child(label="operation")
     schedule = operation.child(label="schedule")
     acquire = schedule.child(label="acquire")
+    later = schedule.child(label="acquire")
     cause = OSError("acquire disconnected")
     acquire.set_error("failed", "first failure", cause)
     first = acquire.error
@@ -141,7 +142,6 @@ def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> N
     acquire.release()
     assert schedule.error is first
     assert not schedule.is_set()
-    later = schedule.child(label="acquire")
     later.set_error("failed", "second failure", ValueError("later"))
     later.release()
     assert schedule.error is first
