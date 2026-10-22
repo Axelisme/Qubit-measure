@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.gui.app.measure.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import (
@@ -108,6 +109,10 @@ class RunAnalyzeControlPort(Protocol):
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome: ...
     def cancel_run(self) -> bool: ...
+    def status_scope(self, operation_id: int) -> str: ...
+    def cancel_scope(
+        self, operation_id: int, scope: str, *, expected: int | None = None
+    ) -> CancelResult: ...
 
     def cancel_analyze(self, tab_id: str) -> bool: ...
     def get_tab_analyze_result(self, tab_id: str) -> object | None: ...
@@ -257,6 +262,16 @@ class RunAnalyzeControlFacet:
             has_analyze_params=preparation.has_params,
             analysis_error=preparation.error,
         )
+
+    def status_scope(self, operation_id: int) -> str:
+        """Read one active Run's path; stale handles return an empty path."""
+        return self._run.status_scope(operation_id)
+
+    def cancel_scope(
+        self, operation_id: int, scope: str, *, expected: int | None = None
+    ) -> CancelResult:
+        """Match and stop a scope in this exact GUI Run, without owner Stop."""
+        return self._run.cancel_scope(operation_id, scope, expected=expected)
 
     def cancel_run(self) -> bool:
         return self._run.cancel_run()

@@ -66,6 +66,53 @@ def test_workflow_tools_forward_explicit_targets_and_preserve_native_reply(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("cancelled", [True, False])
+def test_cancel_workflow_forwards_scope_expected_and_preserves_ack(tmp_path, cancelled):
+    seen = []
+    acknowledgement = {
+        "tab_id": "workflow-1",
+        "run_id": "native",
+        "native": {"active_path": "script/iteration#2/operation#1/acquire#3"},
+        "cancelled": cancelled,
+        "reason": "scope cancellation requested" if cancelled else "sequence mismatch",
+        "active_path": "script/iteration#2/operation#1/acquire#3",
+    }
+
+    def respond(method, params):
+        seen.append((method, params))
+        return acknowledgement
+
+    client = make_client(tmp_path, respond)
+    try:
+        assert (
+            client.call(
+                "cancel", {"run_id": "native", "scope": "acquire#3", "expected": 3}
+            )
+            == acknowledgement
+        )
+        assert seen == [
+            (
+                "workflow.cancel",
+                {"run_id": "native", "scope": "acquire#3", "expected": 3},
+            )
+        ]
+    finally:
+        client.context.session.close()
+
+
+def test_cancel_requires_exactly_one_of_operation_execution_or_run(tmp_path):
+    client = make_client(tmp_path, lambda method, params: {})
+    try:
+        # run_id must count as a target rather than being silently ignored.
+        with pytest.raises(ValueError, match="exactly one"):
+            client.call("cancel", {"op": 1, "run_id": "native"})
+        with pytest.raises(ValueError, match="exactly one"):
+            client.call("cancel", {"execution": "recipe-1", "run_id": "native"})
+        assert not client.transport.sent
+    finally:
+        client.context.session.close()
+
+
 def test_workflow_start_and_resume_share_existing_session_operation_mapping(tmp_path):
     def respond(method, params):
         if method == "operation.await":

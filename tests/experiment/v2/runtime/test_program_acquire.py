@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
+from numpy.typing import NDArray
+from zcu_tools.experiment.script_host import CallContext, ScriptHost
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
 )
+from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
+from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -20,6 +26,120 @@ from tests.experiment.v2.runtime._flow_fakes import (
     identity_array,
     recording_pbar_factory,
 )
+
+
+@pytest.mark.parametrize("decimated", [False, True])
+@pytest.mark.parametrize("before_data", [False, True])
+def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
+    decimated: bool,
+    before_data: bool,
+) -> None:
+    host = ScriptHost()
+    paths: list[str] = []
+    produced: list[tuple[int, int]] = []
+    results: list[NDArray[np.float64]] = []
+
+    def operation(ctx: CallContext) -> None:
+        with Schedule(
+            _cfg(rounds=3), SignalBuffer(1, dtype=np.float64), stop=ctx.stop_signal
+        ) as sched:
+            assert sched.stop is not ctx.stop_signal, "Schedule must own its stop"
+
+            class Program:
+                cfg_model = ProgramV2Cfg(rounds=3)
+                calls = 0
+
+                def acquire(
+                    self,
+                    soc: object,
+                    *,
+                    progress: bool,
+                    round_hook: Callable[
+                        [int, NDArray[np.float64], CancelFlagProtocol], object
+                    ],
+                    cancel_flag: CancelFlagProtocol,
+                    **_kwargs: object,
+                ) -> NDArray[np.float64]:
+                    self.calls += 1
+                    token = sched.stop.active_child
+                    assert token is not None
+                    assert token.label == "acquire"
+                    paths.append(host.active_path)
+                    if self.calls == 1 and before_data:
+                        token.set()
+                        raise StoppedPartialAcquireError("no completed round")
+                    raw = np.array([np.nan])
+                    for ir in range(1, 4):
+                        if cancel_flag.is_set():
+                            break
+                        raw = np.array([float(ir)])
+                        produced.append((self.calls, ir))
+                        round_hook(ir, raw, cancel_flag)
+                        if self.calls == 1:
+                            token.set()
+                    return raw
+
+                acquire_decimated = acquire
+
+            builder = sched.prog_builder("soc", "soccfg")
+            runner = builder.run_program_decimated if decimated else builder.run_program
+            program = Program()
+            for _ in range(2):
+                results.append(
+                    runner(
+                        program,
+                        raw2signal_fn=identity_array,
+                        options=AcquireOptions(retry=3),
+                    ).copy()
+                )
+                assert sched.stop.active_child is None
+                assert not sched.is_stop()
+                assert sched.outcome.status == "completed"
+                assert sched.stop.error is None
+            assert program.calls == 2
+        assert not ctx.stop_signal.is_set()
+
+    async def script() -> None:
+        result = await host.call(operation)
+        assert result.partial_result
+        later = await host.call(lambda ctx: ctx.stop_signal.partial_result)
+        assert later.result is False
+        assert later.partial_result is False
+
+    host.run(script())
+    np.testing.assert_allclose(results[0], [np.nan if before_data else 1.0])
+    np.testing.assert_allclose(results[1], [3.0])
+    assert produced == ([] if before_data else [(1, 1)]) + [(2, 1), (2, 2), (2, 3)]
+    assert paths == [
+        "script/iteration#1/operation#1/schedule#1/acquire#1",
+        "script/iteration#1/operation#1/schedule#1/acquire#2",
+    ]
+
+
+def test_stop_condition_completes_without_partial_or_scope_cancellation() -> None:
+    host = ScriptHost()
+
+    def operation(ctx: CallContext) -> None:
+        with Schedule(
+            _cfg(rounds=2), SignalBuffer(1, dtype=np.float64), stop=ctx.stop_signal
+        ) as sched:
+            assert sched.stop is not ctx.stop_signal
+            builder = sched.prog_builder(
+                "soc", "soccfg", program_cls=FakeProgram, marker="kw"
+            ).add(FakeModule("readout"))
+            builder.build_and_acquire(
+                raw2signal_fn=identity_array,
+                options=AcquireOptions(stop_condition=lambda: True),
+            )
+            assert not sched.stop.partial_result
+            assert not sched.is_stop()
+            assert sched.outcome.status == "completed"
+        assert not ctx.stop_signal.partial_result
+
+    async def script() -> None:
+        assert not (await host.call(operation)).partial_result
+
+    host.run(script())
 
 
 def test_build_and_acquire_builds_program_and_updates_buffer():

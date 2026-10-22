@@ -8,6 +8,7 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
+from zcu_tools.experiment.stop_signal import parse_cancel_scope
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import (
     ReplyDetail,
@@ -16,6 +17,7 @@ from zcu_tools.mcp.measure.execution_reply import (
 )
 from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
+from zcu_tools.mcp.measure.tools_workflow import cancel_workflow
 
 
 def _execution_status(
@@ -23,8 +25,12 @@ def _execution_status(
 ) -> dict[str, Any]:
     """Project a local recipe or standalone execution without reconnecting."""
     if key.startswith("recipe-"):
-        snapshot = asdict(ctx.session.recipes.get(key).snapshot())
-        return project_execution(snapshot, detail=detail)
+        execution = ctx.session.recipes.get(key)
+        snapshot = asdict(execution.snapshot())
+        return {
+            **project_execution(snapshot, detail=detail),
+            "active_path": execution.active_path,
+        }
     return project_execution(
         asdict(ctx.session.executions.get(key).snapshot()),
         detail=detail,
@@ -70,7 +76,13 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     ]
     execution_snapshots = [
         asdict(item) for item in ctx.session.executions.snapshots()
-    ] + [asdict(item) for item in ctx.session.recipes.snapshots()]
+    ] + [
+        {
+            **asdict(item),
+            "active_path": ctx.session.recipes.get(item.execution).active_path,
+        }
+        for item in ctx.session.recipes.snapshots()
+    ]
     return {
         "entry": entry,
         "soc": soc,
@@ -82,7 +94,14 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         "ready": {"can_run": not missing, "missing": missing},
         "tabs": tabs,
         "executions": [
-            project_execution(item)
+            {
+                **project_execution(item),
+                **(
+                    {"active_path": item["active_path"]}
+                    if "active_path" in item
+                    else {}
+                ),
+            }
             for item in execution_snapshots
             if item["phase"] != "terminal"
         ],
@@ -189,9 +208,25 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
 def cancel(
     ctx: MeasureToolContext, arguments: dict[str, Any]
 ) -> dict[str, Any] | ToolReply:
-    """Cancel one registered execution or an unregistered GUI operation."""
-    if ("op" in arguments) == ("execution" in arguments):
-        raise ValueError("provide exactly one of op or execution")
+    """Cancel exactly one execution, native workflow run, or GUI operation."""
+    if sum(key in arguments for key in ("op", "execution", "run_id")) != 1:
+        raise ValueError("provide exactly one of op, execution or run_id")
+    scope = arguments.get("scope", "script")
+    expected = arguments.get("expected")
+    label, sequence = parse_cancel_scope(scope, expected)
+    if "run_id" in arguments:
+        run_id = arguments["run_id"]
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("run_id must be a nonempty string")
+        return cancel_workflow(
+            ctx,
+            {
+                key: value
+                for key, value in arguments.items()
+                if key in {"run_id", "scope", "expected"}
+            },
+        )
+    target_op = None
     if "execution" in arguments:
         key = _execution_id(arguments)
         execution = (
@@ -201,20 +236,19 @@ def cancel(
         )
     else:
         op = _operation_id(arguments)
+        if label in {"schedule", "acquire"}:
+            target_op = op
         execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
-    scope = arguments.get("scope", "script")
-    if scope not in ("script", "run"):
-        raise ValueError("scope must be script or run")
     if execution is not None:
         if isinstance(execution, ScriptRecipeExecution):
-            reply = execution.cancel(scope=scope)
-        elif scope == "run":
-            raise ValueError("scope=run requires a recipe execution")
+            reply = execution.cancel(scope=scope, expected=expected, op=target_op)
+        elif label != "script" or sequence is not None:
+            raise ValueError("scoped cancellation requires a recipe or workflow")
         else:
             reply = execution.cancel()
         return ToolReply(project_control(reply.data), is_error=reply.is_error)
-    if scope == "run":
-        raise ValueError("scope=run requires a recipe execution")
+    if label != "script" or sequence is not None:
+        raise ValueError("scoped cancellation requires a recipe or workflow")
     op = _operation_id(arguments)
     ctx = ctx.bound()
     response = ctx.gui.read_internal("operation.cancel", {}, operation_handle=op)
@@ -270,21 +304,38 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Request script cancellation, or stop only the current recipe Run with scope=run. A run cancellation with no Run in progress is a no-op. Acknowledgement does not imply cleanup completed.",
+            "description": "Cancel a live script, iteration, Run/operation, schedule or acquire scope. Use label#N or expected to refuse stale targets. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "op": {"type": "integer"},
                     "execution": {"type": "string", "minLength": 1},
-                    "scope": {
-                        "type": "string",
-                        "enum": ["script", "run"],
-                        "default": "script",
-                    },
+                    "run_id": {"type": "string", "minLength": 1},
+                    "scope": {"type": "string", "default": "script"},
+                    "expected": {"type": "integer", "minimum": 1},
                 },
                 "oneOf": [
-                    {"required": ["op"], "not": {"required": ["execution"]}},
-                    {"required": ["execution"], "not": {"required": ["op"]}},
+                    {
+                        "required": ["op"],
+                        "not": {
+                            "anyOf": [
+                                {"required": ["execution"]},
+                                {"required": ["run_id"]},
+                            ]
+                        },
+                    },
+                    {
+                        "required": ["execution"],
+                        "not": {
+                            "anyOf": [{"required": ["op"]}, {"required": ["run_id"]}]
+                        },
+                    },
+                    {
+                        "required": ["run_id"],
+                        "not": {
+                            "anyOf": [{"required": ["op"]}, {"required": ["execution"]}]
+                        },
+                    },
                 ],
             },
         },

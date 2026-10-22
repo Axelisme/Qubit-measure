@@ -550,6 +550,7 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             "available": False,
             "source_path": None,
             "source_operation_id": None,
+            "partial_result": False,
         }
         assert initial["analysis_state"]["available"] is False
         assert initial["post_analysis_state"]["available"] is False
@@ -566,6 +567,7 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             "available": True,
             "source_path": "loaded.h5",
             "source_operation_id": None,
+            "partial_result": False,
         }
         fx.state.update_tab_loaded_result(
             tab_id,

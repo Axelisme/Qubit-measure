@@ -71,15 +71,15 @@ L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 wo
 
 #### 控制命令的傳遞路徑：bit 往下傳，意圖留在 host
 
-每個 execution 有一棵 `StopSignal` scope 樹。Host 建立 script 根、iteration child 與 operation child；底層仍只讀自己的 Event，不解讀命令名稱。
+Workflow host 建立一棵 `StopSignal` scope 樹，包含 script 根、iteration、operation 及其下的 Schedule／acquire。Recipe host 的 script／iteration／operation 在 MCP process，GUI Run owner 另有 run 根及 Schedule／acquire。兩邊共用 experiment 層的 scope resolver 與 `CancelResult(cancelled, reason, active_path)`，不建立跨 process 的 token 樹。底層 owner 只讀自己的 Event。
 
 ```text
-agent ──MCP cancel(execution, scope="script"|"run")──▶ recipe runtime
+agent ──MCP cancel(execution|run_id, scope, expected)──▶ host／recipe runtime
                                                        │
                            ScriptHost.control／cancel 的 loop 控制序列
                            跨執行緒 call_soon_threadsafe + acknowledgement
                                                        │
-                       script 根或當前 tab.run token.set()
+                       active_path 比對 label／序號，再 token.set()
                                                        ▼
                            已存在的子孫、之後出生的 child
                                                        ▼
@@ -88,16 +88,23 @@ agent ──MCP cancel(execution, scope="script"|"run")──▶ recipe runtime
                         partial 結果／作者 finally／終態
 ```
 
+2026-10-22 使用者裁定：「裸 script（expected=None）的 ack 權威是 Stop owner lock：owner 先寫 StopRequested／manifest 並 latch，再 host.cancel 原子設 root」。Workflow 沿既有 owner lock 記錄與接受 Stop，持久化不進 control callback。此分支的 `cancelled=True` 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled，不以最後 host.cancel 的 refusal 推翻 owner 的接受。帶序號或 expected 的 script 與其他 scope 直接由 host.cancel 核對，不寫 Stop 意圖。Terminal workflow 對合法請求先回 typed scope-not-active refusal，錯誤語法仍 fail fast。持久化失敗保留 failed 與原始 cause，不偽裝成 accepted。
+
 Acknowledgement 只證明控制命令已處理，不證明 operation 或 cleanup 已 drain。Recipe runtime 用公開 `control(fn)` 在同一 loop 回合檢查與停止當前 Run token，避免 check／ack race。Analysis、Ask 或閒置時的 run cancel 回 `cancelled=False, reason="no run in progress"`，不停止下一個 operation。
 
 - `set()` 只停止本 scope 與子孫，父已停止時新 child 出生即 set。`set_error(status, reason, cause)` 只在本 token 記第一個錯誤並向下 set，不改祖先 event／error；後續兄弟 operation 出生乾淨。`raise_if_error()` 仍讀本 token，完成的 child 由 owner release。
-- `cancel(scope="run")` 只停當前 Run。`await tab.run()` 回 `RunResult(partial_result=True)`，作者仍可分析、問答與保存。沒有 `finish_early` 工具，也沒有 operation `Cancelled` 分支。
+- `cancel(scope="acquire")` 只停一次取得，同 Schedule 的下一次 acquire 正常。`schedule` 停該 Schedule 及其之後出生的 acquire。`iteration` 停本輪，剩餘 operation 出生即 set；commit 換 token 後下一輪正常。父 scope 都繼續。
+- `cancel(scope="run")` 是當前 operation 的別名，workflow 可停任何 operation。Recipe 保留 Run-only admission，只停當前 tab.run。`operation` label 可直接停當前 operation。`await tab.run()` 回 `RunResult(partial_result=True)`，作者仍可分析、問答與保存。沒有 `finish_early` 工具，也沒有 operation `Cancelled` 分支。
 - `cancel(scope="script")` 設根 token 並開 gate。進行中與之後的 Run 都合作返回 partial。Analyze／Ask 無結果時 raise 普通 `Exception` 子類 `RecipeCancelled`，不是 `asyncio.CancelledError`。三個 recipe await 入口 analyze／ask_writeback／session.ask 都回非 Optional 結果。作者不捕捉取消、不寫取消分支，已有 Run 的 finally 照常做同步 Save。
 - 作者 coroutine 以 return 或 raise 結束後，script cancel 的終態仍為 cancelled。`RecipeOutcome(status="cancelled", report=None, runs=[...])` 保留每個 Run 的 tab、adapter、run_id、partial 與各次 Save 收據。`RecipeCancelled` 不記入 error，真正的程式或 owner 例外仍保留診斷。使用者於 2026-10-22 裁定：「既然用不到cannel，那也不用handler了，統一return，這樣寫法比較簡潔」。這取代 2026-10-04／2026-10-16 的作者側 cancelled status 與 handler 選項。
 
-Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration；Resume 只開 gate。`CallResult` 帶起跑 epoch 與完成時的 stop bit，之後的 Pause 不追改自然完成的結果。Workflow env 負責丟棄過期 partial，等 gate 後重跑同 request；自然完成也等 gate 後交付，不重跑。Host 不重試外部效果，舊 workflow Engine 在 async 遷移前仍維持原路徑。
+Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration；Resume 只開 gate。`CallResult` 帶起跑 epoch 與完成時的 stop bit，之後的 Pause 不追改自然完成的結果。Workflow env 負責丟棄過期 partial，等 gate 後重跑同 request；自然完成也等 gate 後交付，不重跑。Host 不重試外部效果，workflow 與 recipe 都使用同一個 async host。
 
-Scope 不設固定層數。使用者於 2026-10-22 說：「我認為可以安排支援，scope機制是需要的，因為我們無法阻止一個run裡有兩次acquire的合理使用場景，這種情況做不到early_stop第一個並開始第二個」「不一定是5層，比如說workflow應該可以跳過operation直接使用Schedule與Program才對。還有都有scope了真的還需要不同kind嗎？finish_early與cancel應該只是不同scope的cancel吧？」目前 recipe MCP 只公開 script／run，Schedule、acquire、iteration 的公開 target 與 active path 留待各 owner 的 interrupt scope 實作，不宣稱已提供。
+Scope 不設固定層數。使用者於 2026-10-22 說：「我認為可以安排支援，scope機制是需要的，因為我們無法阻止一個run裡有兩次acquire的合理使用場景，這種情況做不到early_stop第一個並開始第二個」「不一定是5層，比如說workflow應該可以跳過operation直接使用Schedule與Program才對。還有都有scope了真的還需要不同kind嗎？finish_early與cancel應該只是不同scope的cancel吧？」MCP 公開 acquire／schedule／iteration／run 與 script，status 回 active_path。Scope 只收 label 或 label#正整數，不收整條 path。Expected 只收正整數，拒絕 bool；與 #N 同填須一致。未知 label 或壞語法為 invalid_params。合法但不在路徑上回 scope not active，序號不符回 sequence mismatch，都不設 token。Root 沒有序號，script 配合法 expected 也拒絕。例：`cancel(run_id="r", scope="acquire", expected=3)` 只接受當前第 3 次 acquire。
+
+已知限制是 process 邊界。Recipe 的 schedule／acquire 經 `operation.cancel_scope` 代理到目前 tab.run 的 operation handle，GUI 在共享樹鎖下原子比對與 set。`operation.status_scope` 回 GUI run path。Recipe status 及 cancel ack 省略 run 根，將 schedule／acquire 尾段接在本地 path 後；cancelled/reason 保留 GUI 回覆。兩邊各自檢查，合成 path 不是跨 process 原子快照。Fine scope 的 op target 必須仍是當前 tab.run handle，舊 op 回 scope not active，不以歷史 registry 歸屬改打新 Run。Execution target 的 expected 只檢查目前 GUI root；下一 Run 的序號可以重用，跨 Run 精確取消要用 op target。沒有進行中 tab.run 時，execution-target 細層 cancel 回 no run in progress。
+
+GUI 在 worker 完成時固定 Run root 的 partial_result。State、snapshot 與 wire 的 result_state.partial_result 保留該值，沒有 native metadata 也不遺失。Recipe RunResult 解碼這項完成事實，不用 cancel ack 或 operation 終態猜測。GUI metadata 的 stopped 讀同一值，user Stop 意圖仍由 cancel_requested 保留。這些 import 沿既有前端依賴 experiment 方向，受 .importlinter C8／C13 管理。
 
 Operation 的完成型別只有 completed／failed，合作中止以 `partial_result=True` 表示。使用者於 2026-10-22 裁定：「Completed(complete=False)不直觀，應該叫Completed(partial_result=True)比較好理解。其餘沒有問題，標準也可以」。Workflow 的 Failed 表示目標結果未取得但狀態仍可信；cfg、callback、device setup、saver 或腳本本體的真實錯誤仍 raise，不能以 partial 或空結果掩蓋。
 

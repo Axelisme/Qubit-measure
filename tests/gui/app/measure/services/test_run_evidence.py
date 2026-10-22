@@ -20,6 +20,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
 )
@@ -148,6 +149,99 @@ def test_run_publishes_record_and_historical_metadata_together(
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == ("cancelled" if stopped else "finished")
+
+
+def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
+    request: pytest.FixtureRequest,
+) -> None:
+    state, tab_id, adapter = make_state()
+    board = white_noise()
+    request.addfinalizer(board.devices.close_all_devices)
+    state.set_context(replace(state.session_env, soc=board.soc, soccfg=board.soccfg))
+    service, _gate, background, handles = make_run_service(state)
+    inputs = replace(
+        make_inputs(state, tab_id, adapter),
+        snapshot=_run_snapshot(),
+        experiment_tag="test/native",
+    )
+    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    acquisitions = []
+
+    def acquire(*_args: object, context: RunContext) -> object:
+        schedule = context.cancel_signal.child(label="schedule")
+        first = schedule.child(label="acquire")
+        try:
+            assert service.status_scope(token) == "run/schedule#1/acquire#1"
+            rejected = service.cancel_scope(token, scope="acquire", expected=2)
+            assert not rejected.cancelled
+            assert rejected.reason == "sequence mismatch"
+            accepted = service.cancel_scope(token, scope="acquire#1")
+            assert accepted.cancelled
+            acquisitions.append(first.is_set())
+        finally:
+            first.release()
+        second = schedule.child(label="acquire")
+        acquisitions.append(second.is_set())
+        second.release()
+        schedule.release()
+        assert not context.cancel_signal.is_set()
+        return record
+
+    adapter.run.side_effect = acquire
+    token = service.start_run(inputs, plots=make_plots())
+    background.run_work()
+    pane = state.get_tab(tab_id).run
+    assert require_record(pane).result is record.result
+    assert (metadata := require_record(pane).metadata) is not None
+    assert metadata.completion == "stopped"
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "finished"
+    assert acquisitions == [True, False]
+    assert not service.cancel_scope(token, scope="acquire").cancelled
+
+    def next_run(*_args: object, context: RunContext) -> object:
+        rejected = service.cancel_scope(token, scope="run")
+        assert not rejected.cancelled
+        assert rejected.reason == "scope not active"
+        assert not context.cancel_signal.is_set()
+        return record
+
+    adapter.run.side_effect = next_run
+    next_token = service.start_run(inputs, plots=make_plots())
+    assert next_token != token
+    background.run_work()
+    assert (metadata := require_record(state.get_tab(tab_id).run).metadata) is not None
+    assert metadata.completion == "complete"
+    assert (
+        next_outcome := handles.poll(next_token)
+    ) is not None and next_outcome.status == "finished"
+
+
+def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
+    state, tab_id, adapter = make_state()
+    service, _gate, background, handles = make_run_service(state)
+    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+
+    def partial(*_args: object, context: RunContext) -> object:
+        child = context.cancel_signal.child(label="acquire")
+        child.set()
+        child.release()
+        return record
+
+    adapter.run.side_effect = partial
+    inputs = make_inputs(state, tab_id, adapter)
+    token = service.start_run(inputs, plots=make_plots())
+    background.run_work()
+    pane = state.get_tab(tab_id).run
+    assert require_record(pane).metadata is None
+    assert pane.partial_result
+    assert (outcome := handles.poll(token)) is not None and outcome.status == "finished"
+    adapter.run.side_effect = None
+    adapter.run.return_value = record
+    service.start_run(inputs, plots=make_plots())
+    assert not state.get_tab(tab_id).run.partial_result
+    background.run_work()
+    assert not state.get_tab(tab_id).run.partial_result
 
 
 @pytest.mark.parametrize("provenance_failure", [False, True])

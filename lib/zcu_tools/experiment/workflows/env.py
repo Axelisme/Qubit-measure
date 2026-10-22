@@ -268,11 +268,12 @@ class WorkflowEnv[C]:
                     )
                 raise
             attempt = attempts[0]
-            # Use the host's completion bit, never a later control-state read.
-            attempt.stopped = result.partial_result
+            # Descendant partial completion does not set the operation stop bit.
+            # Use the atomic host snapshot, never a later control-state read.
+            attempt.stopped = result.stopped
             discard = (
                 result.epoch != self._host.epoch
-                and result.partial_result
+                and result.stopped
                 and not self._hooks.stopping()
             )
             if isinstance(result.result, Failed):
@@ -285,7 +286,7 @@ class WorkflowEnv[C]:
                 )
             elif result.partial_result:
                 facts = self._record_attempt(
-                    kind, attempt, "partial", "Operation stop token was set"
+                    kind, attempt, "partial", "Operation or descendant was stopped"
                 )
             else:
                 facts = self._record_attempt(kind, attempt, "completed")

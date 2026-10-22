@@ -47,7 +47,7 @@ Owner 在同一次 dispatch 核對 Primary／Post 全部選定 revisions 與 IDs
 
 ## Workflow namespace
 
-`workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/records/figures/figure/answer`
+`workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/cancel/records/figures/figure/answer`
 call the same headless `WorkflowControlFacet` as Qt panes. Commands do not require
 any GUI mode or selected tab. When the GUI mounts a newly opened owner, it selects
 the new tab and switches to Workflow mode. `tab_id` names an opened draft owner;
@@ -74,7 +74,9 @@ unchanged, current-operation names are operation/<name>. A new attempt replaces
 the whole operation group; terminal delivery retains the latest group.
 Status includes `pending_question`, a
 `{request_id, question_type, question, answer_schema}` envelope or null outside
-Ask. Native status also projects pending_request_id. Answer requires run_id,
+Ask. Native status also projects pending_request_id and active_path.
+`workflow.cancel(run_id, scope, expected)` returns the existing snapshot plus
+cancelled/reason/active_path from the shared resolver. Stop remains script scope. Answer requires run_id,
 request_id and answer, and returns the original operation_id. Engine matches the
 ID before validating fields. Stale or absent questions return
 `precondition_failed/question_mismatch` with current pending_request_id or null.
@@ -88,6 +90,24 @@ Pause, Resume and Answer retain one worker and RUN lease through terminal owner
 delivery; RPC/UI code never executes the author. Committed records project their
 directory, UTC commit time, read-order revisions, qualified model name and
 actual operation-attempt facts alongside the encoded authored record.
+
+## Run scope control
+
+`operation.cancel_scope(operation_id, scope, expected=None)` targets the exact
+active GUI Run handle, alongside the unchanged generic `operation.cancel` hook.
+`operation.status_scope(operation_id)` returns its active_path, or an empty path
+when that Run is no longer active. Cancellation of an inactive handle returns
+scope not active and never targets the next Run. The Run owner and workflow host
+reuse experiment StopSignal resolution and CancelResult.
+
+The GUI path starts with run. Recipe projects only its schedule/acquire tail
+onto the local script/iteration/operation path. It preserves GUI acceptance and
+refusal reasons. Handle and sequence checks are process-local; the combined path
+is not an atomic cross-process observation. Descendant cancellation marks Run
+metadata stopped through partial_result, without changing run Stop intent.
+`tab.snapshot.result_state.partial_result` carries the fixed completion fact even
+without native metadata. New Run and result replacement clear the old fact.
+Recipe RunResult reads this field, not operation terminal status or cancel ack.
 
 ## Predictor sources
 

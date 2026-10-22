@@ -5,6 +5,7 @@ from __future__ import annotations
 from base64 import b64encode
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -26,7 +27,7 @@ from ..form_description import description_wire
 from ..form_errors import recipe_form_errors
 from ..form_observation import form_writes
 from ..workflow_types import project_record, project_status
-from ._wire_values import context_wire_value
+from ._wire_values import cancel_scope_arguments, context_wire_value
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -292,6 +293,17 @@ def h_workflow_resume(
             **_snapshot(_run(adapter.workflow_control, run_id)),
             "operation_id": operation,
         }
+
+
+def h_workflow_cancel(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Cancel one native scope and retain the existing workflow snapshot."""
+    run_id = str(params["run_id"])
+    scope, expected = cancel_scope_arguments(params)
+    with _workflow_errors():
+        result = adapter.workflow_control.cancel(run_id, scope, expected=expected)
+        return {**_snapshot(_run(adapter.workflow_control, run_id)), **asdict(result)}
 
 
 def h_workflow_stop(

@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 from pydantic import BaseModel, JsonValue
 
 from zcu_tools.core.script_protocol import Answer
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.stop_signal import (
+    CancelResult,
+    StopSignal,
+    parse_cancel_scope,
+)
 from zcu_tools.experiment.workflows import (
     Actor,
     Engine,
@@ -419,6 +423,24 @@ class WorkflowController[F: FormModel, C]:
                     state="answered",
                 )
             return run.token
+
+    def cancel(
+        self, run_id: str, scope: str = "script", *, expected: int | None = None
+    ) -> CancelResult:
+        """Cancel a matching native scope without releasing the run's ownership.
+
+        Run mismatch raises RunMismatch; pending acceptance refuses the request.
+        Script acceptance records the same explicit Stop intent as the GUI.
+        """
+        label, _sequence = parse_cancel_scope(scope, expected)
+        self.require_run_id(run_id)
+        engine = self.engine
+        if engine is None:
+            return CancelResult(False, "scope not active", "")
+        result = engine.cancel(run_id, scope, expected=expected)
+        if result.cancelled and label == "script":
+            self.stop(run_id)
+        return result
 
     def stop(self, run_id: str) -> RunStatus | None:
         """Stop the original worker cooperatively without cancelling its author.

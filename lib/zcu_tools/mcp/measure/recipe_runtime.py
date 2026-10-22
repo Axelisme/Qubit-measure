@@ -13,7 +13,11 @@ from typing import Literal
 from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.stop_signal import (
+    CancelResult,
+    StopSignal,
+    parse_cancel_scope,
+)
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
@@ -50,6 +54,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 class _ResultState(BaseModel):
     available: bool
     source_operation_id: str | int | None
+    partial_result: bool
 
 
 class _Interaction(BaseModel):
@@ -150,6 +155,7 @@ class RecipeRuntime:
         self._on_change = on_change
         self._images: list[PngImage] = []
         self._run_token: StopSignal | None = None
+        self._run_handle: int | None = None
 
     def runs(self) -> tuple[RecipeRun, ...]:
         """Read immutable acquisition/save facts in execution order, without RPCs."""
@@ -161,28 +167,82 @@ class RecipeRuntime:
         with self._lock:
             return deepcopy(tuple(self._details))
 
-    def cancel_run(self) -> bool:
-        """Atomically check and stop only the active acquisition on the host loop.
+    @property
+    def active_path(self) -> str:
+        """Project local scopes plus the current GUI Run's descendant tail.
 
-        Return False without changing script/analysis/questions if no Run is
-        active. The retained operation token belongs to the host scope tree.
-        Loop shutdown races are no-ops; no GUI RPC or callback retry occurs.
+        This is two process-local observations, not an atomic cross-process
+        snapshot. A released/missing handle contributes no GUI tail. Transport
+        failures propagate rather than reconnecting or inventing a path.
         """
         try:
-            return self.host.control(self._stop_run)
+            handle, prefix = self.host.control(
+                lambda: (self._run_handle, self.host.active_path)
+            )
         except RuntimeError:
-            # _stop_run has no failure path; only an absent owner loop rejects.
-            return False
+            return self.host.active_path
+        if handle is None:
+            return prefix
+        reply = self._tools.gui.read_internal(
+            "operation.status_scope", {}, operation_handle=handle
+        )
+        tail = TypeAdapter(str).validate_python(reply["active_path"], strict=True)
+        return self._scope_path(prefix, tail)
 
-    def _stop_run(self) -> bool:
-        token = self._run_token
-        if token is None:
-            return False
-        token.set()
-        return True
+    def cancel(
+        self,
+        scope: str = "script",
+        *,
+        expected: int | None = None,
+        op: int | None = None,
+    ) -> CancelResult:
+        """Cancel local scopes or delegate schedule/acquire to the exact GUI Run.
 
-    def _retain_run(self, token: StopSignal) -> None:
+        run retains Run-only admission; operation targets any local operation.
+        Fine scopes require an active tab.run handle; an explicit op must
+        match that handle in the control loop. GUI rejection facts are unchanged; only the acknowledgement path gets the local scope prefix.
+        Neither check nor path projection is atomic across the two processes.
+        """
+        label, _sequence = parse_cancel_scope(scope, expected)
+        if label not in {"schedule", "acquire", "run"}:
+            return self.host.cancel(scope, expected=expected)
+
+        def local() -> CancelResult | tuple[int | None, str]:
+            if op is not None and self._run_handle != op:
+                return CancelResult(False, "scope not active", self.host.active_path)
+            if self._run_token is None:
+                return CancelResult(False, "no run in progress", self.host.active_path)
+            if label == "run":
+                return self.host.cancel(scope, expected=expected)
+            return self._run_handle, self.host.active_path
+
+        try:
+            target = self.host.control(local)
+        except RuntimeError:
+            return CancelResult(False, "no run in progress", self.host.active_path)
+        if isinstance(target, CancelResult):
+            if op is not None and target.reason == "scope not active":
+                return replace(target, active_path=self.active_path)
+            return target
+        handle, prefix = target
+        if handle is None:
+            return CancelResult(False, "no run in progress", prefix)
+        reply = self._tools.gui.read_internal(
+            "operation.cancel_scope",
+            {"scope": scope, "expected": expected},
+            operation_handle=handle,
+        )
+        result = TypeAdapter(CancelResult).validate_python(reply)
+        return replace(result, active_path=self._scope_path(prefix, result.active_path))
+
+    @staticmethod
+    def _scope_path(prefix: str, gui_path: str) -> str:
+        tail = gui_path.partition("/")[2]
+        return f"{prefix}/{tail}" if tail else prefix
+
+    def _retain_run(self, token: StopSignal, handle: int | None = None) -> None:
         self._run_token = token
+        self._run_handle = handle
 
     def images(self) -> tuple[PngImage, ...]:
         """Read explicit previews retained in memory; this never captures new PNGs."""
@@ -332,6 +392,7 @@ class RecipeRuntime:
             raise
         finally:
             self._run_token = None
+            self._run_handle = None
         result = completion.result
         with self._lock:
             self._runs[index] = replace(
@@ -586,6 +647,7 @@ class RecipeRuntime:
             self._tools.send_gui_rpc("tab.run_start", {"tab_id": tab})
         )
         self._run_ops[tab] = started.handle
+        self.host.control(lambda: self._retain_run(ctx.stop_signal, started.handle))
         with self._lock:
             self._details[index] = replace(self._details[index], op=started.handle)
         self._analysis_ops.pop((tab, "primary"), None)
@@ -605,7 +667,7 @@ class RecipeRuntime:
         return RunResult(
             "completed",
             snapshot.raw_data.run_id,
-            completion.status == "cancelled" or ctx.stop_signal.is_set(),
+            snapshot.result_state.partial_result,
         )
 
     def _analyze(

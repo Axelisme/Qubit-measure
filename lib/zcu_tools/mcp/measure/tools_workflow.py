@@ -51,6 +51,13 @@ def _call(
     return result
 
 
+def cancel_workflow(
+    ctx: MeasureToolContext, arguments: dict[str, object]
+) -> dict[str, object] | ToolReply:
+    """Route the shared cancel tool through workflow wire and handle projection."""
+    return _call(ctx, "workflow.cancel", arguments)
+
+
 def _tool(
     ctx: MeasureToolContext,
     method: str,
