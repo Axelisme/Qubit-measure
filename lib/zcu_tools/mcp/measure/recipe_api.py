@@ -272,8 +272,10 @@ class WritebackQuestion(Question[WritebackAnswer]):
 class WritebackReceipt:
     """GUI-confirmed writeback result, including a successful prefix on failure.
 
-    status is completed, cancelled or failed. items lists only confirmed applied
-    candidates in owner order. error describes a failed or uncertain attempt,
+    status is completed, cancelled or failed. items lists original captured
+    candidates for owner-confirmed applied IDs, in owner order. Actual written
+    values and destinations come from the owner's current draft; items is not a
+    written-value snapshot. error describes a failed or uncertain attempt,
     otherwise None. No rollback or automatic retry follows a failed write.
     """
 
@@ -509,11 +511,13 @@ class RecipeTab:
         return answer
 
     def accept_writeback(self, items: Sequence[WritebackItem]) -> WritebackReceipt:
-        """Write selected captured candidates, Primary then Post, without retry.
+        """Write selected IDs from current owner drafts, Primary then Post.
 
-        Validate all items before the first write. Unknown/changed/duplicate
-        candidates raise. Return confirmed applied items; first failed stage
-        leaves the successful prefix and its diagnostic, with no rollback.
+        Unknown/duplicate candidates or author edits to captured items raise
+        before writing. Owner draft edits are accepted, including retargets.
+        Return original captured candidates for confirmed IDs, not written-value
+        snapshots. First failure leaves the successful prefix and diagnostic,
+        without retry or rollback.
         """
         return self._runtime.accept_writeback(self.tab, items)
 

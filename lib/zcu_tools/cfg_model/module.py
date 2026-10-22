@@ -185,14 +185,18 @@ class _MuxReadoutFields(_ModuleFields):
     type: Literal["readout/mux"] = "readout/mux"
     gen_ch: Annotated[int, Field(ge=0)]
     nqz: Literal[1, 2]
-    mixer_freq: float
+    mixer_freq: Annotated[float, FieldMeta(label="Mixer freq", unit="MHz", decimals=3)]
     tones: Annotated[
         list[MuxReadoutTone],
         Field(min_length=1, max_length=8),
         FieldMeta(element_label="label"),
     ]
-    length: Annotated[float, Field(gt=0)]
-    ro_length: Annotated[float, Field(gt=0)]
+    length: Annotated[
+        float, Field(gt=0), FieldMeta(label="Length", unit="us", decimals=3)
+    ]
+    ro_length: Annotated[
+        float, Field(gt=0), FieldMeta(label="RO length", unit="us", decimals=3)
+    ]
     pre_delay: Annotated[float, Field(ge=0)] = 0.0
     post_delay: Annotated[float, Field(ge=0)] = 0.0
     trig_offset: Annotated[float, Field(ge=0)] = 0.0
