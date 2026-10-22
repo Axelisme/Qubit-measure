@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import wraps
+from types import CoroutineType
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -95,8 +96,8 @@ def test_empty_names_are_rejected(name: str) -> None:
 def test_synchronous_author_is_rejected() -> None:
     def synchronous(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
-    ) -> Summary:
-        return Summary(count=1)
+    ) -> CoroutineType[None, None, Summary]:
+        return script(env, plan, tun)
 
     try:
         decorate = w.workflow("synchronous", "Invalid synchronous author")

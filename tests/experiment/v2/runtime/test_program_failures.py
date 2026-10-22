@@ -37,8 +37,9 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
             self,
             soc: object,
             *,
+            progress: bool,
             round_hook: Callable[
-                [int, NDArray[np.float64], CancelFlagProtocol], None
+                [int, NDArray[np.float64], CancelFlagProtocol], object
             ],
             cancel_flag: CancelFlagProtocol,
             **kwargs: object,
@@ -52,14 +53,15 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
             self,
             soc: object,
             *,
+            progress: bool,
             round_hook: Callable[
-                [int, NDArray[np.float64], CancelFlagProtocol], None
+                [int, NDArray[np.float64], CancelFlagProtocol], object
             ],
             cancel_flag: CancelFlagProtocol,
             **kwargs: object,
         ) -> NDArray[np.float64]:
             return self.acquire(
-                soc, round_hook=round_hook, cancel_flag=cancel_flag, **kwargs
+                soc, progress=progress, round_hook=round_hook, cancel_flag=cancel_flag, **kwargs
             )
 
     def convert(raw: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -73,8 +75,9 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
 
     signal = StopSignal()
     buffer = SignalBuffer((1,), on_update=update, update_interval=None)
+    schedule = Schedule(make_flow_cfg(rounds=1), buffer, stop=signal)
     with pytest.raises(RuntimeError, match=f"broken {failure_site}") as caught:
-        with Schedule(make_flow_cfg(rounds=1), buffer, stop=signal) as schedule:
+        with schedule:
             builder = schedule.prog_builder("soc", "soccfg", program_cls=Program).add(
                 FakeModule("readout")
             )
