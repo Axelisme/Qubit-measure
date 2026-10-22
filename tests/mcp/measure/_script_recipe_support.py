@@ -100,7 +100,8 @@ class SyntheticGui:
                         "result_state": {
                             "available": True,
                             "source_operation_id": self.runs,
-                            "partial_result": self.cancelled.is_set() or (self.partial_first and self.runs == 1),
+                            "partial_result": self.cancelled.is_set()
+                            or (self.partial_first and self.runs == 1),
                         },
                     }
                 ]
