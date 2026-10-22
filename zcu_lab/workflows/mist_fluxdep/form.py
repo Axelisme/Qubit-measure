@@ -65,7 +65,7 @@ class MISTPlanForm(FormModel):
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
         Field(description="Explicit setpoint unit")
     )
-    fluxes: Annotated[SweepInput, Display(label="Fluxes", selector=False)] = Field(
+    fluxes: Annotated[SweepInput, Display(label="Fluxes")] = Field(
         description="Ordered absolute flux setpoints"
     )
     pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(

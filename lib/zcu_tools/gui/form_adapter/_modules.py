@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
 from types import UnionType, new_class
 from typing import (
@@ -358,7 +358,7 @@ def _spec_display(name: str, info: FieldInfo) -> Display | None:
         and get_origin(info.annotation) is Literal
         and len(get_args(info.annotation)) == 1
     ):
-        return replace(display or Display(), hidden=True)
+        return (display or Display()).overlay(Display(hidden=True))
     return display
 
 
@@ -429,7 +429,7 @@ def editable_spec(
                 derived.default = seed["value"]
                 derived.default_factory = None
                 derived.validate_default = True
-            display = replace(display or Display(), hidden=True)
+            display = (display or Display()).overlay(Display(hidden=True))
         if display is not None:
             derived.metadata.append(display)
         namespace[name] = derived

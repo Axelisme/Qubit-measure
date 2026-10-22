@@ -232,7 +232,7 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
         ] = Field(default_factory=Alpha)
         alone: Annotated[Alpha, Display(collapsed=False)] = Field(default_factory=Alpha)
         sweep: Annotated[LinRange, Display(collapsed=False)] = Field(
-            default_factory=LinRange
+            default_factory=lambda: LinRange(start=0, stop=1, n=3)
         )
 
     view, _state = build(TagForm, None)
