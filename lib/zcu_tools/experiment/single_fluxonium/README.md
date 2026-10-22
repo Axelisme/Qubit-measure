@@ -72,6 +72,12 @@ Invalidated sessions and closed sources raise `RuntimeError`. Direct callers
 serialize source methods. `close()` clears model, plan, engine and ADC caches,
 invalidates the session and leaves caller-owned drivers untouched.
 
+A standalone source keeps the original 256 MiB prepare, 64 MiB exact-result,
+4 MiB routing and 8 MiB ADC limits. Composing environments may pass a fresh
+`engine` and `readout_cache_bytes` to `SingleFluxoniumSource`; the source takes
+exclusive ownership and closes both caches. The six-cavity environment uses
+this entry point to divide its environment-wide evolution budgets.
+
 One physical generation and one complete noiseless preparation remain resident.
 Keys include settings, the full snapshot, numeric/dependency versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are

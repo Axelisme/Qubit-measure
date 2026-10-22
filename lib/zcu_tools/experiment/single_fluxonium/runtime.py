@@ -151,6 +151,12 @@ class SingleFluxoniumSource:
     across acquires. No noisy result or sampling identity enters these caches.
     readout_kind selects one terminal pulse or coherent mux tones on the same
     physical cavity. It does not add receivers, coupling or hardware routes.
+    engine: optional fresh Engine whose exclusive ownership transfers to this
+    source; close() closes it. None creates the usual 256 MiB prepare engine,
+    64 MiB result memo and 4 MiB routing cache. Do not share an injected engine.
+    readout_cache_bytes: nonnegative integer ADC residency cap in bytes, default
+    8 MiB, with no fixed upper bound. Zero disables ADC retention; invalid values
+    raise ValueError. These caps do not bound scratch, models or process RSS.
     private_replay optionally selects an explicit absolute author archive root;
     None disables I/O. Private single-model replay accepts pulse mode only;
     combining mux mode with private_replay raises ValueError before acquisition. The caller owns devices, including after source close.
@@ -163,6 +169,8 @@ class SingleFluxoniumSource:
         *,
         private_replay: Path | None = None,
         readout_kind: Literal["pulse", "mux"] = "pulse",
+        engine: Engine | None = None,
+        readout_cache_bytes: int = 8 * 1024**2,
     ) -> None:
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
@@ -174,8 +182,10 @@ class SingleFluxoniumSource:
         self.settings = settings
         self.devices = devices
         self.private_replay = private_replay
-        self.engine = Engine(workers=1, cache_bytes=256 * 1024**2)
-        self.readout_cache = ReadoutCache(8 * 1024**2)
+        self.readout_cache = ReadoutCache(readout_cache_bytes)
+        self.engine = (
+            Engine(workers=1, cache_bytes=256 * 1024**2) if engine is None else engine
+        )
         self._prepared: SingleFluxoniumPreparation | None = None
         self._session: SingleFluxoniumAcquire | None = None
         self._source_device = devices.get_all_devices().get(

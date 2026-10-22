@@ -19,9 +19,8 @@ from .engine import EvolutionResult, TimelineBatch
 from .kernel import KernelContext, SegmentTable
 from .secular import ModelSource
 
-# In addition to the prepare budget. Small/disabled Engines never retain more
-# result bytes than their configured prepare budget. Production adds at most
-# 64 MiB to 1.5 GiB resident preparations, well below the measured RAM headroom.
+# Default additional allowance; Engine clamps it to the prepare budget unless
+# the caller supplies an explicit independent result-memo byte cap.
 RESULT_MEMO_BYTES = 64 * 1024**2
 
 

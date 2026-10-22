@@ -30,6 +30,33 @@ legacy schema fallback. Generators 7 through 12 are not configured.
 Each resonator component instead declares
 pulse wiring `ch: 13`, `ro_ch: 6`. `onetone/range_find` uses that pulse route.
 
+## Cache residency budgets
+
+Set the environment's cache allowances in the top-level `numerics` section of
+`default.yaml`, not in `qubits.Q1..Q6.numerics`.
+
+| Field | Default | Scope |
+| --- | --- | --- |
+| `prepare_cache_bytes` | 268435456 bytes, 256 MiB | Total across six sources |
+| `result_memo_bytes` | 67108864 bytes, 64 MiB | Total across six sources |
+| `routing_cache_bytes` | 4194304 bytes, 4 MiB | Total across six sources |
+| `adc_cache_bytes` | 8388608 bytes, 8 MiB | Each source |
+
+Each Engine receives one sixth of the first three totals, rounded down.
+The six sources keep independent models and cache keys. They do not build a
+joint Hilbert space or share ADC receiver calibrations.
+All four fields accept nonnegative integers in bytes. Zero disables the
+corresponding cache. There is no fixed upper bound. At most five bytes of each
+divided total remain unused.
+
+These defaults allow at most 372 MiB of cache residency, including estimated
+metadata. Previously, six sources each had 256 MiB prepare, 64 MiB result and
+4 MiB routing allowances, plus 8 MiB ADC, for 1992 MiB combined.
+Evicted or oversized products compute again without changing the result or RNG
+stream. Models, solver scratch, active products and GUI/native allocations sit
+outside these caps. Reducing a cap does not impose a process RSS limit.
+The timing and RSS observations below predate these shared budgets.
+
 ## Circuit parameters
 
 EJ, EC and EL are H/h in GHz. Cavity frequency also uses GHz in physical YAML;

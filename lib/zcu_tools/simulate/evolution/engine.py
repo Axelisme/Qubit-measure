@@ -519,8 +519,13 @@ class Engine:
     cache_bytes: nonnegative unified resident/pending array and estimated metadata
         byte limit (4608 metadata bytes per whole allocation), not a
         process RAM cap. Active nonretained products and scratch are separate.
-        Exact final results use a separate LRU capped at min(64 MiB, cache_bytes),
-        including metadata. Zero disables both caches. No ADC/sampling is cached.
+        Zero disables prepare residency. No ADC/sampling is cached.
+    result_memo_bytes: optional nonnegative integer byte cap for exact results,
+        including metadata. None uses min(64 MiB, cache_bytes).
+    routing_cache_bytes: optional nonnegative integer byte cap for routing facts,
+        including metadata. None uses min(4 MiB, cache_bytes). Explicit auxiliary
+        caps are independent of cache_bytes, with no fixed upper bound. Zero
+        disables that cache. Invalid explicit caps raise ValueError.
     kernels: optional algorithm collection replacing the production registry;
         each stateless collaborator implements the internal Kernel contract and
         has a unique name. Missing required names raise, never silently reroute.
@@ -567,6 +572,8 @@ class Engine:
         *,
         kernels: Sequence[Kernel] | None = None,
         chunks_per_worker: int | None = None,
+        result_memo_bytes: int | None = None,
+        routing_cache_bytes: int | None = None,
     ) -> None:
         """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
         from ._result_memo import RESULT_MEMO_BYTES, ResultMemo
@@ -586,10 +593,20 @@ class Engine:
         self._kernels = {kernel.name: kernel for kernel in collection}
         if len(self._kernels) != len(collection):
             raise ValueError("kernel names must be unique")
+        if result_memo_bytes is None:
+            result_memo_bytes = min(RESULT_MEMO_BYTES, cache_bytes)
+        if routing_cache_bytes is None:
+            routing_cache_bytes = min(4 * 1024**2, cache_bytes)
+        for name, limit in (
+            ("result_memo_bytes", result_memo_bytes),
+            ("routing_cache_bytes", routing_cache_bytes),
+        ):
+            if type(limit) is not int or limit < 0:
+                raise ValueError(f"{name} must be a nonnegative integer")
         self._cache: PrepareCache = PrepareCache(cache_bytes)
-        self._memo = ResultMemo(min(RESULT_MEMO_BYTES, cache_bytes))
-        self._memo_enabled = cache_bytes > 0
-        self._routing_reuse = RoutingReuse(min(4 * 1024**2, cache_bytes))
+        self._memo = ResultMemo(result_memo_bytes)
+        self._memo_enabled = result_memo_bytes > 0
+        self._routing_reuse = RoutingReuse(routing_cache_bytes)
         self._chunks = workers * (6 if chunks_per_worker is None else chunks_per_worker)
         self._inventory_chunks = chunks_per_worker is None
         self._lock = Lock()
@@ -644,7 +661,8 @@ class Engine:
         invalidate its retained result on any content, source, budget or Engine
         change; evolve does not verify the caller's digest. Registration does not
         change the numerical solve or its result. Facts use a separate LRU capped
-        at min(4 MiB, cache_bytes). Empty work, disabled residency or oversized
+        at routing_cache_bytes (default min(4 MiB, cache_bytes)). Empty work,
+        disabled routing residency or oversized
         facts may leave no entry. A later reuse() returns False after eviction or
         a route change; the caller must then evolve the full acquire again.
         budget: finite positive absolute population and low-four error allowance;
