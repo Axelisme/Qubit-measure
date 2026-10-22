@@ -1,12 +1,47 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-21，單腔與雙腔 ADC、n 維 flux 線路
+**Last updated:** 2026-10-22，跨 process Numba machine-code cache
 
 **讀者：** framework-dev。數值模擬工具與各子模組的責任邊界。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+## Numba machine-code cache
+
+The first `zcu_tools.simulate` import selects one process-wide Numba cache
+directory before simulator dispatchers are created. Without `NUMBA_CACHE_DIR`,
+it uses `user_cache_root()/numba/<digest>/`; the shared root honors
+`ZCU_TOOLS_CACHE_DIR`. An existing `NUMBA_CACHE_DIR` becomes a parent:
+`<NUMBA_CACHE_DIR>/zcu-simulate-<digest>/`. Set overrides before the first
+simulator import. Changing them later requires a new process.
+
+The SHA-256 namespace includes every simulator `.py` file's relative name and
+contents, plus the Python, Numba, NumPy and SciPy versions. Changing an inline
+callee therefore selects a new namespace even when its cached caller is
+unchanged. Unreadable sources fail import rather than reuse unprotected code.
+Numba also checks its own ABI and CPU keys. This requires readable installed
+Python sources and assumes those sources remain fixed for the process lifetime.
+
+This sets the process-global `NUMBA_CACHE_DIR` and fixes
+`NUMBA_CACHE_LOCATOR_CLASSES` to Numba's built-in `UserProvidedCacheLocator`,
+replacing any caller-selected locators. It then reloads Numba configuration.
+Unavailable cache storage fails when a cached dispatcher is created instead of
+falling back to unnamespaced in-tree or user-wide code. Later-created Numba
+dispatchers in other packages also use the selected directory and locator policy;
+already-created dispatchers keep their existing cache locations.
+The namespace does not track other packages' sources, runtime monkeypatches,
+or changes to external native libraries. It does not make those packages'
+cross-module caches safe. Old namespaces remain on disk until the cache owner
+removes them; importing the simulator does not prune them.
+
+Existing `cache=True` dispatchers can load machine code on a later launch with
+matching sources, versions and signatures. This does not persist physical
+results, density matrices or noisy IQ. Engine model/prepare/result caches remain
+process-local and retain their existing lifetimes. ADC raw-path dispatchers with
+`cache=False` still compile in each process. No solver, kernel or precision
+policy changes.
 
 ## Evolution and explicit populations
 
