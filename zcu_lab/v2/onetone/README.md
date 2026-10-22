@@ -2,10 +2,12 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-10-21，未設 kappa 的 timing 初值
+**Last updated:** 2026-10-22，range find 與 core／Form 共用分工
 
-`freq`、`power_dep`、`flux_dep` 的 `make_form` 共用
-[`_shared.py`](_shared.py) 的 `initial_readout_timing`。
+`freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
+[`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
+[`_shared.py`](_shared.py) 保存不依賴 GUI 的 cfg 與 linear acquisition，供 `freq` 與 `range_find` 共用。
+[`range_find`](range_find/guide.md) 掃大範圍絕對 MHz、找多個凹陷並提議各 resonator 的 `freq`。
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
 
 - `kappa` 使用 MHz，時間使用 us。

@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._shared import initial_readout_timing
+from zcu_lab.v2.onetone._form_shared import initial_readout_timing
 from zcu_lab.v2.onetone.power_dep.core import PowerDepCfg
 
 

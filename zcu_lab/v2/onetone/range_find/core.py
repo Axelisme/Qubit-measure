@@ -1,0 +1,219 @@
+"""Hardware-swept absolute-frequency survey and multi-resonator dip analysis."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Annotated
+
+import numpy as np
+from matplotlib.figure import Figure
+from pydantic import Field
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import find_peaks
+from zcu_tools.cfg_model import FieldMeta
+from zcu_tools.experiment import MHZ_TO_HZ, AxesSpec, Axis, PersistableExperiment, ZSpec
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2.onetone._shared import (
+    FreqResult as RangeFindResult,
+)
+from zcu_lab.v2.onetone._shared import (
+    LinearFreqCfg,
+    run_linear,
+)
+
+
+class RangeFindCfg(LinearFreqCfg):
+    """Pulse-readout acquisition plus names used only by later analysis.
+
+    resonators follows expected dip frequency in ascending MHz order. Run allows
+    an empty list; Analyze requires nonempty unique nonblank names. This list is
+    saved with the run and never changes the acquired frequency grid or IQ.
+    """
+
+    resonators: Annotated[list[str], FieldMeta(label="Resonators")] = Field(
+        default_factory=list
+    )
+
+
+class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
+    """Acquire absolute MHz spectra and preserve the analysis name list in cfg."""
+
+    AXES_SPEC = AxesSpec(
+        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
+        z=ZSpec("signals", "Signal", "a.u."),
+        result_type=RangeFindResult,
+        cfg_type=RangeFindCfg,
+        cfg_schema_version="1.0",
+        tag="onetone/range_find",
+    )
+
+    def run(self, config: RangeFindCfg, *, context: RunContext) -> RangeFindResult:
+        """Reset then pulse/read out each FPGA-swept frequency, ignoring names.
+
+        config supplies the same acquisition fields as onetone/freq linear.
+        context supplies SoC, cancellation and live plots. Return absolute MHz
+        and complex IQ; failures propagate and cancellation preserves partial IQ.
+        """
+        return run_linear(config, context=context)
+
+
+DEFAULT_MIN_SEPARATION_MHZ = 1.0
+
+
+@dataclass
+class RangeFindOptions:
+    """Choose frequency-ordered names and minimum spacing for coarse dip detection.
+
+    resonators must be a nonempty unique list of nonblank component-name strings.
+    Names map to selected dips in ascending MHz order, not to a readout label.
+    min_separation is finite positive MHz. The default 1 MHz separates typical
+    MHz readout linewidths; increase it for broader resonators. Validation occurs
+    on Analyze, allowing an empty initial GUI list to be edited before use.
+    """
+
+    resonators: list[str]
+    min_separation: float = DEFAULT_MIN_SEPARATION_MHZ
+
+    def validate(self) -> None:
+        """Reject empty/duplicate/non-string names and nonpositive/nonfinite MHz."""
+        _validate_options(self.resonators, self.min_separation)
+
+
+def _validate_options(resonators: object, min_separation: object) -> None:
+    # GUI editors and notebook callers can supply values outside annotations.
+    if (
+        not isinstance(resonators, list)
+        or not resonators
+        or any(not isinstance(name, str) or not name.strip() for name in resonators)
+    ):
+        raise ValueError("resonators must be a nonempty list of nonblank strings")
+    if len(set(resonators)) != len(resonators):
+        raise ValueError("resonators must contain unique names")
+    if (
+        isinstance(min_separation, bool)
+        or not isinstance(min_separation, (int, float))
+        or not math.isfinite(min_separation)
+        or min_separation <= 0
+    ):
+        raise ValueError("min_separation must be finite and > 0 MHz")
+
+
+@dataclass(frozen=True)
+class ResonatorDip:
+    """One named dip: freq is absolute MHz; depth is magnitude prominence in a.u.
+
+    name comes from Options in frequency order, not from a readout label. depth
+    uses the background-subtracted, Gaussian-smoothed magnitude, not a fit.
+    """
+
+    name: str
+    freq: float
+    depth: float
+
+
+def analyze(
+    source: RunRecord[RangeFindCfg, RangeFindResult],
+    options: RangeFindOptions,
+    *,
+    plots: Plots,
+) -> tuple[ResonatorDip, ...]:
+    """Remove linear magnitude background and select N most prominent interior dips.
+
+    source supplies matching (P,) absolute MHz and complex IQ arrays, P >= 11;
+    cfg may be None. Partial/nonfinite scans and duplicate frequencies raise
+    ValueError. Descending scans are sorted. No current Form or capture is read.
+
+    Background joins median magnitude/frequency in each outer 10% of points
+    (at least two per edge). Gaussian smoothing uses sigma=1 sample. Prominence
+    must exceed five adjacent-difference noise estimates (MAD/0.67449/sqrt(2)),
+    with a 1e-6 magnitude-range floor. Greedy descending prominence enforces
+    min_separation in actual MHz; frequency-sorted dips receive the given names.
+    Edge minima are excluded. depth is prominence in a.u., not linewidth.
+
+    plots receives raw/background and corrected curves, labeled name/freq/depth.
+    Return all requested dips or raise ValueError naming the available count;
+    no partial success or proposals are produced here.
+    """
+    options.validate()
+    freqs = np.asarray(source.result.freqs, dtype=np.float64)
+    signals = np.asarray(source.result.signals, dtype=np.complex128)
+    if freqs.ndim != 1 or signals.shape != freqs.shape or freqs.size < 11:
+        raise ValueError(
+            "Analysis needs matching (P,) frequency/IQ arrays with P >= 11"
+        )
+    if not np.all(np.isfinite(freqs)) or not np.all(np.isfinite(signals)):
+        raise ValueError(
+            "Analysis needs a complete finite scan; partial/NaN points remain"
+        )
+    order = np.argsort(freqs)
+    freqs, magnitude = freqs[order], np.abs(signals[order])
+    if np.any(np.diff(freqs) <= 0):
+        raise ValueError("Analysis needs distinct absolute frequencies")
+
+    # Edge medians leave the interior dips out of the linear background estimate.
+    edge = max(2, freqs.size // 10)
+    x0, x1 = float(np.median(freqs[:edge])), float(np.median(freqs[-edge:]))
+    y0, y1 = float(np.median(magnitude[:edge])), float(np.median(magnitude[-edge:]))
+    background = y0 + (y1 - y0) * (freqs - x0) / (x1 - x0)
+    corrected = magnitude - background
+    difference = np.diff(corrected)
+    noise = float(np.median(np.abs(difference - np.median(difference)))) / (
+        0.67449 * np.sqrt(2)
+    )
+    threshold = max(5 * noise, 1e-6 * float(np.ptp(magnitude)), np.finfo(float).eps)
+    smoothed = gaussian_filter1d(corrected, sigma=1.0)
+    candidates, properties = find_peaks(-smoothed, prominence=threshold)
+    prominences = properties["prominences"]
+
+    # Enforce actual MHz separation rather than distance in samples.
+    selected: list[int] = []
+    for candidate in np.argsort(-prominences, kind="stable"):
+        index = int(candidates[candidate])
+        if all(
+            abs(freqs[index] - freqs[other]) >= options.min_separation
+            for other in selected
+        ):
+            selected.append(index)
+            if len(selected) == len(options.resonators):
+                break
+    if len(selected) < len(options.resonators):
+        raise ValueError(
+            f"Found {len(selected)} significant separated dips; need {len(options.resonators)} "
+            f"(min_separation={options.min_separation:g} MHz, prominence >= {threshold:.6g} a.u.). "
+            "Check scan range, resolution, power and requested names."
+        )
+    depth_by_index = {
+        int(index): float(depth)
+        for index, depth in zip(candidates, prominences, strict=True)
+    }
+    dips = tuple(
+        ResonatorDip(name, float(freqs[index]), depth_by_index[index])
+        for name, index in zip(options.resonators, sorted(selected), strict=True)
+    )
+
+    plots.subplots("fit", nrows=2, sharex=True, figsize=(9, 7))
+
+    def draw(figure: Figure) -> None:
+        raw_ax, dip_ax = figure.axes
+        raw_ax.plot(freqs, magnitude, label="Measured magnitude")
+        raw_ax.plot(freqs, background, label="Linear edge background")
+        raw_ax.set_ylabel("Magnitude (a.u.)")
+        raw_ax.legend()
+        dip_ax.plot(freqs, smoothed, label="Background removed")
+        for dip in dips:
+            dip_ax.axvline(
+                dip.freq,
+                linestyle="--",
+                label=f"{dip.name}: {dip.freq:.6g} MHz, depth {dip.depth:.4g}",
+            )
+        dip_ax.set_xlabel("Frequency (MHz)")
+        dip_ax.set_ylabel("Corrected magnitude (a.u.)")
+        dip_ax.legend()
+        figure.tight_layout()
+
+    plots.draw("fit", draw)
+    return dips

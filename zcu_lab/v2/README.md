@@ -27,11 +27,14 @@
 
 ## Mux readout 與表單初值
 
-`mux/onetone_find` 使用一個 mux tone 掃絕對 MHz，每點只播放所選 tone 並讀取其 ADC。
-完整 native cfg 保留原始 tone 序號及全部 readout tones，raw 是一維頻率與 complex IQ。
+`onetone/range_find` 使用普通 pulse readout 的 generator 與 ADC 硬體掃絕對 MHz。
+Acquisition 與 `onetone/freq` linear 共用純 core cfg 與掃頻流程，raw 是一維頻率與 complex IQ。
+分析名單隨 cfg 保存，Run 可空，Analyze 必須非空且不重複。Open／Reset 有 `$mux` 時，
+全部成員都有目前 freq 才按 freq 升冪排序，否則保留 group 順序；無 `$mux` 時留空。
+Analyze／Load 從該次 cfg 取可編輯的名單初值，不讀目前 Form。
 分析去除直線 magnitude 背景，選取最顯著且符合最小 MHz 間距的 N 個凹陷，依頻率升序配名稱。
 每個 capture 中存在的名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
-不足 N 個凹陷時整次分析失敗。操作與判讀見 [coarse scan guide](mux/onetone_find/guide.md)。
+不足 N 個凹陷時整次分析失敗。操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
 `mux/onetone_fine` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
@@ -74,7 +77,7 @@ Amp Rabi 仍逐點 compile。
 [mux recipe guide](../recipes/mux-guide.md)。
 各 leaf guide 說明 GUI、保存來源及 explicit Apply 操作，core 本身仍不依賴 GUI。
 
-Mux 實驗（onetone_find 除外）每個參與 tone 各有一張 `measurement_i`，
+Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
 requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
 `_support.singleshot.plot.draw_ge_scatter` 供單 qubit 與 mux GE 共用，先複製 IQ，

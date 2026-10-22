@@ -15,20 +15,14 @@ from zcu_tools.experiment import (
     PersistableExperiment,
     ZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    ResetCfg,
     SweepCfg,
     TablePulseReadout,
-    sweep2param,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -38,14 +32,21 @@ from zcu_lab.v2._support.resonator import (
 from zcu_lab.v2._support.resonator import (
     fit_resonance,
 )
+from zcu_lab.v2.onetone._shared import (
+    FreqModuleCfg as FreqModuleCfg,
+)
+from zcu_lab.v2.onetone._shared import (
+    FreqResult as FreqResult,
+)
+from zcu_lab.v2.onetone._shared import (
+    FreqSweepCfg as FreqSweepCfg,
+)
+from zcu_lab.v2.onetone._shared import (
+    LinearFreqCfg,
+    run_linear,
+)
 
 SamplingMode = Literal["linear", "homophasal"]
-
-
-@dataclass(frozen=True)
-class FreqResult:
-    freqs: NDArray[np.float64]
-    signals: NDArray[np.complex128]
 
 
 @dataclass(frozen=True)
@@ -53,15 +54,6 @@ class FreqAnalysis:
     freq: float
     fwhm: float
     params: dict[str, Any]
-
-
-class FreqModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
-
-
-class FreqSweepCfg(ConfigBase):
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class HomophasalSamplingCfg(ConfigBase):
@@ -82,9 +74,7 @@ class HomophasalSamplingCfg(ConfigBase):
         return self.r_f / self.rf_w
 
 
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):
-    modules: FreqModuleCfg
-    sweep: FreqSweepCfg
+class FreqCfg(LinearFreqCfg):
     sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
     homophasal: Annotated[
         HomophasalSamplingCfg | None, FieldMeta(label="Homophasal")
@@ -179,12 +169,13 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
         Homophasal sampling requires positive fit parameters and rejects points
         that collapse onto the same hardware frequency.
         """
+        if config.sampling_mode == "linear":
+            return run_linear(config, context=context)
+
         # 1. Prepare the frequency grid without changing the caller's cfg.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        if cfg.sampling_mode == "linear":
-            freqs = sweep2array(cfg.sweep.freq, "freq", self._round_info(cfg, soccfg))
-        elif cfg.sampling_mode == "homophasal":
+        if cfg.sampling_mode == "homophasal":
             params = cfg.homophasal
             if params is None:
                 raise ValueError("homophasal sampling requires fit parameters")
@@ -206,44 +197,34 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
             cfg = sched.cfg
             modules = cfg.modules
 
-            # 2. Reset then read out; both modes keep the frequency loop on the FPGA.
-            if cfg.sampling_mode == "linear":
-                freq_sweep = cfg.sweep.freq
-                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
-                builder = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add(PulseReadout("readout", modules.readout))
-                    .declare_sweep("freq", freq_sweep)
-                )
-            else:
-                modules.readout.set_param("freq", float(freqs[0]))
-                readout_cfg = modules.readout
-                freq_words, ro_freq_words = readout_freq_words(
-                    soccfg,
-                    freqs,
-                    gen_ch=readout_cfg.gen_ch,
-                    ro_ch=readout_cfg.ro_ch,
-                    mixer_freq=readout_cfg.mixer_freq,
-                    nqz=readout_cfg.nqz,
-                )
+            # 2. Reset then read out using the calibrated DDS table.
+            modules.readout.set_param("freq", float(freqs[0]))
+            readout_cfg = modules.readout
+            freq_words, ro_freq_words = readout_freq_words(
+                soccfg,
+                freqs,
+                gen_ch=readout_cfg.gen_ch,
+                ro_ch=readout_cfg.ro_ch,
+                mixer_freq=readout_cfg.mixer_freq,
+                nqz=readout_cfg.nqz,
+            )
 
-                # Update DDS words after each point, wrapping for the next rep;
-                # the table readout preserves the native sweep's phase timing.
-                builder = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add(
-                        TablePulseReadout(
-                            "readout",
-                            modules.readout,
-                            idx_reg="freq",
-                            freq_words=freq_words,
-                            ro_freq_words=ro_freq_words,
-                        ),
-                    )
-                    .declare_sweep("freq", len(freqs))
+            # Update DDS words after each point, wrapping for the next rep;
+            # the table readout preserves the native sweep's phase timing.
+            builder = (
+                sched.prog_builder(soc, soccfg)
+                .add_reset("reset", modules.reset)
+                .add(
+                    TablePulseReadout(
+                        "readout",
+                        modules.readout,
+                        idx_reg="freq",
+                        freq_words=freq_words,
+                        ro_freq_words=ro_freq_words,
+                    ),
                 )
+                .declare_sweep("freq", len(freqs))
+            )
 
             # 3. Average reps/rounds and retain completed data on cancellation.
             _ = builder.build_and_acquire()

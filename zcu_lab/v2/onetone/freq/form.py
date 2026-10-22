@@ -19,7 +19,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.onetone._shared import initial_readout_timing
+from zcu_lab.v2.onetone._form_shared import initial_readout_timing
 from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
 

@@ -1,56 +1,83 @@
-"""Starting-value policy shared by the three single-tone spectroscopy Forms."""
+"""Qt-free configuration and linear hardware acquisition for one-tone spectra."""
 
-from math import isfinite
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Annotated
 
-from zcu_tools.cfg_model import Expr, TemplateSeed
-from zcu_tools.gui.form_adapter import FormContext
+import numpy as np
+from numpy.typing import NDArray
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseReadout,
+    PulseReadoutCfg,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
 
-from zcu_lab.templates import READOUT_PULSE_LENGTH_US
+
+@dataclass(frozen=True)
+class FreqResult:
+    """Hardware-rounded absolute freqs in MHz and mean complex IQ, both shape (P,)."""
+
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
-def initial_ro_length() -> float:
-    """Return an editable RO window in us, 0.01 us shorter than the readout pulse.
+class FreqModuleCfg(ConfigBase):
+    """Optional reset followed by the pulse readout's generator and ADC settings."""
 
-    The readout Template supplies the pulse source. Open/Reset creates a
-    detached direct RO window that remains independently editable.
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+
+
+class FreqSweepCfg(ConfigBase):
+    """Absolute MHz sweep; the hardware owns both generator and ADC frequencies."""
+
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+
+
+class LinearFreqCfg(ProgramV2Cfg, ExpCfgModel):
+    """One-tone acquisition settings, averaging, delays and absolute frequency grid."""
+
+    modules: FreqModuleCfg
+    sweep: FreqSweepCfg
+
+
+def run_linear(config: LinearFreqCfg, *, context: RunContext) -> FreqResult:
+    """Reset and read out at each FPGA-swept absolute MHz frequency.
+
+    config supplies pulse readout, sweep and averaging; its values stay unchanged.
+    context supplies SoC, cached config, plots and cancellation. Return rounded
+    MHz and mean complex IQ. Cancellation retains unacquired NaNs in the buffer;
+    acquisition errors propagate to the host.
     """
-    return READOUT_PULSE_LENGTH_US - 0.01
-
-
-def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
-    """Return editable single-resonator Template timing seeds for Open/Reset.
-
-    ctx supplies the fixed capture. If resonator kappa is absent or null,
-    seed trig_offset=time_of_fly. Otherwise require a finite positive kappa
-    in MHz and seed trig_offset=time_of_fly+5/(2*pi*kappa) us;
-    kappa=1 MHz adds approximately 0.795775 us. Missing capture or invalid
-    kappa raises ValueError. Alias and source faults propagate.
-    Seed pulse length=max(original template length, trig_offset+ro_length)
-    in us, retaining the template-based RO window.
-    Return Expr seeds for trig_offset and waveform.length, and a direct
-    ro_length seed. Open/Reset resolves these into detached editable values.
-    Subsequent cfg output retains the operator's edited timing.
-    """
-    if ctx.parameters is None:
-        raise ValueError("One-tone timing requires a parameter capture")
-    source = ctx.parameters.lookup_point("$resonator.kappa")
-    kappa = source.value
-    trigger = "$resonator.ext.time_of_fly"
-    if source.present and kappa is not None:
-        if (
-            isinstance(kappa, bool)
-            or not isinstance(kappa, (int, float))
-            or not isfinite(kappa)
-            or kappa <= 0
-        ):
-            raise ValueError("$resonator.kappa must be finite and positive in MHz")
-        trigger += " + 5 / (2 * pi * $resonator.kappa)"
-    window = f"({trigger}) + {initial_ro_length()!r}"
-    original = READOUT_PULSE_LENGTH_US
-    # Encode max using the expression language's abs: max(a,b)=(a+b+abs(a-b))/2.
-    length = f"({original!r} + ({window}) + abs({original!r} - ({window}))) / 2"
-    return {
-        "trig_offset": Expr(trigger),
-        "ro_length": initial_ro_length(),
-        "waveform.length": Expr(length),
-    }
+    cfg = deepcopy(config)
+    readout = cfg.modules.readout
+    freqs = sweep2array(
+        cfg.sweep.freq,
+        "freq",
+        {"soccfg": context.soccfg, "gen_ch": readout.gen_ch, "ro_ch": readout.ro_ch},
+    )
+    viewer = context.plots.liveplot_1d("measurement", "Frequency (MHz)", "Amplitude")
+    signals = SignalBuffer(
+        (len(freqs),), on_update=lambda data: viewer.update(freqs, np.abs(data))
+    )
+    with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        cfg = sched.cfg
+        modules = cfg.modules
+        freq_sweep = cfg.sweep.freq
+        modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+        _ = (
+            sched.prog_builder(context.soc, context.soccfg)
+            .add_reset("reset", modules.reset)
+            .add(PulseReadout("readout", modules.readout))
+            .declare_sweep("freq", freq_sweep)
+            .build_and_acquire()
+        )
+    return FreqResult(freqs=freqs, signals=signals.array)
