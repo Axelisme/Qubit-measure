@@ -1,0 +1,343 @@
+# Six independent single-cavity models. Recheck basis convergence after edits.
+format: zcu.six-fluxonium
+version: 1
+mux_gen_ch: 0
+pulse_gen_ch: 13
+pulse_ro_ch: 6
+dc_source:
+  name: flux_bias
+  unit: A
+  limits: [-0.02, 0.02]
+  initial: 0.0
+  ramp_step: 0.000001
+qubits:
+  Q1:
+    format: zcu.single-fluxonium
+    version: 1
+
+    chip:
+      qubit:
+        ej_ghz: 4.0
+        ec_ghz: 1.0
+        el_ghz: 1.0
+        q_cap: 1000000.0
+        q_ind: 100000000.0
+        xqp: 0.0000002
+        aphi: 0.000002
+      temperature_k: 0.05
+
+    dc_bias:
+      offset_phi0: 0.50
+      flux_per_unit: 100.0 # Phi0/A, shared global DC current.
+
+    drive_line:
+      name: q1_charge
+      gen_ch: 1
+      charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
+
+    readout:
+      drive:
+        gen_ch: 0
+        input_per_gain: 10.0 # sqrt(photons/ns)/gain
+      resonator:
+        frequency_ghz: 7.00
+        charge_coefficient_ghz: 0.03 # Full-charge coupling, GHz.
+        kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+        kappa_internal_mhz: 0.1
+        thermal_occupation: 0.0
+        mismatch_phase_rad: 0.0
+      adc:
+        ro_ch: 0
+        gain: 100.0 # ADC sample units / sqrt(photons/ns)
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+
+    numerics:
+      truncation:
+        native_cutoff: 40 # Harmonic-oscillator dimension.
+        # Fixed DC-reference space; convergence must be checked per circuit.
+        levels: 21
+      solver:
+        rtol: 0.00000001
+        atol: 0.0000000001
+        max_step_ns: 0.1
+        bath_segment_ns: 2.0
+      seed: 123
+      min_round_duration_s: 0.2
+  Q2:
+    format: zcu.single-fluxonium
+    version: 1
+
+    chip:
+      qubit:
+        ej_ghz: 4.5
+        ec_ghz: 0.9
+        el_ghz: 0.8
+        q_cap: 1000000.0
+        q_ind: 100000000.0
+        xqp: 0.0000002
+        aphi: 0.000002
+      temperature_k: 0.05
+
+    dc_bias:
+      offset_phi0: 0.45
+      flux_per_unit: 80.0 # Phi0/A, shared global DC current.
+
+    drive_line:
+      name: q2_charge
+      gen_ch: 2
+      charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
+
+    readout:
+      drive:
+        gen_ch: 0
+        input_per_gain: 10.0 # sqrt(photons/ns)/gain
+      resonator:
+        frequency_ghz: 7.10
+        charge_coefficient_ghz: 0.03 # Full-charge coupling, GHz.
+        kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+        kappa_internal_mhz: 0.1
+        thermal_occupation: 0.0
+        mismatch_phase_rad: 0.0
+      adc:
+        ro_ch: 1
+        gain: 100.0 # ADC sample units / sqrt(photons/ns)
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+
+    numerics:
+      truncation:
+        native_cutoff: 40 # Harmonic-oscillator dimension.
+        # Fixed DC-reference space; convergence must be checked per circuit.
+        levels: 21
+      solver:
+        rtol: 0.00000001
+        atol: 0.0000000001
+        max_step_ns: 0.1
+        bath_segment_ns: 2.0
+      seed: 124
+      min_round_duration_s: 0.2
+  Q3:
+    format: zcu.single-fluxonium
+    version: 1
+
+    chip:
+      qubit:
+        ej_ghz: 5.0
+        ec_ghz: 1.1
+        el_ghz: 0.6
+        q_cap: 1000000.0
+        q_ind: 100000000.0
+        xqp: 0.0000002
+        aphi: 0.000002
+      temperature_k: 0.05
+
+    dc_bias:
+      offset_phi0: 0.55
+      flux_per_unit: 120.0 # Phi0/A, shared global DC current.
+
+    drive_line:
+      name: q3_charge
+      gen_ch: 3
+      charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
+
+    readout:
+      drive:
+        gen_ch: 0
+        input_per_gain: 10.0 # sqrt(photons/ns)/gain
+      resonator:
+        frequency_ghz: 7.20
+        charge_coefficient_ghz: 0.03 # Full-charge coupling, GHz.
+        kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+        kappa_internal_mhz: 0.1
+        thermal_occupation: 0.0
+        mismatch_phase_rad: 0.0
+      adc:
+        ro_ch: 2
+        gain: 100.0 # ADC sample units / sqrt(photons/ns)
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+
+    numerics:
+      truncation:
+        native_cutoff: 40 # Harmonic-oscillator dimension.
+        # Fixed DC-reference space; convergence must be checked per circuit.
+        levels: 21
+      solver:
+        rtol: 0.00000001
+        atol: 0.0000000001
+        max_step_ns: 0.1
+        bath_segment_ns: 2.0
+      seed: 125
+      min_round_duration_s: 0.2
+  Q4:
+    format: zcu.single-fluxonium
+    version: 1
+
+    chip:
+      qubit:
+        ej_ghz: 3.5
+        ec_ghz: 1.0
+        el_ghz: 1.2
+        q_cap: 1000000.0
+        q_ind: 100000000.0
+        xqp: 0.0000002
+        aphi: 0.000002
+      temperature_k: 0.05
+
+    dc_bias:
+      offset_phi0: 0.40
+      flux_per_unit: 90.0 # Phi0/A, shared global DC current.
+
+    drive_line:
+      name: q4_charge
+      gen_ch: 4
+      charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
+
+    readout:
+      drive:
+        gen_ch: 0
+        input_per_gain: 10.0 # sqrt(photons/ns)/gain
+      resonator:
+        frequency_ghz: 7.30
+        charge_coefficient_ghz: 0.03 # Full-charge coupling, GHz.
+        kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+        kappa_internal_mhz: 0.1
+        thermal_occupation: 0.0
+        mismatch_phase_rad: 0.0
+      adc:
+        ro_ch: 3
+        gain: 100.0 # ADC sample units / sqrt(photons/ns)
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+
+    numerics:
+      truncation:
+        native_cutoff: 40 # Harmonic-oscillator dimension.
+        # Fixed DC-reference space; convergence must be checked per circuit.
+        levels: 21
+      solver:
+        rtol: 0.00000001
+        atol: 0.0000000001
+        max_step_ns: 0.1
+        bath_segment_ns: 2.0
+      seed: 126
+      min_round_duration_s: 0.2
+  Q5:
+    format: zcu.single-fluxonium
+    version: 1
+
+    chip:
+      qubit:
+        ej_ghz: 6.0
+        ec_ghz: 0.8
+        el_ghz: 0.5
+        q_cap: 1000000.0
+        q_ind: 100000000.0
+        xqp: 0.0000002
+        aphi: 0.000002
+      temperature_k: 0.05
+
+    dc_bias:
+      offset_phi0: 0.60
+      flux_per_unit: 110.0 # Phi0/A, shared global DC current.
+
+    drive_line:
+      name: q5_charge
+      gen_ch: 5
+      charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
+
+    readout:
+      drive:
+        gen_ch: 0
+        input_per_gain: 10.0 # sqrt(photons/ns)/gain
+      resonator:
+        frequency_ghz: 7.40
+        charge_coefficient_ghz: 0.03 # Full-charge coupling, GHz.
+        kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+        kappa_internal_mhz: 0.1
+        thermal_occupation: 0.0
+        mismatch_phase_rad: 0.0
+      adc:
+        ro_ch: 4
+        gain: 100.0 # ADC sample units / sqrt(photons/ns)
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+
+    numerics:
+      truncation:
+        native_cutoff: 40 # Harmonic-oscillator dimension.
+        # Fixed DC-reference space; convergence must be checked per circuit.
+        levels: 21
+      solver:
+        rtol: 0.00000001
+        atol: 0.0000000001
+        max_step_ns: 0.1
+        bath_segment_ns: 2.0
+      seed: 127
+      min_round_duration_s: 0.2
+  Q6:
+    format: zcu.single-fluxonium
+    version: 1
+
+    chip:
+      qubit:
+        ej_ghz: 4.2
+        ec_ghz: 1.2
+        el_ghz: 0.9
+        q_cap: 1000000.0
+        q_ind: 100000000.0
+        xqp: 0.0000002
+        aphi: 0.000002
+      temperature_k: 0.05
+
+    dc_bias:
+      offset_phi0: 0.50
+      flux_per_unit: 70.0 # Phi0/A, shared global DC current.
+
+    drive_line:
+      name: q6_charge
+      gen_ch: 6
+      charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
+
+    readout:
+      drive:
+        gen_ch: 0
+        input_per_gain: 10.0 # sqrt(photons/ns)/gain
+      resonator:
+        frequency_ghz: 7.50
+        charge_coefficient_ghz: 0.03 # Full-charge coupling, GHz.
+        kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
+        kappa_internal_mhz: 0.1
+        thermal_occupation: 0.0
+        mismatch_phase_rad: 0.0
+      adc:
+        ro_ch: 5
+        gain: 100.0 # ADC sample units / sqrt(photons/ns)
+        phase_deg: 0.0
+        time_of_flight_ns: 400.0
+        offset_adc: [0.0, 0.0]
+        noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
+
+    numerics:
+      truncation:
+        native_cutoff: 40 # Harmonic-oscillator dimension.
+        # Fixed DC-reference space; convergence must be checked per circuit.
+        levels: 21
+      solver:
+        rtol: 0.00000001
+        atol: 0.0000000001
+        max_step_ns: 0.1
+        bath_segment_ns: 2.0
+      seed: 128
+      min_round_duration_s: 0.2
