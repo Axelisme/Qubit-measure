@@ -42,6 +42,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
+from ..state import RunPaneState
 from .guard import RunInputs
 from .operation_gate import OperationKind
 from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
@@ -269,8 +270,8 @@ class RunService:
         logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
         # A cancelled run may still carry a partial result.
         if result is NO_RESULT:
-            retired = self._state.update_tab_result(
-                op.tab_id, None, partial_result=op.stop_signal.partial_result
+            retired = self._state.replace_run_pane(
+                op.tab_id, RunPaneState(partial_result=op.stop_signal.partial_result)
             )
             self._teardown_retired(retired)
             self._discard_plots(op, "Cancelled")
