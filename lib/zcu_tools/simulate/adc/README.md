@@ -1,8 +1,16 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-22, joint-Fock contracts and validation limits
+**Last updated:** 2026-10-23, Numba import boundary
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
+
+Importing `simulate.adc` initializes the shared simulator Numba cache policy
+before creating dispatchers, even if evolution has not been imported. ADC and
+evolution share one successful bootstrap per process. Basic coordinate
+conversions at the `simulate` root do not initialize it. See the
+[cache contract](../README.md#numba-machine-code-cache) for source/version
+isolation, fail-fast storage and process-global effects. Raw-path dispatchers
+with `cache=False` still compile in each process.
 
 `ReadoutModel` supports 1 or 2 cavities on a shared transmission line.
 `cavity_count` comes from the frequency array's second axis. Other counts raise

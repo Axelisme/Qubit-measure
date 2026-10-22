@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-22, explicit diagnostic RK4 step, continuous adiabatic transport, continuation and knot-aligned density integration
+**Last updated:** 2026-10-23, Numba import boundary
 
 **讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -22,6 +22,12 @@ boundary and the decision to keep algorithm knowledge in dispatch.
 - [Research records](#research-records)
 
 ## Public entry points
+
+Importing this package initializes the shared simulator Numba cache policy
+before creating dispatchers. ADC and evolution share one successful bootstrap
+per process. Basic `simulate.value2flux` and `simulate.flux2value` imports do not
+initialize it. See the [cache contract](../README.md#numba-machine-code-cache)
+for source/version isolation, fail-fast storage and process-global effects.
 
 The exports in [__init__.py](__init__.py) fall into these groups:
 

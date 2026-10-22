@@ -7,6 +7,7 @@ records and tools here. Kernel, dispatch, scheduler and cache modules are intern
 implementation details, not a second integration interface.
 """
 
+from .. import _numba_cache  # Bootstrap before any dispatcher is created.
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .engine import (
     SEGMENT_NUMERIC_VERSION,
