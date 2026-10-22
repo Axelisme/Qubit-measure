@@ -21,8 +21,14 @@ class Knobs(BaseModel):
     reps: int = 2
 
 
-async def script(env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]) -> int:
-    return plan.count + tun.current.reps
+class Summary(BaseModel):
+    count: int
+
+
+async def script(
+    env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
+) -> Summary:
+    return Summary(count=plan.count + tun.current.reps)
 
 
 def test_decorator_infers_models_preserves_coroutine_and_defers_execution() -> None:
@@ -30,9 +36,9 @@ def test_decorator_infers_models_preserves_coroutine_and_defers_execution() -> N
 
     async def original(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
-    ) -> int:
+    ) -> Summary:
         calls.append("script")
-        return plan.count + tun.current.reps
+        return Summary(count=plan.count + tun.current.reps)
 
     try:
         declared = w.workflow("example", "Count configured repetitions")(original)
@@ -53,8 +59,8 @@ def test_decorator_infers_models_preserves_coroutine_and_defers_execution() -> N
 def test_catalog_rejects_copied_metadata_and_duplicate_names() -> None:
     async def original(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
-    ) -> int:
-        return plan.count + tun.current.reps
+    ) -> Summary:
+        return Summary(count=plan.count + tun.current.reps)
 
     try:
         declared = w.workflow("original", "A synthetic workflow")(original)
@@ -64,7 +70,7 @@ def test_catalog_rejects_copied_metadata_and_duplicate_names() -> None:
     @wraps(declared)
     async def copied(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
-    ) -> int:
+    ) -> Summary:
         return await declared(env, plan, tun)
 
     registry = w.WorkflowRegistry()
@@ -89,8 +95,8 @@ def test_empty_names_are_rejected(name: str) -> None:
 def test_synchronous_author_is_rejected() -> None:
     def synchronous(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Knobs]
-    ) -> int:
-        return 1
+    ) -> Summary:
+        return Summary(count=1)
 
     try:
         decorate = w.workflow("synchronous", "Invalid synchronous author")
