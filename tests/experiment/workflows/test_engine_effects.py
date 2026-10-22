@@ -13,7 +13,14 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
-from zcu_tools.experiment.workflows import Actor, Completed, Failed, Live, WorkflowEnv
+from zcu_tools.experiment.workflows import (
+    Actor,
+    Completed,
+    Failed,
+    Live,
+    WorkflowEnv,
+    saved_run,
+)
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.modules import SoftDelay
@@ -235,6 +242,91 @@ def test_setup_pause_retries_captured_full_cfg_with_fresh_operation_token(
     assert rig.devices.signals[0].is_set()
     assert not rig.devices.signals[1].is_set()
     assert rig.devices.signals[0] is not rig.devices.signals[1]
+
+
+def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions(
+    rig: Rig,
+) -> None:
+    entered = Event()
+    requests: list[Cfg] = []
+    contexts: list[RunContext] = []
+    captures: list[Cfg] = []
+    delivered: list[int] = []
+
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        requests.append(cfg.model_copy(deep=True))
+        contexts.append(context)
+        value = cfg.value
+        cfg.value = 99
+        cfg.nested.append(99)
+        if len(requests) == 1:
+            entered.set()
+            # The controller pauses only after this attempt has announced entry.
+            assert context.cancel_signal.event.wait(30), "Pause must stop acquisition"
+        return value
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        directory = env.new_commit_dir()
+        cfg = Cfg(value=tun.current.value)
+        captures.append(cfg)
+        outcome = completed(await env.run(acquire, cfg))
+        assert not outcome.partial_result
+        delivered.append(outcome.value.result)
+        # Before commit, a later operation must not inherit Pause's stop bit.
+        assert not completed(await env.call(lambda ctx: ctx.stop_signal.is_set())).value
+        latest = tun.current.value
+        assert tun.current.value == latest
+        await env.commit(Point(value=latest), directory)
+        await env.commit(Point(value=outcome.value.result))
+        await env.commit(Point(value=tun.current.value))
+
+    rig.start(script)
+    with running(rig) as future:
+        try:
+            # The operation signals entry before waiting for the Pause token.
+            assert entered.wait(30), "The first acquisition must enter"
+            rig.engine.update_tunables(
+                "run",
+                Tunables(value=8),
+                expected_revision=0,
+                actor=Actor("user", "test"),
+            )
+            rig.engine.pause("run")
+            paused(rig)
+            rig.engine.update_tunables(
+                "run",
+                Tunables(value=9),
+                expected_revision=1,
+                actor=Actor("user", "test"),
+            )
+            assert delivered == []
+            assert rig.engine.records("run") == ()
+            captures[0].value = 77
+            captures[0].nested.append(77)
+            rig.engine.resume("run")
+            final = future.result(timeout=30)
+        finally:
+            rig.engine.stop("run")
+    assert final.lifecycle == "done", final.reason
+    assert delivered == [1]
+    assert requests == [Cfg(value=1), Cfg(value=1)]
+    assert contexts[0].cancel_signal.is_set()
+    assert not contexts[1].cancel_signal.is_set()
+    assert_paused_acquisition_records(rig.paths.metadata_root)
+
+
+def assert_paused_acquisition_records(run: Path) -> None:
+    """Check live revision reads and retried attempts through the typed reader."""
+    records = saved_run.read_records(run, Point)
+    assert [row.record.value for row in records] == [9, 1, 9]
+    assert [row.revisions for row in records] == [(0, 2), (), (2,)]
+    assert [row.commit_seq for row in records] == [1, 2, 3]
+    assert [row.directory.name for row in records] == ["000001", "000002", "000003"]
+    assert [operation.outcome for operation in records[0].operations] == [
+        "discarded",
+        "completed",
+        "completed",
+    ]
 
 
 def test_file_saved_before_pause_is_retained_and_author_continues(rig: Rig) -> None:
