@@ -7,7 +7,6 @@ import pytest
 from qtpy.QtWidgets import QLabel, QPushButton, QSlider
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.state import (
     DispersiveState,
@@ -21,7 +20,7 @@ def _inputs() -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
         flux_half=0.5,
-        flux_int=1.0,
+        flux_bias=0.0,
         flux_period=2.0,
         bare_rf_seed=5.3,
     )
@@ -55,7 +54,7 @@ def _preprocess(n_flux=12, n_freq=30, median_rf=5.4) -> PreprocessResult:
 
 @pytest.mark.parametrize("stage", range(5))
 def test_actions_gated_on_initial_pipeline_progress(qapp, stage):
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    state = DispersiveState()
     if stage >= 1:
         state.set_fit_inputs(_inputs())
     if stage >= 2:
@@ -71,7 +70,7 @@ def test_actions_gated_on_initial_pipeline_progress(qapp, stage):
             "Load one-tone…",
             "Run preprocessing",
             "Use these g / r_f",
-            "Export to params.json",
+            "Export dispersive",
         ),
         start=1,
     ):
