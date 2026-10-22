@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import Any
 
 from zcu_tools.device.base import DeviceMapping
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import Plots
 
 
@@ -15,14 +15,16 @@ class RunContext:
 
     QICK handles may be local objects or transport proxies. Their dynamic API
     stays at this hardware boundary. The caller finishes plots after the producer
-    has stopped and releases presentation separately.
+    has stopped and releases presentation separately. scope is the explicit
+    run/operation boundary supplied by that owner; core passes it to Schedule
+    and uses scope.stop only for low-level cancellation APIs.
     """
 
     soc: Any
     soccfg: Any
     plots: Plots
     devices: DeviceMapping
-    cancel_signal: StopSignal
+    scope: Scope
 
     def __post_init__(self) -> None:
         # Freeze names, not drivers: their lifecycle remains with the caller.

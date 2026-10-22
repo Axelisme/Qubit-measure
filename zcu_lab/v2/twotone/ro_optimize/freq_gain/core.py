@@ -142,7 +142,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         )
 
         # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             freq_sweep = sched.cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)

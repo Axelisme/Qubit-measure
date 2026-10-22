@@ -73,7 +73,7 @@ class ConstructivePhaseExp(PersistableExperiment[RabiScanResult, ConstructivePha
         """Acquire B11 → dual drive → double Xπ → mux for phase/duration/round.
 
         Preserve all raw shots and full tones, including partial cancellation.
-        Caller must check context.cancel_signal.raise_if_error(). No input mutation.
+        Caller must check context.scope.stop.raise_if_error(). No input mutation.
         """
         phases = sweep2array(config.relative_phase)
         drives = [

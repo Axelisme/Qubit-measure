@@ -459,7 +459,8 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         slot: SignalSlot,
         pbar: BaseProgressBar,
     ) -> T_Raw:
-        token = self._schedule.stop.child(label="acquire")
+        scope = self._schedule.scope.branch("acquire")
+        token = scope.stop
         acquire_cancel_flag = AcquireCancelFlag(token)
 
         def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
@@ -488,7 +489,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                 raise _AcquireStopped
             return raw
         finally:
-            token.release()
+            scope.release()
 
     def _rounds_from(self, program: ProgramProtocol[Any, Any]) -> int:
         rounds = program.cfg_model.rounds

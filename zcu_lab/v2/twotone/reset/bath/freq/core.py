@@ -153,7 +153,7 @@ class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
         )
 
         # Sweep both cavity knobs and the final pi/2 phase in one program.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             tested_reset = modules.tested_reset
             tested_reset.set_param(

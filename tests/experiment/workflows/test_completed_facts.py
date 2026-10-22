@@ -8,6 +8,7 @@ import pytest
 from pydantic import TypeAdapter
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv, saved_run
 
 from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables
@@ -37,7 +38,7 @@ def test_completed_facts_match_journal_and_commit_scope(
         )
         return cfg.value
 
-    async def operation(env: WorkflowEnv[int]) -> None:
+    async def operation(env: Scope) -> None:
         if kind == "call":
             delivered.append(await env.call(lambda ctx: 5))
         elif kind == "run":
@@ -50,15 +51,11 @@ def test_completed_facts_match_journal_and_commit_scope(
             delivered.append(await env.wait_until(START))
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        env.new_commit_dir()
-        directory = env.new_commit_dir()
-        await operation(env)
-        with pytest.raises(ValueError, match="allocated"):
-            await env.commit(Point(value=0), rig.root / "foreign")
-        await operation(env)
-        await env.commit(Point(value=1), directory)
-        await operation(env)
-        await env.commit(Point(value=2))
+        for value, iteration in zip((1, 2), env.iterations(), strict=False):
+            await operation(iteration)
+            if value == 1:
+                await operation(iteration)
+            iteration.commit(Point(value=value))
 
     rig.start(script)
     final = rig.engine.execute("run")

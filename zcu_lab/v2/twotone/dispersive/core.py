@@ -181,7 +181,7 @@ class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
         )
 
         # Sweep readout frequency for both preparations in the same FPGA program.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
             freq_sweep = cfg.sweep.freq

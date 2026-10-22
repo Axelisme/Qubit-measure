@@ -358,7 +358,7 @@ class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
         )
 
         # Acquire both preparations and the full frequency grid in one program.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             res_freq_param = sweep2param("res_freq", sched.cfg.sweep.res_freq)
             qub_freq_param = sweep2param("qub_freq", sched.cfg.sweep.qub_freq)

@@ -54,12 +54,18 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
         return cfg.value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        trend = env.plots.liveplot_1d("trend", "Iteration", "Value")
-        for index in range(2):
-            outcome = completed(await env.run(acquire, Cfg(value=7)))
-            delivered.append(outcome.value.result)
-            trend.update(np.array([0.0]), np.array([float(index)]))
-            await env.commit(Point(value=index))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            trend = env.plots.liveplot_1d("trend", "Iteration", "Value")
+            for index in range(2):
+                outcome = completed(await iteration.run(acquire, Cfg(value=7)))
+                delivered.append(outcome.value.result)
+                trend.update(np.array([0.0]), np.array([float(index)]))
+                iteration.commit(Point(value=index))
+                iteration = next(iterations)
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)
@@ -95,16 +101,22 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
         context.plots.liveplot_1d("measurement", "Delay", "Signal")
         if len(attempts) == 1:
             entered.set()
-            assert context.cancel_signal.event.wait(10), "Pause must stop acquisition"
+            assert context.scope.stop.event.wait(10), "Pause must stop acquisition"
             cfg.value = -1
             return -1
         return cfg.value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        env.plots.liveplot_1d("trend", "Iteration", "Value")
-        result = completed(await env.run(acquire, Cfg(value=9)))
-        delivered.append(result.value.result)
-        await env.commit(Point(value=result.value.result))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            env.plots.liveplot_1d("trend", "Iteration", "Value")
+            result = completed(await iteration.run(acquire, Cfg(value=9)))
+            delivered.append(result.value.result)
+            iteration.commit(Point(value=result.value.result))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)
@@ -147,20 +159,25 @@ def test_operation_finishes_before_return_or_failure_delivery(
         if outcome == "raised":
             raise ValueError("core failed")
         if outcome == "failed":
-            context.cancel_signal.set_error(
+            context.scope.stop.set_error(
                 "failed", "acquire failed", OSError("acquire failed")
             )
         return 3
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        iterations = env.iterations()
         try:
-            delivered.append(await env.run(acquire, Cfg()))
-        except ValueError as error:
-            errors.append(str(error))
-        # The old producer is no longer allowed to update even before run ends.
-        with pytest.raises(RuntimeError, match="finished"):
-            handles[0].update(np.array([0.0]), np.array([1.0]))
-        env.plots.liveplot_1d("trend", "x", "y")
+            iteration = next(iterations)
+            try:
+                delivered.append(await iteration.run(acquire, Cfg()))
+            except ValueError as error:
+                errors.append(str(error))
+            # The old producer is no longer allowed to update even before run ends.
+            with pytest.raises(RuntimeError, match="finished"):
+                handles[0].update(np.array([0.0]), np.array([1.0]))
+            env.plots.liveplot_1d("trend", "x", "y")
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)
@@ -227,10 +244,15 @@ def test_finish_failure_propagates_without_masking_core_error(
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        iterations = env.iterations()
         try:
-            deliveries.append(await env.run(acquire, Cfg()))
-        except (ValueError, OSError) as error:
-            errors.append(error)
+            iteration = next(iterations)
+            try:
+                deliveries.append(await iteration.run(acquire, Cfg()))
+            except (ValueError, OSError) as error:
+                errors.append(error)
+        finally:
+            iterations.close()
 
     try:
         rig.start(script)

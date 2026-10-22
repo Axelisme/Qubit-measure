@@ -24,6 +24,8 @@ The shared RUN lease locks competing panes and Setup/SoC submissions.
 
 `WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
 It forwards Refresh, Start, Pause, Resume, Stop and Apply to the facet.
+The active_path label shows the root-to-first-fork chain. The live_paths label
+shows each live leaf full path on its own line; neither label picks a latest child.
 Busy Stop remains enabled under Remote control and reclaims locked Local before
 calling the same facet. Pause, Resume, Answer and tunables retain the holder gate.
 The services own source capture, lowering, accepted tunables and run lifetime.

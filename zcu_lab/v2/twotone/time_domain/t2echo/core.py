@@ -146,7 +146,7 @@ class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 

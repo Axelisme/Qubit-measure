@@ -127,7 +127,7 @@ class MistExp(PersistableExperiment[MistResult, MistCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.flux_pulse.set_param(
                 "gain", sweep2param("flux_gain", sched.cfg.sweep.flux_gain)

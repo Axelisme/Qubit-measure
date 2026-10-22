@@ -6,7 +6,6 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from zcu_tools.experiment.script_host import CancelScope
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
@@ -39,7 +38,7 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
         run = await tab.run()
         assert run.run_id == "native-1"
         fit = await tab.analyze("primary", result=Fit)
-        assert fit is not None
+        assert fit.result is not None
         assert fit.result.estimate == 3.5
         saved = tab.save()
         assert saved.run_id == run.run_id
@@ -82,9 +81,8 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("scope", ["script", "run"])
-def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
-    tmp_path: Path, scope: CancelScope
+def test_run_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
+    tmp_path: Path,
 ) -> None:
     gui = SyntheticGui(hold=True)
     threads: list[int] = []
@@ -96,10 +94,6 @@ def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
         tab = session.open_tab("synthetic")
         try:
             partial.append((await tab.run()).partial_result)
-            if scope == "script":
-                partial.append((await tab.run()).partial_result)
-                await tab.analyze("primary", result=Fit)
-                raise AssertionError("Cancelled analysis resumed author")
             fit = await tab.analyze("primary", result=Fit)
             assert fit is not None
             return Report(count=inputs.count)
@@ -110,15 +104,15 @@ def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
     try:
         execution = start(client, "synthetic")
         assert gui.started.wait(3)
-        execution.cancel(scope=scope)
+        execution.cancel(scope="run")
         execution.wait(3)
         snapshot = execution.snapshot()
         outcome = snapshot.outcome
         assert outcome is not None
-        assert outcome.status == ("cancelled" if scope == "script" else "completed")
-        assert outcome.report == (None if scope == "script" else Report(count=9))
-        assert partial == ([True, True] if scope == "script" else [True])
-        assert len(outcome.runs) == (2 if scope == "script" else 1)
+        assert outcome.status == "completed"
+        assert outcome.report == Report(count=9)
+        assert partial == [True]
+        assert len(outcome.runs) == 1
         assert all(run.partial_result for run in outcome.runs)
         assert len(threads) == 2 and threads[0] == threads[1] != get_ident()
         assert snapshot.error is None
@@ -335,7 +329,7 @@ def test_run_cancel_during_analysis_does_not_stop_analysis(tmp_path: Path) -> No
         tab = session.open_tab("synthetic")
         await tab.run()
         fit = await tab.analyze("primary", result=Fit)
-        assert fit is not None and fit.result.estimate == 3.5
+        assert fit.result is not None and fit.result.estimate == 3.5
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
@@ -404,7 +398,7 @@ def test_interactive_analysis_hands_off_then_continues_after_owner_completion(
         tab = session.open_tab("synthetic")
         await tab.run()
         fit = await tab.analyze("primary", result=Fit, interactive=True)
-        assert fit is not None and fit.result.estimate == 3.5
+        assert fit.result is not None and fit.result.estimate == 3.5
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
@@ -748,7 +742,8 @@ def test_mcp_interactive_wait_and_status_project_same_pending_owner(
         assert reply.data["status"] == "interactive"
         assert client.call("status", {"execution": key}) == {
             **reply.data,
-            "active_path": "script/iteration#1/operation#2",
+            "active_path": "recipe:synthetic/operation#2",
+            "live_paths": ["recipe:synthetic/operation#2"],
         }
         assert client.call("wait", {"execution": key, "timeout": 1}).data == reply.data
         finished.set()
@@ -756,7 +751,8 @@ def test_mcp_interactive_wait_and_status_project_same_pending_owner(
         assert client.call("status", {"execution": key}) == {
             "execution": key,
             "status": "completed",
-            "active_path": "script",
+            "active_path": "recipe:synthetic",
+            "live_paths": ["recipe:synthetic"],
             "report": {"count": 9},
             "runs": [
                 {

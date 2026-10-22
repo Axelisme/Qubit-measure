@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -24,7 +24,7 @@ class FlowEnv:
 def test_schedule_scan_targets_buffer_step_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         for value, step in sched.scan("value", [10.0, 20.0, 30.0]):
             assert step.value == value
             assert isinstance(step.index, int)
@@ -46,7 +46,7 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
 def test_schedule_repeat_targets_step_buffer_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         for index, step in sched.repeat("round", 3, interval=0.0):
             assert step.index == index
             assert step.value == index
@@ -67,7 +67,7 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
 def test_schedule_env_accepts_dataclass_context():
     env = FlowEnv(label="typed", scale=2.0)
 
-    with Schedule(_cfg(), env=env, stop=StopSignal()) as sched:
+    with Schedule(_cfg(), env=env, scope=Scope("run")) as sched:
         assert sched.env.label == "typed"
         for value, step in sched.scan("value", [3.0]):
             assert step.env is env
@@ -77,7 +77,7 @@ def test_schedule_env_accepts_dataclass_context():
 def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
     signals_buffer = SignalBuffer((2, 3), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         for repeat_index, repeat_step in sched.repeat("round", 2):
             for length_value, step in repeat_step.scan("length", [10.0, 20.0, 30.0]):
                 assert step.path == (repeat_index, step.index)
@@ -98,7 +98,7 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
 
 
 def test_schedule_repeat_validates_times_and_interval():
-    with Schedule(_cfg(), stop=StopSignal()) as sched:
+    with Schedule(_cfg(), scope=Scope("run")) as sched:
         try:
             list(sched.repeat("round", -1))
         except ValueError as exc:
@@ -130,7 +130,7 @@ def test_schedule_batch_runs_children_with_isolated_cfgs():
         return step.cfg.marker
 
     init_cfg = _cfg(marker="base")
-    with Schedule(init_cfg, stop=StopSignal()) as sched:
+    with Schedule(init_cfg, scope=Scope("run")) as sched:
         results = sched.batch({"a": child_a, "b": child_b})
         # tolerated: FlowCfg stores marker as an undeclared Pydantic extra.
         assert getattr(sched.cfg, "marker") == "base"  # noqa: B009
@@ -160,7 +160,7 @@ def test_schedule_batch_returns_partial_on_child_exception_without_retry():
         later_called = True
         return "later"
 
-    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
         results = sched.batch({"child": failing, "later": later})
         assert results == {}
         assert sched.outcome.status == "failed"
@@ -184,7 +184,7 @@ def test_schedule_batch_string_key_default_program_target_marks_failed_outcome()
             raw2signal_fn=identity_array,
         )
 
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
         results = sched.batch({"child": child})
         assert results == {}
         assert sched.outcome.status == "failed"
@@ -208,7 +208,7 @@ def test_schedule_batch_string_key_uses_child_local_default_buffer():
             raw2signal_fn=identity_array,
         )
 
-    with Schedule(_cfg(rounds=1), RecordingBuffer(root), stop=StopSignal()) as sched:
+    with Schedule(_cfg(rounds=1), RecordingBuffer(root), scope=Scope("run")) as sched:
         sched.batch({"child": child})
 
     assert np.allclose(root["child"]["signals"], [6.0])
@@ -229,7 +229,7 @@ def test_schedule_batch_does_not_retry_keyboard_interrupt():
         later_called = True
         return "later"
 
-    with Schedule(_cfg(), stop=StopSignal()) as sched:
+    with Schedule(_cfg(), scope=Scope("run")) as sched:
         results = sched.batch({"a": interrupted, "b": later})
         assert sched.is_stop() is True
         assert sched.outcome.status == "interrupted"

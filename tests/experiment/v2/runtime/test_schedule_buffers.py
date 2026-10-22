@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime.schedule import Schedule
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -29,7 +29,7 @@ def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
         buffer.set(np.array([1.0]))
         buffer.set(np.array([2.0]))
 
-    with Schedule(_cfg(), result_buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(), result_buffer, scope=Scope("run")) as sched:
         sched.batch({"task": child})
 
     np.testing.assert_allclose(root["task"]["signals"], np.array([2.0]))
@@ -44,7 +44,7 @@ def test_schedule_rejects_multiple_root_buffers_at_construction() -> None:
             _cfg(),
             RecordingBuffer(np.zeros((1,))),
             RecordingBuffer(np.zeros((1,))),
-            stop=StopSignal(),
+            scope=Scope("run"),
         )
 
 
@@ -53,7 +53,7 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
     second = RecordingBuffer(np.zeros((1,)))
 
     with (
-        Schedule(_cfg(), first, stop=StopSignal()) as sched,
+        Schedule(_cfg(), first, scope=Scope("run")) as sched,
         np.testing.assert_raises_regex(ValueError, "at most one root result buffer"),
     ):
         sched.register_buffer(second)
@@ -62,7 +62,7 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
 def test_schedule_allows_registering_one_root_buffer_later() -> None:
     buffer = RecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), stop=StopSignal()) as sched:
+    with Schedule(_cfg(), scope=Scope("run")) as sched:
         sched.register_buffer(buffer)
         assert sched.data is buffer.data
 
@@ -70,7 +70,7 @@ def test_schedule_allows_registering_one_root_buffer_later() -> None:
 def test_schedule_root_trigger_update_passes_none_step() -> None:
     buffer = RootUpdateRecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), buffer, stop=StopSignal()) as sched:
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
         sched.trigger_update(flush=True)
 
     assert buffer.calls == [(None, True)]
@@ -101,5 +101,5 @@ def test_schedule_child_buffer_validates_target_before_acquire() -> None:
         else:
             raise AssertionError("buffer should reject non-array targets")
 
-    with Schedule(_cfg(), RecordingBuffer(root), stop=StopSignal()) as sched:
+    with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
         sched.batch({"child": child})

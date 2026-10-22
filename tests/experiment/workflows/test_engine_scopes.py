@@ -36,7 +36,7 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
     rig.close()
 
 
-@pytest.mark.parametrize("scope", ["acquire", "schedule", "run", "iteration", "script"])
+@pytest.mark.parametrize("scope", ["acquire", "schedule", "run", "iteration"])
 def test_workflow_scope_ack_status_and_partial_facts(
     tmp_path: Path, scope: str
 ) -> None:
@@ -46,57 +46,78 @@ def test_workflow_scope_ack_status_and_partial_facts(
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         def acquire(ctx: CallContext) -> int:
-            schedule = ctx.stop_signal.child(label="schedule")
-            first = schedule.child(label="acquire")
+            schedule = ctx.scope.branch("schedule")
+            first = schedule.branch("acquire")
             try:
                 status = rig.engine.status()
                 assert status is not None
                 assert status.active_path == (
-                    "script/iteration#1/operation#1/schedule#1/acquire#1"
+                    "workflow:example/iteration#1/operation#1/schedule#1/acquire#1"
                 )
                 result = rig.engine.cancel("run", scope=scope, expected=None)
                 assert result.cancelled
                 assert result.reason == "scope cancellation requested"
                 assert result.active_path == status.active_path
-                acquisitions.append(first.is_set())
+                acquisitions.append(first.cancelled)
             finally:
                 first.release()
-            second = schedule.child(label="acquire")
-            acquisitions.append(second.is_set())
+            second = schedule.branch("acquire")
+            acquisitions.append(second.cancelled)
             second.release()
             schedule.release()
             return 11
 
-        first = completed(await env.call(acquire))
+        iterations = env.iterations()
+        iteration = next(iterations)
+        first = completed(await iteration.call(acquire))
         outcomes.append((first.partial_result, first.facts.stopped))
-        second = completed(await env.call(lambda ctx: ctx.stop_signal.is_set()))
+        second = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
         outcomes.append((second.partial_result, second.facts.stopped))
-        await env.commit(Point(value=11))
-        third = completed(await env.call(lambda ctx: ctx.stop_signal.is_set()))
+        iteration.commit(Point(value=11))
+        iteration = next(iterations)
+        third = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
         outcomes.append((third.partial_result, third.facts.stopped))
-        await env.commit(Point(value=12))
+        iteration.commit(Point(value=12))
+        iterations.close()
 
     rig.start(script)
     try:
         final = rig.engine.execute("run")
-        assert final.lifecycle == ("cancelled" if scope == "script" else "done"), (
+        assert final.lifecycle == ("cancelled" if scope == "workflow" else "done"), (
             final.reason
         )
         assert acquisitions == [True, scope != "acquire"]
         assert outcomes == [
-            (True, scope in {"run", "iteration", "script"}),
-            (scope in {"iteration", "script"}, scope in {"iteration", "script"}),
-            (scope == "script", scope == "script"),
+            (True, scope in {"run", "iteration", "workflow"}),
+            (scope in {"iteration", "workflow"}, scope in {"iteration", "workflow"}),
+            (scope == "workflow", scope == "workflow"),
         ]
         records = rig.engine.records("run")
         assert [
             [operation.outcome for operation in record.operations] for record in records
         ] == [
-            ["partial", "partial" if scope in {"iteration", "script"} else "completed"],
-            ["partial" if scope == "script" else "completed"],
+            [
+                "partial",
+                "partial" if scope in {"iteration", "workflow"} else "completed",
+            ],
+            ["partial" if scope == "workflow" else "completed"],
         ]
     finally:
         rig.close()
+
+
+def test_cancel_without_selector_stops_workflow_root(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.ask(Choose())
+
+    rig.start(script)
+    with running(rig) as future:
+        pending(rig)
+        result = rig.engine.cancel("run")
+        assert result.cancelled, result.reason
+        assert result.reason == "scope cancellation requested"
+        assert "stop_requested" in rig.kinds()
+        assert future.result(timeout=30).lifecycle == "cancelled"
 
 
 def test_script_cancel_persists_stop_off_author_loop(
@@ -130,7 +151,7 @@ def test_script_cancel_persists_stop_off_author_loop(
         pending(rig)
         with monkeypatch.context() as patch:
             patch.setattr(Path, "open", observe_open)
-            result = rig.engine.cancel("run", "script")
+            result = rig.engine.cancel("run", "workflow")
         # Stop was accepted and recorded before the author can finish.
         assert result.cancelled
         assert "stop_requested" in rig.kinds()
@@ -140,7 +161,7 @@ def test_script_cancel_persists_stop_off_author_loop(
 
 
 @pytest.mark.parametrize("terminal", ["done", "cancelled", "failed"])
-@pytest.mark.parametrize("scope", ["script", "script#1", "acquire"])
+@pytest.mark.parametrize("scope", ["workflow", "workflow#1", "acquire"])
 def test_terminal_cancel_returns_typed_refusal(
     rig: Rig, terminal: str, scope: str
 ) -> None:
@@ -162,10 +183,10 @@ def test_terminal_cancel_returns_typed_refusal(
     assert result.reason == "scope not active"
     assert result.active_path == final.active_path
     assert rig.events() == before
-    with pytest.raises(ValueError, match="Unknown stop scope label"):
-        rig.engine.cancel("run", "unknown")
+    with pytest.raises(ValueError, match="scope must be a nonempty selector"):
+        rig.engine.cancel("run", "")
     with pytest.raises(ValueError, match="expected must be a positive integer"):
-        rig.engine.cancel("run", "script", expected=True)
+        rig.engine.cancel("run", "workflow", expected=True)
 
 
 def test_script_cancel_accepts_after_host_drain_before_owner_finalization(
@@ -196,7 +217,7 @@ def test_script_cancel_accepts_after_host_drain_before_owner_finalization(
             # The submitted author returns unconditionally and execute closes its bar.
             assert closing.wait(30), "Host drains before progress cleanup"
             try:
-                result = rig.engine.cancel("run", "script")
+                result = rig.engine.cancel("run", "workflow")
             except RuntimeError as error:
                 pytest.fail(
                     f"Stop owner must accept before finalization, not {error!r}"
@@ -210,7 +231,7 @@ def test_script_cancel_accepts_after_host_drain_before_owner_finalization(
     assert rig.events()[-1]["lifecycle"] == "cancelled"
 
 
-@pytest.mark.parametrize("scope,expected", [("script", 1), ("script#1", None)])
+@pytest.mark.parametrize("scope,expected", [("workflow", 1), ("workflow#1", None)])
 def test_stale_script_sequence_does_not_record_stop_intent(
     rig: Rig, scope: str, expected: int | None
 ) -> None:
@@ -270,7 +291,7 @@ def test_script_cancel_io_failure_preserves_failed_and_original_cause(
         with monkeypatch.context() as patch:
             patch.setattr(Path, "open", fail_open)
             with pytest.raises(OSError, match="Stop .* storage failed") as caught:
-                rig.engine.cancel("run", "script")
+                rig.engine.cancel("run", "workflow")
         assert caught.value is cause
         final = future.result(timeout=30)
     assert final.lifecycle == "failed"

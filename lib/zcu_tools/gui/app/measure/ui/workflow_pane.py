@@ -130,6 +130,18 @@ class WorkflowPane(QWidget):
         self._status.setObjectName("workflow.status")
         make_label_selectable(self._status)
         column.addWidget(self._status)
+        self._scope_labels: dict[str, QLabel] = {}
+        for name, tooltip in (
+            ("active_path", "Active chain through the first fork"),
+            ("live_paths", "Live scope leaves, one full path per line"),
+        ):
+            label = QLabel(parent)
+            label.setObjectName(f"workflow.{name}")
+            label.setToolTip(tooltip)
+            label.setWordWrap(True)
+            make_label_selectable(label)
+            column.addWidget(label)
+            self._scope_labels[name] = label
 
     def _add_ask_page(self) -> None:
         page = QWidget(self._subtabs)
@@ -226,6 +238,14 @@ class WorkflowPane(QWidget):
         if status is not None:
             lifecycle = status.lifecycle
         self._status.setText(lifecycle)
+        self._scope_labels["active_path"].setText(
+            "" if status is None else status.active_path
+        )
+        self._scope_labels["live_paths"].setText(
+            "" if status is None else "\n".join(status.live_paths)
+        )
+        for label in self._scope_labels.values():
+            label.setVisible(status is not None)
         writable = self._writable
         lease_active = any(
             p.kind == "run" for p in self._ctrl.get_hardware_gate_presence()

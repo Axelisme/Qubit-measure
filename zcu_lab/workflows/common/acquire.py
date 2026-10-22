@@ -41,7 +41,7 @@ def run_qubit_freq(cfg: FreqCfg, *, context: RunContext) -> FreqResult:
         ),
     )
     # Keep initialization: the standard core frequency sequence omits it.
-    with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+    with Schedule(cfg, buffer, scope=context.scope) as sched:
         modules = sched.cfg.modules
         freq_sweep = sched.cfg.sweep.freq
         modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))

@@ -189,7 +189,7 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
 
         signals_buffer = spectrum_buffer(freqs, plots=context.plots)
 
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             modules = cfg.modules
 

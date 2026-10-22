@@ -97,7 +97,7 @@ def run_duration_scan(
 
     Leaf callers supply finite coordinates and equally many validated pairs.
     Schedule writes fixed host-round slots, including final overwrite; errors
-    stay in context.cancel_signal and the operation owner must raise_if_error().
+    stay in context.scope.stop and the operation owner must raise_if_error().
     Inputs are not mutated. No library, hardware discovery or pulse optimization.
     """
     if len(drives) != len(coordinates) or not np.all(np.isfinite(coordinates)):
@@ -119,7 +119,7 @@ def run_duration_scan(
         (len(drives), len(durations), config.rounds, cfg.reps, ntones),
         on_update=update_view,
     )
-    with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+    with Schedule(cfg, buffer, scope=context.scope) as sched:
         for index, step in sched.scan("coordinate", list(range(len(drives)))):
             for duration, duration_step in step.scan("duration", durations.tolist()):
                 drive = drives[index].model_copy(deep=True)

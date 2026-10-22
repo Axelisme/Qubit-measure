@@ -6,6 +6,7 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
+import zcu_tools.experiment as experiment
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.events.tab import (
@@ -28,6 +29,42 @@ from tests.gui.app.measure.services._analyze_support import (
     make_two_tab_state,
 )
 from tests.gui.session.ui._parameter_fakes import make_parameters
+
+
+@pytest.mark.parametrize("phase", ["work", "record"])
+@pytest.mark.parametrize("expected", [True, False])
+def test_only_expected_analysis_work_failure_is_classified(qapp, phase, expected):
+    state = make_state()
+    adapter = MagicMock()
+    state.get_tab("tab1").adapter = adapter
+    error = (
+        experiment.AnalysisFailed("insufficient fitting data")
+        if expected
+        else RuntimeError("broken analysis")
+    )
+    if phase == "work":
+        adapter.analyze.side_effect = error
+    else:
+        adapter.get_writeback_items.side_effect = error
+    handles = OperationHandles()
+    svc, bg = make_service(state, EventBus(), handles=handles)
+    token = svc.start_analyze(
+        "tab1", analyze_params_instance=object(), plots=make_plots()
+    )
+    assert bg.last_work is not None
+    assert bg.last_on_error is not None and bg.last_on_done is not None
+    if phase == "work":
+        with pytest.raises(type(error)) as failure:
+            bg.last_work()
+        bg.last_on_error(failure.value)
+    else:
+        bg.last_on_done(bg.last_work())
+    outcome = handles.poll(token)
+    assert outcome is not None and outcome.status == "failed"
+    assert outcome.error == str(error)
+    assert outcome.failure_kind == (
+        "analysis" if expected and phase == "work" else None
+    )
 
 
 @pytest.mark.parametrize("has_run_source", [True, False])

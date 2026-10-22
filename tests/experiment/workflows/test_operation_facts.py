@@ -69,18 +69,27 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
     async def script(
         env: w.WorkflowEnv[None], plan: Plan, tun: w.Live[Tunables]
     ) -> None:
-        await env.call(lambda ctx: 1)
-        first = await env.run(acquire, cfg)
-        assert isinstance(first, w.Completed)
-        assert first.value.cfg is not None
-        assert first.value.cfg.value == 8
-        assert first.value.result == 9
-        await env.wait_until(START + timedelta(seconds=4))
-        await env.commit(Record(value=1))
-        await env.setup_device("flux", FakeDeviceInfo(address="memory", value=7))
-        await env.run(acquire, cfg)
-        await env.commit(Record(value=2))
-        await env.run(acquire, cfg)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await iteration.call(lambda ctx: 1)
+            first = await iteration.run(acquire, cfg)
+            assert isinstance(first, w.Completed)
+            assert first.value.cfg is not None
+            assert first.value.cfg.value == 8
+            assert first.value.result == 9
+            await iteration.wait_until(START + timedelta(seconds=4))
+            iteration.commit(Record(value=1))
+            iteration = next(iterations)
+            await iteration.setup_device(
+                "flux", FakeDeviceInfo(address="memory", value=7)
+            )
+            await iteration.run(acquire, cfg)
+            iteration.commit(Record(value=2))
+            iteration = next(iterations)
+            await iteration.run(acquire, cfg)
+        finally:
+            iterations.close()
 
     try:
         engine.start(

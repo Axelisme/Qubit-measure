@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 from pydantic import BaseModel, JsonValue
 
 from zcu_tools.core.script_protocol import Answer
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.experiment.stop_signal import (
     CancelResult,
     StopSignal,
-    parse_cancel_scope,
 )
 from zcu_tools.experiment.workflows import (
     Actor,
@@ -425,7 +425,7 @@ class WorkflowController[F: FormModel, C]:
             return run.token
 
     def cancel(
-        self, run_id: str, scope: str = "script", *, expected: int | None = None
+        self, run_id: str, scope: str = "workflow", *, expected: int | None = None
     ) -> CancelResult:
         """Cancel a matching native scope without releasing the run's ownership.
 
@@ -438,7 +438,7 @@ class WorkflowController[F: FormModel, C]:
         if engine is None:
             return CancelResult(False, "scope not active", "")
         result = engine.cancel(run_id, scope, expected=expected)
-        if result.cancelled and label == "script":
+        if result.cancelled and label == "workflow":
             self.stop(run_id)
         return result
 

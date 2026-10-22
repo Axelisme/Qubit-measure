@@ -119,7 +119,7 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             length_param = sweep2param("length", sched.cfg.sweep.length)
             phase_param = sweep2param("phase", sched.cfg.sweep.phase)

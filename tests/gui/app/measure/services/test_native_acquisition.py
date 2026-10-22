@@ -341,7 +341,7 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
         if failure:
             raise RuntimeError("offline acquisition failed")
         record = original(req, cfg, context=context)
-        context.cancel_signal.set()
+        context.scope.stop.set()
         return record
 
     monkeypatch.setattr(adapter, "run", acquire)

@@ -169,7 +169,7 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
                 gains, calc_populations(data).reshape(gains.size, 9).T
             ),
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
             modules = sched.cfg.modules
             modules.rabi_pulse.set_param(

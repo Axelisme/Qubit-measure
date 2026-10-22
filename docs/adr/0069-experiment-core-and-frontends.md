@@ -35,9 +35,11 @@ analyze(source: RunRecord, options, *, plots) -> Analysis
 
 直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。最低共用 core 契約不能強制 analyze，不補空方法、不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
 
-RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與 cancel_signal，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
+RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與顯式 scope，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
 
-每次 run 建立新的 context、Plots 與 StopSignal，硬體 handles 可以重用，停止與錯誤狀態不能沿用。Executor、子實驗、Schedule 與 experiment setup helper 共用這個 StopSignal。只有 helper 呼叫低層 driver 的 stop_event 介面時才取出 Event，device 模組不反向依賴 experiment。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。既有 retry、partial result、raise_if_error 與 GUI operation 分類保持不變，不引入另一個 outcome 或 runner。Progress bar 暫留環境注入。
+每次 run 建立新的 context、Plots 與 Scope，硬體 handles 可以重用，停止與錯誤狀態不能沿用。GUI 與 Notebook 建 run 根，workflow 使用作者明填 parent 下的 operation child。Schedule(scope=..., name=None) 在入口建立 schedule child，每次 acquire 建 acquire child，離開時 release。Driver、clock 與 program builder 只接 scope.stop，不反向依賴 Scope。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。Retry、partial result 與 raise_if_error 仍由原 owner 負責，不引入另一個 runner。Progress bar 暫留環境注入。
+
+Scope 是 experiment 的共用控制與生命週期契約。作者看 scope.cancelled，底層只借 stop bit。Kind/name 路徑、fork status、selector 歧義與根 ScriptCancelled 的出口規則見 [[0075]]。2026-10-22 使用者要求「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」。Host 與 caller 都不得以 latest child 或 callable 反射補 parent/name。Workflow 根及所有 child 具有相同 conveniences；scope.dir 鏡射 scope 路徑，scope.commit 每個 scope 只能一次，commit 當下保存 record 快照。Reader 走目錄樹並按 commit 序號排序。
 
 Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒絕，不自行查找或建立資源。單次 buffer、tracker 與 cache 歸 run。NotebookExperiment 每次 run 從已綁定的 manager 取得一次 driver mapping，再建立 context；同次 run 不重查 registry。建構入口不讀裝置資訊，load／analyze／save 也不查裝置。同一 manager 更新 registry 後，下次 run 使用新綁定；重新賦值 caller 變數不重綁既有入口。GUI 的 RunService 與 workflow RunSession 仍各自在 operation 邊界建立 context。
 
@@ -53,7 +55,7 @@ GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選
 
 ### Notebook 中斷與部分結果
 
-Schedule 在自己的 with 保護區域接住 KeyboardInterrupt，將同次 StopSignal 記為 interrupted，保留 buffer 內已完成的資料，讓實驗在離開 scope 後組成 partial result。Notebook 共用包裝層將正常返回的 interrupted 視為 stopped，發布可保存的 RunRecord，而非丟棄這次資料。Failed signal 與逃出 core.run 的例外仍失敗，不取代上一筆成功 record。
+Schedule 在自己的 with 保護區域接住 KeyboardInterrupt，將該 scope 的 StopSignal 記為 interrupted，保留 buffer 內已完成的資料，讓實驗在離開 scope 後組成 partial result。Notebook 共用包裝層將正常返回的 interrupted 視為 stopped，發布可保存的 RunRecord，而非丟棄這次資料。Failed signal 與逃出 core.run 的例外仍失敗，不取代上一筆成功 record。
 
 這個責任放在 Schedule 與 Notebook 包裝層，不要求每個實驗各包一層 try/catch，也不加 stop widget、背景 thread 或事件 pump。保護區域外的中斷、重複中斷及收尾例外不保證產生 partial record，細節由 Schedule／Notebook 公開契約維護。
 

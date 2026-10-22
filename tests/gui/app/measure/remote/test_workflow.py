@@ -49,7 +49,7 @@ async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> Non
 
     env.plots.draw("trend", draw)
     await env.wait_until(env.started_at)
-    await env.commit(Native(value=tun.current.value))
+    env.commit(Native(value=tun.current.value))
 
 
 @pytest.fixture
@@ -202,16 +202,15 @@ def test_workflow_scoped_cancel_uses_native_host_and_preserves_stop(workflow_rpc
         label="native Ask for scoped control",
     )
     rejected = result(
-        rpc, "workflow.cancel", run_id="scoped", scope="script", expected=1
+        rpc, "workflow.cancel", run_id="scoped", scope="workflow", expected=1
     )
     assert rejected["cancelled"] is False
     assert rejected["reason"] == "sequence mismatch"
-    assert rejected["active_path"] == "script/iteration#1"
+    assert rejected["active_path"] == "workflow:asking"
     status = result(rpc, "workflow.status", run_id="scoped")
-    assert status["status"]["active_path"] == "script/iteration#1"
-    accepted = result(rpc, "workflow.cancel", run_id="scoped", scope="iteration#1")
+    assert status["status"]["active_path"] == "workflow:asking"
+    accepted = result(rpc, "workflow.cancel", run_id="scoped", scope="workflow:asking")
     assert accepted["cancelled"] is True
-    assert facet.pending_question("scoped") is not None
     result(rpc, "workflow.stop", run_id="scoped")
     qt_until(lambda: not facet.tabs()[0].busy, label="script Stop terminal delivery")
     assert (
@@ -384,7 +383,7 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
     operation = records[0]["operations"][0]
     assert (operation["kind"], operation["iteration"], operation["attempt"]) == (
         "wait_until",
-        1,
+        0,
         1,
     )
     assert operation["stopped"] is False

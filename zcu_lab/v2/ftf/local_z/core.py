@@ -138,7 +138,7 @@ class LocalZExp(PersistableExperiment[LocalZResult, LocalZCfg]):
             on_update=update_view,
         )
         m = cfg.modules
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for target_index, target_step in sched.scan("target", [0, 1]):
                 target = (m.x90_f1, m.x90_f2)[target_index]
                 for quadrature, projection_step in target_step.scan(

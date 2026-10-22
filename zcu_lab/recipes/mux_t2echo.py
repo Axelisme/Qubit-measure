@@ -85,6 +85,11 @@ class MuxT2EchoReport(FormModel):
         default=False, description="Whether accepted calibration items were applied."
     )
 
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
+    )
+
 
 class MuxT2EchoFitSummary(MuxSummaryTone):
     """Author view of owner summary fields; no missing values are invented."""
@@ -131,7 +136,8 @@ async def mux_t2echo(
     Analyze Primary, then ask before applying calibration items.
     Save raw data and completed artifacts in the Run finalizer.
     Return ordered estimates and the writeback decision after completion.
-    Invalid inputs and operation failures propagate;
+    Expected top-level analysis failures return a reason without writeback.
+    Invalid inputs and other operation failures propagate;
     completed edits and saves are not rolled back after a later failure.
     """
     # Capture this group's defaults without changing global aliases.
@@ -161,6 +167,12 @@ async def mux_t2echo(
     await tab.run()
     try:
         fit = await tab.analyze("primary", result=MuxT2EchoSummary)
+        if fit.result is None:
+            return MuxT2EchoReport(
+                tones=[],
+                writeback_applied=False,
+                analysis_failure=fit.reason,
+            )
 
         # Asking does not write; only an accepted answer applies calibration items.
         answer = await tab.ask_writeback()

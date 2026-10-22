@@ -119,7 +119,7 @@ class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
         )
 
         # Sweep only the final rotation; keep the simultaneous bath tones fixed.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
                 "pi2_phase", sweep2param("phase", sched.cfg.sweep.phase)

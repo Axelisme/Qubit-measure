@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-import zcu_tools.analysis.fitting.base.base as base_module
+import zcu_tools.experiment as experiment
 from zcu_tools.analysis.fitting.base import (
     asym_lorfunc,
     cosfunc,
@@ -185,27 +185,91 @@ def test_dual_gaussian_gmm_scales_are_sorted_sample_counts(
     assert params[0] + params[3] == pytest.approx(100.0)
 
 
-def test_fit_func_warns_when_falling_back_to_init_p(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    def fail_curve_fit(*args, **kwargs):
-        raise RuntimeError("no convergence")
-
-    # Valid inputs cannot reliably exhaust SciPy\'s unexposed iteration budget.
-    monkeypatch.setattr(base_module.sp.optimize, "curve_fit", fail_curve_fit)
-
-    with pytest.warns(RuntimeWarning, match="returning init_p fallback"):
-        p_opt, p_cov = fit_func(
-            np.array([0.0, 1.0]),
-            np.array([0.0, 1.0]),
-            lambda x, a, b: a * x + b,
-            init_p=[1.0, None],
+def test_fit_func_reports_real_optimizer_nonconvergence() -> None:
+    x = np.linspace(0.0, 3.0, 12)
+    with pytest.raises(Exception, match="Optimal parameters not found") as failure:
+        fit_func(
+            x,
+            np.exp(-x),
+            lambda x, amplitude, rate: amplitude * np.exp(-rate * x),
+            init_p=[8.0, 0.1],
+            maxfev=1,
         )
+    assert isinstance(failure.value, experiment.AnalysisFailed)
+    assert isinstance(failure.value.__cause__, RuntimeError)
 
-    assert isinstance(p_opt, list)
-    assert p_opt[0] == 1.0
-    assert np.isnan(p_opt[1])
-    assert np.all(np.isinf(p_cov))
+
+def test_fit_func_reports_insufficient_observations() -> None:
+    with pytest.raises(Exception, match="Insufficient observations") as failure:
+        fit_func(
+            np.array([0.0]),
+            np.array([1.0]),
+            lambda x, slope, offset: slope * x + offset,
+            init_p=[1.0, 0.0],
+        )
+    assert isinstance(failure.value, experiment.AnalysisFailed)
+
+
+def test_fit_func_preserves_model_programming_errors() -> None:
+    error = RuntimeError("broken model")
+
+    def model(x, amplitude):
+        raise error
+
+    with pytest.raises(RuntimeError) as failure:
+        fit_func(np.array([0.0, 1.0]), np.array([1.0, 2.0]), model, init_p=[1.0])
+    assert failure.value is error
+
+
+@pytest.mark.parametrize("method", ["lm", "trf", "dogbox"])
+def test_fit_func_preserves_jacobian_programming_errors(method: str) -> None:
+    error = RuntimeError("broken Jacobian")
+    x = np.linspace(0.0, 2.0, 5)
+
+    def jacobian(x, slope, intercept):
+        raise error
+
+    with pytest.raises(Exception, match="broken Jacobian") as failure:
+        fit_func(
+            x,
+            2.0 * x + 1.0,
+            lambda x, slope, intercept: slope * x + intercept,
+            init_p=[1.0, 0.0],
+            jac=jacobian,
+            method=method,
+        )
+    assert failure.value is error
+
+
+@pytest.mark.parametrize("jacobian_kind", ["analytic", "2-point", "3-point", "cs"])
+def test_fit_func_accepts_jacobians_and_forwards_optimizer_options(
+    jacobian_kind: str,
+) -> None:
+    x = np.linspace(0.0, 2.0, 5)
+    evaluated = []
+
+    def jacobian(x, slope, intercept):
+        evaluated.append((slope, intercept))
+        return np.column_stack((x, np.ones_like(x)))
+
+    params, covariance = fit_func(
+        x,
+        2.0 * x + 1.0,
+        lambda x, slope, intercept: slope * x + intercept,
+        init_p=[1.0, 0.0],
+        jac=jacobian if jacobian_kind == "analytic" else jacobian_kind,
+        method="trf",
+        sigma=np.full(x.size, 0.5),
+        absolute_sigma=True,
+        max_nfev=10,
+    )
+
+    np.testing.assert_allclose(params, [2.0, 1.0], atol=1e-7)
+    assert covariance.shape == (2, 2)
+    assert np.all(np.isfinite(covariance))
+    assert np.all(np.diag(covariance) > 0.0)
+    if jacobian_kind == "analytic":
+        assert evaluated
 
 
 def test_fit_func_all_none_fixedparams_matches_unfixed_fit():

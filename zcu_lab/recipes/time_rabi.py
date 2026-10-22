@@ -67,7 +67,7 @@ class TimeRabiInputs(FormModel):
 
 
 class TimeRabiReport(FormModel):
-    """Completed time rabi results; cancellation returns no report."""
+    """Time Rabi results and failure reason; cancellation returns no report."""
 
     pi_length_us: float | None = Field(
         description="Pi pulse duration in us; null means not estimable."
@@ -89,6 +89,11 @@ class TimeRabiReport(FormModel):
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -134,8 +139,9 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     # Select the captured sources before editing measurement fields.
@@ -188,6 +194,17 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=TimeRabiSummary)
+        if analysis.result is None:
+            return TimeRabiReport(
+                pi_length_us=None,
+                pi_length_err_us=None,
+                pi2_length_us=None,
+                pi2_length_err_us=None,
+                rabi_frequency_mhz=None,
+                rabi_frequency_err_mhz=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

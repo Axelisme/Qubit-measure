@@ -366,6 +366,26 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     assert driver.observe(object_name="empty_tabs_hint").visible
 
 
+def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tmp_path):
+    _, window = workflow_window
+    driver = ComponentDriver(window)
+    driver.click(object_name="workflow.toggle")
+    _open(driver, tmp_path / "scope-01-open.png")
+    driver.click("Start")
+    qt_until(lambda: _status(driver, "running"), label="workflow accepted")
+    _shot(driver, tmp_path, "scope-02-running")
+    active = driver.observe(object_name="workflow.active_path")
+    leaves = driver.observe(object_name="workflow.live_paths")
+    assert active.visible and active.text == "workflow:synthetic/operation#1"
+    assert leaves.visible and leaves.text == "workflow:synthetic/operation#1"
+    driver.click("Stop")
+    qt_until(lambda: _status(driver, "cancelled"), label="scope root cancelled")
+    _shot(driver, tmp_path, "scope-03-cancelled")
+    assert (
+        driver.observe(object_name="workflow.active_path").text == "workflow:synthetic"
+    )
+
+
 def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
@@ -678,9 +698,7 @@ def two_questions_window(workflow_window):
     async def questions(
         env: WorkflowEnv[None], plan: Native, tun: Live[Native]
     ) -> None:
-        first = await env.ask(Choose(point=1))
-        if first is None:
-            return
+        await env.ask(Choose(point=1))
         if not release.wait(30):
             raise TimeoutError("Second question was not released by the scenario")
         await env.ask(Choose(point=2))
@@ -823,7 +841,7 @@ def _check_workflow_cancelled(
     assert completed is not None and completed.reason == "completed"
     assert completed.outcome is not None
     assert completed.outcome.status == "cancelled"
-    assert [answer for answer, _thread in author.deliveries] == [None]
+    assert len(author.finally_threads) == 1
 
 
 def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
@@ -900,7 +918,15 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         release_cleanup.set()
         # Released cleanup returns; the original owner must deliver cancellation.
         qt_until(
-            lambda: _status(driver, "cancelled"), label="remote Stop terminal delivery"
+            lambda: (
+                _status(driver, "cancelled")
+                and not control.tabs()[0].busy
+                and any(
+                    widget.text == "Start" and widget.enabled
+                    for widget in driver.visible().widgets
+                )
+            ),
+            label="remote Stop terminal owner and view delivery",
         )
         _ask_shot(driver, tmp_path, "remote-09-local-stopped")
         _check_workflow_cancelled(driver, ctrl, run_id, token, author)

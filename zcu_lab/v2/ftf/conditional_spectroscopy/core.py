@@ -146,7 +146,7 @@ class SpectroscopyExp(PersistableExperiment[SpectroscopyResult, SpectroscopyCfg]
         Only external acquisition and the optional named DC device have effects.
         Never mutate caller cfg, read library/aliases, save or propose calibration.
         Schedule preserves completed rounds on cancel; missing slots remain NaN.
-        The operation owner must check context.cancel_signal.raise_if_error() so
+        The operation owner must check context.scope.stop.raise_if_error() so
         invalid acquired IQ or transport failures cannot masquerade as cancellation.
         """
         cfg = config.model_copy(deep=True, update={"rounds": 1})
@@ -170,14 +170,14 @@ class SpectroscopyExp(PersistableExperiment[SpectroscopyResult, SpectroscopyCfg]
             (len(dc_values), 4, len(frequencies), config.rounds, cfg.reps, ntones),
             on_update=update_view,
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
                 if cfg.dc_device is not None:
                     set_flux(
                         context.devices[cfg.dc_device],
                         dc_value,
                         unit=cfg.dc_unit,
-                        stop=context.cancel_signal,
+                        stop=context.scope.stop,
                     )
                 for branch, branch_step in dc_step.scan("branch", [0, 1, 2, 3]):
                     for frequency, step in branch_step.scan(

@@ -62,7 +62,7 @@ class T2RamseyInputs(FormModel):
 
 
 class T2RamseyReport(FormModel):
-    """Completed t2ramsey results; cancellation returns no report."""
+    """T2 Ramsey results and failure reason; cancellation returns no report."""
 
     t2ramsey_us: float | None = Field(
         description="Free-evolution coherence time in us; null means not estimable."
@@ -73,9 +73,16 @@ class T2RamseyReport(FormModel):
     detune_mhz: float | None = Field(
         description="Fitted fringe frequency in MHz; zero for decay-only fitting; null means not estimable."
     )
-    fit_fringe: bool = Field(description="Whether the fringe model was fitted.")
+    fit_fringe: bool = Field(
+        description="Whether the fringe model was fitted; false when analysis failed."
+    )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -110,8 +117,9 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     # Select the captured sources before editing measurement fields.
@@ -154,6 +162,15 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=T2RamseySummary)
+        if analysis.result is None:
+            return T2RamseyReport(
+                t2ramsey_us=None,
+                t2ramsey_err_us=None,
+                detune_mhz=None,
+                fit_fringe=False,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
