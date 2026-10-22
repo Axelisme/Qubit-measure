@@ -23,17 +23,18 @@ class DefaultSweepForm(FormModel):
     sweep: SweepInput = Field(default_factory=lambda: CenterSpan(center=3, span=2, n=5))
 
 
-def test_required_sweep_fresh_input_has_branch_but_no_endpoint_defaults():
+class ExplicitSweepForm(FormModel):
+    sweep: SweepInput = CenterSpan(center=3, span=2, n=5)
+
+
+def test_required_sweep_fresh_input_matches_generated_range_defaults():
     env = FormEnv()
     input = RequiredSweepForm.default_input(env)
-    assert input.data == {"sweep": {"kind": "linrange", "n": 3}}
+    assert input.data == {"sweep": {"kind": "linrange", "start": 0, "stop": 1, "n": 3}}
     state = FormState(input)
-    errors = state.result(env)
-    assert isinstance(errors, FormErrors)
-    assert errors.messages == {
-        ("sweep", "start"): "Field required",
-        ("sweep", "stop"): "Field required",
-    }
+    result = state.result(env)
+    assert not isinstance(result, FormErrors)
+    assert (result.sweep.start, result.sweep.stop, result.sweep.n) == (0, 1, 3)
     assert [field.name for field in state.describe(("sweep",), env).children] == [
         "start",
         "stop",
@@ -41,9 +42,10 @@ def test_required_sweep_fresh_input_has_branch_but_no_endpoint_defaults():
     ]
 
 
-def test_sweep_explicit_default_factory_keeps_authored_coordinates():
+@pytest.mark.parametrize("model", [DefaultSweepForm, ExplicitSweepForm])
+def test_sweep_explicit_defaults_keep_authored_coordinates(model):
     env = FormEnv()
-    input = DefaultSweepForm.default_input(env)
+    input = model.default_input(env)
     assert input.data == {"sweep": {"kind": "center", "center": 3, "span": 2, "n": 5}}
     result = FormState(input).result(env)
     assert not isinstance(result, FormErrors)
@@ -66,6 +68,16 @@ def test_sweep_authored_branch_retains_values(raw):
     assert not isinstance(result, FormErrors)
     assert (result.sweep.start, result.sweep.stop, result.sweep.n) == (2, 4, 3)
     assert state.input.data == {"sweep": raw}
+
+
+def test_sweep_authored_partial_range_keeps_existing_endpoint_defaults():
+    env = FormEnv()
+    state = FormState(
+        FormInput(RequiredSweepForm, {"sweep": {"kind": "linrange", "n": 3}})
+    )
+    result = state.result(env)
+    assert not isinstance(result, FormErrors)
+    assert (result.sweep.start, result.sweep.stop, result.sweep.n) == (0, 1, 3)
 
 
 def test_required_sweep_coordinates_can_roundtrip_through_commands():

@@ -310,12 +310,9 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     ):
         driver.click(object_name="form.fold.fluxes")
         _snapshot(driver, tmp_path, "required-04a-expanded-workflow")
-    for endpoint in ("start", "stop"):
-        assert driver.observe(object_name=f"form.input.fluxes.{endpoint}").text == ""
-        assert (
-            "Field required"
-            in driver.observe(object_name=f"form.row.fluxes.{endpoint}").tooltip
-        )
+    assert driver.observe(object_name="form.input.fluxes.start").text == "0.0"
+    assert driver.observe(object_name="form.input.fluxes.stop").text == "1.0"
+    assert driver.observe(object_name="form.input.fluxes.n").text == "3"
     for field, value in (("start", "0.1"), ("stop", "0.3"), ("n", "3")):
         driver.enter_text(object_name=f"form.input.fluxes.{field}", value=value)
         _snapshot(driver, tmp_path, f"required-05-workflow-{field}")
