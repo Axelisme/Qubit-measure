@@ -26,7 +26,7 @@ Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 f
 
 序列相同時直接用 core.run，例如 `await env.run(T1Exp().run, cfg)`。自訂序列寫與 core 相同的 `(cfg, *, context: RunContext) -> Result` 同步 helper，cfg 是位置參數，其參數名稱不限定。作者也可用 async helper 包裝 env.run。分析政策與接受門檻仍由 workflow 擁有，不經 adapter Form 或 adapter analysis。使用者於 2026-10-22 裁定：「我會預期這個run_t1的接口與core的run一致，這樣我就可以按需直接用core的run，有客製化需求也可以獨立寫一個一樣接口的helper，而env. run的工作就是提供run的接口，最好是能復用Run類」「補充，我說的run_t1是你剛剛指的_acquire_t1」，並以「OK」確認採用計畫。
 
-`env.run` 建立既有 RunContext，借用 soc、soccfg、plots 與 connected drivers，使用 operation child token，在 worker 呼叫前捕捉 device snapshot，再以 cfg deepcopy 呼叫 fn。它回 `Completed[RunRecord[Cfg, Result]] | Failed`。Completed.value 是 RunRecord，Completed.facts 是 OperationFacts，與框架寫入 journal／該 commit 的 record.json 信封使用同一事實結構。Schedule acquire error 回 Failed，build、conversion、callback 與其他例外 raise。非 ExpCfgModel scan 用 env.call，不另造 workflow Run、buffer 或 schedule 糖。
+`env.run` 每個 attempt 建立新的 RunContext，借用 soc、soccfg 與 connected drivers，使用獨立的 operation Plots 與 operation child token。框架在 worker 呼叫前捕捉 device snapshot，再以 cfg deepcopy 呼叫 fn。它回 `Completed[RunRecord[Cfg, Result]] | Failed`。Completed.value 是 RunRecord，Completed.facts 是 OperationFacts，與框架寫入 journal／該 commit 的 record.json 信封使用同一事實結構。Schedule acquire error 回 Failed，build、conversion、callback 與其他例外 raise。非 ExpCfgModel scan 用 env.call，不另造 workflow Run、buffer 或 schedule 糖。
 
 框架按每次實際 attempt 記 kind、iteration、attempt、時間、snapshot、outcome、reason 與 stopped，不新增 Acquired 或 operation run_id。Software provenance 按 workflow run 記錄，manifest 與既有 journal run_started.identity 副本保留，不逐 operation 複製。`env.identity` 提供 detached startup RunIdentity。Lab saver 顯式用 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata，不自行捕捉 AcquisitionEvidence。RunRecord.metadata 與 [[0080]] 的 datafile 改造仍待後續實作。使用者同日修正：「框架不應該知道run裡面是跑acquire或是其他」「workflow有需要run_id嗎？他沒有一次run的概念吧？只有commit的概念」。Measure headless owner 與 Qt pane 的分工仍依 [[0067]]。
 
@@ -102,7 +102,7 @@ Framework 只提供 `env.plots` live plot 工具，不知道趨勢圖、具體 c
 
 使用者在 2026-10-12 更正：「1workflow框架不可以有calibrated認知或是overnight判斷，沒不用畫趨勢圖」與「我說的趨勢圖是workflow不知道趨勢圖，他只是準備可以liveplot的工具，讓workflow決定要畫什麼以及什麼時候更新」。這不是取消趨勢圖，而是將 live 繪圖的資料與更新責任交給 workflow。
 
-Measure 的 headless workflow owner 管理 native Plots 生命週期，Qt pane 顯示圖像，remote 使用共用 PNG renderer。它們不讀 records 來重畫科學趨勢，也不持有繪圖 cursor。Workflow 層 env.plots 跨 Pause 與 iteration 保留。每次 env.run attempt 以同 host 的獨立 operation Plots 組新的 RunContext，返回、丟棄與失敗先 finish。新 attempt release 並整組替換舊 operation，terminal 保留最新一組。Pane 與 MCP 讀相同兩群投影，operation 名稱為 operation/<name>。Replacement Start 與 close 釋放兩組 presentation，不銷毀 caller 保留的 Figures。名稱與 lifetime 邊界見 [[0069]]。
+依 2026-10-22 operation 繪圖邊界裁定，measure 的 headless workflow owner 管理 native Plots 生命週期，Qt pane 顯示圖像，remote 使用共用 PNG renderer。它們不讀 records 來重畫科學趨勢，也不持有繪圖 cursor。Workflow 層 env.plots 跨 Pause 與 iteration 保留。每次 env.run attempt 以同 host 的獨立 operation Plots 組新的 RunContext，返回、丟棄與失敗先 finish。新 attempt release 並整組替換舊 operation，terminal 保留最新一組。Pane 與 MCP 讀相同兩群投影，operation 名稱為 operation/<name>。Replacement Start 與 close 釋放兩組 presentation，不銷毀 caller 保留的 Figures。名稱與 lifetime 邊界見 [[0069]]。
 
 框架不自動保存 overnight 趨勢圖，不從 run 目錄重開互動式圖，也不新增 env.save_figure、Engine 提交通知或 committed journal reader。Workflow 實作者若要保存 commit 目錄內的圖，在自己的 workflow 程式內處理。使用者可自行從 record.json 或 native 資料重畫。
 

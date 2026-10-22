@@ -113,9 +113,13 @@ lifecycle、Form path 與拒絕保留 code/message/reason/data；unexpected prod
 失敗仍是 controller_error。不因 timeout、斷線或傳輸失敗重試或回滾。
 
 Records 直接投影 Engine facts，since 是嚴格大於的 commit_seq cursor。
-Figures 使用同一 retained Plots，status 與 names 不 render。Figure 在 owner
-以 shared renderer 產生 PNG，MCP 驗證 PNG 並附 image content，不在文字中保留
-base64，也不建立 preview 檔。Terminal records/figures 保留到 replacement 或 close。
+依 2026-10-22 operation 繪圖邊界裁定，Figures 使用同一 WorkflowPlots 投影。
+Workflow 圖名維持 `<name>`，目前 operation 圖名為 `operation/<name>`。
+新 attempt release 並整組替換舊 operation，workflow 圖跨 iteration 保留。
+Terminal 保留最新 operation，replacement 或 close 釋放兩組 presentation。
+Status 與 names 不 render。Figure 在 owner 以 shared renderer 產生 PNG，MCP
+驗證 PNG 並附 image content，不在文字中保留 base64，也不建立 preview 檔。
+Terminal records 保留到 replacement 或 close。獨立集合的生命週期見 [[0062]]、[[0069]]。
 
 2026-10-22 依單一 async 腳本契約同步 workflow answer。Status 提供
 pending_question 的 request_id/question_type/question/answer_schema 固定 envelope，
