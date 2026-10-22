@@ -15,7 +15,10 @@ from zcu_tools.mcp.measure.execution_reply import (
     project_control,
     project_execution,
 )
-from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
+from zcu_tools.mcp.measure.script_recipe_execution import (
+    ScriptRecipeExecution,
+    ScriptRecipeSnapshot,
+)
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 from zcu_tools.mcp.measure.tools_workflow import cancel_workflow
 
@@ -37,8 +40,18 @@ def _execution_status(
     )
 
 
+def _recent_terminal_recipes(
+    snapshots: tuple[ScriptRecipeSnapshot, ...],
+) -> list[ScriptRecipeSnapshot]:
+    return sorted(
+        (item for item in snapshots if item.finished_at is not None),
+        key=lambda item: item.finished_at or "",
+        reverse=True,
+    )[:10]
+
+
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Read a local execution, or GUI orientation and nonterminal executions."""
+    """Read one execution, or GUI orientation with active and recent recipe IDs."""
     detail = arguments.get("detail", "summary")
     if detail not in ("summary", "full"):
         raise ValueError("detail must be summary or full")
@@ -74,6 +87,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
         )
         if not present
     ]
+    recipe_snapshots = ctx.session.recipes.snapshots()
     execution_snapshots = [
         asdict(item) for item in ctx.session.executions.snapshots()
     ] + [
@@ -81,7 +95,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             **asdict(item),
             "active_path": ctx.session.recipes.get(item.execution).active_path,
         }
-        for item in ctx.session.recipes.snapshots()
+        for item in recipe_snapshots
     ]
     return {
         "entry": entry,
@@ -104,6 +118,15 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
             }
             for item in execution_snapshots
             if item["phase"] != "terminal"
+        ],
+        "recent_terminal_executions": [
+            {
+                "execution": item.execution,
+                "recipe": item.recipe,
+                "status": item.status,
+                "finished_at": item.finished_at,
+            }
+            for item in _recent_terminal_recipes(recipe_snapshots)
         ],
         "terminal_count": sum(
             item["phase"] == "terminal" for item in execution_snapshots
@@ -264,7 +287,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -283,7 +306,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for one operation or execution; timeout does not cancel. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
+            "description": "Wait for one operation or execution; timeout does not cancel. Terminal recipes retain execution; failed recipes include failure.phase and the human failure.reason without a traceback. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

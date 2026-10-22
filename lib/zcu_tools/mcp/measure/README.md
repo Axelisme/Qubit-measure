@@ -201,7 +201,12 @@ answer 符合 pending question 的 Answer schema 與 evidence 規則。
 不消耗問題、不記 answered。
 問題沒有自動預設回答或 timeout。
 
-Terminal wait summary 只回 status／report／runs。Status 另帶 active_path。
+Terminal recipe summary 回 execution／status／report／runs。Status 另帶 active_path。
+Failed 另帶 `failure: {phase, reason}`，full detail 也保留同一 failure 與原 error。
+Phase 在失敗動作處記錄：作者／Run／開 tab 為 operation，分析結果讀取與解碼為 result_read，
+Save 為 image_save，preview 為 figure_read，writeback 候選讀取為 writeback_read。
+Reason 是 `str(exception)`，不附格式化 traceback。作者 catch 後的新錯誤不沿用舊 phase，
+成功的 finally Save 也不覆蓋原失敗的 phase。
 Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operation status、
 partial 與 Save 收據，不靠作者補取消報告。
 非終態另帶 execution 與明確的 pending question／analysis。
@@ -215,8 +220,13 @@ Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重�
 `ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
 
 即使 `ready.can_run=true` 且 `ready.missing=[]`，表單仍可能缺必填值。Run 前用 `rpc_call(method="tab.get_cfg", params={"tab_id": "<tab id>"})` 讀目標 tab 的 `input`、`values` 與 `errors`。依 errors 的 path 補值，再讀一次確認；不要用環境 readiness 取代表單 validity。`tab.describe_cfg` 用來逐層查欄位能力，不能取代 `get_cfg` 的完整 cfg 診斷。Run admission 仍會檢查目前表單與動態條件。
-全域 status 列 GUI operations 與本 MCP session 非終態 executions，
-終態只給數量及按 ID 查詢提示。
+
+全域 status 列 GUI operations 與本 MCP session 非終態 executions。
+`terminal_count` 計算所有本地終態 execution，包含 standalone analysis。
+`recent_terminal_executions` 只列最近 10 筆終態 recipe，依 finished_at 新至舊排列。
+每筆含 execution、recipe、status、finished_at；finished_at 是發布終態的 UTC ISO-8601 時間，
+包含 completed、failed、cancelled 與 needs_parameters。索引不含 standalone analysis。
+超出最近 10 筆的 recipe 仍可按 ID 查詢；全域回覆保留 query_hint。
 `wait(op)` 只觀察 GUI operation，`wait(execution)` 等本地後續處理與當次 image 交付。
 Execution ID 是 session-local，不是持久恢復機制；query 不建立新的寫回授權。
 
