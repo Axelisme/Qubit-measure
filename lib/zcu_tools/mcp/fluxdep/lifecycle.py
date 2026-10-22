@@ -13,10 +13,11 @@ from .projection import fit_summary, spectrum_summaries
 
 
 class ProjectIdentity(TypedDict):
-    """Only chip/qubit names; the GUI derives its output paths."""
+    """Existing entry under project_root/result and optional fluxonium component."""
 
-    chip_name: str
-    qub_name: str
+    project_root: str
+    entry: str
+    component: NotRequired[str]
 
 
 class ConnectionArguments(TypedDict):
@@ -109,10 +110,11 @@ def build_control_lifecycle_tools(
                 "project": {
                     "type": "object",
                     "properties": {
-                        "chip_name": {"type": "string"},
-                        "qub_name": {"type": "string"},
+                        "project_root": {"type": "string"},
+                        "entry": {"type": "string"},
+                        "component": {"type": "string"},
                     },
-                    "required": ["chip_name", "qub_name"],
+                    "required": ["project_root", "entry"],
                     "additionalProperties": False,
                 },
             }

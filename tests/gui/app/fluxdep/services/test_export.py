@@ -7,7 +7,6 @@ import os
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.io import load_spectrums
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.alignment import AlignmentService, PointsService
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
@@ -49,20 +48,4 @@ def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
     # spectrum signals round-trip (shape preserved)
     assert (
         result["spectrum"]["signals"].shape == st.spectrums[name].raw["signals"].shape
-    )
-
-
-def test_default_export_path_under_result_dir():
-    from zcu_tools.gui.app.fluxdep.services.export import default_export_path
-
-    assert default_export_path(os.path.join("result", "Q5_2D", "Q1")) == os.path.join(
-        "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
-    )
-
-
-def test_export_service_default_path_from_project():
-    # ProjectInfo derives result_dir from chip/qubit in __post_init__.
-    st = FluxDepState(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
-    assert ExportService(st).default_path() == os.path.join(
-        "result", "Q5_2D", "Q1", "data", "fluxdep", "spectrums.hdf5"
     )

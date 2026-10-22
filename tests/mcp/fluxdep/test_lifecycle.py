@@ -48,10 +48,11 @@ def test_connection_returns_project_stages_fit_and_control_in_one_reply(
     bridge = LifecycleBridge(config, transport)
     server = build_fluxdep_server(config, tmp_path, bridge=bridge)
     project = {
-        "chip_name": "chip",
-        "qub_name": "Q1",
-        "result_dir": "/result/chip/Q1",
-        "data_root": "/Database/chip/Q1",
+        "entry": "synthetic",
+        "component": "Q2",
+        "result_root": "/project/result",
+        "result_path": "/project/result/synthetic",
+        "predictors_path": "/project/result/synthetic/predictors",
     }
     control = {"holder": "agent", "locked": False, "online": True, "me": True}
     transport.replies.extend(
@@ -93,7 +94,11 @@ def test_connection_returns_project_stages_fit_and_control_in_one_reply(
         "mode": "owner",
     }
     if setup:
-        arguments["project"] = {"chip_name": "chip", "qub_name": "Q1"}
+        arguments["project"] = {
+            "project_root": "/project",
+            "entry": "synthetic",
+            "component": "Q2",
+        }
     try:
         result = server.tools["fluxdep_launch" if launch else "fluxdep_connect"][
             "handler"
@@ -119,7 +124,10 @@ def test_connection_returns_project_stages_fit_and_control_in_one_reply(
         assert [(r["method"], r["params"]) for r in transport.requests] == [
             ("wire.version", {}),
             ("control.connect", {"label": "agent", "mode": "owner"}),
-            ("project.setup", {"chip_name": "chip", "qub_name": "Q1"})
+            (
+                "project.setup",
+                {"project_root": "/project", "entry": "synthetic", "component": "Q2"},
+            )
             if setup
             else ("project.info", {}),
             ("spectrum.list", {}),

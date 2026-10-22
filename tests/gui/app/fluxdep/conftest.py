@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import h5py
@@ -12,6 +13,35 @@ from zcu_tools.analysis.fluxdep.twotone import TwoToneInputs
 from zcu_tools.datafile import save_labber_data
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
+from zcu_tools.resources.entry import ResultEntry, component_registry
+from zcu_tools.resources.entry.aliases import EntryAliases
+from zcu_tools.resources.entry.schema import ComponentSchema
+
+
+class SyntheticFluxonium(ComponentSchema):
+    """Minimal analysis target with declared energies and no flux fields."""
+
+    kind: str = "qubit/fluxonium"
+    EJ: float | None = None
+    EC: float | None = None
+    EL: float | None = None
+
+
+@pytest.fixture
+def fluxonium_entry(tmp_path: Path) -> Iterator[ResultEntry]:
+    component_registry.register("qubit/fluxonium", SyntheticFluxonium)
+    try:
+        resource = ResultEntry.create(
+            "synthetic",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        resource.setup.add_component("Q1", kind="qubit/fluxonium")
+        resource.setup.add_component("Q2", kind="qubit/fluxonium")
+        resource.save_aliases(EntryAliases(aliases={"qubit": "Q2"}))
+        yield resource
+    finally:
+        component_registry.unregister("qubit/fluxonium")
 
 
 @pytest.fixture(autouse=True, name="_drain_qt_events")

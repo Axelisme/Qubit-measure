@@ -85,11 +85,11 @@ _FIT_RULES: list[FriendlyRule] = [
     (lambda low: "no fit result" in low, "Nothing to export yet — run a search first."),
     (
         lambda low: "no aligned spectrum" in low,
-        "Align at least one spectrum before exporting params.json.",
+        "Align at least one spectrum before exporting a predictor.",
     ),
     (
-        lambda low: "no result_dir" in low,
-        "No output folder set — choose a save path for params.json.",
+        lambda low: "open an entry" in low,
+        "Open an entry and select a component via Project… before exporting.",
     ),
 ]
 
@@ -99,7 +99,7 @@ def friendly_fit_message(action: str, exc: Exception | str) -> str:
 
     ``action`` is "Search" or "Export". ``exc`` may be the exception (export,
     caught locally) or just its message string (search, which crosses a worker
-    signal as a string). A params.json write failure is delegated to
+    signal as a string). A predictor/setup write failure is delegated to
     ``friendly_io_message``; otherwise the domain rules above match.
     """
     raw = normalize_raw(exc)
