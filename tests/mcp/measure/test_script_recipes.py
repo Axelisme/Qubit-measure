@@ -5,164 +5,24 @@ from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.script_host import CancelScope
-from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
-from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 
-from ._support import MeasureClient, make_client
-
-
-class Inputs(FormModel):
-    count: int = Field(description="Synthetic repetition count")
-
-
-class Report(BaseModel):
-    count: int
-
-
-class Fit(BaseModel):
-    estimate: float
-
-
-class SyntheticGui:
-    """A wire collaborator; no production recipe or instrument dependencies."""
-
-    def __init__(self, *, hold: bool = False) -> None:
-        self.hold = hold
-        self.started = Event()
-        self.cancelled = Event()
-        self.runs = 0
-
-    def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.read_recipe_field":
-            return {
-                "description": {"path": [], "target": None, "children": []},
-                "input_present": True,
-                "input": {"count": 9},
-                "value": {"count": 9},
-                "errors": [],
-                "value_status": "available",
-                "selector": None,
-                "source": None,
-                "readonly": False,
-            }
-        if method == "tab.new":
-            return {"tab_id": "tab-1"}
-        if method in {
-            "tab.reset_cfg",
-            "tab.edit_recipe_fields",
-            "tab.select_recipe_module",
-        }:
-            return {"errors": [], "changed": True}
-        return self._operation(method, params)
-
-    def _operation(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.run_start":
-            self.runs += 1
-            self.started.set()
-            return {"operation_id": self.runs}
-        if method in {"tab.analyze", "tab.post_analyze"}:
-            return {"operation_id": 100}
-        if method == "operation.await":
-            if (
-                self.hold
-                and params["operation_id"] != 100
-                and not self.cancelled.is_set()
-            ):
-                return {"reason": "timeout"}
-            return {
-                "reason": "completed",
-                "status": "cancelled"
-                if self.cancelled.is_set() and params["operation_id"] != 100
-                else "finished",
-            }
-        if method in {"tab.cancel", "tab.analyze_cancel", "operation.cancel"}:
-            self.cancelled.set()
-            return {"status": "requested"}
-        return self._snapshots(method, params)
-
-    def _snapshots(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.snapshot":
-            return {
-                "tabs": [
-                    {
-                        "tab_id": "tab-1",
-                        "adapter_name": "synthetic",
-                        "interaction": {"is_running": False, "is_analyzing": False},
-                        "raw_data": {"run_id": f"native-{self.runs}", "saved": False},
-                        "result_state": {
-                            "available": True,
-                            "source_operation_id": self.runs,
-                        },
-                    }
-                ]
-            }
-        return self._artifacts(method, params)
-
-    def _artifacts(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.writeback_preview":
-            return {
-                "has_draft": True,
-                "items": [
-                    {
-                        "id": "param-0",
-                        "target_name": "Q1.freq",
-                        "actual_path": "Q1.freq",
-                        "proposed": 3.5,
-                        "current": 2.0,
-                        "stderr": None,
-                        "note": None,
-                        "kind": "parameter",
-                    }
-                ],
-                "destination_context": {"active_label": "preview-context"},
-            }
-        if method == "tab.writeback_write":
-            assert set(params) == {"tab_id", "subtab_id", "write"}
-            return {"written": [{"id": "param-0", "target": "Q1.freq"}]}
-        if method == "tab.get_analyze_result":
-            return {"summary": {"estimate": 3.5}, "invalid": []}
-        if method in {"tab.save_data", "tab.save_artifacts"}:
-            section = "measurement_data" if method == "tab.save_data" else "analysis"
-            return {
-                "run_id": f"native-{self.runs}",
-                "artifacts": {
-                    section: {
-                        "results": {
-                            "status": "Saved",
-                            "members": {
-                                "data": [
-                                    {
-                                        "format": "data_h5"
-                                        if method == "tab.save_data"
-                                        else "json",
-                                        "path": "/synthetic/output",
-                                        "status": "saved",
-                                        "error": None,
-                                    }
-                                ]
-                            },
-                        }
-                    }
-                },
-            }
-        raise AssertionError(f"Unexpected GUI request: {method}")
-
-
-def start(client: MeasureClient, name: str, count: int = 9) -> ScriptRecipeExecution:
-    """Start through the shared registry, asserting the declaration route."""
-    execution = client.context.session.recipes.start(
-        client.context, name, {"count": count}
-    )
-    assert isinstance(execution, ScriptRecipeExecution)
-    return execution
+from ._script_recipe_support import (
+    ConfirmQuestion,
+    Fit,
+    Inputs,
+    Report,
+    SyntheticGui,
+    start,
+)
+from ._support import make_client
 
 
 def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
@@ -239,7 +99,8 @@ def test_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
             partial.append((await tab.run()).partial_result)
             if scope == "script":
                 partial.append((await tab.run()).partial_result)
-                assert await tab.analyze("primary", result=Fit) is None
+                await tab.analyze("primary", result=Fit)
+                raise AssertionError("Cancelled analysis resumed author")
             else:
                 fit = await tab.analyze("primary", result=Fit)
                 assert fit is not None
@@ -351,8 +212,10 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         client.context.session.close()
 
 
+@pytest.mark.parametrize("summary", [{"estimate": 3.5}, None])
 def test_analysis_summary_missing_authored_field_fails_without_repair(
     tmp_path: Path,
+    summary: dict[str, float] | None,
 ) -> None:
     class RequiredFit(BaseModel):
         absent: float
@@ -364,7 +227,14 @@ def test_analysis_summary_missing_authored_field_fails_without_repair(
         await tab.analyze("primary", result=RequiredFit)
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    gui = SyntheticGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.get_analyze_result":
+            return {"summary": summary, "invalid": []}
+        return gui.respond(method, params)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)
@@ -372,7 +242,11 @@ def test_analysis_summary_missing_authored_field_fails_without_repair(
         assert snapshot.status == "failed"
         assert snapshot.error is not None
         assert snapshot.error.type == "ValidationError"
-        assert "absent" in snapshot.error.message
+        assert (
+            "absent" in snapshot.error.message
+            if summary is not None
+            else "RequiredFit" in snapshot.error.message
+        )
     finally:
         client.context.session.close()
 
@@ -615,14 +489,6 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         assert outcome is not None and outcome.status == "completed"
     finally:
         client.context.session.close()
-
-
-class ConfirmAnswer(Answer):
-    accepted: bool
-
-
-class ConfirmQuestion(Question[ConfirmAnswer]):
-    evidence: str
 
 
 @pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
