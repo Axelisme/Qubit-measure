@@ -19,7 +19,9 @@ from zcu_tools.resources.entry import (
     role_registry,
     snapshot,
 )
-from zcu_tools.resources.entry.schema import PointDocument
+from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+from .fakes import Driver, Sensor
 
 
 @contextmanager
@@ -43,8 +45,22 @@ def make_point(tmp_path: Path) -> PointView:
 
 
 @pytest.fixture
-def document(tmp_path: Path) -> PointDocument:
-    return snapshot(make_point(tmp_path))
+def document() -> PointDocument:
+    document = PointDocument(
+        format="zcu.parameter-container",
+        format_version="2.0",
+        general=PointGeneral(
+            entry_id="00000000-0000-0000-0000-000000000001",
+            created_at="2026-10-09T00:00:00Z",
+        ),
+    )
+    document.components = {
+        "R1": Sensor(kind="fake/sensor", rate=6500.0),
+        "R2": Sensor(kind="fake/sensor", rate=7100.0),
+        "Q1": Driver(kind="fake/drive/a", rate=4300.0, sense="R1"),
+        "Q2": Driver(kind="fake/drive/a", rate=5100.0, sense="R2"),
+    }
+    return document
 
 
 @pytest.mark.parametrize(

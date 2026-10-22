@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.rpc import GuiInvocationError
+from zcu_tools.mcp.fluxdep import align_tools
 
 from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
 
@@ -112,7 +113,11 @@ def test_move_line_resets_conjugate_when_omitted_or_false(
 
 
 @pytest.mark.parametrize("error", [None, "alignment failed"])
-def test_auto_align_polls_named_context_to_terminal(client: Client, error: str | None):
+def test_auto_align_polls_named_context_to_terminal(
+    client: Client, error: str | None, monkeypatch: pytest.MonkeyPatch
+):
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(align_tools, "sleep", sleep_calls.append)
     client.transport.replies.extend(
         GuiResponse(result=result)
         for result in [
@@ -123,6 +128,7 @@ def test_auto_align_polls_named_context_to_terminal(client: Client, error: str |
         ]
     )
     result = invoke(client, command="auto_align")
+    assert sleep_calls == [1.0, 1.0]
     assert result.data["lines"] == {"half": 1.0, "integer": 4.0, "period": 6.0}
     assert result.data["changes"] == {"integer": [3.0, 4.0]}
     assert result.data["auto_align"] == {
