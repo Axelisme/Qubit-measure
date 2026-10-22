@@ -287,6 +287,9 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     assert not thread.is_alive()
     assert statuses[-1].lifecycle == "done"
     assert answers == [Reply(approved=True), Reply(approved=False)]
+    with pytest.raises(w.QuestionMismatch) as terminal:
+        engine.answer("run", Reply(approved=True), request_id=second.request_id)
+    assert terminal.value.pending_request_id is None
 
 
 def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
