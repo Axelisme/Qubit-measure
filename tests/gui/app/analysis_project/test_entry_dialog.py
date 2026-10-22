@@ -1,8 +1,10 @@
 """Entry selection is explicit when its qubit alias cannot choose a target."""
 
+import sys
 from collections.abc import Iterator
 from contextlib import ExitStack
 from pathlib import Path
+from types import TracebackType
 
 import pytest
 from zcu_tools.gui.app.analysis_project.entry_dialog import EntryDialog
@@ -84,7 +86,18 @@ def test_invalid_qubit_alias_requires_explicit_component_choice(
 def test_malformed_alias_reports_validation_and_allows_explicit_choice(
     dialog: ComponentDriver,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    callback_errors: list[BaseException] = []
+
+    def record_callback_error(
+        _type: type[BaseException],
+        error: BaseException,
+        _traceback: TracebackType | None,
+    ) -> None:
+        callback_errors.append(error)
+
+    monkeypatch.setattr(sys, "excepthook", record_callback_error)
     (tmp_path / "result" / "synthetic" / "aliases.yaml").write_text(
         "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  qubit: null\n",
         encoding="utf-8",
@@ -96,6 +109,7 @@ def test_malformed_alias_reports_validation_and_allows_explicit_choice(
     visible_text = "\n".join(item.text for item in dialog.visible().widgets)
     assert "aliases.qubit" in visible_text
     assert "valid string" in visible_text
+    assert not callback_errors
     assert dialog.observe(object_name="analysisComponent").text == ""
     assert not dialog.observe(_caption(dialog, "OK")).enabled
     for index, component in enumerate(("Q1", "Q2"), start=3):
