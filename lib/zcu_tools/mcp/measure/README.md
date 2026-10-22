@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 

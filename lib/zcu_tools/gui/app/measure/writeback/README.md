@@ -1,6 +1,6 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
