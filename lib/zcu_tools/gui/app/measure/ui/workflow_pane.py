@@ -1,4 +1,20 @@
-"""Driving workflow pane: render owner drafts and forward commands to the facet."""
+"""Driving workflow pane: render owner drafts and forward commands to the facet.
+
+Visible run controls (availability still follows writable/lease/accepted gates):
+
+============================  ==============
+Run state                     Controls
+============================  ==============
+Idle or terminal              Refresh, Start
+Running                       Pause, Stop
+Paused without a question     Resume, Stop
+Waiting for an Ask answer     Stop
+Pending, pausing or stopping  Stop
+============================  ==============
+
+Answer stays in Ask. Ask appears for a pending question or the latest retained
+exchange, selects new questions, and keeps accepted/cancelled exchanges visible.
+"""
 
 from __future__ import annotations
 
@@ -144,7 +160,7 @@ class WorkflowPane(QWidget):
         make_label_selectable(self._answer_status)
         layout.addWidget(self._answer_status)
         layout.addStretch()
-        self._subtabs.addTab(page, "Ask")
+        page.hide()
 
     def _add_form_page(self, kind: FormKind, caption: str) -> None:
         page = QWidget(self._subtabs)
@@ -217,6 +233,15 @@ class WorkflowPane(QWidget):
         accepted = status is not None and snapshot.run_id is not None
         self._bind_form("plan", editable=idle)
         self._bind_form("tunables", editable=writable and (idle or snapshot.busy))
+        for caption in ("Refresh", "Start"):
+            self._buttons[caption].setVisible(not snapshot.busy)
+        self._buttons["Pause"].setVisible(snapshot.busy and lifecycle == "running")
+        self._buttons["Resume"].setVisible(
+            snapshot.busy
+            and lifecycle == "paused"
+            and snapshot.pending_question is None
+        )
+        self._buttons["Stop"].setVisible(snapshot.busy)
         self._buttons["Refresh"].setEnabled(idle)
         self._buttons["Start"].setEnabled(idle)
         self._buttons["Pause"].setEnabled(
@@ -243,13 +268,20 @@ class WorkflowPane(QWidget):
 
     def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:
         pending = snapshot.pending_question is not None
+        exchange = snapshot.last_exchange
+        ask_index = self._subtabs.indexOf(self._ask_page)
+        if pending or exchange is not None:
+            if ask_index < 0:
+                self._subtabs.addTab(self._ask_page, "Ask")
+        elif ask_index >= 0:
+            self._subtabs.removeTab(ask_index)
+            self._ask_page.hide()
         if pending and (
             not self._ask_pending or self._question_run_id != snapshot.run_id
         ):
             self._question_run_id = snapshot.run_id
             self._answer_input.setText("{}")
             self._subtabs.setCurrentWidget(self._ask_page)
-        exchange = snapshot.last_exchange
         if exchange is not None:
             question = exchange.question
             self._question_label.setText(

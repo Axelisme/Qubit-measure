@@ -777,7 +777,7 @@ class MainWindow(QMainWindow):
         button = QPushButton("Workflow tabs", self)
         button.setObjectName("workflow.toggle")
         button.clicked.connect(self._toggle_workflows)
-        self._toolbar.layout.insertWidget(1, button)
+        self._toolbar.layout.insertWidget(2, button)
         return button
 
     def _build_workflow_tabs(self) -> WorkflowTabs:
