@@ -184,12 +184,14 @@ def test_workflow_registration_rejects_operation_namespace(
     rig = Rig(tmp_path)
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        with pytest.raises(ValueError, match="operation/"):
-            if registration == "adopt":
+        if registration == "adopt":
+            with pytest.raises(ValueError, match="operation/"):
                 env.plots.adopt("operation/measurement", Figure())
-            elif registration == "subplots":
+        elif registration == "subplots":
+            with pytest.raises(ValueError, match="operation/"):
                 env.plots.subplots("operation/measurement")
-            else:
+        else:
+            with pytest.raises(ValueError, match="operation/"):
                 env.plots.liveplot_1d("operation/measurement", "x", "y")
         env.plots.subplots("trend")
 

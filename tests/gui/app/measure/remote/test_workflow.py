@@ -268,7 +268,7 @@ def test_mcp_operation_projection_replaces_the_whole_set(workflow_rpc, tmp_path)
                 },
             )
             qt_until(
-                lambda: (
+                lambda stage=stage: (
                     (question := control.pending_question("plots")) is None
                     or question["question"]["point"] != stage
                 ),
