@@ -56,9 +56,46 @@ L3 workflow 的核准方向是採用與 L2 相同的 agent 協作方式，由 wo
 
 ### Generator 協作與主動訊息
 
-Recipe 與 workflow 保留 generator，由 driver／Engine 掌握推進時機，不改成 async/await 或普通阻塞函式。工作步驟使用有型別的 `yield from` helper，與要求 agent 判斷的交接分開。Workflow effect 的精確回傳型別讓作者不必在每個呼叫點收窄共同的 send 聯集。使用者於 2026-10-06 裁定：「同意，一律 yield from」。
+2026-10-22 使用者裁定作者面改為 `async def`／`await`：「我之所以多次嘗試將generator換成async/await，是因為我認為作者應該比較熟悉原生python語法，而不是框架自己定義的語法，前者上手應該會比較容易」「改，但先別開task，我重啟後再開」。依據是原型 `prototype/async-protocol`（8dc5df757）：八個情境通過，host 不對作者 task 呼叫 cancel，取消仍靠 scope token，作者 coroutine 內無 CancelledError。條件：作者只 await `env.*`／`tab.*` 原語（README 加 AST 檢查腳本守），loop 只跑在 worker thread，既有 owner／operation／lease 邊界不動，Ask 帶 request id。本段以下的 generator 敘述由實作 task 改寫；在此之前以本段為準。
+
+（2026-10-22 前的條文）Recipe 與 workflow 保留 generator，由 driver／Engine 掌握推進時機，不改成 async/await 或普通阻塞函式。工作步驟使用有型別的 `yield from` helper，與要求 agent 判斷的交接分開。Workflow effect 的精確回傳型別讓作者不必在每個呼叫點收窄共同的 send 聯集。使用者於 2026-10-06 裁定：「同意，一律 yield from」。
 
 目前只支援兩類主動訊息。控制命令如 cancel、finish_early、Stop、Pause，在 Run 進行中透過協作式 StopSignal 生效；它們不是立即停止或 cleanup 完成的證明。帶資料的 workflow tunables 在步驟邊界生效，當前 step 保留自己的 capture。要重做當前步驟，先 Pause，再 Apply、Resume，見 [[0062]]。不支援帶資料且須在 Run 中即時反應，或腳本同時等待多個來源的訊息。使用者於 2026-10-16 裁定：「好，那先不支援c，做ab就好，順便把這討論紀錄到discussion」。這裡的 a、b、c 分別指上述控制命令、步驟邊界資料與 Run 中即時資料需求。
+
+#### 控制命令的傳遞路徑：bit 往下傳，意圖留在 host
+
+底層只有一個 bit：每個 operation 一個 `StopSignal`。所有控制命令到最後都是把它 set，差別只在 host 記的意圖。
+
+```
+agent ──MCP cancel／finish_early／stop／pause──▶ host（recipe host 或 workflow engine）
+                                                  │ 在 host 的鎖下：記意圖、找到正在跑的 operation
+                                                  ▼
+                                        operation.stop_signal.set()
+                     ┌──────────────────────────────┼──────────────────────────────┐
+                     ▼                              ▼                              ▼
+     Schedule（acquire 迴圈）             device.setup(cfg, stop_event=…)     clock.wait_until(target, signal)
+     每 round／每點查 is_set()，           ramp 每步查 event，提早返回           event.wait(remaining)
+     回 outcome stopped 帶已取得資料
+```
+
+- host 啟動 operation 時建 `StopSignal`，放進 host-owned 的 operation；腳本作者看不到 signal。
+- 命令到 host 時只記意圖：`cancel`、`finish_early`（只對進行中的 Run 合法，device setup 與 analyze 時拒絕）、workflow 的 `pause`／`stop`（lifecycle）。然後 set。
+- operation 返回後，host 依意圖決定交付：finish_early 交 completed 帶已取得資料；pause 不交付、留 pending、Resume 重啟同一個 operation；stop／cancel 由各 host 依自己的取消契約處理。
+- `device.setup` 與 Schedule 只認 `threading.Event`，不解讀為什麼停。兩個意圖同時存在時 cancel 優先。
+
+已知限制（使用者 2026-10-22 指出）：底層只有一種機制。agent 面目前只有 `cancel`（結束整個 recipe／workflow）與 workflow 的 `stop`；`finish_early`（提早結束當前 Run、腳本繼續）只在舊 recipe 路徑有，新 recipe 路徑待補，workflow 沒有。「只提早結束最底層的一次 acquire、Run 繼續下一個 acquire」與「跳過當前這一點、繼續下一點」在任何路徑都做不到：bit 是一個 operation 一個，host 的意圖沒有 scope。
+
+決定支援 scope（使用者 2026-10-22：「我認為可以安排支援，scope機制是需要的，因為我們無法阻止一個run裡有兩次acquire的合理使用場景，這種情況做不到early_stop第一個並開始第二個」；「不一定是5層，比如說workflow應該可以跳過operation直接使用Schedule與Program才對。還有都有scope了真的還需要不同kind嗎？finish_early與cancel應該只是不同scope的cancel吧？」）。設計：
+
+- Scope 是一棵動態的 token 樹，誰建子 token 誰就是一個 scope（host 的 execution／run、workflow 的 iteration、operation、Schedule、acquire……），不設固定層數；token 帶 label 與序號，各自登記 `active_child`，host 沿它走到當前路徑。
+- `set()` 寫自己並往下寫所有子孫，永遠不往上寫；子 token 建立時父已 set 則出生即 set；錯誤往上傳到根。底層只認自己的 Event。
+- 只有一個動詞 `cancel(scope)`：該 scope 盡快結束，父 scope 繼續。取消的交付一律 `Completed(result, partial_result=True)`（Schedule 停在任何階段都回傳帶已配置 buffer 的 Result；host 永遠啟動 operation，stop 已 set 時實驗立即回空 Result）。`Failed` 只給「這一步的目標結果沒拿到，但系統狀態仍可信、再量可能就成」的情況（acquire 暫時性錯誤 retry 用完、分析不收斂或找不到峰）；系統或程式碼壞了（cfg 不合法、callback bug、device setup 失敗、saver／plot／workflow 本體例外）一律 raise。作者只有一種檢查 `isinstance(x, Failed)`。沒有 `finish_early` 工具，沒有 `Cancelled` 型別；run 的生命週期狀態仍由 host 記錄給 GUI／MCP。使用者 2026-10-22：「應該不再需要finish_early這個分類與認知了吧？統一用scope不就好了？然後workflow還需要區分Failed與Cancelled嗎？」
+- host 永遠啟動 operation；token 已 set 時實驗在 build 前就返回帶空 buffer 的 Result，交 `Completed(partial_result=True)`；iteration 的 cancel 因此自然持續到 commit 換新 child 為止。
+- `Failed` 的唯一判準：這一步的目標結果沒拿到，但系統狀態仍可信、再量可能就成（acquire 暫時性錯誤 retry 用完、分析不收斂或找不到峰）；系統或程式碼壞了（cfg 不合法、callback bug、device setup 失敗、saver／plot／腳本本體例外）一律 raise。作者只有一種檢查 `isinstance(x, Failed)`，lab helper 的分析失敗也回框架的 `Failed`。使用者 2026-10-22：「Completed(complete=False)不直觀，應該叫Completed(partial_result=True)比較好理解。其餘沒有問題，標準也可以」。
+
+實作安排見 map 決定 0427，待 workflow 單 generator 與 recipe 便利層落地後進行。
+
+使用者於 2026-10-22 確認此圖值得入 ADR：「可以順手修。然後這圖值得進adr或README.md」。「順手修」指新 recipe 路徑的 `finish_early` 依此路徑實作，取代原先的未綁定 stub。
 
 Recipe 的取消結果交給作者，讓作者仍能保存 partial 或補充說明，再自行 return。使用者於 2026-10-04 說明理由：「但我認為可以考慮讓recipe定義者自己決定在cancel或finish要採取什麼行動，這樣顯式的處理也比較符合boring code」。2026-10-16 再以「2A」選擇 helper 回傳具名 status、作者收尾，而非以專用例外終止 recipe。Driver 將具名結果放在 operation.delivery，以 None 推進 generator；真正的失敗仍 throw 回 helper 呼叫處。欄位與可用 helper 由 [measure MCP owner](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution) 維護。
 

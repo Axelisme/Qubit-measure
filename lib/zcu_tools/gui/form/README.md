@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。前端中立的 Form 輸入、查詢、驗證與草稿契約。
 
@@ -14,7 +14,9 @@
 
 Description 的 options 只列 detached value、label 與 command name／label。`selected` 是依 JSON 型別與 value 葉匹配的第一項 index，missing／no-match 為 None，不猜第一項。`options=None` 表示沒有 selector，空 tuple 則保留顯式空清單。Describe 與 `run_command` 共用 active ancestry、最深 local 覆蓋與選項解析，不查 inactive branches 的 hooks。普通缺值 model 可按型別列欄位；停用 nullable model 與 no-match option 只回 target。Unknown、whole-leaf descendant 與 inactive descendant 的 path 立即 raise `FormPathError(ValueError)`，其 `path` 欄位保留完整請求路徑。作者宣告、nonfinite 與其他非 path 失敗維持原例外類別。Describe 不求值、不套 defaults、不寫 input/base，也不抓取來源；宣告 hooks 只讀呼叫端固定 env。有限的 leaf constraints 是顯示提示，驗證仍由 result／preview 負責。
 
-`static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
+`static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。沒有初值宣告的必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
+
+`InputDefault(factory)` 是欄位或型別別名上的 fresh-input metadata。只有欄位沒有 Pydantic default 或 default_factory 時，`static_defaults` 才呼叫 factory，並複製其有限 JSON 結果。外層 metadata 覆蓋內層別名的宣告。它不改 Pydantic 值預設、驗證或已存在的 authored input；具體型別的初值由宣告者提供，Core 不猜選項。
 
 FormModel 的實例承載普通值。類別上的 defaults、choices、options 與 converters 提供輸入契約。FormInput 保存未填、null、expression 與 complex tags。FormState 擁有 draft/base、batch write、branch switch、結果、差異與 recursive restore。宿主持有 Engine revision 與提交 policy。
 

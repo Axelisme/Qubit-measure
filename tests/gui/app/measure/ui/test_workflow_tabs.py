@@ -35,7 +35,13 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
-from tests.gui.app.measure._workflow_ask import AskAuthor, OtherAnswer
+from tests.gui.app.measure._workflow_ask import (
+    AskAuthor,
+    Choose,
+    Native,
+    OtherAnswer,
+    Values,
+)
 
 
 class Plan(FormModel):
@@ -295,6 +301,37 @@ def _status(driver: ComponentDriver, text: str) -> bool:
     )
 
 
+def _controls(driver: ComponentDriver) -> set[str]:
+    return {
+        widget.text
+        for widget in driver.visible().widgets
+        if widget.kind == "QPushButton"
+        and widget.text in {"Refresh", "Start", "Pause", "Resume", "Stop"}
+    }
+
+
+def test_toggle_follows_reload_with_compact_unclipped_captions(
+    workflow_window, tmp_path
+):
+    _, window = workflow_window
+    driver = ComponentDriver(window)
+    for step, caption in (
+        ("01-experiment-toolbar", "Workflow tabs"),
+        ("02-workflow-toolbar", "Experiment tabs"),
+    ):
+        _ask_shot(driver, tmp_path, step)
+        reload = driver.observe("Reload experiments")
+        toggle = driver.observe(object_name="workflow.toggle")
+        assert toggle.text == caption
+        assert reload.bounds is not None and toggle.bounds is not None
+        x, y, width, height = reload.bounds
+        tx, ty, _tw, th = toggle.bounds
+        assert tx > x + width, "Toggle must follow Reload, not New Tab"
+        assert (ty, th) == (y, height)
+        assert toggle.caption_fits and toggle.fully_visible
+        driver.click(object_name="workflow.toggle")
+
+
 def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
@@ -304,7 +341,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     _shot(driver, tmp_path, "02-empty-workflows")
     _open(driver, tmp_path / "03-first-tab.png")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
-    assert driver.tabs("Plan").captions == ("Plan", "Tunables", "Ask")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
     driver.enter_text(value="7", object_name="form.input.cycles")
     _shot(driver, tmp_path, "04-plan-edited")
     _open(driver, tmp_path / "05-second-tab.png")
@@ -316,9 +353,6 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     driver.select_tab("Tunables")
     _shot(driver, tmp_path, "07-tunables")
     assert _text(driver, "form.input.gain") == "0.25"
-    driver.select_tab("Ask")
-    _shot(driver, tmp_path, "08-ask")
-    assert driver.observe(object_name="workflow.ask").text == "No question pending."
     driver.click_tooltip("Close synthetic (1)")
     _shot(driver, tmp_path, "09-one-closed")
     assert driver.tabs("synthetic (2)").captions == ("synthetic (2)",)
@@ -383,6 +417,47 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     assert driver.observe("Start").enabled
 
 
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("idle", {"Refresh", "Start"}),
+        ("running", {"Pause", "Stop"}),
+        ("paused", {"Resume", "Stop"}),
+        ("waiting", {"Stop"}),
+    ],
+)
+def test_run_state_shows_only_meaningful_controls(
+    workflow_window, tmp_path, state, expected
+):
+    ctrl, window = workflow_window
+    if state == "waiting":
+        ctrl.workflow_control().configure((AskAuthor().attachment(),))
+    driver = ComponentDriver(window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("asking" if state == "waiting" else "synthetic",))
+    _ask_shot(driver, tmp_path, "controls-01-idle")
+    if state != "idle":
+        driver.click("Start")
+        # The finite start segment delivers Ask or the synthetic public wait.
+        qt_until(
+            lambda: _status(driver, "paused" if state == "waiting" else "running"),
+            label="control scenario start delivery",
+        )
+    if state == "paused":
+        driver.click("Pause")
+        # Pause ends the waiting segment and delivers its native paused status.
+        qt_until(lambda: _status(driver, "paused"), label="control scenario paused")
+    _ask_shot(driver, tmp_path, f"controls-02-{state}")
+    try:
+        assert _controls(driver) == expected
+    finally:
+        if state != "idle":
+            driver.click("Stop")
+            # Stop releases the synthetic wait or retained Ask before teardown.
+            qt_until(lambda: _status(driver, "stopped"), label="control scenario stop")
+            _ask_shot(driver, tmp_path, "controls-03-stopped")
+
+
 @pytest.fixture
 def asking_window(workflow_window):
     ctrl, window = workflow_window
@@ -396,6 +471,27 @@ def _ask_shot(driver: ComponentDriver, root: Path, step: str) -> None:
     (root / f"{step}.txt").write_text(repr(driver.visible()), encoding="utf-8")
 
 
+@pytest.mark.parametrize("reopen", [False, True])
+def test_idle_ask_content_is_hidden_after_open_and_reopen(
+    asking_window, tmp_path, reopen
+):
+    driver = ComponentDriver(asking_window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("asking",))
+    _ask_shot(driver, tmp_path, "idle-ask-01-opened")
+    if reopen:
+        driver.click_tooltip("Close asking (1)")
+        _ask_shot(driver, tmp_path, "idle-ask-02-closed")
+        driver.select_menu("New Tab ▾", ("asking",))
+        _ask_shot(driver, tmp_path, "idle-ask-03-reopened")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
+    assert not any(
+        widget.object_name
+        in {"workflow.ask", "workflow.answer", "workflow.answer_status"}
+        for widget in driver.visible().widgets
+    ), "Removing the Ask tab must also hide its page contents"
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 def test_ask_answer_or_cancel_preserves_visible_exchange(
     asking_window, tmp_path, cancel
@@ -406,6 +502,7 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     _ask_shot(driver, tmp_path, "ask-02-workflows")
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "ask-03-opened")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
     driver.click("Start")
     # Start submitted a finite segment that must yield its synthetic question.
     qt_until(lambda: _status(driver, "paused"), label="Ask pause")
@@ -414,7 +511,7 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     assert "authored evidence" in driver.observe(object_name="workflow.ask").text
     assert "value" in driver.observe(object_name="workflow.answer_schema").text
     assert "等待回答" in driver.observe(object_name="workflow.badge").text
-    assert not driver.observe("Resume").enabled
+    assert _controls(driver) == {"Stop"}
     driver.select_tab("Tunables")
     _ask_shot(driver, tmp_path, "ask-05-tunables")
     driver.click(object_name="workflow.toggle")
@@ -442,6 +539,172 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
         assert driver.observe(object_name="workflow.answer").text == '{"value": 17}'
         assert "已回答" in driver.observe(object_name="workflow.answer_status").text
     assert driver.observe("Start").enabled
+    assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
+    driver.click_tooltip("Close asking (1)")
+    _ask_shot(driver, tmp_path, "ask-10-closed")
+    driver.select_menu("New Tab ▾", ("asking",))
+    _ask_shot(driver, tmp_path, "ask-11-reopened")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
+
+
+@pytest.fixture
+def restart_questions_window(workflow_window):
+    ctrl, window = workflow_window
+
+    @workflow(
+        "restart-questions", plan=Native, tunables=Native, init=lambda env, plan: 0
+    )
+    def questions(
+        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
+    ) -> Step[int, int]:
+        # An explicit zero plan makes the entire run question-free.
+        if plan.value:
+            yield from env.ask(Choose(point=plan.value))
+        return Done()
+
+    ctrl.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                step=questions,
+                plan_model=Values,
+                knobs_model=Values,
+                plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
+                knobs_to_cfg=lambda form: Native(value=form.value),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    return window
+
+
+def test_new_run_hides_retained_exchange_until_new_question(
+    restart_questions_window, tmp_path
+):
+    driver = ComponentDriver(restart_questions_window)
+    driver.click(object_name="workflow.toggle")
+    _ask_shot(driver, tmp_path, "restart-01-workflows")
+    driver.select_menu("New Tab ▾", ("restart-questions",))
+    _ask_shot(driver, tmp_path, "restart-02-opened")
+    driver.enter_text(object_name="form.input.value", value="1")
+    _ask_shot(driver, tmp_path, "restart-03-first-plan")
+    driver.click("Start")
+    # The finite author segment yields the explicitly requested first question.
+    qt_until(lambda: _status(driver, "paused"), label="first run question")
+    _ask_shot(driver, tmp_path, "restart-04-first-question")
+    assert driver.tabs("Ask").current == "Ask"
+    assert '"point": 1' in driver.observe(object_name="workflow.ask").text
+    driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
+    _ask_shot(driver, tmp_path, "restart-05-answer-edited")
+    driver.click("Answer")
+    # Answer resumes the finite author continuation, which returns Done.
+    qt_until(lambda: _status(driver, "done"), label="first run answered")
+    _ask_shot(driver, tmp_path, "restart-06-retained-exchange")
+    assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
+    assert '"point": 1' in driver.observe(object_name="workflow.ask").text
+    assert driver.observe(object_name="workflow.answer").text == '{"value": 17}'
+    assert driver.observe(object_name="workflow.answer_status").text == "已回答"
+    assert not driver.observe("Answer").enabled
+    driver.select_tab("Plan")
+    _ask_shot(driver, tmp_path, "restart-07-plan")
+    driver.enter_text(object_name="form.input.value", value="0")
+    _ask_shot(driver, tmp_path, "restart-08-question-free-plan")
+    driver.click("Start")
+    # The zero plan returns Done without any Ask, so this is a stable no-question state.
+    qt_until(lambda: _status(driver, "done"), label="question-free run completed")
+    _ask_shot(driver, tmp_path, "restart-09-question-free-run")
+    assert driver.tabs("Plan").captions == ("Plan", "Tunables")
+    assert not any(
+        widget.object_name
+        in {"workflow.ask", "workflow.answer", "workflow.answer_status"}
+        for widget in driver.visible().widgets
+    ), "A new run must clear the old exchange and hide its Ask page"
+    driver.enter_text(object_name="form.input.value", value="2")
+    _ask_shot(driver, tmp_path, "restart-10-new-question-plan")
+    driver.click("Start")
+    # The nonzero plan yields a fresh question on this same tab's third run.
+    qt_until(lambda: _status(driver, "paused"), label="new run question")
+    _ask_shot(driver, tmp_path, "restart-11-new-question")
+    assert driver.tabs("restart-questions (1)").captions == ("restart-questions (1)",)
+    assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
+    assert driver.tabs("Ask").current == "Ask"
+    assert '"point": 2' in driver.observe(object_name="workflow.ask").text
+    assert driver.observe(object_name="workflow.answer").text == "{}"
+    assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
+    assert driver.observe("Answer").enabled
+    driver.click("Stop")
+    # Stop drains the retained question before the shared window fixture closes.
+    qt_until(lambda: _status(driver, "stopped"), label="new run question cancelled")
+    _ask_shot(driver, tmp_path, "restart-12-stopped")
+
+
+@pytest.fixture
+def two_questions_window(workflow_window):
+    ctrl, window = workflow_window
+    release = Event()
+
+    @workflow("two-questions", plan=Native, tunables=Native, init=lambda env, plan: 0)
+    def questions(
+        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
+    ) -> Step[int, int]:
+        first = yield from env.ask(Choose(point=1))
+        if first is None:
+            return Done()
+        if not release.wait(30):
+            raise TimeoutError("Second question was not released by the scenario")
+        yield from env.ask(Choose(point=2))
+        return Done()
+
+    ctrl.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                step=questions,
+                plan_model=Values,
+                knobs_model=Values,
+                plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
+                knobs_to_cfg=lambda form: Native(value=form.value),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    try:
+        yield window, release
+    finally:
+        release.set()
+
+
+def test_next_question_replaces_answer_and_selects_ask(two_questions_window, tmp_path):
+    window, release = two_questions_window
+    driver = ComponentDriver(window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("two-questions",))
+    _ask_shot(driver, tmp_path, "next-01-opened")
+    driver.click("Start")
+    # The finite start segment must yield the first synthetic question.
+    qt_until(lambda: _status(driver, "paused"), label="first question")
+    _ask_shot(driver, tmp_path, "next-02-first-question")
+    assert '"point": 1' in driver.observe(object_name="workflow.ask").text
+    driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
+    _ask_shot(driver, tmp_path, "next-03-first-answer")
+    driver.click("Answer")
+    driver.select_tab("Plan")
+    _ask_shot(driver, tmp_path, "next-04-plan-during-continuation")
+    release.set()
+    # Releasing the author lets the finite continuation yield its second question.
+    qt_until(
+        lambda: any(
+            w.object_name == "workflow.ask" and '"point": 2' in w.text
+            for w in driver.visible().widgets
+        ),
+        label="second question visible",
+    )
+    _ask_shot(driver, tmp_path, "next-05-second-question")
+    assert driver.tabs("Ask").current == "Ask"
+    assert driver.observe(object_name="workflow.answer").text == "{}"
+    assert driver.observe(object_name="workflow.answer_status").text == "等待回答"
+    driver.click("Stop")
+    # Stop drains the second retained Ask before fixture shutdown.
+    qt_until(lambda: _status(driver, "stopped"), label="second question cancelled")
+    _ask_shot(driver, tmp_path, "next-06-cancelled")
 
 
 @pytest.mark.parametrize("reject_first", [False, True])
@@ -501,8 +764,7 @@ def _check_remote_workflow_controls(driver: ComponentDriver, root: Path) -> None
         "Remote · workflow-agent · online"
     )
     assert driver.observe("Stop").enabled, "Remote must not disable local workflow Stop"
-    assert not driver.observe("Pause").enabled
-    assert not driver.observe("Resume").enabled
+    assert _controls(driver) == {"Stop"}
     assert not driver.observe("Answer").enabled
     driver.select_tab("Tunables")
     _ask_shot(driver, root, "remote-06-remote-tunables")
@@ -586,7 +848,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         qt_until(cleanup_entered.is_set, label="remote Stop author cancellation")
         _ask_shot(driver, tmp_path, "remote-08-local-cancelling")
         assert driver.observe(object_name="control_indicator").text == "Local locked"
-        assert not driver.observe("Start").enabled
+        assert _controls(driver) == {"Stop"}
         assert observed == [
             ("rpc:workflow-agent", False, "paused", token),
             ("gui", True, "paused", token),

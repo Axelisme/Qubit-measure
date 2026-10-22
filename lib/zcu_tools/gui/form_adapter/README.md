@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。Core cfg 與持久 Spec 的表單推導與轉換契約。
 
@@ -132,7 +132,7 @@ SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自�
 
 Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／span。接近整數的商使用 1e-9 相對容差，不普遍 round。步長大於非零區間、零步長或方向錯誤保留錯誤草稿，不能縮成單點。Input 保存原稿，preview／result 提供有效端點，不回寫 input。不提供 explicit-list 分支。
 
-座標 command 不要求 n／step 有效，採樣 command 要求座標與目前採樣值有效。換算只在成功時將參與 expression 改為 direct 值；未參與 input 保留原文與缺席狀態。缺值、expression 或換算失敗不安裝部分結果。手寫表單可使用同一個 `SweepInput`；annotation 只接受部分分支時，description 與 execution 不提供其他分支的 command。
+座標 command 不要求 n／step 有效，採樣 command 要求座標與目前採樣值有效。換算只在成功時將參與 expression 改為 direct 值；未參與 input 保留原文與缺席狀態。缺值、expression 或換算失敗不安裝部分結果。手寫表單可使用同一個 `SweepInput`。沒有宣告 default 或 default_factory 的欄位，透過 `InputDefault` metadata 建立 `static_defaults(LinRange)`，初值是 start 0、stop 1、n 3，與未指定起始樹的生成 sweep 相同。明確初值、default_factory 與 authored input 保持原值。Annotation 只接受部分分支時，description 與 execution 不提供其他分支的 command。
 
 ## Log／List 整數清單
 

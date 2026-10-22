@@ -31,6 +31,7 @@ class WorkflowFigures(QWidget):
         self._selector.setObjectName("workflow.figures.selector")
         self._selector.currentTextChanged.connect(self._select)
         layout.addWidget(self._selector)
+        self._selector.hide()
         self._stack = QStackedWidget(self)
         placeholder = QLabel("Workflow plots", self._stack)
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -58,6 +59,7 @@ class WorkflowFigures(QWidget):
             self._figures[name] = figure
             self._selector.addItem(name)
         self._selector.setCurrentText(name)
+        self._selector.setVisible(bool(self._figures))
 
     def refresh(self, figure: Figure, *, final: bool = False) -> None:
         """Refresh a presented figure through the shared coalescing Qt host."""
@@ -70,6 +72,7 @@ class WorkflowFigures(QWidget):
             if retained is figure:
                 del self._figures[name]
                 self._selector.removeItem(self._selector.findText(name))
+        self._selector.setVisible(bool(self._figures))
 
     def dispose(self) -> None:
         """Cancel this adapter's remaining redraws after the producer has stopped."""
