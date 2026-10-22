@@ -14,7 +14,11 @@ def test_formatting_runs_before_anything_measures_the_code() -> None:
     names = [step.name for step in gate.steps("abc", ("lib/a.py",), fix=True)]
 
     assert names == [
-        "ruff import sort", "ruff format", "import contracts", "script awaits", "ratchet"
+        "ruff import sort",
+        "ruff format",
+        "import contracts",
+        "script awaits",
+        "ratchet",
     ]
 
 

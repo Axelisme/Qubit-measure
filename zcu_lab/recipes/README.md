@@ -2,6 +2,8 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
+**Last updated:** 2026-10-22
+
 Recipe 是操作 GUI tab 的 async 函式。Adapter 擁有 cfg、表單、量測與分析。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
 
@@ -12,6 +14,7 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 `Inputs` 繼承 `FormModel`，逐欄寫單位、預設與 null 政策。
 框架從這個 model 產生 MCP JSON schema，不另維護手寫 schema。
+Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。
 `Report` 是作者選擇的具名結果 model，包含此流程要回報的量與 writeback 決定。
 各模組的 `DEFINITION` 指向裝飾後的宣告。組合根把 `RECIPES` 注入框架。
 Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須重啟 MCP server。
@@ -33,9 +36,15 @@ Form 路徑是 tuple，字串指欄位，整數指完整清單中的原始位置
 準備模組用字串 `"off"` 明確停用，null 會被 inputs model 拒絕。
 缺少必要校準時，在 Run 前 raise `RecipeNeedsParameters`。
 
-作者只 await `tab.*` 或 `session.ask(...)`。
-不要 await 外部 coroutine，也不要用 `asyncio`、`create_task`、`gather`、
-`wait_for` 或 `TaskGroup` 安排工作。Runtime 擁有 worker loop 與 operation 生命週期。
+所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
+或靜態解析到 `zcu_lab` async 定義的 helper。Recipe 通常用 `tab.*` 與 `session.ask(...)`。
+Workflow 可寫 `await helper(env, cfg)`，helper 可再呼叫 helper，自己的本文也同樣受檢查。
+不要 await 外部 coroutine。`asyncio.*`、`create_task`、`gather`、
+`wait_for`、`TaskGroup` 的直接呼叫即使不 await 也拒絕，包含 async with TaskGroup()。
+其他 async with／async for 不另禁。Runtime 擁有 worker loop 與 operation 生命週期。
+Quality gate 的 `tools/check_script_awaits.py` 全掃 async def，不識別 decorator，
+不分 entry／helper，也不做可達性分析。
+這不是 type checker；assignment aliases、動態分派與包裝可繞過規則，作者仍須遵守契約。
 通常的順序如下：
 
 ```python
@@ -69,6 +78,7 @@ Analyze 不會自動保存。各 recipe 在已有 Run 結果後進入 `try/final
 Run scope cancel 只停止正在取得資料的 Run，回傳 partial，recipe 繼續後續分析。
 Script scope cancel 使沒有結果的 Analyze 或 Ask raise `RecipeCancelled`。
 這是普通例外，不是 `asyncio.CancelledError`。
+Analyze、ask_writeback、session.ask 都回非 Optional 結果，不用 None 表示取消。
 作者不 catch、不寫取消分支，已有 Run 的 `finally` 仍保存可用結果。
 Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 其他錯誤仍保留失敗診斷，不重跑 acquisition。

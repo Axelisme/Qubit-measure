@@ -24,9 +24,7 @@ import pytest
     ],
 )
 def test_only_framework_or_defined_lab_calls_can_be_awaited(target: str) -> None:
-    sources = {
-        "zcu_lab/recipes/demo.py": f"async def run(env):\n    await {target}\n"
-    }
+    sources = {"zcu_lab/recipes/demo.py": f"async def run(env):\n    await {target}\n"}
 
     violations = check_script_awaits.check_sources(sources)
 
@@ -48,10 +46,7 @@ def test_only_framework_or_defined_lab_calls_can_be_awaited(target: str) -> None
     ],
 )
 def test_scheduling_calls_are_rejected_even_without_await(statement: str) -> None:
-    source = (
-        "import asyncio as aio\n"
-        f"async def unused(tab):\n    {statement}\n"
-    )
+    source = f"import asyncio as aio\nasync def unused(tab):\n    {statement}\n"
 
     violations = check_script_awaits.check_sources({"zcu_lab/helpers.py": source})
 
@@ -66,7 +61,9 @@ def test_other_async_contexts_and_iterators_are_not_blanket_banned() -> None:
         "            await env.run(item)\n"
     )
 
-    assert check_script_awaits.check_sources({"zcu_lab/workflows/demo.py": source}) == ()
+    assert (
+        check_script_awaits.check_sources({"zcu_lab/workflows/demo.py": source}) == ()
+    )
 
 
 def test_uniform_rule_allows_framework_calls_and_real_lab_helpers() -> None:
@@ -122,7 +119,9 @@ def test_import_spelling_is_not_evidence_of_a_lab_definition(import_line: str) -
     name = "lab_helper" if " as " in import_line else "helper"
     source = f"{import_line}\nasync def run(env):\n    await {name}(env)\n"
 
-    violations = check_script_awaits.check_sources({"zcu_lab/workflows/demo.py": source})
+    violations = check_script_awaits.check_sources(
+        {"zcu_lab/workflows/demo.py": source}
+    )
 
     assert len(violations) == 1
 

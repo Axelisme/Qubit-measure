@@ -38,7 +38,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、recipe 推導 owner、generator 工作步驟／提問與取消結果。Workflow 的 agent yield 仍是方向，不等同現行 Engine effects。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、recipe 推導 owner、共用 async host、await guardrail、scope 控制與取消後 finally／runs。Workflow 的 agent yield 仍是方向，不等同現行 Engine effects。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation 與 answer worker 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
