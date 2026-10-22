@@ -9,7 +9,7 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from zcu_tools.datafile import CfgSnapshot
+from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.resources.entry import ComponentRegistry, component_registry
 
 from migrations.experiment_declaration import MigrationExperiment

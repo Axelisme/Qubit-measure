@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -41,13 +42,15 @@ def _make_state(tab_id: str = "t1") -> State:
 
 def _seed_analyze(state: State, tab_id: str = "t1") -> None:
     """Put the tab in a state where a primary analyze result exists."""
-    state.update_tab_result(tab_id, object())
+    state.update_tab_result(tab_id, RunRecord(None, object()))
     state.update_tab_analyze(tab_id, MagicMock(), _plots_for(Figure()))
 
 
 def test_update_post_analyze_requires_primary_result() -> None:
     state = _make_state()
-    state.update_tab_result("t1", object())  # run result but no analyze result
+    state.update_tab_result(
+        "t1", RunRecord(None, object())
+    )  # run result but no analyze result
     with pytest.raises(RuntimeError, match="no primary analyze result"):
         state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
 
@@ -86,7 +89,7 @@ def test_post_analyze_invalidated_on_rerun() -> None:
     state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
 
     # A new run result clears both the primary analyze and the post-analysis.
-    state.update_tab_result("t1", object())
+    state.update_tab_result("t1", RunRecord(None, object()))
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
     assert tab.post_analysis.plots is None

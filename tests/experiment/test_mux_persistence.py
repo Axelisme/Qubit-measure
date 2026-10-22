@@ -1,10 +1,15 @@
 """New mux cfg and helper results use the existing numeric-axis storage seam."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
-from zcu_tools.datafile import decode_labber_comment, load_labber_data, write_labber
+from zcu_tools.datafile import (
+    decode_labber_comment,
+    encode_labber_comment,
+    load_labber_data,
+    write_labber,
+)
 from zcu_tools.experiment import (
     AxesSpec,
     ExpCfgModel,
@@ -57,9 +62,9 @@ def test_mux_numeric_tones_and_order_survive_native_and_labber(tmp_path: Path):
         cfg_type=MuxCfg,
         tag="test/mux",
     )
-    record = RunRecord(cfg=cfg, result=result)
+    record = RunRecord(cfg=cfg, result=result, metadata=native_metadata(spec.tag))
     path = tmp_path / "native.h5"
-    save_run(record, path, spec=spec, metadata=native_metadata(spec.tag))
+    save_run(record, path, spec=spec)
     restored, _ = load_run(path, spec=spec)
     assert restored.cfg is not None
     np.testing.assert_array_equal(
@@ -74,7 +79,13 @@ def test_mux_numeric_tones_and_order_survive_native_and_labber(tmp_path: Path):
 
     prepared = prepare_run_data(record, spec=spec, comment="")
     labber = tmp_path / "labber.h5"
-    write_labber(labber, prepared.payload, cfg=prepared.cfg)
+    write_labber(
+        labber,
+        prepared.container,
+        metadata=replace(
+            prepared.labber_metadata, comment=encode_labber_comment(prepared.cfg.values)
+        ),
+    )
     loaded = load_labber_data(str(labber))
     np.testing.assert_array_equal(loaded.z, result.signals)
     np.testing.assert_array_equal(loaded.axes[0][2], [0, 1])

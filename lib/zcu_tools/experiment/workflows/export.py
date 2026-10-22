@@ -1,44 +1,32 @@
 """Experiment-independent saved workflow trace loading and output writers."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from zcu_tools.datafile import (
-    CfgSnapshot,
-    ExperimentPayload,
     LabberPayload,
-    RunMetadata,
-    RunSnapshot,
-    load_run_data,
-    save_run_data,
-    validate_experiment_payload,
+    encode_labber_comment,
+    load,
+    save,
     write_labber,
 )
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.native_persistence import native_schemas
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
+from zcu_tools.experiment.native_persistence import (
+    PreparedRunData,
+    metadata_from_container,
+    restore_run,
+)
 from zcu_tools.resources.entry import ArtifactKey, SaveLayout
 
 from .artifacts import RunManifest
 from .saved_run import native_path
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PreparedFluxdepExport:
-    """Detached writer input supplied by a workflow-specific science producer.
-
-    payload contains grouped SI/discrete variables with their own grids and
-    metadata. cfg contains the complete fixed plan snapshot and schema identity.
-    This carrier does not prepare, fit or infer scientific channels.
-    """
-
-    payload: ExperimentPayload
-    cfg: CfgSnapshot
 
 
 @dataclass(frozen=True)
@@ -57,26 +45,42 @@ class FluxdepExportOutput:
 
 
 def load_trace[R, C: ExpCfgModel](
-    directory: Path, filename: str, spec: AxesSpec[R, C] | GroupedAxesSpec[R, C]
+    directory: Path,
+    filename: str,
+    spec: AxesSpec[R, C] | GroupedAxesSpec[R, C],
+    *,
+    allow_stopped: bool = False,
 ) -> LabberPayload:
     """Load exactly the point-named native trace using its experiment declaration.
 
-    The filename must stay within the invocation directory. Wrong experiment,
-    incomplete acquisition, schema mismatch or empty data raises ValueError
-    naming that file. Public native reader I/O errors propagate. Return the
-    experiment's single LabberPayload in disk units; never re-fit or interpolate.
+    The filename must stay within the invocation directory. Only complete
+    acquisitions are accepted by default; allow_stopped=True also accepts stopped
+    raw traces, preserving NaN values. Partial and unknown acquisitions always
+    reject. Wrong experiment, disallowed completion, schema mismatch or empty
+    data raises ValueError naming that file. Public native reader I/O errors
+    propagate. Return the experiment's single LabberPayload in disk units with
+    inner-first axes; never re-fit, interpolate or transpose the values.
     """
     path = native_path(directory, filename)
     try:
-        stored = load_run_data(path)
-        if (
-            stored.metadata.experiment != spec.tag
-            or stored.metadata.completion != "complete"
-        ):
-            raise ValueError(f"Expected complete {spec.tag} acquisition")
-        schemas = native_schemas(spec)
-        validate_experiment_payload(stored.payload, schema=schemas)
-        trace = stored.payload.variables[schemas[0].variable]
+        stored = load(path)
+        metadata = metadata_from_container(stored)
+        completion_allowed = metadata.completion == "complete" or (
+            allow_stopped and metadata.completion == "stopped"
+        )
+        if metadata.experiment != spec.tag or not completion_allowed:
+            expected = "complete or stopped" if allow_stopped else "complete"
+            raise ValueError(f"Expected {expected} {spec.tag} acquisition")
+        restore_run(stored, spec=spec)
+        name = (
+            str(spec.required_variables[0])
+            if isinstance(spec, GroupedAxesSpec)
+            else str(spec.data_variable)
+        )
+        variable = stored.vars[name]
+        trace = LabberPayload(
+            (name, variable.unit, variable.values), list(reversed(variable.axes))
+        )
         if not len(trace.z):
             raise ValueError("Empty acquisition")
     except ValueError as error:
@@ -86,7 +90,7 @@ def load_trace[R, C: ExpCfgModel](
 
 def write_outputs(
     manifest: RunManifest,
-    prepared: PreparedFluxdepExport,
+    prepared: PreparedRunData,
     snapshot: RunSnapshot,
     *,
     merged: bool,
@@ -116,13 +120,10 @@ def write_outputs(
                 else "stopped"
                 if manifest.lifecycle == "cancelled"
                 else "partial",
-                labber_path=None,
                 snapshot=snapshot,
                 provenance=manifest.identity.provenance,
             )
-            save_run_data(
-                path, prepared.payload, metadata, cfg=prepared.cfg, replace=True
-            )
+            save(path, prepared.to_container(metadata), replace=True)
             outputs.append(FluxdepExportOutput("data_h5", path, "saved", None))
         except Exception as error:
             logger.exception("Native merged output failed: %s", path)
@@ -152,7 +153,15 @@ def write_outputs(
             path = output.path
             path.parent.mkdir(parents=True, exist_ok=True)
             write_labber(
-                path, prepared.payload, cfg=prepared.cfg, grouped_layout="independent"
+                path,
+                prepared.container,
+                metadata=replace(
+                    prepared.labber_metadata,
+                    comment=encode_labber_comment(
+                        prepared.cfg.values, prepared.labber_metadata.comment
+                    ),
+                ),
+                grouped_layout=prepared.labber_layout,
             )
             outputs.append(FluxdepExportOutput("labber", path, "saved", None))
         except Exception as error:

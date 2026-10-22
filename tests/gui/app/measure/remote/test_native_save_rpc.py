@@ -9,8 +9,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import SoftwareProvenance, load_run_data
+from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
@@ -28,6 +30,7 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_record
 
 from ._helpers import call, open_client, reset_inbox
 
@@ -49,9 +52,8 @@ def native_save_rpc(
         tab = session.state.get_tab("tab")
         session.state.update_tab_result(
             "tab",
-            tab.run.result,
+            replace(require_record(tab.run), metadata=session.metadata),
             source_operation_id=101,
-            metadata=session.metadata,
             parameters=tab.run.parameters,
         )
         declare_panes(session)
@@ -160,7 +162,7 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.save()
         path = session.native_data_path
-        stored = load_run_data(path)
+        stored = load(path)
         events = session.entry.ledger.events()
         tab = session.state.get_tab("tab")
         if unbound_capture:
@@ -192,7 +194,7 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
             "analysis parameters unavailable" if analysis_failure else None
         )
         tab = session.state.get_tab("tab")
-        assert tab.run.metadata == stored.metadata
+        assert require_record(tab.run).metadata == metadata_from_container(stored)
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.post_analysis.result is None
@@ -240,7 +242,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
     with native_save_rpc(tmp_path, qapp) as (session, sock):
         session.save()
         path = session.native_data_path
-        history = load_run_data(path).metadata
+        history = metadata_from_container(load(path))
         events = session.entry.ledger.events()
         session.state.set_active_tab("tab")
         if unbound_capture:
@@ -265,7 +267,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         new_id = outcome["tab_id"]
         assert new_id != "tab"
         tab = session.state.get_tab(new_id)
-        record = tab.run.result
+        record = require_record(tab.run)
         assert isinstance(record, RunRecord)
         assert isinstance(record.cfg, SavingCfg)
         assert isinstance(record.result, SavingResult)
@@ -274,7 +276,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert outcome["analysis_error"] == (
             "analysis parameters unavailable" if analysis_failure else None
         )
-        assert tab.run.metadata == history
+        assert require_record(tab.run).metadata == history
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None
@@ -353,7 +355,7 @@ def test_native_run_rpc_records_mcp_acquired_without_save(
         assert len(events) == 1 and events[0].kind == "acquired"
         assert events[0].origin == "mcp"
         assert isinstance(events[0].payload, AcquiredPayload)
-        metadata = session.state.get_tab("tab").run.metadata
+        metadata = require_record(session.state.get_tab("tab").run).metadata
         assert metadata is not None and events[0].payload.run_id == metadata.run_id
         assert not (session.entry.database_path / "runs").exists()
 
@@ -463,9 +465,8 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
         if selection in ("data", "all"):
             session.state.update_tab_result(
                 "tab",
-                tab.run.result,
+                replace(require_record(tab.run), metadata=session.metadata),
                 source_operation_id=102,
-                metadata=session.metadata,
                 parameters=tab.run.parameters,
             )
             params = {

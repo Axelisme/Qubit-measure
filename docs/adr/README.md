@@ -38,14 +38,14 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 captured writeback revision 提交、recipe 推導 owner、共用 async host、await guardrail、scope 控制與取消後 finally／runs。Workflow 的 operation 原語與 live tunables 生效點見 0062。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 captured writeback revision 提交、recipe 推導 owner、共用 async host、await guardrail、scope 控制、workflow Stop owner acknowledgement 與取消後 finally／runs。Workflow 的 operation 原語與 live tunables 生效點見 0062。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation 與 async host answer 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
-- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：容器只認 `vars`（陣列加具名軸）、`docs`（有限 JSON）、`groups`（opaque 子樹保真）三種表示法與根屬性 format／format_version／producer／kind；cfg、metadata、analysis 只是生產者命名慣例；API save／load／inspect／open_append；datafile 不 import 其他 package（contract 待填）；舊 2.x 由同一 reader 讀、寫回不降版；已採用、待實作。
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Native 2.1 保存未知歷史時間與完成狀態，保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；Entry 只由 Result 構成，Database 首次 Save 才建立且改名不搬舊輸出。Run／圖片與雙側 workflow 路徑保留名稱前綴及完整 run_id，Labber 檔名維持實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
+- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：容器只認 `vars`（陣列加具名軸）、`docs`（有限 JSON）、`groups`（opaque 子樹保真）三種表示法與根屬性 format／format_version／producer／kind；cfg、metadata、analysis 只是生產者命名慣例；API save／load／inspect／open_append；datafile 不 import 其他 package，由 datafile-standalone contract 檢查；save/load 共用含 ContainerAttrs 的 Container，舊 2.x 由同一 reader 讀、寫回 3.0。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界。Container 3.0 的實驗文件由 experiment 擁有，保留未知歷史時間與完成狀態；datafile 長期讀取 legacy native 2.x，同 major 保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；Entry 只由 Result 構成，Database 首次 Save 才建立且改名不搬舊輸出。Run／圖片與雙側 workflow 路徑保留名稱前綴及完整 run_id，Labber 檔名維持實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 
 ## Experiment runtime／Workflows
 

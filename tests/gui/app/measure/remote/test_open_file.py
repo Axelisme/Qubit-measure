@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
-from zcu_tools.datafile import StoredRun
+from pydantic import TypeAdapter
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -18,7 +20,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
-from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._load_support import historical_metadata, write_native_file
 from tests.gui.app.measure._reload_fakes import OldAdapter
 
 from ._helpers import Fixture, call, open_client, reset_inbox
@@ -42,11 +44,17 @@ class FileAdapter(OldAdapter):
 
     experiment_tag: ClassVar[str | None] = "test/load"
 
-    def restore(self, stored: StoredRun):
-        gain = stored.cfg.values["gain"]
+    def restore(self, stored: Container):
+        gain = (
+            TypeAdapter(CfgSnapshot).validate_python(stored.docs["cfg"]).values["gain"]
+        )
         cfg = None if gain == 2.0 else LoadedCfg()
         return RestoredRun(
-            RunRecord(cfg=cfg, result=LoadedResult(gain)),
+            RunRecord(
+                cfg=cfg,
+                result=LoadedResult(gain),
+                metadata=metadata_from_container(stored),
+            ),
             "cfg unavailable" if cfg is None else None,
         )
 
@@ -87,6 +95,7 @@ def test_open_file_loads_without_soc_with_result(app, path):
     assert fx.state.get_tab(tab).run.result == RunRecord(
         cfg=None if path == "no-cfg.h5" else LoadedCfg(),
         result=LoadedResult(2.0 if path == "no-cfg.h5" else 1.0),
+        metadata=historical_metadata(),
     )
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None

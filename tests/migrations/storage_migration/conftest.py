@@ -6,9 +6,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import AxisSchema, DataVariable, JsonObject, VariableSchema
+from zcu_tools.datafile import DataVariable, JsonObject
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
+from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
 from migrations.storage_mapping import build_mapping
 from migrations.storage_migration import (
     KeyRule,
@@ -71,9 +72,11 @@ def mapping(registered_kind: None) -> MigrationMapping:
         roles={"probe": "C1"},
         data_schemas={
             ("synthetic_scan", "SyntheticCfg"): (
-                VariableSchema(
+                LegacyVariableSchema(
                     variable=DataVariable("signal"),
-                    axes=(AxisSchema(name="x", unit="s", dtype=np.dtype("float64")),),
+                    axes=(
+                        LegacyAxisSchema(name="x", unit="s", dtype=np.dtype("float64")),
+                    ),
                     signal_name="signal",
                     signal_unit="V",
                     signal_dtype=np.dtype("complex128"),

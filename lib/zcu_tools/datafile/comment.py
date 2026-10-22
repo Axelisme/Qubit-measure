@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pydantic import TypeAdapter
 
-from .native_models import JsonObject
+from .container_models import JsonObject
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -350,35 +350,58 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._host.resume()
         return self.status()
 
-    def stop(self) -> RunStatus:
-        """Latch explicit Stop and release an Ask/gate without waiting for drain."""
+    def _request_stop(self) -> bool:
+        """Record and latch Stop under the owner lock; refuse terminal owners.
+
+        True includes an already recorded Stop. The caller signals the host only
+        after releasing this lock, keeping persistence outside loop callbacks.
+        """
         try:
             with self._lock:
-                if self._lifecycle in _TERMINAL or self._stop_requested:
-                    return self.status()
+                if self._lifecycle in _TERMINAL:
+                    return False
+                if self._stop_requested:
+                    return True
                 self._artifacts.append(
                     StopRequested(self._ports.clock.now(), self._call_seq)
                 )
                 self._artifacts.set_lifecycle("stopping")
                 self._lifecycle = "stopping"
                 self._stop_requested = True
+                return True
         except Exception as error:
             self._control_failure(error)
             raise
-        self._host.cancel()
+
+    def stop(self) -> RunStatus:
+        """Record explicit Stop, then release Ask/gate without waiting for drain."""
+        if self._request_stop():
+            self._host.cancel()
         return self.status()
 
     def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
-        """Match one live scope on the host loop; script retains explicit Stop."""
-        label, _sequence = parse_cancel_scope(scope, expected)
+        """Accept bare script Stop at the owner; match other scopes on the host.
 
-        def apply() -> CancelResult:
-            result = self._host.cancel(scope, expected=expected)
-            if result.cancelled and label == "workflow":
-                self.stop()
-            return result
-
-        return self._host.control(apply)
+        Bare workflow acceptance means Stop is recorded and latched, even if the
+        host has drained before owner finalization. A live host also sets root.
+        Numbered workflow and other scopes use the host's atomic match/set. Valid
+        terminal requests return scope not active; malformed syntax raises
+        ValueError. Persistence errors propagate and fail the run with their cause.
+        No acknowledgement promises author/finally/executor drain.
+        """
+        label, sequence = parse_cancel_scope(scope, expected)
+        if label == "workflow" and sequence is None:
+            if not self._request_stop():
+                return CancelResult(False, "scope not active", self._host.active_path)
+            result = self._host.cancel()
+            # The Stop owner accepted before finalization, even if host has exited.
+            return CancelResult(
+                True, "scope cancellation requested", result.active_path
+            )
+        with self._lock:
+            if self._lifecycle in _TERMINAL:
+                return CancelResult(False, "scope not active", self._host.active_path)
+        return self._host.cancel(scope, expected=expected)
 
     def pending_question(self) -> PendingQuestion | None:
         """Read the host's exact current request, including its unique request id."""

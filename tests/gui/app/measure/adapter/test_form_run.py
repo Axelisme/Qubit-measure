@@ -2,7 +2,9 @@
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -25,12 +27,14 @@ class MeasurementCfg(ConfigBase):
 class RecordingCore:
     """Expose the exact cfg received through the synchronous core boundary."""
 
-    def run(self, cfg: MeasurementCfg, *, context: RunContext) -> MeasurementCfg:
+    def run(
+        self, cfg: MeasurementCfg, *, context: RunContext
+    ) -> RunRecord[ExpCfgModel, MeasurementCfg]:
         del context
-        return cfg
+        return RunRecord(None, cfg)
 
 
-class FormAdapter(BaseAdapter[MeasurementCfg, MeasurementCfg]):
+class FormAdapter(BaseAdapter[MeasurementCfg, RunRecord[ExpCfgModel, MeasurementCfg]]):
     exp_cls = RecordingCore
     capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE, load_data=False)
 
@@ -64,8 +68,8 @@ def test_base_run_preserves_form_output_identity() -> None:
             result = adapter.run(req, measurement(accepted.cfg), context=context)
         except (AttributeError, NotImplementedError, TypeError) as exc:
             pytest.fail(f"Base Run must forward the validated Form output: {exc}")
-        assert result is accepted.cfg
-        assert result.amount == 4.5
+        assert result.result is accepted.cfg
+        assert result.result.amount == 4.5
     finally:
         plots.finish()
         plots.release()

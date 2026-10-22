@@ -4,12 +4,10 @@ from uuid import UUID
 
 import h5py as h5
 import numpy as np
-from zcu_tools.datafile import (
+from pydantic import TypeAdapter
+from zcu_tools.datafile import Axis, Container, ContainerAttrs, Variable
+from zcu_tools.experiment.metadata import (
     CfgSnapshot,
-    DataVariable,
-    ExperimentPayload,
-    LabberMetadata,
-    LabberPayload,
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -45,7 +43,6 @@ def native_metadata(tag: str = "test/native") -> RunMetadata:
         started_at="2026-10-06T01:00:00Z",
         finished_at="2026-10-06T01:00:02Z",
         completion="complete",
-        labber_path="exports/previous.h5",
         snapshot=RunSnapshot(
             entry_id=UUID("12345678-1234-5678-1234-567812345678"),
             entry_name="test_entry",
@@ -73,16 +70,21 @@ def native_cfg() -> CfgSnapshot:
     )
 
 
-def native_payload() -> ExperimentPayload:
-    """Return a single SI complex signal and one absolute timestamp."""
-    return ExperimentPayload(
-        variables={
-            DataVariable("readout"): LabberPayload(
-                ("signal", "V", np.array([1.0 + 2.0j, 3.0 - 4.0j])),
-                axes=[("frequency", "Hz", np.array([4.0e9, 5.0e9]))],
-                timestamps=np.array([1760000000.0]),
+def native_container(*, metadata: RunMetadata | None = None) -> Container:
+    """Build one synthetic SI readout and its historical cfg/metadata documents."""
+    metadata = native_metadata() if metadata is None else metadata
+    return Container(
+        vars={
+            "readout": Variable(
+                np.array([1 + 2j, 3 - 4j]),
+                (Axis("frequency", "Hz", np.array([4e9, 5e9])),),
+                "V",
             )
         },
-        metadata=LabberMetadata(tags="test/native"),
-        representation="single",
+        docs={
+            "cfg": TypeAdapter(CfgSnapshot).dump_python(native_cfg(), mode="json"),
+            "metadata": metadata.model_dump(mode="json"),
+        },
+        groups={},
+        attrs=ContainerAttrs("3.0", "synthetic-tests", "experiment-run", {}),
     )

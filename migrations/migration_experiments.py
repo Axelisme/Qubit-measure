@@ -1,19 +1,25 @@
 """Fixed native declarations for offline migration, never a runtime registry."""
 
+from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import TypeVar
 
-from zcu_tools.datafile import CfgSnapshot, validate_cfg_snapshot
+import numpy as np
 from zcu_tools.experiment import (
     AxesSpec,
+    Axis,
     ExpCfgModel,
     GroupedAxesSpec,
+    VariableAxisSpec,
+    VariableZSpec,
+    ZSpec,
     load_run,
-    native_schemas,
 )
+from zcu_tools.experiment.metadata import CfgSnapshot, validate_cfg_snapshot
 
 from migrations.experiment_declaration import MigrationExperiment
+from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
 from zcu_lab.v2.fastflux.distortion.acc_phase import (
     core as fastflux_distortion_acc_phase,
 )
@@ -113,6 +119,38 @@ ResultT = TypeVar("ResultT")
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 
 
+def _legacy_schema(
+    variable: str, axes: Sequence[Axis | VariableAxisSpec], z: ZSpec | VariableZSpec
+) -> LegacyVariableSchema:
+    return LegacyVariableSchema(
+        variable=variable,
+        axes=tuple(
+            LegacyAxisSchema(
+                name=axis.label,
+                unit=axis.unit,
+                dtype=np.dtype(axis.dtype)
+                if isinstance(axis, VariableAxisSpec) and axis.generated == "arange"
+                else (np.empty(0, dtype=axis.dtype) * axis.scale).dtype,
+            )
+            for axis in axes
+        ),
+        signal_name=z.label,
+        signal_unit=z.unit,
+        signal_dtype=(np.empty(0, dtype=z.dtype) * z.scale).dtype,
+    )
+
+
+def _legacy_schemas(
+    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
+) -> tuple[LegacyVariableSchema, ...]:
+    if isinstance(spec, GroupedAxesSpec):
+        return tuple(
+            _legacy_schema(item.data_variable, item.axes, item.z)
+            for item in spec.variables
+        )
+    return (_legacy_schema(spec.data_variable, spec.axes, spec.z),)
+
+
 def _declaration(
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT] | None,
     *,
@@ -140,7 +178,7 @@ def _declaration(
         source_tag=spec.tag if source_tag is None else source_tag,
         native_tag=spec.tag,
         cfg_type=spec.cfg_type.__name__,
-        schemas=native_schemas(spec),
+        schemas=_legacy_schemas(spec),
         validate_cfg=validate_cfg,
         validate_native=validate,
     )

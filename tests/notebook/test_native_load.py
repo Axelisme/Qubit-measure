@@ -7,7 +7,7 @@ from typing import ClassVar
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.datafile import load_run_data, save_run_data
+from zcu_tools.datafile import load, save
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import (
     AxesSpec,
@@ -24,6 +24,7 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -120,13 +121,16 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
     analysis = adapter.analyze(None)
     evidence = adapter.acquisition_for(previous)
     path = tmp_path / "data.h5"
-    core.save_run(previous, path, metadata=native_metadata(core.persistence_spec().tag))
-    stored = load_run_data(path)
+    core.save_run(
+        replace(previous, metadata=native_metadata(core.persistence_spec().tag)), path
+    )
+    stored = load(path)
     if cfg_unavailable:
-        stored = replace(stored, cfg=replace(stored.cfg, values={"gain": []}))
-        save_run_data(
-            path, stored.payload, cfg=stored.cfg, metadata=stored.metadata, replace=True
+        stored = replace(
+            stored,
+            docs={**stored.docs, "cfg": {**stored.docs["cfg"], "values": {"gain": []}}},
         )
+        save(path, stored, replace=True)
 
     with pytest.raises(FileNotFoundError):
         adapter.load(tmp_path / "missing.h5")
@@ -183,13 +187,11 @@ def test_unknown_historical_evidence_loads_without_inventing_acquisition(
         cfg=NativeCfg(gain=2.0),
         result=NativeResult(np.array([4000.0, 5000.0]), np.array([4 + 6j, 8 - 10j])),
     )
-    metadata = replace(
-        native_metadata(core.persistence_spec().tag),
-        started_at=None,
-        completion="unknown",
+    metadata = native_metadata(core.persistence_spec().tag).model_copy(
+        update={"started_at": None, "completion": "unknown"}
     )
     try:
-        core.save_run(source, path, metadata=metadata)
+        core.save_run(replace(source, metadata=metadata), path)
         adapter = NotebookAdapter(host=NonPresentingHost())(core)
         loaded = adapter.load(path)
     except ValueError as error:
@@ -202,7 +204,7 @@ def test_unknown_historical_evidence_loads_without_inventing_acquisition(
     assert adapter.analyze(None).result == 12.0
     with pytest.raises(ValueError, match="No acquisition evidence"):
         adapter.acquisition_for(loaded)
-    assert load_run_data(path).metadata == metadata
+    assert metadata_from_container(load(path)) == metadata
 
 
 def test_labber_only_export_is_rejected_without_replacing_notebook_results(

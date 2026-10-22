@@ -88,6 +88,8 @@ agent ──MCP cancel(execution|run_id, scope, expected)──▶ host／recipe
                         partial 結果／作者 finally／終態
 ```
 
+2026-10-22 使用者裁定：「裸 script（expected=None）的 ack 權威是 Stop owner lock：owner 先寫 StopRequested／manifest 並 latch，再 host.cancel 原子設 root」。Workflow 沿既有 owner lock 記錄與接受 Stop，持久化不進 control callback。此分支的 `cancelled=True` 表示 Stop 請求已被 owner 接受並記錄；host 若仍活則同時 set token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled，不以最後 host.cancel 的 refusal 推翻 owner 的接受。帶序號或 expected 的 script 與其他 scope 直接由 host.cancel 核對，不寫 Stop 意圖。Terminal workflow 對合法請求先回 typed scope-not-active refusal，錯誤語法仍 fail fast。持久化失敗保留 failed 與原始 cause，不偽裝成 accepted。
+
 Acknowledgement 只證明控制命令已處理，不證明 operation 或 cleanup 已 drain。Recipe runtime 用公開 `control(fn)` 在同一 loop 回合檢查與停止當前 Run token，避免 check／ack race。Analysis、Ask 或閒置時的 run cancel 回 `cancelled=False, reason="no run in progress"`，不停止下一個 operation。
 
 - `set()` 只停止本 scope 與子孫，父已停止時新 child 出生即 set。`set_error(status, reason, cause)` 只在本 token 記第一個錯誤並向下 set，不改祖先 event／error；後續兄弟 operation 出生乾淨。`raise_if_error()` 仍讀本 token，完成的 child 由 owner release。

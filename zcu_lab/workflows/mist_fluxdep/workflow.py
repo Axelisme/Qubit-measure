@@ -9,7 +9,7 @@ from typing import Literal
 import numpy as np
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.workflows import (
     Failed,
     Live,

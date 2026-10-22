@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDevice
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
@@ -53,6 +54,7 @@ def make_state(
     )
     tab_id = "tab-1"
     adapter = MagicMock()
+    adapter.run.return_value = RunRecord(None, object())
     adapter.capabilities = AdapterCapabilities(requires_soc=True)
     state.add_tab(
         tab_id,

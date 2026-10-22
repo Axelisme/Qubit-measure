@@ -130,9 +130,11 @@ def test_typed_gui_analysis_publishes_typed_result_and_saveable_named_fit(
     )
     state.update_tab_result(
         "tab",
-        source,
-        metadata=replace(
-            native_session.metadata, experiment=SavingCore().persistence_spec().tag
+        replace(
+            source,
+            metadata=native_session.metadata.model_copy(
+                update={"experiment": SavingCore().persistence_spec().tag}
+            ),
         ),
         parameters=_flux_parameters(tab.run.parameters),
     )
@@ -193,9 +195,11 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
     source = RunRecord(cfg=None, result=SpectrumResult(values, freqs, signals))
     state.update_tab_result(
         "tab",
-        source,
-        metadata=replace(
-            native_session.metadata, experiment=SpectrumCore().persistence_spec().tag
+        replace(
+            source,
+            metadata=native_session.metadata.model_copy(
+                update={"experiment": SpectrumCore().persistence_spec().tag}
+            ),
         ),
         parameters=_flux_parameters(tab.run.parameters),
     )

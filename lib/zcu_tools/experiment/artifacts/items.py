@@ -7,13 +7,13 @@ from typing import TypeVar
 
 from matplotlib.figure import Figure
 
-from zcu_tools.datafile import AnalysisDocument
 from zcu_tools.resources.entry import ArtifactKey
 
 from ..axes_spec import AxesSpec, GroupedAxesSpec
 from ..cfg_model import ExpCfgModel
 from ..native_persistence import PreparedRunData, prepare_run_data
 from ..records import RunRecord
+from .analysis_document import AnalysisDocument
 
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 ResultT = TypeVar("ResultT")
@@ -125,10 +125,7 @@ class DataItem(ArtifactItem):
             self,
             data=replace(
                 self.data,
-                payload=replace(
-                    self.data.payload,
-                    metadata=replace(self.data.payload.metadata, comment=comment),
-                ),
+                labber_metadata=replace(self.data.labber_metadata, comment=comment),
             ),
         )
 

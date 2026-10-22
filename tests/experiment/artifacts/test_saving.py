@@ -7,19 +7,20 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.datafile import (
-    AnalysisDocument,
-    RunMetadata,
+    load,
     load_grouped_labber_data,
-    load_run_data,
 )
 from zcu_tools.experiment import (
+    AnalysisDocument,
     AnalysisItem,
     ArtifactRef,
     DataItem,
     FigureItem,
+    RunMetadata,
     RunRecord,
     SaveArtifact,
     prepare_run_data,
@@ -51,13 +52,14 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
     )
     entry.new_point("sweet")
     original = native_metadata("test/saving")
-    metadata = replace(
-        original,
-        snapshot=replace(
-            original.snapshot,
-            entry_id=UUID(snapshot(entry.setup).general.entry_id),
-            entry_name="entry",
-        ),
+    metadata = original.model_copy(
+        update={
+            "snapshot": replace(
+                original.snapshot,
+                entry_id=UUID(snapshot(entry.setup).general.entry_id),
+                entry_name="entry",
+            )
+        }
     )
     layout = SaveLayout(
         result_path=entry.result_path,
@@ -110,7 +112,7 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     report = save_artifacts(
         artifacts(),
         layout=layout,
-        metadata=metadata,
+        record=RunRecord(None, None, metadata=metadata),
         ledger=ledger,
         origin=origin,
     )
@@ -141,14 +143,13 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     )
     assert analysis == run / "analysis/analysis.json"
     assert analysis.is_file()
-    loaded = load_run_data(native)
-    assert loaded.metadata.snapshot == metadata.snapshot
-    assert loaded.metadata.started_at == metadata.started_at
-    assert loaded.metadata.labber_path == str(labber)
-    assert loaded.cfg.values["gain"] == 2.0
+    loaded = load(native)
+    assert loaded.docs["metadata"] == metadata.model_dump(mode="json")
+    assert loaded.docs["cfg"]["values"] == {"dev": None, "gain": 2.0}
     events = ledger.events()
     assert len(events) == 1
     assert isinstance(events[0].payload, SavedPayload)
+    assert events[0].payload.labber_path == str(labber)
     assert len(events[0].payload.outputs) == len(report.outputs)
     assert ledger.get(events[0].id).record is not None
 
@@ -162,9 +163,7 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
     spec = mixed_spec(independent=independent)
     source = mixed_record()
     metadata, layout, ledger = storage(tmp_path)
-    metadata = replace(
-        metadata, experiment=spec.tag, labber_path="previous-success.hdf5"
-    )
+    metadata = metadata.model_copy(update={"experiment": spec.tag})
     selected = (
         SaveArtifact(
             ArtifactRef("run", "measurement_data"),
@@ -182,7 +181,11 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
     native_paths: list[Path] = []
     for _ in range(2):
         report = save_artifacts(
-            selected, layout=layout, metadata=metadata, ledger=ledger, origin="notebook"
+            selected,
+            layout=layout,
+            record=RunRecord(None, None, metadata=metadata),
+            ledger=ledger,
+            origin="notebook",
         )
         (native,) = (item for item in report.outputs if item.output.format == "data_h5")
         (labber,) = (item for item in report.outputs if item.output.format == "labber")
@@ -197,16 +200,20 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
         else:
             assert labber.error and "common grid" in labber.error
             assert not labber.output.path.exists()
-        stored = load_run_data(native.output.path)
-        assert stored.payload.representation == "grouped"
-        assert_mixed_disk_values(stored.payload.variables)
-        assert stored.metadata == replace(
-            metadata,
-            labber_path=str(labber.output.path)
-            if independent
-            else metadata.labber_path,
+        stored = load(native.output.path)
+        assert set(stored.vars) == {"signals", "detunes"}
+        np.testing.assert_allclose(
+            stored.vars["signals"].values, source.result.signals * 1e-3
         )
-        assert stored.cfg.values == {"name": "mixed grids"}
+        np.testing.assert_array_equal(stored.vars["signals"].axes[0].values, [2, 5])
+        np.testing.assert_allclose(
+            stored.vars["signals"].axes[1].values, [1e-6, 2e-6, 4e-6]
+        )
+        np.testing.assert_allclose(
+            stored.vars["detunes"].values, [250_000.0, -500_000.0]
+        )
+        assert stored.docs["metadata"] == metadata.model_dump(mode="json")
+        assert stored.docs["cfg"]["values"] == {"name": "mixed grids"}
         event = ledger.events()[-1]
         assert isinstance(event.payload, SavedPayload)
         assert event.payload.labber_path == (
@@ -235,7 +242,7 @@ def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> 
     report = save_artifacts(
         selected,
         layout=layout,
-        metadata=metadata,
+        record=RunRecord(None, None, metadata=metadata),
         ledger=ledger,
         origin="notebook",
     )
@@ -273,7 +280,7 @@ def test_nonfinite_analysis_isolates_the_member_and_records_other_outputs(
     report = save_artifacts(
         selected,
         layout=layout,
-        metadata=metadata,
+        record=RunRecord(None, None, metadata=metadata),
         ledger=ledger,
         origin="notebook",
     )
@@ -314,7 +321,7 @@ def test_injected_figure_encoder_runs_once_and_shares_png_bytes(tmp_path: Path) 
         report = save_artifacts(
             selected,
             layout=layout,
-            metadata=metadata,
+            record=RunRecord(None, None, metadata=metadata),
             ledger=ledger,
             origin="gui",
             figure_encoder=encode,
@@ -349,7 +356,7 @@ def test_injected_encoder_failure_leaves_data_and_json_saved(tmp_path: Path) -> 
         report = save_artifacts(
             selected,
             layout=layout,
-            metadata=metadata,
+            record=RunRecord(None, None, metadata=metadata),
             ledger=ledger,
             origin="gui",
             figure_encoder=encode,

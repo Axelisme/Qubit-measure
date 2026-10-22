@@ -8,9 +8,9 @@ from pydantic_core import PydanticCustomError
 from qick import QickConfig
 
 from zcu_tools.core.script_protocol import Answer
-from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.experiment.workflows import (

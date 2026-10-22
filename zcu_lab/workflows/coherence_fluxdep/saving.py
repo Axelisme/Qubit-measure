@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.workflows import Completed, RunIdentity
 

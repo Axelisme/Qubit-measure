@@ -202,13 +202,13 @@ def test_workflow_scoped_cancel_uses_native_host_and_preserves_stop(workflow_rpc
         label="native Ask for scoped control",
     )
     rejected = result(
-        rpc, "workflow.cancel", run_id="scoped", scope="script", expected=1
+        rpc, "workflow.cancel", run_id="scoped", scope="workflow", expected=1
     )
     assert rejected["cancelled"] is False
     assert rejected["reason"] == "sequence mismatch"
-    assert rejected["active_path"] == "script/iteration#1"
+    assert rejected["active_path"] == "workflow:asking/iteration#1"
     status = result(rpc, "workflow.status", run_id="scoped")
-    assert status["status"]["active_path"] == "script/iteration#1"
+    assert status["status"]["active_path"] == "workflow:asking/iteration#1"
     accepted = result(rpc, "workflow.cancel", run_id="scoped", scope="iteration#1")
     assert accepted["cancelled"] is True
     assert facet.pending_question("scoped") is not None

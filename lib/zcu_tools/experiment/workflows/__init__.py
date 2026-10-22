@@ -27,4 +27,5 @@ from .models import (
 )
 from .plotting import WorkflowPlots
 from .ports import Clock, DevicePort, EnginePorts, ProgressFactory
+from .run_metadata import record_with_metadata
 from .tunables import Live

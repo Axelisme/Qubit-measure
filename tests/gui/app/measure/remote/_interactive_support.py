@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -12,7 +13,7 @@ from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from qtpy.QtWidgets import QPushButton
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
-from zcu_tools.datafile import RunMetadata, RunSnapshot, SoftwareProvenance
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
@@ -32,6 +33,7 @@ from tests.gui.app.measure._flux_adapter import (
     SpectrumCore,
     SpectrumResult,
 )
+from tests.gui.app.measure._record_support import require_record
 
 from ._helpers import Fixture, recv_response, send
 
@@ -77,7 +79,6 @@ def load_native_spectrum(
         started_at="2026-10-08T00:00:00+00:00",
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
-        labber_path=None,
         snapshot=RunSnapshot(
             entry_id=storage.entry_id,
             entry_name=storage.entry_name,
@@ -94,9 +95,9 @@ def load_native_spectrum(
             hostname=None,
         ),
     )
-    save_run(RunRecord(cfg, result), path, spec=spec, metadata=metadata)
+    save_run(replace(RunRecord(cfg, result), metadata=metadata), path, spec=spec)
     fx.ctrl.load_tab_result(tab_id, str(path))
-    assert fx.state.get_tab(tab_id).run.metadata == metadata
+    assert require_record(fx.state.get_tab(tab_id).run).metadata == metadata
 
 
 def start_mounted(

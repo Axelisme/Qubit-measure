@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
-from zcu_tools.datafile import read_fluxdep_database_info
 from zcu_tools.gui.app.analysis_project.project import (
     ProjectInfo,
     is_real_project,
@@ -43,6 +42,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
+from ..database import read_fluxdep_database_info
 from .dto import (
     ActiveSpectrumReply,
     AxisSnapshot,

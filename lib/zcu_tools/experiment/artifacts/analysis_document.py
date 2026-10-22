@@ -7,8 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
-
-from .native_models import JsonObject
+from zcu_tools.datafile import JsonObject
 
 
 class AnalysisDocument(BaseModel):
@@ -30,6 +29,23 @@ class AnalysisDocument(BaseModel):
     pane: Literal["analysis", "post_analysis"]
     parameters: JsonObject
     summary: JsonObject
+
+    def to_doc(self) -> JsonObject:
+        """Return a detached zcu.analysis-result 1.0 JSON envelope for docs/analysis.
+
+        Revalidate mutable nested values; non-finite or non-JSON edits raise
+        ValueError. The container does not interpret this producer convention.
+        """
+        _check_json(self.parameters)
+        _check_json(self.summary)
+        validated = AnalysisDocument.model_validate(self.model_dump())
+        return {
+            "format": "zcu.analysis-result",
+            "format_version": "1.0",
+            "pane": validated.pane,
+            "parameters": validated.parameters,
+            "summary": validated.summary,
+        }
 
     @field_validator("summary", mode="before")
     @classmethod
@@ -69,15 +85,8 @@ def encode_analysis_document(document: AnalysisDocument) -> bytes:
     I/O and choose no destination. Invalid or subsequently mutated non-JSON
     or non-finite values raise ValueError.
     """
-    _check_json(document.parameters)
-    _check_json(document.summary)
-    validated = AnalysisDocument.model_validate(document.model_dump())
     return json.dumps(
-        {
-            "format": "zcu.analysis-result",
-            "format_version": "1.0",
-            **validated.model_dump(),
-        },
+        document.to_doc(),
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")

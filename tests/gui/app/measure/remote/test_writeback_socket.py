@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.datafile import load_run_data, save_run_data
+from zcu_tools.datafile import load, save
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
@@ -503,7 +504,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     )
     tab = controller.new_tab("pointed")
     application.state.replace_run_pane(
-        tab, RunPaneState(result=1.0, parameters=captured)
+        tab, RunPaneState(result=RunRecord(None, 1.0), parameters=captured)
     )
     analyzed = terminal_result(application, controller.analyze(tab, SampleParams()))
     assert analyzed["status"] == "finished", analyzed
@@ -582,17 +583,24 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
     context.set_alias_rows((AliasRow("coupler", "coupler"),))
     path = tmp_path / "source.h5"
     write_native_file(path, tag=CapturedCouplerAdapter.experiment_tag or "", gain=0.4)
-    stored = load_run_data(path)
-    metadata = replace(
-        stored.metadata,
-        snapshot=replace(
-            stored.metadata.snapshot,
-            entry_id=UUID(target.entry_id),
-            point=target.point,
-            roles={"coupler": "coupler"},
-        ),
+    stored = load(path)
+    metadata = metadata_from_container(stored).model_copy(
+        update={
+            "snapshot": replace(
+                metadata_from_container(stored).snapshot,
+                entry_id=UUID(target.entry_id),
+                point=target.point,
+                roles={"coupler": "coupler"},
+            )
+        }
     )
-    save_run_data(path, stored.payload, metadata, cfg=stored.cfg, replace=True)
+    save(
+        path,
+        replace(
+            stored, docs={**stored.docs, "metadata": metadata.model_dump(mode="json")}
+        ),
+        replace=True,
+    )
     tab = fx.ctrl.new_tab("captured-coupler")
     port = fx.start()
     try:
