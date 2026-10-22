@@ -48,12 +48,12 @@ Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接�
 
 ## FTF 的四個角色與 tone 對應
 
-| Scalar alias | 指向 | 用途 |
+| Scalar alias | 指向（kickstart／simulation 新 entry 的綁定） | 用途 |
 | --- | --- | --- |
-| `f1` | 第一個 fluxonium component | 取 `$f1.module.x180`／`x90`，供準備與 projection。 |
-| `f2` | 另一個 fluxonium component | 取 `$f2.module.x180`／`x90`，使用另一個 charge generator。 |
-| `coupler` | 本對 transmon component | 保存這一對的兩線 CZ pulses 與 local-Z pair。 |
-| `mux` | MuxGroup component | 從 `$mux.module.readout` 取完整 mux readout。缺來源時須手填有效設定；template 只是起點。 |
+| `f1` | 第一個 fluxonium component，`Q1` | 取 `$f1.module.x180`／`x90`，供準備與 projection。既有 entry 缺此角色時，在 Aliases 加入 `f1` 並綁到 `Q1`。 |
+| `f2` | 另一個 fluxonium component，`Q2` | 取 `$f2.module.x180`／`x90`，使用另一個 charge generator。既有 entry 缺此角色時，在 Aliases 加入 `f2` 並綁到 `Q2`。 |
+| `coupler` | 本對 transmon component，`coupler` | 保存這一對的兩線 CZ pulses 與 local-Z pair。 |
+| `mux` | MuxGroup component，`MG12` | 從 `$mux.module.readout` 取完整 mux readout。缺來源時須手填有效設定；template 只是起點。 |
 
 F1 的 tone 是 `$f1` component 在 Open／Reset 所固定的 `$mux.qubits` 中的位置，F2 同理。例如 `f1=FA`、`f2=FB`，`qubits=[FB, FA]`，則 F1 對應 `tones[1]`，F2 對應 `tones[0]`。Tone index 由綁定決定，畫面只供核對。
 
