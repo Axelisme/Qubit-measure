@@ -1,13 +1,11 @@
-"""Measure GUI attachment for coarse single-tone mux resonance discovery."""
+"""Measure GUI attachment for coarse pulse-readout resonance discovery."""
 
 import json
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
-from qick import QickConfig
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -28,21 +26,19 @@ from zcu_tools.plotting.plots import Plots
 
 from .core import (
     DEFAULT_MIN_SEPARATION_MHZ,
-    MuxOnetoneFindCfg,
-    MuxOnetoneFindExp,
-    MuxOnetoneFindOptions,
-    MuxOnetoneFindResult,
+    RangeFindCfg,
+    RangeFindExp,
+    RangeFindOptions,
+    RangeFindResult,
     ResonatorDip,
-    analyze,
-    prepare_frequencies,
 )
 from .form import make_form
 
-MuxOnetoneFindRun: TypeAlias = RunRecord[MuxOnetoneFindCfg, MuxOnetoneFindResult]
+RangeFindRun: TypeAlias = RunRecord[RangeFindCfg, RangeFindResult]
 
 
 @dataclass
-class MuxOnetoneFindParams:
+class RangeFindParams:
     """Enter frequency-ordered resonator names as a JSON list for coarse analysis.
 
     resonators is JSON text such as '["R2", "R1"]', not a comma-separated list.
@@ -55,7 +51,7 @@ class MuxOnetoneFindParams:
         DEFAULT_MIN_SEPARATION_MHZ
     )
 
-    def to_options(self) -> MuxOnetoneFindOptions:
+    def to_options(self) -> RangeFindOptions:
         """Parse JSON names and return validated core Options, or raise ValueError.
 
         Blank/malformed JSON, non-list values and non-string elements fail with
@@ -75,13 +71,13 @@ class MuxOnetoneFindParams:
             if not isinstance(name, str):
                 raise ValueError("Resonators JSON list must contain only strings")
             names.append(name)
-        options = MuxOnetoneFindOptions(names, self.min_separation)
+        options = RangeFindOptions(names, self.min_separation)
         options.validate()
         return options
 
 
 @dataclass
-class MuxOnetoneFindAnalysis(AnalyzeResultBase):
+class RangeFindAnalysis(AnalyzeResultBase):
     """Frequency-ordered dips and captured writeback eligibility.
 
     dips contains name, absolute MHz and background-relative magnitude depth.
@@ -104,100 +100,59 @@ class MuxOnetoneFindAnalysis(AnalyzeResultBase):
         }
 
 
-class MuxOnetoneFindAdapter(
+class RangeFindAdapter(
     BaseAdapter[
-        MuxOnetoneFindCfg,
-        MuxOnetoneFindRun,
-        MuxOnetoneFindAnalysis,
-        MuxOnetoneFindParams,
+        RangeFindCfg,
+        RangeFindRun,
+        RangeFindAnalysis,
+        RangeFindParams,
     ]
 ):
     """Find coarse resonator frequencies and propose only captured scalar freq rows."""
 
-    exp_cls = MuxOnetoneFindExp
-    experiment_tag: ClassVar[str | None] = MuxOnetoneFindExp.persistence_tag()
+    exp_cls = RangeFindExp
+    experiment_tag: ClassVar[str | None] = RangeFindExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @staticmethod
-    def make_form(ctx: FormContext) -> Form[MuxOnetoneFindCfg]:
-        """Copy the captured mux readout using the shared ringup-aware initial values."""
+    def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
+        """Build freq linear defaults and editable captured analysis names."""
         return make_form(ctx)
 
-    def validate_run_request(self, req: RunRequest, cfg: MuxOnetoneFindCfg) -> None:
-        """Reject out-of-band absolute frequencies before Run, without hardware I/O.
-
-        req.soccfg must be the cached QickConfig; missing/incompatible handles
-        raise. cfg supplies full readout settings and the original tone index.
-        """
-        if not isinstance(req.soccfg, QickConfig):
-            raise TypeError("mux/onetone_find requires a cached QickConfig")
-        prepare_frequencies(cfg, soccfg=req.soccfg)
-
     def run(
-        self, req: RunRequest, cfg: MuxOnetoneFindCfg, *, context: RunContext
-    ) -> MuxOnetoneFindRun:
-        """Acquire one spectrum and pair it with the unchanged complete cfg.
+        self, req: RunRequest, cfg: RangeFindCfg, *, context: RunContext
+    ) -> RangeFindRun:
+        """Acquire one spectrum and pair it with the unchanged acquisition cfg and name list.
 
         context supplies SoC, cached config, cancellation and live plots. req is
-        unused after preflight. Stop preserves NaNs for unacquired points; the
+        unused. Stop preserves NaNs for unacquired points; the
         host checks cancellation errors before publishing a successful result.
         """
         del req
-        return RunRecord(cfg=cfg, result=MuxOnetoneFindExp().run(cfg, context=context))
+        return RunRecord(cfg=cfg, result=RangeFindExp().run(cfg, context=context))
 
     def get_analyze_params(
-        self, result: MuxOnetoneFindRun, ctx: SessionEnv
-    ) -> MuxOnetoneFindParams:
-        """Seed JSON names from captured $mux.resonators sorted by captured MHz frequency.
+        self, result: RangeFindRun, ctx: SessionEnv
+    ) -> RangeFindParams:
+        """Seed editable JSON names from the Run/Load record, never the current Form.
 
-        ctx is the result's fixed Run/Load environment, not the current Form.
-        Missing capture or unbound mux starts with an empty editable list; fill
-        names before Analyze. If any captured frequency is unset or null, the
-        list is also empty: enter names in increasing dip-frequency order instead of
-        guessing the component identity. Malformed bindings/frequencies raise.
-        result is unused because names are not stored in raw cfg.
+        result.cfg owns the saved analysis list. A missing/incompatible cfg starts
+        empty so the operator can enter names for data-only analysis. ctx supplies
+        the fixed environment but does not override the saved list.
         """
-        del result
-        parameters = ctx.parameters
-        if parameters is None:
-            return MuxOnetoneFindParams(resonators="[]")
-        roles = parameters.roles
-        if roles is None or "mux" not in roles.names:
-            return MuxOnetoneFindParams(resonators="[]")
-        raw = parameters.value("$mux.resonators")
-        options = MuxOnetoneFindOptions(resonators=[])
-        if not isinstance(raw, list) or not raw:
-            raise ValueError("$mux.resonators must be a nonempty list of names")
-        names: list[str] = []
-        for name in raw:
-            if not isinstance(name, str):
-                raise ValueError("$mux.resonators must contain only strings")
-            names.append(name)
-        options.resonators = names
-        options.validate()
-        captured_frequencies = {
-            name: parameters.lookup(f"{name}.freq").value for name in names
-        }
-        frequencies = {
-            name: _captured_frequency(value, name)
-            for name, value in captured_frequencies.items()
-            if value is not None
-        }
-        if len(frequencies) != len(names):
-            return MuxOnetoneFindParams(resonators="[]")
-        return MuxOnetoneFindParams(
-            resonators=json.dumps(sorted(names, key=frequencies.__getitem__))
-        )
+        del ctx
+        names = result.cfg.resonators if result.cfg is not None else []
+        return RangeFindParams(resonators=json.dumps(names))
 
     def analyze(
         self,
-        req: AnalyzeRequest[MuxOnetoneFindRun, MuxOnetoneFindParams],
+        req: AnalyzeRequest[RangeFindRun, RangeFindParams],
         *,
         plots: Plots,
-    ) -> MuxOnetoneFindAnalysis:
+    ) -> RangeFindAnalysis:
         """Find all requested dips or fail the entire analysis without proposals.
 
         req supplies raw IQ, options and the fixed Run/Load parameter capture.
@@ -205,9 +160,11 @@ class MuxOnetoneFindAdapter(
         calculation but omit their proposals and explain why in the summary.
         Invalid curves/options and insufficient dips raise ValueError.
         """
-        dips = analyze(req.run_result, req.analyze_params.to_options(), plots=plots)
+        dips = RangeFindExp().analyze(
+            req.run_result, req.analyze_params.to_options(), plots=plots
+        )
         if req.parameters is None:
-            return MuxOnetoneFindAnalysis(
+            return RangeFindAnalysis(
                 dips, (), "No Run/Load parameter capture; no frequency proposals"
             )
         writable: list[str] = []
@@ -223,10 +180,10 @@ class MuxOnetoneFindAdapter(
             if missing
             else None
         )
-        return MuxOnetoneFindAnalysis(dips, tuple(writable), diagnostic)
+        return RangeFindAnalysis(dips, tuple(writable), diagnostic)
 
     def get_writeback_items(
-        self, req: WritebackRequest[MuxOnetoneFindRun, MuxOnetoneFindAnalysis]
+        self, req: WritebackRequest[RangeFindRun, RangeFindAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose one independently selectable <name>.freq MHz row per captured dip.
 
@@ -244,13 +201,3 @@ class MuxOnetoneFindAdapter(
             for dip in req.analyze_result.dips
             if dip.name in req.analyze_result.writable
         ]
-
-
-def _captured_frequency(value: object, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-    ):
-        raise ValueError(f"{name}.freq must be finite MHz to seed resonator order")
-    return float(value)

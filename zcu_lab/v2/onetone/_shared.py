@@ -1,56 +1,73 @@
-"""Starting-value policy shared by the three single-tone spectroscopy Forms."""
+"""Qt-free cfg, frequency grids and spectrum buffers for one-tone experiments."""
 
-from math import isfinite
+from dataclasses import dataclass
+from typing import Annotated
 
-from zcu_tools.cfg_model import Expr, TemplateSeed
-from zcu_tools.gui.form_adapter import FormContext
+import numpy as np
+from numpy.typing import NDArray
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import (
+    ProgramV2Cfg,
+    PulseReadoutCfg,
+    ResetCfg,
+    SweepCfg,
+)
 
-from zcu_lab.templates import READOUT_PULSE_LENGTH_US
+
+@dataclass(frozen=True)
+class FreqResult:
+    """Hardware-rounded absolute freqs in MHz and mean complex IQ, both shape (P,)."""
+
+    freqs: NDArray[np.float64]
+    signals: NDArray[np.complex128]
 
 
-def initial_ro_length() -> float:
-    """Return an editable RO window in us, 0.01 us shorter than the readout pulse.
+class FreqModuleCfg(ConfigBase):
+    """Optional reset followed by the pulse readout's generator and ADC settings."""
 
-    The readout Template supplies the pulse source. Open/Reset creates a
-    detached direct RO window that remains independently editable.
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+
+
+class FreqSweepCfg(ConfigBase):
+    """Absolute MHz sweep; the hardware owns both generator and ADC frequencies."""
+
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+
+
+class LinearFreqCfg(ProgramV2Cfg, ExpCfgModel):
+    """One-tone acquisition settings, averaging, delays and absolute frequency grid."""
+
+    modules: FreqModuleCfg
+    sweep: FreqSweepCfg
+
+
+def linear_freqs(config: LinearFreqCfg, *, context: RunContext) -> NDArray[np.float64]:
+    """Expand the absolute MHz sweep onto the readout's hardware frequency grid.
+
+    config supplies the sweep and generator/ADC channels without being changed.
+    context supplies cached SoC configuration. Invalid sweeps propagate errors.
     """
-    return READOUT_PULSE_LENGTH_US - 0.01
+    readout = config.modules.readout
+    return sweep2array(
+        config.sweep.freq,
+        "freq",
+        {"soccfg": context.soccfg, "gen_ch": readout.gen_ch, "ro_ch": readout.ro_ch},
+    )
 
 
-def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
-    """Return editable single-resonator Template timing seeds for Open/Reset.
+def spectrum_buffer(freqs: NDArray[np.float64], *, plots: Plots) -> SignalBuffer:
+    """Create a complex NaN buffer and a live magnitude plot for (P,) MHz freqs.
 
-    ctx supplies the fixed capture. If resonator kappa is absent or null,
-    seed trig_offset=time_of_fly. Otherwise require a finite positive kappa
-    in MHz and seed trig_offset=time_of_fly+5/(2*pi*kappa) us;
-    kappa=1 MHz adds approximately 0.795775 us. Missing capture or invalid
-    kappa raises ValueError. Alias and source faults propagate.
-    Seed pulse length=max(original template length, trig_offset+ro_length)
-    in us, retaining the template-based RO window.
-    Return Expr seeds for trig_offset and waveform.length, and a direct
-    ro_length seed. Open/Reset resolves these into detached editable values.
-    Subsequent cfg output retains the operator's edited timing.
+    plots owns the measurement figure. Buffer updates draw the entire spectrum;
+    acquisition and cancellation remain the caller's responsibility.
     """
-    if ctx.parameters is None:
-        raise ValueError("One-tone timing requires a parameter capture")
-    source = ctx.parameters.lookup_point("$resonator.kappa")
-    kappa = source.value
-    trigger = "$resonator.ext.time_of_fly"
-    if source.present and kappa is not None:
-        if (
-            isinstance(kappa, bool)
-            or not isinstance(kappa, (int, float))
-            or not isfinite(kappa)
-            or kappa <= 0
-        ):
-            raise ValueError("$resonator.kappa must be finite and positive in MHz")
-        trigger += " + 5 / (2 * pi * $resonator.kappa)"
-    window = f"({trigger}) + {initial_ro_length()!r}"
-    original = READOUT_PULSE_LENGTH_US
-    # Encode max using the expression language's abs: max(a,b)=(a+b+abs(a-b))/2.
-    length = f"({original!r} + ({window}) + abs({original!r} - ({window}))) / 2"
-    return {
-        "trig_offset": Expr(trigger),
-        "ro_length": initial_ro_length(),
-        "waveform.length": Expr(length),
-    }
+    viewer = plots.liveplot_1d("measurement", "Frequency (MHz)", "Amplitude")
+    return SignalBuffer(
+        (len(freqs),), on_update=lambda data: viewer.update(freqs, np.abs(data))
+    )
