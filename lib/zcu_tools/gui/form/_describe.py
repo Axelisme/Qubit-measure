@@ -9,6 +9,7 @@ from typing import TypeAliasType, Union, get_args, get_origin
 from pydantic import BaseModel, JsonValue
 from pydantic.fields import FieldInfo
 
+from ._display import field_display
 from ._json import copy_json
 from ._selection import Field, Level, literal_values, resolve, root_level, validate_path
 from ._structure import (
@@ -28,7 +29,7 @@ from .description import (
     FormFieldKind,
     FormOptionDescription,
 )
-from .model import Display, FormEnv, FormModel, FormWritePath
+from .model import FormEnv, FormModel, FormWritePath
 from .options import Option
 
 
@@ -175,10 +176,7 @@ def _metadata(
     target: Field, tags: Mapping[type[BaseModel], str]
 ) -> FormFieldDescription:
     info = target.info
-    display = next(
-        (item for item in reversed(info.metadata) if isinstance(item, Display)),
-        Display(),
-    )
+    display = field_display(info)
     if display.decimals is not None and float not in alternatives(info.annotation):
         raise ValueError(f"{target.path!r}: Display decimals requires a float field")
     fixed, fixed_value = _fixed_value(target)
@@ -235,14 +233,7 @@ def _elements(target: Field) -> tuple[FormElementDescription, ...] | None:
         return None
     raw = target.level.value(target.name)
     items = raw if isinstance(raw, list) else []
-    label = next(
-        (
-            item.element_label
-            for item in reversed(target.info.metadata)
-            if isinstance(item, Display)
-        ),
-        None,
-    )
+    label = field_display(target.info).element_label
     return tuple(
         FormElementDescription(
             index,

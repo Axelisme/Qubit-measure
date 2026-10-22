@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from logging import getLogger
-from typing import TYPE_CHECKING, ClassVar, Literal, Self
+from typing import TYPE_CHECKING, ClassVar, Literal, Self, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 from pydantic_core import PydanticCustomError
@@ -178,15 +178,34 @@ class InputPolicy:
     expression: bool = True
 
 
-@dataclass(frozen=True)
+class _DisplayProperties(TypedDict, total=False):
+    """Typed keyword overrides; absent keys must not reset inner declarations."""
+
+    label: str | None
+    description: str | None
+    unit: str | None
+    placeholder: str | None
+    collapsed: bool
+    decimals: int | None
+    hidden: bool
+    group: str | None
+    selector: bool
+    element_label: str | None
+    readonly: bool
+
+
+@dataclass(frozen=True, init=False)
 class Display:
     """Display and readonly metadata carried by Annotated fields.
 
     label overrides the field title (a model section's default title is its
     field name, e.g. ro_cfg -> "Ro cfg"). description explains the input; unit
-    is its display unit and placeholder is an input hint. None leaves each
-    item unspecified. Model sections start folded; collapsed=False starts them
-    expanded.
+    is its display unit and placeholder is an input hint. Omitted properties
+    inherit from inner Display declarations; explicit values, including None
+    and False, override them. None clears a text hint or uses the field's
+    ordinary title/description fallback. Public attributes expose concrete
+    defaults even when omitted; overlay retains which keywords were supplied.
+    Model sections start folded; collapsed=False starts them expanded.
     decimals is how many digits a float field shows after the decimal point,
     rounded with trailing zeros trimmed; None shows the full value. It never
     rounds input. A negative count raises ValueError here; describe raises
@@ -222,12 +241,36 @@ class Display:
     element_label: str | None = None
     readonly: bool = False
 
-    def __post_init__(self) -> None:
-        """Reject a negative decimals count or an empty group with ValueError."""
+    # Equality includes omission, so Annotated's metadata cache cannot confuse
+    # an omitted property with an explicit default. Values already supply hash.
+    _overrides: _DisplayProperties = field(repr=False, hash=False)
+
+    def __init__(self, **overrides: Unpack[_DisplayProperties]) -> None:
+        """Accept keyword hints; reject negative decimals and empty group names.
+
+        Omitted keywords keep the public defaults but do not override aliases.
+        """
+        # Keep explicit keys separately: False and None are meaningful overrides.
+        # Typed keyword assignment avoids sentinel values in public attributes.
+        for name, value in overrides.items():
+            if name not in _DisplayProperties.__optional_keys__:
+                raise TypeError(f"Unknown Display property: {name}")
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "_overrides", overrides)
         if self.decimals is not None and self.decimals < 0:
             raise ValueError(f"Display decimals must be >= 0, got {self.decimals}")
         if self.group == "":
             raise ValueError("Display group must be a nonempty name or None")
+
+    def overlay(self, outer: Display) -> Display:
+        """Return a detached declaration with only outer's explicit overrides.
+
+        Omitted properties remain omitted so this result can safely be used as
+        metadata on another alias. Explicit None and False remain overrides.
+        """
+        overrides = self._overrides.copy()
+        overrides.update(outer._overrides)
+        return Display(**overrides)
 
 
 @dataclass(frozen=True)

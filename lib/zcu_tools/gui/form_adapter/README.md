@@ -20,7 +20,7 @@
 
 生成器集中處理兩條翻譯政策，host 與 `gui.form` 使用轉換結果：
 
-- `FieldMeta` 的 label、unit、decimals、description、group、readonly 與 element_label 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。唯讀不把欄位改成單值 Literal，原有數值型別與精度保留。Sweep 的 decimals 傳到 start／stop、center／span 與 step float 欄位，不套外層 model 或 n。
+- `FieldMeta` 的 label、unit、decimals、description、group、readonly 與 element_label 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。`Display` 按明示屬性疊加，外層明示的 False／None 也優先；未指定屬性沿用 alias。生成器用 `Display.overlay` 加上 hidden 或 sweep 政策，保留其餘屬性的未指定狀態。`InputDefault` 等其他 metadata 仍整份覆蓋。唯讀不把欄位改成單值 Literal，原有數值型別與精度保留。Sweep 的 decimals 傳到 start／stop、center／span 與 step float 欄位，不套外層 model 或 n。
 - 生成 module 欄位時，選填的 `desc` 不在 model、input、description 與寫入路徑。`to_cfg` 驗證成 Spec 時由 Spec 預設補回。從 library 複製成 inline 或 `input_from_spec` 時，原 description 被丟棄，所以編輯後會變回預設。Readout 的必填通道照常可編輯；Pulse cfg 不保存 `ro_ch`、`mux_*`、`mask` 或 `outsel`。範本 seed 屏蔽欄位時，註冊入口拒絕，訊息寫出 template id 與 seed 路徑；`to_cfg` 只由 Spec 預設補回。其他欄位的字串 seed 照舊是字面值。屏蔽政策由生成器固定。
 
 生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。對明確預設為 None 的 nullable module，生成器補入停用值，讓選單顯示 None 而非空白。只允許 None、卻沒有 None 預設的 required 欄位不自動停用。通用 Form 的 static defaults 仍省略 None，不影響 validator 推導值。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。切換由 `_converters.py` 集中處理，依 [ADR-0079](../../../../docs/adr/0079-form-field-transitions.md#共用-inline-政策) 共用同名同型別的 raw 繼承。
