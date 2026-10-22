@@ -206,7 +206,7 @@ def test_drive_affects_only_its_own_cavity_with_global_dc_live_refresh():
             order=(0, 1, 2, 3, 4, 5),
             cavities=(0, 1, 2, 3, 4, 5),
             drive=PulseCfg(
-                ch=3, nqz=1, freq=580, gain=0.2, waveform=ConstWaveformCfg(length=0.032)
+                ch=3, nqz=1, freq=580, gain=0.2, waveform=ConstWaveformCfg(length=0.064)
             ),
         ).acquire(env.soc, progress=False)
         assert baseline is not None and driven is not None
