@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from zcu_tools.datafile import CfgSnapshot
+from zcu_tools.experiment.metadata import CfgSnapshot
 
 from .backup import finish_cleanup
 from .bootstrap import prepare_session, publish_report, validate_mapping

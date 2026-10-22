@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from zcu_tools.datafile import CfgSnapshot
+from zcu_tools.experiment.metadata import CfgSnapshot
 
 from migrations.legacy_labber import LegacyVariableSchema
 

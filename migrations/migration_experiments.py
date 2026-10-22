@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TypeVar
 
 import numpy as np
-from zcu_tools.datafile import CfgSnapshot, validate_cfg_snapshot
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -17,6 +16,7 @@ from zcu_tools.experiment import (
     ZSpec,
     load_run,
 )
+from zcu_tools.experiment.metadata import CfgSnapshot, validate_cfg_snapshot
 
 from migrations.experiment_declaration import MigrationExperiment
 from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema

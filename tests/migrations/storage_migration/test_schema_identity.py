@@ -10,12 +10,12 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import (
-    CfgSnapshot,
     DataVariable,
     LabberMetadata,
     encode_labber_comment,
     save_labber_data,
 )
+from zcu_tools.experiment.metadata import CfgSnapshot
 
 from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
 from migrations.storage_migration import (

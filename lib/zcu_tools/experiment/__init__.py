@@ -43,14 +43,20 @@ if TYPE_CHECKING:
         RecordExperiment,
         SynchronousExperiment,
     )
+    from .metadata import (
+        CfgSnapshot,
+        RunMetadata,
+        RunSnapshot,
+        SoftwareProvenance,
+        validate_cfg_snapshot,
+        validate_run_id,
+    )
     from .native_persistence import (
         CfgUnavailableWarning,
         PreparedRunData,
         RestoredRun,
-        RunSnapshot,
         load_run,
         load_run_with_metadata,
-        native_schemas,
         prepare_run_data,
         restore_run,
         save_run,
@@ -58,6 +64,11 @@ if TYPE_CHECKING:
     from .records import AnalysisRecord, RunRecord
 
 __all__ = [
+    "validate_run_id",
+    "validate_cfg_snapshot",
+    "SoftwareProvenance",
+    "RunMetadata",
+    "CfgSnapshot",
     "AnalysisDocument",
     "encode_analysis_document",
     "config",
@@ -69,7 +80,6 @@ __all__ = [
     "RunSnapshot",
     "save_run",
     "load_run",
-    "native_schemas",
     "PreparedRunData",
     "RestoredRun",
     "CfgUnavailableWarning",
@@ -106,6 +116,11 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "validate_run_id": ".metadata",
+    "validate_cfg_snapshot": ".metadata",
+    "SoftwareProvenance": ".metadata",
+    "RunMetadata": ".metadata",
+    "CfgSnapshot": ".metadata",
     "AnalysisDocument": ".artifacts",
     "encode_analysis_document": ".artifacts",
     "config": ".config",
@@ -114,10 +129,9 @@ _EXPORT_MODULES = {
     "new_run_id": ".acquisition",
     "ExpCfgModel": ".cfg_model",
     "RunRecord": ".records",
-    "RunSnapshot": ".native_persistence",
+    "RunSnapshot": ".metadata",
     "save_run": ".native_persistence",
     "load_run": ".native_persistence",
-    "native_schemas": ".native_persistence",
     "PreparedRunData": ".native_persistence",
     "RestoredRun": ".native_persistence",
     "CfgUnavailableWarning": ".native_persistence",

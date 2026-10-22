@@ -8,7 +8,6 @@ from uuid import UUID
 
 from pydantic import TypeAdapter
 from zcu_tools.datafile import (
-    CfgSnapshot,
     Container,
     JsonObject,
     LabberMetadata,
@@ -19,6 +18,7 @@ from zcu_tools.datafile import (
     load_labber_device_snapshot,
     save,
 )
+from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.resources.entry import (
     ArtifactKey,
     ResultEntry,

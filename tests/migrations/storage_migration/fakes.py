@@ -10,13 +10,12 @@ import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from zcu_tools.datafile import (
-    CfgSnapshot,
     JsonObject,
     LabberMetadata,
     encode_labber_comment,
     save_labber_data,
 )
-from zcu_tools.datafile.native_models import SoftwareProvenance
+from zcu_tools.experiment.metadata import CfgSnapshot, SoftwareProvenance
 from zcu_tools.resources.entry import ComponentSchema
 
 from migrations.storage_migration import (

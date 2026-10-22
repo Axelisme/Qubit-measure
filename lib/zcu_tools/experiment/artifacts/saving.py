@@ -7,16 +7,12 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Literal
+from typing import Literal, TypeVar
 from uuid import uuid4
 
 from matplotlib.figure import Figure
 
-from zcu_tools.datafile import (
-    RunMetadata,
-    save_run_data,
-    write_labber,
-)
+from zcu_tools.datafile import encode_labber_comment, save, write_labber
 from zcu_tools.resources.entry import (
     ArtifactKey,
     JsonObject,
@@ -31,6 +27,9 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.ledger_models import validate_origin
 from zcu_tools.utils import atomic_replace
 
+from ..cfg_model import ExpCfgModel
+from ..metadata import RunMetadata
+from ..records import RunRecord
 from .analysis_document import encode_analysis_document
 from .items import (
     AnalysisItem,
@@ -39,6 +38,9 @@ from .items import (
     FigureItem,
     SaveArtifact,
 )
+
+CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+ResultT = TypeVar("ResultT")
 
 
 @dataclass(frozen=True)
@@ -83,14 +85,15 @@ def save_artifacts(
     artifacts: tuple[SaveArtifact, ...],
     *,
     layout: SaveLayout,
-    metadata: RunMetadata,
+    record: RunRecord[CfgT, ResultT],
     ledger: RecordsLedger,
     origin: Origin,
     figure_encoder: Callable[[Figure], bytes] | None = None,
 ) -> SaveReport:
     """Rewrite every selected output, isolate failures, then append one saved event.
 
-    metadata supplies fixed run/context/acquisition evidence; layout supplies
+    record.metadata supplies fixed run/context/acquisition evidence; missing
+    or invalid metadata raises ValueError before writes. layout supplies
     exact entry destinations and ledger belongs to that entry. origin is gui,
     notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
@@ -101,24 +104,25 @@ def save_artifacts(
     thread. AnalysisDocument uses the artifacts-owned analysis encoder.
     Encoding failure marks all destinations of that member failed and still
     attempts other members. Do not encode in the caller or accept bytes aliases.
-    Attempt Labber before native for each data member, retaining the previous
-    successful metadata.labber_path if this Labber output fails. Native/PNG/JSON
+    Labber paths appear only in output results and the saved ledger event.
+    Native/PNG/JSON
     use single-file replacement; Labber never overwrites or retries.
     Return every output attempt, even when some fail. Ledger append errors
     propagate after the writes, without deleting files or returning a receipt.
     """
+    metadata = record.metadata
+    if metadata is None:
+        raise ValueError("RunRecord.metadata is None; cannot save without metadata")
+    metadata = RunMetadata.model_validate(metadata)
     validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()
     results: list[OutputResult] = []
-    current_metadata = metadata
     for artifact in artifacts:
         for member in artifact.members:
             outputs = layout.outputs(member.key)
             if isinstance(member, DataItem):
-                attempts, current_metadata = _save_data(
-                    member, outputs, current_metadata
-                )
+                attempts = _save_data(member, outputs, metadata)
             else:
                 attempts = _save_file(member, outputs, figure_encoder)
             results.extend(attempts)
@@ -131,7 +135,7 @@ def save_artifacts(
         ),
         None,
     )
-    record: JsonObject = {
+    saved_record: JsonObject = {
         "point": metadata.snapshot.point,
         "experiment": metadata.experiment,
         "outputs": [
@@ -171,7 +175,7 @@ def save_artifacts(
                 ),
             ),
         ),
-        record=record,
+        record=saved_record,
     )
     return report
 
@@ -182,41 +186,37 @@ def _failed(key: ArtifactKey, output: Output, error: Exception) -> OutputResult:
 
 def _save_data(
     member: DataItem, outputs: tuple[Output, ...], metadata: RunMetadata
-) -> tuple[tuple[OutputResult, ...], RunMetadata]:
+) -> tuple[OutputResult, ...]:
     if isinstance(member.data, DataPreparationFailure):
         return tuple(
             OutputResult(member.key, output, "failed", member.data.error)
             for output in outputs
-        ), metadata
-    attempts: dict[Output, OutputResult] = {}
-    # Native must see the successful Labber link, but the report retains layout order.
-    ordered = sorted(outputs, key=lambda output: output.format != "labber")
-    for output in ordered:
+        )
+    attempts: list[OutputResult] = []
+    for output in outputs:
         try:
             output.path.parent.mkdir(parents=True, exist_ok=True)
             if output.format == "labber":
                 write_labber(
                     output.path,
-                    member.data.payload,
-                    cfg=member.data.cfg,
+                    member.data.container,
+                    metadata=replace(
+                        member.data.labber_metadata,
+                        comment=encode_labber_comment(
+                            member.data.cfg.values, member.data.labber_metadata.comment
+                        ),
+                    ),
                     grouped_layout=member.data.labber_layout,
                 )
-                metadata = replace(metadata, labber_path=str(output.path))
             else:
-                save_run_data(
-                    output.path,
-                    member.data.payload,
-                    metadata,
-                    cfg=member.data.cfg,
-                    replace=True,
-                )
+                save(output.path, member.data.to_container(metadata), replace=True)
         except Exception as error:
-            # Isolate this destination; other formats still receive the same prepared data.
+            # Isolate this destination; other formats still receive prepared data.
             logging.exception("Failed saving %s", output.path)
-            attempts[output] = _failed(member.key, output, error)
+            attempts.append(_failed(member.key, output, error))
         else:
-            attempts[output] = OutputResult(member.key, output, "saved", None)
-    return tuple(attempts[output] for output in outputs), metadata
+            attempts.append(OutputResult(member.key, output, "saved", None))
+    return tuple(attempts)
 
 
 def _save_file(

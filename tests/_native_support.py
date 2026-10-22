@@ -3,13 +3,8 @@
 from uuid import UUID
 
 import h5py as h5
-import numpy as np
-from zcu_tools.datafile import (
+from zcu_tools.experiment.metadata import (
     CfgSnapshot,
-    DataVariable,
-    ExperimentPayload,
-    LabberMetadata,
-    LabberPayload,
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -45,7 +40,6 @@ def native_metadata(tag: str = "test/native") -> RunMetadata:
         started_at="2026-10-06T01:00:00Z",
         finished_at="2026-10-06T01:00:02Z",
         completion="complete",
-        labber_path="exports/previous.h5",
         snapshot=RunSnapshot(
             entry_id=UUID("12345678-1234-5678-1234-567812345678"),
             entry_name="test_entry",
@@ -70,19 +64,4 @@ def native_cfg() -> CfgSnapshot:
         values={"frequency": 5000.0, "nested": {"unknown": [None, True, 1.5]}},
         cfg_type="SyntheticCfg",
         schema_version="1.3",
-    )
-
-
-def native_payload() -> ExperimentPayload:
-    """Return a single SI complex signal and one absolute timestamp."""
-    return ExperimentPayload(
-        variables={
-            DataVariable("readout"): LabberPayload(
-                ("signal", "V", np.array([1.0 + 2.0j, 3.0 - 4.0j])),
-                axes=[("frequency", "Hz", np.array([4.0e9, 5.0e9]))],
-                timestamps=np.array([1760000000.0]),
-            )
-        },
-        metadata=LabberMetadata(tags="test/native"),
-        representation="single",
     )

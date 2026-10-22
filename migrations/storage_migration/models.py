@@ -8,11 +8,8 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import JsonValue
-from zcu_tools.datafile import (
-    CfgSnapshot,
-    JsonObject,
-)
-from zcu_tools.datafile.native_models import SoftwareProvenance
+from zcu_tools.datafile import JsonObject
+from zcu_tools.experiment.metadata import CfgSnapshot, SoftwareProvenance
 
 from migrations.comparison import ExistingItem
 from migrations.comparison import MigrationDifference as MigrationDifference

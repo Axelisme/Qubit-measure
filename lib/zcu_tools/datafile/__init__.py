@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         VariableSchema,
     )
     from .grouped import load_grouped_labber_data, save_grouped_labber_data
+    from .json_values import json_values_equal
     from .labber import save_labber_data, save_labber_trace_data
     from .labber_container import read_labber
     from .labber_reader import load_labber_data, load_labber_logs
@@ -36,12 +37,6 @@ if TYPE_CHECKING:
         LabberMetadata,
         LabberPayload,
     )
-    from .native_metadata import (
-        json_values_equal,
-        validate_cfg_snapshot,
-        validate_run_id,
-    )
-    from .native_models import CfgSnapshot
     from .paths import (
         create_datafolder,
         format_ext,
@@ -86,9 +81,6 @@ __all__ = [
     "load_grouped_labber_data",
     "LabberSnapshotError",
     "load_labber_device_snapshot",
-    "CfgSnapshot",
-    "validate_cfg_snapshot",
-    "validate_run_id",
     "json_values_equal",
     "format_ext",
     "remove_ext",
@@ -133,10 +125,7 @@ _EXPORT_MODULES = {
     "load_grouped_labber_data": ".grouped",
     "LabberSnapshotError": ".labber_snapshot",
     "load_labber_device_snapshot": ".labber_snapshot",
-    "CfgSnapshot": ".native_models",
-    "validate_cfg_snapshot": ".native_metadata",
-    "validate_run_id": ".native_metadata",
-    "json_values_equal": ".native_metadata",
+    "json_values_equal": ".json_values",
     "format_ext": ".paths",
     "remove_ext": ".paths",
     "reserve_labber_filepath": ".paths",

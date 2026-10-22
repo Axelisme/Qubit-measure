@@ -1,4 +1,4 @@
-"""Native typed-result persistence, with the caller supplying an explicit spec."""
+"""Typed Result/metadata mapping over the standalone numeric/JSON Container."""
 
 import warnings
 from copy import deepcopy
@@ -10,18 +10,12 @@ import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
 from zcu_tools.datafile import (
-    CfgSnapshot,
-    ExperimentPayload,
+    Container,
+    ContainerAttrs,
     JsonObject,
     LabberMetadata,
-    RunMetadata,
-    RunSnapshot,
-    StoredRun,
-    VariableSchema,
-    load_run_data,
-    save_run_data,
-    validate_cfg_snapshot,
-    validate_experiment_payload,
+    load,
+    save,
 )
 
 from .axes_spec import (
@@ -33,11 +27,15 @@ from .axes_spec import (
     VariableZSpec,
 )
 from .cfg_model import ExpCfgModel
+from .metadata import CfgSnapshot, RunMetadata, RunSnapshot, validate_cfg_snapshot
 from .records import RunRecord
 
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 ResultT = TypeVar("ResultT")
 RecordT = TypeVar("RecordT", covariant=True)
+_METADATA = TypeAdapter(RunMetadata)
+_CFG = TypeAdapter(CfgSnapshot)
+_JSON = TypeAdapter(JsonObject)
 
 
 class CfgUnavailableWarning(UserWarning):
@@ -46,11 +44,11 @@ class CfgUnavailableWarning(UserWarning):
 
 @dataclass(frozen=True)
 class RestoredRun(Generic[RecordT]):
-    """A restored result and an explicit historical configuration diagnostic.
+    """Typed record and its optional historical configuration diagnostic.
 
-    record is the core's typed RunRecord or an adapter-owned opaque result.
-    cfg_issue is None when typed cfg is available, otherwise a nonempty readable
-    reason why it is unavailable. It never substitutes current or default cfg.
+    record contains restored arrays and metadata. cfg_issue is None for valid cfg,
+    otherwise the readable reason why cfg is unavailable. No defaults substitute
+    for unavailable historical cfg.
     """
 
     record: RecordT
@@ -59,37 +57,51 @@ class RestoredRun(Generic[RecordT]):
 
 @dataclass(frozen=True)
 class PreparedRunData:
-    """One typed record mapped for the native and Labber writers.
+    """One record's detached cfg, numeric container and Labber export options.
 
-    payload contains SI/discrete arrays, ordered variable identities and the
-    original user comment; representation preserves single/grouped semantics.
-    cfg contains the same record's complete JSON values and declaration identity.
-    labber_layout carries the grouped spec's explicit 'common' or 'independent'
-    export layout; single specs use 'common'. It does not alter the native payload.
-    Construction isolates cfg JSON, variable mappings and metadata containers,
-    without copying large arrays. Callers must not modify arrays during saving.
-    Format-specific constraints and I/O remain the respective writer's concern.
+    container holds SI arrays with NumPy-ordered axes. cfg retains complete JSON
+    values and declaration identity. labber_metadata carries raw comment and tags,
+    not a cfg envelope. labber_layout is common or independent, from the spec.
+    Construction copies mappings and cfg/metadata but shares large arrays.
+    Callers must not mutate arrays during saving. Preparation performs no I/O.
     """
 
-    payload: ExperimentPayload
+    container: Container
     cfg: CfgSnapshot
+    labber_metadata: LabberMetadata
     labber_layout: Literal["common", "independent"] = "common"
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
-            "payload",
+            "container",
             replace(
-                self.payload,
-                variables=dict(self.payload.variables),
-                metadata=replace(
-                    self.payload.metadata, tags=list(self.payload.metadata.tags)
-                ),
+                self.container,
+                vars=dict(self.container.vars),
+                docs=deepcopy(self.container.docs),
+                groups=dict(self.container.groups),
             ),
         )
-        object.__setattr__(
-            self, "cfg", replace(self.cfg, values=deepcopy(self.cfg.values))
-        )
+        object.__setattr__(self, "cfg", deepcopy(self.cfg))
+        object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
+
+    def to_container(self, metadata: RunMetadata) -> Container:
+        """Return the prepared arrays with validated docs/cfg and docs/metadata.
+
+        metadata is the saving record's historical evidence. Revalidate even
+        unchecked model_copy updates. Invalid cfg or metadata raises ValueError;
+        no live state is captured, paths chosen or files written. Unknown prepared
+        docs/groups and container attributes remain intact.
+        """
+        validate_cfg_snapshot(self.cfg)
+        try:
+            metadata = _METADATA.validate_python(metadata)
+        except ValidationError as error:
+            raise ValueError(f"/docs/metadata: {error}") from error
+        docs = dict(self.container.docs)
+        docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
+        docs["metadata"] = _JSON.validate_python(metadata.model_dump(mode="json"))
+        return replace(self.container, docs=docs)
 
 
 def prepare_run_data(
@@ -98,16 +110,13 @@ def prepare_run_data(
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
     comment: str,
 ) -> PreparedRunData:
-    """Prepare disk-unit payload and JSON cfg from one typed record, without I/O.
+    """Prepare SI variables/cfg and raw Labber comment from one typed record.
 
-    source.cfg must be present and match spec.cfg_type; result must match
-    spec.result_type. Validate declared variables, shapes, units and an optional
-    grouped result validator. Preserve single/grouped representation, including
-    a one-member group, and retain comment as raw text for the writer's codec.
-    Carry the grouped spec's declared Labber layout without changing native data.
-    Invalid cfg/result/comment raises TypeError or ValueError; missing Result
-    fields raise AttributeError. Do not require Labber-compatible common grids
-    or axes, choose paths, capture metadata or mutate the source record.
+    cfg must be present and match spec.cfg_type; result must match result_type.
+    Validate shapes/dtypes and the grouped result validator. Preserve the spec's
+    Labber layout without adding common-grid restrictions. Metadata may be absent
+    during preparation; native saving requires it. Bad inputs raise TypeError,
+    ValueError or AttributeError. No I/O, live capture or source mutation occurs.
     """
     if source.cfg is None:
         raise ValueError("RunRecord.cfg is None; cannot save without configuration")
@@ -116,47 +125,30 @@ def prepare_run_data(
     if not isinstance(source.result, spec.result_type):
         raise TypeError(f"Result must be {spec.result_type.__name__}")
     comment = TypeAdapter(str).validate_python(comment, strict=True)
-    variables = _variable_specs(spec)
     if isinstance(spec, GroupedAxesSpec) and spec.result_validator is not None:
         spec.result_validator(source.result)
-    payload = ExperimentPayload(
-        variables={
-            variable.data_variable: variable.payload_from_result(
-                source.result, context=f"{spec.tag}: /data/{variable.data_variable}"
+    container = Container(
+        vars={
+            str(variable.data_variable): variable.variable_from_result(
+                source.result, context=f"{spec.tag}: /vars/{variable.data_variable}"
             )
-            for variable in variables
+            for variable in _variable_specs(spec)
         },
-        metadata=LabberMetadata(comment=comment, tags=spec.tag),
-        representation="grouped" if isinstance(spec, GroupedAxesSpec) else "single",
+        docs={},
+        groups={},
+        attrs=ContainerAttrs("3.0", "zcu_tools.experiment", "experiment-run", {}),
     )
-    validate_experiment_payload(payload, schema=native_schemas(spec))
     cfg = CfgSnapshot(
-        values=TypeAdapter(JsonObject).validate_python(
-            source.cfg.model_dump(mode="json")
-        ),
+        values=_JSON.validate_python(source.cfg.model_dump(mode="json")),
         cfg_type=spec.cfg_type.__name__,
         schema_version=spec.cfg_schema_version,
     )
     return PreparedRunData(
-        payload=payload,
-        cfg=cfg,
-        labber_layout=spec.labber_layout
-        if isinstance(spec, GroupedAxesSpec)
-        else "common",
+        container,
+        cfg,
+        LabberMetadata(comment=comment, tags=spec.tag),
+        spec.labber_layout if isinstance(spec, GroupedAxesSpec) else "common",
     )
-
-
-def native_schemas(
-    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
-) -> tuple[VariableSchema, ...]:
-    """Project an explicit experiment declaration to generic disk-unit schemas.
-
-    spec is the same single or grouped declaration accepted by save_run/load_run.
-    Return one schema per declared variable, preserving axes, names, units,
-    dtypes and required identities. Do not inspect files, cfg or live hardware.
-    Invalid declared units/dtypes propagate datafile schema validation errors.
-    """
-    return tuple(variable.native_schema() for variable in _variable_specs(spec))
 
 
 def save_run(
@@ -164,28 +156,24 @@ def save_run(
     destination: Path,
     *,
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
-    metadata: RunMetadata,
     replace: bool = False,
 ) -> None:
-    """Save a typed record to native data.h5 using the explicit mapping spec.
+    """Save a typed record with its own metadata at the exact native path.
 
-    source.cfg must be non-None and match spec.cfg_type. Map arrays to declared
-    SI/discrete units and preserve spec variable identities/representation.
-    metadata is caller-captured historical evidence; its experiment must match
-    spec.tag. cfg_type and schema_version come from the supplied declaration.
-    Validate through datafile; do not inspect HDF5 layout here. Existing files
-    raise FileExistsError unless replace=True, using atomic single-file replace.
-    Invalid cfg/Result/spec/metadata raises ValueError or TypeError; I/O errors
-    propagate. No live context capture, filename inference or legacy fallback.
+    source.cfg and metadata must be present; metadata.experiment must match tag.
+    Map arrays to declared SI/discrete units and serialize cfg/metadata as JSON
+    docs. Invalid inputs raise ValueError/TypeError before I/O. Existing files
+    raise FileExistsError unless replace=True. Atomic single-file publication
+    and I/O errors belong to datafile. No live state or legacy format is guessed.
     """
-    prepared = prepare_run_data(source, spec=spec, comment="")
-    if metadata.experiment != spec.tag:
+    if source.metadata is None:
+        raise ValueError("RunRecord.metadata is None; cannot save without metadata")
+    if source.metadata.experiment != spec.tag:
         raise ValueError(
-            f"{destination}: /: experiment {metadata.experiment!r} does not match {spec.tag!r}"
+            f"{destination}: experiment {source.metadata.experiment!r} does not match {spec.tag!r}"
         )
-    save_run_data(
-        destination, prepared.payload, metadata, cfg=prepared.cfg, replace=replace
-    )
+    prepared = prepare_run_data(source, spec=spec, comment="")
+    save(destination, prepared.to_container(source.metadata), replace=replace)
 
 
 def load_run(
@@ -193,101 +181,86 @@ def load_run(
     *,
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
 ) -> tuple[RunRecord[CfgT, ResultT], RunSnapshot]:
-    """Load one native record and its caller-captured historical snapshot.
+    """Load a record and its historical snapshot using an explicit declaration.
 
-    source is the exact native file; spec declares its typed Result/cfg mapping.
-    Delegate to load_run_with_metadata and return only its snapshot for the
-    existing tuple contract. The same validation and I/O errors propagate;
-    no live context is captured and this instance-free entry mutates no caller.
+    This tuple retains the snapshot convenience contract. Both items come from
+    the same validated metadata document; invalid data/metadata/cfg raises a
+    source-located ValueError. I/O errors propagate. Incompatible typed cfg emits
+    CfgUnavailableWarning and leaves valid arrays/metadata available with cfg=None.
     """
-    record, metadata = load_run_with_metadata(source, spec=spec)
-    return record, metadata.snapshot
+    record = load_run_with_metadata(source, spec=spec)
+    if record.metadata is None:
+        raise ValueError(f"{source}: missing metadata")
+    return record, record.metadata.snapshot
 
 
 def load_run_with_metadata(
     source: Path,
     *,
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
-) -> tuple[RunRecord[CfgT, ResultT], RunMetadata]:
-    """Load typed data and all historical run metadata using an explicit spec.
+) -> RunRecord[CfgT, ResultT]:
+    """Read a Container once and return a typed record carrying all run metadata.
 
-    source is an exact native file. Metadata retains its run identity, UTC
-    times, completion, Labber path, snapshot and provenance without recapture.
-    Read through datafile once without capturing a full file image, then use
-    restore_run for typed conversion. Incompatible cfg type/schema or concrete
-    validation returns cfg=None and emits CfgUnavailableWarning. Valid arrays
-    remain available. Same-major minor and unknown cfg keys use known projection.
-    Wrong tag, missing variables or malformed native data/cfg envelope raises a
-    located ValueError (format/version retain public subtypes). I/O errors
-    propagate. No registry lookup, dynamic imports or Labber/legacy fallback.
-    This typed tuple is not a lossless unknown-field rewrite envelope; callers
-    needing that promise use datafile.load_run_data(preserve_unknown=True).
+    source is the exact path, not a filename-derived identity. Container format
+    and document/data validation errors name source; I/O errors propagate.
+    Incompatible typed cfg warns and yields cfg=None after successful Result
+    reconstruction. No live capture, registry lookup or Labber fallback occurs.
+    The record is not a lossless rewrite envelope; retain Container for that use.
     """
-    stored = load_run_data(source)
+    container = load(source)
     try:
-        restored = restore_run(stored, spec=spec)
+        return restore_run(container, spec=spec).record
     except ValueError as error:
         raise ValueError(f"{source}: {error}") from error
-    return restored.record, stored.metadata
 
 
 def restore_run(
-    stored: StoredRun,
+    stored: Container,
     *,
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
 ) -> RestoredRun[RunRecord[CfgT, ResultT]]:
-    """Convert already-read native data to a typed record without I/O.
+    """Restore typed arrays/cfg/metadata from an already-read Container, without I/O.
 
-    stored supplies generic SI arrays and historical cfg/metadata; spec explicitly
-    declares the experiment tag, required variables, memory units and cfg model.
-    Validate tag and data before interpreting typed cfg. Missing variables, bad
-    axes/units/dtype/shape, invalid cfg envelope or rejected builder results raise
-    ValueError or TypeError. Extra variables are projected out. No registry or
-    dynamic imports are used, and raw cfg/metadata are not modified. Grouped
-    builders receive cfg_snapshot=None: build and validate the Result from
-    variables before restoring typed cfg.
-
-    A valid cfg envelope with an incompatible cfg_type, schema major or concrete
-    model returns record.cfg=None and a readable cfg_issue, also emitted as one
-    CfgUnavailableWarning after successful reconstruction. Same-major minor and
-    unknown cfg keys use typed known projection; validators see isolated raw
-    values. record.labber_metadata retains a detached copy of the payload's
-    comment, tags, project, user and creation time. This result is not a lossless
-    rewrite envelope.
+    Validate metadata/tag, required variables, units/axes/dtypes/shapes and cfg
+    envelope. Reconstruct and validate Result before concrete cfg validation;
+    grouped builders receive cfg_snapshot=None. Extra variables/unknown cfg keys
+    remain in the Container, not the typed record. Malformed docs or data raise
+    ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
+    cfg_issue and one CfgUnavailableWarning, retaining data and record.metadata.
+    Inputs are not changed and no current settings substitute historical values.
     """
-    if stored.metadata.experiment != spec.tag:
+    try:
+        metadata = _METADATA.validate_python(stored.docs["metadata"])
+    except (KeyError, ValidationError) as error:
+        raise ValueError(f"/docs/metadata: {error}") from error
+    if metadata.experiment != spec.tag:
         raise ValueError(
-            f"/: experiment {stored.metadata.experiment!r} does not match {spec.tag!r}"
+            f"/docs/metadata: experiment {metadata.experiment!r} does not match {spec.tag!r}"
         )
     variables = _variable_specs(spec)
     missing = {
-        variable.data_variable for variable in variables
-    } - stored.payload.variables.keys()
+        str(variable.data_variable) for variable in variables
+    } - stored.vars.keys()
     if missing:
-        raise ValueError(f"/data: missing variables {sorted(missing)}")
-    payload = ExperimentPayload(
-        variables={
-            variable.data_variable: stored.payload.variables[variable.data_variable]
-            for variable in variables
-        },
-        metadata=stored.payload.metadata,
-        representation="grouped" if isinstance(spec, GroupedAxesSpec) else "single",
-    )
-    validate_experiment_payload(
-        payload, schema=tuple(variable.native_schema() for variable in variables)
-    )
+        raise ValueError(f"/vars: missing variables {sorted(missing)}")
     loaded = {
-        variable.data_variable: variable.loaded_from_payload(
-            payload.variables[variable.data_variable],
-            context=f"/data/{variable.data_variable}",
+        variable.data_variable: variable.loaded_from_variable(
+            stored.vars[str(variable.data_variable)],
+            context=f"/vars/{variable.data_variable}",
         )
         for variable in variables
     }
-    validate_cfg_snapshot(stored.cfg)
+    try:
+        cfg_snapshot = _CFG.validate_python(stored.docs["cfg"])
+    except (KeyError, ValidationError) as error:
+        raise ValueError(f"/docs/cfg: {error}") from error
+    validate_cfg_snapshot(cfg_snapshot)
     if isinstance(spec, GroupedAxesSpec):
         result = spec.result_builder(
             GroupedLoadData(
-                variables=loaded, metadata=payload.metadata, cfg_snapshot=None
+                variables=loaded,
+                metadata=metadata.labber or LabberMetadata(),
+                cfg_snapshot=None,
             )
         )
         if not isinstance(result, spec.result_type):
@@ -304,13 +277,10 @@ def restore_run(
         }
         fields[spec.z.field_name] = variable.z
         result = spec.result_type(**fields)
-    cfg, cfg_issue = _restore_cfg(stored.cfg, spec=spec)
+    cfg, cfg_issue = _restore_cfg(cfg_snapshot, spec=spec)
     if cfg_issue is not None:
         warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)
-    return RestoredRun(
-        record=RunRecord(cfg=cfg, result=result, labber_metadata=payload.metadata),
-        cfg_issue=cfg_issue,
-    )
+    return RestoredRun(RunRecord(cfg=cfg, result=result, metadata=metadata), cfg_issue)
 
 
 def _restore_cfg(
@@ -319,15 +289,16 @@ def _restore_cfg(
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
 ) -> tuple[CfgT | None, str | None]:
     if cfg.cfg_type != spec.cfg_type.__name__:
-        return None, (
-            f"/cfg: cfg_type {cfg.cfg_type!r} does not match {spec.cfg_type.__name__!r}"
+        return (
+            None,
+            f"/cfg: cfg_type {cfg.cfg_type!r} does not match {spec.cfg_type.__name__!r}",
         )
     if int(cfg.schema_version.split(".")[0]) != int(
         spec.cfg_schema_version.split(".")[0]
     ):
-        return None, (
-            f"/cfg: schema major {cfg.schema_version!r} does not match "
-            f"{spec.cfg_schema_version!r} for {cfg.cfg_type}"
+        return (
+            None,
+            f"/cfg: schema major {cfg.schema_version!r} does not match {spec.cfg_schema_version!r} for {cfg.cfg_type}",
         )
     try:
         return spec.cfg_type.model_validate(deepcopy(cfg.values), extra="ignore"), None
@@ -340,7 +311,6 @@ def _variable_specs(
 ) -> tuple[VariableSpec, ...]:
     if isinstance(spec, GroupedAxesSpec):
         return spec.variables
-    # Reuse the same unit/dtype mapping for single and grouped native variables.
     return (
         VariableSpec(
             variable=spec.data_variable,

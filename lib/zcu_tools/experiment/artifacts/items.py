@@ -125,10 +125,7 @@ class DataItem(ArtifactItem):
             self,
             data=replace(
                 self.data,
-                payload=replace(
-                    self.data.payload,
-                    metadata=replace(self.data.payload.metadata, comment=comment),
-                ),
+                labber_metadata=replace(self.data.labber_metadata, comment=comment),
             ),
         )
 

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import h5py
 from pydantic import TypeAdapter
-from zcu_tools.datafile import CfgSnapshot, Container, JsonObject, load
-from zcu_tools.datafile.native_models import RunSnapshot
+from zcu_tools.datafile import Container, JsonObject, load
+from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot
 
 
 @dataclass(frozen=True)
