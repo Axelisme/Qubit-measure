@@ -114,19 +114,25 @@ def _legacy_provenance(file: h5.File) -> JsonObject:
     return provenance
 
 
-def load_legacy(file: h5.File) -> Container:
-    """Project native 2.x vars and JSON documents; retain the original tree."""
-    attrs = legacy_header(file)
-    cfg = known_node(file, "cfg")
-    if not isinstance(cfg, h5.Dataset):
-        raise FormatError("/cfg: missing dataset")
-    docs: dict[str, JsonObject] = {
-        "cfg": {
+def read_legacy_doc(file: h5.File, name: str) -> JsonObject:
+    """Project one cfg/metadata doc from a header-validated native 2.x file.
+
+    No variable schemas or arrays are read. Unknown names or missing cfg raise
+    KeyError; malformed document nodes raise ValueError/FormatError.
+    """
+    if name == "cfg":
+        cfg = known_node(file, "cfg")
+        if cfg is None:
+            raise KeyError(name)
+        if not isinstance(cfg, h5.Dataset):
+            raise FormatError("/cfg: expected dataset")
+        return {
             "values": read_doc(file, "cfg"),
             "cfg_type": text_attr(cfg, "cfg_type"),
             "schema_version": text_attr(cfg, "cfg_schema_version"),
         }
-    }
+    if name != "metadata":
+        raise KeyError(name)
     metadata: JsonObject = {}
     for name in (
         "run_id",
@@ -147,7 +153,18 @@ def load_legacy(file: h5.File) -> Container:
         metadata["labber"] = TypeAdapter(JsonObject).validate_json(
             text_attr(data, "metadata"), strict=True
         )
-    docs["metadata"] = metadata
+    json_text(metadata)
+    return metadata
+
+
+def load_legacy(file: h5.File) -> Container:
+    """Project native 2.x vars and JSON documents; retain the original tree."""
+    attrs = legacy_header(file)
+    try:
+        docs = {name: read_legacy_doc(file, name) for name in ("cfg", "metadata")}
+    except KeyError as error:
+        raise FormatError("/cfg: missing dataset") from error
+    data = known_group(file, "data")
     result: dict[str, Variable] = {}
     for name in data:
         if not isinstance(name, str):

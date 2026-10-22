@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .append import AppendWriter, open_append
     from .comment import LabberComment, decode_labber_comment, encode_labber_comment
-    from .container import inspect, load, save
+    from .container import inspect, load, read_doc, save
     from .container_models import (
         Axis,
         Container,
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 __all__ = [
     "save",
     "load",
+    "read_doc",
     "inspect",
     "open_append",
     "AppendWriter",
@@ -92,6 +93,7 @@ __all__ = [
 _EXPORT_MODULES = {
     "save": ".container",
     "load": ".container",
+    "read_doc": ".container",
     "inspect": ".container",
     "open_append": ".append",
     "AppendWriter": ".append",

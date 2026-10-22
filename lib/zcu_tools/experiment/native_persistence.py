@@ -15,6 +15,7 @@ from zcu_tools.datafile import (
     JsonObject,
     LabberMetadata,
     load,
+    read_doc,
     save,
 )
 
@@ -214,6 +215,46 @@ def load_run_with_metadata(
         raise ValueError(f"{source}: {error}") from error
 
 
+def _validate_metadata_doc(doc: JsonObject) -> RunMetadata:
+    try:
+        return _METADATA.validate_python(doc)
+    except ValidationError as error:
+        raise ValueError(f"/docs/metadata: {error}") from error
+
+
+def metadata_from_container(container: Container) -> RunMetadata:
+    """Validate and return typed historical evidence from container.docs/metadata.
+
+    container is an already-read generic Container; no arrays or cfg are examined,
+    no I/O occurs and the input is not changed. Unknown metadata keys remain in
+    the Container but are not projected into RunMetadata. Missing/invalid metadata
+    raises ValueError naming /docs/metadata; callers may attach their source path
+    when translating that error. No live settings or default metadata substitute
+    for missing historical evidence.
+    """
+    try:
+        doc = container.docs["metadata"]
+    except KeyError as error:
+        raise ValueError(f"/docs/metadata: {error}") from error
+    return _validate_metadata_doc(doc)
+
+
+def read_run_metadata(path: Path) -> RunMetadata:
+    """Read typed run metadata without loading arrays, cfg or the whole container.
+
+    path is the exact major-3 container or legacy native major-2 source path.
+    Validate only its projected metadata doc using the same schema as full load.
+    Invalid metadata/format raises path-qualified ValueError; missing documents
+    raise path-qualified KeyError and I/O errors propagate. No full-load fallback,
+    live capture, registry lookup or filename-derived identity is used.
+    """
+    doc = read_doc(path, "metadata")
+    try:
+        return _validate_metadata_doc(doc)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from error
+
+
 def restore_run(
     stored: Container,
     *,
@@ -229,10 +270,7 @@ def restore_run(
     cfg_issue and one CfgUnavailableWarning, retaining data and record.metadata.
     Inputs are not changed and no current settings substitute historical values.
     """
-    try:
-        metadata = _METADATA.validate_python(stored.docs["metadata"])
-    except (KeyError, ValidationError) as error:
-        raise ValueError(f"/docs/metadata: {error}") from error
+    metadata = metadata_from_container(stored)
     if metadata.experiment != spec.tag:
         raise ValueError(
             f"/docs/metadata: experiment {metadata.experiment!r} does not match {spec.tag!r}"

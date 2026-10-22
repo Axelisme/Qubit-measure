@@ -31,7 +31,10 @@ from .container_nodes import (
     write_doc,
     write_variable,
 )
-from .native_nodes import known_group
+from .container_nodes import (
+    read_doc as read_document,
+)
+from .native_nodes import known_group, known_node
 
 
 def save(path: Path, container: Container, *, replace: bool = False) -> None:
@@ -125,7 +128,6 @@ def load(path: Path) -> Container:
     docs/cfg and docs/metadata and its original tree is retained in groups/legacy.
     Malformed content raises path-qualified FormatError; I/O errors propagate.
     """
-    from .container_nodes import read_doc
     from .legacy_native import load_legacy
 
     with h5.File(path, "r") as file:
@@ -146,13 +148,44 @@ def load(path: Path) -> Container:
             docs = {}
             for name in node_names(documents):
                 name_segment(name)
-                docs[name] = read_doc(documents, name)
+                docs[name] = read_document(documents, name)
             image = file.id.get_file_image() if len(opaque) else b""
             groups = {}
             for name in node_names(opaque):
                 name_segment(name)
                 groups[name] = GroupSource(image, f"/groups/{name}")
             return Container(result, docs, groups, attrs)
+        except ValueError as error:
+            raise FormatError(f"{path}: {error}") from error
+
+
+def read_doc(path: Path, name: str) -> JsonObject:
+    """Read one detached finite JSON object without loading vars or other docs.
+
+    path is an exact major-3 container or legacy native major-2 file. name is a
+    nonempty path segment excluding '.', '..', slash and NUL. Legacy cfg and
+    metadata use the same projections as load; no other legacy docs are defined.
+    Only the header and requested document's nodes are validated. Invalid vars
+    do not prevent document reads, and success does not promise load will work.
+    Missing documents raise KeyError naming path and name. Invalid names raise
+    ValueError; malformed headers/documents or external links raise path-qualified
+    FormatError. File I/O errors propagate. The file is closed before returning.
+    """
+    from .legacy_native import legacy_header, read_legacy_doc
+
+    name_segment(name)
+    with h5.File(path, "r") as file:
+        try:
+            if text_attr(file, "format") == "zcu.experiment-data":
+                legacy_header(file)
+                return read_legacy_doc(file, name)
+            root_attrs(file)
+            documents = known_group(file, "docs")
+            if known_node(documents, name) is None:
+                raise KeyError(name)
+            return read_document(documents, name)
+        except KeyError as error:
+            raise KeyError(f"{path}: document {name!r} not found") from error
         except ValueError as error:
             raise FormatError(f"{path}: {error}") from error
 

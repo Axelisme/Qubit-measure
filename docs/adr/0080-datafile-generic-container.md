@@ -43,7 +43,8 @@ related: [0063, 0072]
 
 - `save(path, container: Container, *, replace: bool = False)`：寫到呼叫者的精確路徑，同目錄 temp 加 atomic replace。讀寫共用 `Container(vars, docs, groups, attrs)`，caller 可以直接修改 load 的結果再寫回，不另行拆出 header 參數。
 - `load(path) -> Container`：`groups` 是 detached opaque handle，只供寫回，原檔關閉或刪除後仍可使用。`attrs` 是 frozen `ContainerAttrs(format_version: str, producer: str, kind: str | None, extra: Mapping[str, JsonScalar])`。新檔由 caller 指定 3.0 與 producer，kind 可為 None。讀回的同 major 來源 minor 與未知根屬性 extra 在 save 保留，不降版。`format` 固定為 zcu.container，不接受 extra 覆寫 header keys。extra 只接受有限 JSON scalar，null 以 HDF5 null-dataspace attribute 表示。舊 2.x reader 回傳的 attrs 已正規化為 3.0。
-- `inspect(path) -> ContainerInfo`：只讀根屬性與每個 var／doc 的 schema，不載陣列。
+- `read_doc(path, name) -> JsonObject`：只讀指定的有限 JSON object，不讀 vars、其他 docs 或 opaque groups。接受與 load 相同的 3.x／2.x 格式與舊文件投影。缺文件 raise 指名來源檔與文件名的 KeyError；格式或文件非法 raise 指名來源檔的 FormatError。壞 vars 不阻礙合法文件讀取。
+- `inspect(path) -> ContainerInfo`：只讀根屬性與 var schema、doc/group 名稱，不解碼 docs，也不載陣列。
 - `open_append(path, *, vars: Mapping[str, VariableSchema], ...)`：長時間量測用，預先宣告完整形狀與 fill value，逐外層列寫入，`finalize()` 標記完成；這是今天 streaming 版面的通用化，不再是 Labber 專屬。
 - `Variable(values, axes: tuple[Axis, ...], unit)`、`Axis(name, unit, values)`：axes 按 NumPy 維度順序排列。`VariableSchema(shape, axes, dtype, unit, fill_value)` 宣告 append 的完整形狀與座標。`ContainerInfo` 的 axes 不載座標值。另提供 `JsonObject`、`JsonScalar` 與 `FormatError`。
 
@@ -57,7 +58,7 @@ Fluxdep database reader 由 `gui.app.fluxdep.database` 擁有。`analysis_docume
 
 ### 其他 package 的對應
 
-- `experiment`：擁有 `RunMetadata`（pydantic）與 cfg 的具名型別，save 時 `model_dump(mode="json")` 成 doc、load 時 `TypeAdapter` 驗回（[[0063]] 的 `axes_spec` mapping 不變，只是輸出目標從 `ExperimentPayload` 改為 `vars`）。`RunRecord.metadata` 承載它。
+- `experiment`：擁有 `RunMetadata`（pydantic）與 cfg 的具名型別，save 時 `model_dump(mode="json")` 成 doc、load 時 `TypeAdapter` 驗回（[[0063]] 的 `axes_spec` mapping 不變，只是輸出目標從 `ExperimentPayload` 改為 `vars`）。`RunRecord.metadata` 承載它。`native_persistence.read_run_metadata(path)` 用 read_doc 只讀 metadata；`metadata_from_container(container)` 驗證已載入的 Container。兩者共用同一個 RunMetadata 驗證函式，宿主不重做驗證，也不為取得已載 metadata 再開檔。
 - GUI、notebook、workflow 的宿主：只傳 `RunRecord`，不再另傳 metadata；載入對話框等需要 run_id、point、experiment 的地方讀 experiment 層的型別。
 - 遷移工具：`migrations/` 讀舊 Labber 與 2.x native，輸出新容器。
 
