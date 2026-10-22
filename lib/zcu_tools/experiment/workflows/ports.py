@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from qick import QickConfig
 
-from ...datafile import JsonObject
-from ...device import BaseDeviceInfo
-from ...plotting.plots import Plots
+from ...device import BaseDeviceInfo, DeviceMapping
 from ...progress_bar import BaseProgressBar
 from ..stop_signal import StopSignal
+from .plotting import WorkflowPlots
 
 
 class DevicePort(Protocol):
@@ -23,14 +22,12 @@ class DevicePort(Protocol):
     Neither the adapter nor the engine declares or checks device limits.
     """
 
-    def capture_snapshot(self) -> Mapping[str, JsonObject]:
-        """Read all connected drivers once into detached JSON, or raise.
+    def get_connected_devices(self) -> DeviceMapping:
+        """Return a detached name-to-driver mapping, empty when none are connected.
 
-        Called in the workflow worker before each experiment callback, under
-        the host's RUN lease. Reuse capture_device_snapshot and the public
-        driver mapping; do not read GUI cache or update GUI state. An explicitly
-        empty mapping means no connected devices. Read/serialization errors
-        propagate, without retries or cached fallbacks.
+        Call on the workflow worker under the RUN lease. Drivers remain borrowed;
+        their lifecycle belongs to the session. Do not connect, read hardware or
+        use GUI caches here. env.run owns the pre-call device snapshot.
         """
         ...
 
@@ -79,8 +76,10 @@ type ProgressFactory = Callable[..., BaseProgressBar]
 class EnginePorts[C]:
     """Capabilities owned and injected by the host.
 
-    ``plots`` is the host-owned Plots whose commands synchronously dispatch
-    artists to its PlotHost owner. The host stops execution before finish/release.
+    ``plots`` owns workflow trends and the latest independent operation group.
+    Its commands synchronously dispatch artists to the same PlotHost owner.
+    env.run finishes each operation; the host stops execution before finishing
+    workflow plots and releasing both presentations.
     ``progress`` accepts the existing
     make_pbar arguments and returns BaseProgressBar, including runtime bars.
     Do not use make_pbar itself as this factory; use a concrete backend factory.
@@ -91,7 +90,7 @@ class EnginePorts[C]:
     adapter, or None. The engine never connects or disconnects these handles.
     """
 
-    plots: Plots
+    plots: WorkflowPlots
     progress: ProgressFactory
     clock: Clock
     context: C | None = None

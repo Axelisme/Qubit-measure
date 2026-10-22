@@ -6,13 +6,13 @@ WIRE_VERSION; it reports GUI_VERSION without comparing it.
 
 from __future__ import annotations
 
-# Workflow commands share the measure session and headless tab owners.
+# Workflow Ask answers require the exact request ID; records expose commit directories.
 # Writeback previews include adapter-authored initial selection and notes.
 # Library/recipe diagnostics, explicit raw-save observations and predictor files.
 # Async recipe declarations use request-scoped answers and script/run cancellation.
 # Captured acceptance checks all pane revisions before any write.
-WIRE_VERSION = 116
+WIRE_VERSION = 117
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 149
+GUI_VERSION = 150

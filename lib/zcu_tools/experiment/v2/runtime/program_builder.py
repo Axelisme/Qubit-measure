@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeAlias
 
 import numpy as np
@@ -39,6 +39,14 @@ T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
 StopCondition: TypeAlias = Callable[[], bool]
+
+
+class _CallbackError(Exception):
+    """Carry callback origin across the producer's synchronous acquire boundary."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
 
 
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
@@ -166,8 +174,9 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
     Build/run operations require an active owner scope and a configured default
     slot for acquisition. Build methods require at least one explicit module.
     Invalid scope, missing modules/slot or negative retry raises immediately.
-    build() propagates factory errors; build-and-acquire methods instead record
-    build failures on the Schedule after retry exhaustion.
+    All build methods propagate factory errors without retry. Retry applies only
+    to acquire on the same built program. Conversion and update callback errors
+    propagate without marking an acquire failure.
 
     All acquire methods write each converted completed round before checking
     stop_condition, then write the final converted result. Data-driven stop is
@@ -326,39 +335,17 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
-        retry = options.retry
-        if retry < 0:
+        if options.retry < 0:
             raise ValueError("retry must be non-negative")
-
-        slot = self._default_slot()
-        for attempt in range(retry + 1):
-            if self._schedule.check_stop_requested():
-                return slot.view
-            try:
-                program = self._build_program(self._isolated_cfg())
-            except KeyboardInterrupt as exc:
-                self._schedule.mark_interrupted(exc)
-                return slot.view
-            # tolerated: Program factories may fail arbitrarily; preserve stop, retry and partial data.
-            except Exception as exc:  # noqa: BLE001
-                if self._schedule.check_stop_requested(exception=exc):
-                    return slot.view
-                if attempt == retry:
-                    self._schedule.mark_failed(exc)
-                    return slot.view
-                continue
-
-            result = runner(
-                program,
-                raw2signal_fn=raw2signal_fn,
-                options=replace(options, retry=0),
-                **acquire_kwargs,
-            )
-            if self._schedule.prepare_retry_after_failed_attempt(attempt, retry):
-                continue
-            return result
-
-        return self._default_slot().view
+        if self._schedule.check_stop_requested():
+            return self._default_slot().view
+        program = self._build_program(self._isolated_cfg())
+        return runner(
+            program,
+            raw2signal_fn=raw2signal_fn,
+            options=options,
+            **acquire_kwargs,
+        )
 
     def _run_program(
         self,
@@ -399,10 +386,12 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                         slot=slot,
                         pbar=pbar,
                     )
+                except _CallbackError as exc:
+                    raise exc.error from None
                 except KeyboardInterrupt as exc:
                     self._schedule.mark_interrupted(exc)
                     break
-                # tolerated: Acquire and round hooks may fail arbitrarily; preserve stop/retry and data.
+                # tolerated: Native acquisition failures retain partial data and may be retried.
                 except Exception as exc:  # noqa: BLE001
                     # The producer reports first-round cancellation with an exception.
                     cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
@@ -416,14 +405,8 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                 if self._schedule.check_stop_requested():
                     break
 
-                try:
-                    pbar.set_progress(rounds)
-                    slot.set(signal_fn(raw))
-                except KeyboardInterrupt as exc:
-                    self._schedule.mark_interrupted(exc)
-                # tolerated: Conversion/update callbacks may fail arbitrarily; retain data and the cause.
-                except Exception as exc:  # noqa: BLE001
-                    self._schedule.mark_failed(exc)
+                pbar.set_progress(rounds)
+                slot.set(signal_fn(raw))
                 break
         except KeyboardInterrupt as exc:
             self._schedule.mark_interrupted(exc)
@@ -472,10 +455,13 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         acquire_cancel_flag = AcquireCancelFlag(self._schedule.stop)
 
         def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
-            pbar.set_progress(ir)
-            slot.set(signal_fn(raw))
-            if options.stop_condition is not None and options.stop_condition():
-                cancel_flag.set()
+            try:
+                pbar.set_progress(ir)
+                slot.set(signal_fn(raw))
+                if options.stop_condition is not None and options.stop_condition():
+                    cancel_flag.set()
+            except Exception as exc:
+                raise _CallbackError(exc) from exc
 
         return acquire(
             self._soc,

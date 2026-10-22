@@ -1,14 +1,14 @@
 """Headless workflow hosting through synthetic registrations and shared session."""
 
+from threading import Event
+
 import pytest
 from pydantic import BaseModel, ConfigDict
+from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import (
     Actor,
-    Done,
-    InitEnv,
-    Next,
+    Live,
     RunMismatch,
-    Step,
     WorkflowEnv,
     workflow,
 )
@@ -56,20 +56,13 @@ def make_control(tmp_path):
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     control = facet_type(harness.state, harness.services)
 
-    def init(env: InitEnv[None], plan: Native) -> int:
-        return 0
-
-    @workflow("synthetic", plan=Native, tunables=Native, init=init)
-    def step(
-        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
-    ) -> Step[int, int]:
-        if state:
-            return Done()
-        yield from env.wait_until(env.started_at)
-        return Next(tun.value, 1)
+    @workflow("synthetic", "Synthetic form and record hosting")
+    async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
+        await env.wait_until(env.started_at)
+        await env.commit(Native(value=tun.current.value))
 
     attachment = WorkflowAttachment(
-        step=step,
+        script=script,
         plan_model=Values,
         knobs_model=Values,
         plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
@@ -146,35 +139,32 @@ def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_pat
     control, harness = make_control(tmp_path)
     tab = control.open("synthetic")
     token = control.start(tab, "paused")
-    # Pause from the native init boundary before the first generator commits.
-    # Native producer is deferred; pause is requested by the first plot-free step.
-    # The registration boundary below uses the public command, not engine internals.
+    # Stop before native acceptance, then register a script with a public pause gate.
     from zcu_tools.gui.app.measure.services.workflow_attachment import (
         WorkflowAttachment,
     )
-
-    def init(env: InitEnv[None], plan: Native) -> int:
-        return 0
 
     # Stop the initial pending run without creating files, then use a pausing registration.
     control.stop("paused")
     harness.complete_segment()
     assert control.close(tab)
 
-    @workflow("pausing", plan=Native, tunables=Native, init=init)
-    def step(
-        env: WorkflowEnv[None], plan: Native, tun: Native, state: int
-    ) -> Step[int, int]:
-        if state:
-            return Done()
-        control.pause("pausing-run")
-        yield from env.wait_until(env.started_at)
-        return Next(tun.value, 1)
+    entered = Event()
+
+    def operation(ctx: CallContext) -> None:
+        entered.set()
+        if not ctx.stop_signal.event.wait(30):
+            raise TimeoutError("Scenario did not interrupt the operation")
+
+    @workflow("pausing", "Synthetic retained-worker pause")
+    async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
+        await env.call(operation)
+        await env.commit(Native(value=tun.current.value))
 
     control.configure(
         (
             WorkflowAttachment(
-                step=step,
+                script=script,
                 plan_model=Values,
                 knobs_model=Values,
                 plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
@@ -185,20 +175,31 @@ def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_pat
     )
     tab = control.open("pausing")
     token = control.start(tab, "pausing-run")
-    harness.complete_segment()
+    harness.background.start()
+    try:
+        assert entered.wait(5), "The retained operation must start before Pause"
+        control.pause("pausing-run")
+        harness.wait_for(
+            lambda: (
+                (status := control.status("pausing-run")) is not None
+                and status.lifecycle == "paused"
+            ),
+            label="native pause gate",
+        )
+        status = control.status("pausing-run")
+        assert status is not None and status.lifecycle == "paused"
+        assert not control.close(tab)
+        snapshot = control.apply_tunables(
+            "pausing-run", {("value",): 9}, actor=Actor("user", "test")
+        )
+        assert not isinstance(snapshot, FormErrors)
+        assert snapshot.revision == 1
+        assert control.resume("pausing-run") == token
+    finally:
+        control.stop("pausing-run")
+        harness.finish_worker()
     status = control.status("pausing-run")
-    assert status is not None and status.lifecycle == "paused"
-    assert not control.close(tab)
-    snapshot = control.apply_tunables(
-        "pausing-run", {("value",): 9}, actor=Actor("user", "test")
-    )
-    assert not isinstance(snapshot, FormErrors)
-    assert snapshot.revision == 1
-    assert control.resume("pausing-run") == token
-    control.stop("pausing-run")
-    harness.complete_segment()
-    status = control.status("pausing-run")
-    assert status is not None and status.lifecycle == "stopped"
+    assert status is not None and status.lifecycle == "cancelled"
     assert control.close(tab)
 
 

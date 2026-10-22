@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -150,8 +150,9 @@ with Schedule(cfg, signals_buffer) as sched:
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
 - `Schedule.outcome` 記錄 run 結果（資料保留不等於 operation 成功）：`completed`、`stopped`、`interrupted` 或
-  `failed`。stop / `KeyboardInterrupt` / program build、acquire 或分析例外都會設定 `StopSignal`
-  並保留目前已寫入 buffer / result tree 的 partial result；已寫入的 slot 保留，
+  `failed`。stop、`KeyboardInterrupt` 或 acquire 失敗會設定 `StopSignal`。
+  Program build、raw conversion 與 update callback 的一般例外直接向 caller 傳播，不標記為 acquire 失敗。
+  目前已寫入 buffer / result tree 的 partial result 保留；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
 - `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。這不改
@@ -162,8 +163,9 @@ with Schedule(cfg, signals_buffer) as sched:
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
-- Program build/acquire 在每次 attempt 前與 failed attempt retry 前都重新檢查
-  `StopSignal`；stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
+- Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
+  Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
+  stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
 
 ---
 

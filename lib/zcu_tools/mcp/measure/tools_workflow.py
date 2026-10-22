@@ -193,8 +193,8 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
         "workflow_answer": _tool(
             ctx,
             "workflow.answer",
-            "Answer the pending_question envelope from workflow_status using its answer_schema. Returns the original pending handle; execution stays on the same worker operation/RUN lease until terminal delivery. Invalid answers leave the question paused for retry.",
-            {"run_id": _STRING, "answer": {}},
-            ("run_id", "answer"),
+            "Answer the exact pending_question.request_id from workflow_status using its answer_schema. Returns the original pending handle; execution stays on the same worker operation/RUN lease until terminal delivery. Invalid answers leave the question paused for retry.",
+            {"run_id": _STRING, "request_id": _STRING, "answer": {}},
+            ("run_id", "request_id", "answer"),
         ),
     }

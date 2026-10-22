@@ -1,27 +1,27 @@
-"""Engine effect boundary: failure source, Completed pairing, files, and live."""
+"""Operation outcomes, cooperative cancellation and author-owned persistence."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from datetime import timedelta
 from pathlib import Path
-from typing import Literal, Never
+from threading import Event
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from pydantic import BaseModel
-from zcu_tools.device import FakeDeviceInfo, YOKOGS200Info
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from pydantic import TypeAdapter
+from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.script_host import CallContext
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.workflows import (
-    Aborted,
     Actor,
-    Cancelled,
     Completed,
-    Done,
     Failed,
-    Next,
-    Run,
-    Step,
+    Live,
+    OperationFacts,
     WorkflowEnv,
+    saved_run,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import ProgramV2Cfg
@@ -29,563 +29,498 @@ from zcu_tools.program.v2.modules import SoftDelay
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
-from ._engine_fakes import Cfg, Plan, Rig, State, Tunables, save_integer
+from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed, paused, running
 
 
 @pytest.fixture
-def rig(tmp_path: Path) -> Rig:
-    return Rig(tmp_path)
+def rig(tmp_path: Path) -> Iterator[Rig]:
+    rig = Rig(tmp_path, native=True)
+    yield rig
+    rig.close()
 
 
-@pytest.mark.parametrize("unit", ["A", "V", "native"])
-@pytest.mark.parametrize("pause", [False, True], ids=["complete", "pause"])
-def test_complete_cfg_reaches_port_with_engine_owned_stop_signal(
-    rig: Rig, unit: Literal["A", "V", "native"], pause: bool
-) -> None:
-    observed: list[StopSignal] = []
-    cfg = (
-        FakeDeviceInfo(address="memory", value=0.25)
-        if unit == "native"
-        else YOKOGS200Info(
-            address="memory", mode="current" if unit == "A" else "voltage", value=0.001
-        )
-    )
+def start_call(
+    rig: Rig, operation: Callable[[CallContext], int]
+) -> list[Completed[int] | Failed]:
+    observed: list[Completed[int] | Failed] = []
 
-    def operate(signal: StopSignal) -> None:
-        observed.append(signal)
-        assert not signal.is_set()
-        if pause:
-            rig.engine.pause("run")
-            assert signal.is_set()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        observed.append(await env.call(operation))
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        yield from env.setup_device("bias", cfg)
-        return Done()
-
-    rig.devices.on_set = operate
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if pause else "done"), status.reason
-    assert rig.devices.values == [("bias", cfg.value)]
-    assert rig.devices.configs[0].model_dump() == cfg.model_dump()
-    assert len(observed) == 1
-    assert rig.devices.signals[0] is observed[0]
-    assert rig.devices.signals[0].is_set() == pause
-
-
-def run_value(run: Run[Cfg]) -> int:
-    return run.cfg.value
-
-
-def start_effect(
-    rig: Rig,
-    experiment: Callable[[Run[Cfg]], int],
-    *,
-    saver: Callable[[Completed[Cfg, int], Path], None] = save_integer,
-) -> list[Completed[Cfg, int] | Failed | Cancelled]:
-    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        outcome = yield from env.run(experiment, Cfg())
-        if isinstance(outcome, Completed):
-            saver(outcome, env.iteration_dir / "measurement.h5")
-        observed.append(outcome)
-        state.index += 1
-        return Next(outcome.result if isinstance(outcome, Completed) else 0, state)
-
-    rig.start(step, plan=Plan(count=1))
+    rig.start(script)
     return observed
 
 
-class ModelCfg(BaseModel):
-    value: int = 1
+def test_full_device_cfg_reaches_port_with_operation_stop_signal(rig: Rig) -> None:
+    cfg = FakeDeviceInfo(address="memory", value=0.5, rampstep=0.01, output="on")
+    signals: list[StopSignal] = []
+    rig.devices.on_set = lambda signal: signals.append(signal)
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        completed(await env.setup_device("flux", cfg))
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert rig.devices.configs == [cfg]
+    assert signals == rig.devices.signals
+    assert len(signals) == 1 and not signals[0].is_set()
 
 
-@pytest.mark.parametrize("make_cfg", [Cfg, ModelCfg], ids=["dataclass", "pydantic"])
-def test_cfg_at_experiment_return_is_detached_and_workflow_can_save_response(
-    rig: Rig, make_cfg: Callable[..., Cfg | ModelCfg]
-) -> None:
-    original = make_cfg()
-    observed: list[Completed[Cfg | ModelCfg, int] | Failed] = []
-    saved: list[Completed[Cfg | ModelCfg, int]] = []
+def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> None:
+    original = Cfg()
+    saved: list[object] = []
 
-    def acquire(run: Run[Cfg | ModelCfg]) -> int:
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-        with run.schedule(buffer) as first:
-            first.cfg.value = 10
-            buffer.set(np.array([2 + 0j]))
-        with run.schedule(buffer) as second:
-            second.cfg.value = 20
-        run.cfg.value = 30
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        cfg.value = 30
+        cfg.nested.append(3)
         return 9
 
-    def save(source: Completed[Cfg | ModelCfg, int], path: Path) -> None:
-        saved.append(source)
-        path.write_text(f"{source.cfg.value}:{source.result}", encoding="utf-8")
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        result = completed(await env.run(acquire, original))
+        saved.append(result.value)
+        assert result.value.cfg == Cfg(value=30, nested=[2, 3])
+        path = env.new_commit_dir() / "measurement.txt"
+        returned_cfg = result.value.cfg
+        assert returned_cfg is not None
+        path.write_text(f"{returned_cfg.value}:{result.value.result}")
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        outcome = yield from env.run(acquire, original)
-        assert isinstance(outcome, Completed)
-        save(outcome, env.iteration_dir / "measurement.h5")
-        observed.append(outcome)
-        assert len(saved) == 1
-        assert (env.iteration_dir / "measurement.h5").is_file()
-        state.index = 1
-        return Next(1, state)
-
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "done"
-    assert isinstance(observed[0], Completed)
-    assert observed[0].cfg == make_cfg(value=30)
-    assert saved[0] is observed[0]
-    assert original == make_cfg()
-    final = rig.paths.data_root / "iter/000001/measurement.h5"
-    assert final.read_text(encoding="utf-8") == "30:9"
-
-
-@pytest.mark.parametrize("rethrow", [False, True])
-def test_schedule_failure_remains_recoverable_and_next_effect_has_fresh_signal(
-    rig: Rig, rethrow: bool
-) -> None:
-    cause = OSError("acquire disconnected")
-    signals: list[StopSignal] = []
-    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
-
-    def fail(run: Run[Cfg]) -> int:
-        signals.append(run.cancel_signal)
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-
-        def acquire(_step: object) -> None:
-            raise cause
-
-        with run.schedule(buffer) as schedule:
-            schedule.batch({"acquire": acquire})
-        if rethrow:
-            run.cancel_signal.raise_if_error()
-        return 99
-
-    def recover(run: Run[Cfg]) -> int:
-        signals.append(run.cancel_signal)
-        assert not run.cancel_signal.is_set()
-        return 7
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        observed.append((yield from env.run(fail, Cfg())))
-        observed.append((yield from env.run(recover, Cfg())))
-        state.index = 1
-        return Next(7, state)
-
-    rig.start(step)
+    rig.start(script)
     final = rig.engine.execute("run")
-    assert final.lifecycle == "done"
-    assert isinstance(observed[0], Failed)
-    assert isinstance(observed[1], Completed)
-    assert signals[0] is not signals[1]
-    failed = next(
-        event for event in rig.events() if event["kind"] == "experiment_failed"
-    )
-    assert failed["run_no"] == 1
-    assert isinstance(failed["error"], dict)
-    assert failed["error"]["type"] == "builtins.OSError"
-    assert failed["error"]["message"] == "acquire disconnected"
-    assert "raise cause" in str(failed["error"]["traceback"])
+    assert final.lifecycle == "done", final.reason
+    assert len(saved) == 1
+    assert original == Cfg()
+    assert (
+        rig.paths.data_root / "commits/000001/measurement.txt"
+    ).read_text() == "30:9"
 
 
-@pytest.mark.parametrize("source", ["other_signal", "equal_wrapper", "outside"])
-def test_other_schedule_wrappers_and_experiment_errors_fail_run(
-    rig: Rig, source: str
-) -> None:
-    cause = OSError("disconnected")
+def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
+    cause = OSError("acquire disconnected")
 
-    def fail(run: Run[Cfg]) -> int:
-        if source == "outside":
-            raise cause
-        if source == "other_signal":
-            other = StopSignal()
-            other.set_error("failed", "same message", cause)
-            other.raise_if_error()
-        else:
-            buffer = run.buffer((1,), axes=(np.array([0.0]),))
-
-            def acquire(_step: object) -> None:
-                raise cause
-
-            with run.schedule(buffer) as schedule:
-                schedule.batch({"acquire": acquire})
-            error = run.cancel_signal.error
-            assert error is not None
-            raise ScheduleOutcomeError("failed", error.reason, error.exception)
-        return 0
-
-    observed = start_effect(rig, fail)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert observed == []
-    assert "experiment_failed" not in rig.kinds()
-    assert "step_failed" in rig.kinds()
-    assert rig.engine.records("run") == ()
-
-
-@pytest.mark.parametrize("source", ["outside", "schedule", "schedule_rethrow"])
-def test_keyboard_interrupt_is_stop_not_failed(rig: Rig, source: str) -> None:
-    def interrupted(run: Run[Cfg]) -> int:
-        if source == "outside":
-            raise KeyboardInterrupt
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-
-        def acquire(_step: object) -> None:
-            raise KeyboardInterrupt
-
-        with run.schedule(buffer) as schedule:
-            schedule.batch({"acquire": acquire})
-        if source == "schedule_rethrow":
-            run.cancel_signal.raise_if_error()
-        return 99
-
-    observed = start_effect(rig, interrupted)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "stopped"
-    assert observed == []
-    assert rig.kinds().count("step_discarded") == 1
-    assert "step_failed" not in rig.kinds()
-    assert "experiment_failed" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))
-
-
-@pytest.mark.parametrize("control", ["pause", "stop"])
-def test_cancel_during_experiment_never_saves_partial_or_returns_failed(
-    rig: Rig, control: str
-) -> None:
-    def interrupted(run: Run[Cfg]) -> int:
-        if control == "pause":
-            rig.engine.pause("run")
-        else:
-            rig.engine.stop("run")
-        assert run.cancel_signal.is_set()
-        return 99
-
-    observed = start_effect(rig, interrupted)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
-    assert observed == []
-    assert rig.engine.records("run") == ()
-    assert not tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))
-
-
-def test_file_saved_before_pause_is_retained_and_resume_allocates_new_call(
-    rig: Rig,
-) -> None:
-    observed: list[int] = []
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        outcome = yield from env.run(run_value, Cfg())
-        assert isinstance(outcome, Completed)
-        save_integer(outcome, env.iteration_dir / "measurement.h5")
-        observed.append(1)
-        yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.2))
-        state.index = 1
-        return Next(1, state)
-
-    rig.start(step)
-    rig.devices.on_set = lambda _signal: rig.engine.pause("run")
-    assert rig.engine.execute("run").lifecycle == "paused"
-    assert "step_discarded" in rig.kinds()
-    assert rig.engine.records("run") == ()
-    rig.devices.on_set = None
-    rig.engine.resume("run")
-    assert rig.engine.execute("run").lifecycle == "done"
-    assert observed == [1, 1]
-    assert len(tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))) == 2
-    assert rig.engine.records("run")[0].call_seq == 2
-
-
-def test_saver_failure_after_pause_keeps_true_failure_cause(rig: Rig) -> None:
-    def fail_save(_source: Completed[Cfg, int], path: Path) -> None:
-        path.write_text("incomplete", encoding="utf-8")
-        rig.engine.pause("run")
-        raise OSError("writer failed")
-
-    observed = start_effect(rig, run_value, saver=fail_save)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "writer failed" in str(status.reason)
-    assert observed == []
-    assert "step_discarded" not in rig.kinds()
-    assert (rig.paths.data_root / "iter/000001/measurement.h5").read_text(
-        encoding="utf-8"
-    ) == "incomplete"
-
-
-@pytest.mark.parametrize("use_device", [False, True])
-def test_run_resolves_role_names_only_when_experiment_uses_device(
-    rig: Rig, use_device: bool
-) -> None:
-    original = Cfg(value=7, dev={"selected": "missing", "unused": "disconnected"})
-    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
-    entered: list[bool] = []
-    cause = OSError("Device 'missing' is disconnected")
-
-    def unavailable(_signal: StopSignal) -> None:
-        raise cause
-
-    rig.devices.on_set = unavailable
-
-    def acquire(run: Run[Cfg]) -> int:
-        entered.append(True)
-        if use_device:
-            dev = run.cfg.dev
-            if dev is None:
-                raise ValueError("This experiment requires device roles")
-            run.devices.setup_device(
-                dev["selected"],
-                FakeDeviceInfo(address="memory", value=0.5),
-                run.cancel_signal,
-            )
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-        with run.schedule(buffer):
-            buffer.set(np.array([1 + 0j]))
-        run.cfg.value = 9
-        return 11
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index:
-            return Done()
-        observed.append((yield from env.run(acquire, original)))
-        state.index = 1
-        return Next(1, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    if use_device:
-        assert status.lifecycle == "failed"
-        assert status.reason == "OSError: Device 'missing' is disconnected"
-        assert rig.devices.values == [("missing", 0.5)]
-        assert observed == []
-        assert rig.engine.records("run") == ()
-        assert not tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))
-    else:
-        assert status.lifecycle == "done"
-        assert rig.devices.values == []
-        assert observed == [Completed(Cfg(value=9, dev=original.dev), 11)]
-    assert entered == [True]
-    assert original == Cfg(
-        value=7, dev={"selected": "missing", "unused": "disconnected"}
-    )
-
-
-@pytest.mark.parametrize("rethrow", [False, True])
-def test_live_callback_caught_by_schedule_is_still_run_failure(
-    rig: Rig, rethrow: bool
-) -> None:
-    observed: list[Completed[Cfg, int] | Failed | Cancelled] = []
-
-    def projection(
-        _axes: tuple[NDArray[np.float64], ...], _values: NDArray[np.complex128]
-    ) -> None:
-        raise ValueError("live projection failed")
-
-    def acquire(run: Run[Cfg]) -> int:
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-
-        def write(_step: object) -> None:
-            buffer.set(np.array([2 + 0j]))
-
-        with run.schedule(buffer) as schedule:
-            schedule.batch({"write": write})
-        if rethrow:
-            run.cancel_signal.raise_if_error()
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        observed.append((yield from env.run(acquire, Cfg(), live=projection)))
-        return Next(1, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "live projection failed" in str(status.reason)
-    assert observed == []
-    assert "experiment_failed" not in rig.kinds()
-    failed = next(event for event in rig.events() if event["kind"] == "step_failed")
-    assert isinstance(failed["error"], dict)
-    assert failed["error"]["type"] == "builtins.ValueError"
-
-
-def test_workflow_can_abort_after_a_recoverable_failed_effect(rig: Rig) -> None:
-    def failed(run: Run[Cfg]) -> int:
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-
-        def acquire(_step: object) -> None:
-            raise ValueError("calibration bad")
-
-        with run.schedule(buffer) as schedule:
-            schedule.batch({"acquire": acquire})
-        return 0
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        outcome = yield from env.run(failed, Cfg())
-        assert isinstance(outcome, Failed)
-        return Aborted("calibration unavailable")
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert (status.lifecycle, status.reason, status.committed_seq) == (
-        "aborted",
-        "calibration unavailable",
-        0,
-    )
-    assert rig.engine.stop("run") == status
-
-
-@pytest.mark.parametrize("control", ["pause", "stop"])
-def test_real_schedule_failure_is_delivered_before_pending_control(
-    rig: Rig, control: str
-) -> None:
-    def acquire(run: Run[Cfg]) -> int:
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
+    def acquire(ctx: CallContext) -> int:
+        buffer = SignalBuffer((1,))
 
         def fail(_step: object) -> None:
-            if control == "pause":
-                rig.engine.pause("run")
-            else:
-                rig.engine.stop("run")
-            raise OSError("acquire failed with control")
+            raise cause
 
-        with run.schedule(buffer) as schedule:
+        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
             schedule.batch({"acquire": fail})
         return 99
 
-    observed = start_effect(rig, acquire)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
-    assert isinstance(observed[0], Failed)
-    assert status.committed_seq == 1
-    assert "experiment_failed" in rig.kinds()
-    assert "step_discarded" not in rig.kinds()
-
-
-@pytest.mark.parametrize("control", ["pause", "stop"])
-@pytest.mark.parametrize("source", ["acquire", "build"])
-@pytest.mark.parametrize("native_stop", [False, True])
-def test_program_error_beats_control(
-    rig: Rig, control: str, source: str, native_stop: bool
-) -> None:
-    message = f"program {source} failed with control"
-    cause = OSError(message)
-    attempts: list[str] = []
-
-    def fail(schedule_stop: Callable[[], None]) -> Never:
-        attempts.append(source)
-        if control == "pause":
-            rig.engine.pause("run")
-        else:
-            rig.engine.stop("run")
-        if native_stop:
-            schedule_stop()
-        raise cause
-
-    class FailingProgram:
-        cfg_model = ProgramV2Cfg(rounds=1)
-
-        def __init__(
-            self,
-            *_args: object,
-            schedule_stop: Callable[[], None],
-            **_kwargs: object,
-        ) -> None:
-            self.schedule_stop = schedule_stop
-            if source == "build":
-                fail(schedule_stop)
-
-        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
-            fail(self.schedule_stop)
-
-        def acquire_decimated(self, *_args: object, **_kwargs: object) -> object:
-            raise AssertionError("unexpected decimated acquire")
-
-    def acquire(run: Run[Cfg]) -> int:
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-        with run.schedule(buffer) as schedule:
-            builder = schedule.prog_builder(
-                "soc",
-                "soccfg",
-                cfg=ProgramV2Cfg(),
-                program_cls=FailingProgram,
-                schedule_stop=schedule.set_stop,
-            )
-            if source == "build":
-                builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
-                    raw2signal_fn=lambda raw: raw, options=AcquireOptions(retry=3)
-                )
-            else:
-                builder.run_program(
-                    FailingProgram(schedule_stop=schedule.set_stop),
-                    raw2signal_fn=lambda raw: raw,
-                    options=AcquireOptions(retry=3),
-                )
-        return 99
-
-    observed = start_effect(rig, acquire)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
+    observed = start_call(rig, acquire)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
     assert len(observed) == 1
     assert isinstance(observed[0], Failed)
-    assert message in observed[0].reason
-    assert attempts == [source]
-    assert status.committed_seq == 1
-    failed = next(
-        event for event in rig.events() if event["kind"] == "experiment_failed"
-    )
-    assert isinstance(failed["error"], dict)
-    assert failed["error"]["type"] == "builtins.OSError"
-    assert failed["error"]["message"] == message
-    assert "raise cause" in str(failed["error"]["traceback"])
-    assert "step_discarded" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.rglob("*.h5"))
+    assert "acquire disconnected" in observed[0].reason
+    assert rig.engine.records("run") == ()
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert len(facts) == 1
+    assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "failed")
+    assert facts[0].stopped is True
+    assert facts[0].reason == observed[0].reason
+    assert facts[0].device_snapshot is None
 
 
-@pytest.mark.parametrize("control", ["pause", "stop"])
-@pytest.mark.parametrize("first_round_stop", [False, True])
-@pytest.mark.parametrize("acquire_mode", ["integrated", "decimated"])
-def test_program_cancel_protocol_never_returns_failed(
-    rig: Rig, control: str, first_round_stop: bool, acquire_mode: str
+@pytest.mark.parametrize("source", ["outside", "other_signal"])
+def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
+    rig: Rig, source: str
 ) -> None:
-    class CancelledProgram:
+    def acquire(ctx: CallContext) -> int:
+        cause = OSError("disconnected")
+        if source == "outside":
+            raise cause
+        other = StopSignal()
+        other.set_error("failed", "foreign failure", cause)
+        other.raise_if_error()
+        return 0
+
+    observed = start_call(rig, acquire)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert observed == []
+    reason = "disconnected" if source == "outside" else "foreign failure"
+    assert reason in str(final.reason)
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert len(facts) == 1
+    assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "raised")
+    assert facts[0].stopped is False
+    assert reason in str(facts[0].reason)
+    assert facts[0].device_snapshot is None
+
+
+def test_schedule_interrupt_returns_partial_not_acquire_failure(rig: Rig) -> None:
+    def acquire(ctx: CallContext) -> int:
+        with Schedule(Cfg(), stop=ctx.stop_signal):
+            raise KeyboardInterrupt
+        return 7
+
+    observed = start_call(rig, acquire)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    outcome = completed(observed[0])
+    assert (outcome.value, outcome.partial_result) == (7, True)
+
+
+def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) -> None:
+    entered = Event()
+    outcomes: list[Completed[int]] = []
+    stops: list[bool] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        def first(ctx: CallContext) -> int:
+            entered.set()
+            assert ctx.stop_signal.event.wait(10), "Stop reaches active operation"
+            return 7
+
+        outcomes.append(completed(await env.call(first)))
+
+        def later(ctx: CallContext) -> int:
+            stops.append(ctx.stop_signal.is_set())
+            return 0
+
+        outcomes.append(completed(await env.call(later)))
+
+    rig.start(script)
+    with running(rig) as future:
+        assert entered.wait(10), "Worker reaches operation"
+        rig.engine.stop("run")
+        final = future.result(timeout=10)
+    assert final.lifecycle == "cancelled"
+    assert [(outcome.value, outcome.partial_result) for outcome in outcomes] == [
+        (7, True),
+        (0, True),
+    ]
+    assert stops == [True]
+    assert [
+        (outcome.facts.iteration, outcome.facts.attempt) for outcome in outcomes
+    ] == [
+        (1, 1),
+        (1, 2),
+    ]
+    assert all(outcome.facts.stopped is outcome.partial_result for outcome in outcomes)
+    assert all(outcome.facts.outcome == "partial" for outcome in outcomes)
+
+
+def test_wait_pause_retries_original_deadline_without_restarting_author(
+    rig: Rig,
+) -> None:
+    deadline = rig.clock.now() + timedelta(seconds=10)
+    entered = Event()
+    authors: list[int] = []
+    outcomes: list[Completed[None]] = []
+
+    def wait(signal: StopSignal) -> None:
+        if len(rig.clock.targets) == 1:
+            entered.set()
+            assert signal.event.wait(10), "Pause stops first wait"
+
+    rig.clock.on_wait = wait
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        authors.append(1)
+        outcomes.append(completed(await env.wait_until(deadline)))
+
+    rig.start(script)
+    with running(rig) as future:
+        assert entered.wait(10), "Clock announces first wait"
+        rig.engine.pause("run")
+        paused(rig)
+        assert authors == [1]
+        rig.engine.resume("run")
+        final = future.result(timeout=10)
+    assert final.lifecycle == "done", final.reason
+    assert rig.clock.targets == [deadline, deadline]
+    assert authors == [1]
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert [(op.iteration, op.attempt, op.stopped, op.outcome) for op in facts] == [
+        (1, 1, True, "discarded"),
+        (1, 2, False, "completed"),
+    ]
+    assert facts[0].reason == "Pause interrupted this attempt"
+    assert outcomes[0].facts == facts[1]
+    assert outcomes[0].partial_result is False
+
+
+def test_setup_pause_retries_captured_full_cfg_with_fresh_operation_token(
+    rig: Rig,
+) -> None:
+    entered = Event()
+    cfg = FakeDeviceInfo(address="memory", value=0.25, rampstep=0.05, output="on")
+    original = cfg.model_copy(deep=True)
+
+    def setup(signal: StopSignal) -> None:
+        if len(rig.devices.configs) == 1:
+            entered.set()
+            assert signal.event.wait(10), "Pause stops first setup"
+
+    rig.devices.on_set = setup
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        completed(await env.setup_device("flux", cfg))
+
+    rig.start(script)
+    with running(rig) as future:
+        assert entered.wait(10), "Port announces first setup"
+        rig.engine.pause("run")
+        paused(rig)
+        cfg.value = 99
+        rig.engine.resume("run")
+        final = future.result(timeout=10)
+    assert final.lifecycle == "done", final.reason
+    assert rig.devices.configs == [original, original]
+    assert rig.devices.signals[0].is_set()
+    assert not rig.devices.signals[1].is_set()
+    assert rig.devices.signals[0] is not rig.devices.signals[1]
+
+
+def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions(
+    rig: Rig,
+) -> None:
+    entered = Event()
+    requests: list[Cfg] = []
+    contexts: list[RunContext] = []
+    captures: list[Cfg] = []
+    delivered: list[int] = []
+
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        requests.append(cfg.model_copy(deep=True))
+        contexts.append(context)
+        value = cfg.value
+        cfg.value = 99
+        cfg.nested.append(99)
+        if len(requests) == 1:
+            entered.set()
+            # The controller pauses only after this attempt has announced entry.
+            assert context.cancel_signal.event.wait(30), "Pause must stop acquisition"
+        return value
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        directory = env.new_commit_dir()
+        cfg = Cfg(value=tun.current.value)
+        captures.append(cfg)
+        outcome = completed(await env.run(acquire, cfg))
+        assert not outcome.partial_result
+        delivered.append(outcome.value.result)
+        # Before commit, a later operation must not inherit Pause's stop bit.
+        assert not completed(await env.call(lambda ctx: ctx.stop_signal.is_set())).value
+        latest = tun.current.value
+        assert tun.current.value == latest
+        await env.commit(Point(value=latest), directory)
+        await env.commit(Point(value=outcome.value.result))
+        await env.commit(Point(value=tun.current.value))
+
+    rig.start(script)
+    with running(rig) as future:
+        try:
+            # The operation signals entry before waiting for the Pause token.
+            assert entered.wait(30), "The first acquisition must enter"
+            rig.engine.update_tunables(
+                "run",
+                Tunables(value=8),
+                expected_revision=0,
+                actor=Actor("user", "test"),
+            )
+            rig.engine.pause("run")
+            paused(rig)
+            rig.engine.update_tunables(
+                "run",
+                Tunables(value=9),
+                expected_revision=1,
+                actor=Actor("user", "test"),
+            )
+            assert delivered == []
+            assert rig.engine.records("run") == ()
+            captures[0].value = 77
+            captures[0].nested.append(77)
+            rig.engine.resume("run")
+            final = future.result(timeout=30)
+        finally:
+            rig.engine.stop("run")
+    assert final.lifecycle == "done", final.reason
+    assert delivered == [1]
+    assert requests == [Cfg(value=1), Cfg(value=1)]
+    assert contexts[0].cancel_signal.is_set()
+    assert not contexts[1].cancel_signal.is_set()
+    assert_paused_acquisition_records(rig.paths.metadata_root)
+
+
+def assert_paused_acquisition_records(run: Path) -> None:
+    """Check live revision reads and retried attempts through the typed reader."""
+    records = saved_run.read_records(run, Point)
+    assert [row.record.value for row in records] == [9, 1, 9]
+    assert [row.revisions for row in records] == [(0, 2), (), (2,)]
+    assert [row.commit_seq for row in records] == [1, 2, 3]
+    assert [row.directory.name for row in records] == ["000001", "000002", "000003"]
+    assert [operation.outcome for operation in records[0].operations] == [
+        "discarded",
+        "completed",
+        "completed",
+    ]
+
+
+def test_file_saved_before_pause_is_retained_and_author_continues(rig: Rig) -> None:
+    entered = Event()
+    saved: list[Path] = []
+    calls: list[int] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        directory = env.new_commit_dir()
+        path = directory / "measurement.txt"
+        path.write_text("retained")
+        saved.append(path)
+
+        def acquire(ctx: CallContext) -> int:
+            calls.append(1)
+            if len(calls) == 1:
+                entered.set()
+                assert ctx.stop_signal.event.wait(10), "Pause stops operation"
+            return 7
+
+        await env.call(acquire)
+        await env.commit(Point(value=7), directory)
+
+    rig.start(script)
+    with running(rig) as future:
+        assert entered.wait(10), "Worker reaches operation"
+        rig.engine.pause("run")
+        paused(rig)
+        assert saved[0].read_text() == "retained"
+        rig.engine.resume("run")
+        assert future.result(timeout=10).lifecycle == "done"
+    assert len(saved) == 1 and saved[0].read_text() == "retained"
+
+
+@pytest.mark.parametrize("failure", ["saver", "analysis", "cleanup"])
+def test_author_failure_retains_files_without_committing(
+    rig: Rig, failure: str
+) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        directory = env.new_commit_dir()
+        path = directory / "measurement.txt"
+        path.write_text("raw")
+        completed(await env.call(lambda ctx: 7))
+        if failure == "cleanup":
+            try:
+                rig.engine.stop("run")
+            finally:
+                raise OSError("cleanup failed")
+        if failure == "saver":
+            rig.engine.pause("run")
+        raise OSError(f"{failure} failed")
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert final.reason == f"OSError: {failure} failed"
+    assert rig.engine.records("run") == ()
+    assert (rig.paths.data_root / "commits/000001/measurement.txt").read_text() == "raw"
+
+
+def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> None:
+    def acquire(ctx: CallContext) -> int:
+        buffer = SignalBuffer((3,))
+        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+            for _value, step in schedule.scan("sample", (0, 1, 2)):
+                step.set_data(np.complex128(2))
+                break
+        assert np.isnan(buffer.array[1:]).all()
+        return 7
+
+    observed = start_call(rig, acquire)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert len(observed) == 1
+    outcome = completed(observed[0])
+    assert (outcome.value, outcome.partial_result) == (7, False)
+
+
+@pytest.mark.parametrize("source", ["build", "acquire", "conversion"])
+def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_conversion(
+    rig: Rig,
+    source: str,
+) -> None:
+    attempts: list[str] = []
+
+    class Program:
+        cfg_model = ProgramV2Cfg(rounds=1)
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            attempts.append("build")
+            if source == "build":
+                raise OSError("build failed")
+
+        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+            attempts.append("acquire")
+            if source == "acquire":
+                raise OSError("acquire failed")
+            return np.array([1.0], dtype=np.complex128)
+
+        def acquire_decimated(
+            self, *_args: object, **_kwargs: object
+        ) -> NDArray[np.complex128]:
+            raise AssertionError("unexpected decimated acquire")
+
+    def convert(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
+        attempts.append("conversion")
+        if source == "conversion":
+            raise OSError("conversion failed")
+        return raw
+
+    def operation(ctx: CallContext) -> int:
+        buffer = SignalBuffer((1,))
+        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+            builder = schedule.prog_builder(
+                "soc", "soccfg", cfg=ProgramV2Cfg(), program_cls=Program
+            )
+            builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
+                raw2signal_fn=convert, options=AcquireOptions(retry=1)
+            )
+        return 99
+
+    observed = start_call(rig, operation)
+    final = rig.engine.execute("run")
+    if source == "acquire":
+        assert final.lifecycle == "done", final.reason
+        assert isinstance(observed[0], Failed)
+        assert "acquire failed" in observed[0].reason
+        assert attempts == ["build", "acquire", "acquire"]
+    else:
+        assert final.lifecycle == "failed"
+        assert final.reason == f"OSError: {source} failed"
+        assert observed == []
+        assert attempts == (
+            ["build"] if source == "build" else ["build", "acquire", "conversion"]
+        )
+
+
+@pytest.mark.parametrize("first_round_stop", [False, True])
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_program_stop_keeps_partial_delivery_without_failed_outcome(
+    rig: Rig,
+    first_round_stop: bool,
+    mode: str,
+) -> None:
+    class Program:
         cfg_model = ProgramV2Cfg(rounds=1)
 
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
-            if control == "pause":
-                rig.engine.pause("run")
-            else:
-                rig.engine.stop("run")
+            rig.engine.stop("run")
             if first_round_stop:
-                raise StoppedPartialAcquireError(
-                    "acquire stopped before the first round completed"
-                )
+                raise StoppedPartialAcquireError("stopped before first completed round")
             return np.array([1.0], dtype=np.complex128)
 
         def acquire_decimated(
@@ -593,137 +528,78 @@ def test_program_cancel_protocol_never_returns_failed(
         ) -> NDArray[np.complex128]:
             return self.acquire()
 
-    def acquire(run: Run[Cfg]) -> int:
-        buffer = run.buffer((1,), axes=(np.array([0.0]),))
-        with run.schedule(buffer) as schedule:
+    def operation(ctx: CallContext) -> int:
+        buffer = SignalBuffer((1,))
+        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
             builder = schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg())
-            if acquire_mode == "integrated":
-                builder.run_program(CancelledProgram(), raw2signal_fn=lambda raw: raw)
+            if mode == "integrated":
+                builder.run_program(Program(), raw2signal_fn=lambda raw: raw)
             else:
-                builder.run_program_decimated(
-                    CancelledProgram(), raw2signal_fn=lambda raw: raw
-                )
+                builder.run_program_decimated(Program(), raw2signal_fn=lambda raw: raw)
         return 99
 
-    observed = start_effect(rig, acquire)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
-    assert not observed
-    assert status.committed_seq == 0
-    assert "step_discarded" in rig.kinds()
-    assert "experiment_failed" not in rig.kinds()
-    assert not tuple(rig.paths.data_root.rglob("*.h5"))
+    observed = start_call(rig, operation)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "cancelled", final.reason
+    assert len(observed) == 1
+    outcome = completed(observed[0])
+    assert (outcome.value, outcome.partial_result) == (99, True)
 
 
-def test_data_driven_early_stop_with_nan_slots_remains_completed(rig: Rig) -> None:
-    def acquire(run: Run[Cfg]) -> int:
-        buffer = run.buffer((3,), axes=(np.array([0.0, 1.0, 2.0]),))
-        with run.schedule(buffer) as schedule:
-            for _value, step in schedule.scan("sample", (0, 1, 2)):
-                step.set_data(np.complex128(2.0))
-                break
-        assert np.isnan(buffer.array[1:]).all()
-        return 7
-
-    observed = start_effect(rig, acquire)
-    assert rig.engine.execute("run").lifecycle == "done"
-    assert isinstance(observed[0], Completed)
-    assert observed[0].result == 7
-
-
-def test_analysis_error_after_completed_effect_retains_file_but_never_commits(
+def test_active_tunables_journal_failure_stops_operation_and_retains_original_cause(
     rig: Rig,
 ) -> None:
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        outcome = yield from env.run(run_value, Cfg())
-        assert isinstance(outcome, Completed)
-        save_integer(outcome, env.iteration_dir / "measurement.h5")
-        raise ValueError("analysis failed")
+    causes: list[OSError] = []
+    stopped: list[bool] = []
+    delivered: list[object] = []
 
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "analysis failed" in str(status.reason)
-    assert rig.engine.records("run") == ()
-    failed = next(event for event in rig.events() if event["kind"] == "step_failed")
-    assert isinstance(failed["error"], dict)
-    assert failed["error"]["type"] == "builtins.ValueError"
-    assert "raise ValueError" in str(failed["error"]["traceback"])
-    assert len(tuple(rig.paths.data_root.glob("iter/*/measurement.h5"))) == 1
-
-
-def test_device_operation_error_is_not_recoverable_schedule_failure(rig: Rig) -> None:
-    observed: list[int] = []
-
-    def operate(_signal: StopSignal) -> None:
-        rig.engine.pause("run")
-        raise OSError("Device 'flux' failed")
-
-    def acquire(_run: Run[Cfg]) -> int:
-        observed.append(1)
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        yield from env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.1))
-        yield from env.run(acquire, Cfg())
-        return Next(1, state)
-
-    rig.devices.on_set = operate
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "Device 'flux' failed" in str(status.reason)
-    assert observed == []
-    assert "experiment_failed" not in rig.kinds()
-    assert "step_discarded" not in rig.kinds()
-
-
-def test_active_update_journal_failure_cancels_then_reports_original_cause(
-    rig: Rig,
-) -> None:
-    def acquire(run: Run[Cfg]) -> int:
+    def operation(ctx: CallContext) -> int:
         journal = rig.paths.metadata_root / "journal.jsonl"
+        contents = journal.read_bytes()
         journal.unlink()
         journal.mkdir()
-        with pytest.raises(DIRECTORY_OPEN_ERROR):
-            rig.engine.update_tunables(
-                "run",
-                Tunables.model_construct(value=2),
-                expected_revision=0,
-                actor=Actor("user", "test"),
-            )
-        assert run.cancel_signal.is_set()
-        return 1
-
-    observed = start_effect(rig, acquire)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
-    assert "unusable" not in str(status.reason)
-    assert status.revision == 0
-    assert observed == []
-
-
-def test_cancelled_generator_cleanup_failure_is_real_run_failure(rig: Rig) -> None:
-    def acquire(_run: Run[Cfg]) -> int:
-        rig.engine.pause("run")
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
         try:
-            yield from env.run(acquire, Cfg())
+            with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
+                rig.engine.update_tunables(
+                    "run",
+                    Tunables(value=2),
+                    expected_revision=0,
+                    actor=Actor("user", "test"),
+                )
+            causes.append(caught.value)
         finally:
-            raise OSError("workflow cleanup failed")
-        return Next(1, state)
+            journal.rmdir()
+            journal.write_bytes(contents)
+        stopped.append(ctx.stop_signal.is_set())
+        return 1
 
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "workflow cleanup failed" in str(status.reason)
-    assert "step_discarded" not in rig.kinds()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        delivered.append(await env.call(operation))
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert len(causes) == 1
+    assert final.reason == f"{type(causes[0]).__name__}: {causes[0]}"
+    assert final.revision == 0
+    assert stopped == [True]
+    assert delivered == []
+
+
+def test_device_operation_error_is_not_a_recoverable_schedule_failure(rig: Rig) -> None:
+    def operate(signal: StopSignal) -> None:
+        raise OSError("Device 'flux' failed")
+
+    rig.devices.on_set = operate
+    observed: list[object] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        observed.append(
+            await env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.1))
+        )
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert final.reason == "OSError: Device 'flux' failed"
+    assert observed == []

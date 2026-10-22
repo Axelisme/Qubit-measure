@@ -16,6 +16,23 @@ from .models import Actor, RevisionConflict, TunablesSnapshot
 _json_adapter = TypeAdapter(JsonValue)
 
 
+class Live[T]:
+    """Read-only handle to the latest complete tunables model.
+
+    read is the owner's synchronous snapshot callback. Each current access
+    calls it again; the owner records that revision and supplies a detached
+    model. Retaining a returned model does not turn it into a live reference.
+    """
+
+    def __init__(self, read: Callable[[], T]) -> None:
+        self._read = read
+
+    @property
+    def current(self) -> T:
+        """Read the latest model and record its revision through the owner."""
+        return self._read()
+
+
 @dataclass(frozen=True)
 class CapturedTunables[T: BaseModel]:
     """One invocation's isolated input, unaffected by later edits.

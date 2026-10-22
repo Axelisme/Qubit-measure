@@ -24,7 +24,7 @@ from zcu_tools.experiment.workflows import (
     RunStatus,
     TunablesSnapshot,
 )
-from zcu_tools.experiment.workflows.declaration import WorkflowStep
+from zcu_tools.experiment.workflows.declaration import WorkflowScript
 from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath
 from zcu_tools.gui.session.operation_handles import OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
@@ -46,11 +46,13 @@ logger = logging.getLogger(__name__)
 class PendingQuestion(TypedDict):
     """Detached Ask envelope for GUI and wire consumers.
 
-    question_type is the authored class name. question contains only authored
-    fields. answer_schema is the driver's declared Answer model JSON schema.
+    request_id is the exact host question ID required by answer. question_type
+    is the authored class name. question contains only authored fields.
+    answer_schema is the declared Answer model JSON schema.
     None, rather than an empty envelope, denotes no currently answerable Ask.
     """
 
+    request_id: str
     question_type: str
     question: dict[str, JsonValue]
     answer_schema: dict[str, JsonValue]
@@ -72,14 +74,14 @@ class QuestionExchange:
 
 
 def _answer_model[C](
-    engine: Engine[C], run_id: str, value: Answer | JsonValue
+    engine: Engine[C], run_id: str, value: Answer | JsonValue, *, request_id: str
 ) -> Answer:
-    """Decode only the answer carrier; Engine/driver own model field validation."""
+    """Decode the carrier; Engine owns exact request matching and field validation."""
     if isinstance(value, Answer):
         return value
     if not isinstance(value, dict):
         raise TypeError("Workflow answer must be a JSON object or Answer model")
-    return engine.parse_answer(run_id, value)
+    return engine.parse_answer(run_id, value, request_id=request_id)
 
 
 @dataclass
@@ -87,15 +89,7 @@ class _Run[F: FormModel, C]:
     """Keep binding, producer ownership and cleanup together for one native run."""
 
     binding: TunablesHost[F, C]
-    phase: Literal[
-        "starting",
-        "producing",
-        "paused",
-        "resuming",
-        "draining",
-        "finishing",
-        "terminal",
-    ] = "starting"
+    phase: Literal["starting", "producing", "finishing", "terminal"] = "starting"
     stop: StopSignal = field(default_factory=StopSignal)
     token: int | None = None
     engine: Engine[C] | None = None
@@ -126,8 +120,8 @@ class WorkflowController[F: FormModel, C]:
     A fixed controller accepts a replacement only after terminal cleanup. The
     current binding owns the unique form draft and fixed Start capture. Native
     Engine status remains authoritative; a token or binding is not acceptance.
-    Pause retains the operation, local RUN lease and progress. Resume submits a
-    producer through the same Runner handle, never another begin. This does not
+    Pause and Ask retain the original worker, operation, RUN lease and progress.
+    Resume and Answer only signal that worker; they submit no producer. This does not
     arbitrate other processes or restore hardware. Commands run on the owner
     thread; startup publication and cooperative controls share a binding lock.
     """
@@ -139,14 +133,14 @@ class WorkflowController[F: FormModel, C]:
         *,
         on_finished: Callable[[RunStatus | None, Exception | None], None],
     ) -> None:
-        """Borrow runner and report paused/terminal native delivery to the view.
+        """Borrow runner and report terminal native delivery to the view.
 
         owner_id labels the run lease and progress. runner owns that progress
         service. on_finished receives authoritative native status (None before
         acceptance) and the original producer error, if any. Terminal cleanup
         fixes the native handle outcome and releases admission/lease/progress
         before notification. View errors are logged and do not alter outcome or
-        binding. Paused notification retains ownership. Callback reentry may
+        binding. Pause and Ask retain the original worker until terminal delivery. Callback reentry may
         Stop, or Start a replacement after terminal cleanup; no old binding is
         written after notification. No instrument call occurs here.
         """
@@ -187,21 +181,24 @@ class WorkflowController[F: FormModel, C]:
     def last_exchange(self) -> QuestionExchange | None:
         """Read detached latest question/accepted answer facts, or None before Ask."""
         with self._lock:
-            return None if self._run is None else deepcopy(self._run.last_exchange)
+            if self._run is None:
+                return None
+            self.pending_question(self._run.binding.run_id)
+            return deepcopy(self._run.last_exchange)
 
     @property
     def has_pending_segment(self) -> bool:
         """Read whether admission, producer or terminal cleanup is still pending.
 
-        False after paused owner delivery, even though operation_id is retained.
-        Stop/close must wait for pending work, including paused Ask worker drain.
+        Pause and Ask leave work pending. Stop/close wait for the original worker
+        to finish author cleanup and deliver its terminal result.
         """
         run = self._run
-        return run is not None and run.phase not in {"paused", "terminal"}
+        return run is not None and run.phase != "terminal"
 
-    def start[P: BaseModel, T: BaseModel, S, R](
+    def start[P: BaseModel, T: BaseModel, Summary: BaseModel | None](
         self,
-        step: WorkflowStep[P, T, S, R, C],
+        script: WorkflowScript[P, T, Summary, C],
         **inputs: Unpack[WorkflowStartInputs[P, T, F, C]],
     ) -> int:
         """Publish prepared binding and submit native startup once via Runner.
@@ -243,7 +240,7 @@ class WorkflowController[F: FormModel, C]:
                 return None
             engine = Engine(replace(ports, progress=factory))
             status = engine.start(
-                step, plan=plan, tunables=tunables, paths=paths, identity=identity
+                script, plan=plan, tunables=tunables, paths=paths, identity=identity
             )
             with self._lock:
                 binding.accept(engine)
@@ -288,22 +285,9 @@ class WorkflowController[F: FormModel, C]:
             status is not None
             and status.lifecycle in {"stopping", "failed"}
             and status.reason is not None
+            and run.native_error is None
         ):
-            if run.native_error is None:
-                run.native_error = error
-            if run.phase == "paused":
-                if status.lifecycle == "stopping":
-                    try:
-                        self._drain(run, run.binding.run_id)
-                    except Exception as submit_error:
-                        # Preserve the control I/O error. Submission is secondary
-                        # and ownership stays live for a later Stop/close retry.
-                        error.add_note(
-                            f"Workflow failure drain submit failed: {submit_error}"
-                        )
-                        logger.exception("Workflow failure drain could not submit")
-                else:
-                    self._finish(run, error)
+            run.native_error = error
 
     def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
         if run.phase in {"finishing", "terminal"}:
@@ -315,7 +299,7 @@ class WorkflowController[F: FormModel, C]:
             outcome = OperationOutcome("failed", status.reason)
         elif error is not None:
             outcome = OperationOutcome("failed", str(error))
-        elif status is None or status.lifecycle == "stopped":
+        elif status is None or status.lifecycle == "cancelled":
             outcome = OperationOutcome("cancelled")
         else:
             outcome = OperationOutcome("finished")
@@ -328,29 +312,7 @@ class WorkflowController[F: FormModel, C]:
 
     def _delivered(self, run: _Run[F, C], bg: BgResult, settle: SettleFn) -> None:
         run.settle = settle
-        status = None if run.engine is None else run.engine.status()
-        if status is not None and status.lifecycle == "paused":
-            # Rejected native Answer models never reserved a segment. Keep the
-            # original operation answerable, and deliver the validation error.
-            run.phase = "paused"
-            question = self.pending_question(run.binding.run_id)
-            if question is not None:
-                run.last_exchange = QuestionExchange(question, None, "waiting")
-            self._notify(status, bg.error)
-        elif status is not None and status.lifecycle == "stopping":
-            # Stop or control I/O failure can precede continuation admission.
-            # The retained generator still needs worker drain before settlement.
-            run.native_error = run.native_error or bg.error
-            run.phase = "paused"
-            try:
-                self._drain(run, run.binding.run_id)
-            except Exception as error:
-                # Rejected drain submission is not a terminal author delivery.
-                # Keep settlement/lease live so Stop or close can retry.
-                logger.exception("Workflow continuation drain could not submit")
-                self._notify(status, run.native_error or error)
-        else:
-            self._finish(run, bg.error)
+        self._finish(run, bg.error)
 
     def status(self) -> RunStatus | None:
         """Return current accepted native status; None means no acceptance."""
@@ -390,181 +352,88 @@ class WorkflowController[F: FormModel, C]:
                 raise
 
     def resume(self, run_id: str) -> int:
-        """Continue a delivered paused run with its retained token and RUN lease.
+        """Open the native pause gate on the retained worker; return its run token.
 
-        Target/state and Runner ownership checks precede continuation submission.
-        Submit failure preserves a healthy paused run and original ownership.
-        Stop during admission with no producer finishes synchronously, then
-        reraises any original error. Native resume/execute run off-main with
-        unchanged context, cursor, progress and records; no repeated init.
+        Stale targets raise RunMismatch. Pending acceptance raises RuntimeError.
+        Engine rejects a nonpaused run or pending Ask without changing ownership.
+        No second worker or Runner continuation is submitted.
+        """
+        with self._lock:
+            self.require_run_id(run_id)
+            run = self._run
+            if run is None or run.engine is None or run.token is None:
+                raise RuntimeError("Resume requires an accepted workflow run")
+            run.engine.resume(run_id)
+            return run.token
+
+    def pending_question(self, run_id: str) -> PendingQuestion | None:
+        """Read the retained worker's current Ask, including its unique request ID.
+
+        Reads update the detached presentation exchange, not execution. Pending
+        acceptance or no native Ask returns None. Stale targets raise RunMismatch.
+        Engine owns question evidence and answer schema inference.
         """
         with self._lock:
             self.require_run_id(run_id)
             run = self._run
             if run is None or run.engine is None:
-                raise RuntimeError("Resume requires an accepted paused workflow run")
-            status = run.engine.status()
-            if run.phase != "paused" or status is None or status.lifecycle != "paused":
-                raise InvalidRunState(
-                    "resume", "running" if status is None else status.lifecycle
-                )
-            if run.token is None or run.settle is None:
-                raise RuntimeError("Resume requires retained Runner ownership")
-            engine = run.engine
-            run.phase = "resuming"
-        try:
-
-            def work() -> RunStatus | None:
-                with self._lock:
-                    if run.stop.is_set():
-                        # Delivery still owns cleanup after Stop during admission.
-                        return engine.status()
-                    engine.resume(run_id)
-                return engine.execute(run_id)
-
-            token = self._runner.continue_operation(
-                run.token,
-                work=work,
-                run_in_pool=False,
-                on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
-                settle=run.settle,
-            )
-        except Exception:
-            status = engine.status()
-            if run.stop.is_set() or (
-                status is not None and status.lifecycle == "failed"
-            ):
-                self._finish(run, None)
-            else:
-                run.phase = "paused"
-            raise
-        if run.phase == "resuming":
-            run.phase = "producing"
-        return token
-
-    def pending_question(self, run_id: str) -> PendingQuestion | None:
-        """Project a delivered, answerable Ask through Engine's public read seam.
-
-        No author code runs. Pending acceptance/continuation returns None;
-        stale run_id raises RunMismatch. Schema inference belongs to the driver.
-        """
-        with self._lock:
-            self.require_run_id(run_id)
-            run = self._run
-            if run is None or run.engine is None or run.phase != "paused":
                 return None
-            question = run.engine.pending_question(run_id)
-            answer_type = run.engine.pending_answer_type(run_id)
-            if question is None or answer_type is None:
+            pending = run.engine.pending_question(run_id)
+            if pending is None:
                 return None
-            return PendingQuestion(
-                question_type=type(question).__name__,
-                question=question.model_dump(mode="json"),
-                answer_schema=answer_type.model_json_schema(),
+            question = PendingQuestion(
+                request_id=pending.request_id,
+                question_type=type(pending.question).__name__,
+                question=pending.question.model_dump(mode="json"),
+                answer_schema=pending.answer_type.model_json_schema(),
             )
-
-    def answer(self, run_id: str, answer: Answer | JsonValue) -> int:
-        """Submit Engine.answer on a worker with the original token and lease.
-
-        Answer models are validated by the engine worker; wrong-model TypeError
-        is delivered as a recoverable paused error. JSON objects first pass the
-        engine's pure parse_answer; invalid fields raise ValidationError without
-        submission. Other JSON carriers raise TypeError. Stale targets raise
-        RunMismatch; pending, non-Ask and duplicate submissions raise
-        InvalidRunState. Submit failure preserves paused ownership for retry.
-        The returned token is pending, not completion or accepted delivery.
-        """
-        with self._lock:
-            self.require_run_id(run_id)
-            run = self._run
-            status = self.status()
             if (
-                run is None
-                or run.engine is None
-                or run.phase != "paused"
-                or run.engine.pending_question(run_id) is None
+                run.last_exchange is None
+                or run.last_exchange.question["request_id"] != pending.request_id
             ):
-                raise InvalidRunState(
-                    "answer", "running" if status is None else status.lifecycle
-                )
-            engine = run.engine
-            answer = _answer_model(engine, run_id, answer)
-            if run.token is None or run.settle is None:
-                raise RuntimeError("Answer requires retained Runner ownership")
-            run.phase = "resuming"
+                run.last_exchange = QuestionExchange(question, None, "waiting")
+            return question
+
+    def answer(
+        self, run_id: str, answer: Answer | JsonValue, *, request_id: str
+    ) -> int:
+        """Deliver this question ID through Engine and return the original run token.
+
+        Engine owns ID matching, model/schema validation and loop delivery.
+        Rejected answers propagate without changing the waiting exchange, worker
+        or RUN lease. Acceptance signals the retained worker; it is not terminal
+        delivery. Author code never runs on this calling thread.
+        """
+        with self._lock:
+            self.require_run_id(run_id)
+            run = self._run
+            if run is None or run.engine is None or run.token is None:
+                raise RuntimeError("Answer requires an accepted workflow run")
+            self.pending_question(run_id)
+            validated = _answer_model(run.engine, run_id, answer, request_id=request_id)
+            run.engine.answer(run_id, validated, request_id=request_id)
             if run.last_exchange is not None:
-                run.last_exchange = replace(run.last_exchange, state="submitted")
-            validated = answer
-
-        def work() -> RunStatus | None:
-            with self._lock:
-                if run.stop.is_set():
-                    return engine.status()
-            status = engine.answer(run_id, validated)
-            with self._lock:
-                if run.last_exchange is not None:
-                    run.last_exchange = replace(
-                        run.last_exchange,
-                        answer=validated.model_dump(mode="json"),
-                        state="answered",
-                    )
-            return status
-
-        try:
-            token = self._runner.continue_operation(
-                run.token,
-                work=work,
-                run_in_pool=False,
-                on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
-                settle=run.settle,
-            )
-        except Exception:
-            run.phase = "paused"
-            if run.stop.is_set():
-                self._drain(run, run_id)
-            elif run.last_exchange is not None:
-                run.last_exchange = replace(run.last_exchange, state="waiting")
-            raise
-        if run.phase == "resuming":
-            run.phase = "producing"
-        return token
-
-    def _drain(self, run: _Run[F, C], run_id: str) -> None:
-        """Queue paused Stop cleanup under retained ownership; allow submit retry."""
-        engine = run.engine
-        if engine is None or run.token is None or run.settle is None:
-            raise RuntimeError("Drain requires retained Engine and Runner ownership")
-        run.phase = "draining"
-        try:
-            self._runner.continue_operation(
-                run.token,
-                work=lambda: engine.drain(run_id),
-                run_in_pool=False,
-                on_terminal=lambda bg, settle: self._delivered(run, bg, settle),
-                settle=run.settle,
-            )
-        except Exception:
-            # No producer exists after rejected submission. Stop/close can retry;
-            # settlement and lease remain live until an actual terminal delivery.
-            run.phase = "paused"
-            raise
+                run.last_exchange = replace(
+                    run.last_exchange,
+                    answer=validated.model_dump(mode="json"),
+                    state="answered",
+                )
+            return run.token
 
     def stop(self, run_id: str) -> RunStatus | None:
-        """Request explicit-target Stop; queue retained Ask cleanup on a worker.
+        """Stop the original worker cooperatively without cancelling its author.
 
-        Stale/absent targets raise RunMismatch. Before acceptance, set Stop and
-        return None. Pending work retains ownership until delivery/unwind. An
-        idle paused run without a producer can finish synchronously. A retained
-        Ask queues Engine.drain under the same token, settlement and RUN lease;
-        no author code runs here. Drain submit errors retain ownership and permit
-        Stop/close retry. Terminal calls do not repeat notification. Native
-        failures propagate; no hardware rollback.
+        Stale targets raise RunMismatch. Before native acceptance, record intent
+        and return None. Ask resumes with None on its existing worker. The token,
+        progress and RUN lease remain until terminal owner delivery, including
+        after native control I/O failure. No hardware rollback occurs.
         """
         with self._lock:
             self.require_run_id(run_id)
             run = self._run
             if run is None:
                 raise RuntimeError("Stop requires a current run")
+            self.pending_question(run_id)
             run.stop.set()
             if run.last_exchange is not None and run.last_exchange.state in {
                 "waiting",
@@ -578,11 +447,6 @@ class WorkflowController[F: FormModel, C]:
             except Exception as error:
                 self._record_native_failure(run, error)
                 raise
-            if run.phase == "paused":
-                if stopped.lifecycle == "stopping":
-                    self._drain(run, run_id)
-                else:
-                    self._finish(run, None)
             return stopped
 
     def apply_tunables(

@@ -8,6 +8,7 @@ from typing import Literal
 import h5py as h5
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     DataVariable,
     RunSnapshot,
@@ -17,13 +18,13 @@ from zcu_tools.datafile import (
 )
 from zcu_tools.experiment import AxesSpec, Axis, ExpCfgModel, ZSpec
 from zcu_tools.experiment.workflows import RunIdentity, RunPaths
+from zcu_tools.experiment.workflows.artifacts import RunManifest
 from zcu_tools.experiment.workflows.export import (
     PreparedFluxdepExport,
     load_trace,
     validate_destinations,
     write_outputs,
 )
-from zcu_tools.experiment.workflows.saved_run import SavedManifest
 
 from tests._filesystem import symlink_or_skip
 from tests._native_support import native_cfg, native_metadata, native_payload
@@ -70,12 +71,12 @@ def test_trace_requires_known_completion_but_not_known_start_time(
 
 def inputs(
     tmp_path: Path,
-    lifecycle: Literal["done", "stopped", "failed", "aborted"] = "done",
+    lifecycle: Literal["done", "cancelled", "failed"] = "done",
     run_id: str | None = None,
-) -> tuple[SavedManifest, PreparedFluxdepExport, RunSnapshot]:
+) -> tuple[RunManifest, PreparedFluxdepExport, RunSnapshot]:
     metadata = native_metadata()
     now = datetime(2026, 10, 12, tzinfo=UTC)
-    manifest = SavedManifest.model_validate(
+    manifest = TypeAdapter(RunManifest).validate_python(
         {
             "format": "zcu-workflow-run",
             "format_version": 1,
@@ -101,14 +102,13 @@ def inputs(
     "lifecycle,completion",
     [
         ("done", "complete"),
-        ("stopped", "stopped"),
+        ("cancelled", "stopped"),
         ("failed", "partial"),
-        ("aborted", "partial"),
     ],
 )
 def test_saved_export_roundtrip_overwrite_and_new_labber(
     tmp_path: Path,
-    lifecycle: Literal["done", "stopped", "failed", "aborted"],
+    lifecycle: Literal["done", "cancelled", "failed"],
     completion: str,
 ):
     manifest, prepared, snapshot = inputs(tmp_path, lifecycle)

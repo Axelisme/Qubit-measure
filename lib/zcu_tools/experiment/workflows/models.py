@@ -1,111 +1,55 @@
-"""Typed workflow results, control observations, and provenance."""
+"""Typed workflow outcomes, controls, records and host-supplied provenance."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import JsonValue
 
-from zcu_tools.core.script_protocol import OperationResult, ScriptGenerator
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.experiment.script_host import PendingQuestion
 
 type Lifecycle = Literal[
-    "running", "pausing", "paused", "stopping", "done", "aborted", "stopped", "failed"
+    "running", "pausing", "paused", "stopping", "done", "cancelled", "failed"
 ]
 
 
-class Effect:
-    """Type marker for core-owned suspension requests, not an extension point.
+@dataclass(frozen=True)
+class Completed[T]:
+    """A returned value, partial-delivery flag and facts for one attempt.
 
-    Workflow code receives requests through ``yield from env.<effect>(...)``.
-    Direct construction is rejected; the engine also rejects non-core requests.
-    name identifies the operation. delivery is None until host dispatch completes;
-    typed effect-specific outcomes remain on the concrete request.
+    value is fn's payload; env.run uses the existing RunRecord with cfg/data.
+    partial_result includes cancellation of the operation or a descendant. It is
+    not a scientific completeness check or a persistence guarantee. facts is the
+    required OperationFacts for this delivered attempt, also written to journal
+    and the enclosing commit. facts.stopped records the operation token's own
+    control intent at completion, not descendant cancellation. These flags
+    describe different facts and must not be merged.
     """
 
-    name: str
-    delivery: OperationResult[None] | None = None
-
-    def __init__(self) -> None:
-        raise TypeError("Use yield from env.<effect>(...), not Effect()")
-
-
-@dataclass(frozen=True)
-class Next[R, S]:
-    """Commit one step: ``record`` is its summary, ``state`` is the next input.
-
-    Both values must support deepcopy. Curve data belongs in saved run files,
-    not in record. The engine owns the commit and copies both values.
-    """
-
-    record: R
-    state: S
-
-
-@dataclass(frozen=True)
-class Done:
-    """Finish successfully without a new point record or state commit."""
-
-
-@dataclass(frozen=True)
-class Aborted:
-    """Finish deliberately; ``reason`` is a nonempty human-readable explanation."""
-
-    reason: str
-
-    def __post_init__(self) -> None:
-        if not self.reason.strip():
-            raise ValueError("Aborted.reason must not be empty")
-
-
-type Step[S, R] = ScriptGenerator[Next[R, S] | Done | Aborted]
-
-
-@dataclass(frozen=True)
-class Completed[Cfg, Result]:
-    """Successful experiment output, without a persistence guarantee.
-
-    ``cfg`` is a deepcopy of run.cfg at experiment return, never the last
-    Schedule's local cfg. ``result`` is the experiment's returned data.
-    Completed means measurement succeeded. The workflow decides whether and
-    where to save this pair.
-    """
-
-    cfg: Cfg
-    result: Result
+    value: T
+    partial_result: bool
+    facts: OperationFacts
 
 
 @dataclass(frozen=True)
 class Failed:
-    """Recoverable Schedule failure; ``reason`` describes its original cause.
+    """A recoverable acquire/analysis failure, without partial data.
 
-    No partial Result accompanies this value. The journal retains
-    the original exception diagnostics; workflow code decides how to continue.
+    reason describes the cause. Authors decide whether to retry or continue;
+    arbitrary framework/build/conversion exceptions instead propagate.
     """
 
     reason: str
 
 
 @dataclass(frozen=True)
-class Cancelled:
-    """An unstarted acquisition cancelled during author-owned cleanup.
-
-    run_id is the owning Engine workflow run ID, not an experiment ID.
-    reason is always 'cancelled'; cancellation is not an error or Failed.
-    """
-
-    run_id: str
-    reason: Literal["cancelled"] = "cancelled"
-
-
-@dataclass(frozen=True)
 class Actor:
-    """Identity of a tunables editor.
-
-    ``kind`` is user or agent. ``name`` is the nonempty operator/agent name.
-    """
+    """Editor attribution: kind is user/agent; name is a nonempty identity."""
 
     kind: Literal["user", "agent"]
     name: str
@@ -117,11 +61,7 @@ class Actor:
 
 @dataclass(frozen=True)
 class TunablesSnapshot:
-    """Detached control view: ``revision`` is its version, ``values`` is JSON.
-
-    Values contain the complete tunables model, not only the most recent patch.
-    Values are detached from the Engine, not a live writable view.
-    """
+    """Detached complete model JSON in values, at the nonnegative revision."""
 
     revision: int
     values: JsonValue
@@ -129,11 +69,7 @@ class TunablesSnapshot:
 
 @dataclass(frozen=True)
 class ProgressSnapshot:
-    """Display-only progress, not proof of a committed step.
-
-    ``name`` identifies the bar. ``total`` is its backend's target, or None.
-    ``completed`` is the absolute displayed progress, never an increment.
-    """
+    """Display-only bar: name, optional target total, absolute completed value."""
 
     name: str
     total: float | None
@@ -142,14 +78,14 @@ class ProgressSnapshot:
 
 @dataclass(frozen=True)
 class RunStatus:
-    """Detached state of the engine's current or last run.
+    """Detached lifecycle, progress and committed-record counters.
 
-    ``run_id`` is the host's run identity; ``workflow`` is the declared name.
-    ``lifecycle`` is running, pausing, paused, stopping, done, aborted, stopped,
-    or failed. ``call_seq`` is the latest invocation number, or None before any
-    invocation. ``committed_seq`` starts at zero and counts successful Next
-    commits. ``revision`` is the latest tunables version. ``reason`` describes
-    an abort/failure/stop when available. ``progress`` contains display snapshots.
+    run_id/workflow identify the run. lifecycle is a Lifecycle value. call_seq
+    identifies the current commit scope, or None before execute. committed_seq
+    counts published records, independent of allocated directory numbers.
+    revision is the latest tunables version. reason describes failure or None.
+    progress is display-only. pending holds the exact request id, authored
+    question and declared answer type while an Ask is answerable, otherwise None.
     """
 
     run_id: str
@@ -160,16 +96,15 @@ class RunStatus:
     revision: int
     reason: str | None
     progress: tuple[ProgressSnapshot, ...]
+    pending: PendingQuestion | None = None
 
 
 @dataclass(frozen=True)
 class RunPaths:
-    """Two host-allocated, not-yet-existing run directories.
+    """Distinct new run roots: metadata_root for ledger; data_root for commits.
 
-    ``metadata_root`` holds manifest/journal. ``data_root`` holds iterations.
-    Engine.start validates distinct roots and refuses existing directories.
-    Workflow authors own any files beneath an invocation root. Engine-owned
-    manifest and iteration summaries use same-directory temporary plus replace.
+    Start refuses existing/overlapping roots. Authors own files in allocated
+    commit directories. The framework never scans or interprets native files.
     """
 
     metadata_root: Path
@@ -178,14 +113,10 @@ class RunPaths:
 
 @dataclass(frozen=True)
 class RunIdentity:
-    """Host-supplied identity and provenance, not inferred from directory names.
+    """Stable run_id, native software provenance and optional entry identity.
 
-    ``run_id`` is a nonempty stable run ID.
-    ``provenance`` is the native SoftwareProvenance captured by the
-    host: its optional evidence remains None when genuinely unavailable.
-    Manifest and journal preserve this value nested under provenance.
-    ``entry_id`` and ``entry_label`` identify the workpoint, or None.
-    The host retains hardware ownership.
+    entry_id/entry_label are host-supplied workpoint evidence or None. Unknown
+    provenance remains None in SoftwareProvenance; it is not inferred here.
     """
 
     run_id: str
@@ -200,11 +131,10 @@ class RunIdentity:
 
 @dataclass(frozen=True)
 class EncodedRecord:
-    """Record projection persisted in the journal.
+    """Detached record projection: JSON value or diagnostic repr degradation.
 
-    ``mode`` is json for structured encoding or repr for degradation. ``value``
-    is JSON in json mode and a diagnostic string in repr mode. ``error`` is None
-    on success, otherwise the serialization/repr failure description.
+    mode is json/repr. value is JSON data or a diagnostic string. error is None
+    for successful encoding and describes serialization/repr failure otherwise.
     """
 
     mode: Literal["json", "repr"]
@@ -212,25 +142,71 @@ class EncodedRecord:
     error: str | None
 
 
+type OperationKind = Literal["run", "call", "setup_device", "wait_until"]
+type OperationOutcome = Literal["completed", "partial", "discarded", "failed", "raised"]
+
+
+@dataclass(frozen=True)
+class OperationFacts:
+    """One actual executor attempt, retained even when Pause discards its value.
+
+    kind names run/call/setup_device/wait_until. iteration starts at one and
+    advances only after successful commit, not directory allocation. attempt
+    counts from one within that scope, including retries. started_at/finished_at are UTC
+    worker boundaries. device_snapshot is detached pre-call driver JSON for run,
+    otherwise None. outcome is completed, partial, discarded by Pause, failed
+    acquire, or raised exception. reason is a diagnostic or None on completion.
+    stopped is the operation token's completion-time stop bit, including failed,
+    raised and discarded attempts; it is not inferred from later run state.
+    """
+
+    kind: OperationKind
+    iteration: int
+    attempt: int
+    started_at: datetime
+    finished_at: datetime
+    device_snapshot: Mapping[str, JsonObject] | None
+    outcome: OperationOutcome
+    reason: str | None
+    stopped: bool
+
+
 @dataclass(frozen=True)
 class CommittedRecord:
-    """One journal-authoritative point returned by Engine.records.
+    """One journal-authoritative record, independent of directory allocation.
 
-    ``commit_seq`` counts Next commits; ``call_seq`` counts step invocations.
-    ``revision`` is the tunables version captured for this invocation.
-    ``encoded_record`` contains the point summary. ``iteration_dir`` is relative
-    to data_root. File references belong to the encoded point, not the Engine.
+    commit_seq counts successful commits; call_seq identifies the commit scope.
+    revision is the scope's initial tunables version. revisions lists versions
+    actually read, deduplicated in read order. encoded_record is detached JSON.
+    directory is relative to data_root, e.g. commits/000007. committed_at is UTC.
+    record_type is the model's module-qualified name, keyed in manifest schemas.
+    operations retains this scope's actual executor attempts in start order.
     """
 
     commit_seq: int
     call_seq: int
     revision: int
     encoded_record: EncodedRecord
-    iteration_dir: str
+    directory: str
+    committed_at: datetime
+    revisions: tuple[int, ...]
+    record_type: str
+    operations: tuple[OperationFacts, ...] = ()
+
+
+class QuestionMismatch(ValueError):
+    """A rejected stale answer; pending_request_id names the current request or None."""
+
+    def __init__(self, request_id: str, pending_request_id: str | None) -> None:
+        self.request_id = request_id
+        self.pending_request_id = pending_request_id
+        super().__init__(
+            f"Question {request_id!r} is not pending; current request is {pending_request_id!r}"
+        )
 
 
 class MissingCapability(RuntimeError):
-    """A required host capability is absent; ``capability`` names that seam."""
+    """A required capability is absent; capability identifies the missing port."""
 
     def __init__(self, capability: str) -> None:
         self.capability = capability
@@ -238,7 +214,7 @@ class MissingCapability(RuntimeError):
 
 
 class RunMismatch(ValueError):
-    """Wrong run identity: ``expected`` is requested, ``actual`` is attached."""
+    """Requested expected run identity differs from attached actual identity."""
 
     def __init__(self, expected: str, actual: str | None) -> None:
         self.expected = expected
@@ -247,7 +223,7 @@ class RunMismatch(ValueError):
 
 
 class InvalidRunState(RuntimeError):
-    """Illegal lifecycle operation; ``action`` and ``lifecycle`` explain rejection."""
+    """Illegal action for the current lifecycle; both fields describe rejection."""
 
     def __init__(self, action: str, lifecycle: Lifecycle) -> None:
         self.action = action
@@ -256,7 +232,7 @@ class InvalidRunState(RuntimeError):
 
 
 class RevisionConflict(ValueError):
-    """Stale edit: ``expected`` is the caller revision, ``actual`` is current."""
+    """Stale expected tunables version; actual is the current published revision."""
 
     def __init__(self, expected: int, actual: int) -> None:
         self.expected = expected

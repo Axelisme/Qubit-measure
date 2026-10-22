@@ -1,13 +1,10 @@
 """Stateless script outcomes and typed question/answer contracts.
 
 These declarations perform no driving, I/O or source lookup. The async host
-owns control scheduling and Future delivery. Existing workflow generators still
-use the original Wait/Ask contracts until their async migration lands.
+owns control scheduling and Future delivery for recipes and workflows.
 """
 
-from collections.abc import Generator
-from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
@@ -67,78 +64,3 @@ class Question[A: Answer](BaseModel):
         raise TypeError(
             "Question must declare Question[AnswerSubclass] before answering"
         )
-
-
-@dataclass(frozen=True)
-class OperationResult[T]:
-    """One operation's detached terminal delivery.
-
-    status is completed or failed. result is the operation's named payload, or
-    None without data. partial_result reports cooperative interruption, not
-    script cancellation; completed partial results may retain usable data.
-    error is the failure diagnostic, otherwise None. Completed does not mean saved.
-    """
-
-    status: Literal["completed", "failed"]
-    result: T | None
-    error: str | None = None
-    partial_result: bool = False
-
-
-class Operation[T](Protocol):
-    """Host-owned operation with a typed terminal delivery.
-
-    The host starts and owns the work. Scripts wrap this handle in Wait rather
-    than iterating it or accessing a runner. The host supplies delivery before
-    advancing the suspended helper. This contract contains no runtime policy.
-    """
-
-    @property
-    def name(self) -> str:
-        """Return the operation name reported by the host, not analysis content."""
-        raise NotImplementedError
-
-    @property
-    def delivery(self) -> OperationResult[T] | None:
-        """Return None while pending, then this operation's terminal outcome."""
-        raise NotImplementedError
-
-
-class ScriptRequest:
-    """Common yield type for Wait and Ask, without erasing their payload types.
-
-    This marker is not an author extension point. Hosts accept only Wait and
-    Ask requests and reject other values yielded by a script.
-    """
-
-
-@dataclass(frozen=True)
-class Wait[T](ScriptRequest):
-    """Suspend a script until op, a host-owned Operation[T], reaches terminal.
-
-    op retains its typed OperationResult[T] delivery. Cancellation returns a
-    cancelled outcome for author-owned cleanup; genuine failures remain failed
-    outcomes and convenience helpers may raise the original operation error.
-    Waiting does not expose analysis content to the agent.
-    """
-
-    op: Operation[T]
-
-
-@dataclass
-class Ask[A: Answer](ScriptRequest):
-    """Suspend a script for an explicit agent or user decision.
-
-    question contains authored evidence and declares the Answer model A.
-    delivery is None until the host validates and supplies an A instance.
-    Helpers return that instance after the host advances them with None.
-    After a cancelled question resumes, delivery=None denotes cancellation.
-    Asking never performs the action described by an accepted answer.
-    """
-
-    question: Question[A]
-    delivery: A | None = None
-
-
-type ScriptGenerator[R] = Generator[ScriptRequest, None, R]
-"""Yield Wait/Ask, resume via request delivery plus None, return an authored R."""

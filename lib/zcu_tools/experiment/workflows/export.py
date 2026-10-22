@@ -22,7 +22,8 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import native_schemas
 from zcu_tools.resources.entry import ArtifactKey, SaveLayout
 
-from .saved_run import SavedManifest, native_path
+from .artifacts import RunManifest
+from .saved_run import native_path
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def load_trace[R, C: ExpCfgModel](
 
 
 def write_outputs(
-    manifest: SavedManifest,
+    manifest: RunManifest,
     prepared: PreparedFluxdepExport,
     snapshot: RunSnapshot,
     *,
@@ -113,7 +114,7 @@ def write_outputs(
                 completion="complete"
                 if manifest.lifecycle == "done"
                 else "stopped"
-                if manifest.lifecycle == "stopped"
+                if manifest.lifecycle == "cancelled"
                 else "partial",
                 labber_path=None,
                 snapshot=snapshot,

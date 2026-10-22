@@ -906,12 +906,26 @@ class ComponentDriver:
         index = widget.findText(value)
         if index < 0:
             raise LookupError(f"{object_name!r} has no option {value!r}")
+        model = widget.model()
+        if model is None:
+            raise RuntimeError("Combo box has no option model")
+        selectable = [
+            row
+            for row in range(widget.count())
+            if model.flags(model.index(row, widget.modelColumn()))
+            & Qt.ItemFlag.ItemIsEnabled
+            and model.flags(model.index(row, widget.modelColumn()))
+            & Qt.ItemFlag.ItemIsSelectable
+        ]
+        if index not in selectable:
+            raise ValueError(f"{value!r} is not selectable")
         if self._can_interact(widget):
             mouse_click(widget, widget.rect().center())
             popup = widget.view()
             assert popup is not None
-            key_click(popup, Qt.Key.Key_Home)
-            for _ in range(index):
+            # QComboBox Home skips disabled headings; the popup view's Home does not.
+            key_click(widget, Qt.Key.Key_Home)
+            for _ in range(selectable.index(index)):
                 key_click(popup, Qt.Key.Key_Down)
             key_click(popup, Qt.Key.Key_Return)
         QApplication.processEvents()
@@ -1064,6 +1078,8 @@ class ComponentDriver:
 
         Visible dialogs are grabbed separately beside it as ``<stem>-dialog-N.png``
         because top-level dialog windows are not included in QWidget.grab().
+        The active visible popup belonging to this window is saved separately as
+        ``<stem>-popup.png``. Other windows' popups are never captured.
         Raises OSError if Qt cannot save any image.
         """
         QApplication.processEvents()
@@ -1075,4 +1091,14 @@ class ComponentDriver:
             )
             if not widget.grab().save(str(output), "PNG"):
                 raise OSError(f"Could not save screenshot: {output}")
+        popup = QApplication.activePopupWidget()
+        if popup is not None and popup.isVisible():
+            # isAncestorOf excludes child windows, so follow Qt's public parent chain.
+            parent = popup.parentWidget()
+            while parent is not None and parent is not self._window:
+                parent = parent.parentWidget()
+            if parent is self._window:
+                output = path.with_stem(f"{path.stem}-popup")
+                if not popup.grab().save(str(output), "PNG"):
+                    raise OSError(f"Could not save screenshot: {output}")
         return path

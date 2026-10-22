@@ -86,13 +86,21 @@ MCP 直接呼叫同一 facet，不經 pane 或 toggle。讓 service 透過 pane 
 Pane 關閉先取得 owner 同意，再釋放自己的訂閱、timer 與 children。被拒絕時
 保留 pane。最後一個 workflow pane 關閉也不 disconnect 硬體或 drain session。
 純 figure widgets 留在 UI，native Plots 的生命週期由 headless owner 管理。
+依 2026-10-22 operation 繪圖邊界裁定，workflow pane 的圖選單分 workflow 與
+目前 operation 兩群。Headless owner 的 `WorkflowPlots.figures()` 同時提供 pane 與 MCP 的名稱投影，operation 名稱為
+`operation/<name>`。新 attempt release 並整組替換舊 operation，workflow 趨勢圖
+跨 iteration 保留。Terminal 保留最新 operation，replacement Start 與 close
+release 兩組 presentation。獨立集合與同 host fork 的邊界見 [[0069]]。
 
-Facet 的 pending_question 提供固定 question_type/question/answer_schema envelope，
-問題 authored fields 只在 question 內。Engine/driver 擁有 schema 推導與答案轉換。
-Engine.answer 同步跑到下一個 paused 或 terminal，因此在 worker 執行。
-Facet 保留原 operation、RUN lease 與 terminal delivery，不在 UI owner thread
-續跑，也不將 Answer 拆成另一次 Resume。Headless run owner 保留最近一次問題、
-成功接受的答案與提交／已回答／取消的顯示事實。Pane 與 RPC/MCP status 共用投影，
+Facet 的 pending_question 提供固定 request_id/question_type/question/answer_schema envelope，
+問題 authored fields 只在 question 內。Engine 擁有 schema 推導與答案轉換。
+2026-10-22 依既定 async host 契約同步：pending question 帶一題一個 request_id，
+Answer 必須帶原題 ID，Engine 先比對 ID 再驗答案。共用 host 的 answer Future
+與 control 序列依 [[0075]] 的「Async 協作與控制命令」。整個 coroutine 留在
+原 worker，Answer 只通知該 worker，不在 UI owner thread 續跑或另排 segment。
+Facet 保留原 operation 與 RUN lease，原 worker 完成 finally 與 executor drain 後，
+才由原 owner terminal delivery 交付終局並釋放 lease。
+Headless run owner 保留最近一次問題、成功接受的答案與提交／已回答／取消的顯示事實。Pane 與 RPC/MCP status 共用投影，
 不因命令入口而顯示不同問答。未接受的錯型輸入不記為已回答。
 錯型答案由 engine 拒絕並保持 paused，
 facet 不複製驗型別或狀態規則。這維持 [[0066]] 的執行與終局責任。

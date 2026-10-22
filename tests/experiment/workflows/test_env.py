@@ -1,165 +1,285 @@
-"""Environment capability and display contracts, without executing requests."""
+"""Environment capabilities and retained displays through an async author."""
 
-from collections.abc import Generator
+from collections.abc import Callable, Iterator, MutableMapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import pytest
 from qick import QickConfig
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.workflows import (
+    Engine,
     EnginePorts,
-    InitEnv,
+    Live,
     MissingCapability,
+    OperationFacts,
+    RunIdentity,
     WorkflowEnv,
+    saved_run,
+    workflow,
 )
-from zcu_tools.experiment.workflows.env import Displays
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
+from zcu_tools.experiment.workflows.env import Displays, EnvHooks
 
-from ._engine_fakes import ManualClock, RecordingDevices
-
-START = datetime(2026, 10, 6, tzinfo=UTC)
-
-
-class RecordingBar(TQDMProgressBar):
-    """Concrete runtime bar with a visible close flag for lifecycle observations."""
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
-        super().close()
+from ._engine_fakes import START, Cfg, Plan, Point, Rig, Tunables, completed, identity
 
 
 @pytest.fixture
-def ports() -> Generator[EnginePorts[str], None, None]:
-    plots = Plots(NonPresentingHost())
-    try:
-        yield EnginePorts(plots, RecordingBar, ManualClock(), context="snapshot")
-    finally:
-        plots.finish(present=False)
-        plots.release()
+def rig(tmp_path: Path) -> Iterator[Rig]:
+    rig = Rig(tmp_path)
+    yield rig
+    rig.close()
 
 
-@pytest.fixture
-def displays(ports: EnginePorts[str]) -> Generator[Displays, None, None]:
-    owner = Displays(ports.progress)
-    try:
-        yield owner
-    finally:
-        owner.close()
+class PauseOnCompletionHost(ScriptHost):
+    """Control the real host's return boundary before env classifies completion.
+
+    The adapter only pauses after the host has sampled the first complete result.
+    It preserves that result, so the env sees a stale epoch with no stop bit.
+    """
+
+    async def call[T](self, fn: Callable[[CallContext], T]) -> CallResult[T]:
+        """Delegate execution, then Pause once before returning the same result."""
+        result = await super().call(fn)
+        if self.epoch == 0:
+            self.pause()
+        return result
 
 
-@pytest.fixture
-def env(
-    tmp_path: Path, displays: Displays, ports: EnginePorts[str]
-) -> WorkflowEnv[str]:
-    return WorkflowEnv(START, ports, tmp_path, displays)
-
-
-def test_init_exposes_original_start_and_context() -> None:
-    initial = InitEnv(START, "snapshot")
-    assert initial.started_at == START
-    assert initial.context == "snapshot"
-
-
-@pytest.mark.parametrize(
-    "start",
-    [
-        datetime(2026, 10, 6),
-        datetime(2026, 10, 6, tzinfo=timezone(timedelta(hours=8))),
-    ],
-)
-def test_naive_and_non_utc_start_are_rejected(start: datetime) -> None:
-    with pytest.raises(ValueError, match="timezone-aware UTC"):
-        InitEnv(start, "snapshot")
-
-
-def test_absent_context_is_not_silently_returned(
-    displays: Displays,
-    tmp_path: Path,
-    ports: EnginePorts[str],
+def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call(
+    rig: Rig,
 ) -> None:
-    initial: InitEnv[str] = InitEnv(START, None)
-    step: WorkflowEnv[str] = WorkflowEnv(
-        START, replace(ports, context=None), tmp_path, displays
+    host = PauseOnCompletionHost()
+    at_boundary = Event()
+    facts: list[OperationFacts] = []
+    calls: list[CallContext] = []
+    deliveries: list[int] = []
+
+    hooks = EnvHooks(
+        new_commit_dir=lambda: pytest.fail("This script does not allocate directories"),
+        commit=lambda record, directory: pytest.fail("This script does not commit"),
+        boundary=at_boundary.set,
+        stopping=lambda: False,
+        experiment_failed=lambda name, reason, error: pytest.fail(reason),
+        question=lambda phase: pytest.fail("This script does not ask"),
+        next_attempt=lambda: (1, len(facts) + 1),
+        operation_finished=facts.append,
+        device_setup=lambda name, cfg: pytest.fail(
+            "This script does not set up devices"
+        ),
     )
-    with pytest.raises(MissingCapability, match="context"):
-        _ = initial.context
-    with pytest.raises(MissingCapability, match="context"):
-        _ = step.context
-
-
-@pytest.mark.parametrize("port", ["soc", "devices"])
-def test_absent_native_port_raises_on_accessor(
-    env: WorkflowEnv[str], port: str
-) -> None:
-    with pytest.raises(MissingCapability, match=port):
-        _ = env.soc if port == "soc" else env.devices
-
-
-def test_native_accessors_return_injected_handles_without_operating(
-    ports: EnginePorts[str], displays: Displays, tmp_path: Path
-) -> None:
-    soc, devices = object(), RecordingDevices()
-    native = replace(ports, soc=soc, soccfg=QickConfig({}), devices=devices)
-    env = WorkflowEnv(START, native, tmp_path, displays)
-    assert env.soc is soc
-    assert env.devices is devices
-    assert devices.values == []
-
-
-def test_wait_rejects_naive_target_before_suspension(env: WorkflowEnv[str]) -> None:
-    request = env.wait_until(datetime(2026, 10, 6))
-    with pytest.raises(ValueError, match="timezone-aware"):
-        next(request)
-
-
-def test_plots_are_shared_across_step_environments(
-    env: WorkflowEnv[str], displays: Displays, tmp_path: Path, ports: EnginePorts[str]
-) -> None:
-    viewer = env.plots.liveplot_1d("main", "x", "y")
-    next_step = WorkflowEnv(START, ports, tmp_path / "next", displays)
-    assert env.plots is next_step.plots is ports.plots
-    viewer.update(np.array([0.0, 1.0]), np.array([2.0, 3.0]))
-    np.testing.assert_array_equal(
-        next_step.plots["main"].axes[0].lines[0].get_ydata(), [2.0, 3.0]
+    env = WorkflowEnv(
+        START,
+        EnginePorts(rig.plots, rig.progress, rig.clock, context=7),
+        host,
+        Displays(rig.progress),
+        hooks,
+        identity=identity(),
     )
 
+    def acquire(ctx: CallContext) -> int:
+        calls.append(ctx)
+        assert not ctx.stop_signal.is_set()
+        return len(calls)
 
-def test_bar_progress_and_identity_are_retained_until_owner_closes(
-    env: WorkflowEnv[str],
-    displays: Displays,
-    tmp_path: Path,
-    ports: EnginePorts[str],
-) -> None:
-    bar = env.pbar("points", 10)
-    bar.set_progress(3)
-    next_step = WorkflowEnv(START, ports, tmp_path / "next", displays)
-    assert next_step.pbar("points", 10) is bar
-    assert next_step.pbar("points", 10).n == 3
-    assert isinstance(bar, RecordingBar)
-    assert not bar.closed
-    displays.close()
-    assert bar.closed
+    async def script() -> None:
+        first = completed(await env.call(acquire))
+        assert not first.partial_result
+        assert first.facts is facts[0]
+        assert first.facts.stopped is first.partial_result
+        deliveries.append(first.value)
+        second = completed(await env.call(acquire))
+        assert not second.partial_result
+        assert second.facts is facts[1]
+        assert second.facts.stopped is second.partial_result
+        deliveries.append(second.value)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(host.run, script())
+        future.add_done_callback(lambda done: at_boundary.set())
+        try:
+            # The paused completion reaches the boundary, or worker failure wakes us.
+            assert at_boundary.wait(30), (
+                "The completed operation must reach its boundary"
+            )
+            assert not future.done(), future.result()
+            assert deliveries == []
+            assert host.epoch == 1
+            host.resume()
+            future.result(timeout=30)
+        finally:
+            host.cancel()
+            future.result(timeout=30)
+            host.close()
+
+    assert deliveries == [1, 2]
+    assert [ctx.epoch for ctx in calls] == [0, 1]
+    assert [fact.outcome for fact in facts] == ["completed", "completed"]
+    assert [(fact.iteration, fact.attempt) for fact in facts] == [(1, 1), (1, 2)]
+    assert all(not ctx.stop_signal.is_set() for ctx in calls)
 
 
-def test_same_bar_name_cannot_change_total(env: WorkflowEnv[str]) -> None:
-    bar = env.pbar("points", 10)
-    with pytest.raises(ValueError, match="total changed"):
-        env.pbar("points", 11)
-    assert bar.total == 10
+def test_original_start_context_and_injected_handles_are_shared(rig: Rig) -> None:
+    soc = object()
+    ports = EnginePorts(
+        rig.plots,
+        rig.progress,
+        rig.clock,
+        context=7,
+        soc=soc,
+        soccfg=QickConfig({}),
+        devices=rig.devices,
+    )
+    rig.engine = Engine(ports)
+    observed: list[object] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        observed.extend([env.started_at, env.context, env.soc, env.devices, env.plots])
+        await env.commit(Point(value=1))
+        assert env.started_at == START
+        assert env.devices is rig.devices
+        assert env.plots is rig.plots
+
+    rig.start(script)
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert observed == [START, 7, soc, rig.devices, rig.plots]
+    assert rig.devices.values == []
+
+
+def test_author_identity_matches_supplied_run_and_saved_manifest(rig: Rig) -> None:
+    supplied = replace(identity(), entry_id="point-7", entry_label="Sample point")
+    observed: list[RunIdentity] = []
+
+    @workflow("identity", "Expose the existing workflow run identity to savers")
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        assert hasattr(env, "identity"), "Authors must receive the existing RunIdentity"
+        observed.append(env.identity)
+        author_copy = env.identity
+        versions = author_copy.provenance.software_versions
+        if isinstance(versions, MutableMapping):
+            versions["author-only"] = "changed"
+        assert env.identity == supplied
+        await env.call(lambda ctx: None)
+        await env.commit(Point(value=1))
+        observed.append(env.identity)
+
+    rig.engine.start(
+        script,
+        plan=Plan(),
+        tunables=Tunables(),
+        paths=rig.paths,
+        identity=supplied,
+    )
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert observed == [supplied, supplied]
+    assert saved_run.read_manifest(rig.paths.metadata_root).identity == supplied
+
+
+def test_run_accepts_typed_bound_callable_with_config_parameter(rig: Rig) -> None:
+    class Experiment:
+        def run(self, config: Cfg, *, context: RunContext) -> int:
+            assert context.plots is not rig.plots
+            assert context.devices == {}
+            return config.value + 4
+
+    rig.engine = Engine(
+        EnginePorts(
+            rig.plots,
+            rig.progress,
+            rig.clock,
+            soc=object(),
+            soccfg=QickConfig({}),
+            devices=rig.devices,
+        )
+    )
+    experiment = Experiment()
+    results: list[int] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        outcome = completed(await env.run(experiment.run, Cfg(value=3)))
+        assert outcome.value.cfg == Cfg(value=3)
+        results.append(outcome.value.result)
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert results == [7]
+
+
+@pytest.mark.parametrize("capability", ["context", "soc", "devices"])
+def test_missing_capability_raises_at_use(rig: Rig, capability: str) -> None:
+    ports = EnginePorts(
+        rig.plots, rig.progress, rig.clock, context=7, devices=rig.devices
+    )
+    if capability == "context":
+        ports = replace(ports, context=None)
+    elif capability == "devices":
+        ports = replace(ports, devices=None)
+    rig.engine = Engine(ports)
+    seen: list[str] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        with pytest.raises(MissingCapability) as caught:
+            getattr(env, capability)
+        seen.append(caught.value.capability)
+
+    rig.start(script)
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert seen == [capability]
+
+
+def test_naive_wait_target_is_rejected_without_using_clock(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            await env.wait_until(datetime(2026, 10, 6))
+
+    rig.start(script)
+    assert rig.engine.execute("run").lifecycle == "done"
+    assert rig.clock.targets == []
+
+
+def test_plots_and_named_bar_are_retained_across_commits(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        bar = env.pbar("points", 10)
+        bar.set_progress(3)
+        viewer = env.plots.liveplot_1d("main", "x", "y")
+        viewer.update(np.array([0.0, 1.0]), np.array([2.0, 3.0]))
+        await env.commit(Point(value=3))
+        assert env.pbar("points", 10) is bar
+        assert bar.n == 3
+        assert not rig.bars[0].closed
+        np.testing.assert_array_equal(
+            env.plots["main"].axes[0].lines[0].get_ydata(), [2.0, 3.0]
+        )
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    assert len(rig.bars) == 1 and rig.bars[0].closed
+    assert final.progress[0].completed == 3
+
+
+def test_same_bar_name_cannot_change_total(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        bar = env.pbar("points", 10)
+        with pytest.raises(ValueError, match="total changed"):
+            env.pbar("points", 11)
+        assert bar.total == 10
+
+    rig.start(script)
+    assert rig.engine.execute("run").lifecycle == "done"
 
 
 @pytest.mark.parametrize(("name", "total"), [("", 1), ("points", -1), ("points", True)])
-def test_invalid_bar_declaration_is_rejected(
-    env: WorkflowEnv[str],
-    name: str,
-    total: int,
-) -> None:
-    with pytest.raises(ValueError, match="nonnegative integer total"):
-        env.pbar(name, total)
+def test_invalid_bar_declaration_is_rejected(rig: Rig, name: str, total: int) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        with pytest.raises(ValueError, match="nonnegative integer total"):
+            env.pbar(name, total)
+
+    rig.start(script)
+    assert rig.engine.execute("run").lifecycle == "done"

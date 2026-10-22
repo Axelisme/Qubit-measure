@@ -1,101 +1,49 @@
-"""Deterministic host ports for public Engine seam tests."""
+"""Deterministic ports and worker lifetime for public async Engine tests."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from io import StringIO
 from pathlib import Path
+from threading import Event
+from time import monotonic
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
-from zcu_tools.datafile import JsonObject, SoftwareProvenance
-from zcu_tools.device import BaseDeviceInfo, FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment.acquisition import capture_device_snapshot
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.device import FakeDevice
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.script_host import PendingQuestion
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import (
     Completed,
     Engine,
     EnginePorts,
-    InitEnv,
+    Failed,
+    Live,
     RunIdentity,
     RunPaths,
-    Step,
+    RunStatus,
     WorkflowEnv,
+    WorkflowPlots,
+    WorkflowScript,
     workflow,
 )
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
+from zcu_tools.plotting.plots import NonPresentingHost, PlotHost
 
-START = datetime(2026, 10, 7, tzinfo=UTC)
-
-
-class ManualClock:
-    """Advance only when the Engine requests a future wait."""
-
-    def __init__(self) -> None:
-        self.value = START
-        self.targets: list[datetime] = []
-        self.on_wait: Callable[[StopSignal], object] | None = None
-
-    def now(self) -> datetime:
-        return self.value
-
-    def wait_until(self, target: datetime, cancel_signal: StopSignal) -> None:
-        self.targets.append(target)
-        if self.on_wait is not None:
-            self.on_wait(cancel_signal)
-        if not cancel_signal.is_set():
-            self.value = target
+from ._engine_ports import START as START
+from ._engine_ports import ManualClock, RecordingBar
+from ._engine_ports import RecordingDevices as DeviceRecorder
 
 
-class RecordingDevices:
-    """Record requested native setpoints without touching hardware."""
+class RecordingDevices(DeviceRecorder):
+    """Expose a detached connected mapping without owning driver lifetimes."""
 
-    def __init__(self) -> None:
-        self.values: list[tuple[str, float]] = []
-        self.on_set: Callable[[StopSignal], object] | None = None
-        self.configs: list[BaseDeviceInfo] = []
-        self.signals: list[StopSignal] = []
-        self.drivers: dict[str, FakeDevice] = {}
-        self.captures = 0
-
-    def capture_snapshot(self) -> dict[str, JsonObject]:
-        self.captures += 1
-        return capture_device_snapshot(self.drivers)
-
-    def get_device_cfg(self, name: str) -> BaseDeviceInfo:
-        if name in self.drivers:
-            return self.drivers[name].get_info().model_copy(deep=True)
-        return FakeDeviceInfo(address="memory")
-
-    def setup_device(
-        self, name: str, cfg: BaseDeviceInfo, cancel_signal: StopSignal
-    ) -> None:
-        value = cfg.model_dump()["value"]
-        self.values.append((name, value))
-        self.configs.append(cfg.model_copy(deep=True))
-        self.signals.append(cancel_signal)
-        if self.on_set is not None:
-            self.on_set(cancel_signal)
-        if name in self.drivers:
-            driver = self.drivers[name]
-            validated = driver.info_model.model_validate(cfg.model_dump(mode="python"))
-            driver.setup(validated, progress=False, stop_event=cancel_signal.event)
-
-
-class RecordingBar(TQDMProgressBar):
-    """Silent runtime progress bar with observable close lifecycle."""
-
-    def __init__(self, **kwargs: object) -> None:
-        super().__init__(**kwargs, file=StringIO())
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
-        super().close()
+    def get_connected_devices(self) -> dict[str, FakeDevice]:
+        return dict(self.drivers)
 
 
 class Plan(BaseModel):
-    """Number of points and nested input data to exercise copy isolation."""
+    """Fixed point count and nested input for copy-isolation scenarios."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     count: int = Field(default=2, ge=1)
@@ -103,51 +51,80 @@ class Plan(BaseModel):
 
 
 class Tunables(BaseModel):
-    """Positive test value captured once per step."""
+    """Positive value read through Live at author-selected boundaries."""
 
     model_config = ConfigDict(extra="forbid")
     value: int = Field(default=1, ge=1)
 
 
-@dataclass
-class State:
-    """Next point index and mutable values carried only by committed Nexts."""
-
-    index: int = 0
-    values: list[int] = field(default_factory=list)
+class Point(BaseModel):
+    value: int
 
 
-@dataclass
-class Cfg:
-    """Mutable experiment value and optional role-to-device-name mapping."""
+class Cfg(ExpCfgModel):
+    """Minimal core-compatible input, with optional device roles."""
 
     value: int = 1
-    dev: dict[str, str] | None = None
+    dev: dict[str, str] = Field(default_factory=dict)
+    nested: list[int] = Field(default_factory=lambda: [2])
 
 
-def save_integer(source: Completed[Cfg, int], path: Path) -> None:
-    """Write the paired cfg value and integer result to the engine temporary."""
-    path.write_text(f"{source.cfg.value}:{source.result}", encoding="utf-8")
+def completed[T](outcome: Completed[T] | Failed) -> Completed[T]:
+    """Require a successful delivery before checking its payload."""
+    assert isinstance(outcome, Completed), outcome
+    return outcome
+
+
+def identity(run_id: str = "run") -> RunIdentity:
+    return RunIdentity(
+        run_id,
+        SoftwareProvenance(
+            software_versions={},
+            git_commit=None,
+            git_dirty=None,
+            qick_version=None,
+            soc_fingerprint=None,
+            hostname="offline",
+        ),
+    )
+
+
+def until(predicate: Callable[[], bool], label: str) -> None:
+    """Wait for a public condition; elapsed time only guards against deadlock."""
+    deadline = monotonic() + 10
+    tick = Event()
+    while not predicate():
+        assert monotonic() < deadline, f"Timed out awaiting {label}"
+        tick.wait(0.001)
 
 
 @dataclass
 class Rig:
-    """One isolated host/Engine and its dynamic on-disk outputs."""
+    """One isolated Engine and its caller-owned ports and output roots."""
 
     root: Path
+    native: bool = False
     clock: ManualClock = field(default_factory=ManualClock)
     devices: RecordingDevices = field(default_factory=RecordingDevices)
-    plots: Plots = field(default_factory=lambda: Plots(NonPresentingHost()))
-    initialized: list[datetime] = field(default_factory=list)
+    plot_host: PlotHost = field(default_factory=NonPresentingHost)
+    plots: WorkflowPlots = field(init=False)
     bars: list[RecordingBar] = field(default_factory=list)
     engine: Engine[int] = field(init=False)
     paths: RunPaths = field(init=False)
 
     def __post_init__(self) -> None:
+        self.plots = WorkflowPlots(self.plot_host)
         self.paths = RunPaths(self.root / "metadata", self.root / "data")
+        board = white_noise() if self.native else None
         self.engine = Engine(
             EnginePorts(
-                self.plots, self.progress, self.clock, context=7, devices=self.devices
+                self.plots,
+                self.progress,
+                self.clock,
+                context=7,
+                devices=self.devices,
+                soc=None if board is None else board.soc,
+                soccfg=None if board is None else board.soccfg,
             )
         )
 
@@ -156,44 +133,23 @@ class Rig:
         self.bars.append(bar)
         return bar
 
-    def init(self, env: InitEnv[int], _plan: Plan) -> State:
-        self.initialized.append(env.started_at)
-        return State()
-
     def start(
         self,
-        step: Callable[[WorkflowEnv[int], Plan, Tunables, State], Step[State, int]],
+        script: WorkflowScript[Plan, Tunables, None, int],
         *,
         plan: Plan | None = None,
     ) -> None:
-        # A fresh declared wrapper avoids mutating shared module-level callables.
-        def invoke(
-            env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-        ) -> Step[State, int]:
-            return step(env, plan, tun, state)
+        async def invoke(
+            env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]
+        ) -> None:
+            await script(env, plan, tun)
 
-        declared = workflow(
-            "example",
-            plan=Plan,
-            tunables=Tunables,
-            init=self.init,
-        )(invoke)
         self.engine.start(
-            declared,
+            workflow("example", "Synthetic async workflow")(invoke),
             plan=Plan() if plan is None else plan,
             tunables=Tunables(),
             paths=self.paths,
-            identity=RunIdentity(
-                "run",
-                SoftwareProvenance(
-                    software_versions={},
-                    git_commit=None,
-                    git_dirty=None,
-                    qick_version=None,
-                    soc_fingerprint=None,
-                    hostname="offline",
-                ),
-            ),
+            identity=identity(),
         )
 
     def events(self) -> tuple[dict[str, JsonValue], ...]:
@@ -201,9 +157,47 @@ class Rig:
         return tuple(
             adapter.validate_json(line)
             for line in (self.paths.metadata_root / "journal.jsonl")
-            .read_text(encoding="utf-8")
+            .read_text()
             .splitlines()
         )
 
     def kinds(self) -> tuple[JsonValue, ...]:
         return tuple(event["kind"] for event in self.events())
+
+    def close(self) -> None:
+        self.plots.finish(present=False)
+        self.plots.release()
+
+
+@contextmanager
+def running(rig: Rig) -> Generator[Future[RunStatus]]:
+    """Keep execute on one worker until Stop/return, including paused/Ask time."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(rig.engine.execute, "run")
+        try:
+            yield future
+        finally:
+            rig.engine.stop("run")
+            future.result(timeout=10)
+
+
+def pending(rig: Rig) -> str:
+    """Wait until the public Ask seam exposes an answerable request id."""
+    until(lambda: rig.engine.pending_question("run") is not None, "pending question")
+    return question(rig).request_id
+
+
+def question(rig: Rig) -> PendingQuestion:
+    """Read an expected pending request through the public Engine seam."""
+    value = rig.engine.pending_question("run")
+    assert value is not None
+    return value
+
+
+def paused(rig: Rig) -> None:
+    until(
+        lambda: (
+            (status := rig.engine.status()) is not None and status.lifecycle == "paused"
+        ),
+        "paused lifecycle",
+    )

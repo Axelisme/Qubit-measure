@@ -157,19 +157,39 @@ metadata and values come from that candidate, with no native lowering or commit.
 None Start batches use parsed shared drafts. Explicit batches use fresh captured
 defaults. Tunables Apply with an empty batch submits the current shared draft.
 
-`pending_question` returns the detached `{question_type, question, answer_schema}`
-envelope only after an Ask pause reaches owner delivery. Authored fields stay
-inside `question`. Engine/driver own schema inference and JSON answer validation.
-`answer` returns the original pending operation token and schedules Engine.answer
-on the worker, without Resume/Execute. Wrong native Answer models deliver a
-recoverable error while retaining the paused question, operation and RUN lease.
+`WorkflowAttachment(script=...)` pairs an async workflow with its native plan,
+live tunables and optional summary types. One Runner worker calls Engine.execute
+through terminal completion. Pause and Ask retain that worker, operation,
+progress and RUN lease. Resume and Answer signal it without another submission.
+Running and paused Apply both publish a complete tunables model and a new revision.
+The next tun.current read sees it; already captured operation cfg stays unchanged.
+Pause interrupts acquisition and retries only a stale partial after Resume, not
+an entire point. A naturally completed result waits for Resume without retry.
+
+`pending_question` returns the detached
+`{request_id, question_type, question, answer_schema}` envelope while that worker
+waits for an answer. Authored fields stay inside `question`. Answer requires the
+original request_id. Engine matches it before schema validation; stale or absent
+IDs raise QuestionMismatch with the current pending ID. Rejection preserves the
+question and records no accepted answer. Wrong native models or fields raise
+TypeError/ValidationError without terminating the run.
+
 The headless owner retains `last_exchange` with the latest question, accepted
 answer and waiting/submitted/answered/cancelled presentation state. Qt panes and
-RPC/MCP status read the same facts regardless of the command's entry point.
-Submitted does not mean accepted; rejected native models retain no answer input.
-Stop is pure control; a retained Ask drains on the worker, including after control
-I/O failure. Control I/O failure ends as failed teardown, not cancellation.
-Only terminal owner delivery settles the operation and releases RUN.
+RPC/MCP status read the same facts. GUI Answer sends the rendered question ID,
+not whichever question is pending at click time. Submitted is not acceptance.
+Stop releases Ask with None on its existing worker. Control I/O failure retains
+its original cause and fails after worker cleanup. Only terminal owner delivery
+settles the operation and releases RUN.
+The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
+same-host operation Plots and finishes before returning or being discarded.
+`WorkflowFigures` groups workflow figures and the current operation in its
+selector. Pane and MCP read `WorkflowPlots.figures()`: workflow names stay
+unchanged and operation names are `operation/<name>`. Workflow registration
+rejects that prefix. A new attempt releases and replaces the whole operation
+group. Terminal runs retain the latest group; replacement Start and close
+release both groups without destroying retained Figures.
+
 Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 ## Sources and workflow

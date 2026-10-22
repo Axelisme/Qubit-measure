@@ -1,339 +1,178 @@
-"""Public Engine control, isolation, and journal-authoritative commit contracts."""
+"""Public async Engine lifecycle, isolation and journal-authoritative commits."""
 
 import json
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
 
 import pytest
 from pydantic import ValidationError
-from zcu_tools.core.script_protocol import ScriptRequest
-from zcu_tools.datafile import SoftwareProvenance
-from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import (
     Actor,
-    Done,
     Engine,
     EnginePorts,
-    InitEnv,
     InvalidRunState,
-    Next,
+    Live,
     RevisionConflict,
-    Run,
-    RunIdentity,
     RunMismatch,
     RunPaths,
-    RunStatus,
-    Step,
     WorkflowEnv,
     workflow,
 )
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
-from ._engine_fakes import START, Cfg, Plan, RecordingBar, Rig, State, Tunables
+from ._engine_fakes import (
+    Plan,
+    Point,
+    RecordingBar,
+    Rig,
+    Tunables,
+    completed,
+    identity,
+    paused,
+    running,
+)
 
 
 @pytest.fixture
-def rig(tmp_path: Path) -> Rig:
-    return Rig(tmp_path)
+def rig(tmp_path: Path) -> Iterator[Rig]:
+    rig = Rig(tmp_path)
+    yield rig
+    rig.close()
 
 
-class ReadCallbackBar(RecordingBar):
-    """Read real progress with an optional one-shot ``on_read`` host callback.
-
-    None leaves reads unchanged. The getter clears the callback before calling
-    it, so control methods may take nested progress snapshots safely.
-    """
-
-    on_read: Callable[[], None] | None = None
-
-    @property
-    def n(self) -> int | float:
-        callback = self.on_read
-        self.on_read = None
-        if callback is not None:
-            callback()
-        return super().n
-
-
-@pytest.fixture
-def capture_bar(rig: Rig) -> ReadCallbackBar:
-    bar = ReadCallbackBar(total=2, desc="work")
-
-    def progress(**_kwargs: object) -> ReadCallbackBar:
-        return bar
-
-    rig.bars.append(bar)
-    rig.engine = Engine(
-        EnginePorts(rig.plots, progress, rig.clock, context=7, devices=rig.devices)
-    )
-    return bar
-
-
-def points(
-    env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-) -> Step[State, int]:
-    if state.index == plan.count:
-        return Done()
-    yield from env.wait_until(START)
-    state.index += 1
-    return Next(tun.value, state)
-
-
-def start_replacement(rig: Rig) -> RunStatus:
-    """Start offline points on the same Engine with fresh paths and run ID new."""
-
-    def replacement(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        return points(env, plan, tun, state)
-
-    declared = workflow(
-        "replacement",
-        plan=Plan,
-        tunables=Tunables,
-        init=rig.init,
-    )(replacement)
-    return rig.engine.start(
-        declared,
-        plan=Plan(count=1),
-        tunables=Tunables(),
-        paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity(
-            "new",
-            SoftwareProvenance(
-                software_versions={},
-                git_commit=None,
-                git_dirty=None,
-                qick_version=None,
-                soc_fingerprint=None,
-                hostname="offline",
-            ),
-        ),
-    )
+async def points(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+    for _ in range(plan.count):
+        await env.commit(Point(value=tun.current.value))
 
 
 def test_start_is_deferred_and_commits_precede_done(rig: Rig) -> None:
+    entered: list[int] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        entered.append(env.context)
+        await points(env, plan, tun)
+
     assert rig.engine.status() is None
-    rig.start(points)
-    assert rig.initialized == []
+    rig.start(script)
+    assert entered == []
     assert rig.kinds() == ("run_started",)
     initial = rig.engine.status()
     assert initial is not None
-    assert (
-        initial.lifecycle,
-        initial.call_seq,
-        initial.committed_seq,
-        initial.revision,
-    ) == ("running", None, 0, 0)
-
+    assert (initial.lifecycle, initial.call_seq, initial.committed_seq) == (
+        "running",
+        None,
+        0,
+    )
     final = rig.engine.execute("run")
-    assert rig.initialized == [START]
-    assert (final.lifecycle, final.call_seq, final.committed_seq) == ("done", 3, 2)
+    assert final.lifecycle == "done", final.reason
+    assert entered == [7]
+    assert final.committed_seq == 2
     assert rig.kinds() == (
         "run_started",
-        "iteration_started",
-        "step_committed",
-        "iteration_started",
-        "step_committed",
-        "iteration_started",
-        "step_finished",
+        "record_committed",
+        "record_committed",
         "run_ended",
     )
-    assert [record.call_seq for record in rig.engine.records("run")] == [1, 2]
-    assert [record.commit_seq for record in rig.engine.records("run", since=1)] == [2]
+    assert [r.commit_seq for r in rig.engine.records("run", since=1)] == [2]
     assert rig.engine.records("run", since=2) == ()
-    assert len(tuple((rig.paths.data_root / "iter").iterdir())) == 3
-    assert (rig.paths.data_root / "iter/000003").is_dir()
     manifest = json.loads((rig.paths.metadata_root / "manifest.json").read_text())
     assert manifest["lifecycle"] == "done"
     assert manifest["ended_at"] is not None
     assert rig.engine.stop("run") == final
 
 
-def test_revision_is_captured_once_and_nested_inputs_are_detached(rig: Rig) -> None:
-    seen: list[tuple[list[int], list[int], int]] = []
+def test_nested_inputs_and_published_records_are_detached(rig: Rig) -> None:
     caller_plan = Plan()
+    observed: list[list[int]] = []
 
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index == plan.count:
-            return Done()
-        seen.append((plan.values.copy(), state.values.copy(), tun.value))
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        observed.append(plan.values.copy())
         plan.values.append(99)
-        state.values.append(tun.value)
-        if state.index == 0:
-            changed = rig.engine.update_tunables(
-                "run",
-                Tunables.model_construct(value=8),
-                expected_revision=0,
-                actor=Actor("agent", "test"),
-            )
-            assert changed.revision == 1
-        yield from env.wait_until(START)
-        state.index += 1
-        return Next(tun.value, state)
+        record = Point(value=tun.current.value)
+        await env.commit(record)
+        record.value = 100
 
-    rig.start(step, plan=caller_plan)
+    rig.start(script, plan=caller_plan)
     caller_plan.values.append(42)
     assert rig.engine.execute("run").lifecycle == "done"
-    assert seen == [([10], [], 1), ([10], [1], 8)]
+    assert observed == [[10]]
     records = rig.engine.records("run")
-    assert [(record.revision, record.encoded_record.value) for record in records] == [
-        (0, 1),
-        (1, 8),
-    ]
-    assert rig.kinds().index("tunables_changed") < rig.kinds().index("step_committed")
-    event = next(event for event in rig.events() if event["kind"] == "tunables_changed")
-    assert (event["revision_before"], event["revision_after"]) == (0, 1)
-    assert event["tunables"] == {"value": 8}
+    assert records[0].encoded_record.value == {"value": 1}
+    value = records[0].encoded_record.value
+    assert isinstance(value, dict)
+    value["value"] = 9
+    assert rig.engine.records("run")[0].encoded_record.value == {"value": 1}
 
 
-def test_resume_without_device_input_keeps_commits_and_latest_revision(
-    rig: Rig,
-) -> None:
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index == plan.count:
-            return Done()
-        env.pbar("points", plan.count).set_progress(state.index)
-        yield from env.wait_until(START)
-        state.index += 1
-        if state.index == 1:
-            rig.engine.pause("run")
-        return Next(tun.value, state)
+def test_resume_keeps_commits_progress_and_author_locals(rig: Rig) -> None:
+    entered = Event()
+    calls: list[int] = []
 
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    records = rig.engine.records("run")
-    assert len(records) == 1 and records[0].revision == 0
-    rig.engine.update_tunables(
-        "run",
-        Tunables.model_construct(value=3),
-        expected_revision=0,
-        actor=Actor("user", "test"),
-    )
-    with pytest.raises(RunMismatch):
-        rig.engine.resume("old")
-    assert rig.engine.resume("run").lifecycle == "running"
-    assert rig.engine.records("run") == records
-    assert len(rig.bars) == 1 and not rig.bars[0].closed
-    assert rig.engine.execute("run").lifecycle == "done"
-    assert [record.revision for record in rig.engine.records("run")] == [0, 1]
-    assert rig.initialized == [START] and rig.bars[0].closed
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        bar = env.pbar("points", plan.count)
+        await env.commit(Point(value=tun.current.value))
+        bar.set_progress(1)
 
+        def operation(ctx: CallContext) -> int:
+            calls.append(1)
+            if len(calls) == 1:
+                entered.set()
+                assert ctx.stop_signal.event.wait(10), "Pause reaches active operation"
+            return 7
 
-def test_pause_discards_mutated_copy_and_resume_repeats_deadline(rig: Rig) -> None:
-    deadline = START + timedelta(seconds=10)
-    seen: list[tuple[int, list[int], int]] = []
-    closed: list[int] = []
+        value = completed(await env.call(operation)).value
+        assert env.pbar("points", plan.count) is bar
+        await env.commit(Point(value=value + tun.current.value))
+        bar.set_progress(2)
 
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index == plan.count:
-            return Done()
-        env.pbar("points", plan.count).set_progress(state.index)
-        seen.append((state.index, state.values.copy(), tun.value))
-        state.values.append(tun.value)
-        try:
-            yield from env.wait_until(deadline)
-        finally:
-            closed.append(state.index)
-        state.index += 1
-        return Next(tun.value, state)
-
-    rig.start(step)
-    rig.clock.on_wait = lambda _signal: rig.engine.pause("run")
-    paused = rig.engine.execute("run")
-    assert (paused.lifecycle, paused.committed_seq, paused.call_seq) == ("paused", 0, 1)
-    assert seen == [(0, [], 1)]
-    assert closed == [0]
-    assert rig.bars[0].closed is False
-    assert rig.kinds().count("step_discarded") == 1
-    assert rig.engine.pause("run") == paused
-    rig.engine.update_tunables(
-        "run",
-        Tunables.model_construct(value=3),
-        expected_revision=0,
-        actor=Actor("user", "test"),
-    )
-    rig.clock.on_wait = None
-    assert rig.engine.resume("run").lifecycle == "running"
-    final = rig.engine.execute("run")
-    assert final.lifecycle == "done"
-    assert final.call_seq == 4
-    assert rig.initialized == [START]
-    assert rig.clock.targets == [deadline, deadline]
-    assert seen == [(0, [], 1), (0, [], 3), (1, [3], 3)]
-    assert [record.call_seq for record in rig.engine.records("run")] == [2, 3]
-    assert rig.bars[0].closed is True
-    assert len(rig.bars) == 1
-    assert final.progress[0].completed == 1
-
-
-@pytest.mark.parametrize("control", ["pause", "stop"])
-def test_next_return_is_committed_before_pending_control(
-    rig: Rig, control: str
-) -> None:
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index == plan.count:
-            return Done()
-        yield from env.wait_until(START)
-        if state.index == 0:
-            if control == "pause":
-                rig.engine.pause("run")
-            else:
-                rig.engine.stop("run")
-        state.index += 1
-        return Next(tun.value, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
-    assert status.committed_seq == 1
-    assert rig.engine.records("run")[0].call_seq == 1
-    assert "step_discarded" not in rig.kinds()
-    if control == "pause":
+    rig.start(script)
+    with running(rig) as future:
+        assert entered.wait(10), "The worker reaches the operation"
+        rig.engine.pause("run")
+        paused(rig)
+        records = rig.engine.records("run")
+        assert len(records) == 1
+        assert not future.done()
+        assert len(rig.bars) == 1 and not rig.bars[0].closed
+        rig.engine.update_tunables(
+            "run", Tunables(value=3), expected_revision=0, actor=Actor("user", "test")
+        )
         rig.engine.resume("run")
-        assert rig.engine.execute("run").lifecycle == "done"
-        assert [record.call_seq for record in rig.engine.records("run")] == [1, 2]
+        final = future.result(timeout=10)
+    assert final.lifecycle == "done", final.reason
+    assert calls == [1, 1]
+    assert [r.encoded_record.value for r in rig.engine.records("run")] == [
+        {"value": 1},
+        {"value": 10},
+    ]
+    assert final.progress[0].completed == 2
+    assert rig.bars[0].closed
 
 
 def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> None:
     entered, release = Event(), Event()
-    signals: list[bool] = []
+    stops: list[bool] = []
 
-    def wait(signal: object) -> None:
-        entered.set()
-        # The controlling caller releases this seam even when an assertion fails.
-        assert release.wait(30), "test did not release the engine thread"
-        signals.append(True)
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        def operation(ctx: CallContext) -> int:
+            entered.set()
+            assert release.wait(10), "Controller releases the operation in finally"
+            stops.append(ctx.stop_signal.is_set())
+            return 4
 
-    rig.clock.on_wait = wait
+        result = completed(await env.call(operation))
+        assert result.partial_result
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        yield from env.wait_until(START + timedelta(seconds=20))
-        return Next(1, state)
-
-    rig.start(step)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        segment = pool.submit(rig.engine.execute, "run")
+    rig.start(script)
+    with running(rig) as future:
         try:
-            # execute is scheduled and its injected clock announces arrival here.
-            assert entered.wait(30), "engine did not reach the injected wait seam"
+            assert entered.wait(10), "Worker enters the injected operation"
             assert rig.engine.pause("run").lifecycle == "pausing"
             assert rig.engine.pause("run").lifecycle == "pausing"
-            assert not segment.done()
+            assert not future.done()
             with pytest.raises(InvalidRunState):
                 rig.engine.execute("run")
             with pytest.raises(InvalidRunState):
@@ -345,204 +184,23 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
             with pytest.raises(InvalidRunState):
                 rig.engine.update_tunables(
                     "run",
-                    Tunables.model_construct(value=2),
+                    Tunables(value=2),
                     expected_revision=0,
                     actor=Actor("user", "test"),
                 )
         finally:
             release.set()
-        # Release lets execute finish its genuine stop/cleanup path.
-        assert segment.result(timeout=30).lifecycle == "stopped"
-    assert signals == [True]
+        assert future.result(timeout=10).lifecycle == "cancelled"
+    assert stops == [True]
     assert rig.kinds().count("pause_requested") == 1
     assert rig.kinds().count("stop_requested") == 1
-    assert rig.engine.records("run") == ()
-    discarded = next(
-        event for event in rig.events() if event["kind"] == "step_discarded"
-    )
-    assert discarded["reason"] == "stop"
 
 
-def test_final_capture_rejects_resume_until_paused_segment_returns(
-    rig: Rig, capture_bar: ReadCallbackBar
-) -> None:
-    attempts: list[str] = []
-
-    def reject_takeover() -> None:
-        attempts.append("resume")
-        with pytest.raises(InvalidRunState):
-            rig.engine.resume("run")
-        with pytest.raises(InvalidRunState):
-            rig.engine.execute("run")
-
-    def pause(_signal: object) -> None:
-        rig.engine.pause("run")
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        bar = env.pbar("work", 2)
-        bar.set_progress(1)
-        try:
-            yield from env.wait_until(START + timedelta(seconds=20))
-            return Next(1, state)
-        finally:
-            capture_bar.on_read = reject_takeover
-
-    rig.clock.on_wait = pause
-    rig.start(step)
-    paused = rig.engine.execute("run")
-    assert attempts == ["resume"]
-    assert (
-        paused.lifecycle,
-        paused.call_seq,
-        paused.committed_seq,
-        paused.revision,
-    ) == ("paused", 1, 0, 0)
-    assert paused.progress[0].completed == 1
-
-    rig.engine.update_tunables(
-        "run",
-        Tunables.model_construct(value=9),
-        expected_revision=0,
-        actor=Actor("user", "test"),
-    )
-    assert rig.engine.resume("run").lifecycle == "running"
-    resumed = rig.engine.execute("run")
-    assert (resumed.lifecycle, resumed.call_seq, resumed.revision) == ("paused", 2, 1)
-    assert attempts == ["resume", "resume"]
-    capture_bar.set_progress(2)
-    assert (paused.lifecycle, paused.call_seq, paused.revision) == ("paused", 1, 0)
-    assert paused.progress[0].completed == 1
-
-
-def test_final_capture_rejects_replacement_until_terminal_segment_returns(
-    rig: Rig, capture_bar: ReadCallbackBar
-) -> None:
-    attempts: list[str] = []
-
-    def reject_takeover() -> None:
-        attempts.append("start")
-        with pytest.raises(InvalidRunState):
-            start_replacement(rig)
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        bar = env.pbar("work", 2)
-        bar.set_progress(1)
-        yield from env.wait_until(START)
-        capture_bar.on_read = reject_takeover
-        return Done()
-
-    rig.start(step)
-    old = rig.engine.execute("run")
-    assert attempts == ["start"]
-    assert (old.run_id, old.lifecycle, old.call_seq, old.committed_seq) == (
-        "run",
-        "done",
-        1,
-        0,
-    )
-    assert old.progress[0].completed == 1
-    assert capture_bar.closed
-    assert start_replacement(rig).lifecycle == "running"
-    new = rig.engine.execute("new")
-    assert (new.run_id, new.lifecycle, new.committed_seq) == ("new", "done", 1)
-    assert (old.run_id, old.lifecycle, old.call_seq, old.committed_seq) == (
-        "run",
-        "done",
-        1,
-        0,
-    )
-    assert old.progress[0].completed == 1
-
-
-@pytest.mark.parametrize(
-    ("ending", "lifecycle", "reason"),
-    [
-        ("pause", "paused", None),
-        ("done", "done", None),
-        ("failure", "failed", "RuntimeError: producer failed"),
-    ],
-)
-def test_final_capture_failure_releases_reservation_and_preserves_producer_cause(
-    rig: Rig,
-    capture_bar: ReadCallbackBar,
-    ending: str,
-    lifecycle: str,
-    reason: str | None,
-) -> None:
-    def fail_capture() -> None:
-        raise LookupError("capture failed")
-
-    def pause(_signal: object) -> None:
-        rig.engine.pause("run")
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        env.pbar("work", 2).set_progress(1)
-        try:
-            if ending == "failure":
-                raise RuntimeError("producer failed")
-            yield from env.wait_until(START + timedelta(seconds=20))
-            return Done()
-        finally:
-            capture_bar.on_read = fail_capture
-
-    if ending == "pause":
-        rig.clock.on_wait = pause
-    rig.start(step)
-    with pytest.raises(LookupError, match="capture failed"):
-        rig.engine.execute("run")
-    status = rig.engine.status()
-    assert status is not None
-    assert (status.lifecycle, status.call_seq, status.committed_seq, status.reason) == (
-        lifecycle,
-        1,
-        0,
-        reason,
-    )
-    assert status.progress[0].completed == 1
-    assert rig.engine.records("run") == ()
-    if ending == "failure":
-        event = next(e for e in rig.events() if e["kind"] == "step_failed")
-        error = event["error"]
-        assert isinstance(error, dict) and error["message"] == "producer failed"
-    if ending == "pause":
-        assert rig.engine.resume("run").lifecycle == "running"
-        rig.engine.stop("run")
-        assert rig.engine.execute("run").lifecycle == "stopped"
-    else:
-        assert start_replacement(rig).lifecycle == "running"
-        assert rig.engine.execute("new").committed_seq == 1
-
-
-@pytest.mark.parametrize("control", ["pause", "stop"])
-def test_request_before_execute_never_calls_init(rig: Rig, control: str) -> None:
-    rig.start(points)
-    if control == "pause":
-        rig.engine.pause("run")
-    else:
-        rig.engine.stop("run")
-    status = rig.engine.execute("run")
-    assert status.lifecycle == ("paused" if control == "pause" else "stopped")
-    assert rig.initialized == []
-    assert status.call_seq is None
-    if control == "pause":
-        assert rig.engine.stop("run").lifecycle == "stopped"
-    assert "iteration_started" not in rig.kinds()
-
-
-def test_bad_revision_or_values_do_not_fail_or_publish(rig: Rig) -> None:
+def test_bad_revision_or_values_do_not_publish(rig: Rig) -> None:
     rig.start(points)
     with pytest.raises(RevisionConflict) as caught:
         rig.engine.update_tunables(
-            "run",
-            Tunables.model_construct(value=2),
-            expected_revision=1,
-            actor=Actor("user", "test"),
+            "run", Tunables(value=2), expected_revision=1, actor=Actor("user", "test")
         )
     assert (caught.value.expected, caught.value.actual) == (1, 0)
     with pytest.raises(ValidationError):
@@ -557,41 +215,18 @@ def test_bad_revision_or_values_do_not_fail_or_publish(rig: Rig) -> None:
     assert rig.engine.execute("run").lifecycle == "done"
 
 
-def test_update_journal_failure_keeps_revision_and_fails_idle_run(rig: Rig) -> None:
-    rig.start(points)
-    journal = rig.paths.metadata_root / "journal.jsonl"
-    journal.unlink()
-    journal.mkdir()
-    with pytest.raises(DIRECTORY_OPEN_ERROR):
-        rig.engine.update_tunables(
-            "run",
-            Tunables.model_construct(value=2),
-            expected_revision=0,
-            actor=Actor("user", "test"),
-        )
-    status = rig.engine.status()
-    assert status is not None and status.lifecycle == "failed"
-    assert status.revision == 0
-    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
-    assert rig.engine.tunables("run").values == {"value": 1}
-    assert rig.initialized == []
-    with pytest.raises(InvalidRunState):
-        rig.engine.execute("run")
-
-
-def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
+def test_wrong_run_invalid_lifecycle_and_terminal_replacement(rig: Rig) -> None:
     with pytest.raises(RunMismatch) as caught:
         rig.engine.execute("missing")
     assert (caught.value.expected, caught.value.actual) == ("missing", None)
     rig.start(points)
-    with pytest.raises(RunMismatch) as caught:
+    with pytest.raises(RunMismatch):
         rig.engine.stop("other")
-    assert caught.value.actual == "run"
     with pytest.raises(InvalidRunState):
         rig.start(points)
     with pytest.raises(InvalidRunState):
         rig.engine.resume("run")
-    rig.engine.execute("run")
+    old = rig.engine.execute("run")
     with pytest.raises(InvalidRunState):
         rig.engine.execute("run")
     with pytest.raises(InvalidRunState):
@@ -599,225 +234,117 @@ def test_wrong_run_and_invalid_lifecycle_are_explicit(rig: Rig) -> None:
     with pytest.raises(ValueError, match="since"):
         rig.engine.records("run", since=-1)
 
-    def replacement(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        return points(env, plan, tun, state)
+    async def replacement(
+        env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]
+    ) -> None:
+        await points(env, plan, tun)
 
-    declared = workflow(
-        "replacement",
-        plan=Plan,
-        tunables=Tunables,
-        init=rig.init,
-    )(replacement)
     rig.engine.start(
-        declared,
+        workflow("replacement", "New run")(replacement),
         plan=Plan(count=1),
         tunables=Tunables(),
         paths=RunPaths(rig.root / "new-meta", rig.root / "new-data"),
-        identity=RunIdentity(
-            "new",
-            SoftwareProvenance(
-                software_versions={},
-                git_commit=None,
-                git_dirty=None,
-                qick_version=None,
-                soc_fingerprint=None,
-                hostname="offline",
-            ),
-        ),
+        identity=identity("new"),
     )
     with pytest.raises(RunMismatch):
         rig.engine.records("run")
     assert rig.engine.execute("new").committed_seq == 1
+    assert old.run_id == "run" and old.committed_seq == 2
 
 
-def test_start_revalidates_constructed_model_before_creating_paths(rig: Rig) -> None:
-    def fresh(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        return points(env, plan, tun, state)
-
+def test_start_revalidates_plan_before_creating_paths(rig: Rig) -> None:
     with pytest.raises(ValidationError):
-        rig.start(fresh, plan=Plan.model_construct(count=-1, values=[]))
+        rig.start(points, plan=Plan.model_construct(count=-1, values=[]))
     assert not rig.paths.data_root.exists()
 
 
-def test_scalar_state_and_inferred_record_type_commit_normally(rig: Rig) -> None:
-    def init(_env: InitEnv[int], _plan: Plan) -> int:
-        return 0
-
-    @workflow("scalar-state", plan=Plan, tunables=Tunables, init=init)
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: int
-    ) -> Step[int, str]:
-        if state == plan.count:
-            return Done()
-        yield from env.wait_until(START)
-        return Next(f"point-{state}", state + 1)
-
-    rig.engine.start(
-        step,
-        plan=Plan(count=2),
-        tunables=Tunables(),
-        paths=rig.paths,
-        identity=RunIdentity(
-            "run",
-            SoftwareProvenance(
-                software_versions={},
-                git_commit=None,
-                git_dirty=None,
-                qick_version=None,
-                soc_fingerprint=None,
-                hostname="offline",
-            ),
-        ),
-    )
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "done", status.reason
-    assert [record.encoded_record.value for record in rig.engine.records("run")] == [
-        "point-0",
-        "point-1",
-    ]
-
-
-@pytest.mark.parametrize("port", ["soc", "devices"])
+@pytest.mark.parametrize("port", ["soc", "devices", "context"])
 def test_missing_port_fails_only_when_used_during_execute(rig: Rig, port: str) -> None:
-    def needs_soc(run: Run[Cfg]) -> int:
-        _ = run.soc
-        return 1
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         if port == "soc":
-            yield from env.run(needs_soc, Cfg())
+            _ = env.soc
+        elif port == "devices":
+            _ = env.devices
         else:
-            yield from env.setup_device(
-                "flux", FakeDeviceInfo(address="memory", value=1.0)
-            )
-        return Done()
+            _ = env.context
 
-    rig.engine = Engine(
-        EnginePorts(
-            rig.plots,
-            rig.progress,
-            rig.clock,
-            context=7,
-            devices=rig.devices if port == "soc" else None,
-        )
-    )
-    rig.start(step)
-    assert rig.initialized == []
-    status = rig.engine.status()
-    assert status is not None and status.lifecycle == "running"
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert f"Missing workflow capability: {port}" in str(status.reason)
+    rig.engine = Engine(EnginePorts(rig.plots, rig.progress, rig.clock))
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert f"Missing workflow capability: {port}" in str(final.reason)
     assert rig.engine.records("run") == ()
-    assert rig.devices.values == []
-    assert not tuple(rig.paths.data_root.glob("iter/*/runs/*.h5"))
 
 
-def test_init_failure_is_failed_without_step_or_commit(rig: Rig) -> None:
-    def broken_init(_env: InitEnv[int], _plan: Plan) -> State:
-        raise OSError("init failed")
+def test_author_startup_failure_never_commits(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        raise OSError("author startup failed")
 
-    def step(
-        env: WorkflowEnv[int], plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        return points(env, plan, tun, state)
-
-    declared = workflow(
-        "bad-init",
-        plan=Plan,
-        tunables=Tunables,
-        init=broken_init,
-    )(step)
-    rig.engine.start(
-        declared,
-        plan=Plan(),
-        tunables=Tunables(),
-        paths=rig.paths,
-        identity=RunIdentity(
-            "run",
-            SoftwareProvenance(
-                software_versions={},
-                git_commit=None,
-                git_dirty=None,
-                qick_version=None,
-                soc_fingerprint=None,
-                hostname="offline",
-            ),
-        ),
-    )
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "init failed" in str(status.reason)
-    assert status.call_seq is None
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert final.reason == "OSError: author startup failed"
     assert rig.engine.records("run") == ()
     assert rig.kinds() == ("run_started", "run_ended")
 
 
-@pytest.mark.parametrize("copied", ["state", "record"])
-def test_deepcopy_failure_during_next_never_commits(rig: Rig, copied: str) -> None:
-    class BrokenState(State):
-        def __deepcopy__(self, _memo: dict[int, object]) -> State:
-            raise ValueError("state copy failed")
+@pytest.mark.parametrize("producer_fails", [False, True])
+def test_progress_snapshot_error_does_not_replace_producer_cause_or_retain_worker_reservation(
+    rig: Rig,
+    producer_fails: bool,
+) -> None:
+    class ReadCallbackBar(RecordingBar):
+        fail_next_read = False
 
-    class BrokenRecord(int):
-        def __deepcopy__(self, _memo: dict[int, object]) -> int:
-            raise ValueError("record copy failed")
+        @property
+        def n(self) -> int | float:
+            if self.fail_next_read:
+                self.fail_next_read = False
+                raise LookupError("capture failed")
+            return super().n
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        yield from env.wait_until(START)
-        if copied == "state":
-            return Next(1, BrokenState(index=1))
-        return Next(BrokenRecord(1), state)
+    bar = ReadCallbackBar(total=2, desc="work")
 
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert f"{copied} copy failed" in str(status.reason)
-    assert status.committed_seq == 0
-    assert rig.engine.records("run") == ()
-    assert "step_failed" in rig.kinds()
+    def progress(**kwargs: object) -> ReadCallbackBar:
+        return bar
+
+    rig.engine = Engine(
+        EnginePorts(rig.plots, progress, rig.clock, context=7, devices=rig.devices)
+    )
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        env.pbar("work", 2).set_progress(1)
+        try:
+            if producer_fails:
+                raise RuntimeError("producer failed")
+        finally:
+            bar.fail_next_read = True
+
+    rig.start(script)
+    with pytest.raises(LookupError, match="capture failed"):
+        rig.engine.execute("run")
+    status = rig.engine.status()
+    assert status is not None
+    assert status.lifecycle == ("failed" if producer_fails else "done")
+    assert status.reason == (
+        "RuntimeError: producer failed" if producer_fails else None
+    )
+    assert status.progress[0].completed == 1
+    assert bar.closed
+    with pytest.raises(InvalidRunState):
+        rig.engine.execute("run")
 
 
-def test_commit_journal_failure_does_not_publish_record_or_next_state(rig: Rig) -> None:
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        yield from env.wait_until(START)
+def test_commit_journal_failure_does_not_publish_record(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         journal = rig.paths.metadata_root / "journal.jsonl"
         journal.unlink()
         journal.mkdir()
-        state.index = 1
-        return Next(1, state)
+        await env.commit(Point(value=1))
 
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert DIRECTORY_OPEN_ERROR.__name__ in str(status.reason)
-    assert status.committed_seq == 0
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "failed"
+    assert DIRECTORY_OPEN_ERROR.__name__ in str(final.reason)
+    assert final.committed_seq == 0
     assert rig.engine.records("run") == ()
-
-
-def test_unknown_yield_fails_at_effect_boundary_with_authoring_hint(rig: Rig) -> None:
-    class UnknownEffect(ScriptRequest):
-        def __init__(self) -> None:
-            pass
-
-    def step(
-        _env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, state: State
-    ) -> Step[State, int]:
-        yield UnknownEffect()
-        return Next(1, state)
-
-    rig.start(step)
-    status = rig.engine.execute("run")
-    assert status.lifecycle == "failed"
-    assert "Wait or Ask" in str(status.reason)
-    assert status.committed_seq == 0

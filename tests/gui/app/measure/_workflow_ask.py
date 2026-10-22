@@ -8,10 +8,7 @@ from threading import get_ident
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.workflows import (
-    Done,
-    InitEnv,
-    Next,
-    Step,
+    Live,
     WorkflowEnv,
     workflow,
 )
@@ -55,36 +52,29 @@ class AskAuthor:
 
     def attachment(
         self,
-    ) -> WorkflowAttachment[Native, Native, int, int, Values, Values, None]:
-        def init(env: InitEnv[None], plan: Native) -> int:
-            return 0
-
-        @workflow("asking", plan=Native, tunables=Native, init=init)
-        def step(
-            env: WorkflowEnv[None], plan: Native, tun: Native, state: int
-        ) -> Step[int, int]:
-            if state:
-                return Done()
-            self.captures.append(tun.value)
+    ) -> WorkflowAttachment[Native, Native, None, Values, Values, None]:
+        @workflow("asking", "Synthetic retained-worker Ask")
+        async def script(
+            env: WorkflowEnv[None], plan: Native, tun: Live[Native]
+        ) -> None:
+            self.captures.append(tun.current.value)
             try:
-                answer = yield from env.ask(Choose())
+                answer = await env.ask(Choose())
                 self.deliveries.append((answer, get_ident()))
                 if answer is None:
                     self.on_cancel()
                     self.cancelled_followups.append(
-                        (yield from env.wait_until(env.started_at + timedelta(days=1)))
+                        (await env.wait_until(env.started_at + timedelta(days=1)))
                     )
-                    self.cancelled_followups.append(
-                        (yield from env.ask(Choose(point=99)))
-                    )
-                    return Done()
-                return Next(answer.value, 1)
+                    self.cancelled_followups.append((await env.ask(Choose(point=99))))
+                    return
+                await env.commit(Native(value=answer.value))
             finally:
                 self.finally_threads.append(get_ident())
                 self.on_finish()
 
         return WorkflowAttachment(
-            step=step,
+            script=script,
             plan_model=Values,
             knobs_model=Values,
             plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),

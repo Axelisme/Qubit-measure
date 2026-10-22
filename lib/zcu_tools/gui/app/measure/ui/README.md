@@ -33,8 +33,11 @@ other tabs. Answer submits to the retained worker. The pane preserves the last
 exchange from the owner's `last_exchange`, including answers submitted through
 facet/RPC/MCP. Only accepted answers display 「已回答」; pending submissions display
 「回答已提交」. Cancelled questions display 「提問已取消」 and disable old answers.
-`WorkflowFigures` owns only
-named canvas presentation through `QtPlotHost`. A refused close keeps the pane.
+`WorkflowFigures` owns only named canvas presentation through `QtPlotHost`.
+Its selector separates Workflow and Current operation groups. Both use the
+headless owner's `WorkflowPlots.figures()` projection, with operation/<name>
+entries. Releasing an old operation removes its entire group before the next
+attempt presents figures. A refused close keeps the pane.
 After accepted close, the view detaches its subscriptions and editors and stops
 its redraw timers before deleting children. Closing the last pane does not drain
 or disconnect the session.

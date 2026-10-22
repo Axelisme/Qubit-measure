@@ -1,56 +1,110 @@
-# `experiment.workflows` — 具名 workflow 核心
+# `experiment.workflows` — 具名 async workflow
 
 **Last updated:** 2026-10-22
 
-**讀者：** framework-dev。具名 workflow 的執行、控制與保存契約。
+**讀者：** framework-dev、lab-author。查閱 workflow 宣告、執行、控制與 record 保存的分工。
 
-此 package 擁有具名 workflow 的通用執行契約。具體 flux 清單、校準、分析與 record 語意屬於使用者 workflow，不屬於核心。架構分工見 [ADR-0062](../../../../docs/adr/0062-experiment-workflow.md)。
+此 package 擁有 workflow 的宣告、控制與 framework JSON。使用者 workflow 擁有量測順序、分析、檔名與 record 的領域欄位。框架不匯入 `zcu_lab`，也不解讀原始量測檔案。既有架構分工見 [ADR-0062](../../../../docs/adr/0062-experiment-workflow.md)。
 
-## 能力與資料
+## 宣告與 live tunables
 
-宿主以 `EnginePorts` 注入 clock、device、`Plots`、progress 與 detached context。繪圖沿用既有 `PlotHost`，artists 留在 host owner thread；核心不持 raw Axes，也不捕捉 Figure snapshot。宿主持有硬體連線與 worker，核心不建立執行緒、不 connect／disconnect，不依賴 Qt 或 GUI。Progress factory 沿用現有 runtime bar 契約，不能把會再次查 ContextVar 的 make_pbar 當成 concrete factory。
+`@workflow(name, description)` 附在一個 `async def (env, plan, tun)` 上，不包裝或執行它。簽名以 `WorkflowEnv[C]`、Plan model、`Live[Tunables]` 與 `BaseModel | None` 回傳註記配對型別。Plan 必須 frozen、extra-forbid，Tunables 必須 extra-forbid 且符合 JSON schema 限制。宿主顯式建立 `WorkflowRegistry`，每次 catalog 重載使用新 instance。
 
-`Next` 配對步驟摘要與下一步 state。`Done` 不新增點 record，`Aborted` 表達明確的業務終止。`Completed` 配對 experiment 返回時的 Run.cfg 副本與 Result，workflow 自行決定保存與單次檔案格式。`Failed` 表達可由 workflow 處理的 Schedule 失敗，只攜帶失敗資訊。
+作者在同一個 coroutine 保留區域變數。`await env.commit(record)` 提交 BaseModel record；同一 run 可以提交不同的 model。作者 return 才結束 workflow。非 None 的 BaseModel return 只在 done 時寫 metadata run root 的 `summary.json`，不算一次 commit。`RunEnded.summary` 記是否寫了 summary。
 
-`workflow(name, *, plan, tunables, init)` 將具名宣告附在原函式；init 由 execute 執行，catalog 由宿主建立。State／record 型別由 init 與 step 簽名推導，state 只需支援 deepcopy，不限定 dataclass。`WorkflowRegistry` 由宿主顯式填入，每次重載建立新 instance。Tunables 宣告檢查 JSON schema。Engine.update_tunables 接收完整的宣告型別 model、expected_revision 與 actor，重新驗證全部欄位後整體替換，不比對差異。每次成功都增加一次 revision，相同值也一樣。Package 內的 TunableValues 集中完整 model 驗證、deepcopy capture 與 revision。TunablesChanged 記完整新 tunables JSON 與 actor、revision_before／after，journal append 成功後才發布新值。更新以完整 model 提交，日誌使用現行格式。Engine 擁有 run_id 與 lifecycle 政策。當前 step 的 capture 不受新 revision 影響。
+`tun.current` 每次回最新 revision 的完整 detached model。作者可以保留其中一份作固定 capture，也可以在 iteration 中重新讀取。框架把本輪實際讀過的 revision 去重，依讀取順序保存為清單，不取最高值。
 
-`InitEnv` 只提供原始 UTC start 與 detached context。`WorkflowEnv` 的 effect helpers 使用 `yield from`，把 request 與回應的型別交接留在核心。同步 `get_device_cfg` 是例外，它在 worker 直接讀取 live cfg。環境共用 injected `Plots` 與 engine-owned progress bars。WorkflowEnv 的 soc／devices 與 context 存取在缺 port 時立即 raise，供定義者在步驟開頭自檢。Engine 不做 capability admission，也不記錄 requires。硬體操作應經 effect 保留 journal 與取消；框架信任定義者，不強制阻擋直接操作。
+`Engine.update_tunables` 接完整 model、expected_revision 與 actor。它重新驗證全部欄位，在 journal append 成功後整體發布。相同值仍增加 revision。`TunablesChanged` 保存完整新值與前後 revision。驗證或 revision 衝突不改 run；journal I/O failure 則停止 run，保留原始 cause，等待作者與 executor 清理。
 
-`Run` 為 experiment 複製 dataclass 或 Pydantic model instance cfg，將同一個 StopSignal 與明確 env 接入既有 Schedule。型別本身與無結構輸入在入口失敗。cfg.dev 只放角色到 device 名稱，不觸發 automatic setup。同步 `env.get_device_cfg(name)` 回傳 detached 的實際 `BaseDeviceInfo` 子類。`yield from env.setup_device(name, cfg)` 傳遞完整 model 與同一個 StopSignal，journal 記錄 name 與全部 cfg 欄位。Host 以 selected driver.info_model 重新驗證 dump，拒絕未驗證的 model_copy 更新，再把 signal.event 交給 native setup。框架不認識 flux、unit 或 device 種類。Unknown／disconnected names 在使用時指名報錯，driver limits 與 I/O cause 原樣傳播，不 retry 或 clamp。使用者套件的 set_flux 工具重用 `check_flux_unit`，單位規則不在核心重做。Start／Resume 不讀裝置，也不記錄 device provenance；RunIdentity 只保存 run／entry identity 與 software provenance。Schedule 的局部 cfg 不倒灌回 Run，後一個 completed outcome 不覆蓋前一個非 completed。Run 保留 live callback 的原始 failure cause，Engine 依來源區分可恢復的 Schedule Failed、宿主 Stop 與核心失敗。即使 experiment 重拋本次 signal.error，來源也不改變。
+## Host 與操作
 
-每次 `env.run` 在宿主保留的 RUN lease 下、callback 前，經 DevicePort 捕捉全部 connected drivers。讀取失敗使 run failed，不執行 callback。缺少 devices 能力不是零 device；真正零 device 仍注入明確回傳 `{}` 的 port。`Run` 要求 caller 提供固定、detached 的 device JSON，直接 caller 先捕捉，確知無 device 時明填 `{}`。Native callback 與 saver 只傳遞這份資料，後續 acquisition／Save 不重新讀取。同步 getter 只讀選定 device，與每次 env.run 的全 device capture 用途不同。SessionDevices 在同一 RUN lease 下重用公開 connected mapping 與 native acquisition helper，不更新 GUI State。
+宿主以 `EnginePorts` 注入 clock、devices、`WorkflowPlots`、concrete progress factory 與 context。宿主持有連線、worker 與 RUN lease。核心不 connect、disconnect，也不依賴 Qt。
 
-Record encoder 將摘要投影成 detached JSON。非有限數字變成 null，曲線陣列與過大 record 會警告。只有摘要序列化可降級為 repr；deepcopy、必要 journal 欄位與檔案 I/O 不能借用此降級規則。
+`Engine.start` 驗證與保存啟動資料，不執行作者。宿主在一個 worker 呼叫一次 `Engine.execute`。這個呼叫透過共用 `experiment.script_host.ScriptHost` 推進整個 coroutine，包含 Pause 與 Ask 的等待。控制命令只通知同一個 worker，不另排 execute、answer 或 drain segment。新 run 必須等原 worker 的 finally 與 executor 都結束。
 
-Engine 在每次 step 呼叫前建立 `data_root/iter/<至少六位 call_seq>/`。唯讀 `env.iteration_dir` 是已存在的 absolute Path，指向該 iteration 的根目錄。屬性不可重綁，workflow 仍可自行操作檔案系統。Engine 不預建量測或圖形子目錄，也不掃描、驗證、追蹤或清理 workflow 檔案。
+`await env.call(fn)` 在 executor 執行 `fn(CallContext)`，回 `Completed[T] | Failed`。CallContext 只有 operation stop_signal 與 epoch。其他能力由 closure 使用 env。`Completed.value` 是 fn 的原始值，`partial_result` 表示交付的結果是否因合作中止而不完整。必填的 `Completed.facts: OperationFacts` 是同時寫入 journal 與 commit 信封的當次事實。任意程式例外直接傳回作者，不變成可恢復的 Failed。
 
-`env.run(experiment, cfg, live=...)` 只執行量測。`Completed` 不代表已保存；workflow 自行呼叫 native saver，決定檔名及是否保存。需要讓工具找到的檔名與用途寫進自己的 point record。Saver 例外沿 workflow 的非正常例外路徑停止 run，不變成量測 `Failed`。Pause／Stop 可能留下未提交或不完整的檔案，框架不承諾 rollback。`ExperimentFailed.run_no` 只識別 invocation 內從 1 計數的 effect，與保存或檔名無關。
+`await env.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result` callable，可以直接傳 bound Experiment.run。cfg 是位置參數，名稱不限定；context 必須是具名 keyword-only 參數。cfg 必須是 ExpCfgModel。每個 attempt 建立新的 RunContext，借用 soc、soccfg 與 connected drivers，使用當次 operation token 及獨立的 operation Plots。框架在呼叫前經 `capture_device_snapshot` 讀全部 connected drivers，再以新的 cfg deepcopy 執行 fn。回傳為 `Completed[RunRecord[Cfg, Result]] | Failed`，saver 接收 Completed，以 value 取原始 record，以 facts 取框架捕捉的事實。非 ExpCfgModel scan 使用 env.call。
 
-Package 內的保存 seam 只負責 typed journal、manifest、iteration 路徑與摘要。Journal 使用 Engine 的同一把 control lock，逐行追加並 flush，不宣稱 fsync 或崩潰接續。Manifest 只摘要生命週期，不保存每點 record 或 state，沿同目錄 temporary 加 replace。
+`DevicePort.get_connected_devices` 回 detached mapping，driver 生命週期仍屬宿主。DeviceMapping 集中異質 driver 的型別邊界。缺 devices capability 會 raise MissingCapability；確定沒有 device 時，宿主提供回空 mapping 的 port。Snapshot 讀取失敗阻止 core fn 執行。框架不依 cfg.dev 自動 setup 或預先解析角色。
 
-每個已結束 invocation 在 `iter/<至少六位 call_seq>/record.json` 保存輸入與結果摘要。格式為 `zcu-workflow-iteration`，版本為 1，包含 identity、workflow、完整 plan、本次 capture 的完整普通 tunables、started 與 result。Started 保存 call_seq、commit_seq、revision、kind。Result 沿用 journal 的 StepCommitted／Finished／Discarded／Failed 欄位。具體檔名屬於 encoded point record，框架不解讀。摘要不保存 state，也不複製 native 檔案的 cfg 或量測結果；EncodedRecord 沿用 json／repr／null 規則。
+`env.get_device_cfg(name)` 同步讀取一個 detached 實際 Info model。`await env.setup_device(name, cfg)` 把完整設定與 operation token 交給 driver owner 重新驗證及操作。`await env.wait_until(target)` 接 aware deadline。這兩種操作也經 env.call，不因記錄 attempt 而要求 devices snapshot。
 
-Engine 在結果 journal append 與 flush 成功後，以同目錄 temporary 加 replace 原子保存摘要。執行中的 invocation 沒有 record.json，不先建 pending 檔。摘要序列化或 I/O 失敗只記 log，不改變提交、state publication、後續 step 或 run 終態。Journal 仍是 commit 唯一權威；record.json 不是 checkpoint，不支援 crash resume。核心不提供 committed journal reader。Workflow 透過 `env.plots` 自行決定繪圖資料與更新時機。框架不輪詢 records，也不保證圖只呈現 journal 已提交的紀錄。Workflow 實作者自行處理 iter 內的圖形保存，不新增框架存圖 interface。責任分工見 ADR-0062。
+Schedule acquire failure 回 Failed，作者決定重試、繼續或 return。新 operation 不繼承前次已交付的 acquire error。Build、conversion 與 callback 錯誤照原 cause raise；runtime retry 只重試同一個已建立 program 的 acquire。
 
-RunIdentity 持有宿主傳入的 native SoftwareProvenance。Manifest 與 run_started journal 在 provenance 底下保存同一份資訊，unknown 保留 None，不以預設 False 或字串代替。
+Pause set 當前 operation token、推進 epoch 並關閉 gate，不 set iteration token。被打斷且 stale 的 partial attempt 記為 discarded。Resume 後重跑同一個 callable 與原 capture，作者不會提前收到該 partial。已自然完成的結果等 Resume 後交付，不重跑。
 
-Engine.start 只驗證並保存啟動資料。第一次 execute 才執行 init；每次 execute 在呼叫執行緒同步跑到 paused 或 terminal。宿主安排 worker 與 lease。核心以同一把 control lock 序列化控制、revision 與不可中斷的提交，不在 effect 執行期間持有這把鎖。Pause／Stop 不等待 effect。一般 Pause 或 effect 中 Stop 會丟棄未提交 invocation，以 driver.close 執行 finally。Next 已返回時仍先提交；Resume 使用已提交 state 與最新 tunables 重做未提交步驟。內部 typed run 保留宣告的泛型配對，Engine 只持有 detached control view。Terminal run 只有在 execute 真正返回後才能被新 run 取代。
+Stop set run scope，往下傳到 iteration 與 operation。作者收到 `Completed(partial_result=True)`，後續 operation 仍啟動並看到已 set 的 token，後續 Ask 回 None。作者必須處理空值並完成清理。框架不向作者 Task 注入 CancelledError。明確 Stop 的終態為 cancelled；清理例外或 control I/O failure 為 failed。
 
-`yield from env.ask(question)` 暫停並保留當前 invocation，不關閉 generator、不提交或丟棄 iteration。Engine 使用共用 `experiment.script_driver.ScriptDriver` 推進所有 step；既有 effects 包成 `Wait`，operation delivery 與 typed outcome 由 workflow host dispatch 填入。`pending_question(run_id)` 回傳 detached 的 authored `Question[Answer]`，只有等待答案且 worker 已返回時有值。沒有 timeout 或預設答案。`pending_answer_type(run_id)` 由 retained driver 提供宣告的 Answer model，宿主可讀其 JSON schema。`parse_answer(run_id, mapping)` 在同一 control lock 內委派 driver 驗證 wire fields，回具體 Answer，不交付、不續跑；錯欄位 raise ValidationError，沒有 pending Ask raise RuntimeError。等待 Ask 時 `resume(run_id)` 拒絕；一般 Pause 仍丟棄步驟並由 Resume 重做。
+## 作者範例
 
-`answer(run_id, answer) -> RunStatus` 與 `execute` 都是同步 worker segment。宿主在同一 RUN lease、同一 operation 下排 worker，不在 UI owner thread 執行 answer。Engine 持 control lock 先經 driver 驗證具體 Answer model，再記 Resumed 並 reserve；錯型 raise TypeError，保持 paused 且不寫事件。驗證成功後釋放 lock，由 worker 送入答案並跑到下一次 paused 或 terminal，不需要另呼叫 Resume 或 Execute。當前 invocation 保留原 tunables capture；新 revision 只供後續 step 使用。`stop(run_id) -> RunStatus` 只設控制狀態與 StopSignal，不推進 generator。等待 Ask 時 Stop 回 stopping，宿主必須在同 operation／RUN lease 排 `drain(run_id) -> RunStatus` worker segment。正常 Stop 的 drain 以 None resume 作者，執行收尾後丟棄 iteration，回 stopped；收尾拋錯回 failed。Terminal owner delivery 之前不得釋放 lease 或接受 replacement。沒有 retained driver 的 paused run 可在 Stop 當下結束。
-Control I/O failure ends as failed teardown, not cancellation. The original error and pending_error remain, and worker drain runs author finally. Ask is not guaranteed a None delivery.
+序列相同時直接重用 core，或用 typed async helper 包裝它：
 
-`WorkflowEnv.ask(question) -> ScriptGenerator[A | None]` 在取消時回 None，作者必須明確分支。取消之後的 Ask 也立即回 None。新的 `env.run` 不啟動 acquisition，回傳 workflow owner 的 `Cancelled(run_id, reason="cancelled")`，run_id 是 Engine 的 workflow run ID，不是 experiment ID。Run 的結果型別為 `Completed | Failed | Cancelled`。新的 device／wait helpers 也不啟動工作，直接回 None。這些 delivery 由 effect owner 填入，共用 driver 只負責推進與驗證 cancelled delivery。
+```python
+async def run_t1(
+    env: WorkflowEnv[Calibrated], cfg: T1Cfg
+) -> Completed[RunRecord[T1Cfg, T1Result]] | Failed:
+    return await env.run(T1Exp().run, cfg)
 
-`WorkflowEnv.plots` 直接提供注入的 `Plots`，跨步驟與 retry 保留同一個繪圖 lifetime。`live` 接 `LiveUpdate` 回呼，收到 buffer 維度順序的 float64 axes tuple 與 complex128 samples，包含 partial NaN。回呼同步執行，不修改或保留借用的資料；workflow 用 typed handles 投影實數，或以 draw 任意繪圖、save 保存。Run 只綁定一個 buffer，保留回呼錯誤來源，不驗證繪圖策略。宿主在 producer 停止後 finish／release，Pause 不結束 Plots。回呼簽名目前是顧問代裁，待使用者審查。`assemble_rows`／`assemble_scalars` 把稀疏結果組成 detached 顯示陣列，保留缺值與 filled mask，不插值。
+# Inside the authored workflow coroutine:
+for flux, d in zip(plan.fluxes, env.commit_dirs()):
+    outcome = await env.run(T1Exp().run, cfg)
+    # Equivalent when a helper adds lab-specific policy:
+    # outcome = await run_t1(env, cfg)
+    if isinstance(outcome, Failed):
+        continue
+    save_t1(outcome, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
+    await env.commit(Point(flux=flux), d)
+```
 
-Workflow 由 `gui.app.measure` 承載。`WorkflowControlFacet` 路由多個 headless tab owner，Qt pane 與 measure RPC 呼叫同一 facet。組合根注入註冊清單，owner 使用既有 SessionServices 的 runner／progress 與 RUN lease。核心與宿主不依賴具體 workflow 或 `Calibrated`，不反向 import `zcu_lab`。各 workflow 保留自己的 forms 與科學流程。這些組裝不改變核心的 device、run 或保存契約。宿主與 agent 入口見 [measure README](../../gui/app/measure/README.md) 及 [measure MCP](../../mcp/measure/README.md#workflow-tools)。
+範例中的 cfg、Point 與 saver 由 lab 定義。不同序列可以寫同簽名的同步 helper，再傳給 env.run。作者 async helper 仍只 await env／tab／session 或可靜態解析的 lab helper，不自行建立 asyncio task。Guardrail 的範圍見 [lab 教學](../../../../zcu_lab/workflows/README.md#async-await-guardrail)。
 
-`saved_run` 提供 typed manifest／iteration reader，由 caller 傳入 workflow 名稱與 point TypeAdapter。它只消費 structured committed summaries，指名缺失與 malformed source，不讀 journal 或從 leftover native 檔創造提交點。`export` 以 caller 的 native declaration 讀具名 trace，並對已準備好的 grouped payload 分別寫 merged native 與 Labber。Writer failure 保留各自 path／error，不操作 ledger 或修復 run identity。
+要回到過去某點，開新 run、切 plan 範圍，用 saved_run reader 從上一個 run 初始化 history。Engine 不提供 cursor 回退或自動回灌。
 
-各 workflow 的獨立工具留在 zcu_lab，擁有科學 payload、channel、單位與樣本政策。框架不提供通用 dispatcher，不解讀具體實驗或 device snapshot。GUI/Controller 不保留 export binding。缺 record 不代表無量測。
+## Commit 目錄與保存
+
+`env.new_commit_dir()` 每次建立新的 absolute `data_root/commits/<六位配置序號>/`。配置順序與 commit 順序獨立。`env.commit_dirs()` 每次 next 才配置，使用 `zip(values, env.commit_dirs())`，把有限 values 放前面，避免多配置一次。
+
+`await env.commit(record, d)` 只接受本 run 已配置且未提交的 d。省略 d 時自配新目錄。同目錄二次提交或 foreign path 會 raise，不發布 record。配置目錄不換 iteration token，成功 commit 才換新 iteration scope。未提交目錄可保留作者檔案，但沒有 framework record.json。
+
+作者自行保存 RunRecord、圖形與其他原始檔，並在自己的 record 記檔名。Completed 不代表已保存。Saver 例外沿作者例外路徑傳播，不變成 acquire Failed。Pause 或 Stop 不回滾檔案，框架也不掃描、追蹤或刪除它們。
+
+成功 commit 先追加並 flush `record_committed` journal，再發布 in-memory records。`record.json` 以同目錄 temporary 加 replace 寫入；這份副本寫入失敗只記 log，已 flush 的 journal 仍是 commit 權威。它不是 checkpoint，不支援 crash resume 或 fsync 承諾。
+
+`env.identity` 每次回 detached 的既有 startup RunIdentity，作者修改回傳值不影響 run。Software provenance 在 workflow 啟動時保存，manifest 與 run_started.identity 各留既有副本。每次 operation 不另建 provenance 或 run_id。
+
+Lab 的 `save_native(completed, destination, *, spec, snapshot, identity)` 顯式接收 env.identity。它從 Completed.value 取 RunRecord，以 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata。H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completion 由 Completed.partial_result 推導，True 為 stopped，False 為 complete。它不使用 facts.stopped 判定 completion，避免漏掉 descendant 取消。labber_path 為 None。這是既有 writer 的接線，不表示 RunRecord.metadata 或 datafile 通用容器已完成。
+
+Record 信封保存 commit_seq、配置目錄、UTC 時間、record 型別名、encoded record、本輪 revisions 與 operations。Manifest 為每種出現的 record model 保存一次 JSON schema。這些 schema 只提供資訊，不作 runtime validator。Record encoder 把非有限值改成 null，只有 authored record/summary 序列化可降級成 repr；必要 metadata 與 I/O failure 不使用這項降級。
+
+## Operation 事實與讀取
+
+每次實際 executor attempt 都追加 flattened `operation_finished` JSONL event。它包含 call_seq 與 operation；seq、time、run_id 是既有 journal 欄位。`OperationFacts` 欄位為 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason 與 stopped。
+
+Kind 是 run、call、setup_device 或 wait_until。Iteration 從 1 起，成功 commit 才推進，配置目錄不推進。Attempt 在 iteration 中從 1 起，成功 commit 後重置。Stopped 只記完成時 operation 自身 token 的控制意圖，不代表所有 descendant 的取消，也不從後來的 Stop 或 Pause 狀態推導。交付結果是否不完整以 Completed.partial_result 為準。只有 run 有呼叫前的 device snapshot，其餘是 None。Outcome 是 completed、partial、discarded、failed 或 raised。Pause discard 與重試各留一筆，例外也留事實，不改原始例外分類。
+
+Commit 的 operations 按 attempt 順序列出同一結構。未 commit 的操作只留 journal。Snapshot 固定在操作前，後續量測、driver mutation 或 Save 不重新讀取或覆寫它。
+
+`saved_run.read_records(run, Model | TypeAdapter(Model))` 回按 commit_seq 排序的 `SavedRecord` tuple。型別名不符、欄位驗證失敗或 malformed envelope 會指名 record.json source raise。`read_records_raw(run)` 回保留 JSON 的 `SavedRecord[EncodedRecord]`，供異質 record 使用。Reader 不用 manifest schema 驗證，也不從 leftover native files 推導提交。
+
+`saved_run.read_summary(run)` 讀 metadata root 的 summary.json。缺檔回 None，run 目錄不存在或格式錯誤則 raise。GUI/MCP 不新增 summary result 欄位。
+
+## Ask 與顯示
+
+`await env.ask(question)` 等待一題一個 host 配發的 request_id。Engine 的 pending question 保存原題與 declared answer type。`Engine.parse_answer(run_id, fields, request_id=...)` 先比對題 ID，再驗 schema，不消耗問題。`Engine.answer(run_id, answer, request_id=...)` 驗證並通知原 worker，不執行新 segment。
+
+Stale 或無 pending 的 ID 會 raise QuestionMismatch，攜帶目前 pending_request_id 或 None。拒絕不改 lifecycle，也不記 question_answered。成功 host acknowledgement 後，workflow owner 才保存原 ID、題目與已接受答案。Host control callback 只捕捉記憶體資料，持久化在 callback 之外。
+
+GUI facet 與 MCP status 讀相同 pending envelope。GUI Answer 使用畫面原題的 ID，MCP workflow_answer 必填 request_id。Wrong model 或 schema 不消耗問題。Stop 在同一 worker 交 None 並執行 finally。只有 terminal owner delivery 才釋放 operation、progress 與 RUN lease。
+
+`env.plots` 是原注入的 `WorkflowPlots`，跨 commit、Pause 與 retry 保留 workflow 趨勢圖。每次 `env.run` attempt 經 `start_operation()` 建立同一 presentation host 上的獨立 Plots。返回、Pause 丟棄與失敗都先 finish；下一個 attempt 開始前 release 舊 operation。Core 與 finish 同時失敗時保留 core 例外並附 cleanup note；只有 finish 失敗則直接 raise，不交 Completed。
+
+`WorkflowPlots.figures()` 回 workflow `<name>` 與目前 `operation/<name>` 的同一投影，供 pane 與 MCP 使用。Workflow 圖名登記時拒絕 `operation/` 前綴，通用 Plots 與 operation 圖不受此限制。新 attempt 整組替換 operation，terminal 保留最新一組；宿主在 workflow producer 結束後 finish，tab replacement 或 close release 兩組 presentation，不銷毀原生 Figures。
+
+作者用 typed plot handles 或 draw 更新 workflow 圖。保存圖片時從 `completed.value.result` 重畫，不依賴 operation live 圖的保存位置。`assemble_rows` 與 `assemble_scalars` 將稀疏結果組成 detached 顯示陣列，不插值。
+
+GUI 組裝見 [measure README](../../gui/app/measure/README.md#workflow-hosting)，agent 工具見 [measure MCP](../../mcp/measure/README.md#workflow-tools)。框架不依賴具體 workflow、校準資料或 GUI 選中狀態。
 
 ## 驗證 owner
 
-`tests/experiment/workflows/` 從公開契約驗證核心結果。既有 `tests/experiment/v2/runtime/` 仍擁有 Schedule、ProgramBuilder 與 buffer 行為，不在此複製底層 runtime 測試。
+`tests/experiment/workflows/` 從公開 Engine、env 與 saved reader 驗證作者交接、控制、commit 和 I/O failure。`tests/experiment/v2/runtime/` 擁有 Schedule、ProgramBuilder 與 buffer 的行為。GUI/MCP 的註冊、wire 投影與元件操作由各自 owner tests 驗證。

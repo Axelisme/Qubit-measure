@@ -69,15 +69,25 @@ returns form_errors with path/message rows. Unexpected producer failures retain
 controller_error. No retry or rollback follows an error or transport timeout.
 Figures and committed records remain readable after terminal delivery. Names
 and status do not render; figure returns png_b64 for validated MCP image delivery.
-Status includes `pending_question`, a `{question_type, question, answer_schema}`
-envelope or null outside a delivered Ask pause. Answer returns the original
-pending `operation_id`. Status also retains `last_exchange` with the last
-question envelope, accepted answer fields or null, and state
-waiting/submitted/answered/cancelled. Submitted is not acceptance; only a returned
-Engine.answer segment records an accepted answer. Engine/driver validate JSON fields; rejection projects
-`invalid_params/answer_validation` without consuming the question. Execution
-continues on the worker under the existing RUN lease and terminal operation
-delivery, not the RPC/UI owner thread.
+Figures use the pane's same WorkflowPlots projection: workflow names stay
+unchanged, current-operation names are operation/<name>. A new attempt replaces
+the whole operation group; terminal delivery retains the latest group.
+Status includes `pending_question`, a
+`{request_id, question_type, question, answer_schema}` envelope or null outside
+Ask. Native status also projects pending_request_id. Answer requires run_id,
+request_id and answer, and returns the original operation_id. Engine matches the
+ID before validating fields. Stale or absent questions return
+`precondition_failed/question_mismatch` with current pending_request_id or null.
+Invalid fields return `invalid_params/answer_validation`. Neither rejection
+consumes the question or records an accepted answer.
+
+Status retains `last_exchange` with the latest question envelope, accepted
+answer fields or null, and waiting/submitted/answered/cancelled state. Host
+acknowledgement proves answer validation and delivery, not run completion.
+Pause, Resume and Answer retain one worker and RUN lease through terminal owner
+delivery; RPC/UI code never executes the author. Committed records project their
+directory, UTC commit time, read-order revisions, qualified model name and
+actual operation-attempt facts alongside the encoded authored record.
 
 ## Predictor sources
 

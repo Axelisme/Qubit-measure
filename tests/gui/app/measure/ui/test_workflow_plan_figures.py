@@ -7,10 +7,11 @@ from typing import Annotated
 import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.experiment.workflows import Done, InitEnv, Step, WorkflowEnv, workflow
+from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.adapter import RunRequest
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -31,6 +32,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure._operation_plots import attachment as plot_attachment
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleRun
 
 
@@ -81,31 +83,25 @@ class NativeTunables(BaseModel):
     gain: float
 
 
-def _init(env: InitEnv[None], plan: NativePlan) -> None:
-    return None
-
-
-@workflow("flux-list", plan=NativePlan, tunables=NativeTunables, init=_init)
-def _plot_fluxes(
-    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: None
-) -> Step[None, None]:
+@workflow("flux-list", "Synthetic float-list plan plotting")
+async def _plot_fluxes(
+    env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+) -> None:
     if plan.fluxes:
         viewer = env.plots.liveplot_1d("flux trace", "Flux", f"fluxes={plan.fluxes}")
         values = np.asarray(plan.fluxes)
-        viewer.update(values, values * tun.gain)
-    yield from env.wait_until(env.started_at)
-    return Done()
+        viewer.update(values, values * tun.current.gain)
+    await env.wait_until(env.started_at)
 
 
-@workflow("flux-sweep", plan=NativePlan, tunables=NativeTunables, init=_init)
-def _plot_sweep(
-    env: WorkflowEnv[None], plan: NativePlan, tun: NativeTunables, state: None
-) -> Step[None, None]:
+@workflow("flux-sweep", "Synthetic sweep plan plotting")
+async def _plot_sweep(
+    env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+) -> None:
     values = np.asarray(plan.fluxes)
     viewer = env.plots.liveplot_1d("flux trace", "Flux", f"fluxes={plan.fluxes}")
-    viewer.update(values, values * tun.gain)
-    yield from env.wait_until(env.started_at)
-    return Done()
+    viewer.update(values, values * tun.current.gain)
+    await env.wait_until(env.started_at)
 
 
 @pytest.fixture
@@ -136,7 +132,7 @@ def _host_plan_window(
     ctrl.workflow_control().configure(
         (
             WorkflowAttachment(
-                step=_plot_fluxes,
+                script=_plot_fluxes,
                 plan_model=Plan,
                 knobs_model=Tunables,
                 plan_to_cfg=lambda form, env, snapshot: NativePlan(fluxes=form.fluxes),
@@ -144,7 +140,7 @@ def _host_plan_window(
                 seed=lambda plan, form: None,
             ),
             WorkflowAttachment(
-                step=_plot_sweep,
+                script=_plot_sweep,
                 plan_model=RequiredSweepPlan if required else SweepPlan,
                 knobs_model=Tunables,
                 plan_to_cfg=lambda form, env, snapshot: NativePlan(
@@ -155,6 +151,7 @@ def _host_plan_window(
                 knobs_to_cfg=lambda form: NativeTunables(gain=form.gain),
                 seed=lambda plan, form: None,
             ),
+            plot_attachment(),
         )
     )
     ctrl.setup_control.new_entry(EntryRequest("plan-ui"))
@@ -171,6 +168,13 @@ def _host_plan_window(
     try:
         yield window
     finally:
+        facet = ctrl.workflow_control()
+        for tab in facet.tabs():
+            if tab.busy and tab.run_id is not None:
+                facet.stop(tab.run_id)
+        qt_until(
+            lambda: all(not tab.busy for tab in facet.tabs()), label="workflow teardown"
+        )
         ctrl.close()
         window.dispose()
 
@@ -188,7 +192,69 @@ def _open(driver: ComponentDriver, root: Path, name: str = "flux-list") -> None:
 
 
 def _done(driver: ComponentDriver) -> bool:
-    return driver.observe(object_name="workflow.status").text == "done"
+    return driver.observe(object_name="workflow.status").text == "done" and any(
+        w.text == "Start" and w.enabled for w in driver.visible().widgets
+    )
+
+
+def test_operation_groups_replace_old_set_and_retain_workflow_trend(
+    plan_window, tmp_path
+):
+    driver = ComponentDriver(plan_window)
+    _open(driver, tmp_path, "operation-plots")
+    driver.click("Start")
+    qt_until(
+        lambda: (
+            driver.observe(object_name="workflow.ask").visible
+            and '"point": 1' in driver.observe(object_name="workflow.ask").text
+        ),
+        label="first operation question",
+    )
+    _snapshot(driver, tmp_path, "03-first-operation")
+    driver.select_combo(
+        "operation/measurement", object_name="workflow.figures.selector"
+    )
+    _snapshot(driver, tmp_path, "04-first-measurement")
+    assert driver.plots().axes[0].ylabel == "Attempt 1"
+    driver.select_combo("operation/diagnostic", object_name="workflow.figures.selector")
+    _snapshot(driver, tmp_path, "05-first-diagnostic")
+    assert driver.plots().axes[0].ylabel == "Diagnostic"
+    driver.select_combo("trend", object_name="workflow.figures.selector")
+    _snapshot(driver, tmp_path, "06-workflow-trend")
+    assert driver.plots().axes[0].ylabel == "Workflow trend"
+    driver.enter_text(object_name="workflow.answer", value='{"value": 1}')
+    driver.click("Answer")
+    qt_until(
+        lambda: (
+            '"point": 2' in driver.observe(object_name="workflow.ask").text
+            and driver.observe("Answer").enabled
+        ),
+        label="replacement operation question",
+    )
+    _snapshot(driver, tmp_path, "07-replacement-operation")
+    driver.select_combo(
+        "operation/measurement", object_name="workflow.figures.selector"
+    )
+    _snapshot(driver, tmp_path, "08-second-measurement")
+    assert driver.plots().axes[0].ylabel == "Attempt 2"
+    with pytest.raises(LookupError, match="diagnostic"):
+        driver.select_combo(
+            "operation/diagnostic", object_name="workflow.figures.selector"
+        )
+    driver.select_combo("trend", object_name="workflow.figures.selector")
+    _snapshot(driver, tmp_path, "09-retained-workflow")
+    assert driver.plots().axes[0].ylabel == "Workflow trend"
+    driver.click(object_name="workflow.figures.selector")
+    _snapshot(driver, tmp_path, "10-grouped-selector")
+    driver.press_key(Qt.Key.Key_Escape, object_name="workflow.figures.selector")
+    driver.enter_text(object_name="workflow.answer", value='{"value": 2}')
+    driver.click("Answer")
+    qt_until(lambda: _done(driver), label="operation workflow terminal delivery")
+    _snapshot(driver, tmp_path, "11-terminal-retained")
+    driver.select_combo(
+        "operation/measurement", object_name="workflow.figures.selector"
+    )
+    assert driver.plots().axes[0].ylabel == "Attempt 2"
 
 
 def test_plan_float_list_edit_errors_and_native_lowering(plan_window, tmp_path):
@@ -366,6 +432,7 @@ def test_figure_selector_appears_with_figures_and_hides_after_release(
     assert selector.visible
     assert selector.text == "flux trace"
     driver.enter_text(object_name="form.input.fluxes", value="[]")
+    assert driver.observe(object_name="form.input.fluxes").text == "[]"
     _snapshot(driver, tmp_path, "04-empty-plan")
     driver.click("Start")
     qt_until(lambda: _done(driver), label="finite plot-free replacement run")

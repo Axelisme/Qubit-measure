@@ -42,6 +42,7 @@ from zcu_tools.gui.app.measure.services.workflow_borrower import WorkflowBorrowe
 from zcu_tools.gui.app.measure.services.workflow_control import (
     WorkflowTabSnapshot,
 )
+from zcu_tools.gui.app.measure.services.workflow_run import QuestionExchange
 from zcu_tools.gui.app.measure.services.workflow_tab import FormKind
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
@@ -83,7 +84,7 @@ class WorkflowPane(QWidget):
         self._envs: dict[FormKind, FormEnv] = {}
         self._editing: dict[FormKind, bool] = {}
         self._ask_pending = False
-        self._question_run_id: str | None = None
+        self._question_request_id: str | None = None
         self._pages: dict[FormKind, QVBoxLayout] = {}
         layout = QVBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -230,9 +231,23 @@ class WorkflowPane(QWidget):
             p.kind == "run" for p in self._ctrl.get_hardware_gate_presence()
         )
         idle = writable and not lease_active and not snapshot.busy
-        accepted = status is not None and snapshot.run_id is not None
         self._bind_form("plan", editable=idle)
         self._bind_form("tunables", editable=writable and (idle or snapshot.busy))
+        self._project_controls(snapshot, lifecycle, idle=idle)
+        if snapshot.error is not None:
+            self._message.setText(snapshot.error)
+        elif (
+            self._owner_error is not None and self._message.text() == self._owner_error
+        ):
+            self._message.clear()
+        self._owner_error = snapshot.error
+        self._project_question(snapshot)
+
+    def _project_controls(
+        self, snapshot: WorkflowTabSnapshot, lifecycle: str, *, idle: bool
+    ) -> None:
+        writable = self._writable
+        accepted = snapshot.status is not None and snapshot.run_id is not None
         for caption in ("Refresh", "Start"):
             self._buttons[caption].setVisible(not snapshot.busy)
         self._buttons["Pause"].setVisible(snapshot.busy and lifecycle == "running")
@@ -257,17 +272,10 @@ class WorkflowPane(QWidget):
         self._apply.setEnabled(
             writable and accepted and lifecycle in {"running", "paused"}
         )
-        if snapshot.error is not None:
-            self._message.setText(snapshot.error)
-        elif (
-            self._owner_error is not None and self._message.text() == self._owner_error
-        ):
-            self._message.clear()
-        self._owner_error = snapshot.error
-        self._project_question(snapshot)
 
     def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:
-        pending = snapshot.pending_question is not None
+        question = snapshot.pending_question
+        pending = question is not None
         exchange = snapshot.last_exchange
         ask_index = self._subtabs.indexOf(self._ask_page)
         if pending or exchange is not None:
@@ -276,38 +284,37 @@ class WorkflowPane(QWidget):
         elif ask_index >= 0:
             self._subtabs.removeTab(ask_index)
             self._ask_page.hide()
-        if pending and (
-            not self._ask_pending or self._question_run_id != snapshot.run_id
-        ):
-            self._question_run_id = snapshot.run_id
+        if question is not None and self._question_request_id != question["request_id"]:
+            self._question_request_id = question["request_id"]
             self._answer_input.setText("{}")
             self._subtabs.setCurrentWidget(self._ask_page)
         if exchange is not None:
-            question = exchange.question
-            self._question_label.setText(
-                f"{question['question_type']}\n"
-                + json.dumps(question["question"], ensure_ascii=False, indent=2)
-            )
-            self._answer_schema.setText(
-                "Answer schema: "
-                + json.dumps(question["answer_schema"], ensure_ascii=False)
-            )
-            if exchange.answer is not None:
-                self._answer_input.setText(
-                    json.dumps(exchange.answer, ensure_ascii=False)
-                )
-            self._answer_status.setText(
-                {
-                    "waiting": "等待回答",
-                    "submitted": "回答已提交",
-                    "answered": "已回答",
-                    "cancelled": "提問已取消",
-                }[exchange.state]
-            )
+            self._show_exchange(exchange)
         self._ask_pending = pending
         enabled = self._writable and pending
         self._answer_input.setEnabled(enabled)
         self._answer_button.setEnabled(enabled)
+
+    def _show_exchange(self, exchange: QuestionExchange) -> None:
+        question = exchange.question
+        self._question_label.setText(
+            f"{question['question_type']}\n"
+            + json.dumps(question["question"], ensure_ascii=False, indent=2)
+        )
+        self._answer_schema.setText(
+            "Answer schema: "
+            + json.dumps(question["answer_schema"], ensure_ascii=False)
+        )
+        if exchange.answer is not None:
+            self._answer_input.setText(json.dumps(exchange.answer, ensure_ascii=False))
+        self._answer_status.setText(
+            {
+                "waiting": "等待回答",
+                "submitted": "回答已提交",
+                "answered": "已回答",
+                "cancelled": "提問已取消",
+            }[exchange.state]
+        )
 
     def focus_question(self) -> None:
         """Show the pending Ask after badge navigation, without submitting anything."""
@@ -351,7 +358,9 @@ class WorkflowPane(QWidget):
             self._control.stop(run_id)
         elif command == "Answer":
             answer = TypeAdapter(JsonValue).validate_json(self._answer_input.text())
-            self._control.answer(run_id, answer)
+            if self._question_request_id is None:
+                raise RuntimeError("No rendered question to answer")
+            self._control.answer(run_id, answer, request_id=self._question_request_id)
             self._message.setText("")
         elif command == "Apply":
             result = self._control.apply_tunables(

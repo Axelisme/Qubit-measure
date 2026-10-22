@@ -1,55 +1,81 @@
-"""Workflow environments and yield-from helpers."""
+"""Async workflow operations over the shared cooperative script host."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Iterator, Mapping
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
+from typing import Literal, Protocol
 
-from ...core.script_protocol import Answer, Ask, Question, ScriptGenerator, Wait
-from ...device import BaseDeviceInfo
-from ...plotting.plots import Plots
-from ...progress_bar import BaseProgressBar
-from .effects import DeviceEffect, RunEffect, WaitEffect
-from .models import Cancelled, Completed, Failed, MissingCapability, ProgressSnapshot
+from pydantic import BaseModel
+
+from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.datafile import JsonObject
+from zcu_tools.device import BaseDeviceInfo
+from zcu_tools.experiment.acquisition import capture_device_snapshot
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.script_host import CallContext, ScriptHost
+from zcu_tools.progress_bar import BaseProgressBar
+
+from .models import (
+    Completed,
+    Failed,
+    MissingCapability,
+    OperationFacts,
+    OperationKind,
+    OperationOutcome,
+    ProgressSnapshot,
+    RunIdentity,
+)
+from .plotting import WorkflowPlots
 from .ports import DevicePort, EnginePorts, ProgressFactory
-from .run import LiveUpdate, Run
+
+_logger = logging.getLogger(__name__)
 
 
-class InitEnv[C]:
-    """Init-only data: started_at is aware UTC, context is detached read-only data.
+def _validate_model(value: object, model: type[BaseModel], label: str) -> None:
+    if not isinstance(value, model):
+        raise TypeError(f"{label} must be a {model.__name__} instance")
 
-    The host owns context's deep immutability. context=None means the capability
-    is absent and access raises MissingCapability. Naive or non-UTC started_at
-    raises ValueError. No files, hardware, or plots are exposed to init.
+
+class RunFunction[Cfg: ExpCfgModel, Result](Protocol):
+    """Core experiment callable, including bound Experiment.run methods.
+
+    cfg is an owned, mutable experiment configuration passed positionally; its
+    parameter name is unrestricted. context provides borrowed hardware, plots,
+    drivers and the cooperative operation cancellation token.
     """
 
-    def __init__(self, started_at: datetime, context: C | None) -> None:
-        if started_at.utcoffset() != timedelta(0):
-            raise ValueError("Workflow start must be timezone-aware UTC")
-        self._started_at = started_at
-        self._context = context
+    def __call__(self, cfg: Cfg, /, *, context: RunContext) -> Result: ...
 
-    @property
-    def started_at(self) -> datetime:
-        """Return the original aware UTC start, unchanged by Resume."""
-        return self._started_at
 
-    @property
-    def context(self) -> C:
-        """Return host-owned deeply read-only data, or raise MissingCapability."""
-        if self._context is None:
-            raise MissingCapability("context")
-        return self._context
+@dataclass
+class _Attempt:
+    iteration: int
+    number: int
+    started_at: datetime
+    finished_at: datetime
+    device_snapshot: Mapping[str, JsonObject] | None = None
+    stopped: bool = False
+
+
+@dataclass(frozen=True)
+class _Value[T]:
+    # Distinguish arbitrary raw values (including Failed) from acquire failure.
+    value: T
 
 
 class Displays:
-    """Engine-owned named bars shared across step environments.
+    """Retain named progress bars until the run's producer has drained.
 
-    progress is the concrete runtime bar factory, not make_pbar. This owner
-    retains bars during Pause and closes them at terminal; environments do not
-    own their lifecycle. Plotting belongs to the injected Plots instead.
+    progress is a concrete runtime factory. Named bars survive operation retries
+    and Pause. The engine closes them at terminal; Plots remains host-owned.
     """
 
     def __init__(self, progress: ProgressFactory) -> None:
@@ -58,7 +84,7 @@ class Displays:
         self._lock = RLock()
 
     def pbar(self, desc: str, total: int) -> BaseProgressBar:
-        """Return a retained named bar, requiring a consistent nonnegative total."""
+        """Return a named bar, requiring a consistent nonnegative integer total."""
         if not desc.strip() or type(total) is not int or total < 0:
             raise ValueError(
                 "Progress requires a nonempty name and nonnegative integer total"
@@ -72,11 +98,7 @@ class Displays:
             return bar
 
     def snapshot(self) -> tuple[ProgressSnapshot, ...]:
-        """Return detached display values; they are not commit evidence.
-
-        Bar creation and snapshot iteration are serialized. A backend may
-        update numeric values concurrently; this is a display-only observation.
-        """
+        """Read display snapshots, not evidence of committed iteration records."""
         with self._lock:
             return tuple(
                 ProgressSnapshot(name, bar.total, bar.n)
@@ -84,167 +106,378 @@ class Displays:
             )
 
     def close(self) -> None:
-        """Close all retained workflow bars after producers stop."""
+        """Attempt every close after producer drain, raising the first failure.
+
+        Later close failures are logged and attached as notes to the first one.
+        """
+        errors: list[Exception] = []
         for bar in self._bars.values():
-            bar.close()
+            try:
+                bar.close()
+            except Exception as error:
+                _logger.exception("Failed to close workflow progress bar")
+                errors.append(error)
+        if errors:
+            primary = errors[0]
+            for error in errors[1:]:
+                primary.add_note(
+                    f"Another progress close failed: {type(error).__name__}: {error}"
+                )
+            raise primary
 
 
-class WorkflowEnv[C](InitEnv[C]):
-    """One step's detached context, invocation root, and effect capabilities.
+@dataclass(frozen=True)
+class EnvHooks:
+    """Keep iteration storage and lifecycle policy in the execution owner.
 
-    started_at is the run's aware UTC start, unchanged by Resume. context is
-    host-owned deeply read-only data. iteration_dir is this invocation's existing
-    absolute root, not the run root. displays is the retained display owner.
-    soc/devices are read-only accessors for author-owned availability checks.
-    Hardware operations should still use effects to retain journal and cancellation
-    behavior; the framework trusts authors and does not enforce that restriction.
-    Use yield from for every effect. Legacy Pause discards the invocation;
-    stopping a retained Ask resumes None for author-owned cancellation cleanup.
+    new_commit_dir allocates a fresh author directory. commit persists a model
+    before record publication. boundary acknowledges suspension or raises the
+    original control I/O error. stopping reads explicit cancellation; question
+    marks Ask suspension/return. next_attempt returns the one-based successful
+    commit scope and actual executor attempt number within it, including retries;
+    operation_finished persists their facts. experiment_failed retains acquire
+    causes; device_setup retains the requested full typed settings.
+    """
+
+    new_commit_dir: Callable[[], Path]
+    commit: Callable[[BaseModel, Path | None], None]
+    boundary: Callable[[], None]
+    stopping: Callable[[], bool]
+    experiment_failed: Callable[[str, str, BaseException], None]
+    question: Callable[[Literal["waiting", "answered"]], None]
+    next_attempt: Callable[[], tuple[int, int]]
+    operation_finished: Callable[[OperationFacts], None]
+    device_setup: Callable[[str, BaseDeviceInfo], None]
+
+
+class WorkflowEnv[C]:
+    """One async author's capabilities, commit allocation and operations.
+
+    started_at is aware UTC. identity is the existing host-supplied RunIdentity,
+    detached on construction and access; no new provenance is captured. ports
+    borrows native handles without connecting or copying them. host owns
+    loop/executor and scope tokens. displays retains bars. hooks delegates
+    persistence/control to the Engine execution owner.
+    Authors use env.call for blocking work, env.ask for decisions, and explicit
+    env.commit for records. Missing capabilities raise at use, not at Start.
     """
 
     def __init__(
         self,
         started_at: datetime,
         ports: EnginePorts[C],
-        iteration_dir: Path,
+        host: ScriptHost,
         displays: Displays,
+        hooks: EnvHooks,
+        *,
+        identity: RunIdentity,
     ) -> None:
-        """Bind host ports and retained displays to one step's invocation root.
-
-        ports supplies detached context and native handles without copying or
-        connecting them. iteration_dir is the current invocation's absolute root.
-        displays retains bars across steps. started_at obeys InitEnv's UTC
-        contract. Missing ports are checked only when their accessor is used.
-        """
-        super().__init__(started_at, ports.context)
-        self._iteration_dir = iteration_dir
+        if started_at.utcoffset() != timedelta(0):
+            raise ValueError("Workflow start must be timezone-aware UTC")
+        self._started_at = started_at
+        self._identity = deepcopy(identity)
         self._ports = ports
+        self._host = host
         self._displays = displays
+        self._hooks = hooks
 
     @property
-    def iteration_dir(self) -> Path:
-        """Return this invocation's existing absolute root, for author-owned files.
+    def started_at(self) -> datetime:
+        """Return the original aware UTC run start, unchanged by Resume."""
+        return self._started_at
 
-        The property cannot be rebound. The Engine does not track, validate,
-        publish or clean up files written by the workflow.
+    @property
+    def identity(self) -> RunIdentity:
+        """Return detached startup identity/provenance, unchanged across operations."""
+        return deepcopy(self._identity)
+
+    @property
+    def context(self) -> C:
+        """Return host-owned read-only context, or raise MissingCapability."""
+        if self._ports.context is None:
+            raise MissingCapability("context")
+        return self._ports.context
+
+    def new_commit_dir(self) -> Path:
+        """Allocate/create a new absolute commits/<six-digit number> directory.
+
+        Numbers follow allocation order, independently of successful commits.
+        Allocation does not commit a record or change the iteration token. Raw
+        files in unused directories remain author-owned and are never parsed.
         """
-        return self._iteration_dir
+        return self._hooks.new_commit_dir()
+
+    def commit_dirs(self) -> Iterator[Path]:
+        """Lazily allocate one new directory per next(), without an upper bound.
+
+        Put authored values first in zip(values, env.commit_dirs()) so exhausting
+        those values does not allocate an unused extra directory.
+        """
+        while True:
+            yield self.new_commit_dir()
 
     @property
     def soc(self) -> object:
-        """Return the native SoC, or raise MissingCapability('soc').
-
-        Use this for availability checks. Hardware operations should go through
-        effects; direct access bypasses engine journaling and cancellation.
-        """
+        """Return the native SoC handle, or raise MissingCapability('soc')."""
         if self._ports.soc is None:
             raise MissingCapability("soc")
         return self._ports.soc
 
     @property
     def devices(self) -> DevicePort:
-        """Return the injected adapter, or raise MissingCapability('devices').
-
-        Use this for availability checks. Hardware operations should go through
-        effects; direct access bypasses engine journaling and cancellation.
-        """
+        """Return connected-device access, or raise MissingCapability('devices')."""
         if self._ports.devices is None:
             raise MissingCapability("devices")
         return self._ports.devices
 
-    def run[Cfg, Result](
-        self,
-        experiment: Callable[[Run[Cfg]], Result],
-        cfg: Cfg,
-        *,
-        live: LiveUpdate | None = None,
-    ) -> ScriptGenerator[Completed[Cfg, Result] | Failed | Cancelled]:
-        """Execute without saving; return Completed, Failed or Cancelled.
+    async def call[T](self, fn: Callable[[CallContext], T]) -> Completed[T] | Failed:
+        """Run fn(ctx) in the executor and deliver its value or acquire failure.
 
-        cfg must be a deepcopy-able dataclass or Pydantic BaseModel instance.
-        Completed means acquisition succeeded, not that files were saved.
-        live optionally receives (axes, samples) synchronously on each update
-        of the experiment's unique buffer: finite float64 axis vectors in buffer
-        dimension order, and complex128 samples of the buffer shape, including
-        partial NaNs. Do not mutate or retain these arrays; use Plots handles to
-        copy/dispatch real projected values to the host owner. Callback failures
-        fail the workflow even when Schedule catches them. The experiment owns
-        device operations; the engine does not inspect cfg.dev or apply settings.
-        Outer, live, and deepcopy errors propagate; Schedule failures
-        return Failed without data.
-        Legacy Pause/Stop during an acquisition discards the invocation. During
-        retained Ask cancellation cleanup, no new acquisition starts and this
-        returns Cancelled with the owning workflow run ID.
+        ctx is the host CallContext: stop_signal and starting epoch only. Use
+        closures over env for other capabilities. fn always starts, even with a
+        stopped token, and must cooperate and return its partial/empty value.
+        Arbitrary exceptions propagate into the author. A captured Schedule
+        acquire failure returns Failed without partial data. Pause keeps this
+        await pending: interrupted attempts restart with the same callable;
+        naturally completed attempts wait for Resume without being repeated.
+        Stop does not throw CancelledError, and does not suppress later calls.
+        Completed.facts is the same completion-time OperationFacts written to
+        journal and commit, including iteration, attempt and stopped. Directory
+        allocation does not advance iteration; successful commit does.
         """
-        request = RunEffect(experiment, cfg, live)
-        yield Wait(request)
-        if request.outcome is None:
-            raise RuntimeError("Engine did not complete the run effect")
-        return request.outcome
+
+        return await self._call("call", lambda ctx, attempt: fn(ctx))
+
+    async def _call[T](
+        self, kind: OperationKind, fn: Callable[[CallContext, _Attempt], T]
+    ) -> Completed[T] | Failed:
+        while True:
+            attempts: list[_Attempt] = []
+
+            def invoke(
+                ctx: CallContext, attempts: list[_Attempt] = attempts
+            ) -> _Value[T] | Failed:
+                return self._invoke(fn, attempts, ctx)
+
+            try:
+                result = await self._host.call(invoke)
+            except BaseException as error:
+                if attempts:  # Executor admission can fail before an attempt starts.
+                    self._record_attempt(
+                        kind, attempts[0], "raised", f"{type(error).__name__}: {error}"
+                    )
+                raise
+            attempt = attempts[0]
+            # Use the host's completion bit, never a later control-state read.
+            attempt.stopped = result.partial_result
+            discard = (
+                result.epoch != self._host.epoch
+                and result.partial_result
+                and not self._hooks.stopping()
+            )
+            if isinstance(result.result, Failed):
+                facts = self._record_attempt(
+                    kind, attempt, "failed", result.result.reason
+                )
+            elif discard:
+                facts = self._record_attempt(
+                    kind, attempt, "discarded", "Pause interrupted this attempt"
+                )
+            elif result.partial_result:
+                facts = self._record_attempt(
+                    kind, attempt, "partial", "Operation stop token was set"
+                )
+            else:
+                facts = self._record_attempt(kind, attempt, "completed")
+            self._hooks.boundary()
+            await self._host.wait_until_resumed()
+            if discard:
+                continue
+            if isinstance(result.result, Failed):
+                return result.result
+            return Completed(result.result.value, result.partial_result, facts)
+
+    def _invoke[T](
+        self,
+        fn: Callable[[CallContext, _Attempt], T],
+        attempts: list[_Attempt],
+        ctx: CallContext,
+    ) -> _Value[T] | Failed:
+        started = self._ports.clock.now()
+        iteration, number = self._hooks.next_attempt()
+        attempt = _Attempt(iteration, number, started, started)
+        attempts.append(attempt)
+        try:
+            value = fn(ctx, attempt)
+            error = ctx.stop_signal.error
+            if error is not None and error.status == "failed":
+                return Failed(error.reason)
+            return _Value(value)
+        finally:
+            attempt.stopped = ctx.stop_signal.is_set()
+            attempt.finished_at = self._ports.clock.now()
+
+    def _record_attempt(
+        self,
+        kind: OperationKind,
+        attempt: _Attempt,
+        outcome: OperationOutcome,
+        reason: str | None = None,
+    ) -> OperationFacts:
+        facts = OperationFacts(
+            kind=kind,
+            iteration=attempt.iteration,
+            attempt=attempt.number,
+            started_at=attempt.started_at,
+            finished_at=attempt.finished_at,
+            device_snapshot=attempt.device_snapshot,
+            outcome=outcome,
+            reason=reason,
+            stopped=attempt.stopped,
+        )
+        self._hooks.operation_finished(facts)
+        return facts
+
+    async def run[Cfg: ExpCfgModel, Result](
+        self, experiment: RunFunction[Cfg, Result], cfg: Cfg
+    ) -> Completed[RunRecord[Cfg, Result]] | Failed:
+        """Run a core callable with a copied configuration, without saving it.
+
+        experiment accepts (cfg, *, context: RunContext), including a bound
+        T1Exp().run. cfg must be an ExpCfgModel; other scans use raw env.call.
+        Each attempt builds RunContext with this operation token and borrowed
+        soc/soccfg/devices and fresh operation Plots on the workflow's same
+        presentation host, captures device settings, then invokes the core
+        callable with a fresh deepcopy of cfg. Completed.value is RunRecord with
+        callback-return cfg and result. Completed.facts carries the same
+        OperationFacts as journal/commit, including the pre-call device snapshot,
+        one-based successful commit scope (iteration), attempt and stopped bit.
+        Schedule acquire failure returns Failed; other exceptions propagate.
+        Stop delivers a partial/empty record. Pause retries the captured cfg
+        with a new plot collection. Each attempt finishes before delivery or
+        discard; the next attempt releases the previous presentation. A core
+        exception remains primary if finish also fails (cleanup adds a note).
+        A finish-only failure propagates instead of delivering Completed.
+        Framework journal/commit envelopes retain attempt facts and snapshots;
+        provenance stays in workflow startup metadata, not a per-operation identity.
+        """
+        _validate_model(cfg, ExpCfgModel, "env.run cfg")
+        captured = deepcopy(cfg)
+
+        def invoke(ctx: CallContext, attempt: _Attempt) -> RunRecord[Cfg, Result]:
+            plots = self.plots.start_operation()
+            try:
+                context = RunContext(
+                    soc=self.soc,
+                    soccfg=self._ports.soccfg,
+                    plots=plots,
+                    devices=self.devices.get_connected_devices(),
+                    cancel_signal=ctx.stop_signal,
+                )
+                attempt.device_snapshot = capture_device_snapshot(context.devices)
+                current = deepcopy(captured)
+                result = experiment(current, context=context)
+                error = context.cancel_signal.error
+                if error is not None and error.status != "failed":
+                    raise error from error.exception
+                if error is not None:
+                    self._hooks.experiment_failed(
+                        getattr(experiment, "__qualname__", type(experiment).__name__),
+                        error.reason,
+                        error.exception or error,
+                    )
+            except BaseException as error:
+                try:
+                    plots.finish()
+                except Exception as cleanup_error:
+                    _logger.exception(
+                        "Failed to finish operation plots after core failure"
+                    )
+                    error.add_note(
+                        f"Operation plot finish failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+                raise
+            plots.finish()
+            return RunRecord(current, result)
+
+        return await self._call("run", invoke)
 
     def get_device_cfg(self, name: str) -> BaseDeviceInfo:
-        """Synchronously live-read detached device settings in the worker.
-
-        This read is not an effect. The host returns the actual Info subclass;
-        unknown/disconnected names identify name and read failures propagate.
-        Missing devices raises MissingCapability('devices') at use.
-        """
+        """Live-read detached typed settings; name/I/O errors propagate."""
         return self.devices.get_device_cfg(name)
 
-    def setup_device(self, name: str, cfg: BaseDeviceInfo) -> ScriptGenerator[None]:
-        """Apply complete typed settings with the engine's cooperative signal.
+    async def setup_device(
+        self, name: str, cfg: BaseDeviceInfo
+    ) -> Completed[None] | Failed:
+        """Apply a captured full settings model with cooperative operation stop.
 
-        The host revalidates all fields with the selected driver's Info model.
-        Limits, validation and I/O failures propagate; no conversion, retries or
-        clamping occurs. Legacy Pause/Stop discards the invocation. After a
-        retained Ask is cancelled, this returns None without touching devices.
+        The device owner revalidates fields and enforces limits. Errors propagate
+        unchanged. Pause retries the same captured settings; Stop still invokes
+        the device with an already-stopped token for cooperative empty work.
+        Completed.facts records this setup attempt with device_snapshot=None;
+        no snapshot read is required.
         """
-        request = DeviceEffect(name, cfg)
-        yield Wait(request)
-        if request.delivery is not None and request.delivery.partial_result:
-            return
-        if not request.done:
-            raise RuntimeError("Engine did not complete the device effect")
+        captured = deepcopy(cfg)
 
-    def wait_until(self, target: datetime) -> ScriptGenerator[None]:
-        """Wait for an aware deadline, returning immediately for past targets.
+        def invoke(ctx: CallContext, _attempt: _Attempt) -> None:
+            self.devices.setup_device(name, captured, ctx.stop_signal)
+            self._hooks.device_setup(name, captured)
 
-        Naive datetimes raise ValueError. Legacy Pause discards the invocation,
-        leaving its state-derived deadline unchanged for Resume. After retained
-        Ask cancellation this returns None without waiting.
+        return await self._call("setup_device", invoke)
+
+    async def wait_until(self, target: datetime) -> Completed[None] | Failed:
+        """Wait for an aware deadline through call; Stop cooperatively returns.
+
+        A naive deadline raises ValueError. A past target returns immediately.
+        Pause retries the same deadline, not a new relative delay. Completed.facts
+        records this wait attempt with device_snapshot=None and its stop bit.
         """
-        request = WaitEffect(target)
-        yield Wait(request)
-        if request.delivery is not None and request.delivery.partial_result:
-            return
-        if not request.done:
-            raise RuntimeError("Engine did not complete the wait effect")
+        if target.tzinfo is None or target.utcoffset() is None:
+            raise ValueError("Wait target must be timezone-aware")
+        return await self._call(
+            "wait_until",
+            lambda ctx, attempt: self._ports.clock.wait_until(target, ctx.stop_signal),
+        )
 
-    def ask[A: Answer](self, question: Question[A]) -> ScriptGenerator[A | None]:
-        """Suspend this invocation until the host supplies its declared Answer.
+    async def ask[A: Answer](self, question: Question[A]) -> A | None:
+        """Await one request-id-bound answer, or None after explicit Stop.
 
-        question is an authored Question[A] instance. The engine exposes it as
-        pending_question and returns paused without closing this generator.
-        Engine.answer resumes it with A; worker Engine.drain resumes it with
-        None after Stop. Authors must branch on None for cancellation. Later
-        questions during cancellation also return None without waiting. There
-        is no timeout or default answer. The suspended invocation retains its
-        state, files and tunables capture.
+        Questions have no timeout/default and do not authorize writes. Stop
+        releases an existing question and later asks return None immediately.
+        No new worker segment is created when a caller delivers the answer.
         """
-        request = Ask(question)
-        yield request
-        return request.delivery
+        self._hooks.boundary()
+        self._hooks.question("waiting")
+        try:
+            return await self._host.ask(question)
+        finally:
+            self._hooks.question("answered")
+
+    async def commit(self, record: BaseModel, d: Path | None = None) -> None:
+        """Commit one typed record, then advance iteration storage and scope.
+
+        record must be a BaseModel. d is a directory allocated by this run;
+        None allocates a fresh one. Foreign or already committed d raises
+        ValueError without publishing a record. Journal append/flush precedes
+        publication; record.json is best effort, not a crash checkpoint. Commit
+        waits at the pause gate; Stop permits authored cleanup commits. Files
+        left in uncommitted allocated directories remain without a record.
+        """
+        _validate_model(record, BaseModel, "Workflow record")
+        self._hooks.boundary()
+        await self._host.wait_until_resumed()
+        self._hooks.commit(record, d)
+        await self._host.commit()
 
     @property
-    def plots(self) -> Plots:
-        """Return the injected Plots shared across steps and retries.
+    def plots(self) -> WorkflowPlots:
+        """Return injected workflow trends, independent of each env.run attempt.
 
-        Use typed handles or draw/save for synchronous host-owner operations.
-        Do not mutate active artists on the workflow execution thread. The host
-        owns finish/release after the producer stops; Pause does not finish plots.
+        This collection persists across commits. The operation/ name prefix is
+        reserved for the pane/MCP projection and raises ValueError at registration.
         """
         return self._ports.plots
 
     def pbar(self, desc: str, total: int) -> BaseProgressBar:
-        """Return a retained named bar with a consistent nonnegative integer total."""
+        """Return a retained named bar with a consistent nonnegative total."""
         return self._displays.pbar(desc, total)

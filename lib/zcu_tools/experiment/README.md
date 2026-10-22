@@ -16,7 +16,7 @@
 
 Pause 只停止目前 operation、增加 epoch 並關 gate，不停止 iteration。Resume 只開 gate。CallResult 固定起跑 epoch 與 fn 完成時的 stop bit。Workflow env 決定是否丟棄 partial 並重跑相同 request；host 不重跑外部效果。Commit 等 gate 後更換 iteration child。Script cancel 打開 gate，使作者可收尾。
 
-`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳。`set_error()` 只在本 scope 記第一個錯誤並停止自己與子孫，不改祖先或兄弟的停止與錯誤狀態。`release()` 移除已完成 scope。原 `script_driver.ScriptDriver` 暫只服務尚未遷移的 workflow；其直接 `cancel()` 保留既有邊界語意，不提供控制訊息 inbox。
+`stop_signal.StopSignal.child()` 在出生時繼承停止與錯誤，set 往下傳。`set_error()` 只在本 scope 記第一個錯誤並停止自己與子孫，不改祖先或兄弟的停止與錯誤狀態。`release()` 移除已完成 scope。Recipe 與 workflow 都使用此 host，作者以原生 async／await 等待，不使用 generator protocol。
 
 ## Explicit simulation environments
 
@@ -73,8 +73,9 @@ physical models, evolution and sampling.
   `capture_software_provenance` 只讀 package／Git／host 與已有的 SoC cached config，不查儀器。
   `capture_device_snapshot(devices)` 由 Run owner 在下述 checkpoint 呼叫，讀取全部 connected drivers 的設定並轉成隔離 JSON。
   量測時間和 completion 由前端 adapter 在 acquire 邊界記錄，不由 core 或 datafile writer 擷取。Evidence 複製版本 mapping，獨立於可修改的 RunRecord cfg／Result。
-- Device snapshot 由兩個 Run 建立路徑各捕捉一次。GUI 在 hardware lease 後、adapter.run 前讀取。Notebook 同步執行，資源由 caller 擁有，不新增 lease；它在建立 RunContext 後、core.run 前讀取。兩路對全部已連線 device 各讀一次 get_info，只讀不寫。任一讀取失敗拒絕 Run，不進 adapter/core，不以 cached info 補值；無 device 記 `{}`。Snapshot 隨當次 Run 保存，後續 sweep 或 Save 不重讀、不覆寫。
-- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 cancel_signal。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 `stop_signal.py` 的 StopSignal；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。
+- GUI experiment 與 Notebook 的 Run 建立路徑各捕捉一次 device snapshot。GUI 在 hardware lease 後、adapter.run 前讀取。Notebook 同步執行，資源由 caller 擁有，不新增 lease；它在建立 RunContext 後、core.run 前讀取。兩路對全部已連線 device 各讀一次 get_info，只讀不寫。任一讀取失敗拒絕 Run，不進 adapter/core，不以 cached info 補值；無 device 記 `{}`。Snapshot 隨當次 Run 保存，後續 sweep 或 Save 不重讀、不覆寫。
+- Workflow 的 `await env.run(core.run, cfg)` 每次 attempt 建立新的 `RunContext` 與獨立的 operation Plots，呼叫 core 前捕捉 connected device snapshot，回 `Completed[RunRecord] | Failed`。`Completed.facts: OperationFacts` 與 journal／commit 信封共用事實結構；`env.identity` 回 detached startup RunIdentity。Lab saver 顯式接收 identity、facts、spec.tag 與 snapshot，組裝既有 RunMetadata。RunRecord 仍使用既有 labber_metadata，尚未新增 RunRecord.metadata；datafile 通用容器改造也未交付。作者與保存介面見 [workflows](workflows/README.md)。
+- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 cancel_signal。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 `stop_signal.py` 的 StopSignal；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的 operation Plots 使用和 workflow 趨勢圖相同的 presentation host；返回或失敗先 finish，Pause retry 使用新集合。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
 - `axes_spec.py` 用 `AxesSpec`、`Axis`、`ZSpec` 描述 Result 欄位如何對應檔案中的軸與資料 channel。`AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`PersistableExperiment.save` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；`GroupedAxesSpec.save(source, destination)` 接明確 RunRecord／Path，cfg 缺失時拒絕匯出。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。單檔 save 與 artifact 保存都遵守這項宣告，不自動切換，也不改 native 格式。Grouped native load 由 `PersistableExperiment.load` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
 ## Cfg 與父層支援

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Literal
@@ -10,25 +9,21 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.workflows import (
-    Cancelled,
-    Done,
     Failed,
-    InitEnv,
-    Next,
-    Step,
+    Live,
     WorkflowEnv,
     workflow,
 )
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1ModuleCfg, T1SweepCfg
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoCfg,
+    T2EchoExp,
     T2EchoModuleCfg,
     T2EchoSweepCfg,
 )
-from zcu_lab.workflows.common.acquire import run_t1, run_t2echo
 from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.saving import save_t1, save_t2echo
@@ -104,36 +99,21 @@ class OvernightTunables(BaseModel):
     )
 
 
-@dataclass
-class OvernightState:
-    """Track lifetime pairs and their start times to display fixed-flux drift.
-
-    round_index is the next zero-based pair index. last_actual_start is the
-    preceding committed pair's aware UTC start, or None before the first pair.
-    trend_points contains completed scalar pairs in start order, never Figures
-    or axes. Engine copies this state; uncommitted changes disappear on
-    Pause/Stop and Resume repeats that pair. A live plot may already show the
-    discarded pair until the next workflow draw; it is not journal authority.
-    """
-
-    round_index: int = 0
-    last_actual_start: datetime | None = None
-    trend_points: tuple[OvernightPoint, ...] = ()
-
-
-@dataclass(frozen=True)
-class OvernightPoint:
+class OvernightPoint(BaseModel):
     """Summarize one T1/Echo pair to monitor lifetime drift without feedback.
 
     round_index is zero-based; scheduled_start/actual_start are aware UTC
     wall-clock times. flux is in the plan's explicit unit. t1_us/t2_us and their
     errors are accepted lifetimes and marginal uncertainties in microseconds,
     or None on rejection/native failure. t1_reason/t2_reason are None on
-    acceptance, otherwise the rejection or Schedule failure diagnosis. Exceptions
-    stop the run without committing this point. t1_file/t2_file are relative
+    acceptance, otherwise stopped for partial, a fit rejection, or the Schedule/
+    expected fitting failure diagnosis. Unexpected exceptions stop the run
+    without committing this point. t1_file/t2_file are relative
     native filenames for each completed member, or None after native failure;
     rejected fits retain their raw acquisition filenames.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     round_index: int
     scheduled_start: datetime
@@ -149,23 +129,18 @@ class OvernightPoint:
     t2_file: str | None
 
 
-def init_overnight[C](_env: InitEnv[C], _plan: OvernightPlan) -> OvernightState:
-    """Start lifetime monitoring with no pairs or historical drift values.
-
-    _env and _plan are unused; no hardware, timing or capture reads occur.
-    """
-    return OvernightState()
-
-
 def _summary(
-    fit: DecayFit, tun: OvernightTunables, name: str
+    fit: DecayFit | Failed, tun: OvernightTunables, name: str
 ) -> tuple[float | None, float | None, str | None]:
     """Apply the shared scalar acceptance bounds to either lifetime fit.
 
     fit contains microsecond lifetime/error and residual quality; tun holds
-    strict dimensionless bounds. name identifies rejected members. Return
-    accepted lifetime/error or None values with a diagnosis, without feedback.
+    strict dimensionless bounds. name identifies rejected members. Expected
+    fitting failures supply Failed(reason). Return accepted lifetime/error or
+    None values with a diagnosis, without feedback.
     """
+    if isinstance(fit, Failed):
+        return None, None, fit.reason
     residual = fit.quality.normalized_residual_rms
     if not (
         isfinite(fit.lifetime_us)
@@ -180,131 +155,132 @@ def _summary(
     return fit.lifetime_us, fit.error_us, None
 
 
-def overnight[C](
+@workflow("overnight", "Monitor fixed-flux T1 and Hahn-echo lifetime pairs.")
+async def overnight[C](
     env: WorkflowEnv[C],
     plan: OvernightPlan,
-    tun: OvernightTunables,
-    state: OvernightState,
-) -> Step[OvernightState, OvernightPoint]:
-    """Acquire T1 then Echo at fixed flux, publishing a complete pair via Next.
+    tun: Live[OvernightTunables],
+) -> None:
+    """Acquire T1 then zero-detune Echo at fixed flux, committing complete pairs.
 
-    Does not read or produce context; it may be any value, including None.
-    All hardware/wait effects use Engine cancellation. A native Failed outcome
-    is recorded per member; the other member is still attempted. Unexpected
-    acquisition/analysis/plot/saver/device errors propagate and stop the run.
-    Pause/Stop discard uncommitted pairs while retaining workflow-written native files.
-    Wait until max(now, previous committed actual start + interval). Overruns
-    start immediately, without catching up to an original-start grid. Pause
-    does not freeze wall time; Resume repeats the discarded pair under the same
-    rule. Progress counts committed pairs only. Drive, readout and timing are fixed;
-    fit acceptance only affects scalar summaries, never the next native cfg.
-    Refresh the scalar trend on entry and after each complete pair, before
-    returning Next; live plots are not proof of journal commit. No trend file
-    is saved and no Figure or axes is retained in copied state.
+    No calibration, context read or lifetime feedback occurs. A native Failed
+    outcome is recorded per member; the other member is still attempted.
+    Completed members save before analysis. Partial records stopped without
+    fitting; expected fitting failures record their reason without estimates.
+    Neither case skips the next member or the pair commit.
+    Unexpected acquisition/fit/plot/save/device errors propagate. Each pair starts
+    at max(now, previous actual start + interval), without catch-up bursts.
+    Pause resumes the pending operation; it does not freeze wall time.
+    Read timing and acceptance from tun.current. The trend retains scalar
+    pairs, not Figures, and is not automatically saved.
+    To revisit past points, start a new run with a sliced plan and seed local
+    history from the previous run using the saved_run reader.
     """
-    # Check capabilities and refresh the previously completed scalar pairs.
     _ = env.soc
     _ = env.devices
-    env.pbar("overnight rounds", total=plan.outer_rounds).set_progress(
-        state.round_index
-    )
-    draw_overnight_trend(
-        env.plots, state.trend_points, start_interval_s=plan.start_interval_s
-    )
-    if state.round_index == plan.outer_rounds:
-        return Done()
-    # Space actual pair starts without catching up after overruns.
-    scheduled = datetime.now(UTC)
-    if state.last_actual_start is not None:
-        scheduled = max(
-            scheduled,
-            state.last_actual_start + timedelta(seconds=plan.start_interval_s),
+    last_actual_start: datetime | None = None
+    trend_points: tuple[OvernightPoint, ...] = ()
+    for round_index in range(plan.outer_rounds):
+        d = env.new_commit_dir()
+        env.pbar("overnight rounds", total=plan.outer_rounds).set_progress(round_index)
+        draw_overnight_trend(
+            env.plots, trend_points, start_interval_s=plan.start_interval_s
         )
-    yield from env.wait_until(scheduled)
-    actual = datetime.now(UTC)
-    # Set the fixed flux before acquiring either member.
-    yield from set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
-    # Acquire and save T1 before fitting its scalar summary.
-    t1_stop = tun.sweep_factor * tun.t1_guess_us
-    t1_cfg = T1Cfg(
-        reps=tun.reps,
-        rounds=tun.rounds,
-        relax_delay=tun.relax_factor * tun.t1_guess_us,
-        modules=T1ModuleCfg(pi_pulse=plan.qub_pulse, readout=plan.readout),
-        sweep=T1SweepCfg(
-            length=SweepCfg(
-                start=0.0,
-                stop=t1_stop,
-                expts=plan.points,
-                step=t1_stop / (plan.points - 1),
+        # Space actual pair starts without catching up after overruns.
+        scheduled = datetime.now(UTC)
+        if last_actual_start is not None:
+            scheduled = max(
+                scheduled,
+                last_actual_start + timedelta(seconds=plan.start_interval_s),
             )
-        ),
-    )
-    t1 = yield from env.run(run_t1, t1_cfg)
-    t1_file = None
-    if not isinstance(t1, (Failed, Cancelled)):
-        save_t1(t1, env.iteration_dir / "t1.h5", snapshot=plan.snapshot)
-        t1_file = "t1.h5"
-    t1_summary = (
-        (None, None, t1.reason)
-        if isinstance(t1, (Failed, Cancelled))
-        else _summary(analyze_t1(t1.result), tun, "T1")
-    )
-    # Acquire zero-detune Echo even if the T1 member failed.
-    t2_stop = tun.sweep_factor * tun.t2_guess_us
-    t2_cfg = T2EchoCfg(
-        reps=tun.reps,
-        rounds=tun.rounds,
-        relax_delay=tun.relax_factor * tun.t2_guess_us,
-        modules=T2EchoModuleCfg(
-            pi_pulse=plan.qub_pulse,
-            pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),
-            readout=plan.readout,
-        ),
-        sweep=T2EchoSweepCfg(
-            length=SweepCfg(
-                start=0.0,
-                stop=t2_stop,
-                expts=plan.points,
-                step=t2_stop / (plan.points - 1),
+        await env.wait_until(scheduled)
+        actual = datetime.now(UTC)
+        # Set the fixed flux before acquiring either member.
+        await set_flux(env, plan.flux_dev, plan.flux, unit=plan.flux_unit)
+        # Acquire and save T1 before fitting its scalar summary.
+        t1_stop = tun.current.sweep_factor * tun.current.t1_guess_us
+        t1_cfg = T1Cfg(
+            reps=tun.current.reps,
+            rounds=tun.current.rounds,
+            relax_delay=tun.current.relax_factor * tun.current.t1_guess_us,
+            modules=T1ModuleCfg(pi_pulse=plan.qub_pulse, readout=plan.readout),
+            sweep=T1SweepCfg(
+                length=SweepCfg(
+                    start=0.0,
+                    stop=t1_stop,
+                    expts=plan.points,
+                    step=t1_stop / (plan.points - 1),
+                )
+            ),
+        )
+        t1 = await env.run(T1Exp().run, t1_cfg)
+        t1_file = None
+        if not isinstance(t1, Failed):
+            save_t1(t1, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
+            t1_file = "t1.h5"
+        if isinstance(t1, Failed):
+            t1_summary = (None, None, t1.reason)
+        elif t1.partial_result:
+            t1_summary = (None, None, "stopped")
+        else:
+            t1_summary = _summary(analyze_t1(t1.value.result), tun.current, "T1")
+        # Acquire zero-detune Echo even if the T1 member failed.
+        t2_stop = tun.current.sweep_factor * tun.current.t2_guess_us
+        t2_cfg = T2EchoCfg(
+            reps=tun.current.reps,
+            rounds=tun.current.rounds,
+            relax_delay=tun.current.relax_factor * tun.current.t2_guess_us,
+            modules=T2EchoModuleCfg(
+                pi_pulse=plan.qub_pulse,
+                pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),
+                readout=plan.readout,
+            ),
+            sweep=T2EchoSweepCfg(
+                length=SweepCfg(
+                    start=0.0,
+                    stop=t2_stop,
+                    expts=plan.points,
+                    step=t2_stop / (plan.points - 1),
+                )
+            ),
+        )
+        t2 = await env.run(T2EchoExp().run, t2_cfg)
+        t2_file = None
+        if not isinstance(t2, Failed):
+            save_t2echo(
+                t2, d / "t2echo.h5", snapshot=plan.snapshot, identity=env.identity
             )
-        ),
+            t2_file = "t2echo.h5"
+        if isinstance(t2, Failed):
+            t2_summary = (None, None, t2.reason)
+        elif t2.partial_result:
+            t2_summary = (None, None, "stopped")
+        else:
+            t2_summary = _summary(
+                analyze_t2echo(t2.value.result), tun.current, "T2 Echo"
+            )
+        t1_us, t1_error_us, t1_reason = t1_summary
+        t2_us, t2_error_us, t2_reason = t2_summary
+        point = OvernightPoint(
+            round_index=round_index,
+            scheduled_start=scheduled,
+            actual_start=actual,
+            flux=plan.flux,
+            t1_us=t1_us,
+            t1_error_us=t1_error_us,
+            t1_reason=t1_reason,
+            t2_us=t2_us,
+            t2_error_us=t2_error_us,
+            t2_reason=t2_reason,
+            t1_file=t1_file,
+            t2_file=t2_file,
+        )
+        last_actual_start = actual
+        trend_points += (point,)
+        draw_overnight_trend(
+            env.plots, trend_points, start_interval_s=plan.start_interval_s
+        )
+        await env.commit(point, d)
+    env.pbar("overnight rounds", total=plan.outer_rounds).set_progress(
+        plan.outer_rounds
     )
-    t2 = yield from env.run(run_t2echo, t2_cfg)
-    t2_file = None
-    if not isinstance(t2, (Failed, Cancelled)):
-        save_t2echo(t2, env.iteration_dir / "t2echo.h5", snapshot=plan.snapshot)
-        t2_file = "t2echo.h5"
-    t2_summary = (
-        (None, None, t2.reason)
-        if isinstance(t2, (Failed, Cancelled))
-        else _summary(analyze_t2echo(t2.result), tun, "T2 Echo")
-    )
-    # Publish the complete pair and update the workflow-owned trend.
-    point = OvernightPoint(
-        state.round_index,
-        scheduled,
-        actual,
-        plan.flux,
-        *t1_summary,
-        *t2_summary,
-        t1_file,
-        t2_file,
-    )
-    state.round_index += 1
-    state.last_actual_start = actual
-    state.trend_points += (point,)
-    draw_overnight_trend(
-        env.plots, state.trend_points, start_interval_s=plan.start_interval_s
-    )
-    return Next(point, state)
-
-
-# The decorator's return fixes invariant C, losing the function's parametric context.
-# Declare the original function in place instead of assigning that return.
-workflow(
-    name="overnight",
-    plan=OvernightPlan,
-    tunables=OvernightTunables,
-    init=init_overnight,
-)(overnight)

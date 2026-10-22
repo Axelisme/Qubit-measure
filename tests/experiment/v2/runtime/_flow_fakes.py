@@ -311,7 +311,7 @@ class FlakyBuildProgram:
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
         self.acquire_count += 1
-        if len(FlakyBuildProgram.instances) == 1:
+        if self.acquire_count == 1:
             raise RuntimeError("temporary failure")
         raw = np.array([4.0])
         round_hook(1, np.array([3.0]), cancel_flag)
@@ -342,37 +342,9 @@ class AlwaysFailingProgram:
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
         self.acquire_count += 1
-        raw = np.array([float(len(AlwaysFailingProgram.instances))])
+        raw = np.array([float(self.acquire_count)])
         round_hook(1, raw, cancel_flag)
         raise RuntimeError("permanent failure")
-
-    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
-        raise NotImplementedError
-
-
-class ConstructorFailingProgram:
-    def __init__(
-        self,
-        soccfg: Any,
-        cfg: FlowCfg,
-        *,
-        modules: list[Module],
-        sweep: list[tuple[str, Any]] | None,
-    ) -> None:
-        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
-        if getattr(cfg, "value") == 1.0:  # noqa: B009
-            raise RuntimeError("build failure")
-        self.cfg_model = cfg
-        self.modules = modules
-        self.sweep = sweep
-
-    def acquire(
-        self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
-    ) -> np.ndarray:
-        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
-        raw = np.array([float(getattr(self.cfg_model, "value"))])  # noqa: B009
-        round_hook(1, raw, cancel_flag)
-        return raw
 
     def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
         raise NotImplementedError

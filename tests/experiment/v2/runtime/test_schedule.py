@@ -8,7 +8,6 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 from tests.experiment.v2.runtime._flow_fakes import (
-    ConstructorFailingProgram,
     FakeModule,
     FakeScalarProgram,
     RecordingBuffer,
@@ -20,31 +19,6 @@ from tests.experiment.v2.runtime._flow_fakes import (
 class FlowEnv:
     label: str
     scale: float
-
-
-def test_scan_returns_partial_when_program_build_fails():
-    signals_buffer = SignalBuffer((3,), dtype=np.float64)
-
-    with Schedule(_cfg(rounds=1), signals_buffer, stop=StopSignal()) as sched:
-        for value, step in sched.scan("value", [0.0, 1.0, 2.0]):
-            # tolerated: FlowCfg stores value as an undeclared Pydantic extra.
-            setattr(step.cfg, "value", value)  # noqa: B010
-            step.prog_builder(
-                "soc",
-                "soccfg",
-                program_cls=ConstructorFailingProgram,
-            ).add(FakeModule("readout")).build_and_acquire(
-                raw2signal_fn=identity_array,
-            )
-        assert sched.outcome.status == "failed"
-        assert isinstance(sched.outcome.exception, RuntimeError)
-        assert sched.outcome.reason == "RuntimeError: build failure"
-
-    np.testing.assert_allclose(
-        signals_buffer.array,
-        np.array([0.0, np.nan, np.nan]),
-        equal_nan=True,
-    )
 
 
 def test_schedule_scan_targets_buffer_step_without_mutating_env():

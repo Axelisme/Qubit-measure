@@ -1,6 +1,9 @@
-"""Public Engine question suspension, worker delivery and cancellation contracts."""
+"""Questions suspend one async author and accept request-bound answers."""
 
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
+from contextvars import Context
 from datetime import timedelta
 from pathlib import Path
 from threading import Event, get_ident
@@ -9,355 +12,404 @@ import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.device import FakeDeviceInfo
+from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import (
     Actor,
-    Done,
     InvalidRunState,
-    Next,
-    Run,
+    Live,
+    QuestionMismatch,
     RunMismatch,
-    Step,
     WorkflowEnv,
+    workflow,
 )
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
-from ._engine_fakes import START, Cfg, Plan, Rig, State, Tunables
+from ._engine_fakes import (
+    START,
+    Plan,
+    Point,
+    Rig,
+    Tunables,
+    completed,
+    identity,
+    pending,
+    question,
+    running,
+    until,
+)
 
 
 class Decision(Answer):
-    """The synthetic operator's chosen point value."""
-
     value: int
 
 
 class OtherAnswer(Answer):
-    """An unrelated model, even though its fields match Decision."""
-
-    value: int
+    text: str
 
 
 class Choose(Question[Decision]):
-    """Evidence identifying the point awaiting a decision."""
-
     point: int
 
 
 @pytest.fixture
-def rig(tmp_path: Path) -> Rig:
-    return Rig(tmp_path)
+def rig(tmp_path: Path) -> Iterator[Rig]:
+    rig = Rig(tmp_path)
+    yield rig
+    rig.close()
 
 
-def test_pending_answer_type_is_readonly_and_absent_outside_ask(rig: Rig) -> None:
-    received: list[Decision | None] = []
+async def ask_once(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+    answer = await env.ask(Choose(point=0))
+    if answer is not None:
+        await env.commit(Point(value=answer.value))
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        received.append((yield from env.ask(Choose(point=4))))
-        return Done()
 
-    rig.start(step)
+def test_pending_answer_type_and_parse_are_readonly_and_allow_retry(rig: Rig) -> None:
+    rig.start(ask_once)
     assert rig.engine.pending_answer_type("run") is None
-    rig.engine.execute("run")
-    before = rig.kinds()
-    answer_type = rig.engine.pending_answer_type("run")
-    assert answer_type is Decision
-    assert answer_type.model_json_schema()["properties"]["value"]["type"] == "integer"
-    assert received == []
-    assert rig.kinds() == before
-    with pytest.raises(RunMismatch):
-        rig.engine.pending_answer_type("stale")
-    rig.engine.answer("run", Decision(value=7))
+    with pytest.raises(QuestionMismatch) as absent:
+        rig.engine.parse_answer("run", {"value": 7}, request_id="no-question")
+    assert absent.value.pending_request_id is None
+    with running(rig) as future:
+        request_id = pending(rig)
+        assert rig.engine.pending_answer_type("run") is Decision
+        before = rig.events()
+        with pytest.raises(RunMismatch):
+            rig.engine.parse_answer("stale", {"value": 7}, request_id=request_id)
+        with pytest.raises(ValidationError):
+            rig.engine.parse_answer("run", {"unknown": 3}, request_id=request_id)
+        assert rig.engine.parse_answer(
+            "run", {"value": 7}, request_id=request_id
+        ) == Decision(value=7)
+        assert rig.events() == before
+        assert question(rig).request_id == request_id
+        assert not future.done()
+        with pytest.raises(InvalidRunState):
+            rig.engine.resume("run")
+        rig.engine.answer("run", Decision(value=7), request_id=request_id)
+        assert future.result(timeout=10).lifecycle == "done"
     assert rig.engine.pending_answer_type("run") is None
+    assert rig.engine.records("run")[0].encoded_record.value == {"value": 7}
+    with pytest.raises(QuestionMismatch) as ended:
+        rig.engine.parse_answer("run", {"value": 8}, request_id=request_id)
+    assert ended.value.pending_request_id is None
 
 
-def test_parse_answer_validates_without_resuming_and_preserves_retry(rig: Rig) -> None:
-    received: list[Decision | None] = []
+def test_answer_continues_same_author_with_live_tunables(rig: Rig) -> None:
+    entered: list[int] = []
+    seen: list[tuple[int, int]] = []
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        received.append((yield from env.ask(Choose(point=4))))
-        return Done()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        entered.append(get_ident())
+        captured = tun.current
+        answer = await env.ask(Choose(point=0))
+        assert answer is not None
+        seen.append((captured.value, tun.current.value))
+        await env.commit(Point(value=answer.value))
 
-    rig.start(step)
-    with pytest.raises(RuntimeError, match="pending"):
-        rig.engine.parse_answer("run", {"value": 7})
-    rig.engine.execute("run")
-    before = rig.kinds()
-    with pytest.raises(ValidationError, match="Choose"):
-        rig.engine.parse_answer("run", {"value": "not an integer"})
-    with pytest.raises(RunMismatch):
-        rig.engine.parse_answer("stale", {"value": 7})
-    answer = rig.engine.parse_answer("run", {"value": 7})
-    assert answer == Decision(value=7)
-    assert received == []
-    status = rig.engine.status()
-    assert status is not None and status.lifecycle == "paused"
-    assert rig.kinds() == before
-    rig.engine.answer("run", answer)
-    assert received == [Decision(value=7)]
-    with pytest.raises(RuntimeError, match="pending"):
-        rig.engine.parse_answer("run", {"value": 8})
-
-
-def test_answer_continues_same_invocation_with_original_capture(rig: Rig) -> None:
-    entered: list[tuple[int, Path]] = []
-    observed: list[tuple[int, int]] = []
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, tun: Tunables, state: State
-    ) -> Step[State, int]:
-        if state.index == 1:
-            return Done()
-        entered.append((tun.value, env.iteration_dir))
-        yield from env.wait_until(START)
-        decision = yield from env.ask(Choose(point=state.index))
-        assert decision is not None
-        observed.append((decision.value, tun.value))
-        yield from env.wait_until(START)
-        state.index += 1
-        return Next(decision.value, state)
-
-    rig.start(step)
-    paused = rig.engine.execute("run")
-    assert (paused.lifecycle, paused.call_seq, paused.committed_seq) == ("paused", 1, 0)
-    question = rig.engine.pending_question("run")
-    assert question == Choose(point=0)
-    assert rig.engine.pending_question("run") == question
-    assert rig.engine.records("run") == ()
-    assert not (entered[0][1] / "record.json").exists()
-    with pytest.raises(InvalidRunState):
-        rig.engine.resume("run")
-    with pytest.raises(InvalidRunState):
-        rig.engine.execute("run")
-    rig.engine.update_tunables(
-        "run", Tunables(value=9), expected_revision=0, actor=Actor("agent", "test")
-    )
-    final = rig.engine.answer("run", Decision(value=23))
-    assert final.lifecycle == "done"
-    assert observed == [(23, 1)]
+    rig.start(script)
+    with running(rig) as future:
+        request_id = pending(rig)
+        rig.engine.update_tunables(
+            "run", Tunables(value=8), expected_revision=0, actor=Actor("agent", "test")
+        )
+        rig.engine.answer("run", Decision(value=4), request_id=request_id)
+        assert future.result(timeout=10).lifecycle == "done"
     assert len(entered) == 1
-    assert rig.initialized == [START]
-    records = rig.engine.records("run")
-    assert [(record.call_seq, record.revision) for record in records] == [(1, 0)]
-    assert rig.engine.pending_question("run") is None
-    assert "step_discarded" not in rig.kinds()
+    assert entered[0] != get_ident()
+    assert seen == [(1, 8)]
+    assert rig.engine.records("run")[0].revisions == (0, 1)
 
 
-def test_wrong_answer_preserves_question_and_allows_retry(rig: Rig) -> None:
-    received: list[Decision] = []
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        decision = yield from env.ask(Choose(point=4))
-        assert decision is not None
-        received.append(decision)
-        return Done()
-
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    before = rig.kinds()
-    with pytest.raises(TypeError, match="Decision"):
-        rig.engine.answer("run", OtherAnswer(value=7))
-    assert rig.engine.pending_question("run") == Choose(point=4)
-    assert rig.kinds() == before
-    assert received == []
-    assert rig.engine.answer("run", Decision(value=7)).lifecycle == "done"
-    assert received == [Decision(value=7)]
+def test_wrong_answer_and_request_preserve_pending_question(rig: Rig) -> None:
+    rig.start(ask_once)
+    with running(rig) as future:
+        request_id = pending(rig)
+        before = rig.events()
+        with pytest.raises(TypeError):
+            rig.engine.answer("run", OtherAnswer(text="wrong"), request_id=request_id)
+        with pytest.raises(QuestionMismatch) as error:
+            rig.engine.answer("run", Decision(value=1), request_id="stale")
+        assert error.value.pending_request_id == request_id
+        assert rig.events() == before
+        assert question(rig).question == Choose(point=0)
+        rig.engine.answer("run", Decision(value=2), request_id=request_id)
+        assert future.result(timeout=10).lifecycle == "done"
 
 
-def test_each_answer_runs_until_next_question_without_restart(rig: Rig) -> None:
+def test_each_answer_continues_until_next_question_without_restart(rig: Rig) -> None:
     received: list[int] = []
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        for point in (1, 2):
-            decision = yield from env.ask(Choose(point=point))
-            assert decision is not None
-            received.append(decision.value)
-        return Done()
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        for index in range(plan.count):
+            answer = await env.ask(Choose(point=index))
+            assert answer is not None
+            received.append(answer.value)
 
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    second = rig.engine.answer("run", Decision(value=11))
-    assert (second.lifecycle, second.call_seq) == ("paused", 1)
-    assert rig.engine.pending_question("run") == Choose(point=2)
-    assert received == [11]
-    assert rig.engine.answer("run", Decision(value=22)).lifecycle == "done"
-    assert received == [11, 22]
-    with pytest.raises(InvalidRunState):
-        rig.engine.answer("run", Decision(value=33))
+    rig.start(script)
+    with running(rig) as future:
+        first_id = pending(rig)
+        rig.engine.answer("run", Decision(value=2), request_id=first_id)
+        until(
+            lambda: (
+                (q := rig.engine.pending_question("run")) is not None
+                and q.request_id != first_id
+            ),
+            "second question",
+        )
+        second_id = pending(rig)
+        assert question(rig).question == Choose(point=1)
+        with pytest.raises(QuestionMismatch):
+            rig.engine.answer("run", Decision(value=99), request_id=first_id)
+        rig.engine.answer("run", Decision(value=3), request_id=second_id)
+        assert future.result(timeout=10).lifecycle == "done"
+    assert received == [2, 3]
 
 
 @pytest.mark.parametrize("cleanup_fails", [False, True])
-def test_stop_is_control_only_and_drain_resumes_cancelled_ask_on_worker(
-    rig: Rig, cleanup_fails: bool
+def test_stop_delivers_none_and_cooperative_stopped_calls_then_runs_finally(
+    rig: Rig,
+    cleanup_fails: bool,
 ) -> None:
     closed: list[int] = []
     received: list[Decision | None] = []
+    stops: list[bool] = []
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         try:
-            received.append((yield from env.ask(Choose(point=0))))
-            from zcu_tools.experiment.workflows import Cancelled
+            received.append(await env.ask(Choose(point=0)))
 
-            def acquisition(_run: Run[Cfg]) -> int:
-                pytest.fail("Cancelled invocation must not start new work")
+            def operation(ctx: CallContext) -> int:
+                stops.append(ctx.stop_signal.is_set())
+                return 0
 
-            cancelled = yield from env.run(acquisition, Cfg())
-            assert cancelled == Cancelled(run_id="run")
-            yield from env.setup_device("unused", FakeDeviceInfo(address="unused"))
-            yield from env.wait_until(START + timedelta(days=1))
-            received.append((yield from env.ask(Choose(point=1))))
+            result = completed(await env.call(operation))
+            assert result.partial_result and result.value == 0
+            assert completed(
+                await env.setup_device(
+                    "unused", FakeDeviceInfo(address="unused", value=0.5)
+                )
+            ).partial_result
+            assert completed(
+                await env.wait_until(START + timedelta(days=1))
+            ).partial_result
+            received.append(await env.ask(Choose(point=1)))
             if cleanup_fails:
                 raise ValueError("cancel cleanup failed")
         finally:
             closed.append(get_ident())
-        return Done()
 
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    assert closed == []
-    assert rig.engine.pause("run").lifecycle == "paused"
-    assert rig.engine.stop("run").lifecycle == "stopping"
-    assert closed == []
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        # The submitted drain has no blocked collaborator and must return.
-        stopped = pool.submit(rig.engine.drain, "run").result(timeout=30)
-    assert stopped.lifecycle == ("failed" if cleanup_fails else "stopped")
+    rig.start(script)
+    with running(rig) as future:
+        pending(rig)
+        assert closed == []
+        rig.engine.stop("run")
+        final = future.result(timeout=10)
+    assert final.lifecycle == ("failed" if cleanup_fails else "cancelled")
     if cleanup_fails:
-        assert stopped.reason == "ValueError: cancel cleanup failed"
+        assert final.reason == "ValueError: cancel cleanup failed"
     assert len(closed) == 1 and closed[0] != get_ident()
     assert received == [None, None]
-    assert rig.devices.values == []
-    assert rig.devices.captures == 0
-    assert rig.clock.targets == []
+    assert stops == [True]
+    assert rig.devices.values == [("unused", 0.5)]
+    assert rig.devices.signals[0].is_set()
+    assert rig.clock.targets == [START + timedelta(days=1)]
     assert rig.engine.pending_question("run") is None
-    assert rig.kinds().count("step_failed" if cleanup_fails else "step_discarded") == 1
     assert rig.engine.records("run") == ()
 
 
-def test_stop_journal_failure_defers_author_teardown_to_unlocked_worker(
+def test_stop_journal_failure_keeps_original_cause_and_cleans_up_on_worker(
     rig: Rig,
 ) -> None:
-    owner = get_ident()
     cleanup_threads: list[int] = []
-    statuses: list[object] = []
 
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         try:
-            yield from env.ask(Choose(point=0))
+            await env.ask(Choose(point=0))
         finally:
             cleanup_threads.append(get_ident())
-            if get_ident() != owner:
-                with ThreadPoolExecutor(max_workers=1) as probe:
-                    # A public status read must finish while author cleanup runs;
-                    # no control lock may surround generator teardown.
-                    statuses.append(probe.submit(rig.engine.status).result(timeout=30))
-        return Done()
 
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    journal = rig.paths.metadata_root / "journal.jsonl"
-    contents = journal.read_bytes()
-    journal.unlink()
-    journal.mkdir()
-    try:
-        with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
-            rig.engine.stop("run")
-    finally:
-        journal.rmdir()
-        journal.write_bytes(contents)
-    assert cleanup_threads == [], "Control I/O failure must not run author cleanup"
-    with ThreadPoolExecutor(max_workers=1) as worker:
-        # The failed journal request has settled; drain owns only local teardown.
-        failed = worker.submit(rig.engine.drain, "run").result(timeout=30)
-    assert failed.lifecycle == "failed"
-    assert failed.reason == f"{type(caught.value).__name__}: {caught.value}"
-    assert len(cleanup_threads) == 1 and cleanup_threads[0] != owner
-    assert len(statuses) == 1
-
-
-def test_answer_reserves_worker_segment_and_pause_discards_on_next_effect(
-    rig: Rig,
-) -> None:
-    entered, release = Event(), Event()
-    closed: list[bool] = []
-
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
+    rig.start(script)
+    with running(rig) as future:
+        request_id = pending(rig)
+        journal = rig.paths.metadata_root / "journal.jsonl"
+        contents = journal.read_bytes()
+        journal.unlink()
+        journal.mkdir()
         try:
-            yield from env.ask(Choose(point=0))
-            entered.set()
-            # The test releases the continuation in its finally block.
-            assert release.wait(30)
-            yield from env.wait_until(START)
+            with pytest.raises(DIRECTORY_OPEN_ERROR) as caught:
+                rig.engine.stop("run")
         finally:
-            closed.append(True)
-        return Done()
-
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(rig.engine.answer, "run", Decision(value=1))
+            journal.rmdir()
+            journal.write_bytes(contents)
         try:
-            # The submitted answer resumes directly into entered.set().
-            assert entered.wait(30)
-            with pytest.raises(InvalidRunState):
-                rig.engine.answer("run", Decision(value=2))
+            # A control I/O failure must fail and drain the existing worker.
+            final = future.result(timeout=10)
+        finally:
+            # If a broken engine leaves Ask pending, release it only for teardown.
+            # The timeout above still fails the test; no result is accepted here.
+            if not future.done() and rig.engine.pending_question("run") is not None:
+                rig.engine.answer("run", Decision(value=0), request_id=request_id)
+                future.result(timeout=10)
+    assert final.lifecycle == "failed"
+    assert final.reason == f"{type(caught.value).__name__}: {caught.value}"
+    assert len(cleanup_threads) == 1 and cleanup_threads[0] != get_ident()
+    assert rig.engine.records("run") == ()
+
+
+def test_answer_is_nonblocking_and_continuation_errors_fail_execution(rig: Rig) -> None:
+    entered, release = Event(), Event()
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.ask(Choose(point=0))
+
+        def operation(ctx: CallContext) -> None:
+            entered.set()
+            assert release.wait(10), "Caller releases operation in finally"
+            raise ValueError("analysis after answer failed")
+
+        await env.call(operation)
+
+    rig.start(script)
+    with running(rig) as future:
+        request_id = pending(rig)
+        try:
+            rig.engine.answer("run", Decision(value=1), request_id=request_id)
+            assert entered.wait(10), "Answer continues on retained worker"
+            assert not future.done()
             with pytest.raises(InvalidRunState):
                 rig.engine.execute("run")
-            assert rig.engine.pause("run").lifecycle == "pausing"
         finally:
             release.set()
-        # Release above lets the synchronous segment reach its pause boundary.
-        assert future.result(timeout=30).lifecycle == "paused"
-    assert closed == [True]
-    assert rig.engine.pending_question("run") is None
-    assert rig.engine.resume("run").lifecycle == "running"
-    assert rig.engine.execute("run").lifecycle == "paused"
-    rig.engine.stop("run")
-    rig.engine.drain("run")
+        final = future.result(timeout=10)
+    assert final.lifecycle == "failed"
+    assert final.reason == "ValueError: analysis after answer failed"
 
 
-def test_answer_failure_uses_execution_failure_boundary(rig: Rig) -> None:
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        yield from env.ask(Choose(point=0))
-        raise ValueError("analysis after answer failed")
+@contextmanager
+def deschedule_after_next_control(
+    monkeypatch: pytest.MonkeyPatch, release_loop: Event
+) -> Generator[None]:
+    """Run the next external loop callback intact, then pause its OS thread."""
+    armed = Event()
+    armed.set()
+    original_schedule = asyncio.BaseEventLoop.call_soon_threadsafe
 
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    failed = rig.engine.answer("run", Decision(value=1))
-    assert failed.lifecycle == "failed"
-    assert failed.reason == "ValueError: analysis after answer failed"
-    assert rig.engine.pending_question("run") is None
-    assert "step_failed" in rig.kinds()
+    def schedule(
+        loop: asyncio.BaseEventLoop,
+        callback: Callable[..., object],
+        *args: object,
+        context: Context | None = None,
+    ) -> asyncio.Handle:
+        if not armed.is_set():
+            return original_schedule(loop, callback, *args, context=context)
+        armed.clear()
+
+        def acknowledged_then_descheduled() -> None:
+            callback(*args)
+            # Run the real control completely, then model OS descheduling before
+            # the author continuation. The caller's journal attempt releases it.
+            assert release_loop.wait(10), "Caller I/O or teardown releases loop"
+
+        return original_schedule(loop, acknowledged_then_descheduled, context=context)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(asyncio.BaseEventLoop, "call_soon_threadsafe", schedule)
+        try:
+            yield
+        finally:
+            release_loop.set()
+
+
+@pytest.mark.parametrize("journal_fails", [False, True], ids=["clean", "broken"])
+def test_answer_flush_preserves_io_cause_and_drains_finally(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, journal_fails: bool
+) -> None:
+    release_loop, cleanup_entered, release_cleanup = Event(), Event(), Event()
+    append_seen = Event()
+    flush_threads: list[int] = []
+    cleanup_threads: list[int] = []
+    original_open = Path.open
+    journal = rig.paths.metadata_root / "journal.jsonl"
+
+    def open_journal(
+        path: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ):
+        if path == journal and mode == "a" and not append_seen.is_set():
+            flush_threads.append(get_ident())
+            append_seen.set()
+            release_loop.set()
+            if journal_fails:
+                raise OSError("answer journal storage failed")
+        return original_open(path, mode, buffering, encoding, errors, newline)
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        try:
+            await env.ask(Choose(point=0))
+        finally:
+
+            def cleanup(ctx: CallContext) -> None:
+                cleanup_threads.append(get_ident())
+                cleanup_entered.set()
+                assert release_cleanup.wait(10), (
+                    "Test finally releases executor cleanup"
+                )
+
+            await env.call(cleanup)
+
+    rig.start(script)
+    with running(rig) as future:
+        request_id = pending(rig)
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(Path, "open", open_journal)
+                caller_thread = get_ident()
+                with deschedule_after_next_control(monkeypatch, release_loop):
+                    if journal_fails:
+                        with pytest.raises(
+                            OSError, match="answer journal storage failed"
+                        ):
+                            rig.engine.answer(
+                                "run", Decision(value=1), request_id=request_id
+                            )
+                    else:
+                        rig.engine.answer(
+                            "run", Decision(value=1), request_id=request_id
+                        )
+            assert cleanup_entered.wait(10), "Accepted answer reaches authored finally"
+            assert not future.done()
+            with pytest.raises(InvalidRunState):
+                rig.engine.start(
+                    workflow("replacement", "Cannot replace a draining worker")(script),
+                    plan=Plan(),
+                    tunables=Tunables(),
+                    paths=rig.paths,
+                    identity=identity(),
+                )
+        finally:
+            release_loop.set()
+            release_cleanup.set()
+        final = future.result(timeout=10)
+    assert flush_threads == [caller_thread]
+    assert len(cleanup_threads) == 1 and cleanup_threads[0] != caller_thread
+    assert final.lifecycle == ("failed" if journal_fails else "done")
+    assert final.reason == (
+        "OSError: answer journal storage failed" if journal_fails else None
+    )
 
 
 def test_question_controls_reject_stale_run_ids(rig: Rig) -> None:
-    def step(
-        env: WorkflowEnv[int], _plan: Plan, _tun: Tunables, _state: State
-    ) -> Step[State, int]:
-        yield from env.ask(Choose(point=0))
-        return Done()
-
-    rig.start(step)
-    assert rig.engine.execute("run").lifecycle == "paused"
-    with pytest.raises(RunMismatch):
-        rig.engine.pending_question("stale")
-    with pytest.raises(RunMismatch):
-        rig.engine.answer("stale", Decision(value=1))
-    assert rig.engine.pending_question("run") == Choose(point=0)
-    rig.engine.stop("run")
-    rig.engine.drain("run")
+    rig.start(ask_once)
+    with running(rig):
+        request_id = pending(rig)
+        with pytest.raises(RunMismatch):
+            rig.engine.pending_question("stale")
+        with pytest.raises(RunMismatch):
+            rig.engine.answer("stale", Decision(value=1), request_id=request_id)
+        assert question(rig).question == Choose(point=0)

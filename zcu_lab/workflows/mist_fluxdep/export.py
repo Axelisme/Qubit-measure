@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     Axis,
     CfgSnapshot,
@@ -22,9 +21,9 @@ from zcu_tools.experiment.workflows.export import (
     write_outputs,
 )
 from zcu_tools.experiment.workflows.saved_run import (
-    SavedPoint,
+    SavedRecord,
     read_manifest,
-    read_points,
+    read_records,
 )
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepExp
@@ -36,17 +35,21 @@ class MISTExportReport:
     """Report raw MIST export results so callers can identify missing science inputs.
 
     outputs lists each selected native/Labber writer result, including path,
-    status and failure reason. missing_records lists every absent iteration
-    record.json path; no trace is fabricated for those iterations."""
+    status and failure reason. missing_records remains an empty tuple because
+    saved_run only returns committed records, without reconstructing missing ones.
+    """
 
     outputs: tuple[FluxdepExportOutput, ...]
     missing_records: tuple[Path, ...]
 
 
 def prepare_export(
-    plan: MISTPlan, points: tuple[SavedPoint[MISTPoint], ...]
+    plan: MISTPlan, points: tuple[SavedRecord[MISTPoint], ...]
 ) -> PreparedFluxdepExport:
     """Assemble raw MIST response across flux and gain for offline analysis.
+
+    Completed partial traces retain their native reference with success=False.
+    They export raw IQ without contributing an acquisition-success value.
 
     Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
 
@@ -63,7 +66,7 @@ def prepare_export(
     seen: set[int] = set()
     usable = False
     for saved in points:
-        point = saved.point
+        point = saved.record
         try:
             if (
                 point.index < 0
@@ -75,7 +78,7 @@ def prepare_export(
                     "MIST index must be unique/inside plan and flux finite"
                 )
             seen.add(point.index)
-            if point.success != (point.gain_file is not None):
+            if point.success and point.gain_file is None:
                 raise ValueError("MIST success must identify its Completed acquisition")
             fluxes[point.index] = point.flux
             if point.gain_file is None:
@@ -127,7 +130,8 @@ def export_run(
     other selections reject. Labber requires explicit --database before any
     write. Merged replaces data_root/merged.h5 with no external destination.
     Fixed manifest and each record.json provide input, not journal or leftover
-    files. Missing records are listed; malformed inputs name their source.
+    files. Missing records are not reconstructed or listed; malformed inputs
+    name their source.
     Prepare errors allocate nothing; writers return independent typed failures.
     """
     validate_destinations(outputs, {"merged", "labber"}, result=None, database=database)
@@ -138,7 +142,7 @@ def export_run(
             raise ValueError("Plan snapshot entry and manifest identity differ")
     except ValueError as error:
         raise ValueError(f"{run}/manifest.json: {error}") from error
-    points, missing = read_points(manifest, TypeAdapter(MISTPoint))
+    points = read_records(run, MISTPoint)
     prepared = prepare_export(plan, points)
     outputs_written = write_outputs(
         manifest,
@@ -147,7 +151,7 @@ def export_run(
         merged="merged" in outputs,
         database=database if "labber" in outputs else None,
     )
-    return MISTExportReport(outputs_written, missing)
+    return MISTExportReport(outputs_written, ())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -157,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
 
     argv omits the executable. Select --merged and/or --labber. --database is
     necessary only for Labber. Unsupported --samples is an argparse error.
-    Malformed inputs raise; every missing record and writer result is printed.
+    Malformed inputs raise; writer results are printed.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)

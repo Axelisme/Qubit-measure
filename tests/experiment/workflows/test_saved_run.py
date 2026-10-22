@@ -1,150 +1,185 @@
-"""Shared saved-input diagnostics using synthetic envelopes, not experiments."""
+"""Saved readers validate committed models without interpreting leftover files."""
 
-from datetime import datetime, timezone
+import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Self
 
 import pytest
-from pydantic import BaseModel, TypeAdapter
-from zcu_tools.datafile import SoftwareProvenance
-from zcu_tools.experiment.workflows import EncodedRecord, RunIdentity, RunPaths
-from zcu_tools.experiment.workflows.journal import ErrorInfo
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ModelWrapValidatorHandler,
+    TypeAdapter,
+    model_validator,
+)
+from zcu_tools.experiment.workflows import Live, WorkflowEnv
 from zcu_tools.experiment.workflows.saved_run import (
-    SavedCommit,
-    SavedDiscarded,
-    SavedFailed,
-    SavedFinished,
-    SavedIteration,
-    SavedManifest,
-    SavedStarted,
-    read_points,
+    native_path,
+    read_manifest,
+    read_records,
+    read_records_raw,
 )
 
+from ._engine_fakes import Plan, Point, Rig, Tunables
 
-class SyntheticPoint(BaseModel):
-    """Minimal committed record for the shared reader's typed output."""
 
-    index: int
+class OtherPoint(BaseModel):
+    other: str
+
+
+class AfterPoint(BaseModel):
+    model_config = ConfigDict(title="NotTheQualifiedType")
+    value: int
+
+    @model_validator(mode="after")
+    def positive(self) -> Self:
+        if self.value < 0:
+            raise ValueError("point must be positive")
+        return self
+
+
+class WrappedPoint(BaseModel):
+    value: int
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def positive(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        point = handler(value)
+        if point.value < 0:
+            raise ValueError("point must be positive")
+        return point
+
+
+@pytest.mark.parametrize("model", [AfterPoint, WrappedPoint], ids=["after", "wrap"])
+@pytest.mark.parametrize("use_adapter", [False, True], ids=["model", "adapter"])
+def test_typed_reader_runs_model_validators_and_preserves_source_and_identity(
+    tmp_path: Path, model: type[BaseModel], use_adapter: bool
+) -> None:
+    rig = Rig(tmp_path)
+    point = model.model_validate({"value": 2})
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.commit(point)
+
+    try:
+        rig.start(script)
+        assert rig.engine.execute("run").lifecycle == "done"
+        target = TypeAdapter(model) if use_adapter else model
+        records = read_records(rig.paths.metadata_root, target)
+        assert [row.record for row in records] == [point]
+        assert records[0].record_type == f"{model.__module__}.{model.__qualname__}"
+        source = records[0].record_path
+        document = json.loads(source.read_text())
+        document["record"]["value"] = {"value": -1}
+        source.write_text(json.dumps(document))
+        with pytest.raises(ValueError, match="point must be positive") as caught:
+            read_records(rig.paths.metadata_root, target)
+        assert str(source) in str(caught.value)
+        assert read_records_raw(rig.paths.metadata_root)[0].record.value == {
+            "value": -1
+        }
+    finally:
+        rig.close()
 
 
 @pytest.fixture
-def manifest(tmp_path: Path) -> SavedManifest:
-    """Supply two missing summaries beside a third, writable invocation."""
-    roots = RunPaths(tmp_path / "metadata", tmp_path / "data")
-    for call_seq in (1, 2, 3):
-        (roots.data_root / "iter" / f"{call_seq:06d}").mkdir(parents=True)
-    now = datetime(2026, 10, 12, tzinfo=timezone.utc)
-    return SavedManifest(
-        format="zcu-workflow-run",
-        format_version=1,
-        identity=RunIdentity(
-            "synthetic-run",
-            SoftwareProvenance(
-                software_versions={},
-                git_commit=None,
-                git_dirty=None,
-                qick_version=None,
-                soc_fingerprint=None,
-                hostname=None,
-            ),
-        ),
-        workflow="synthetic",
-        plan={"points": 1},
-        initial_tunables={},
-        roots=roots,
-        journal=roots.metadata_root / "journal.jsonl",
-        started_at=now,
-        updated_at=now,
-        ended_at=now,
-        lifecycle="done",
-        reason=None,
-    )
+def rig(tmp_path: Path) -> Iterator[Rig]:
+    rig = Rig(tmp_path)
 
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        uncommitted = env.new_commit_dir()
+        (uncommitted / "native.h5").write_text("leftover is not a record")
+        later = env.new_commit_dir()
+        earlier = env.new_commit_dir()
+        await env.commit(Point(value=2), earlier)
+        await env.commit(Point(value=1), later)
 
-def write_summary(
-    manifest: SavedManifest,
-    result: SavedCommit | SavedFinished | SavedDiscarded | SavedFailed,
-) -> Path:
-    """Serialize a valid third invocation through the public saved envelope."""
-    source = manifest.roots.data_root / "iter" / "000003" / "record.json"
-    saved = SavedIteration(
-        format="zcu-workflow-iteration",
-        format_version=1,
-        identity=manifest.identity,
-        workflow=manifest.workflow,
-        plan=manifest.plan,
-        tunables=manifest.initial_tunables,
-        started=SavedStarted(
-            kind="iteration_started", call_seq=3, commit_seq=0, revision=0
-        ),
-        result=result,
-    )
-    source.write_text(saved.model_dump_json(), encoding="utf-8")
-    return source
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    yield rig
+    rig.close()
 
 
 @pytest.mark.parametrize(
-    "result",
-    [
-        SavedFinished(
-            kind="step_finished",
-            call_seq=3,
-            revision=0,
-            iteration_dir="iter/000003",
-            outcome="done",
-            reason=None,
-        ),
-        SavedDiscarded(
-            kind="step_discarded",
-            call_seq=3,
-            revision=0,
-            iteration_dir="iter/000003",
-            reason="pause",
-        ),
-        SavedFailed(
-            kind="step_failed",
-            call_seq=3,
-            revision=0,
-            iteration_dir="iter/000003",
-            error=ErrorInfo("RuntimeError", "synthetic failure", "synthetic trace"),
-        ),
-    ],
-    ids=["finished", "discarded", "failed"],
+    "adapter", [Point, TypeAdapter(Point)], ids=["model", "adapter"]
 )
-def test_missing_summaries_are_named_when_only_noncommit_records_remain(
-    manifest: SavedManifest, result: SavedFinished | SavedDiscarded | SavedFailed
+def test_typed_reader_orders_commits_and_ignores_uncommitted_native_files(
+    rig: Rig, adapter: type[Point] | TypeAdapter[Point]
 ) -> None:
-    write_summary(manifest, result)
-
-    with pytest.raises(ValueError, match=r"missing record\.json") as raised:
-        read_points(manifest, TypeAdapter(SyntheticPoint))
-
-    message = str(raised.value)
-    for call_seq in (1, 2):
-        missing = manifest.roots.data_root / "iter" / f"{call_seq:06d}" / "record.json"
-        assert str(missing) in message
+    records = read_records(rig.paths.metadata_root, adapter)
+    assert tuple(row.record for row in records) == (Point(value=2), Point(value=1))
+    assert [row.directory.name for row in records] == ["000003", "000002"]
+    assert [row.commit_seq for row in records] == [1, 2]
+    assert all(row.record_path == row.directory / "record.json" for row in records)
 
 
-def test_committed_point_and_all_missing_summaries_are_returned_together(
-    manifest: SavedManifest,
+def test_missing_committed_file_does_not_invent_data_from_native_files(
+    rig: Rig,
 ) -> None:
-    point = SyntheticPoint(index=0)
-    source = write_summary(
-        manifest,
-        SavedCommit(
-            kind="step_committed",
-            call_seq=3,
-            revision=0,
-            iteration_dir="iter/000003",
-            commit_seq=1,
-            encoded_record=EncodedRecord("json", point.model_dump(mode="json"), None),
-        ),
-    )
+    missing = rig.paths.data_root / "commits/000003/record.json"
+    missing.unlink()
+    records = read_records(rig.paths.metadata_root, Point)
+    assert tuple(row.record for row in records) == (Point(value=1),)
+    assert tuple(row.directory.name for row in records) == ("000002",)
 
-    points, missing = read_points(manifest, TypeAdapter(SyntheticPoint))
 
-    assert tuple(saved.point for saved in points) == (point,)
-    assert tuple(saved.record_path for saved in points) == (source,)
-    assert missing == (
-        manifest.roots.data_root / "iter" / "000001" / "record.json",
-        manifest.roots.data_root / "iter" / "000002" / "record.json",
-    )
+def test_reader_type_mismatch_names_source_and_raw_reader_retains_json(
+    rig: Rig,
+) -> None:
+    source = rig.paths.data_root / "commits/000003/record.json"
+    with pytest.raises(ValueError, match="Expected record type") as caught:
+        read_records(rig.paths.metadata_root, OtherPoint)
+    assert str(source) in str(caught.value)
+    assert [row.record.value for row in read_records_raw(rig.paths.metadata_root)] == [
+        {"value": 2},
+        {"value": 1},
+    ]
+
+
+def test_reader_validation_failure_names_source_without_validating_raw_json(
+    rig: Rig,
+) -> None:
+    source = rig.paths.data_root / "commits/000003/record.json"
+    document = json.loads(source.read_text())
+    document["record"]["value"] = {"value": "invalid integer"}
+    source.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="value") as caught:
+        read_records(rig.paths.metadata_root, Point)
+    assert str(source) in str(caught.value)
+    assert read_records_raw(rig.paths.metadata_root)[0].record.value == {
+        "value": "invalid integer"
+    }
+
+
+def test_manifest_schema_is_information_not_validation(rig: Rig) -> None:
+    path = rig.paths.metadata_root / "manifest.json"
+    document = json.loads(path.read_text())
+    for name in document["record_schemas"]:
+        document["record_schemas"][name] = {"not": {}}
+    path.write_text(json.dumps(document))
+    assert tuple(
+        row.record for row in read_records(rig.paths.metadata_root, Point)
+    ) == (Point(value=2), Point(value=1))
+
+
+def test_malformed_record_and_wrong_workflow_name_source(rig: Rig) -> None:
+    with pytest.raises(ValueError, match="Expected workflow") as caught:
+        read_manifest(rig.paths.metadata_root, "other")
+    assert "manifest.json" in str(caught.value)
+    source = rig.paths.data_root / "commits/000003/record.json"
+    source.write_text("not json")
+    with pytest.raises(ValueError, match="JSON") as caught:
+        read_records_raw(rig.paths.metadata_root)
+    assert str(source) in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "filename", ["../outside", "/outside", "C:/outside", "C:outside", "nested\\outside"]
+)
+def test_native_reference_cannot_escape_commit_directory(
+    rig: Rig, filename: str
+) -> None:
+    with pytest.raises(ValueError, match="Invalid workflow-relative filename"):
+        native_path(rig.paths.data_root / "commits/000003", filename)

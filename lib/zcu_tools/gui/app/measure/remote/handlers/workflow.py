@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
-from zcu_tools.experiment.workflows import Actor, InvalidRunState, RunMismatch
+from zcu_tools.experiment.workflows import (
+    Actor,
+    InvalidRunState,
+    QuestionMismatch,
+    RunMismatch,
+)
 from zcu_tools.gui.app.measure.services.workflow_control import (
     WorkflowControlFacet,
     WorkflowTabSnapshot,
@@ -38,6 +43,13 @@ def _workflow_errors() -> Generator[None]:
             str(exc),
             reason="run_mismatch",
             data={"expected": exc.expected, "actual": exc.actual},
+        ) from exc
+    except QuestionMismatch as exc:
+        raise RemoteError(
+            ErrorCode.PRECONDITION_FAILED,
+            str(exc),
+            reason="question_mismatch",
+            data={"pending_request_id": exc.pending_request_id},
         ) from exc
     except InvalidRunState as exc:
         raise RemoteError(
@@ -358,7 +370,9 @@ def h_workflow_answer(
     with _workflow_errors():
         tab = _run(adapter.workflow_control, run_id)
         try:
-            operation = adapter.workflow_control.answer(run_id, answer)
+            operation = adapter.workflow_control.answer(
+                run_id, answer, request_id=str(params["request_id"])
+            )
         except (ValidationError, TypeError) as exc:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
