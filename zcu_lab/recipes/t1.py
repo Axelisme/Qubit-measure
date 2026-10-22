@@ -58,7 +58,7 @@ class T1Inputs(FormModel):
 
 
 class T1Report(FormModel):
-    """Completed t1 results; cancellation returns no report."""
+    """T1 results and failure reason; cancellation returns no report."""
 
     t1_us: float | None = Field(
         description="Relaxation time in us; null means not estimable."
@@ -74,6 +74,11 @@ class T1Report(FormModel):
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -110,8 +115,9 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     # Select the captured sources before editing measurement fields.
@@ -153,6 +159,15 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=T1Summary)
+        if analysis.result is None:
+            return T1Report(
+                t1_us=None,
+                t1_err_us=None,
+                t1b_us=None,
+                t1b_err_us=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

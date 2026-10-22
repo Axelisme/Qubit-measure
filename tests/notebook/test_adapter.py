@@ -193,7 +193,7 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     second_device = FakeDevice(fast_mode=True)
     manager.drop_device("flux")
     manager.register_device("flux", second_device)
-    core.contexts[0].cancel_signal.set_error("failed", "old run", None)
+    core.contexts[0].scope.stop.set_error("failed", "old run", None)
 
     first_evidence = adapter.acquisition_for(first)
     second = adapter.run(cfg)
@@ -213,9 +213,9 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     first_context, second_context = core.contexts
     assert first_context is not second_context
     assert first_context.plots is not second_context.plots
-    assert first_context.cancel_signal is not second_context.cancel_signal
-    assert not second_context.cancel_signal.is_set()
-    assert second_context.cancel_signal.error is None
+    assert first_context.scope.stop is not second_context.scope.stop
+    assert not second_context.scope.stop.is_set()
+    assert second_context.scope.stop.error is None
     assert first_context.devices["flux"] is first_device
     assert second_context.devices["flux"] is second_device
     assert first_context.soc is soc and second_context.soc is soc
@@ -372,7 +372,7 @@ def test_stopped_partial_run_is_committed(outcome: str) -> None:
     assert partial is not previous
     assert partial.result == 9.0
     assert adapter.acquisition_for(partial).completion == "stopped"
-    assert core.contexts[-1].cancel_signal.is_set()
+    assert core.contexts[-1].scope.stop.is_set()
     assert host.released == []
 
 
@@ -435,10 +435,7 @@ def test_factory_keeps_each_experiment_records_independent() -> None:
     assert second.analysis is second_analysis
     assert second_analysis.result == 14.0
     assert first_core.contexts[0].plots is not second_core.contexts[0].plots
-    assert (
-        first_core.contexts[0].cancel_signal
-        is not second_core.contexts[0].cancel_signal
-    )
+    assert first_core.contexts[0].scope.stop is not second_core.contexts[0].scope.stop
 
 
 def test_binding_and_offline_operations_do_not_query_devices(tmp_path: Path) -> None:

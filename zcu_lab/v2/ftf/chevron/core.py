@@ -74,7 +74,7 @@ class ChevronExp(PersistableExperiment[RabiScanResult, ChevronCfg]):
         """Acquire B11 → dual drive → double Xπ → mux for frequency/duration/round.
 
         Preserve all raw shots and full tones, including partial cancellation.
-        Caller must check context.cancel_signal.raise_if_error(). No input mutation.
+        Caller must check context.scope.stop.raise_if_error(). No input mutation.
         """
         frequencies = sweep2array(config.frequency)
         drives = [

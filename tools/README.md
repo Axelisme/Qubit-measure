@@ -106,7 +106,7 @@ Quality gate 以絕對檢查執行，不是可容忍新增違規的計數比較�
 Status 模式也列目前違規數。
 
 所有 recipe、workflow 與 helper 共用一條規則。
-Await 目標必須是 env／tab／session 呼叫，或解析到 lab 內定義的函式呼叫。
+Await 目標必須是 env／scope／iteration／tab／session 呼叫，或解析到 lab 內定義的函式呼叫。
 目標函式可用 def 或 async def 定義，工具不推導回傳型別。
 工具解析直接的絕對／相對 import，不因外部函式名稱像 helper 就放行。
 Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集，不識別 decorator 或做 reachability。
@@ -115,7 +115,7 @@ Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集
 其他 async with／async for 不另禁。
 
 這是 ADR-0075 的漸進式 AST guardrail，不是 type checker 或 sandbox。
-框架 receiver 以 env／tab／session 字面名稱辨認，不驗證其 runtime 型別。
+框架 receiver 以 env／scope／iteration／tab／session 字面名稱辨認，不驗證其 runtime 型別。
 Assignment aliases、動態分派、包裝與轉匯出不追蹤，可能造成漏報或拒絕合法 helper。
 出現實際失敗類別再擴充，不藉此新增作者排程 API。
 同 process 合成 source／fixture 驗證在 `tests/tools/test_check_script_awaits.py`。

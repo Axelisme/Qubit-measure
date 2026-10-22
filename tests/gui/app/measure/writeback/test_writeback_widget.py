@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     RunRequest,
@@ -94,7 +94,7 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
         RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None),
         SampleCfg(sweep=SweepCfg(start=5.0, stop=6.0, expts=11, step=0.1)),
         context=RunContext(
-            ctx.soc, ctx.soccfg, run_plots, devices={}, cancel_signal=StopSignal()
+            ctx.soc, ctx.soccfg, run_plots, devices={}, scope=Scope("run")
         ),
     )
     run_plots.finish()

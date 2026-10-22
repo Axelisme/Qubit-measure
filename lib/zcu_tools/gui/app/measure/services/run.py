@@ -17,10 +17,10 @@ from zcu_tools.experiment.acquisition import (
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.scope import Scope, parse_cancel_scope
 from zcu_tools.experiment.stop_signal import (
     CancelResult,
     StopSignal,
-    parse_cancel_scope,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -123,7 +123,7 @@ class RunService:
         # active_token is set by begin() and cleared on the terminal path so the
         # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None
-        self._active_stop: StopSignal | None = None
+        self._active_stop: Scope | None = None
         # Run plots are view-only, never part of the canonical pane or Save All.
         self._view_plots: dict[str, Plots] = {}
         self._bus.subscribe(TabClosedPayload, self._on_tab_closed)
@@ -353,7 +353,8 @@ class RunService:
         # The run root receives completed Schedule errors without being stopped.
         # ``cancel_requested`` records user intent separately from scope outcomes.
         stop_event = threading.Event()
-        stop_signal = StopSignal(stop_event, label="run")
+        stop_signal = StopSignal(stop_event)
+        scope = Scope("run", stop=stop_signal)
         cancel_requested = threading.Event()
         adapter = inputs.adapter
         request = inputs.request
@@ -363,12 +364,12 @@ class RunService:
             soccfg=request.soccfg,
             plots=plots,
             devices=self._devices(),
-            cancel_signal=stop_signal,
+            scope=scope,
         )
 
         def request_cancel() -> None:
             cancel_requested.set()
-            stop_event.set()
+            stop_signal.set()
 
         operation = _RunOperation(
             tab_id=tab_id,
@@ -461,7 +462,7 @@ class RunService:
 
         # Started events are emitted only after begin() succeeds (ADR-0066).
         self._active_token = token
-        self._active_stop = stop_signal
+        self._active_stop = scope
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
@@ -481,6 +482,17 @@ class RunService:
         if operation_id != self._active_token or signal is None:
             return ""
         return signal.active_path
+
+    def live_paths_scope(self, operation_id: int) -> list[str]:
+        """Read all active Run leaf paths; stale/non-Run handles return [].
+
+        Call on the owner thread. Paths come from the same explicit Scope tree
+        as status_scope; no latest-child selection occurs at forks.
+        """
+        scope = self._active_stop
+        if operation_id != self._active_token or scope is None:
+            return []
+        return scope.live_paths
 
     def cancel_scope(
         self, operation_id: int, scope: str, *, expected: int | None = None

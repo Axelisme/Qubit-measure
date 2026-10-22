@@ -36,7 +36,7 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
         (len(times),), on_update=lambda samples: plot.update(times, np.real(samples))
     )
     # Execute the pulse sequence using schedule-local modules and sweeps.
-    with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+    with Schedule(cfg, buffer, scope=context.scope) as sched:
         modules = sched.cfg.modules
         length_sweep = cfg.sweep.length
         length_param = sweep2param("length", length_sweep)

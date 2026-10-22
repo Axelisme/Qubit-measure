@@ -152,7 +152,7 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
             dtype=np.float64,
             on_update=lambda data: viewer.update(freqs, calc_populations(data).T),
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
             modules = run_cfg.modules
             freq_sweep = run_cfg.sweep.freq

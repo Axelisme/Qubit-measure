@@ -22,37 +22,46 @@ Plan 是 frozen、extra-forbid 的 Pydantic model。Tunables 是 extra-forbid mo
 每次 `tun.current` 取得目前已接受的完整 model。需要子 model 時直接讀
 `tun.current.t1` 或 `tun.current.cal`，再傳給該段 helper。
 
-序列與 core 相同時，直接傳 bound run method：
+序列與 core 相同時，helper 接同一個 Scope 與 typed cfg：
 
 ```python
-outcome = await env.run(T1Exp().run, cfg)
-if not isinstance(outcome, Failed):
-    save_t1(outcome, d / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
+async def run_t1(scope: Scope, cfg: T1Cfg):
+    return await scope.run(T1Exp().run, cfg, name="T1")
 ```
 
-可選的 async helper 只包裝相同呼叫，例如
-`async def run_t1(env, cfg): return await env.run(T1Exp().run, cfg)`。
-不要複製 core 的 pulse 序列。需要不同序列時，寫同步
-`def acquire(cfg, *, context: RunContext) -> Result`，cfg 是位置參數且名稱不限定，context 是 keyword-only，再用
-`await env.run(acquire, cfg)` 呼叫。頻率校準保留自己的 init_pulse，因此使用自訂 callable。
+需要不同序列時，寫同步 `def acquire(cfg, *, context: RunContext) -> Result`，
+再用 `await iteration.run(acquire, cfg, name="frequency")` 呼叫。
+Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序列。
+需要 workflow 圖的 helper 明收 `plots: Plots`。Identity 與 live device cfg 從 scope 取得。
 
-`Completed.value` 是 core 的 RunRecord，不重新組 cfg/result 信封。
-`Completed.facts` 是框架同時寫入 journal 與 commit 信封的 operation 事實。
-`env.identity` 每次回 detached startup RunIdentity，保留原 run 的 software provenance。Saver 收 Completed、歷史 snapshot 與顯式 env.identity，不捕捉 evidence。它以 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata；RunRecord.metadata 與 datafile 通用容器仍未改造。
-每點先配置 `d = env.new_commit_dir()`，自行存 raw 或圖片，再
-`await env.commit(point, d)`。Point 必須是 Pydantic BaseModel。
-框架不解析原始檔，commit 前後都可寫入作者自己的檔案。
+`env` 是 workflow 根。`with env.scope("calibration") as scope` 建作者 child。
+逐點量測用 `zip(plan.fluxes, env.iterations())`，變數命名為 `iteration`。
+一趟開始建可變的 Pydantic point_record，未填欄位為 None。每個結果到了再填。
+主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
+量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
+在 helper 裡則用 return 退出目前點，不用主 workflow 的 return 結束整個 run。
+完整收集式範例與 Failed 指引見 [教學](../tutorial/05-workflow.md)。
 
-每次 env.run attempt 使用獨立的 operation Plots。Pause retry 可以重建同名 measurement，workflow 趨勢圖仍留在 env.plots。Pane 與 MCP 以 operation/<name> 顯示目前 attempt，新 attempt 整組替換舊圖。Workflow 圖名不可使用 operation/ 前綴。
+`iteration.dir` 第一次使用才建立目錄。Nested child 在該目錄下鏡射 label 與 sequence。
+`scope.commit(record)` 寫該 scope 的 record.json，第二次提交會 raise。
+根 env.commit 寫 data root，也只能提交一次。Commit 不經 pause gate，取消 finally 可保存已有成果。
+Reader 走 nested 樹依 commit_seq 排序，不依目錄名排序。
+
+`Completed.value` 是 core 的 RunRecord。`Completed.facts` 是同時寫入 journal 與信封的 operation 事實。
+Iteration 序號取自 iteration 物件，不取成功 commit 數，跳過未提交點也不重用序號。
+Saver 收 Completed、歷史 snapshot 與 scope.identity，不重新捕捉 evidence。
+每次 run attempt 建獨立 operation Plots，workflow 趨勢圖留在 env.plots。
+Pane/MCP 以 operation/<name> 顯示目前 attempt，workflow 圖名不能用 operation/ 前綴。
 
 Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。Coherence 的 decay 使用 Result.times/signals，fit 與 summary 使用同一份結果及接受值 history。MIST 的 gain.png 使用 Result 的實際 gains/signals 與既有 mist_signal2real，map.png 使用保留的 traces。這些保存不讀 operation 圖或更動科學序列。
 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
 Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。
 兩種情況都不重跑整個 workflow。
-Stop 讓 operation 正常回傳 partial result。作者先保存每個 Completed 的原始資料，再檢查 partial_result。
-Partial 不進完整資料的擬合或接受流程，回 rejected、reason=stopped，不更新 accepted history。
-後續 attempt 與 commit 仍照各 workflow 的流程執行，不新增全局取消分支。
+子層取消讓 operation 回 partial result。作者先保存 Completed raw，再檢查 partial_result。
+Partial 不進擬合或接受，保留原本拒絕原因，不更新 accepted history。
+根 Stop 則在下一個 async operation 或 Ask raise ScriptCancelled。進行中工作先 drain 並留 facts。
+作者 finally 同步提交已有成果，不吞掉例外，也不在 finally 改寫 status。
 Failed 表示 Schedule acquisition 或預期分析失敗。分析 helper 的 Failed 由 caller 記 failed 與 reason。
 NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其他程式例外仍 raise，停止 run。
 
@@ -61,9 +70,9 @@ NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其�
 
 ## Async await guardrail
 
-作者可寫 `await env.run(...)` 或 `await helper(env, cfg)`。
+作者可寫 `await iteration.run(...)` 或 `await helper(scope, cfg)`。
 Helper 必須解析到 zcu_lab 內的函式定義，可用 def 或 async def，不能只靠函式名稱像 helper 就放行。
-所有 lab async def 統一只 await env／tab／session 的呼叫或 lab 內定義的 helper，helper 可再呼叫 helper。
+所有 lab async def 統一只 await env／scope／iteration／tab／session 的呼叫或 lab 內定義的 helper，helper 可再呼叫 helper。
 Quality gate 全掃 async def 本文，不依 decorator 或可達性選集。
 在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 即使不 await 也拒絕，包含 async with TaskGroup()。
 其他 async with／async for 不另禁。

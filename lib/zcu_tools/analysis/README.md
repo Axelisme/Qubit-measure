@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -12,6 +12,10 @@ fluxdep 的互動 line picker，也不要求 QICK。
 
 `spectrum.py` 提供兩個分析 GUI 共用的原始頻譜資料型別，以及 Hz→GHz 與座標遞增排序。
 其中 `fluxs` 是座標軸，不是 flux 校正參數。
+
+`failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
+Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
+分類範圍由各數值 owner 文件列明，不以 ValueError／RuntimeError 的文字猜測。
 
 子模組：
 

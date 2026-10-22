@@ -125,7 +125,7 @@ class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
         )
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.probe_pulse.set_param(
                 "freq", sweep2param("freq", sched.cfg.sweep.freq)

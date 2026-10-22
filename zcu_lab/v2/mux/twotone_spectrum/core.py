@@ -63,7 +63,7 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 
     core = MuxFreqExp()
     result = core.run(cfg, context=context)
-    context.cancel_signal.raise_if_error()
+    context.scope.stop.raise_if_error()
     source = RunRecord(cfg=cfg, result=result)
     outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 """
@@ -209,7 +209,7 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
         Drive frequencies share one hardware loop; readout frequencies stay fixed.
         Cancellation keeps completed-round averages across the sweep, or NaN
         when no round completed.
-        Call context.cancel_signal.raise_if_error() before reporting success.
+        Call context.scope.stop.raise_if_error() before reporting success.
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
         cfg = MuxFreqCfg.model_validate(config.model_dump())
@@ -235,7 +235,7 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
 
         # 3. A shared DAC register loop advances the independent frequency ranges.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals, scope=context.scope) as sched:
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]

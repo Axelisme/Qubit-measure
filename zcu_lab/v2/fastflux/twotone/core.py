@@ -113,7 +113,7 @@ class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.flux_pulse.set_param(
                 "gain", sweep2param("gain", sched.cfg.sweep.gain)

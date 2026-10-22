@@ -121,7 +121,7 @@ class CZAmplitudeExp(PersistableExperiment[CZAmplitudeResult, CZAmplitudeCfg]):
         buffer = SignalBuffer(
             (len(scales), config.rounds, cfg.reps, ntones), on_update=update_view
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for scale, step in sched.scan("scale", scales.tolist()):
                 builder = step.prog_builder(context.soc, context.soccfg)
                 m = cfg.modules

@@ -51,6 +51,7 @@ def test_terminal_recipe_reply_keeps_queryable_execution_id(
         assert client.call("status", {"execution": execution_id}) == {
             **reply.data,
             "active_path": full["active_path"],
+            "live_paths": ["recipe:synthetic"],
         }
     finally:
         client.context.session.close()

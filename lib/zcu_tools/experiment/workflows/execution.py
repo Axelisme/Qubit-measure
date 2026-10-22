@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from copy import deepcopy
-from pathlib import Path
 from threading import Lock, RLock
 from typing import Literal
 
@@ -13,14 +12,15 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.device import BaseDeviceInfo
+from zcu_tools.experiment.scope import Scope, ScriptCancelled, parse_cancel_scope
 from zcu_tools.experiment.script_host import PendingQuestion, ScriptHost
-from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.progress_bar import use_pbar_factory
 
 from .artifacts import RecordStarted, RunArtifacts
 from .declaration import WorkflowDefinition
 from .encoding import encode_record
-from .env import Displays, EnvHooks, WorkflowEnv
+from .env import EnvHooks, WorkflowEnv
 from .journal import (
     DeviceSetup,
     ExperimentFailed,
@@ -79,8 +79,10 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._definition = definition
         self._ports = ports
         self._lock = lock
-        self._host = ScriptHost()
-        self._displays = Displays(ports.progress)
+        self._host: ScriptHost
+        self._attempts: dict[Scope, int] = {}
+        self._operations: dict[Scope, list[OperationFacts]] = {}
+        self._scope_revision = 0
         self._lifecycle: Lifecycle = "running"
         self._reason: str | None = None
         self._executing = False
@@ -122,6 +124,25 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             self._ports.clock,
             self._lock,
         )
+        self._env = WorkflowEnv(
+            self._started_at,
+            self._ports,
+            EnvHooks(
+                self._artifacts.directory,
+                self._commit,
+                self._boundary,
+                self._stopping,
+                self._experiment_failed,
+                self._question_boundary,
+                self._next_attempt,
+                self._operation_finished,
+                self._device_setup,
+            ),
+            identity=self._identity,
+            name=self._definition.name,
+        )
+        self._host = self._env.host
+        self._displays = self._env.displays
 
     @property
     def run_id(self) -> str:
@@ -156,6 +177,8 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             try:
                 with use_pbar_factory(self._ports.progress):
                     summary = self._host.run(self._author())
+            except ScriptCancelled:
+                self._stop_requested = True
             except Exception as error:
                 _logger.exception("Workflow execution failed")
                 primary = self._pending_error or error
@@ -183,47 +206,27 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         return self.status()
 
     async def _author(self) -> Summary:
-        with self._lock:
-            self._new_iteration()
-        env = WorkflowEnv(
-            self._started_at,
-            self._ports,
-            self._host,
-            self._displays,
-            EnvHooks(
-                self._artifacts.new_commit_dir,
-                self._commit,
-                self._boundary,
-                self._stopping,
-                self._experiment_failed,
-                self._question_boundary,
-                self._next_attempt,
-                self._operation_finished,
-                self._device_setup,
-            ),
-            identity=self._identity,
-        )
         return await self._definition.script(
-            env, deepcopy(self._plan), Live(self._read_tunables)
+            self._env, deepcopy(self._plan), Live(self._read_tunables)
         )
 
-    def _new_iteration(self) -> None:
-        self._call_seq = self._commit_seq + 1
-        self._scope_revision = self._tunables.revision
-        self._revisions = []
-        self._run_no = 0
-        self._attempt = 0
-        self._operations: list[OperationFacts] = []
-
-    def _next_attempt(self) -> tuple[int, int]:
+    def _next_attempt(self, scope: Scope) -> tuple[int, int]:
         with self._lock:
-            self._attempt += 1
-            return self._commit_seq + 1, self._attempt
+            boundary = scope
+            while boundary.kind != "iteration" and boundary.parent is not None:
+                boundary = boundary.parent
+            number = self._attempts.get(boundary, 0) + 1
+            self._attempts[boundary] = number
+            self._call_seq = scope.iteration_sequence
+            return scope.iteration_sequence, number
 
-    def _operation_finished(self, operation: OperationFacts) -> None:
+    def _operation_finished(self, scope: Scope, operation: OperationFacts) -> None:
         with self._lock:
-            self._artifacts.append(OperationFinished(self._commit_seq + 1, operation))
-            self._operations.append(deepcopy(operation))
+            self._artifacts.append(OperationFinished(operation.iteration, operation))
+            node: Scope | None = scope
+            while node is not None:
+                self._operations.setdefault(node, []).append(deepcopy(operation))
+                node = node.parent
 
     def _device_setup(self, name: str, cfg: BaseDeviceInfo) -> None:
         self._artifacts.append(DeviceSetup(name, cfg.model_copy(deep=True)))
@@ -235,30 +238,33 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._revisions.append(captured.revision)
             return captured.model
 
-    def _commit(self, record: BaseModel, directory: Path | None) -> None:
+    def _commit(self, scope: Scope, record: BaseModel) -> None:
         with self._lock:
-            directory = self._artifacts.prepare_commit(directory)
+            directory = self._artifacts.prepare_commit(scope)
             record_type = self._artifacts.register_record(record)
             revisions = tuple(self._revisions)
             event = RecordCommitted(
                 self._commit_seq + 1,
-                self._commit_seq + 1,
+                scope.iteration_sequence,
                 self._scope_revision,
                 encode_record(record),
                 directory.relative_to(self._artifacts.paths.data_root).as_posix(),
                 self._ports.clock.now(),
                 revisions,
                 record_type,
-                tuple(self._operations),
+                tuple(self._operations.get(scope, ())),
             )
             self._artifacts.publish_record(
                 directory,
                 event,
-                RecordStarted(self._commit_seq + 1, self._commit_seq, revisions),
+                RecordStarted(scope.iteration_sequence, self._commit_seq, revisions),
+                scope,
             )
             self._records.append(event)
             self._commit_seq += 1
-            self._new_iteration()
+            self._call_seq = scope.iteration_sequence
+            self._revisions = []
+            self._scope_revision = self._tunables.revision
 
     def _boundary(self) -> None:
         with self._lock:
@@ -298,7 +304,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
             self._run_no += 1
             self._artifacts.append(
                 ExperimentFailed(
-                    self._commit_seq + 1,
+                    self._call_seq or 0,
                     self._run_no,
                     experiment,
                     reason,
@@ -379,21 +385,21 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         return self.status()
 
     def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
-        """Accept bare script Stop at the owner; match other scopes on the host.
+        """Accept unnumbered root Stop at the owner; match other scopes on Host.
 
-        Bare script acceptance means Stop is recorded and latched, even if the
-        host has drained before owner finalization. A live host also sets root.
-        Numbered script and other scopes use the host's atomic match/set. Valid
-        terminal requests return scope not active; malformed syntax raises
-        ValueError. Persistence errors propagate and fail the run with their cause.
-        No acknowledgement promises author/finally/executor drain.
+        Root acceptance records and latches Stop before setting the live Host
+        token, even if Host drained before owner finalization. Numbered roots
+        and other scopes use Host's atomic match/set without recording Stop.
+        Terminal requests refuse; malformed syntax raises ValueError.
+        Persistence errors propagate and fail the run with their original cause.
+        Acknowledgement never waits for author/finally/executor drain.
         """
         label, sequence = parse_cancel_scope(scope, expected)
-        if label == "script" and sequence is None:
+        if label in {self._host.root.kind, self._host.root.path} and sequence is None:
             if not self._request_stop():
                 return CancelResult(False, "scope not active", self._host.active_path)
             result = self._host.cancel()
-            # The Stop owner accepted before finalization, even if host has exited.
+            # Stop remains accepted if Host drained before owner finalization.
             return CancelResult(
                 True, "scope cancellation requested", result.active_path
             )
@@ -489,7 +495,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 if self._executing and self._lifecycle not in _TERMINAL
                 else "failed"
             )
-        # Acknowledgement may wait for the loop; never retain the Engine lock.
+        # Root acceptance never waits for loop wake; release the owner lock first.
         self._host.cancel()
 
     def update_tunables(
@@ -561,6 +567,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._displays.snapshot(),
                 self.pending_question(),
                 self._host.active_path,
+                self._host.live_paths,
             )
 
     def tunables(self) -> TunablesSnapshot:

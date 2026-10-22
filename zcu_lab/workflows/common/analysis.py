@@ -1,6 +1,5 @@
 """common analysis helpers for lab workflows."""
 
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -13,6 +12,7 @@ from zcu_tools.analysis.fitting import (
     fit_qubit_freq,
     fit_rabi,
 )
+from zcu_tools.experiment import AnalysisFailed
 from zcu_tools.experiment.workflows import Failed
 
 from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
@@ -106,26 +106,21 @@ def fit_or_failed[T](fit: Callable[[], T]) -> T | Failed:
     """Run one native fit, isolating only NaN data and non-convergence.
 
     fit is a zero-argument callable that invokes the caller's chosen fitter.
-    Return its value unchanged on success. The native fitter's explicit
-    non-convergence fallback warning and scipy's nonfinite-array ValueError
-    become Failed(reason). Other warnings retain their normal handling; all
-    other exceptions, including configuration/shape ValueErrors, propagate.
+    Return its value unchanged on success. The fitter's AnalysisFailed and
+    scipy's exact nonfinite-array ValueError become Failed(reason). Warnings
+    retain their normal handling. Other exceptions, including callback errors
+    and configuration/shape ValueErrors, propagate unchanged.
     This shared boundary serves spectroscopy, Rabi and lifetime analysis; it
     does not mask data, change optimizer options or impose acceptance gates.
     """
-    fallback = "fit_func failed; returning init_p fallback with infinite covariance"
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message=fallback, category=RuntimeWarning)
-        try:
-            return fit()
-        except RuntimeWarning as exc:
-            if not str(exc).startswith(fallback):
-                raise
-            return Failed(f"Fit failed: {exc}")
-        except ValueError as exc:
-            if str(exc) != "array must not contain infs or NaNs":
-                raise
-            return Failed(f"Fit failed: {exc}")
+    try:
+        return fit()
+    except AnalysisFailed as exc:
+        return Failed(f"Fit failed: {exc}")
+    except ValueError as exc:
+        if str(exc) != "array must not contain infs or NaNs":
+            raise
+        return Failed(f"Fit failed: {exc}")
 
 
 def analyze_qubit_freq(result: FreqResult) -> FrequencyFit | Failed:

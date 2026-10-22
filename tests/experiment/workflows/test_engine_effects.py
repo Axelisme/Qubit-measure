@@ -45,7 +45,12 @@ def start_call(
     observed: list[Completed[int] | Failed] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        observed.append(await env.call(operation))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            observed.append(await iteration.call(operation))
+        finally:
+            iterations.close()
 
     rig.start(script)
     return observed
@@ -57,7 +62,12 @@ def test_full_device_cfg_reaches_port_with_operation_stop_signal(rig: Rig) -> No
     rig.devices.on_set = lambda signal: signals.append(signal)
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        completed(await env.setup_device("flux", cfg))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            completed(await iteration.setup_device("flux", cfg))
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -77,13 +87,18 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
         return 9
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        result = completed(await env.run(acquire, original))
-        saved.append(result.value)
-        assert result.value.cfg == Cfg(value=30, nested=[2, 3])
-        path = env.new_commit_dir() / "measurement.txt"
-        returned_cfg = result.value.cfg
-        assert returned_cfg is not None
-        path.write_text(f"{returned_cfg.value}:{result.value.result}")
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            result = completed(await iteration.run(acquire, original))
+            saved.append(result.value)
+            assert result.value.cfg == Cfg(value=30, nested=[2, 3])
+            path = iteration.dir / "measurement.txt"
+            returned_cfg = result.value.cfg
+            assert returned_cfg is not None
+            path.write_text(f"{returned_cfg.value}:{result.value.result}")
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -91,7 +106,7 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
     assert len(saved) == 1
     assert original == Cfg()
     assert (
-        rig.paths.data_root / "commits/000001/measurement.txt"
+        rig.paths.data_root / "iteration-000001/measurement.txt"
     ).read_text() == "30:9"
 
 
@@ -104,7 +119,7 @@ def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
         def fail(_step: object) -> None:
             raise cause
 
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             schedule.batch({"acquire": fail})
         return 99
 
@@ -147,8 +162,8 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         acquire_decimated = acquire
 
     def operation(ctx: CallContext) -> int:
-        with Schedule(Cfg(), SignalBuffer(1), stop=ctx.stop_signal) as schedule:
-            assert schedule.stop is not ctx.stop_signal, "Schedule must own a child"
+        with Schedule(Cfg(), SignalBuffer(1), scope=ctx.scope) as schedule:
+            assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
                 schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
                     Program(),
@@ -157,22 +172,27 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
                 )
             else:
                 schedule.set_stop()
-            assert not ctx.stop_signal.is_set()
-            assert ctx.stop_signal.error is None
+            assert not ctx.scope.stop.is_set()
+            assert ctx.scope.stop.error is None
         return 99
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        observed.append(await env.call(operation))
-        observed.append(
-            await env.call(
-                lambda ctx: (
-                    0
-                    if ctx.stop_signal.partial_result
-                    or ctx.stop_signal.error is not None
-                    else 7
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            observed.append(await iteration.call(operation))
+            observed.append(
+                await iteration.call(
+                    lambda ctx: (
+                        0
+                        if ctx.scope.stop.partial_result
+                        or ctx.scope.stop.error is not None
+                        else 7
+                    )
                 )
             )
-        )
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -239,7 +259,7 @@ def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
 
 def test_schedule_interrupt_returns_partial_not_acquire_failure(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
-        with Schedule(Cfg(), stop=ctx.stop_signal):
+        with Schedule(Cfg(), scope=ctx.scope):
             raise KeyboardInterrupt
         return 7
 
@@ -256,25 +276,31 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
     stops: list[bool] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        def first(ctx: CallContext) -> int:
-            entered.set()
-            assert ctx.stop_signal.event.wait(10), "Stop reaches active operation"
-            return 7
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
 
-        outcomes.append(completed(await env.call(first)))
+            def first(ctx: CallContext) -> int:
+                entered.set()
+                assert ctx.scope.stop.event.wait(10), "Stop reaches active operation"
+                return 7
 
-        def later(ctx: CallContext) -> int:
-            stops.append(ctx.stop_signal.is_set())
-            return 0
+            outcomes.append(completed(await iteration.call(first)))
 
-        outcomes.append(completed(await env.call(later)))
+            def later(ctx: CallContext) -> int:
+                stops.append(ctx.scope.stop.is_set())
+                return 0
+
+            outcomes.append(completed(await iteration.call(later)))
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
         assert entered.wait(10), "Worker reaches operation"
-        rig.engine.stop("run")
+        rig.engine.cancel("run", scope="iteration")
         final = future.result(timeout=10)
-    assert final.lifecycle == "cancelled"
+    assert final.lifecycle == "done"
     assert [(outcome.value, outcome.partial_result) for outcome in outcomes] == [
         (7, True),
         (0, True),
@@ -312,8 +338,13 @@ def test_wait_pause_retries_original_deadline_without_restarting_author(
     rig.clock.on_wait = wait
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        authors.append(1)
-        outcomes.append(completed(await env.wait_until(deadline)))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            authors.append(1)
+            outcomes.append(completed(await iteration.wait_until(deadline)))
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -355,7 +386,12 @@ def test_setup_pause_retries_captured_full_cfg_with_fresh_operation_token(
     rig.devices.on_set = setup
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        completed(await env.setup_device("flux", cfg))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            completed(await iteration.setup_device("flux", cfg))
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -390,23 +426,26 @@ def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions
         if len(requests) == 1:
             entered.set()
             # The controller pauses only after this attempt has announced entry.
-            assert context.cancel_signal.event.wait(30), "Pause must stop acquisition"
+            assert context.scope.stop.event.wait(30), "Pause must stop acquisition"
         return value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        directory = env.new_commit_dir()
-        cfg = Cfg(value=tun.current.value)
-        captures.append(cfg)
-        outcome = completed(await env.run(acquire, cfg))
-        assert not outcome.partial_result
-        delivered.append(outcome.value.result)
-        # Before commit, a later operation must not inherit Pause's stop bit.
-        assert not completed(await env.call(lambda ctx: ctx.stop_signal.is_set())).value
-        latest = tun.current.value
-        assert tun.current.value == latest
-        await env.commit(Point(value=latest), directory)
-        await env.commit(Point(value=outcome.value.result))
-        await env.commit(Point(value=tun.current.value))
+        with env.branch("iteration") as iteration:
+            cfg = Cfg(value=tun.current.value)
+            captures.append(cfg)
+            outcome = completed(await iteration.run(acquire, cfg))
+            assert not outcome.partial_result
+            delivered.append(outcome.value.result)
+            # Before commit, a later operation must not inherit Pause's stop bit.
+            assert not completed(
+                await iteration.call(lambda ctx: ctx.scope.stop.is_set())
+            ).value
+            assert tun.current.value == 9
+            iteration.commit(Point(value=tun.current.value))
+        with env.branch("iteration") as iteration:
+            iteration.commit(Point(value=outcome.value.result))
+        with env.branch("iteration") as iteration:
+            iteration.commit(Point(value=tun.current.value))
 
     rig.start(script)
     with running(rig) as future:
@@ -438,8 +477,7 @@ def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions
     assert final.lifecycle == "done", final.reason
     assert delivered == [1]
     assert requests == [Cfg(value=1), Cfg(value=1)]
-    assert contexts[0].cancel_signal.is_set()
-    assert not contexts[1].cancel_signal.is_set()
+    assert [ctx.scope.cancelled for ctx in contexts] == [True, False]
     assert_paused_acquisition_records(rig.paths.metadata_root)
 
 
@@ -449,7 +487,11 @@ def assert_paused_acquisition_records(run: Path) -> None:
     assert [row.record.value for row in records] == [9, 1, 9]
     assert [row.revisions for row in records] == [(0, 2), (), (2,)]
     assert [row.commit_seq for row in records] == [1, 2, 3]
-    assert [row.directory.name for row in records] == ["000001", "000002", "000003"]
+    assert [row.directory.name for row in records] == [
+        "iteration-000001",
+        "iteration-000002",
+        "iteration-000003",
+    ]
     assert [operation.outcome for operation in records[0].operations] == [
         "discarded",
         "completed",
@@ -463,20 +505,26 @@ def test_file_saved_before_pause_is_retained_and_author_continues(rig: Rig) -> N
     calls: list[int] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        directory = env.new_commit_dir()
-        path = directory / "measurement.txt"
-        path.write_text("retained")
-        saved.append(path)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            directory = iteration.dir
+            path = directory / "measurement.txt"
+            path.write_text("retained")
+            saved.append(path)
 
-        def acquire(ctx: CallContext) -> int:
-            calls.append(1)
-            if len(calls) == 1:
-                entered.set()
-                assert ctx.stop_signal.event.wait(10), "Pause stops operation"
-            return 7
+            def acquire(ctx: CallContext) -> int:
+                calls.append(1)
+                if len(calls) == 1:
+                    entered.set()
+                    assert ctx.scope.stop.event.wait(10), "Pause stops operation"
+                return 7
 
-        await env.call(acquire)
-        await env.commit(Point(value=7), directory)
+            await iteration.call(acquire)
+            iteration.commit(Point(value=7))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -494,31 +542,38 @@ def test_author_failure_retains_files_without_committing(
     rig: Rig, failure: str
 ) -> None:
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        directory = env.new_commit_dir()
-        path = directory / "measurement.txt"
-        path.write_text("raw")
-        completed(await env.call(lambda ctx: 7))
-        if failure == "cleanup":
-            try:
-                rig.engine.stop("run")
-            finally:
-                raise OSError("cleanup failed")
-        if failure == "saver":
-            rig.engine.pause("run")
-        raise OSError(f"{failure} failed")
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            directory = iteration.dir
+            path = directory / "measurement.txt"
+            path.write_text("raw")
+            completed(await iteration.call(lambda ctx: 7))
+            if failure == "cleanup":
+                try:
+                    rig.engine.stop("run")
+                finally:
+                    raise OSError("cleanup failed")
+            if failure == "saver":
+                rig.engine.pause("run")
+            raise OSError(f"{failure} failed")
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
     assert final.lifecycle == "failed"
     assert final.reason == f"OSError: {failure} failed"
     assert rig.engine.records("run") == ()
-    assert (rig.paths.data_root / "commits/000001/measurement.txt").read_text() == "raw"
+    assert (
+        rig.paths.data_root / "iteration-000001/measurement.txt"
+    ).read_text() == "raw"
 
 
 def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((3,))
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             for _value, step in schedule.scan("sample", (0, 1, 2)):
                 step.set_data(np.complex128(2))
                 break
@@ -567,7 +622,7 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             builder = schedule.prog_builder(
                 "soc", "soccfg", cfg=ProgramV2Cfg(), program_cls=Program
             )
@@ -603,7 +658,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
         cfg_model = ProgramV2Cfg(rounds=1)
 
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
-            rig.engine.stop("run")
+            rig.engine.cancel("run", scope="iteration")
             if first_round_stop:
                 raise StoppedPartialAcquireError("stopped before first completed round")
             return np.array([1.0], dtype=np.complex128)
@@ -615,7 +670,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             builder = schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg())
             if mode == "integrated":
                 builder.run_program(Program(), raw2signal_fn=lambda raw: raw)
@@ -625,7 +680,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
 
     observed = start_call(rig, operation)
     final = rig.engine.execute("run")
-    assert final.lifecycle == "cancelled", final.reason
+    assert final.lifecycle == "done", final.reason
     assert len(observed) == 1
     outcome = completed(observed[0])
     assert (outcome.value, outcome.partial_result) == (99, True)
@@ -655,11 +710,16 @@ def test_active_tunables_journal_failure_stops_operation_and_retains_original_ca
         finally:
             journal.rmdir()
             journal.write_bytes(contents)
-        stopped.append(ctx.stop_signal.is_set())
+        stopped.append(ctx.scope.stop.is_set())
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        delivered.append(await env.call(operation))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            delivered.append(await iteration.call(operation))
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -679,9 +739,16 @@ def test_device_operation_error_is_not_a_recoverable_schedule_failure(rig: Rig) 
     observed: list[object] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        observed.append(
-            await env.setup_device("flux", FakeDeviceInfo(address="memory", value=0.1))
-        )
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            observed.append(
+                await iteration.setup_device(
+                    "flux", FakeDeviceInfo(address="memory", value=0.1)
+                )
+            )
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")

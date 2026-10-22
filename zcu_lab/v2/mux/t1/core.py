@@ -336,7 +336,7 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
 
         # 3. Compile each delay once; all pi pulses start together after reset.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
-        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals, scope=context.scope) as sched:
             for delay, step in sched.scan("delay", times.tolist()):
                 pulses = []
                 for index in indices:

@@ -376,7 +376,7 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
         )
 
         # 2. Use the previous SNR to choose and apply the next pump/bias setting.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for idx, step in sched.scan("Iteration", range(num_points)):
                 current_index = idx
                 last_snr = None
@@ -396,7 +396,7 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
                     context.devices[step.cfg.jpa_flux_dev],
                     params[idx, 0],
                     unit=step.cfg.flux_unit,
-                    stop=context.cancel_signal,
+                    stop=context.scope.stop,
                     progress=False,
                 )
                 set_rf_frequency(

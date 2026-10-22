@@ -76,7 +76,7 @@ class AmplitudeRabiInputs(FormModel):
 
 
 class AmplitudeRabiReport(FormModel):
-    """Completed amplitude rabi results; cancellation returns no report."""
+    """Amplitude Rabi results and failure reason; cancellation returns no report."""
 
     pi_gain: float | None = Field(
         description="Pi rotation gain in native amplitude units; null means not estimable."
@@ -92,6 +92,11 @@ class AmplitudeRabiReport(FormModel):
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -130,8 +135,9 @@ async def amplitude_rabi(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     _check_gain_endpoints(inputs.gain_range)
@@ -201,6 +207,15 @@ async def amplitude_rabi(
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=AmplitudeRabiSummary)
+        if analysis.result is None:
+            return AmplitudeRabiReport(
+                pi_gain=None,
+                pi_gain_err=None,
+                pi2_gain=None,
+                pi2_gain_err=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

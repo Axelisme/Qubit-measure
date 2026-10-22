@@ -199,7 +199,7 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
         )
 
         # Prepare each thermal branch independently, then perform one joint read.
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for branch, step in sched.scan("branch", list(range(4))):
                 builder = step.prog_builder(context.soc, context.soccfg)
                 if branch & 2:

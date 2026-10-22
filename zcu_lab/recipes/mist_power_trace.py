@@ -27,10 +27,15 @@ class MistPowerTraceInputs(FormModel):
 
 
 class MistPowerTraceReport(FormModel):
-    """Completed mist power trace results; cancellation returns no report."""
+    """MIST power trace results and failure reason; cancellation returns no report."""
 
     analysis_completed: bool = Field(
         description="Whether the default displacement figure completed without a fit."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -51,8 +56,9 @@ async def mist_power_trace(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     """
     for name, value in (
         ("target", inputs.target),
@@ -78,7 +84,12 @@ async def mist_power_trace(
     await tab.run()
     try:
         # Analyze the acquisition with the GUI parameters.
-        await tab.analyze("primary", result=MistPowerTraceSummary)
+        analysis = await tab.analyze("primary", result=MistPowerTraceSummary)
+        if analysis.result is None:
+            return MistPowerTraceReport(
+                analysis_completed=False,
+                analysis_failure=analysis.reason,
+            )
         return MistPowerTraceReport(analysis_completed=True)
     finally:
         tab.save()
