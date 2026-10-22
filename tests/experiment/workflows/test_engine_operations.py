@@ -17,7 +17,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost
 
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
 
@@ -52,7 +52,7 @@ type Rig = tuple[w.Engine[int], w.RunPaths, RecordingDevices]
 
 @pytest.fixture
 def rig(tmp_path: Path) -> Iterator[Rig]:
-    plots = Plots(NonPresentingHost())
+    plots = w.WorkflowPlots(NonPresentingHost())
     devices = RecordingDevices()
     board = white_noise()
     engine = w.Engine(

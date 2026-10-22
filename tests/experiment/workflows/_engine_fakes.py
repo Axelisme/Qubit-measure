@@ -24,10 +24,11 @@ from zcu_tools.experiment.workflows import (
     RunPaths,
     RunStatus,
     WorkflowEnv,
+    WorkflowPlots,
     WorkflowScript,
     workflow,
 )
-from zcu_tools.plotting.plots import NonPresentingHost, PlotHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost, PlotHost
 
 from ._engine_ports import START as START
 from ._engine_ports import ManualClock, RecordingBar
@@ -106,13 +107,13 @@ class Rig:
     clock: ManualClock = field(default_factory=ManualClock)
     devices: RecordingDevices = field(default_factory=RecordingDevices)
     plot_host: PlotHost = field(default_factory=NonPresentingHost)
-    plots: Plots = field(init=False)
+    plots: WorkflowPlots = field(init=False)
     bars: list[RecordingBar] = field(default_factory=list)
     engine: Engine[int] = field(init=False)
     paths: RunPaths = field(init=False)
 
     def __post_init__(self) -> None:
-        self.plots = Plots(self.plot_host)
+        self.plots = WorkflowPlots(self.plot_host)
         self.paths = RunPaths(self.root / "metadata", self.root / "data")
         board = white_noise() if self.native else None
         self.engine = Engine(

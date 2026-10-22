@@ -12,7 +12,7 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost
 
 from ._engine_ports import START, ManualClock, RecordingBar, RecordingDevices
 
@@ -39,7 +39,7 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
     clock = ManualClock()
     devices = RecordingDevices()
     devices.drivers["flux"] = FakeDevice(address="memory", fast_mode=True)
-    plots = Plots(NonPresentingHost())
+    plots = w.WorkflowPlots(NonPresentingHost())
     board = white_noise()
     engine = w.Engine(
         w.EnginePorts(

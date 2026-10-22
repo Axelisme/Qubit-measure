@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from zcu_tools.datafile import SoftwareProvenance
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.workflows import saved_run
-from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.plotting.plots import NonPresentingHost
 
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
 
@@ -41,7 +41,7 @@ class Summary(BaseModel):
 def test_async_commits_heterogeneous_records_and_tracks_every_live_revision(
     tmp_path: Path,
 ) -> None:
-    plots = Plots(NonPresentingHost())
+    plots = w.WorkflowPlots(NonPresentingHost())
     engine = w.Engine(
         w.EnginePorts(
             plots, RecordingBar, ManualClock(), context=7, devices=RecordingDevices()
