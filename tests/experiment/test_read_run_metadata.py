@@ -116,7 +116,7 @@ def test_read_run_metadata_rejects_invalid_typed_doc(
     with h5py.File(metadata_path, "r+") as file:
         del file["docs/metadata"]
         file.create_dataset("docs/metadata", data=json.dumps(metadata_doc))
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="metadata") as caught:
         native_persistence.read_run_metadata(metadata_path)
     assert str(metadata_path) in str(caught.value)
     assert "metadata" in str(caught.value)
