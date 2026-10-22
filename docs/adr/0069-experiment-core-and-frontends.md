@@ -85,7 +85,7 @@ Adapter／Notebook 分析工具掌握操作或 session 使用期，共用 plots 
 
 Presentation owner 保留明確的呈現使用期與 release 責任，不能複製 mapping 後丟失所有權。跨存活 owner 接管仍拒絕。停止 producer、最後 refresh、釋放呈現與保留可保存的原生 Figure 分開處理。替換目前引用不關閉使用者持有的舊圖，release 後原生 artist 操作與 savefig 仍可使用。
 
-Workflow 的每次 `env.run` attempt 使用獨立 operation Plots，與 workflow 層 `env.plots` 共用 presentation host。返回、丟棄與失敗先 finish，下一 attempt release 舊 operation。`workflows.WorkflowPlots` 擁有 workflow 名稱限制與兩組圖的生命週期；通用 `Plots.fork()` 只建立同 host 的新集合。Pane 與 MCP 投影目前 operation 為 `operation/<name>`，workflow 圖名保持不變並在登記時拒絕該前綴。Terminal 保留最新 operation，tab replacement 與 close release 兩組。保存圖片由作者從 `Completed.value.result` 重畫，不增加 result wrapper 或 Completed 圖形欄位。這不改 G3 的名稱與接管檢查。
+依 2026-10-22 operation 繪圖邊界裁定，workflow 的每次 `env.run` attempt 使用獨立 operation Plots，與 workflow 層 `env.plots` 共用 presentation host。返回、丟棄與失敗先 finish，下一 attempt release 舊 operation。`workflows.WorkflowPlots` 擁有 workflow 名稱限制與兩組圖的生命週期；通用 `Plots.fork()` 只建立同 host 的新集合。Pane 與 MCP 投影目前 operation 為 `operation/<name>`，workflow 圖名保持不變並在登記時拒絕該前綴。Terminal 保留最新 operation，tab replacement 與 close release 兩組。保存圖片由作者從 `Completed.value.result` 重畫，不增加 result wrapper 或 Completed 圖形欄位。這不改 G3 的名稱與接管檢查。
 
 圖已登記不表示操作成功。Core、host finish 或必要收尾失敗時不提交新成功 record，失敗診斷圖不得混入上一筆成功分析。
 

@@ -106,9 +106,24 @@ class Displays:
             )
 
     def close(self) -> None:
-        """Close all retained bars after authored and executor work has drained."""
+        """Attempt every close after producer drain, raising the first failure.
+
+        Later close failures are logged and attached as notes to the first one.
+        """
+        errors: list[Exception] = []
         for bar in self._bars.values():
-            bar.close()
+            try:
+                bar.close()
+            except Exception as error:
+                _logger.exception("Failed to close workflow progress bar")
+                errors.append(error)
+        if errors:
+            primary = errors[0]
+            for error in errors[1:]:
+                primary.add_note(
+                    f"Another progress close failed: {type(error).__name__}: {error}"
+                )
+            raise primary
 
 
 @dataclass(frozen=True)

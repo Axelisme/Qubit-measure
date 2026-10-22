@@ -1,6 +1,9 @@
 """Questions suspend one async author and accept request-bound answers."""
 
-from collections.abc import Iterator
+import asyncio
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
+from contextvars import Context
 from datetime import timedelta
 from pathlib import Path
 from threading import Event, get_ident
@@ -17,6 +20,7 @@ from zcu_tools.experiment.workflows import (
     QuestionMismatch,
     RunMismatch,
     WorkflowEnv,
+    workflow,
 )
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
@@ -28,6 +32,7 @@ from ._engine_fakes import (
     Rig,
     Tunables,
     completed,
+    identity,
     pending,
     question,
     running,
@@ -280,6 +285,123 @@ def test_answer_is_nonblocking_and_continuation_errors_fail_execution(rig: Rig) 
         final = future.result(timeout=10)
     assert final.lifecycle == "failed"
     assert final.reason == "ValueError: analysis after answer failed"
+
+
+@contextmanager
+def deschedule_after_next_control(
+    monkeypatch: pytest.MonkeyPatch, release_loop: Event
+) -> Generator[None]:
+    """Run the next external loop callback intact, then pause its OS thread."""
+    armed = Event()
+    armed.set()
+    original_schedule = asyncio.BaseEventLoop.call_soon_threadsafe
+
+    def schedule(
+        loop: asyncio.BaseEventLoop,
+        callback: Callable[..., object],
+        *args: object,
+        context: Context | None = None,
+    ) -> asyncio.Handle:
+        if not armed.is_set():
+            return original_schedule(loop, callback, *args, context=context)
+        armed.clear()
+
+        def acknowledged_then_descheduled() -> None:
+            callback(*args)
+            # Run the real control completely, then model OS descheduling before
+            # the author continuation. The caller's journal attempt releases it.
+            assert release_loop.wait(10), "Caller I/O or teardown releases loop"
+
+        return original_schedule(loop, acknowledged_then_descheduled, context=context)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(asyncio.BaseEventLoop, "call_soon_threadsafe", schedule)
+        try:
+            yield
+        finally:
+            release_loop.set()
+
+
+@pytest.mark.parametrize("journal_fails", [False, True], ids=["clean", "broken"])
+def test_answer_flush_preserves_io_cause_and_drains_finally(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, journal_fails: bool
+) -> None:
+    release_loop, cleanup_entered, release_cleanup = Event(), Event(), Event()
+    append_seen = Event()
+    flush_threads: list[int] = []
+    cleanup_threads: list[int] = []
+    original_open = Path.open
+    journal = rig.paths.metadata_root / "journal.jsonl"
+
+    def open_journal(
+        path: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ):
+        if path == journal and mode == "a" and not append_seen.is_set():
+            flush_threads.append(get_ident())
+            append_seen.set()
+            release_loop.set()
+            if journal_fails:
+                raise OSError("answer journal storage failed")
+        return original_open(path, mode, buffering, encoding, errors, newline)
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        try:
+            await env.ask(Choose(point=0))
+        finally:
+
+            def cleanup(ctx: CallContext) -> None:
+                cleanup_threads.append(get_ident())
+                cleanup_entered.set()
+                assert release_cleanup.wait(10), (
+                    "Test finally releases executor cleanup"
+                )
+
+            await env.call(cleanup)
+
+    rig.start(script)
+    with running(rig) as future:
+        request_id = pending(rig)
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(Path, "open", open_journal)
+                caller_thread = get_ident()
+                with deschedule_after_next_control(monkeypatch, release_loop):
+                    if journal_fails:
+                        with pytest.raises(
+                            OSError, match="answer journal storage failed"
+                        ):
+                            rig.engine.answer(
+                                "run", Decision(value=1), request_id=request_id
+                            )
+                    else:
+                        rig.engine.answer(
+                            "run", Decision(value=1), request_id=request_id
+                        )
+            assert cleanup_entered.wait(10), "Accepted answer reaches authored finally"
+            assert not future.done()
+            with pytest.raises(InvalidRunState):
+                rig.engine.start(
+                    workflow("replacement", "Cannot replace a draining worker")(script),
+                    plan=Plan(),
+                    tunables=Tunables(),
+                    paths=rig.paths,
+                    identity=identity(),
+                )
+        finally:
+            release_loop.set()
+            release_cleanup.set()
+        final = future.result(timeout=10)
+    assert flush_threads == [caller_thread]
+    assert len(cleanup_threads) == 1 and cleanup_threads[0] != caller_thread
+    assert final.lifecycle == ("failed" if journal_fails else "done")
+    assert final.reason == (
+        "OSError: answer journal storage failed" if journal_fails else None
+    )
 
 
 def test_question_controls_reject_stale_run_ids(rig: Rig) -> None:

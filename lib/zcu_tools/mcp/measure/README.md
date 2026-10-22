@@ -276,7 +276,11 @@ Figures 與 GUI pane 使用相同投影。Workflow 圖名維持 `<name>`，目�
 Records 依 commit_seq 查詢，包含配置 directory、committed_at、實際讀過的 revisions、
 record_type 與 operations。配置目錄順序不等於 commit 順序。Operation facts 包含
 kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、
-outcome 與 reason。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
+outcome、reason 與 stopped，另有一基 iteration。這與作者 Completed.facts 使用同一
+OperationFacts 結構。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
+Running 或 paused 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
+operation 的 cfg。Pause 打斷的 stale partial 在 Resume 後重試原 request，完整結果
+只等 Resume 交付。Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
 
 ## 分析、互動與寫回
 
