@@ -100,13 +100,12 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(form
                     "participants": ["B"],
                 },
                 fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
-                seed_metadata={
-                    ("tones", 0, "gain"): FieldMeta(
-                        description="Synthetic amplitude candidate", calibration="uncalibrated"
-                    ),
-                    ("tones", 1, "gain"): FieldMeta(calibration="measured"),
-                },
-            )
+            ).with_seed_metadata({
+                ("tones", 0, "gain"): FieldMeta(
+                    description="Synthetic amplitude candidate", calibration="uncalibrated"
+                ),
+                ("tones", 1, "gain"): FieldMeta(calibration="measured"),
+            })
 
     fixture.registry.register("seed-metadata", SeedMetadataAdapter)
     tab = fixture.ctrl.new_tab("seed-metadata")
