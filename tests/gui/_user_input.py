@@ -921,7 +921,8 @@ class ComponentDriver:
             mouse_click(widget, widget.rect().center())
             popup = widget.view()
             assert popup is not None
-            key_click(popup, Qt.Key.Key_Home)
+            # QComboBox Home skips disabled headings; the popup view's Home does not.
+            key_click(widget, Qt.Key.Key_Home)
             for _ in range(selectable.index(index)):
                 key_click(popup, Qt.Key.Key_Down)
             key_click(popup, Qt.Key.Key_Return)
