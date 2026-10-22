@@ -208,11 +208,11 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     next_token = service.start_run(inputs, plots=make_plots())
     assert next_token != token
     background.run_work()
-    metadata = state.get_tab(tab_id).run.metadata
-    assert metadata is not None
+    assert (metadata := state.get_tab(tab_id).run.metadata) is not None
     assert metadata.completion == "complete"
-    next_outcome = handles.poll(next_token)
-    assert next_outcome is not None and next_outcome.status == "finished"
+    assert (
+        next_outcome := handles.poll(next_token)
+    ) is not None and next_outcome.status == "finished"
 
 
 @pytest.mark.parametrize("provenance_failure", [False, True])

@@ -122,7 +122,7 @@ def test_root_has_no_sequence_and_inactive_label_returns_current_path() -> None:
 @pytest.mark.parametrize("expected", [0, -1, True, 1.5, "1"])
 def test_invalid_expected_is_a_value_error(expected: int) -> None:
     host = ScriptHost()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="expected"):
         host.cancel(scope="acquire", expected=expected)
 
 
@@ -140,9 +140,9 @@ def test_scope_validation_rejects_bad_labels_sequences_and_expected_values() -> 
             "acquire#x",
             "script/acquire#1",
         ]:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="scope|label"):
                 host.cancel(scope=scope)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="sequence|expected"):
             host.cancel(scope="acquire#2", expected=1)
 
     host.run(script())
