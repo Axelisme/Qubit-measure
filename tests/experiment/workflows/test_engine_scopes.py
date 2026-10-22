@@ -104,6 +104,20 @@ def test_workflow_scope_ack_status_and_partial_facts(
         rig.close()
 
 
+def test_cancel_without_selector_stops_workflow_root(rig: Rig) -> None:
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        await env.ask(Choose())
+
+    rig.start(script)
+    with running(rig) as future:
+        pending(rig)
+        result = rig.engine.cancel("run")
+        assert result.cancelled, result.reason
+        assert result.reason == "scope cancellation requested"
+        assert "stop_requested" in rig.kinds()
+        assert future.result(timeout=30).lifecycle == "cancelled"
+
+
 def test_script_cancel_persists_stop_off_author_loop(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
