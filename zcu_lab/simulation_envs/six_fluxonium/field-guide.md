@@ -55,7 +55,95 @@ metadata. Previously, six sources each had 256 MiB prepare, 64 MiB result and
 Evicted or oversized products compute again without changing the result or RNG
 stream. Models, solver scratch, active products and GUI/native allocations sit
 outside these caps. Reducing a cap does not impose a process RSS limit.
-The timing and RSS observations below predate these shared budgets.
+The walkthrough timings and acquire-only observations below predate these shared
+budgets. The following measurements compare the cache-budget change.
+
+## Cache budget measurements
+
+The 2026-10-23 check ran `range_find`, `mux/onetone_fine`,
+`mux/twotone_spectrum` and `mux/amp_rabi` in that order. The check analyzed each
+Run. It closed range_find after fine analysis, fine after spectroscopy
+analysis, and spectroscopy then Rabi after Rabi analysis. Backend close followed
+all tab closes. All work used the offscreen GUI, heavy-slot CPUs 2 and 3, and
+one BLAS, OpenMP and Numba thread. The check used no hardware or measured data.
+
+The survey used 6900 to 7600 MHz, 300 points and 64 reps. Fine used a common
+-4 to 4 MHz offset with 81 points and one rep. Spectroscopy used six independent
+60 MHz spans with 61 joint points. Rabi used 41 joint gain points. Both qubit
+Runs used 65536 reps and one round. All four used a 2.2 us readout pulse and
+1.12 us trigger offset. Mux Runs used a 0.99 us ADC window and mixer 7250 MHz.
+Drive pulses were 0.1 us, except Q3's 0.2 us Rabi pulse.
+
+The first old/new pair retained the same tracemalloc and ownership profiler in
+both GUI processes. Old was `f5362637e`, before shared budgets; new was
+`2eaf50e62`, with shared budgets. They ran consecutively in one heavy-slot call,
+with separate initially empty Numba caches. A separate check used the reconciled
+candidate `27757d875`, including main `bf67ce263`, without tracemalloc or ownership
+scans. Its RPC handshake reported wire version 121. Every GUI exited with code 0.
+
+| GUI measurement | Largest sampled VmRSS, bytes | Kernel VmHWM, bytes |
+| --- | ---: | ---: |
+| Old, with ownership profiler | 3239047168 | 3239047168 |
+| Shared budgets, with ownership profiler | 2731687936 | 2731724800 |
+| Reconciled candidate, /proc only | 1553829888 | 1559523328 |
+
+These are GUI Python process measurements, not launcher RSS or marker maxima.
+The sampler read `/proc` about every 20 ms; VmHWM also retains peaks between
+samples. The paired profiled peak fell 15.66%. It still exceeded the original
+1.5 GiB target of 1610612736 bytes. The final /proc-only peak was 51089408 bytes
+below that target. This is one workflow observation, not an RSS guarantee.
+
+At all 31 profiled markers, each source's cache residency stayed within its
+share. The largest observed totals were:
+
+| Cache | Divided six-source limit, bytes | Largest observed charged or resident bytes |
+| --- | ---: | ---: |
+| Prepare, including estimated metadata | 268435452 | 219742544 |
+| Result memo | 67108860 | 7153274 |
+| Routing | 4194300 | 1431488 |
+| ADC, six separate allowances | 50331648 | 50149140 |
+
+The largest simultaneous cache total was 278476446 bytes. After backend close,
+all four cache totals and tab-owned arrays were zero. The profiled new process
+still had RSS 2382536704 bytes and traced live allocations of 167072328 bytes.
+Cache eviction and close release ownership; they do not force native allocators
+to return pages. Active solver products, tracing bookkeeping, Qt and native
+allocations are outside the cache counters. These measurements do not identify
+which of those accounts for the remaining RSS. They do not diagnose a Qt leak.
+
+The /proc-only check also uses a later main and omits profiling callbacks,
+including forced collection at close markers. Subtracting its peak from the
+profiled peak would not isolate tracemalloc's cost. Neither check measured native
+heap allocations or the maximum active solver scratch separately.
+
+The paired profiled Runs and analyses produced identical numeric field dtypes,
+shapes and C-order bytes at all eight completion markers. This comparison used
+raw numeric arrays and SHA256 hashes, not timestamp-filtered metadata.
+
+### Paired warm Run timings
+
+Both pairs below used six-tone Rabi with gain 0 to 0.5 at 41 points and T1 with
+0 to 200 us delay at 30 points. Both used 200 reps, one round and 0.1 us constant
+drive pulses at 0 A. Public model facts supplied starting frequencies; the cold
+Rabi result supplied T1 gains. Each experiment ran cold then warm in one process.
+Wall time includes cProfile and production pacing. Each old/new pair ran in a
+single heavy-slot call on CPUs 2 and 3 with the same thread limits.
+
+| Versions, old → new | Warm Run | Old wall, s | New wall, s | New/old |
+| --- | --- | ---: | ---: | ---: |
+| `f5362637e` → `2eaf50e62` | Rabi | 8.878339 | 8.879238 | 1.000101 |
+| `f5362637e` → `2eaf50e62` | T1 | 6.500948 | 6.509018 | 1.001241 |
+| `bf67ce263` → `27757d875` | Rabi | 8.892921 | 8.891226 | 0.999809 |
+| `bf67ce263` → `27757d875` | T1 | 6.514958 | 6.512932 | 0.999689 |
+
+Every ratio was below 1.10. Do not compare timings across the two pairs to
+attribute main-branch changes to the cache budget. Each version started Rabi
+with an empty disk cache. The first pair created 59 Numba cache artifacts per
+version; the final pair created 57. T1 inherited only its own version's Rabi
+artifacts. Warm Runs compiled or loaded no Numba functions. Each Rabi Run made
+41 program admissions and rounds; each T1 Run made 30. The final pair's cold
+and warm numeric arrays matched in dtype, shape and bytes, and its workload
+inputs matched. All preparation and Run processes exited with code 0.
 
 ## Circuit parameters
 
