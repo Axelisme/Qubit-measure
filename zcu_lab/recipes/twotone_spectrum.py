@@ -70,7 +70,7 @@ class TwotoneSpectrumInputs(FormModel):
 
 
 class TwotoneSpectrumReport(FormModel):
-    """Completed twotone spectrum results; cancellation returns no report."""
+    """Twotone spectrum results and failure reason; cancellation returns no report."""
 
     frequency_mhz: float | None = Field(
         description="Fitted transition frequency in MHz; null means not estimable."
@@ -86,6 +86,11 @@ class TwotoneSpectrumReport(FormModel):
     )
     writeback_applied: bool = Field(
         description="Whether the selected calibration proposal was explicitly accepted and applied."
+    )
+
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Analysis failure reason; null when analysis completed.",
     )
 
 
@@ -124,8 +129,9 @@ async def twotone_spectrum(
 
     Inputs declare native units and GUI-retention policies. The session supplies
     fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
+    The runtime owns cancellation. Expected analysis failures return a reason in
+    the report; other errors propagate. Save raw data and completed artifacts once
+    in the Run finalizer.
     Missing calibration raises RecipeNeedsParameters before Run.
     """
     # Select the captured sources before editing measurement fields.
@@ -183,6 +189,15 @@ async def twotone_spectrum(
     try:
         # Analyze the acquisition with the GUI parameters.
         analysis = await tab.analyze("primary", result=TwotoneSpectrumSummary)
+        if analysis.result is None:
+            return TwotoneSpectrumReport(
+                frequency_mhz=None,
+                frequency_err_mhz=None,
+                linewidth_mhz=None,
+                linewidth_err_mhz=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()

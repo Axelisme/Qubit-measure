@@ -52,11 +52,23 @@ Quality gate 的 `tools/check_script_awaits.py` 全掃 async def，不識別 dec
 await tab.run()
 try:
     analysis = await tab.analyze("primary", result=FitSummary)
+    if analysis.result is None:
+        return Report(
+            value=None,
+            writeback_applied=False,
+            analysis_failure=analysis.reason,
+        )
     decision = await tab.ask_writeback()
+    writeback_applied = False
     if decision.accepted:
         receipt = tab.accept_writeback(decision.items)
         receipt.raise_for_error()
-    return Report(value=analysis.result.value)
+        writeback_applied = bool(receipt.items)
+    return Report(
+        value=analysis.result.value,
+        writeback_applied=writeback_applied,
+        analysis_failure=None,
+    )
 finally:
     tab.save()
 ```
@@ -65,6 +77,14 @@ finally:
 框架用 `TypeAdapter` 驗證 summary，不把 GUI 內部 analysis dataclass 填回來。
 欄位缺失或型別不合會失敗，不補值。沒有 scalar 的 figure-only 分析可用空的具名 view。
 `report_number` 只把不可估計或非有限的 fit scalar 轉成 null，不改擬合或 writeback 政策。
+
+預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
+範例的 Report 宣告 nullable value、writeback_applied 與 nullable analysis_failure。
+有分析的 21 支 recipe 都在每次 Analyze 後檢查 result。
+失敗時回報原因，不詢問或接受 writeback，也不跑相依的 Post。
+成功時 analysis_failure 為 null。Primary 成功而 Post 失敗時，報告保留 Primary 的估計。
+Mux 頂層分析失敗回空 tones；單 tone 失敗仍由 owner 保留該 tone 的原因，其他 tone 繼續。
+Owner 的程式錯誤、record 與 postprocessing 錯誤仍向上傳播，不以空報告掩蓋。
 
 `tab.save()` 同步保存 raw data 與全部已完成階段的 artifacts。
 Analyze 不會自動保存。各 recipe 在已有 Run 結果後進入 `try/finally`，收尾只 save 一次。
@@ -82,10 +102,14 @@ Analyze 不會自動保存。各 recipe 在已有 Run 結果後進入 `try/final
 報告的 `writeback_applied` 只依完成收據中的已確認項目，不依回答的 accepted。
 
 Run scope cancel 只停止正在取得資料的 Run，回傳 partial，recipe 繼續後續分析。
-Script scope cancel 使沒有結果的 Analyze 或 Ask raise `RecipeCancelled`。
+取消 recipe 根則讓下一個 call／ask await raise `ScriptCancelled`。
+進行中的 Run 先合作 drain，runtime 保留 run_id、partial 與完成事實，再 raise。
 這是普通例外，不是 `asyncio.CancelledError`。
-Analyze、ask_writeback、session.ask 都回非 Optional 結果，不用 None 表示取消。
-作者不 catch、不寫取消分支，已有 Run 的 `finally` 仍保存可用結果。
+Analyze、ask_writeback、session.ask 都回非 Optional 物件，不用 None 表示根取消。
+AnalysisResult.result 的 null 表示該分析沒有成功結果，與根取消的例外不同。
+作者不 catch 根取消。已進入 try 的 `finally` 仍在原 worker 同步 Save。
+本目錄的 `await tab.run()` 保持在 try 外，根取消在此 raise 時不進入 Save finalizer。
+Drained partial 留在 tab，交由 agent 決定是否另行保存。
 Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 其他錯誤仍保留失敗診斷，不重跑 acquisition。
 
