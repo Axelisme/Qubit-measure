@@ -2,11 +2,12 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-This environment has six uncoupled fluxonium qubits, six DC sources and six
-readout cavities. Each qubit has its own microwave line and fast-flux line.
-One mux generator serves all six readout tones. A separate pulse generator and
-ADC serve single-tone scans. The environment has no coupler, qubit-qubit
-interaction or DC crosstalk.
+This environment has six uncoupled fluxonium qubits, one global DC source and
+six readout cavities. Each qubit has its own microwave line and its own DC flux
+offset and period. Changing the shared current changes all six qubits' flux.
+There are no fast-flux lines. One mux generator drives all six readout tones.
+A separate pulse generator and ADC handle single-tone scans. The environment
+has no coupler, qubit-qubit interaction or crosstalk matrix.
 
 `default.yaml` holds physical settings. `entry-template.yaml` holds working
 components, wiring and aliases. Neither file supplies calibrated pulses or a
@@ -29,12 +30,12 @@ connect(launch="new", script="<checkout>/zcu_lab/simulation_envs/six_fluxonium/s
 ```
 
 The script creates or reopens `six-fluxonium-demo/initial`. On first use it seeds
-Q1 through Q6, R1 through R6, six `flux_bias_1` through `flux_bias_6` components
-and the `MG123456` mux group. Each Qi references Ri and `flux_bias_i`.
+Q1 through Q6, R1 through R6, one `flux_bias` current-source component
+and the `MG123456` mux group. Each Qi references Ri and the same `flux_bias`.
 Aliases bind `mux` to `MG123456`, `qubit` to `Q1`, `resonator` to
-`$qubit.resonator` and `flux_dev` to `$qubit.flux_source`.
+`$qubit.resonator` and `flux_dev` directly to `flux_bias`.
 
-The script installs a mock SoC and six fixed-unit DC FakeDevices. It reads files
+The script installs a mock SoC and one DC FakeDevice with fixed unit A. It reads files
 beside the script rather than relative to the shell cwd. Startup does not acquire,
 run numeric warmup or access hardware. Existing entries keep their edited
 components and aliases. To apply a changed template, use a new project root or
@@ -65,6 +66,9 @@ and ADCs; this does not supply a complete calibrated readout.
 Qubit `freq` starts at null. Measure each transition before supplying frequencies
 for `mux/twotone_spectrum` or calibrated excitation for `mux/t1`. Changing alias
 `qubit` changes the scalar target, not the mux group's ordered six-qubit mapping.
+Changing `flux_dev` current affects every qubit, even when the scalar `qubit`
+alias selects only one. Each qubit uses its own offset and flux-per-current
+coefficient from the [settings guide](field-guide.md#dc-and-control-units).
 Reopen or Reset a form after changing its source values or aliases.
 Do not treat the physical YAML's parameters as a measured calibration.
 

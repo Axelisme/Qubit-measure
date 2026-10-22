@@ -4,6 +4,12 @@ version: 1
 mux_gen_ch: 0
 pulse_gen_ch: 13
 pulse_ro_ch: 6
+dc_source:
+  name: flux_bias
+  unit: A
+  limits: [-0.02, 0.02]
+  initial: 0.0
+  ramp_step: 0.000001
 qubits:
   Q1:
     format: zcu.single-fluxonium
@@ -21,29 +27,13 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.5
-      source:
-        name: flux_bias_1
-        unit: A
-        limits: [-0.02, 0.02]
-        initial: 0.0
-        ramp_step: 0.000001
-        flux_per_unit: 100.0 # Phi0/A, one period is 10 mA.
+      offset_phi0: 0.50
+      flux_per_unit: 100.0 # Phi0/A, shared global DC current.
 
     drive_line:
       name: q1_charge
       gen_ch: 1
       charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
-
-    flux_line:
-      name: q1_fastflux
-      gen_ch: 7
-      flux_phi0_per_gain: 0.2
-      delay_ns: 5.0
-      tau_ns: 2.0
-      distortion_terms:
-        - {amplitude: 0.08, tau_ns: 40.0}
-        - {amplitude: -0.03, tau_ns: 200.0}
 
     readout:
       drive:
@@ -92,29 +82,13 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.5
-      source:
-        name: flux_bias_2
-        unit: A
-        limits: [-0.02, 0.02]
-        initial: 0.0
-        ramp_step: 0.000001
-        flux_per_unit: 100.0 # Phi0/A, one period is 10 mA.
+      offset_phi0: 0.45
+      flux_per_unit: 80.0 # Phi0/A, shared global DC current.
 
     drive_line:
       name: q2_charge
       gen_ch: 2
       charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
-
-    flux_line:
-      name: q2_fastflux
-      gen_ch: 8
-      flux_phi0_per_gain: 0.2
-      delay_ns: 5.0
-      tau_ns: 2.0
-      distortion_terms:
-        - {amplitude: 0.08, tau_ns: 40.0}
-        - {amplitude: -0.03, tau_ns: 200.0}
 
     readout:
       drive:
@@ -163,29 +137,13 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.5
-      source:
-        name: flux_bias_3
-        unit: A
-        limits: [-0.02, 0.02]
-        initial: 0.0
-        ramp_step: 0.000001
-        flux_per_unit: 100.0 # Phi0/A, one period is 10 mA.
+      offset_phi0: 0.55
+      flux_per_unit: 120.0 # Phi0/A, shared global DC current.
 
     drive_line:
       name: q3_charge
       gen_ch: 3
       charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
-
-    flux_line:
-      name: q3_fastflux
-      gen_ch: 9
-      flux_phi0_per_gain: 0.2
-      delay_ns: 5.0
-      tau_ns: 2.0
-      distortion_terms:
-        - {amplitude: 0.08, tau_ns: 40.0}
-        - {amplitude: -0.03, tau_ns: 200.0}
 
     readout:
       drive:
@@ -234,29 +192,13 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.5
-      source:
-        name: flux_bias_4
-        unit: A
-        limits: [-0.02, 0.02]
-        initial: 0.0
-        ramp_step: 0.000001
-        flux_per_unit: 100.0 # Phi0/A, one period is 10 mA.
+      offset_phi0: 0.40
+      flux_per_unit: 90.0 # Phi0/A, shared global DC current.
 
     drive_line:
       name: q4_charge
       gen_ch: 4
       charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
-
-    flux_line:
-      name: q4_fastflux
-      gen_ch: 10
-      flux_phi0_per_gain: 0.2
-      delay_ns: 5.0
-      tau_ns: 2.0
-      distortion_terms:
-        - {amplitude: 0.08, tau_ns: 40.0}
-        - {amplitude: -0.03, tau_ns: 200.0}
 
     readout:
       drive:
@@ -305,29 +247,13 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.5
-      source:
-        name: flux_bias_5
-        unit: A
-        limits: [-0.02, 0.02]
-        initial: 0.0
-        ramp_step: 0.000001
-        flux_per_unit: 100.0 # Phi0/A, one period is 10 mA.
+      offset_phi0: 0.60
+      flux_per_unit: 110.0 # Phi0/A, shared global DC current.
 
     drive_line:
       name: q5_charge
       gen_ch: 5
       charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
-
-    flux_line:
-      name: q5_fastflux
-      gen_ch: 11
-      flux_phi0_per_gain: 0.2
-      delay_ns: 5.0
-      tau_ns: 2.0
-      distortion_terms:
-        - {amplitude: 0.08, tau_ns: 40.0}
-        - {amplitude: -0.03, tau_ns: 200.0}
 
     readout:
       drive:
@@ -376,29 +302,13 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.5
-      source:
-        name: flux_bias_6
-        unit: A
-        limits: [-0.02, 0.02]
-        initial: 0.0
-        ramp_step: 0.000001
-        flux_per_unit: 100.0 # Phi0/A, one period is 10 mA.
+      offset_phi0: 0.50
+      flux_per_unit: 70.0 # Phi0/A, shared global DC current.
 
     drive_line:
       name: q6_charge
       gen_ch: 6
       charge_drive_ghz_per_gain: {real: 0.1, imag: 0.0} # Full charge n.
-
-    flux_line:
-      name: q6_fastflux
-      gen_ch: 12
-      flux_phi0_per_gain: 0.2
-      delay_ns: 5.0
-      tau_ns: 2.0
-      distortion_terms:
-        - {amplitude: 0.08, tau_ns: 40.0}
-        - {amplitude: -0.03, tau_ns: 200.0}
 
     readout:
       drive:

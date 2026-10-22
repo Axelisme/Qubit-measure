@@ -10,19 +10,16 @@ components:
     EL: 1.0
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R1
-    flux_source: flux_bias_1
+    flux_source: flux_bias
     flux_unit: A
     wiring:
       ch: 1
-      lo_flux_ch: 7
   R1:
     kind: resonator
     freq: 7000.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias_1:
-    kind: device/current_source
   Q2:
     kind: qubit/fluxonium
     EJ: 4.5 # GHz
@@ -30,19 +27,16 @@ components:
     EL: 0.8
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R2
-    flux_source: flux_bias_2
+    flux_source: flux_bias
     flux_unit: A
     wiring:
       ch: 2
-      lo_flux_ch: 8
   R2:
     kind: resonator
     freq: 7100.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias_2:
-    kind: device/current_source
   Q3:
     kind: qubit/fluxonium
     EJ: 5.0 # GHz
@@ -50,19 +44,16 @@ components:
     EL: 0.6
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R3
-    flux_source: flux_bias_3
+    flux_source: flux_bias
     flux_unit: A
     wiring:
       ch: 3
-      lo_flux_ch: 9
   R3:
     kind: resonator
     freq: 7200.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias_3:
-    kind: device/current_source
   Q4:
     kind: qubit/fluxonium
     EJ: 3.5 # GHz
@@ -70,19 +61,16 @@ components:
     EL: 1.2
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R4
-    flux_source: flux_bias_4
+    flux_source: flux_bias
     flux_unit: A
     wiring:
       ch: 4
-      lo_flux_ch: 10
   R4:
     kind: resonator
     freq: 7300.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias_4:
-    kind: device/current_source
   Q5:
     kind: qubit/fluxonium
     EJ: 6.0 # GHz
@@ -90,19 +78,16 @@ components:
     EL: 0.5
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R5
-    flux_source: flux_bias_5
+    flux_source: flux_bias
     flux_unit: A
     wiring:
       ch: 5
-      lo_flux_ch: 11
   R5:
     kind: resonator
     freq: 7400.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias_5:
-    kind: device/current_source
   Q6:
     kind: qubit/fluxonium
     EJ: 4.2 # GHz
@@ -110,18 +95,17 @@ components:
     EL: 0.9
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R6
-    flux_source: flux_bias_6
+    flux_source: flux_bias
     flux_unit: A
     wiring:
       ch: 6
-      lo_flux_ch: 12
   R6:
     kind: resonator
     freq: 7500.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias_6:
+  flux_bias:
     kind: device/current_source
   MG123456:
     kind: group/mux
@@ -137,4 +121,4 @@ aliases:
     mux: MG123456
     qubit: Q1
     resonator: $qubit.resonator
-    flux_dev: $qubit.flux_source
+    flux_dev: flux_bias
