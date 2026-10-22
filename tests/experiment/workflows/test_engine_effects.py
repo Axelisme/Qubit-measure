@@ -122,7 +122,7 @@ def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
     ]
     assert len(facts) == 1
     assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "failed")
-    assert facts[0].stopped is True
+    assert facts[0].stopped is False
     assert facts[0].reason == observed[0].reason
     assert facts[0].device_snapshot is None
 
@@ -184,8 +184,24 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     else:
         first = completed(observed[0])
         assert (first.value, first.partial_result) == (99, True)
+        assert first.facts.stopped is False
+        assert first.facts.outcome == "partial"
     second = completed(observed[1])
     assert (second.value, second.partial_result) == (7, False)
+    assert second.facts.stopped is False
+    assert second.facts.outcome == "completed"
+    facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert [(fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts] == [
+        (1, 1, "failed" if failed else "partial", False),
+        (1, 2, "completed", False),
+    ]
+    if not failed:
+        assert facts[0] == completed(observed[0]).facts
+    assert facts[1] == second.facts
 
 
 @pytest.mark.parametrize("source", ["outside", "other_signal"])
@@ -270,6 +286,12 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
     ]
     assert all(outcome.facts.stopped is outcome.partial_result for outcome in outcomes)
     assert all(outcome.facts.outcome == "partial" for outcome in outcomes)
+    journal_facts = [
+        TypeAdapter(OperationFacts).validate_python(event["operation"])
+        for event in rig.events()
+        if event["kind"] == "operation_finished"
+    ]
+    assert journal_facts == [outcome.facts for outcome in outcomes]
 
 
 def test_wait_pause_retries_original_deadline_without_restarting_author(
