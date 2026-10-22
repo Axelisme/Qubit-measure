@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-21，未設 kappa 的 mux ringup 初值
+**Last updated:** 2026-10-23，mux group wiring 與必要綁定
 
 # Measure domain support
 
@@ -13,8 +13,8 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
-Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。Gain 與 ro_ch 保持未填，操作員必須指定通道與振幅。
-`mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones。Blank 的 gen_ch、mixer_freq、length 與 ro_length 保持必填且未填，不猜接線與時長。
+Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch 與 freq 使用 Expr 初值。各 tone 的 ro_ch 是從固定 capture 的 group.wiring.ro_ch[i] 取出的整數初值，scalar Expr 不支援 indexing。操作員仍須確認通道與振幅。
+`mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones 與 group wiring。Blank 的 mixer_freq、length 與 ro_length 保持必填且未填，不猜時長。
 `mux/onetone_fine` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。Helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
 缺 leaf 或 null 的 kappa 不參與最小值。全未設時不加等待，trig_offset 保留來源的 time-of-flight offset。
 有 captured readout 時，Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。Blank 只補 trig_offset，不填 length 或 ro_length。
@@ -64,6 +64,10 @@ pi_len 須為有限正數，pi_gain 須為有限數且在 (0, 1]。無效來源�
 Nested waveform key 的複製由 Form adapter 負責。來源與其他欄位不變，不寫回校準。
 
 ## Mux 綁定驗證
+
+`mux_bindings.require_mux_group(parameters)` 要求固定 capture 中有 scalar alias `mux`，且指向 `group/mux` 元件。
+Mux readout 初值與 `require_mux_qubits` 共用此查詢。缺 capture、alias 未綁或 target 非 group 時，錯誤指出需要 `group/mux` 與 alias `mux`。
+此要求不改變下列可選 qubit 配對驗證的 bring-up 政策。
 
 `mux_bindings.validate_mux_bindings(parameters: ParameterContext | None) -> None`
 集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
