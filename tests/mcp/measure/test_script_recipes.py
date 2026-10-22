@@ -538,6 +538,12 @@ def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
     tmp_path: Path,
 ) -> None:
     gui = SyntheticGui()
+    presentation = {
+        "run_id": "native-1",
+        "stage": "primary",
+        "figure_names": ["fit_2"],
+        "figures_replaced": True,
+    }
     summary = {
         "estimate": 3.5,
         "stderr": 0.125,
@@ -549,6 +555,7 @@ def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
         if method == "tab.get_analyze_result":
             return {
                 "summary": summary,
+                "presentation": presentation,
                 "invalid": [{"path": "secondary", "reason": "non_finite"}],
             }
         return gui.respond(method, params)
@@ -575,6 +582,7 @@ def test_recipe_full_preserves_native_estimate_uncertainty_and_operation_source(
         )
         analysis = detail["analyses"][0]
         assert (analysis["stage"], analysis["op"]) == ("primary", 2)
+        assert analysis.get("presentation") == presentation
         assert analysis["summary"] == {
             "estimate": 3.5,
             "stderr": 0.125,
