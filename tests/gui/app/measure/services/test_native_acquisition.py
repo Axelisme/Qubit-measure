@@ -1,5 +1,6 @@
 """Native run evidence publication, acquired ledger events and retained admission source."""
 
+from tests.gui.app.measure._record_support import require_record
 import logging
 from collections.abc import Generator
 from dataclasses import replace
@@ -8,10 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import (
-    SoftwareProvenance,
-    load_run_data,
-)
+from zcu_tools.datafile import load_run_data
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
@@ -132,7 +131,7 @@ def test_run_without_cfg_records_acquired_evidence(
     assert terminal.outcome == "finished"
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
-    metadata = session.state.get_tab("tab").run.metadata
+    metadata = require_record(session.state.get_tab("tab").run).metadata
     assert metadata is not None
     events = session.entry.ledger.events()
     assert len(events) == 1
@@ -167,7 +166,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
     tab = session.state.get_tab("tab")
-    metadata = tab.run.metadata
+    metadata = require_record(tab.run).metadata
     record = tab.run.result
     assert metadata is not None and record is not None and record.cfg is not None
     events = other.ledger.events()
@@ -284,7 +283,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     finally:
         subscription.unsubscribe()
     assert len(finished) == 1 and finished[0].outcome == "finished"
-    metadata, parameters = tab.run.metadata, tab.run.parameters
+    metadata, parameters = require_record(tab.run).metadata, tab.run.parameters
     assert metadata is not None and parameters is not None
     storage = parameters.capture_storage()
     assert metadata.snapshot.roles == {"driver": "Q2", "custom": "Q1"}
@@ -355,7 +354,7 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
         assert session.state.get_tab("tab").run.result is None
     else:
         assert terminal.outcome == outcome.status == "cancelled"
-        metadata = session.state.get_tab("tab").run.metadata
+        metadata = require_record(session.state.get_tab("tab").run).metadata
         assert metadata is not None and metadata.completion == "stopped"
         assert len(events) == 1 and isinstance(events[0].payload, AcquiredPayload)
         assert events[0].payload.run_id == metadata.run_id
@@ -378,7 +377,7 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     assert outcome.error == terminal.error_message
     tab = session.state.get_tab("tab")
     assert tab.run.result is not None
-    metadata = tab.run.metadata
+    metadata = require_record(tab.run).metadata
     assert metadata is not None
     assert tab.run.source_operation_id == token
     assert tab.run.confirmed_run_id is None
@@ -422,7 +421,7 @@ def test_native_run_without_storage_reports_missing_acquired_destination(
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
     assert session.state.get_tab("tab").run.result is not None
-    assert session.state.get_tab("tab").run.metadata is None
+    assert require_record(session.state.get_tab("tab").run).metadata is None
     assert session.entry.ledger.events() == ()
     assert any(
         record.name == "zcu_tools.gui.app.measure.services.run"

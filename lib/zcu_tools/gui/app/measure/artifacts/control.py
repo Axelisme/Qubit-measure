@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from zcu_tools.datafile import read_run_metadata
+from zcu_tools.experiment.native_persistence import read_run_metadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin

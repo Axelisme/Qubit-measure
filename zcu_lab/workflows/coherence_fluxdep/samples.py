@@ -5,7 +5,8 @@ from math import isfinite
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import load
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.workflows.export import load_trace
 from zcu_tools.experiment.workflows.saved_run import SavedRecord, native_path
 from zcu_tools.resources.sample_table import JsonlSampleTable
@@ -128,7 +129,7 @@ def _coordinate(
     saved: SavedRecord[CoherencePoint], device: str
 ) -> tuple[SampleField, SampleField]:
     path = native_path(saved.directory, _last_completed(saved))
-    snapshot = load_run_data(path).metadata.device_snapshot
+    snapshot = metadata_from_container(load(path)).device_snapshot
     if snapshot is None or device not in snapshot:
         raise ValueError(f"{path}: Native snapshot lacks flux device {device}")
     value, unit = snapshot[device].get("value"), snapshot[device].get("value_unit")

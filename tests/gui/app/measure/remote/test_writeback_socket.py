@@ -583,15 +583,12 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
     path = tmp_path / "source.h5"
     write_native_file(path, tag=CapturedCouplerAdapter.experiment_tag or "", gain=0.4)
     stored = load_run_data(path)
-    metadata = replace(
-        stored.metadata,
-        snapshot=replace(
+    metadata = stored.metadata.model_copy(update={'snapshot': replace(
             stored.metadata.snapshot,
             entry_id=UUID(target.entry_id),
             point=target.point,
             roles={"coupler": "coupler"},
-        ),
-    )
+        )})
     save_run_data(path, stored.payload, metadata, cfg=stored.cfg, replace=True)
     tab = fx.ctrl.new_tab("captured-coupler")
     port = fx.start()

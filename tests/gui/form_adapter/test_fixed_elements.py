@@ -1,5 +1,6 @@
 """The declaring adapter owns fixed identities and ordinary participant errors."""
 
+from dataclasses import replace
 from collections.abc import Mapping
 from typing import Annotated
 

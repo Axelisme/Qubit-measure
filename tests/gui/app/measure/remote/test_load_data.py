@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.gui.app.measure._record_support import require_record
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
@@ -35,10 +36,10 @@ class StoredAdapter(DummyAdapter):
     experiment_tag: ClassVar[str | None] = "test/load"
 
     def __init__(self) -> None:
-        self.received: list[StoredRun] = []
+        self.received: list[Container] = []
         self.record = OpaqueRecord()
 
-    def restore(self, stored: StoredRun) -> RestoredRun[OpaqueRecord]:
+    def restore(self, stored: Container) -> RestoredRun[OpaqueRecord]:
         self.received.append(stored)
         return RestoredRun(self.record, "adapter cfg unavailable")
 
@@ -74,7 +75,7 @@ def test_registered_adapter_loads_opaque_record_and_cfg_diagnostic(stored_app) -
     assert isinstance(adapter, StoredAdapter)
     assert adapter.received[0].metadata == metadata
     assert tab.run.result is adapter.record
-    assert tab.run.metadata == metadata
+    assert require_record(tab.run).metadata == metadata
     assert tab.run.source_path == str(path)
     assert tab.cfg.input.data == before
     assert tab.cfg.env is env

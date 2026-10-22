@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.gui.app.measure._record_support import require_record
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -7,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from pydantic import Field, JsonValue
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
@@ -87,7 +88,7 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     metadata = historical_metadata()
 
     def restore_and_rebind(
-        stored: StoredRun,
+        stored: Container,
     ) -> RestoredRun[RunRecord[ExpCfgModel, object]]:
         assert stored.metadata == metadata
         state.set_context(replace(state.session_env, parameters=q2))
@@ -101,7 +102,7 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     assert tab.run.parameters is None
     assert tab.run.storage is None
     assert tab.run.source_operation_id is None
-    assert tab.run.metadata == metadata
+    assert require_record(tab.run).metadata == metadata
     state.clear_tab_results(tab_id)
     assert tab.run.parameters is None
 
@@ -140,7 +141,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     outcome = svc.load_result(tab_id, native_path)
 
     assert tab.run.result is loaded
-    assert tab.run.metadata == metadata
+    assert require_record(tab.run).metadata == metadata
     assert tab.run.confirmed_run_id is None
     assert tab.run.source_path == native_path
     assert tab.analysis.result is None
@@ -195,7 +196,7 @@ def test_load_preserves_authored_input_including_invalid_drafts(
         assert tab.run.result is loaded
         assert loaded.cfg is not None
         assert loaded.cfg.reps == 40
-        assert tab.run.metadata == metadata
+        assert require_record(tab.run).metadata == metadata
         assert tab.run.source_path == native_path
         assert outcome.cfg_issue is None
     finally:

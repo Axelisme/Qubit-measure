@@ -117,7 +117,7 @@ def test_invalid_start_time_creates_no_roots(
 ) -> None:
     with pytest.raises(ValueError, match="timezone-aware UTC"):
         RunArtifacts(
-            replace(metadata, started_at=datetime(2026, 10, 6)), clock, RLock()
+            metadata.model_copy(update={'started_at': datetime(2026, 10, 6)}), clock, RLock()
         )
     assert not metadata.roots.metadata_root.exists()
     assert not metadata.roots.data_root.exists()

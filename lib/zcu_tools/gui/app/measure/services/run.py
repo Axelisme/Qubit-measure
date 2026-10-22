@@ -16,6 +16,7 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -72,7 +73,6 @@ class _RunOperation:
     adapter_name: str
     storage: PointStorageBinding | None
     parameters: ParameterContext | None
-    metadata: RunMetadata | None = None
 
 
 class RunService:
@@ -178,7 +178,6 @@ class RunService:
                 op.tab_id,
                 result,
                 source_operation_id=self._active_token,
-                metadata=op.metadata,
                 parameters=op.parameters,
             )
         except Exception as error:
@@ -204,7 +203,7 @@ class RunService:
             return False
         return True
 
-    def _append_acquired(self, op: _RunOperation, result: object) -> None:
+    def _append_acquired(self, op: _RunOperation, result: RunRecord[Any, Any]) -> None:
         if result is NO_RESULT:
             return
         if op.storage is None:
@@ -214,7 +213,7 @@ class RunService:
                 op.tab_id,
             )
             return
-        metadata = op.metadata
+        metadata = result.metadata
         if metadata is None:
             logger.warning(
                 "Acquired omitted: tab_id=%r has no native acquisition evidence",
@@ -380,23 +379,23 @@ class RunService:
             else None
         )
 
-        def work(factory: Any) -> object:
+        def work(factory: Any) -> RunRecord[Any, Any]:
             # OperationRunner has acquired the hardware lease before submission.
             # A failed read rejects acquisition, including adapters without metadata.
             device_snapshot = capture_device_snapshot(context.devices)
+            metadata = None
             # Provenance uses only software/host and the cached SoC config.
             if (
                 snapshot is not None
                 and experiment_tag is not None
                 and run_id is not None
             ):
-                operation.metadata = RunMetadata(
+                metadata = RunMetadata(
                     run_id=run_id,
                     experiment=experiment_tag,
                     started_at=started_at.isoformat(),
                     finished_at=None,
                     completion="partial",
-                    labber_path=None,
                     snapshot=snapshot,
                     provenance=capture_software_provenance(context=context),
                     device_snapshot=device_snapshot,
@@ -408,13 +407,12 @@ class RunService:
             # Completion records acquisition progress, not later operation cancellation.
             completion = "stopped" if stop_event.is_set() else "complete"
             finished_at = datetime.now(UTC)
-            if operation.metadata is not None:
-                operation.metadata = replace(
-                    operation.metadata,
-                    finished_at=finished_at.isoformat(),
-                    completion=completion,
-                )
-            return result
+            if metadata is not None:
+                metadata = metadata.model_copy(update={
+                    "finished_at": finished_at.isoformat(),
+                    "completion": completion,
+                })
+            return replace(result, metadata=metadata)
 
         spec = OperationSpec(
             exclusion=ExclusionRequest(

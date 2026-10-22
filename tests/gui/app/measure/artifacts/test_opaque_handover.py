@@ -1,5 +1,6 @@
 """Registered opaque run handles cross Run, Analyze and synchronous Save unchanged."""
 
+from tests.gui.app.measure._record_support import require_record
 import json
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -8,7 +9,8 @@ from typing import ClassVar, Literal
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import AnalysisDocument, load_run_data
+from zcu_tools.datafile import load_run_data
+from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.experiment.artifacts import AnalysisItem, DataItem
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -144,7 +146,7 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
         "Native evidence must accept an opaque run handle"
     )
     handle = tab.run.result
-    metadata = tab.run.metadata
+    metadata = require_record(tab.run).metadata
     storage = tab.run.storage
     assert metadata is not None and storage is not None
     acquired = storage.ledger.events()

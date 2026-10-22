@@ -9,13 +9,8 @@ import h5py as h5
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.datafile import (
-    DataVariable,
-    RunSnapshot,
-    load_grouped_labber_data,
-    load_run_data,
-    save_run_data,
-)
+from zcu_tools.datafile import DataVariable, load_grouped_labber_data, load_run_data, save_run_data
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment import AxesSpec, Axis, ExpCfgModel, ZSpec
 from zcu_tools.experiment.workflows import RunIdentity, RunPaths
 from zcu_tools.experiment.workflows.artifacts import RunManifest

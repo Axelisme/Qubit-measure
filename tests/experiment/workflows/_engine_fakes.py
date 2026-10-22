@@ -9,7 +9,7 @@ from threading import Event
 from time import monotonic
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.script_host import PendingQuestion

@@ -1,5 +1,6 @@
 """The shared Inspect composes the real parameter owner and component frontend."""
 
+from dataclasses import replace
 import os
 from collections.abc import Generator
 from pathlib import Path

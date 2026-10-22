@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -110,7 +110,7 @@ class ModalLoadAdapter(OldAdapter):
     experiment_tag: ClassVar[str | None] = "test/load"
 
     def restore(
-        self, stored: StoredRun
+        self, stored: Container
     ) -> RestoredRun[RunRecord[ModalRuntimeCfg, ModalLoadResult]]:
         return RestoredRun(
             RunRecord(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import threading
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tempfile import mkdtemp
 from types import SimpleNamespace
 from unittest.mock import MagicMock

@@ -1,5 +1,6 @@
 """User-facing save evidence over real State, tracker reports and Qt widgets."""
 
+from dataclasses import replace
 from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,12 +60,7 @@ def saving_view(
         )
         tab_id = ctrl.new_tab("saving")
         original = session.state.get_tab("tab")
-        session.state.update_tab_result(
-            tab_id,
-            original.run.result,
-            metadata=session.metadata,
-            parameters=original.run.parameters,
-        )
+        session.state.update_tab_result(tab_id, replace(original.run.result, metadata=session.metadata), parameters=original.run.parameters)
         ctrl.update_tab_analyze_param_instance(tab_id, PaneParams())
         window = MainWindow(
             ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

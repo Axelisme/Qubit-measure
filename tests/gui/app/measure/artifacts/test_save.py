@@ -1,5 +1,7 @@
 """Synchronous native Save through real state, writers and ledger."""
 
+from dataclasses import replace
+from tests.gui.app.measure._record_support import require_record
 import json
 import threading
 from collections.abc import Generator
@@ -10,13 +12,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import (
-    CfgSnapshot,
-    ExperimentPayload,
-    NativeExtensions,
-    RunMetadata,
-    load_run_data,
-)
+from zcu_tools.datafile import ExperimentPayload, NativeExtensions, load_run_data
+from zcu_tools.experiment.metadata import CfgSnapshot, RunMetadata
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import SessionEnv
@@ -71,12 +68,7 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
     if failure == "invalid_shape":
         result.signal = result.signal[:1]
     source = RunRecord(cfg=None if failure == "missing_cfg" else cfg, result=result)
-    session.state.update_tab_result(
-        "tab",
-        source,
-        metadata=session.metadata,
-        parameters=session.state.get_tab("tab").run.parameters,
-    )
+    session.state.update_tab_result("tab", replace(source, metadata=session.metadata), parameters=session.state.get_tab("tab").run.parameters)
     declare_panes(session)
     try:
         report = session.save_artifacts()
@@ -486,12 +478,7 @@ def test_invalid_record_reports_failed_data_outputs_and_saved_event(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    session.state.update_tab_result(
-        "tab",
-        object(),
-        metadata=session.metadata,
-        parameters=session.state.get_tab("tab").run.parameters,
-    )
+    session.state.update_tab_result("tab", replace(object(), metadata=session.metadata), parameters=session.state.get_tab("tab").run.parameters)
     report = session.save()
     assert len(report.outputs) == 2
     assert all(item.status == "failed" for item in report.outputs)
@@ -541,7 +528,7 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == first.outputs[0].output.path
     assert second.outputs[1].output.path != first.outputs[1].output.path
-    metadata = session.state.get_tab("tab").run.metadata
+    metadata = require_record(session.state.get_tab("tab").run).metadata
     assert metadata is not None
     assert metadata.labber_path == str(second.outputs[1].output.path)
     assert len(session.entry.ledger.events()) == 2
@@ -747,7 +734,7 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     assert [output.status for output in data.members[0].outputs] == ["failed", "failed"]
     assert data.members[0].outputs[1].path == second.outputs[1].output.path
     assert data.members[0].outputs[1].path != first.outputs[1].output.path
-    metadata = session.state.get_tab("tab").run.metadata
+    metadata = require_record(session.state.get_tab("tab").run).metadata
     assert metadata is not None
     assert metadata.labber_path == str(first.outputs[1].output.path)
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id

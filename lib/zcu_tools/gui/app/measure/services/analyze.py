@@ -122,12 +122,12 @@ class AnalyzeService(StagedAnalyzeService):
         adapter = tab.adapter
         captured_inputs = _AnalyzeCapture(
             run_result=req.run_result,
-            run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
-            experiment_name=tab.run.metadata.experiment
-            if tab.run.metadata is not None
+            run_id=(None if tab.run.result is None else tab.run.result.metadata).run_id if (None if tab.run.result is None else tab.run.result.metadata) is not None else None,
+            experiment_name=(None if tab.run.result is None else tab.run.result.metadata).experiment
+            if (None if tab.run.result is None else tab.run.result.metadata) is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy(tab.run.metadata.device_snapshot)
-            if tab.run.metadata is not None
+            device_snapshot=deepcopy((None if tab.run.result is None else tab.run.result.metadata).device_snapshot)
+            if (None if tab.run.result is None else tab.run.result.metadata) is not None
             else None,
             context=ctx,
             adapter=adapter,
@@ -184,12 +184,12 @@ class AnalyzeService(StagedAnalyzeService):
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
             run_result=tab.run.result,
-            run_id=tab.run.metadata.run_id if tab.run.metadata is not None else None,
-            experiment_name=tab.run.metadata.experiment
-            if tab.run.metadata is not None
+            run_id=(None if tab.run.result is None else tab.run.result.metadata).run_id if (None if tab.run.result is None else tab.run.result.metadata) is not None else None,
+            experiment_name=(None if tab.run.result is None else tab.run.result.metadata).experiment
+            if (None if tab.run.result is None else tab.run.result.metadata) is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy(tab.run.metadata.device_snapshot)
-            if tab.run.metadata is not None
+            device_snapshot=deepcopy((None if tab.run.result is None else tab.run.result.metadata).device_snapshot)
+            if (None if tab.run.result is None else tab.run.result.metadata) is not None
             else None,
             context=ctx,
             adapter=tab.adapter,

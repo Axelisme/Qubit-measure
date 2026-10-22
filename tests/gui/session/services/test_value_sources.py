@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import dataclasses
 from unittest.mock import MagicMock
 

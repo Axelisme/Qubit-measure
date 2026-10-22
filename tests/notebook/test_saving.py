@@ -10,11 +10,8 @@ import h5py
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec, PulseSpec
-from zcu_tools.datafile import (
-    AnalysisDocument,
-    load_labber_data,
-    load_run_data,
-)
+from zcu_tools.datafile import load_labber_data, load_run_data
+from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError

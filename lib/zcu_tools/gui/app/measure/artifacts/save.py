@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from zcu_tools.experiment.metadata import RunMetadata
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.artifacts import (
     AnalysisItem,
     ArtifactRef,
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 class _SavePlan:
     artifacts: tuple[SaveArtifact, ...]
     layout: SaveLayout
-    metadata: RunMetadata
+    record: RunRecord[Any, Any]
     storage: PointStorageBinding
     origin: CommandOrigin
     comment: str
@@ -137,9 +137,10 @@ class SaveService:
     ) -> _SavePlan:
         self._require_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
-        metadata = tab.run.metadata
+        record = tab.run.result
+        metadata = None if record is None else record.metadata
         storage = tab.run.storage
-        if metadata is None or storage is None:
+        if record is None or metadata is None or storage is None:
             raise FailedPreconditionError(
                 "Run has no historical native metadata or captured storage",
                 reason_code="storage_unavailable",
@@ -194,7 +195,7 @@ class SaveService:
                         )
                     )
             captured.append(SaveArtifact(ref, tuple(members)))
-        return _SavePlan(tuple(captured), layout, metadata, storage, origin, annotation)
+        return _SavePlan(tuple(captured), layout, record, storage, origin, annotation)
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)
@@ -212,7 +213,7 @@ class SaveService:
         report = save_artifacts(
             plan.artifacts,
             layout=plan.layout,
-            metadata=plan.metadata,
+            record=plan.record,
             ledger=plan.storage.ledger,
             origin=plan.origin.origin,
             figure_encoder=render_save_figure_png,

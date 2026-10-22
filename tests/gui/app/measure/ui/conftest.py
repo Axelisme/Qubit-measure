@@ -1,5 +1,6 @@
 """Shared real measure UI composition and teardown for public view contracts."""
 
+from dataclasses import replace
 from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 
@@ -64,12 +65,7 @@ def live_ui(
         )
         tab_id = ctrl.new_tab("saving")
         original = session.state.get_tab("tab")
-        session.state.update_tab_result(
-            tab_id,
-            original.run.result,
-            metadata=session.metadata,
-            parameters=original.run.parameters,
-        )
+        session.state.update_tab_result(tab_id, replace(original.run.result, metadata=session.metadata), parameters=original.run.parameters)
         window = MainWindow(
             ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
         )

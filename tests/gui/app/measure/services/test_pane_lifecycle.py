@@ -465,14 +465,7 @@ def analysis_panes(native_session: NativeSaveSession):
     state, tab_id, ctx = native_session.state, "tab", native_session.state.session_env
     adapter = PaneAdapter()
     state.get_tab(tab_id).adapter = adapter
-    state.update_tab_result(
-        tab_id,
-        _pane_source_with_excited_initial_state(),
-        metadata=replace(
-            native_session.metadata, experiment=SavingCore().persistence_spec().tag
-        ),
-        parameters=_pane_capture(state.get_tab(tab_id).run.parameters),
-    )
+    state.update_tab_result(tab_id, replace(_pane_source_with_excited_initial_state(), metadata=native_session.metadata.model_copy(update={'experiment': SavingCore().persistence_spec().tag})), parameters=_pane_capture(state.get_tab(tab_id).run.parameters))
     bus = EventBus()
     writeback = WritebackService(MagicMock(), arb_names=lambda: ())
     primary_service, primary_bg = _analyze_service(state, writeback, bus)

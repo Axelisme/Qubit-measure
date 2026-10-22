@@ -312,14 +312,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
     record = session.state.get_tab("tab").run.result
     assert record is not None
     run = session.state.get_tab("tab").run
-    session.state.update_tab_loaded_result(
-        "tab",
-        record,
-        "existing.hdf5",
-        metadata=session.metadata,
-        parameters=run.parameters,
-        storage=run.storage,
-    )
+    session.state.update_tab_loaded_result("tab", replace(record, metadata=session.metadata), "existing.hdf5", parameters=run.parameters, storage=run.storage)
     snapshot = _native_snapshot(session)
 
     assert snapshot.run is not None and snapshot.run.source_path == "existing.hdf5"
@@ -372,21 +365,12 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
     record = session.state.get_tab("tab").run.result
     assert record is not None
     run = session.state.get_tab("tab").run
-    session.state.update_tab_result(
-        "tab", record, metadata=session.metadata, parameters=run.parameters
-    )
+    session.state.update_tab_result("tab", replace(record, metadata=session.metadata), parameters=run.parameters)
     assert (
         _native_snapshot(session).artifacts[0].artifacts[0].status
         is SaveStatus.NOT_SAVED
     )
-    session.state.update_tab_loaded_result(
-        "tab",
-        record,
-        "imported.hdf5",
-        metadata=session.metadata,
-        parameters=run.parameters,
-        storage=run.storage,
-    )
+    session.state.update_tab_loaded_result("tab", replace(record, metadata=session.metadata), "imported.hdf5", parameters=run.parameters, storage=run.storage)
     loaded = _native_snapshot(session)
     assert loaded.run is not None and loaded.run.source_path == "imported.hdf5"
     assert loaded.artifacts[0].artifacts[0].status is SaveStatus.NOT_SAVED

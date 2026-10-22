@@ -47,9 +47,7 @@ def native_file(session: NativeSaveSession, *, completion: str = "complete") -> 
     path.parent.mkdir(parents=True)
     metadata = session.metadata
     if completion == "unknown":
-        metadata = replace(
-            metadata, started_at=None, finished_at=None, completion="unknown"
-        )
+        metadata = metadata.model_copy(update={'started_at': None, 'finished_at': None, 'completion': "unknown"})
     save_run_data(path, native_payload(), metadata, cfg=native_cfg())
     return path
 

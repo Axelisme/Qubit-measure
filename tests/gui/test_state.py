@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.gui.app.measure._record_support import require_record
 from dataclasses import dataclass, replace
 from unittest.mock import MagicMock
 from uuid import UUID
@@ -9,7 +10,7 @@ from uuid import UUID
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile.native_models import (
+from zcu_tools.experiment.metadata import (
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
@@ -258,11 +259,11 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
             hostname="historical-host",
         ),
     )
-    state.update_tab_loaded_result("t1", result, "/tmp/loaded.hdf5", metadata=metadata)
+    state.update_tab_loaded_result("t1", replace(result, metadata=metadata), "/tmp/loaded.hdf5")
 
     tab = state.get_tab("t1")
     assert tab.run.result is result
-    assert tab.run.metadata == metadata
+    assert require_record(tab.run).metadata == metadata
     assert tab.run.source_path == "/tmp/loaded.hdf5"
     assert state.version.get("tab:t1:result") == 1
     assert state.version.get("tab:t1:analyze") == 1

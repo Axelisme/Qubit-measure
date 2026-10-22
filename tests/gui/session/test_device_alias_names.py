@@ -1,5 +1,6 @@
 """Names and numeric fields share one fixed alias capture."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest

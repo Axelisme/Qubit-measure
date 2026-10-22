@@ -1,7 +1,7 @@
 """Fixed context/storage through Context, Tab, synchronous Save and RunInputs."""
 
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -210,11 +210,7 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
             captured_parameters=lambda _aliases: None,
         )
         tab_id = tabs.new_tab("pure")
-        empty_state.update_tab_result(
-            tab_id,
-            native.state.get_tab("tab").run.result,
-            metadata=native.metadata,
-        )
+        empty_state.update_tab_result(tab_id, replace(native.state.get_tab("tab").run.result, metadata=native.metadata))
         empty_state.set_context(native.state.session_env)
         control = SaveControlFacet(
             state=empty_state,

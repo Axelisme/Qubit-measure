@@ -7,7 +7,7 @@ from typing import ClassVar, TypeAlias
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import StoredRun, load_run_data
+from zcu_tools.datafile import Container, load_run_data
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -76,7 +76,7 @@ class _InternalTypeErrorAdapter(_LoadAdapter):
 
 
 @pytest.fixture
-def stored(tmp_path: Path) -> StoredRun:
+def stored(tmp_path: Path) -> Container:
     path = tmp_path / "data.h5"
     write_native_file(path)
     return load_run_data(path)
@@ -101,14 +101,14 @@ def test_base_adapter_load_reads_native_record_and_full_history(
 
 @pytest.mark.parametrize("adapter_cls", [_NeedsArgsAdapter, _NoLoadAdapter])
 def test_base_adapter_restore_raises_explicit_unsupported(
-    adapter_cls: type[_LoadAdapter], stored: StoredRun
+    adapter_cls: type[_LoadAdapter], stored: Container
 ) -> None:
     with pytest.raises(NotImplementedError, match="does not support loading"):
         adapter_cls().restore(stored)
 
 
 def test_base_adapter_restore_preserves_constructor_internal_type_error(
-    stored: StoredRun,
+    stored: Container,
 ) -> None:
     with pytest.raises(TypeError, match="constructor bug"):
         _InternalTypeErrorAdapter().restore(stored)

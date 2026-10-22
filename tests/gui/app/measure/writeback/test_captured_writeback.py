@@ -1,5 +1,6 @@
 """Accepted evidence and fixed destinations at the real writeback/owner seam."""
 
+from tests.gui.app.measure._record_support import require_record
 from collections.abc import Generator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -130,8 +131,8 @@ def test_accepted_retains_run_identity_with_or_without_save(
         service = WritebackService(control, arb_names=lambda: ())
         tab = native.state.get_tab("tab")
         captured = control.read_context()
-        assert tab.run.metadata is not None
-        source_run_id = tab.run.metadata.run_id
+        assert require_record(tab.run).metadata is not None
+        source_run_id = require_record(tab.run).metadata.run_id
         draft = service.create_draft(
             [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],
             parameters=captured,
@@ -144,7 +145,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
             any(event.kind == "saved" for event in native.entry.ledger.events())
             is save_before_accept
         )
-        tab.run.metadata = replace(native.metadata, run_id="later-run")
+        require_record(tab.run).metadata = native.metadata.model_copy(update={'run_id': "later-run"})
         service.apply_draft(draft)
         event = native.entry.ledger.events()[-1]
         assert event.kind == "accepted"
@@ -168,20 +169,13 @@ def test_analysis_draft_uses_start_run_identity(
     with native_save_session(tmp_path, qapp) as native:
         tab = native.state.get_tab("tab")
         if source == "load":
-            native.state.update_tab_loaded_result(
-                "tab",
-                tab.run.result,
-                "historical.h5",
-                metadata=native.metadata,
-                parameters=tab.run.parameters,
-                storage=tab.run.storage,
-            )
+            native.state.update_tab_loaded_result("tab", replace(tab.run.result, metadata=native.metadata), "historical.h5", parameters=tab.run.parameters, storage=tab.run.storage)
         elif source in ("without_metadata", "context_free"):
-            tab.run.metadata = None
+            require_record(tab.run).metadata = None
             if source == "context_free":
                 tab.run.parameters = None
         captured = tab.run.parameters
-        expected = tab.run.metadata.run_id if tab.run.metadata is not None else None
+        expected = require_record(tab.run).metadata.run_id if require_record(tab.run).metadata is not None else None
         seen_analyze: list[AnalyzeRequest[object, object]] = []
         seen_proposals: list[WritebackRequest[object, PaneSummary]] = []
 
@@ -224,7 +218,7 @@ def test_analysis_draft_uses_start_run_identity(
             )
         else:
             service.start_analyze("tab", object(), plots=plots)
-        tab.run.metadata = replace(native.metadata, run_id="later-run")
+        require_record(tab.run).metadata = native.metadata.model_copy(update={'run_id': "later-run"})
         if interactive:
             assert service.finish_plugin("tab")
         else:
@@ -259,16 +253,9 @@ def test_post_analysis_draft_retains_primary_identity(
         tab = native.state.get_tab("tab")
         original_capture = tab.run.parameters
         if source == "load":
-            native.state.update_tab_loaded_result(
-                "tab",
-                tab.run.result,
-                "historical.h5",
-                metadata=native.metadata,
-                parameters=original_capture,
-                storage=tab.run.storage,
-            )
+            native.state.update_tab_loaded_result("tab", replace(tab.run.result, metadata=native.metadata), "historical.h5", parameters=original_capture, storage=tab.run.storage)
         elif source in ("without_metadata", "context_free"):
-            tab.run.metadata = None
+            require_record(tab.run).metadata = None
             if source == "context_free":
                 tab.run.parameters = None
         captured = tab.run.parameters
@@ -291,7 +278,7 @@ def test_post_analysis_draft_retains_primary_identity(
         )
         if save_before_accept:
             # Save is independent of whether Primary has a native identity.
-            tab.run.metadata = native.metadata
+            require_record(tab.run).metadata = native.metadata
             native.save()
         seen_requests: list[PostAnalyzeRequest[object, PaneSummary, object]] = []
         seen_proposals: list[
@@ -328,7 +315,7 @@ def test_post_analysis_draft_retains_primary_identity(
             native.state, runner, native.bus, native.handles, writeback
         )
         # A later live Run id must not replace the Primary draft's identity.
-        tab.run.metadata = replace(native.metadata, run_id="not-primary-source")
+        require_record(tab.run).metadata = native.metadata.model_copy(update={'run_id': "not-primary-source"})
         native.entry.new_point("later-point")
         control.use_point(PointUseRequest("later-point"))
         current = control.read_context()
@@ -336,7 +323,7 @@ def test_post_analysis_draft_retains_primary_identity(
         service.start_post_analyze("tab", object(), plots=Plots(NonPresentingHost()))
         # Terminal delivery must use the operation-start identity and context.
         tab.analysis.writeback_draft = None
-        tab.run.metadata = replace(native.metadata, run_id="terminal-live-run")
+        require_record(tab.run).metadata = native.metadata.model_copy(update={'run_id': "terminal-live-run"})
         tab.run.parameters = current
         assert native.background.quiesce()
         draft = tab.post_analysis.writeback_draft

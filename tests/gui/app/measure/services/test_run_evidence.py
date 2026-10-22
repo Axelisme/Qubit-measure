@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.gui.app.measure._record_support import require_record
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +13,8 @@ import h5py
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import RunSnapshot, SoftwareProvenance, load_run_data
+from zcu_tools.datafile import load_run_data
+from zcu_tools.experiment.metadata import RunSnapshot, SoftwareProvenance
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
@@ -168,17 +170,17 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
     service, _gate, background, handles = make_run_service(state)
     service.start_run(inputs, plots=make_plots())
     background.run_work()
-    assert state.get_tab(tab_id).run.metadata is not None
+    assert require_record(state.get_tab(tab_id).run).metadata is not None
     if provenance_failure:
         capture.side_effect = RuntimeError("provenance failed")
     else:
         adapter.run.side_effect = RuntimeError("acquire failed")
     token = service.start_run(inputs, plots=make_plots())
     assert state.get_tab(tab_id).run.result is None
-    assert state.get_tab(tab_id).run.metadata is None
+    assert require_record(state.get_tab(tab_id).run).metadata is None
     background.run_work()
     assert state.get_tab(tab_id).run.result is None
-    assert state.get_tab(tab_id).run.metadata is None
+    assert require_record(state.get_tab(tab_id).run).metadata is None
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
 
@@ -200,7 +202,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     service, _gate, background, _handles = make_run_service(state)
     service.start_run(inputs, plots=make_plots())
     background.run_work()
-    assert state.get_tab(tab_id).run.metadata is None
+    assert require_record(state.get_tab(tab_id).run).metadata is None
     capture.assert_not_called()
 
 
@@ -250,7 +252,7 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     record = state.get_tab(tab_id).run.result
-    metadata = state.get_tab(tab_id).run.metadata
+    metadata = require_record(state.get_tab(tab_id).run).metadata
     assert isinstance(record, RunRecord)
     assert isinstance(record.cfg, SavingCfg)
     assert record.cfg == cfg
@@ -285,7 +287,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     assert service.cancel_run()
     assert background.last_on_done is not None
     background.last_on_done(acquired)
-    metadata = state.get_tab(tab_id).run.metadata
+    metadata = require_record(state.get_tab(tab_id).run).metadata
     assert metadata is not None and metadata.completion == "complete"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "cancelled"
@@ -322,7 +324,7 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     background.run_work()
     assert flux.events == ["read", "write"]
     assert unused.events == ["read"]
-    metadata = state.get_tab(tab_id).run.metadata
+    metadata = require_record(state.get_tab(tab_id).run).metadata
     assert metadata is not None
     assert metadata.device_snapshot is not None
     assert metadata.device_snapshot["flux"]["value"] == 0.25
@@ -392,7 +394,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         assert isinstance(result, RunRecord)
         assert result.cfg is not None
         assert result.cfg.dev == {"flux_dev": "yoko1"}
-        metadata = state.get_tab("tab").run.metadata
+        metadata = require_record(state.get_tab("tab").run).metadata
         assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
         report = session.save()
         path = next(

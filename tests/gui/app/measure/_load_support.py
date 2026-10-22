@@ -4,12 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
-from zcu_tools.datafile import (
-    RunMetadata,
-    RunSnapshot,
-    SoftwareProvenance,
-    save_run_data,
-)
+from zcu_tools.datafile import save
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import prepare_run_data
 from zcu_tools.experiment.records import RunRecord
 
@@ -27,8 +23,8 @@ def write_native_file(
         spec=replace(core.persistence_spec(), tag=tag),
         comment="history",
     )
-    metadata = replace(historical_metadata(), experiment=tag)
-    save_run_data(path, prepared.payload, metadata, cfg=prepared.cfg)
+    metadata = historical_metadata().model_copy(update={"experiment": tag})
+    save(path, prepared.to_container(metadata))
     return metadata
 
 
@@ -40,7 +36,6 @@ def historical_metadata() -> RunMetadata:
         started_at="2026-10-08T00:00:00+00:00",
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
-        labber_path=None,
         snapshot=RunSnapshot(
             entry_id=UUID("00000000-0000-4000-8000-000000000001"),
             entry_name="historical",

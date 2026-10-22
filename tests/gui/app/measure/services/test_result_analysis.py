@@ -1,5 +1,6 @@
 """Result-bound Primary/Post parameter preparation through TabService and State."""
 
+from tests.gui.app.measure._record_support import require_record
 from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import MagicMock
@@ -69,9 +70,7 @@ def test_default_analysis_params_retain_result_source(
     result = object()
     metadata = historical_metadata()
     retired = (
-        state.update_tab_loaded_result(
-            "tab", result, "native.h5", metadata=metadata, parameters=saved
-        )
+        state.update_tab_loaded_result("tab", replace(result, metadata=metadata), "native.h5", parameters=saved)
         if loaded
         else state.update_tab_result("tab", result, parameters=saved)
     )
@@ -98,7 +97,7 @@ def test_default_analysis_params_retain_result_source(
         assert saved.value("$source_qubit.rate") == 1.0
     if loaded:
         assert state.get_tab("tab").run.source_operation_id is None
-        assert state.get_tab("tab").run.metadata is metadata
+        assert require_record(state.get_tab("tab").run).metadata is metadata
         assert state.get_tab("tab").run.source_path == "native.h5"
 
 

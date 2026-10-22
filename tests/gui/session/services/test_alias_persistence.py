@@ -1,5 +1,6 @@
 """Point-local authored aliases through public storage and session seams."""
 
+from dataclasses import replace
 from collections.abc import Generator
 from pathlib import Path
 

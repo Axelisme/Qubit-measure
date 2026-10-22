@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
@@ -32,7 +32,7 @@ class OldAdapter(DummyAdapter):
         del ctx
         return Form(ReloadCfg, {})
 
-    def restore(self, stored: StoredRun) -> RestoredRun[object]:
+    def restore(self, stored: Container) -> RestoredRun[object]:
         """Reject native Load requests; this reload-only fake has no loader."""
         del stored
         raise NotImplementedError("Reload fake does not load native data")

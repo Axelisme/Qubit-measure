@@ -120,7 +120,7 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
     analysis = adapter.analyze(None)
     evidence = adapter.acquisition_for(previous)
     path = tmp_path / "data.h5"
-    core.save_run(previous, path, metadata=native_metadata(core.persistence_spec().tag))
+    core.save_run(replace(previous, metadata=native_metadata(core.persistence_spec().tag)), path)
     stored = load_run_data(path)
     if cfg_unavailable:
         stored = replace(stored, cfg=replace(stored.cfg, values={"gain": []}))
@@ -189,7 +189,7 @@ def test_unknown_historical_evidence_loads_without_inventing_acquisition(
         completion="unknown",
     )
     try:
-        core.save_run(source, path, metadata=metadata)
+        core.save_run(replace(source, metadata=metadata), path)
         adapter = NotebookAdapter(host=NonPresentingHost())(core)
         loaded = adapter.load(path)
     except ValueError as error:

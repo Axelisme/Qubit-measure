@@ -159,7 +159,7 @@ class TabService:
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
                 acquisition_run_id=(
-                    tab.run.metadata.run_id if tab.run.metadata is not None else None
+                    (None if tab.run.result is None else tab.run.result.metadata).run_id if (None if tab.run.result is None else tab.run.result.metadata) is not None else None
                 ),
             ),
             analysis=AnalysisPaneSnapshot(

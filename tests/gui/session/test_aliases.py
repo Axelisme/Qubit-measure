@@ -1,5 +1,6 @@
 """Authored alias changes and lazy reads through the public table interface."""
 
+from dataclasses import replace
 import pytest
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable

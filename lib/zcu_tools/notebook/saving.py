@@ -107,13 +107,12 @@ class SavedRun(Generic[CfgT, ResultT]):
         )
         self._storage = capture_point_storage(ctx, roles=roles)
         self._point = ctx
-        self._metadata = RunMetadata(
+        metadata = RunMetadata(
             run_id=acquisition.run_id,
             experiment=spec.tag,
             started_at=acquisition.started_at.isoformat(),
             finished_at=acquisition.finished_at.isoformat(),
             completion=acquisition.completion,
-            labber_path=None,
             snapshot=RunSnapshot(
                 entry_id=self._storage.entry_id,
                 entry_name=self._storage.entry_name,
@@ -124,11 +123,19 @@ class SavedRun(Generic[CfgT, ResultT]):
             provenance=deepcopy(acquisition.provenance),
             device_snapshot=deepcopy(acquisition.device_snapshot),
         )
+        self._record = replace(source, metadata=metadata)
         self._figures: dict[str, Figure] = {}
         self._analysis: tuple[AnalysisDocument, ...] = ()
         self._report = SaveReport(acquisition.run_id, ())
         self._acquired = False
         self._acquired_at = acquisition.finished_at.isoformat()
+
+    @property
+    def _metadata(self) -> RunMetadata:
+        metadata = self._record.metadata
+        if metadata is None:
+            raise ValueError("SavedRun requires record metadata")
+        return metadata
 
     @property
     def run_id(self) -> str:
@@ -204,15 +211,10 @@ class SavedRun(Generic[CfgT, ResultT]):
         self._report = save_artifacts(
             artifacts,
             layout=layout,
-            metadata=self._metadata,
+            record=self._record,
             ledger=self._storage.ledger,
             origin="notebook",
         )
-        for item in self._report.outputs:
-            if item.output.format == "labber" and item.status == "saved":
-                self._metadata = replace(
-                    self._metadata, labber_path=str(item.output.path)
-                )
         if any(item.status == "failed" for item in self._report.outputs):
             raise PartialSaveError(self, self._report)
         return self._report

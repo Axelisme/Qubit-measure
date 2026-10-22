@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import pytest
-from zcu_tools.datafile import StoredRun
+from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
@@ -42,7 +42,7 @@ class FileAdapter(OldAdapter):
 
     experiment_tag: ClassVar[str | None] = "test/load"
 
-    def restore(self, stored: StoredRun):
+    def restore(self, stored: Container):
         gain = stored.cfg.values["gain"]
         cfg = None if gain == 2.0 else LoadedCfg()
         return RestoredRun(

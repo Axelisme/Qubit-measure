@@ -1,5 +1,6 @@
 """Native Save RPC reports through the real connection-owned dispatcher."""
 
+from tests.gui.app.measure._record_support import require_record
 import socket
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -9,7 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import SoftwareProvenance, load_run_data
+from zcu_tools.datafile import load_run_data
+from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import SessionEnv
@@ -47,13 +49,7 @@ def native_save_rpc(
     """
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
-        session.state.update_tab_result(
-            "tab",
-            tab.run.result,
-            source_operation_id=101,
-            metadata=session.metadata,
-            parameters=tab.run.parameters,
-        )
+        session.state.update_tab_result("tab", replace(tab.run.result, metadata=session.metadata), source_operation_id=101, parameters=tab.run.parameters)
         declare_panes(session)
         post = tab.post_analysis
         session.state.swap_analysis_pane(
@@ -192,7 +188,7 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
             "analysis parameters unavailable" if analysis_failure else None
         )
         tab = session.state.get_tab("tab")
-        assert tab.run.metadata == stored.metadata
+        assert require_record(tab.run).metadata == stored.metadata
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.post_analysis.result is None
@@ -274,7 +270,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert outcome["analysis_error"] == (
             "analysis parameters unavailable" if analysis_failure else None
         )
-        assert tab.run.metadata == history
+        assert require_record(tab.run).metadata == history
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None
@@ -353,7 +349,7 @@ def test_native_run_rpc_records_mcp_acquired_without_save(
         assert len(events) == 1 and events[0].kind == "acquired"
         assert events[0].origin == "mcp"
         assert isinstance(events[0].payload, AcquiredPayload)
-        metadata = session.state.get_tab("tab").run.metadata
+        metadata = require_record(session.state.get_tab("tab").run).metadata
         assert metadata is not None and events[0].payload.run_id == metadata.run_id
         assert not (session.entry.database_path / "runs").exists()
 
@@ -461,13 +457,7 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
         tab = session.state.get_tab("tab")
         if selection in ("data", "all"):
-            session.state.update_tab_result(
-                "tab",
-                tab.run.result,
-                source_operation_id=102,
-                metadata=session.metadata,
-                parameters=tab.run.parameters,
-            )
+            session.state.update_tab_result("tab", replace(tab.run.result, metadata=session.metadata), source_operation_id=102, parameters=tab.run.parameters)
             params = {
                 "tab_id": "tab",
                 "comment": "must not publish",

@@ -5,17 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from zcu_tools.datafile import (
-    Axis,
-    CfgSnapshot,
-    DataVariable,
-    ExperimentPayload,
-    LabberMetadata,
-    LabberPayload,
-)
+from zcu_tools.datafile import Axis, Container, ContainerAttrs, Variable, LabberMetadata, LabberPayload
+from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.experiment.workflows.export import (
     FluxdepExportOutput,
-    PreparedFluxdepExport,
     load_trace,
     validate_destinations,
     write_outputs,
@@ -45,7 +39,7 @@ class MISTExportReport:
 
 def prepare_export(
     plan: MISTPlan, points: tuple[SavedRecord[MISTPoint], ...]
-) -> PreparedFluxdepExport:
+) -> PreparedRunData:
     """Assemble raw MIST response across flux and gain for offline analysis.
 
     Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
@@ -94,27 +88,22 @@ def prepare_export(
     if not usable:
         raise ValueError("No usable committed MIST acquisition")
     flux_axis = Axis("Flux", plan.flux_unit, fluxes)
-    return PreparedFluxdepExport(
-        ExperimentPayload(
-            variables={
-                DataVariable("signal"): LabberPayload(
-                    ("Signal", "a.u.", signal),
-                    [Axis("Readout Gain", "a.u.", gains), flux_axis],
-                ),
-                DataVariable("success"): LabberPayload(
-                    ("Success", "", success), [flux_axis]
-                ),
+    return PreparedRunData(
+        Container(
+            vars={
+                "signal": Variable(signal, (flux_axis, Axis("Readout Gain", "a.u.", gains)), "a.u."),
+                "success": Variable(success, (flux_axis,), ""),
             },
-            metadata=LabberMetadata(
-                comment="Committed MIST raw gain traces and acquisition success"
-            ),
-            representation="grouped",
+            docs={}, groups={},
+            attrs=ContainerAttrs("3.0", "zcu_lab", "workflow-export", {}),
         ),
         CfgSnapshot(
             values=plan.model_dump(mode="json"),
             cfg_type="MISTPlan",
             schema_version="1.0",
         ),
+        LabberMetadata(comment="Committed MIST raw gain traces and acquisition success"),
+        "independent",
     )
 
 
