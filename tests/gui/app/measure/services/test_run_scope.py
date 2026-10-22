@@ -5,6 +5,26 @@ from zcu_tools.experiment.context import RunContext
 from ._run_support import make_inputs, make_plots, make_run_service, make_state
 
 
+def test_gui_stop_reaches_already_active_descendants() -> None:
+    state, tab_id, adapter = make_state()
+    service, _gate, background, _handles = make_run_service(state)
+    observed: list[bool] = []
+
+    def run(*_args: object, context: RunContext) -> object:
+        with (
+            context.scope.branch("schedule") as schedule,
+            schedule.branch("acquire") as acquire,
+        ):
+            assert service.cancel_run()
+            observed.extend([schedule.cancelled, acquire.cancelled])
+        return object()
+
+    adapter.run.side_effect = run
+    service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
+    background.run_work()
+    assert observed == [True, True]
+
+
 def test_gui_run_scope_matches_status_and_operation_stop_intent() -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
