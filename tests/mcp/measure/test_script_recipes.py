@@ -582,7 +582,7 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         tab = session.open_tab("lookback")
         sweep = tab.read(("sweep",))
         assert {"start", "stop", "n"}.issubset(sweep.fields)
-        assert sweep.value == {"start": 1.0, "stop": 2.0, "n": 51}
+        assert sweep.value == {"kind": "linrange", "start": 1.0, "stop": 2.0, "n": 51}
         module = tab.read(("modules", "readout"))
         assert module.fields
         assert tab.read(("rounds",)).value == 3
