@@ -182,7 +182,11 @@ def _open(driver: ComponentDriver, root: Path, name: str = "flux-list") -> None:
 
 
 def _done(driver: ComponentDriver) -> bool:
-    return driver.observe(object_name="workflow.status").text == "done"
+    return (
+        driver.observe(object_name="workflow.status").text == "done"
+        and driver.observe("Start").visible
+        and driver.observe("Start").enabled
+    )
 
 
 def test_plan_float_list_edit_errors_and_native_lowering(plan_window, tmp_path):
@@ -339,6 +343,7 @@ def test_figure_selector_appears_with_figures_and_hides_after_release(
     assert selector.visible
     assert selector.text == "flux trace"
     driver.enter_text(object_name="form.input.fluxes", value="[]")
+    assert driver.observe(object_name="form.input.fluxes").text == "[]"
     _snapshot(driver, tmp_path, "04-empty-plan")
     driver.click("Start")
     qt_until(lambda: _done(driver), label="finite plot-free replacement run")
