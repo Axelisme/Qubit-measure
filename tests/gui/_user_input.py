@@ -907,6 +907,8 @@ class ComponentDriver:
         if index < 0:
             raise LookupError(f"{object_name!r} has no option {value!r}")
         model = widget.model()
+        if model is None:
+            raise RuntimeError("Combo box has no option model")
         selectable = [
             row
             for row in range(widget.count())
