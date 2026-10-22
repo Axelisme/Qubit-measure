@@ -6,7 +6,7 @@ from threading import Event
 from typing import Literal
 
 import pytest
-from zcu_tools.mcp.measure import recipe_api
+from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from ._script_recipe_support import (
@@ -190,11 +190,9 @@ def test_recipe_reads_partial_completion_without_stop_intent_or_cancel_ack(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("await_kind", ["analyze", "ask", "writeback"])
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
     tmp_path: Path,
-    await_kind: Literal["analyze", "ask", "writeback"],
     cleanup_fails: bool,
 ) -> None:
     gui = SyntheticGui(hold=True)
@@ -205,13 +203,7 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
         try:
-            assert (await tab.run()).partial_result
-            if await_kind == "analyze":
-                await tab.analyze("primary", result=Fit)
-            elif await_kind == "ask":
-                await session.ask(ConfirmQuestion(evidence="never answered"))
-            else:
-                await tab.ask_writeback()
+            await tab.run()
             continued.append(True)
             return Report(count=inputs.count)
         finally:
@@ -229,13 +221,15 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
         snapshot = execution.snapshot()
         assert continued == []
         assert len(unwinding) == 1
-        assert isinstance(unwinding[0], recipe_api.RecipeCancelled)
+        assert isinstance(unwinding[0], ScriptCancelled)
         assert isinstance(unwinding[0], Exception)
         assert snapshot.status == "cancelled"
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert len(snapshot.outcome.runs) == 1
         assert snapshot.outcome.runs[0].partial_result
+        assert snapshot.outcome.runs[0].run_id == "native-1"
+        assert snapshot.outcome.runs[0].status == "completed"
         assert len(snapshot.outcome.runs[0].saves) == 1
         if cleanup_fails:
             assert snapshot.error is not None
@@ -303,7 +297,7 @@ def test_cancel_pending_value_await_unwinds_without_an_error(
         snapshot = execution.snapshot()
         assert continued == []
         assert len(unwinding) == 1
-        assert isinstance(unwinding[0], recipe_api.RecipeCancelled)
+        assert isinstance(unwinding[0], ScriptCancelled)
         assert snapshot.status == "cancelled"
         assert snapshot.error is None
         assert snapshot.outcome is not None

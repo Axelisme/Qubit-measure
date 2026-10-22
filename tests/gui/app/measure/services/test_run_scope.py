@@ -35,10 +35,12 @@ def test_gui_run_scope_matches_status_and_operation_stop_intent() -> None:
     assert context.scope.active_path == "run"
     assert not context.scope.cancelled
     assert service.status_scope(token) == ""
+    assert service.live_paths_scope(token) == []
     assert handles.poll(token) is not None
 
     token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
     assert service.status_scope(token) == "run"
+    assert service.live_paths_scope(token) == ["run"]
     assert service.cancel_run()
     background.run_work()
     context = adapter.run.call_args.kwargs["context"]
