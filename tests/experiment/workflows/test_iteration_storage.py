@@ -27,7 +27,7 @@ def test_allocated_directory_and_author_files_survive_pause(tmp_path: Path) -> N
             attempts.append(1)
             if len(attempts) == 1:
                 entered.set()
-                assert ctx.stop_signal.event.wait(10), "Pause stops the operation"
+                assert ctx.scope.stop.event.wait(10), "Pause stops the operation"
             return 42
 
         result = completed(await env.call(operation))

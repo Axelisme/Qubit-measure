@@ -15,8 +15,9 @@ from uuid import uuid4
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.experiment.script_host import ScriptStatus
-from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.recipe_api import (
     RecipeCancelled,
@@ -83,7 +84,7 @@ class ScriptRecipeSnapshot:
     cancel_requested: bool = False
     missing: tuple[str, ...] = ()
     details: tuple[RecipeRunDetail, ...] = ()
-    active_path: str = "script"
+    active_path: str = "recipe"
 
 
 class ScriptRecipeExecution:
@@ -125,7 +126,7 @@ class ScriptRecipeExecution:
                 details=self._host.runtime.details() if self._host is not None else (),
                 active_path=self._host.scheduler.active_path
                 if self._host is not None
-                else "script",
+                else "recipe",
             )
 
     def wait(self, timeout: float) -> ToolReply:
@@ -214,11 +215,11 @@ class ScriptRecipeExecution:
         """Read local scopes plus the active GUI Run tail, without driving author code."""
         with self._condition:
             host = self._host
-        return "script" if host is None else host.runtime.active_path
+        return "recipe" if host is None else host.runtime.active_path
 
     def cancel(
         self,
-        scope: str = "script",
+        scope: str = "recipe",
         *,
         expected: int | None = None,
         op: int | None = None,
@@ -236,19 +237,19 @@ class ScriptRecipeExecution:
             host = self._host
             terminal = self._progress.status in SCRIPT_TERMINAL
             if terminal or host is None:
-                accepted = not terminal and label == "script" and sequence is None
+                accepted = not terminal and label == "recipe" and sequence is None
                 reason = (
                     "scope cancellation requested"
                     if accepted
                     else "sequence mismatch"
-                    if label == "script" and sequence is not None
+                    if label == "recipe" and sequence is not None
                     else "scope not active"
                     if op is not None
                     else "no run in progress"
                     if label in {"run", "schedule", "acquire"}
                     else "scope not active"
                 )
-                result = CancelResult(accepted, reason, "script")
+                result = CancelResult(accepted, reason, "recipe")
                 if accepted:
                     self._cancelled.set()
                     self._progress = replace(self._progress, cancel_requested=True)
@@ -257,7 +258,7 @@ class ScriptRecipeExecution:
         if result is None:
             assert host is not None
             result = host.runtime.cancel(scope, expected=expected, op=op)
-            if result.cancelled and label == "script":
+            if result.cancelled and label == "recipe":
                 with self._condition:
                     self._cancelled.set()
                     self._progress = replace(self._progress, cancel_requested=True)
@@ -308,7 +309,7 @@ class ScriptRecipeExecution:
         error: Exception | None = None
         try:
             inputs = self._definition.inputs.model_validate(self._arguments)
-            host = self._host_factory(self._tools, self._changed)
+            host = self._host_factory(self._tools, self._changed, self._definition.name)
             with self._condition:
                 self._host = host
             if self._cancelled.is_set():

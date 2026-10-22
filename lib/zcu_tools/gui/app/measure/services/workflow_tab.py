@@ -11,7 +11,8 @@ from zcu_tools.core.script_protocol import Answer
 from zcu_tools.datafile import RunSnapshot
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.stop_signal import CancelResult, StopSignal
+from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.experiment.workflows import (
     Actor,
     CommittedRecord,
@@ -286,7 +287,7 @@ class WorkflowTab[C]:
             session.soccfg,
             plots,
             self._services.device.get_connected_devices(),
-            StopSignal(),
+            Scope("run"),
         )
         identity = RunIdentity(
             run_id,

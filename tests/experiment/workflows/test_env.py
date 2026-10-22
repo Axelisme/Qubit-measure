@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.workflows import (
     Engine,
@@ -53,7 +54,7 @@ class PauseOnCompletionHost(ScriptHost):
 def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call(
     rig: Rig,
 ) -> None:
-    host = PauseOnCompletionHost()
+    host = PauseOnCompletionHost(Scope("workflow", name="test"))
     at_boundary = Event()
     facts: list[OperationFacts] = []
     calls: list[CallContext] = []
@@ -83,7 +84,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
 
     def acquire(ctx: CallContext) -> int:
         calls.append(ctx)
-        assert not ctx.stop_signal.is_set()
+        assert not ctx.scope.stop.is_set()
         return len(calls)
 
     async def script() -> None:
@@ -120,7 +121,7 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
     assert [ctx.epoch for ctx in calls] == [0, 1]
     assert [fact.outcome for fact in facts] == ["completed", "completed"]
     assert [(fact.iteration, fact.attempt) for fact in facts] == [(1, 1), (1, 2)]
-    assert all(not ctx.stop_signal.is_set() for ctx in calls)
+    assert all(not ctx.scope.stop.is_set() for ctx in calls)
 
 
 def test_original_start_context_and_injected_handles_are_shared(rig: Rig) -> None:

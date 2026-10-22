@@ -12,11 +12,11 @@ from typing import Literal
 
 from pydantic import BaseModel, TypeAdapter
 
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
 from zcu_tools.experiment.stop_signal import (
     CancelResult,
     StopSignal,
-    parse_cancel_scope,
 )
 from zcu_tools.format_version import YamlValue
 from zcu_tools.mcp.core.images import validated_png
@@ -191,7 +191,7 @@ class RecipeRuntime:
 
     def cancel(
         self,
-        scope: str = "script",
+        scope: str = "recipe",
         *,
         expected: int | None = None,
         op: int | None = None,
@@ -601,7 +601,7 @@ class RecipeRuntime:
         stopped = False
         while True:
             began = time.monotonic()
-            if ctx.stop_signal.is_set() and not stopped:
+            if ctx.scope.stop.is_set() and not stopped:
                 self._tools.gui.read_internal(
                     "operation.cancel", {}, operation_handle=op
                 )
@@ -625,7 +625,7 @@ class RecipeRuntime:
             if stopped:
                 time.sleep(delay)
             else:
-                ctx.stop_signal.event.wait(delay)
+                ctx.scope.stop.event.wait(delay)
 
     def _detail_index(self, tab: str) -> int:
         return next(
@@ -635,7 +635,7 @@ class RecipeRuntime:
         )
 
     def _acquire(self, tab: str, index: int, ctx: CallContext) -> RunResult:
-        self.host.control(lambda: self._retain_run(ctx.stop_signal))
+        self.host.control(lambda: self._retain_run(ctx.scope.stop))
         conditions = field_observation(
             self._tools.send_gui_rpc(
                 "tab.read_recipe_field", {"tab_id": tab, "path": []}
@@ -647,7 +647,7 @@ class RecipeRuntime:
             self._tools.send_gui_rpc("tab.run_start", {"tab_id": tab})
         )
         self._run_ops[tab] = started.handle
-        self.host.control(lambda: self._retain_run(ctx.stop_signal, started.handle))
+        self.host.control(lambda: self._retain_run(ctx.scope.stop, started.handle))
         with self._lock:
             self._details[index] = replace(self._details[index], op=started.handle)
         self._analysis_ops.pop((tab, "primary"), None)
@@ -673,7 +673,7 @@ class RecipeRuntime:
     def _analyze(
         self, tab: str, stage: str, ctx: CallContext, *, interactive: bool
     ) -> object:
-        if ctx.stop_signal.is_set():
+        if ctx.scope.stop.is_set():
             raise RecipeCancelled("Script cancelled before analysis")
         run = self._run_ops[tab]
         primary = self._analysis_ops[(tab, "primary")] if stage == "post" else None

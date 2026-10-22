@@ -176,7 +176,7 @@ def test_stop_delivers_none_and_cooperative_stopped_calls_then_runs_finally(
             received.append(await env.ask(Choose(point=0)))
 
             def operation(ctx: CallContext) -> int:
-                stops.append(ctx.stop_signal.is_set())
+                stops.append(ctx.scope.stop.is_set())
                 return 0
 
             result = completed(await env.call(operation))

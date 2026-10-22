@@ -120,7 +120,7 @@ def test_resume_keeps_commits_progress_and_author_locals(rig: Rig) -> None:
             calls.append(1)
             if len(calls) == 1:
                 entered.set()
-                assert ctx.stop_signal.event.wait(10), "Pause reaches active operation"
+                assert ctx.scope.stop.event.wait(10), "Pause reaches active operation"
             return 7
 
         value = completed(await env.call(operation)).value
@@ -160,7 +160,7 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
         def operation(ctx: CallContext) -> int:
             entered.set()
             assert release.wait(10), "Controller releases the operation in finally"
-            stops.append(ctx.stop_signal.is_set())
+            stops.append(ctx.scope.stop.is_set())
             return 4
 
         result = completed(await env.call(operation))

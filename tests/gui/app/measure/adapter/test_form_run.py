@@ -3,7 +3,7 @@
 import pytest
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -57,7 +57,7 @@ def test_base_run_preserves_form_output_identity() -> None:
     req = RunRequest(soc=None, soccfg=None, cfg_context=None)
     plots = Plots(NonPresentingHost())
     context = RunContext(
-        soc=None, soccfg=None, plots=plots, devices={}, cancel_signal=StopSignal()
+        soc=None, soccfg=None, plots=plots, devices={}, scope=Scope("run")
     )
     try:
         try:

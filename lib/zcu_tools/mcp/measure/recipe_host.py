@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.script_host import ScriptHost
 from zcu_tools.mcp.measure.recipe_api import RecipeSession
 from zcu_tools.mcp.measure.recipe_runtime import RecipeRuntime
@@ -25,18 +26,21 @@ class RecipeHost:
     runtime: RecipeRuntime
 
 
-type RecipeHostFactory = Callable[[MeasureToolContext, Callable[[], None]], RecipeHost]
-"""Bind one execution on its worker; the second argument notifies progress changes."""
+type RecipeHostFactory = Callable[
+    [MeasureToolContext, Callable[[], None], str], RecipeHost
+]
+"""Bind tools, progress callback and the explicit recipe catalog name on its worker."""
 
 
 def create_recipe_host(
-    tools: MeasureToolContext, on_change: Callable[[], None]
+    tools: MeasureToolContext, on_change: Callable[[], None], name: str
 ) -> RecipeHost:
     """Bind the current GUI once and compose its runtime with the production host.
 
+    name is the registered recipe catalog name, used for its root scope.
     This can perform the initial connection. Source/transport errors propagate;
     the bound runtime never reconnects or retries an uncertain mutation.
     """
-    scheduler = ScriptHost(on_change=on_change)
+    scheduler = ScriptHost(Scope("recipe", name=name), on_change=on_change)
     runtime = RecipeRuntime(tools, scheduler, on_change=on_change)
     return RecipeHost(scheduler, RecipeSession(runtime), runtime)

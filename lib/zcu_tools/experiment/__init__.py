@@ -54,8 +54,11 @@ if TYPE_CHECKING:
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
+    from .scope import Scope, ScriptCancelled
 
 __all__ = [
+    "Scope",
+    "ScriptCancelled",
     "config",
     "AcquisitionEvidence",
     "capture_software_provenance",
@@ -102,6 +105,8 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "Scope": ".scope",
+    "ScriptCancelled": ".scope",
     "config": ".config",
     "AcquisitionEvidence": ".acquisition",
     "capture_software_provenance": ".acquisition",

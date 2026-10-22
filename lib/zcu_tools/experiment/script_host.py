@@ -21,7 +21,8 @@ from pydantic import BaseModel
 
 from zcu_tools.core.script_protocol import Answer, Question
 
-from .stop_signal import CancelResult, StopSignal, parse_cancel_scope
+from .scope import Scope, parse_cancel_scope
+from .stop_signal import CancelResult
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,13 @@ type CancelScope = str
 class CallContext:
     """One blocking invocation's cooperative controls.
 
-    stop_signal is this operation's child scope. It may be born stopped; fn must
+    scope is this operation\'s explicit child boundary. It may be born stopped; fn must
     still start and return its partial result. epoch identifies the invocation
     attempt, for workflow owners that discard interrupted work. Do not clear or
     release this token; the host owns its lifetime.
     """
 
-    stop_signal: StopSignal
+    scope: Scope
     epoch: int
 
 
@@ -79,6 +80,8 @@ class PendingQuestion:
 class ScriptHost:
     """Run one authored coroutine on a caller-owned worker, without task cancel.
 
+    scope is the caller-created workflow or recipe root with its catalog name.
+    The host creates and releases iteration/operation children under that root.
     on_change runs on the worker after pending-question/status changes; it must
     not block or reenter run(). It may notify an owner's condition/event.
     Constructing the host starts neither a thread nor an event loop. One host
@@ -87,11 +90,13 @@ class ScriptHost:
     remain in error; script cancellation takes precedence in terminal status.
     """
 
-    def __init__(self, *, on_change: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self, scope: Scope, *, on_change: Callable[[], None] | None = None
+    ) -> None:
         self._on_change = on_change
-        self._root = StopSignal(label="script")
-        self._iteration = self._root.child(label="iteration")
-        self._active: StopSignal | None = None
+        self._root = scope
+        self._iteration = self._root.branch("iteration")
+        self._active: Scope | None = None
         self._epoch = 0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._owner: int | None = None
@@ -152,7 +157,7 @@ class ScriptHost:
                 with self._lock:
                     self._loop = runner.get_loop()
                     self._gate = asyncio.Event()
-                    if not self._paused or self._root.is_set():
+                    if not self._paused or self._root.cancelled:
                         self._gate.set()
                 return runner.run(self._execute(script))
         except BaseException as error:
@@ -164,7 +169,7 @@ class ScriptHost:
                 self._loop = None
                 self._status = (
                     "cancelled"
-                    if self._root.is_set()
+                    if self._root.cancelled
                     else "failed"
                     if self._error is not None
                     else "completed"
@@ -185,7 +190,7 @@ class ScriptHost:
         """
         loop = self._require_loop()
         await self.wait_until_resumed()
-        token = self._iteration.child(label="operation")
+        token = self._iteration.branch("operation")
         self._active = token
         context = CallContext(token, self._epoch)
 
@@ -193,7 +198,7 @@ class ScriptHost:
             value = fn(context)
             with self._lock:
                 return CallResult(
-                    value, context.epoch, token.partial_result, token.is_set()
+                    value, context.epoch, token.stop.partial_result, token.cancelled
                 )
 
         try:
@@ -210,7 +215,7 @@ class ScriptHost:
         authorizes writes. Nested/concurrent asks raise RuntimeError.
         """
         loop = self._require_loop()
-        if self._root.is_set():
+        if self._root.cancelled:
             return None
         if self._pending is not None:
             raise RuntimeError("A question is already pending")
@@ -267,7 +272,7 @@ class ScriptHost:
         """
         await self.wait_until_resumed()
         self._iteration.release()
-        self._iteration = self._root.child(label="iteration")
+        self._iteration = self._root.branch("iteration")
 
     async def wait_until_resumed(self) -> None:
         """Wait on the worker pause gate; script cancellation also opens it.
@@ -293,8 +298,8 @@ class ScriptHost:
                 self._paused = True
                 self._epoch += 1
                 if self._active is not None:
-                    self._active.set()
-                if self._gate is not None and not self._root.is_set():
+                    self._active.stop.set()
+                if self._gate is not None and not self._root.cancelled:
                     self._gate.clear()
 
         self._command(apply, allow_idle=True)
@@ -310,23 +315,25 @@ class ScriptHost:
         self._command(apply, allow_idle=True)
 
     def cancel(
-        self, scope: str = "script", *, expected: int | None = None
+        self, scope: str | None = None, *, expected: int | None = None
     ) -> CancelResult:
         """Match and stop a live scope on the loop, acknowledging without drain.
 
-        scope is a label or label#N; expected optionally guards its birth number.
-        run aliases the current operation. A successful script request also opens
+        scope is a kind, kind#N, operation:name or exact live leaf path.
+        None selects the root kind; expected optionally guards its birth number.
+        run aliases the current operation. A successful root request also opens
         the gate and releases Ask with None. Other targets leave parents running.
         Invalid syntax raises ValueError; inactive/stale targets return a refusal.
         Before run, script stop is retained; terminal hosts refuse further stops.
         """
-        label, _sequence = parse_cancel_scope(scope, expected)
+        selector = self._root.kind if scope is None else scope
+        label, _sequence = parse_cancel_scope(selector, expected)
 
         def stop() -> CancelResult:
             if self._done.is_set():
                 return CancelResult(False, "scope not active", self.active_path)
-            result = self._root.cancel(scope, expected=expected)
-            if result.cancelled and label == "script":
+            result = self._root.cancel(selector, expected=expected)
+            if result.cancelled and label == self._root.kind:
                 if self._gate is not None:
                     self._gate.set()
                 if self._answer is not None and not self._answer.done():

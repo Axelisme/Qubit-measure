@@ -13,8 +13,9 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.device import BaseDeviceInfo
+from zcu_tools.experiment.scope import Scope, parse_cancel_scope
 from zcu_tools.experiment.script_host import PendingQuestion, ScriptHost
-from zcu_tools.experiment.stop_signal import CancelResult, parse_cancel_scope
+from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.progress_bar import use_pbar_factory
 
 from .artifacts import RecordStarted, RunArtifacts
@@ -79,7 +80,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._definition = definition
         self._ports = ports
         self._lock = lock
-        self._host = ScriptHost()
+        self._host = ScriptHost(Scope("workflow", name=definition.name))
         self._displays = Displays(ports.progress)
         self._lifecycle: Lifecycle = "running"
         self._reason: str | None = None
@@ -356,7 +357,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
 
         def apply() -> CancelResult:
             result = self._host.cancel(scope, expected=expected)
-            if result.cancelled and label == "script":
+            if result.cancelled and label == "workflow":
                 self.stop()
             return result
 

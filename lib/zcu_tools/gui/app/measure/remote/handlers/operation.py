@@ -77,7 +77,7 @@ def h_operation_cancel_scope(
     operation_id = params["operation_id"]
     if not isinstance(operation_id, int) or isinstance(operation_id, bool):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "operation_id must be an integer")
-    scope, expected = cancel_scope_arguments(params)
+    scope, expected = cancel_scope_arguments(params, default="run")
     return asdict(
         adapter.run_analyze_control.cancel_scope(operation_id, scope, expected=expected)
     )

@@ -48,9 +48,9 @@ class RecordingCore:
         if self.fail_run:
             raise ValueError("Run failed after creating a diagnostic figure")
         if self.signal_outcome == "stopped":
-            context.cancel_signal.set()
+            context.scope.stop.set()
         elif self.signal_outcome is not None:
-            context.cancel_signal.set_error(
+            context.scope.stop.set_error(
                 self.signal_outcome, "Acquisition failed", OSError("Device unavailable")
             )
         return result

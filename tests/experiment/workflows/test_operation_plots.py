@@ -95,7 +95,7 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
         context.plots.liveplot_1d("measurement", "Delay", "Signal")
         if len(attempts) == 1:
             entered.set()
-            assert context.cancel_signal.event.wait(10), "Pause must stop acquisition"
+            assert context.scope.stop.event.wait(10), "Pause must stop acquisition"
             cfg.value = -1
             return -1
         return cfg.value
@@ -147,7 +147,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
         if outcome == "raised":
             raise ValueError("core failed")
         if outcome == "failed":
-            context.cancel_signal.set_error(
+            context.scope.stop.set_error(
                 "failed", "acquire failed", OSError("acquire failed")
             )
         return 3

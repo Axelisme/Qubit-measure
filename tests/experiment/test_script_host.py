@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
-import weakref
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, get_ident
 from typing import TYPE_CHECKING
@@ -13,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 
 if TYPE_CHECKING:
@@ -85,56 +85,13 @@ def test_child_error_stops_only_its_scope_and_preserves_first_error() -> None:
         unaffected.raise_if_error()
 
 
-def test_scope_labels_number_each_label_and_project_the_active_path() -> None:
-    root = StopSignal()
-    assert getattr(root, "label", None) == "operation"
-    script = StopSignal(label="script")
-    iteration = script.child(label="iteration")
-    first = iteration.child(label="operation")
-    schedule = first.child(label="schedule")
-    acquire = schedule.child(label="acquire")
-    assert script.active_path == ("script/iteration#1/operation#1/schedule#1/acquire#1")
-    assert acquire.sequence == 1
-    acquire.release()
-    assert script.active_path == "script/iteration#1/operation#1/schedule#1"
-    assert schedule.child(label="acquire").sequence == 2
-    assert iteration.child(label="run").sequence == 1
-    assert iteration.child().sequence == 2
-
-
-def test_active_child_restores_live_siblings_without_retaining_released_scopes() -> (
-    None
-):
-    root = StopSignal()
-    first = root.child()
-    assert getattr(root, "active_child", None) is first
-    middle = root.child()
-    newest = root.child()
-    middle.release()
-    assert root.active_child is newest
-    newest.release()
-    assert root.active_child is first
-    first.release()
-    assert root.active_child is None
-    assert root.active_path == "operation"
-    for _ in range(1000):
-        child = root.child()
-        reference = weakref.ref(child)
-        child.release()
-        del child
-        assert reference() is None, "Completed scopes must not accumulate in the tree"
-    assert root.active_child is None
-    assert root.child().sequence == 1004
-
-
 def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> None:
     root = StopSignal()
-    assert getattr(root, "label", None) == "operation"
-    iteration = root.child(label="iteration")
-    operation = iteration.child(label="operation")
-    schedule = operation.child(label="schedule")
-    acquire = schedule.child(label="acquire")
-    later = schedule.child(label="acquire")
+    iteration = root.child(boundary=False)
+    operation = iteration.child()
+    schedule = operation.child(boundary=False)
+    acquire = schedule.child(boundary=False)
+    later = schedule.child(boundary=False)
     cause = OSError("acquire disconnected")
     acquire.set_error("failed", "first failure", cause)
     first = acquire.error
@@ -154,7 +111,7 @@ def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> N
     operation.release()
     assert iteration.error is None
     assert not iteration.is_set()
-    next_operation = iteration.child(label="operation")
+    next_operation = iteration.child()
     assert next_operation.error is None
     assert not next_operation.is_set()
 
@@ -163,8 +120,8 @@ def test_release_delivers_partial_without_stopping_parent_or_next_operation() ->
     iteration = StopSignal()
     operation = iteration.child()
     assert getattr(operation, "partial_result", None) is False
-    schedule = operation.child(label="schedule")
-    acquire = schedule.child(label="acquire")
+    schedule = operation.child(boundary=False)
+    acquire = schedule.child(boundary=False)
     acquire.set()
     assert not schedule.partial_result
     acquire.release()
@@ -179,11 +136,11 @@ def test_release_delivers_partial_without_stopping_parent_or_next_operation() ->
 
 
 def test_host_labels_calls_and_replaces_iteration_at_commit() -> None:
-    host = host_module().ScriptHost()
+    host = host_module().ScriptHost(Scope("workflow", name="test"))
     observed: list[str] = []
 
     def observe(ctx) -> None:
-        assert getattr(ctx.stop_signal, "label", None) == "operation"
+        assert ctx.scope.kind == "operation"
         observed.append(host.active_path)
 
     async def script() -> None:
@@ -194,16 +151,16 @@ def test_host_labels_calls_and_replaces_iteration_at_commit() -> None:
 
     host.run(script())
     assert observed == [
-        "script/iteration#1/operation#1",
-        "script/iteration#1/operation#2",
-        "script/iteration#2/operation#1",
+        "workflow:test/iteration#1/operation#1",
+        "workflow:test/iteration#1/operation#2",
+        "workflow:test/iteration#2/operation#1",
     ]
-    assert host.active_path == "script"
+    assert host.active_path == "workflow:test"
 
 
 def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
     module = host_module()
-    host = module.ScriptHost()
+    host = module.ScriptHost(Scope("workflow", name="test"))
     author_threads: list[int] = []
     executor_threads: list[int] = []
     worker = get_ident()
@@ -224,25 +181,25 @@ def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
     assert host.status == "completed"
 
 
-@pytest.mark.parametrize("scope", ["script", "run"])
+@pytest.mark.parametrize("scope", ["workflow", "run"])
 def test_cooperative_cancel_never_cancels_author_and_starts_later_calls(
     scope: str,
 ) -> None:
     module = host_module()
-    host = module.ScriptHost()
+    host = module.ScriptHost(Scope("workflow", name="test"))
     entered = Event()
     calls: list[bool] = []
     finished: list[int] = []
 
     def operation(ctx) -> bool:
         entered.set()
-        assert ctx.stop_signal.event.wait(3), "cancel did not reach active operation"
-        return ctx.stop_signal.is_set()
+        assert ctx.scope.stop.event.wait(3), "cancel did not reach active operation"
+        return ctx.scope.stop.is_set()
 
     async def script() -> str:
         try:
             calls.append((await host.call(operation)).result)
-            calls.append((await host.call(lambda ctx: ctx.stop_signal.is_set())).result)
+            calls.append((await host.call(lambda ctx: ctx.scope.stop.is_set())).result)
             return "author report"
         except asyncio.CancelledError:
             pytest.fail("The host cancelled the author task")
@@ -258,18 +215,18 @@ def test_cooperative_cancel_never_cancels_author_and_starts_later_calls(
             assert entered.wait(3)
             host.cancel(scope=scope)
         finally:
-            host.cancel(scope="script") if not entered.is_set() else None
+            host.cancel(scope="workflow") if not entered.is_set() else None
         report, worker_id = future.result(timeout=3)
     assert report == "author report"
-    assert calls == [True, scope == "script"]
+    assert calls == [True, scope == "workflow"]
     assert finished == [worker_id]
-    assert host.status == ("cancelled" if scope == "script" else "completed")
+    assert host.status == ("cancelled" if scope == "workflow" else "completed")
 
 
 def test_question_request_ids_reject_invalid_duplicate_and_late_answers() -> None:
     module = host_module()
     changed = Event()
-    host = module.ScriptHost(on_change=changed.set)
+    host = module.ScriptHost(Scope("workflow", name="test"), on_change=changed.set)
 
     async def script() -> Approval | None:
         return await host.ask(Confirm(evidence="fit"))
@@ -296,7 +253,7 @@ def test_question_request_ids_reject_invalid_duplicate_and_late_answers() -> Non
 def test_close_drains_question_and_preserves_cancelled_cleanup_error() -> None:
     module = host_module()
     changed = Event()
-    host = module.ScriptHost(on_change=changed.set)
+    host = module.ScriptHost(Scope("workflow", name="test"), on_change=changed.set)
     cleaned = Event()
 
     async def script() -> None:
@@ -319,14 +276,14 @@ def test_close_drains_question_and_preserves_cancelled_cleanup_error() -> None:
 
 def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() -> None:
     module = host_module()
-    host = module.ScriptHost()
+    host = module.ScriptHost(Scope("workflow", name="test"))
     entered = Event()
     delivered = Event()
     attempts: list[CallResult[int | bool]] = []
 
     def blocking(ctx) -> int:
         entered.set()
-        assert ctx.stop_signal.event.wait(3)
+        assert ctx.scope.stop.event.wait(3)
         return 11
 
     async def script() -> int:
@@ -334,7 +291,7 @@ def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() ->
         attempts.append(first)
         delivered.set()
         await host.commit()
-        second = await host.call(lambda ctx: ctx.stop_signal.is_set())
+        second = await host.call(lambda ctx: ctx.scope.stop.is_set())
         attempts.append(second)
         return second.epoch
 
@@ -361,7 +318,7 @@ def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() ->
 def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> None:
     module = host_module()
     changed = Event()
-    host = module.ScriptHost(on_change=changed.set)
+    host = module.ScriptHost(Scope("workflow", name="test"), on_change=changed.set)
     completions: list[CallResult[int]] = []
 
     async def script() -> None:
@@ -392,7 +349,7 @@ def test_public_control_serializes_on_worker_returns_value_and_transports_errors
 ):
     module = host_module()
     changed = Event()
-    host = module.ScriptHost(on_change=changed.set)
+    host = module.ScriptHost(Scope("workflow", name="test"), on_change=changed.set)
     worker_ids: list[int] = []
 
     class ControlFailure(Exception):

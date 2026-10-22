@@ -104,7 +104,7 @@ def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
         def fail(_step: object) -> None:
             raise cause
 
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             schedule.batch({"acquire": fail})
         return 99
 
@@ -147,8 +147,8 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         acquire_decimated = acquire
 
     def operation(ctx: CallContext) -> int:
-        with Schedule(Cfg(), SignalBuffer(1), stop=ctx.stop_signal) as schedule:
-            assert schedule.stop is not ctx.stop_signal, "Schedule must own a child"
+        with Schedule(Cfg(), SignalBuffer(1), scope=ctx.scope) as schedule:
+            assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
                 schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
                     Program(),
@@ -157,8 +157,8 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
                 )
             else:
                 schedule.set_stop()
-            assert not ctx.stop_signal.is_set()
-            assert ctx.stop_signal.error is None
+            assert not ctx.scope.stop.is_set()
+            assert ctx.scope.stop.error is None
         return 99
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -167,8 +167,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
             await env.call(
                 lambda ctx: (
                     0
-                    if ctx.stop_signal.partial_result
-                    or ctx.stop_signal.error is not None
+                    if ctx.scope.stop.partial_result or ctx.scope.stop.error is not None
                     else 7
                 )
             )
@@ -239,7 +238,7 @@ def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
 
 def test_schedule_interrupt_returns_partial_not_acquire_failure(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
-        with Schedule(Cfg(), stop=ctx.stop_signal):
+        with Schedule(Cfg(), scope=ctx.scope):
             raise KeyboardInterrupt
         return 7
 
@@ -258,13 +257,13 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         def first(ctx: CallContext) -> int:
             entered.set()
-            assert ctx.stop_signal.event.wait(10), "Stop reaches active operation"
+            assert ctx.scope.stop.event.wait(10), "Stop reaches active operation"
             return 7
 
         outcomes.append(completed(await env.call(first)))
 
         def later(ctx: CallContext) -> int:
-            stops.append(ctx.stop_signal.is_set())
+            stops.append(ctx.scope.stop.is_set())
             return 0
 
         outcomes.append(completed(await env.call(later)))
@@ -390,7 +389,7 @@ def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions
         if len(requests) == 1:
             entered.set()
             # The controller pauses only after this attempt has announced entry.
-            assert context.cancel_signal.event.wait(30), "Pause must stop acquisition"
+            assert context.scope.stop.event.wait(30), "Pause must stop acquisition"
         return value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -401,7 +400,7 @@ def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions
         assert not outcome.partial_result
         delivered.append(outcome.value.result)
         # Before commit, a later operation must not inherit Pause's stop bit.
-        assert not completed(await env.call(lambda ctx: ctx.stop_signal.is_set())).value
+        assert not completed(await env.call(lambda ctx: ctx.scope.stop.is_set())).value
         latest = tun.current.value
         assert tun.current.value == latest
         await env.commit(Point(value=latest), directory)
@@ -438,8 +437,8 @@ def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions
     assert final.lifecycle == "done", final.reason
     assert delivered == [1]
     assert requests == [Cfg(value=1), Cfg(value=1)]
-    assert contexts[0].cancel_signal.is_set()
-    assert not contexts[1].cancel_signal.is_set()
+    assert contexts[0].scope.stop.is_set()
+    assert not contexts[1].scope.stop.is_set()
     assert_paused_acquisition_records(rig.paths.metadata_root)
 
 
@@ -472,7 +471,7 @@ def test_file_saved_before_pause_is_retained_and_author_continues(rig: Rig) -> N
             calls.append(1)
             if len(calls) == 1:
                 entered.set()
-                assert ctx.stop_signal.event.wait(10), "Pause stops operation"
+                assert ctx.scope.stop.event.wait(10), "Pause stops operation"
             return 7
 
         await env.call(acquire)
@@ -518,7 +517,7 @@ def test_author_failure_retains_files_without_committing(
 def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((3,))
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             for _value, step in schedule.scan("sample", (0, 1, 2)):
                 step.set_data(np.complex128(2))
                 break
@@ -567,7 +566,7 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             builder = schedule.prog_builder(
                 "soc", "soccfg", cfg=ProgramV2Cfg(), program_cls=Program
             )
@@ -615,7 +614,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, stop=ctx.stop_signal) as schedule:
+        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
             builder = schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg())
             if mode == "integrated":
                 builder.run_program(Program(), raw2signal_fn=lambda raw: raw)
@@ -655,7 +654,7 @@ def test_active_tunables_journal_failure_stops_operation_and_retains_original_ca
         finally:
             journal.rmdir()
             journal.write_bytes(contents)
-        stopped.append(ctx.stop_signal.is_set())
+        stopped.append(ctx.scope.stop.is_set())
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:

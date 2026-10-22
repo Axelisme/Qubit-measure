@@ -8,7 +8,7 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any
 
-from zcu_tools.experiment.stop_signal import parse_cancel_scope
+from zcu_tools.experiment.scope import parse_cancel_scope
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.measure.execution_reply import (
     ReplyDetail,
@@ -241,7 +241,11 @@ def cancel(
         execution = ctx.session.recipes.for_op(op) or ctx.session.executions.for_op(op)
     if execution is not None:
         if isinstance(execution, ScriptRecipeExecution):
-            reply = execution.cancel(scope=scope, expected=expected, op=target_op)
+            reply = execution.cancel(
+                scope=scope if "scope" in arguments else "recipe",
+                expected=expected,
+                op=target_op,
+            )
         elif label != "script" or sequence is not None:
             raise ValueError("scoped cancellation requires a recipe or workflow")
         else:

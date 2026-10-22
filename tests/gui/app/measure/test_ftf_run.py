@@ -65,7 +65,7 @@ class FTFAcquisitionAdapter(SavingAdapter):
             context.soccfg, ProgramV2Cfg(reps=2), modules=modules, sweep=[("point", 3)]
         )
         acquired = program.acquire(
-            context.soc, progress=False, cancel_flag=context.cancel_signal
+            context.soc, progress=False, cancel_flag=context.scope.stop
         )
         assert acquired is not None
         iq = acquired[0][0]

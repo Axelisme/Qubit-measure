@@ -19,6 +19,7 @@ import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from typing_extensions import TypeVar
 
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
 from zcu_tools.experiment.v2.runtime.outcome import (
@@ -140,6 +141,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
     ScheduleStep and ProgramBuilder use the owner-aware cooperation methods to
     access buffers and record outcomes. Schedule alone owns scope validation,
     local-buffer registration, stop transitions and failed-attempt retry reset.
+    scope is the explicit parent. Entry attaches one schedule child, optionally
+    labeled by name; exit releases it. Acquisition attaches its own child under
+    that schedule. Buffer cfg/environment behavior is independent of scope names.
     """
 
     def __init__(
@@ -147,7 +151,8 @@ class Schedule(Generic[T_Cfg, T_Env]):
         init_cfg: T_Cfg,
         *buffers: BufferProtocol,
         env: T_Env | None = None,
-        stop: StopSignal,
+        scope: Scope,
+        name: str | None = None,
     ) -> None:
         self._ensure_single_root_buffer_count(len(buffers))
         self.cfg = deepcopy(init_cfg)
@@ -158,14 +163,15 @@ class Schedule(Generic[T_Cfg, T_Env]):
         self._outcome = ScheduleOutcome()
         self._is_active = False
         self._is_closed = False
-        self._stop = stop
+        self._scope = scope
+        self._name = name
 
     def __enter__(self) -> Schedule[T_Cfg, T_Env]:
         if self._is_closed:
             raise RuntimeError("Schedule cannot be reused after exiting its context")
         if self._is_active:
             raise RuntimeError("Schedule context is already active")
-        self._stop = self._stop.child(label="schedule")
+        self._scope = self._scope.branch("schedule", name=self._name)
         self._is_active = True
         return self
 
@@ -199,7 +205,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
         finally:
             self._is_active = False
             self._is_closed = True
-            self._stop.release()
+            self._scope.release()
 
     @property
     def data(self) -> Any:
@@ -227,21 +233,26 @@ class Schedule(Generic[T_Cfg, T_Env]):
         return ()
 
     @property
+    def scope(self) -> Scope:
+        """This Schedule boundary; before entry, the supplied parent scope."""
+        return self._scope
+
+    @property
     def stop(self) -> StopSignal:
-        return self._stop
+        return self._scope.stop
 
     @property
     def outcome(self) -> ScheduleOutcome:
         return self._outcome
 
     def is_stop(self) -> bool:
-        return self._stop.is_set()
+        return self.stop.is_set()
 
     def set_stop(self) -> None:
         self._mark_stopped("stop requested")
 
     def clear_stop(self) -> None:
-        self._stop.clear_stop()
+        self.stop.clear_stop()
 
     def scan(
         self, name: str, values: Iterable[T_Value]
@@ -327,7 +338,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
             )
 
     def _mark_stopped(self, reason: str, *, exception: Exception | None = None) -> None:
-        self._stop.set()
+        self.stop.set()
         self._set_outcome("stopped", reason=reason, exception=exception)
         if (
             exception is not None
@@ -345,9 +356,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         """
         reason = exception_reason(exc)
         if self._set_outcome("interrupted", reason=reason, exception=exc):
-            self._stop.set_error("interrupted", reason, exc)
+            self.stop.set_error("interrupted", reason, exc)
         else:
-            self._stop.set()
+            self.stop.set()
 
     def mark_failed(self, exc: BaseException) -> None:
         """Stop the run after a failure without discarding buffered results.
@@ -357,9 +368,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         """
         reason = exception_reason(exc)
         if self._set_outcome("failed", reason=reason, exception=exc):
-            self._stop.set_error("failed", reason, exc)
+            self.stop.set_error("failed", reason, exc)
         else:
-            self._stop.set()
+            self.stop.set()
 
     def _set_outcome(
         self,
@@ -377,7 +388,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
 
     def _reset_outcome_for_retry(self) -> None:
         self._outcome = ScheduleOutcome()
-        self._stop.clear_stop()
+        self.stop.clear_stop()
 
     def check_stop_requested(self, *, exception: Exception | None = None) -> bool:
         """Return whether the shared stop signal is set and record a stopped run.

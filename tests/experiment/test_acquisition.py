@@ -18,7 +18,7 @@ from zcu_tools.experiment import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
@@ -234,7 +234,7 @@ def test_capture_hashes_cached_config_without_touching_hardware(
         soccfg=config,
         devices={"flux": device},
         plots=Plots(NonPresentingHost()),
-        cancel_signal=StopSignal(),
+        scope=Scope("run"),
     )
 
     evidence = capture_software_provenance(context=context, source_directory=tmp_path)
@@ -252,7 +252,7 @@ def test_opaque_cached_config_is_genuine_absence(tmp_path: Path) -> None:
         soccfg=object(),
         devices={},
         plots=Plots(NonPresentingHost()),
-        cancel_signal=StopSignal(),
+        scope=Scope("run"),
     )
     assert (
         capture_software_provenance(
@@ -274,7 +274,7 @@ def test_invalid_cached_serialization_is_not_absence(
         soccfg=config,
         devices={},
         plots=Plots(NonPresentingHost()),
-        cancel_signal=StopSignal(),
+        scope=Scope("run"),
     )
     with pytest.raises((ValueError, TypeError)):
         capture_software_provenance(context=context, source_directory=tmp_path)
@@ -291,7 +291,7 @@ def test_cached_config_failures_propagate(tmp_path: Path, failure: Exception) ->
         soccfg=config,
         devices={},
         plots=Plots(NonPresentingHost()),
-        cancel_signal=StopSignal(),
+        scope=Scope("run"),
     )
     with pytest.raises(type(failure), match=str(failure)):
         capture_software_provenance(context=context, source_directory=tmp_path)
@@ -310,7 +310,7 @@ def test_declared_config_capability_lookup_failure_is_not_absence(
         soccfg=BrokenConfig(),
         devices={},
         plots=Plots(NonPresentingHost()),
-        cancel_signal=StopSignal(),
+        scope=Scope("run"),
     )
     with pytest.raises(AttributeError, match="Cached descriptor failed"):
         capture_software_provenance(context=context, source_directory=tmp_path)
@@ -325,7 +325,7 @@ def test_existing_noncallable_dump_is_not_absence(tmp_path: Path) -> None:
         soccfg=InvalidConfig(),
         devices={},
         plots=Plots(NonPresentingHost()),
-        cancel_signal=StopSignal(),
+        scope=Scope("run"),
     )
     with pytest.raises(TypeError):
         capture_software_provenance(context=context, source_directory=tmp_path)

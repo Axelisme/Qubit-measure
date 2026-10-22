@@ -153,7 +153,7 @@ def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_pat
 
     def operation(ctx: CallContext) -> None:
         entered.set()
-        if not ctx.stop_signal.event.wait(30):
+        if not ctx.scope.stop.event.wait(30):
             raise TimeoutError("Scenario did not interrupt the operation")
 
     @workflow("pausing", "Synthetic retained-worker pause")

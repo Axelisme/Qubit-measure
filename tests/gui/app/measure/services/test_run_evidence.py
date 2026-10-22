@@ -166,8 +166,8 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     acquisitions = []
 
     def acquire(*_args: object, context: RunContext) -> object:
-        schedule = context.cancel_signal.child(label="schedule")
-        first = schedule.child(label="acquire")
+        schedule = context.scope.branch("schedule")
+        first = schedule.branch("acquire")
         try:
             assert service.status_scope(token) == "run/schedule#1/acquire#1"
             rejected = service.cancel_scope(token, scope="acquire", expected=2)
@@ -175,14 +175,14 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
             assert rejected.reason == "sequence mismatch"
             accepted = service.cancel_scope(token, scope="acquire#1")
             assert accepted.cancelled
-            acquisitions.append(first.is_set())
+            acquisitions.append(first.cancelled)
         finally:
             first.release()
-        second = schedule.child(label="acquire")
-        acquisitions.append(second.is_set())
+        second = schedule.branch("acquire")
+        acquisitions.append(second.cancelled)
         second.release()
         schedule.release()
-        assert not context.cancel_signal.is_set()
+        assert not context.scope.stop.is_set()
         return record
 
     adapter.run.side_effect = acquire
@@ -201,7 +201,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
         rejected = service.cancel_scope(token, scope="run")
         assert not rejected.cancelled
         assert rejected.reason == "scope not active"
-        assert not context.cancel_signal.is_set()
+        assert not context.scope.stop.is_set()
         return record
 
     adapter.run.side_effect = next_run
@@ -221,8 +221,8 @@ def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
     record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
 
     def partial(*_args: object, context: RunContext) -> object:
-        child = context.cancel_signal.child(label="acquire")
-        child.set()
+        child = context.scope.branch("acquire")
+        child.stop.set()
         child.release()
         return record
 
@@ -314,7 +314,7 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
         self: SavingCore, config: SavingCfg, *, context: RunContext
     ) -> SavingResult:
         assert config is cfg
-        assert not context.cancel_signal.is_set()
+        assert not context.scope.stop.is_set()
         return result
 
     monkeypatch.setattr(

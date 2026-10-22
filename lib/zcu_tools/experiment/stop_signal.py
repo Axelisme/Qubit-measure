@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
 ErrorStatus: TypeAlias = Literal["interrupted", "failed"]
-ScopeLabel: TypeAlias = Literal[
-    "script", "run", "iteration", "operation", "schedule", "acquire"
-]
 
 
 @dataclass(frozen=True)
@@ -18,42 +15,15 @@ class CancelResult:
 
     cancelled is True only when the target token was set. reason is scope
     cancellation requested, scope not active, sequence mismatch, or the recipe
-    admission refusal no run in progress. active_path is the path at the check.
+    admission refusal no run in progress. ambiguous refuses multiple matches.
+    active_path is the unique live path at the check, stopping at the first fork.
+    candidates lists full matching paths only for an ambiguous refusal.
     """
 
     cancelled: bool
     reason: str
     active_path: str
-
-
-def parse_cancel_scope(
-    scope: object, expected: object = None
-) -> tuple[ScopeLabel, int | None]:
-    """Validate a label or label#N and return its label and expected sequence.
-
-    N and expected must be positive integers; bool is not an integer here.
-    Conflicting sequences, unknown labels and malformed segments raise ValueError.
-    A root's sequence is checked by the resolver, not by this syntax parser.
-    """
-    if expected is not None and (
-        not isinstance(expected, int) or isinstance(expected, bool) or expected <= 0
-    ):
-        raise ValueError("expected must be a positive integer")
-    if not isinstance(scope, str):
-        raise ValueError("scope must be a label or label#N")
-    label, separator, suffix = scope.partition("#")
-    if separator:
-        if not suffix.isascii() or not suffix.isdecimal() or int(suffix) <= 0:
-            raise ValueError("scope sequence must be a positive integer")
-        sequence = int(suffix)
-        if expected is not None and expected != sequence:
-            raise ValueError("scope sequence conflicts with expected")
-        expected = sequence
-    match label:
-        case "script" | "run" | "iteration" | "operation" | "schedule" | "acquire":
-            return label, expected
-        case _:
-            raise ValueError(f"Unknown stop scope label: {label!r}")
+    candidates: list[str] = field(default_factory=list)
 
 
 class ScheduleOutcomeError(RuntimeError):
@@ -74,89 +44,20 @@ class ScheduleOutcomeError(RuntimeError):
 class StopSignal:
     """Thread-safe scope tree separating cancellation from completion facts.
 
-    label names the scope's control boundary. A supplied event is borrowed as
-    this token's stop bit; descendants own independent events. Completed child
-    facts travel upward on release, without stopping the parent, and stop at
-    operation boundaries. Constructing a token does not attach it to a tree.
+    A supplied event is borrowed as this token\'s stop bit; descendants own
+    independent events. Scope owns names, selectors and birth numbers. Completed
+    child facts travel upward on release without stopping the parent, unless
+    the child was created with boundary=True.
     """
 
-    def __init__(
-        self, event: threading.Event | None = None, *, label: ScopeLabel = "operation"
-    ) -> None:
-        if label not in (
-            "script",
-            "run",
-            "iteration",
-            "operation",
-            "schedule",
-            "acquire",
-        ):
-            raise ValueError(f"Unknown stop scope label: {label!r}")
-        self._label: ScopeLabel = label
-        self._sequence = 0
+    def __init__(self, event: threading.Event | None = None) -> None:
+        self._boundary = True
         self._completed_partial = False
         self._event = event if event is not None else threading.Event()
         self._error: ScheduleOutcomeError | None = None
         self._lock = threading.RLock()
         self._parent: StopSignal | None = None
         self._children: dict[StopSignal, None] = {}
-        self._child_sequences: dict[ScopeLabel, int] = {}
-
-    @property
-    def label(self) -> ScopeLabel:
-        """Read script/run/iteration/operation/schedule/acquire scope identity."""
-        return self._label
-
-    @property
-    def sequence(self) -> int:
-        """Read the one-based per-parent/per-label birth number, or 0 for a root."""
-        return self._sequence
-
-    @property
-    def active_child(self) -> StopSignal | None:
-        """Read the newest attached child, or None after all children release."""
-        with self._lock:
-            return next(reversed(self._children), None)
-
-    @property
-    def active_path(self) -> str:
-        """Project this subtree as label/label#sequence along active_child.
-
-        The starting token has no suffix. Releasing the newest child restores
-        the previous live sibling; released scopes never appear in this path.
-        """
-        with self._lock:
-            segments = [self.label]
-            child = self.active_child
-            while child is not None:
-                segments.append(f"{child.label}#{child.sequence}")
-                child = child.active_child
-            return "/".join(segments)
-
-    def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
-        """Atomically match the active path and set one scope and its descendants.
-
-        scope is a label or label#N. run aliases operation unless this tree has
-        a run root. Missing targets and stale sequences return a refusal with
-        the current path; malformed input raises ValueError. Roots have no
-        sequence. Child creation/release shares this check's tree lock.
-        """
-        label, sequence = parse_cancel_scope(scope, expected)
-        if label == "run" and self.label != "run":
-            label = "operation"
-        with self._lock:
-            path = self.active_path
-            token: StopSignal | None = self
-            while token is not None and token.label != label:
-                token = token.active_child
-            if token is None:
-                return CancelResult(False, "scope not active", path)
-            if sequence is not None and (
-                token.sequence == 0 or token.sequence != sequence
-            ):
-                return CancelResult(False, "sequence mismatch", path)
-            token.set()
-            return CancelResult(True, "scope cancellation requested", path)
 
     @property
     def partial_result(self) -> bool:
@@ -178,19 +79,16 @@ class StopSignal:
             for child in self._children:
                 child.set()
 
-    def child(self, *, label: ScopeLabel = "operation") -> StopSignal:
+    def child(self, *, boundary: bool = True) -> StopSignal:
         """Attach a scope inheriting this scope's stop/error, including at birth.
 
-        label selects the control boundary and its per-label birth counter.
-        Stops travel down immediately. Errors and partial completion travel up
-        only on release, stopping at operation boundaries. Call release after
-        the scope drains so completed work is not retained by the tree.
+        boundary=True prevents completion facts from reaching the parent,
+        as required for operations. False delivers first error and partial facts
+        on release. Stops travel down immediately. Call release after work drains.
         """
         with self._lock:
-            child = StopSignal(label=label)
-            sequence = self._child_sequences.get(label, 0) + 1
-            self._child_sequences[label] = sequence
-            child._sequence = sequence
+            child = StopSignal()
+            child._boundary = boundary
             child._lock = self._lock
             child._parent = self
             child._error = self._error
@@ -210,7 +108,7 @@ class StopSignal:
         with self._lock:
             parent = self._parent
             if parent is not None:
-                if self.label != "operation":
+                if not self._boundary:
                     if parent._error is None:
                         parent._error = self._error
                     parent._completed_partial |= self.partial_result

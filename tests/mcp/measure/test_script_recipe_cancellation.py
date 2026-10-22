@@ -29,7 +29,7 @@ def test_recipe_proxies_fine_scope_by_run_handle_and_projects_active_path(
     released = Event()
     requests: list[tuple[str, dict[str, object]]] = []
     partials: list[bool] = []
-    path = "script/iteration#1/operation#1/schedule#1/acquire#2"
+    path = "recipe:synthetic/iteration#1/operation#1/schedule#1/acquire#2"
 
     def respond(method: str, params: dict[str, object]) -> dict[str, object]:
         requests.append((method, params))
@@ -142,7 +142,7 @@ def test_fine_scope_old_recipe_op_cannot_cancel_the_next_run(
         execution = start(client, "synthetic")
         assert waiting.wait(3), "The second Run must be active"
         first, second = execution.snapshot().details
-        path = "script/iteration#1/operation#2/schedule#1/acquire#1"
+        path = "recipe:synthetic/iteration#1/operation#2/schedule#1/acquire#1"
         stale = client.call("cancel", {"op": first.op, "scope": scope, "expected": 1})
         assert stale.data["cancelled"] is False
         assert stale.data["reason"] == "scope not active"

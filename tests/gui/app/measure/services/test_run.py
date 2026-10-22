@@ -394,7 +394,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
         with Schedule(
             ProgramV2Cfg(),
             SignalBuffer((1,), dtype=np.float64),
-            stop=context.cancel_signal,
+            scope=context.scope,
         ) as sched:
             _ = (
                 sched.prog_builder(
@@ -441,11 +441,11 @@ def test_cancel_run_stops_selected_flux_before_first_write():
     dev = FakeDevice(fast_mode=True)
 
     def run_flux(*_args: Any, context: RunContext) -> object:
-        if not context.cancel_signal.is_set():
+        if not context.scope.stop.is_set():
             context.devices["run-dev"].setup(
                 dev.get_info().with_updates(value=1.0),
                 progress=False,
-                stop_event=context.cancel_signal.event,
+                stop_event=context.scope.stop.event,
             )
         return object()
 
@@ -472,14 +472,14 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     def run_flux(*_args: Any, context: RunContext) -> object:
         contexts.append(context)
         device = context.devices["flux"]
-        if not context.cancel_signal.is_set():
+        if not context.scope.stop.is_set():
             device.setup(
                 device.get_info().with_updates(value=0.5),
                 progress=False,
-                stop_event=context.cancel_signal.event,
+                stop_event=context.scope.stop.event,
             )
         if len(contexts) == 1:
-            context.cancel_signal.set_error("failed", "first run failed", None)
+            context.scope.stop.set_error("failed", "first run failed", None)
         return object()
 
     adapter.run.side_effect = run_flux
@@ -501,8 +501,8 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     second_outcome = handles.poll(second_token)
     assert second_outcome is not None and second_outcome.status == "finished"
     assert second_device.get_value() == 0.5
-    assert contexts[0].cancel_signal is not contexts[1].cancel_signal
-    assert contexts[1].cancel_signal.error is None
+    assert contexts[0].scope.stop is not contexts[1].scope.stop
+    assert contexts[1].scope.stop.error is None
     assert contexts[0].plots is not contexts[1].plots
     assert not gate.has_active(OperationKind.RUN)
 
@@ -574,7 +574,7 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
     partial = object()
 
     def run_after_retry_reset(*_args: Any, context: RunContext) -> object:
-        context.cancel_signal.clear_stop()
+        context.scope.stop.clear_stop()
         return partial
 
     adapter.run.side_effect = run_after_retry_reset

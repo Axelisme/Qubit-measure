@@ -295,12 +295,12 @@ class WorkflowEnv[C]:
         attempts.append(attempt)
         try:
             value = fn(ctx, attempt)
-            error = ctx.stop_signal.error
+            error = ctx.scope.stop.error
             if error is not None and error.status == "failed":
                 return Failed(error.reason)
             return _Value(value)
         finally:
-            attempt.stopped = ctx.stop_signal.is_set()
+            attempt.stopped = ctx.scope.stop.is_set()
             attempt.finished_at = self._ports.clock.now()
 
     def _record_attempt(
@@ -358,12 +358,12 @@ class WorkflowEnv[C]:
                     soccfg=self._ports.soccfg,
                     plots=plots,
                     devices=self.devices.get_connected_devices(),
-                    cancel_signal=ctx.stop_signal,
+                    scope=ctx.scope,
                 )
                 attempt.device_snapshot = capture_device_snapshot(context.devices)
                 current = deepcopy(captured)
                 result = experiment(current, context=context)
-                error = context.cancel_signal.error
+                error = context.scope.stop.error
                 if error is not None and error.status != "failed":
                     raise error from error.exception
                 if error is not None:
@@ -406,7 +406,7 @@ class WorkflowEnv[C]:
         captured = deepcopy(cfg)
 
         def invoke(ctx: CallContext, _attempt: _Attempt) -> None:
-            self.devices.setup_device(name, captured, ctx.stop_signal)
+            self.devices.setup_device(name, captured, ctx.scope.stop)
             self._hooks.device_setup(name, captured)
 
         return await self._call("setup_device", invoke)
@@ -422,7 +422,7 @@ class WorkflowEnv[C]:
             raise ValueError("Wait target must be timezone-aware")
         return await self._call(
             "wait_until",
-            lambda ctx, attempt: self._ports.clock.wait_until(target, ctx.stop_signal),
+            lambda ctx, attempt: self._ports.clock.wait_until(target, ctx.scope.stop),
         )
 
     async def ask[A: Answer](self, question: Question[A]) -> A | None:

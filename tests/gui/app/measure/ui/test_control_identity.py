@@ -88,7 +88,7 @@ class StoppableAdapter(OldAdapter):
     def run(self, req: RunRequest, cfg: ConfigBase, *, context: RunContext) -> object:
         del req, cfg
         # The test Stop/close action releases this held adapter via cancellation.
-        if not context.cancel_signal.event.wait(30):
+        if not context.scope.stop.event.wait(30):
             raise RuntimeError("test run was not stopped")
         return object()
 

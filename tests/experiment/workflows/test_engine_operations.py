@@ -140,9 +140,7 @@ def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(
         def first(ctx: CallContext) -> int:
             entered.set()
             ready.set()
-            assert ctx.stop_signal.event.wait(30), (
-                "Stop must reach the active operation"
-            )
+            assert ctx.scope.stop.event.wait(30), "Stop must reach the active operation"
             return 4
 
         first_result = await env.call(first)
@@ -150,7 +148,7 @@ def test_stop_delivers_partial_then_starts_stopped_operations_and_skips_ask(
         outcomes.append((first_result.value, first_result.partial_result))
 
         def later(ctx: CallContext) -> int:
-            later_stops.append(ctx.stop_signal.is_set())
+            later_stops.append(ctx.scope.stop.is_set())
             return 0
 
         second_result = await env.call(later)
@@ -193,11 +191,11 @@ def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
             if len(calls) == 1:
                 entered.set()
                 ready.set()
-                assert ctx.stop_signal.event.wait(30), (
+                assert ctx.scope.stop.event.wait(30), (
                     "Pause must reach the active operation"
                 )
                 return -1
-            assert not ctx.stop_signal.is_set()
+            assert not ctx.scope.stop.is_set()
             return 42
 
         result = await env.call(acquire)
@@ -300,10 +298,10 @@ def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
     tokens: list[bool] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        tokens.append(context.cancel_signal.is_set())
+        tokens.append(context.scope.stop.is_set())
         if len(tokens) == 1:
             cause = OSError("first acquire failed")
-            context.cancel_signal.set_error("failed", str(cause), cause)
+            context.scope.stop.set_error("failed", str(cause), cause)
         return 42
 
     @w.workflow("recover", "A recoverable acquire failure permits an authored retry")
@@ -337,7 +335,7 @@ def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
     ) -> None:
         def experiment(cfg: Cfg, *, context: RunContext) -> int:
             assert context.plots is not env.plots
-            assert not context.cancel_signal.is_set()
+            assert not context.scope.stop.is_set()
             cfg.value = 8
             return cfg.value + 1
 
