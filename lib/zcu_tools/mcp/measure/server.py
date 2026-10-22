@@ -85,7 +85,7 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 # v122: predictor RPC uses entry-local filenames or independent inline params.
 # v123: actionable launch collisions and explicit raw-save analysis observations.
 # v124: Async declarations, request-scoped answers, full owner evidence and scoped cancel.
-MCP_VERSION = 124
+MCP_VERSION = 125
 
 _SERVER_INSTRUCTIONS = """\
 Attach to the live qubit-measure GUI with connect. This does not connect hardware.

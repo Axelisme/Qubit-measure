@@ -109,6 +109,7 @@ class SyntheticGui:
         if method == "tab.writeback_preview":
             return {
                 "has_draft": True,
+                "revision": 1,
                 "items": [
                     {
                         "id": "param-0",
@@ -122,6 +123,12 @@ class SyntheticGui:
                     }
                 ],
                 "destination_context": {"active_label": "preview-context"},
+            }
+        if method == "tab.writeback_accept":
+            return {
+                "status": "completed",
+                "written": [{"subtab_id": "analysis", "ids": ["param-0"]}],
+                "error": None,
             }
         if method == "tab.writeback_write":
             assert set(params) == {"tab_id", "subtab_id", "write"}

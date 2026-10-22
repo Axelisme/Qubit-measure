@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import count
 from typing import Any, Literal
 
 from pydantic import JsonValue
@@ -21,7 +23,11 @@ from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
 from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, WritebackItem
 
+logger = logging.getLogger(__name__)
+
 _GUI_ORIGIN = CommandOrigin("gui")
+# Process-local monotonic revisions also distinguish replacement drafts.
+_REVISIONS = count(1)
 
 
 # Kind prefixes are deliberately draft-local. Two independent drafts can both
@@ -165,6 +171,7 @@ class _DraftEntry:
     """
 
     item: WritebackItem
+    revision: int = field(default_factory=lambda: next(_REVISIONS))
     form: ModuleEntryForm | None = None
     # S2 display-only baseline — not on WritebackItem, not persisted/wire.
     current_summary: str | None = None
@@ -199,6 +206,7 @@ class WritebackDraft:
         "_parameters",
         "_run_source",
         "_unavailable_reasons",
+        "_revision",
     )
 
     def __init__(
@@ -216,6 +224,16 @@ class WritebackDraft:
         self._entries = entries
         self._parameters = parameters
         self._closed = False
+        self._revision = next(_REVISIONS)
+
+    @property
+    def revision(self) -> int:
+        """Process-local draft revision; edits and replacement never reuse a value.
+
+        Module Form writes and commands advance it through their subscription.
+        Preview reads do not advance it. It is evidence, not write permission.
+        """
+        return max((self._revision, *(entry.revision for entry in self._entries)))
 
     @property
     def parameters(self) -> ParameterContext | None:
@@ -287,6 +305,7 @@ class WritebackDraft:
         """
         self.require_owner(service, allow_closed=True)
         self._closed = True
+        self._revision = next(_REVISIONS)
 
     @property
     def is_active(self) -> bool:
@@ -341,6 +360,39 @@ def _entries_to_apply(
     return [entry for entry in entries if entry.item.session_id in requested]
 
 
+@dataclass(frozen=True)
+class WritebackSelection:
+    """One captured draft submission, in caller-specified group order.
+
+    draft is an active owner handle. expected_revision is the preview revision.
+    ids lists explicit draft-local IDs, independent of GUI selection.
+    """
+
+    draft: WritebackDraft
+    expected_revision: int
+    ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WritebackAcceptance:
+    """Receipt for an ordered group submission, without retry or rollback.
+
+    applied_ids has one tuple per submitted draft, in submission order; only
+    confirmed writes appear. error is None on completion, otherwise the first
+    write failure diagnostic. Stale revisions and invalid IDs raise before writes.
+    """
+
+    applied_ids: tuple[tuple[str, ...], ...]
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class _DraftApplication:
+    applied_ids: tuple[str, ...]
+    written: dict[str, list[str]]
+    error: BaseException | None = None
+
+
 class WritebackService:
     """Own opaque transactional drafts and their module item Forms.
 
@@ -383,7 +435,7 @@ class WritebackService:
         """Create a draft with one Form per module item at the creation capture.
 
         The input is a proposal collection, not an adapter or stage. Items are
-        shallow-copied so draft-local ``session_id``, selection, target and value
+        deep-copied so draft-local ``session_id``, selection, target and value
         edits cannot mutate the adapter's proposal objects. Author element
         identities are detached at creation and never resolved against aliases.
         Initial selection and the optional display note come from each proposal.
@@ -557,11 +609,12 @@ class WritebackService:
         self._require_draft(draft)
         entry = self._find_draft_entry(draft, session_id)
         item = entry.item
-        if selected is not None:
+        if selected is not None and selected != item.selected:
             item.selected = selected
+            entry.revision = next(_REVISIONS)
         if target_name is not None and target_name != item.target_name:
             item.target_name = target_name
-            entry.applied = False
+            self._mark_unapplied(entry)
             # Keep the bounded proposed summary in sync for a module retarget.
             if isinstance(item, ModuleWriteback):
                 # Preserve original current_summary; recompute proposed_summary
@@ -578,9 +631,9 @@ class WritebackService:
                     f"{session_id!r} is not a parameter item; proposed_value invalid"
                 )
             if not self._values_equal(proposed_value, item.proposed_value):
-                item.proposed_value = proposed_value
+                item.proposed_value = copy.deepcopy(proposed_value)
                 entry.proposed_summary = self._format_value_summary(proposed_value)
-                entry.applied = False
+                self._mark_unapplied(entry)
         if edits is not None:
             self._write_form(entry, edits)
 
@@ -644,6 +697,18 @@ class WritebackService:
         Each parameter's metadata is replaced by {"stderr": x} when the item has
         stderr, else by {}; no source, kind, run_id or time is written there.
         """
+        result = self._apply_draft(draft, item_ids=item_ids, origin=origin)
+        if result.error is not None:
+            raise result.error from result.error.__cause__
+        return {"applied_ids": list(result.applied_ids), "written": result.written}
+
+    def _apply_draft(
+        self,
+        draft: WritebackDraft,
+        *,
+        item_ids: tuple[str, ...] | None,
+        origin: CommandOrigin,
+    ) -> _DraftApplication:
         self._require_draft(draft)
         selected_entries = _entries_to_apply(draft.entries_for(self), item_ids)
         written: dict[str, list[str]] = {
@@ -652,7 +717,7 @@ class WritebackService:
             "samples": [],
         }
         if not selected_entries:
-            return {"applied_ids": [], "written": written}
+            return _DraftApplication((), written)
         parameters = self._require_parameters(draft)
         destinations: set[str] = set()
         items: list[concrete.WritebackItem] = []
@@ -702,13 +767,65 @@ class WritebackService:
                 raise RuntimeError(
                     "WritebackApplyError requires its original cause"
                 ) from exc
-            raise cause from cause.__cause__
+            return _DraftApplication(
+                tuple(
+                    entry.item.session_id for entry in selected_entries[: exc.applied]
+                ),
+                written,
+                cause,
+            )
         for entry in selected_entries:
             entry.applied = True
-        return {
-            "applied_ids": [entry.item.session_id for entry in selected_entries],
-            "written": written,
-        }
+        return _DraftApplication(
+            tuple(entry.item.session_id for entry in selected_entries), written
+        )
+
+    def accept_drafts(
+        self,
+        selections: tuple[WritebackSelection, ...],
+        *,
+        origin: CommandOrigin = _GUI_ORIGIN,
+    ) -> WritebackAcceptance:
+        """Check every captured group before the first write, then apply in order.
+
+        Call synchronously on the owner thread; no yield separates validation
+        from application. Unknown/duplicate IDs, foreign/closed/repeated drafts
+        and stale revisions raise before any write. A stale error lists changed
+        draft revisions. Do not edit or restore proposals here. Write failures
+        return the confirmed prefix and diagnostic, without retry or rollback.
+        """
+        seen: set[WritebackDraft] = set()
+        changed: list[str] = []
+        for index, selection in enumerate(selections):
+            draft = selection.draft
+            self._require_draft(draft)
+            if draft in seen:
+                raise InvalidInputError("Repeated captured writeback draft")
+            seen.add(draft)
+            _entries_to_apply(draft.entries_for(self), selection.ids)
+            if draft.revision != selection.expected_revision:
+                changed.append(
+                    f"group {index} IDs {selection.ids}: revision {selection.expected_revision} -> {draft.revision}"
+                )
+        if changed:
+            raise FailedPreconditionError(
+                "writeback draft changed: " + "; ".join(changed),
+                reason_code="writeback_changed",
+            )
+        applied: list[tuple[str, ...]] = [() for _ in selections]
+        for index, selection in enumerate(selections):
+            try:
+                result = self._apply_draft(
+                    selection.draft, item_ids=selection.ids, origin=origin
+                )
+            except Exception as error:
+                # Isolate an uncertain read/ledger failure; earlier groups remain confirmed.
+                logger.exception("Captured writeback failed after confirmed groups")
+                return WritebackAcceptance(tuple(applied), str(error))
+            applied[index] = result.applied_ids
+            if result.error is not None:
+                return WritebackAcceptance(tuple(applied), str(result.error))
+        return WritebackAcceptance(tuple(applied))
 
     def write_draft(
         self,
@@ -803,8 +920,7 @@ class WritebackService:
 
     @staticmethod
     def _copy_item(item: WritebackItem) -> WritebackItem:
-        copied = copy.copy(item)
-        copied.element = copy.deepcopy(item.element)
+        copied = copy.deepcopy(item)
         copied.session_id = ""
         return copied
 
@@ -956,3 +1072,4 @@ class WritebackService:
     @staticmethod
     def _mark_unapplied(entry: _DraftEntry) -> None:
         entry.applied = False
+        entry.revision = next(_REVISIONS)

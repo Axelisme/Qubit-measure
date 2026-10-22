@@ -94,7 +94,13 @@ Status／wait 提前回 `status="interactive"`，GUI 完成同一 operation 後�
 `ask_writeback()` 等待經 evidence 驗證的 `WritebackAnswer`，回答不寫入。
 只有 `tab.accept_writeback(decision.items)` 寫入選定的 captured 候選。
 Unknown、重複或已變更的項目在第一筆寫入前拒絕。
+Recipe 將 preview 的 owner revisions 與選定 IDs 一次交給 `tab.writeback_accept`。
+Owner 在同一提交核對 Primary／Post 全部選定 drafts，任何 draft 改動或替換都在第一筆寫入前拒絕。
+單 pane L1 `tab.writeback_write` 仍編輯並寫入當前 draft，不供 recipe captured acceptance 使用。
 Primary 先於 Post，首錯停止，成功前綴保留，不 retry 或 rollback。
+`WritebackReceipt` 以 pane 與 owner item ID 關聯 confirmed items，不拿 alias 名稱比 concrete target。
+作者可檢查收據或呼叫 `receipt.raise_for_error()`，不可將 decision.accepted 當作寫入成功。
+Full details 的 writeback_receipts 保留每次接受的確認項目與錯誤，失敗後的 finally Save 仍執行。
 `WritebackDestination.path` 是 owner 原樣的 opaque actual_path，
 label 是 preview 當時 active context 的顯示標籤，不是 captured identity。
 
@@ -158,7 +164,7 @@ Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operati
 partial 與 Save 收據，不靠作者補取消報告。
 非終態另帶 execution 與明確的 pending question／analysis。
 `status(execution, detail="full")` 保留 detached Run 前 Form 條件、
-各 stage 的 owner-native summary／invalid、最後明確捕捉的 writeback proposal 與 error。
+各 stage 的 owner-native summary／invalid、最後明確捕捉的 writeback proposal、各次 writeback_receipts 與 error。
 Scalar、uncertainty、unit 與元素 identity 都沿 owner summary，不重算或套 reporting 宣告。
 Query 不重讀 GUI，也不自動存檔。
 

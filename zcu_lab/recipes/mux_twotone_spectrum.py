@@ -164,8 +164,11 @@ async def mux_twotone_spectrum(
 
         # Asking does not write; only an accepted answer applies calibration items.
         answer = await tab.ask_writeback()
+        writeback_applied = False
         if answer.accepted:
-            tab.accept_writeback(answer.items)
+            receipt = tab.accept_writeback(answer.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
 
         tones: list[MuxTwotoneSpectrumToneReport] = []
         for outcome in fit.result.tones:
@@ -187,7 +190,9 @@ async def mux_twotone_spectrum(
                         fwhm_err=report_number(outcome.fwhm_err),
                     )
                 )
-        return MuxTwotoneSpectrumReport(tones=tones, writeback_applied=answer.accepted)
+        return MuxTwotoneSpectrumReport(
+            tones=tones, writeback_applied=writeback_applied
+        )
     finally:
         tab.save()
 

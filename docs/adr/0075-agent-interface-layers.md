@@ -113,6 +113,23 @@ Operation 的完成型別只有 completed／failed，合作中止以 `partial_re
 
 Agent 可以讀這些狀態來判斷，但後續實驗取用參數時，以共享狀態為準，不以 agent 對話中記住的數值為準。
 
+### Captured writeback acceptance
+
+Recipe 的問答只接受捕捉時的候選，不接受回答時已改動的 GUI draft。
+Preview 回 owner 的 draft revision。Recipe 將各 pane 的 revision 與穩定 item IDs 一次交給
+`tab.writeback_accept`，GUI owner 在同一次提交檢查全部 Primary／Post drafts，通過才寫第一筆。
+編輯 target、parameter value、selection 或 module Form 都升號，替換 draft 不重用 revision。
+任一過期就拒絕整批，不把 draft 改回舊值。通過後按 Primary、Post、各 pane 的候選順序寫，
+首錯停止，收據保留成功前綴與診斷，不 retry／rollback。
+單 pane L1 `writeback_set`／`writeback_write` 繼續編輯並寫入當前 draft。
+
+收據用 owner item ID 關聯確認項目，不將 authored alias 名稱與 concrete target 比較。
+作者處理 failed receipt，或以 `raise_for_error()` 保留診斷並終止流程，finally 仍 Save。
+Report 不以 answer.accepted 宣稱已寫入。Full execution details 保留每次接受收據。
+
+2026-10-22 設計代裁：「任何一筆被 `writeback_set` 改過或被替換 → 整批拒絕並回報哪些變了，不覆蓋回舊值強寫。」
+同日補充：「recipe 的 `accept_writeback` 只走 `writeback_accept`。」
+
 ### 自動推導的 owner
 
 自動推導參數的規則有兩類 owner：

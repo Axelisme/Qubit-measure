@@ -1,6 +1,6 @@
 """Captured writeback receipts through registered synthetic recipes and GUI RPC."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -86,13 +86,32 @@ def writeback_registry() -> Iterator[None]:
         restore_registry(before)
 
 
+@pytest.fixture
+def writeback_gui(
+    tmp_path: Path,
+    writeback_registry: None,
+) -> Iterator[Callable[[bool, bool], WritebackGui]]:
+    owners: list[WritebackGui] = []
+
+    def create(module: bool, partial: bool) -> WritebackGui:
+        gui = WritebackGui(tmp_path, module=module, partial=partial)
+        owners.append(gui)
+        return gui
+
+    try:
+        yield create
+    finally:
+        for gui in owners:
+            gui.owner.shutdown()
+
+
 @pytest.mark.parametrize("edit", ["target", "value", "module", "replacement"])
 def test_accept_rejects_changed_post_before_any_primary_write(
     tmp_path: Path,
     edit: str,
-    writeback_registry: None,
+    writeback_gui: Callable[[bool, bool], WritebackGui],
 ) -> None:
-    gui = WritebackGui(tmp_path, module=edit == "module")
+    gui = writeback_gui(edit == "module", False)
     receipts: list[WritebackReceipt] = []
 
     @recipe("synthetic", "Bind accepted candidates across both stages")
@@ -149,7 +168,68 @@ def test_accept_rejects_changed_post_before_any_primary_write(
         assert receipts[0].error is not None and "changed" in receipts[0].error
     finally:
         client.context.session.close()
-        gui.owner.shutdown()
+
+
+@pytest.mark.parametrize("mode", ["parameters", "module", "partial"])
+def test_captured_owner_writes_in_order_and_retains_confirmed_prefix(
+    tmp_path: Path,
+    mode: str,
+    writeback_gui: Callable[[bool, bool], WritebackGui],
+) -> None:
+    gui = writeback_gui(mode == "module", mode == "partial")
+    receipts: list[WritebackReceipt] = []
+
+    @recipe("synthetic", "Submit captured candidates and preserve confirmed writes")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        try:
+            await tab.analyze("primary", result=Fit)
+            await tab.analyze("post", result=Fit)
+            answer = await tab.ask_writeback()
+            receipt = tab.accept_writeback(answer.items)
+            receipts.append(receipt)
+            receipt.raise_for_error()
+            return Report(count=inputs.count)
+        finally:
+            tab.save()
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.wait(3)
+        pending = execution.snapshot().pending_question
+        assert pending is not None
+        items = pending.question.model_dump(mode="json")["proposal"]["items"]
+        execution.answer(
+            {
+                "request_id": pending.request_id,
+                "answer": {"accepted": True, "items": items},
+            }
+        )
+        current = gui.read_context()
+        assert current.value("general.ext.first") == 20.0
+        if mode == "module":
+            pulse = current.library.entry_value("Q1.pulses.pi", kind="module")
+            assert isinstance(pulse, dict) and pulse["gain"] == 0.2
+        else:
+            assert current.value("general.ext.second") == 30.0
+        receipt = receipts[0]
+        assert [item.stage for item in receipt.items] == ["primary", "post"]
+        snapshot = execution.snapshot()
+        assert snapshot.status == ("failed" if mode == "partial" else "completed")
+        assert receipt.status == ("failed" if mode == "partial" else "completed")
+        if mode == "partial":
+            assert (
+                snapshot.error is not None
+                and "setter refused" in snapshot.error.message
+            )
+            assert not current.lookup("general.ext.rejected").present
+            assert not current.lookup("general.ext.later").present
+        assert snapshot.details[0].writeback_receipts == (receipt,)
+        assert snapshot.outcome is not None and len(snapshot.outcome.runs[0].saves) == 1
+    finally:
+        client.context.session.close()
 
 
 def test_alias_receipt_confirms_by_item_id_not_authored_target(tmp_path: Path) -> None:

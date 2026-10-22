@@ -191,8 +191,11 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return TimeRabiReport(
             pi_length_us=report_number(analysis.result.pi_len),
             pi_length_err_us=report_number(analysis.result.pi_len_err),
@@ -200,7 +203,7 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
             pi2_length_err_us=report_number(analysis.result.pi2_len_err),
             rabi_frequency_mhz=report_number(analysis.result.rabi_f),
             rabi_frequency_err_mhz=report_number(analysis.result.rabi_f_err),
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

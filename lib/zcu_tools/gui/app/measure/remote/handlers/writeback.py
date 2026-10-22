@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Final, cast
 
+from pydantic import TypeAdapter, ValidationError
+
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
@@ -14,6 +16,7 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackEdit,
     WritebackItem,
 )
+from zcu_tools.gui.app.measure.writeback.control import CapturedWritebackPane
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 
@@ -134,6 +137,11 @@ def h_tab_writeback_preview(
         raise entry_invalid_to_remote(exc) from exc
     return {
         "has_draft": pane.has_writeback_draft,
+        "revision": adapter.writeback_control.get_writeback_revision_for_pane(
+            tab_id, subtab_id
+        )
+        if pane.has_writeback_draft
+        else None,
         "unavailable_reasons": list(pane.unavailable_reasons),
         "items": [
             {
@@ -271,6 +279,40 @@ def h_tab_writeback_write(
     except LibraryEntryInvalid as exc:
         raise entry_invalid_to_remote(exc) from exc
     return {"written": [_writeback_wire_value(asdict(item)) for item in result]}
+
+
+def h_tab_writeback_accept(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Submit all captured panes in one owner dispatch, without editing them.
+
+    stages contains subtab_id, expected_revision and ids for each selected pane.
+    All revisions/IDs are checked before the first write. Return stage-qualified
+    confirmed IDs and the first write diagnostic; stale submissions raise.
+    """
+    tab_id = str(params["tab_id"])
+    try:
+        stages = TypeAdapter(tuple[CapturedWritebackPane, ...]).validate_python(
+            params["stages"]
+        )
+    except ValidationError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    if any(not row.ids or any(not identity for identity in row.ids) for row in stages):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "captured stages require nonempty item IDs"
+        )
+    try:
+        result = adapter.writeback_control.accept_writeback(tab_id, stages)
+    except LibraryEntryInvalid as exc:
+        raise entry_invalid_to_remote(exc) from exc
+    return {
+        "status": "failed" if result.error is not None else "completed",
+        "written": [
+            {"subtab_id": stage.subtab_id, "ids": list(ids)}
+            for stage, ids in zip(stages, result.applied_ids, strict=True)
+        ],
+        "error": result.error,
+    }
 
 
 def h_tab_writeback_apply(

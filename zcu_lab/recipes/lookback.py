@@ -146,11 +146,14 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return LookbackReport(
             trigger_offset_us=report_number(analysis.result.predict_offset),
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

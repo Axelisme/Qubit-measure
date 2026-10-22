@@ -157,14 +157,17 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return T2RamseyReport(
             t2ramsey_us=report_number(analysis.result.t2r),
             t2ramsey_err_us=report_number(analysis.result.t2r_err),
             detune_mhz=report_number(analysis.result.detune),
             fit_fringe=analysis.result.fit_fringe,
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

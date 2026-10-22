@@ -156,14 +156,17 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return T1Report(
             t1_us=report_number(analysis.result.t1),
             t1_err_us=report_number(analysis.result.t1_err),
             t1b_us=report_number(analysis.result.t1b),
             t1b_err_us=report_number(analysis.result.t1b_err),
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

@@ -6,7 +6,7 @@ from typing import Literal
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.remote.form_description import RecipeFieldObservation
 from zcu_tools.mcp.measure.analysis_execution import InvalidAnalysisValue
-from zcu_tools.mcp.measure.recipe_api import WritebackProposal
+from zcu_tools.mcp.measure.recipe_api import WritebackProposal, WritebackReceipt
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,9 @@ class RecipeRunDetail:
     immediately before Run, including inputs, values and validation diagnostics;
     None means capture did not complete. analyses retains completed stage facts
     in order. writeback is the last explicit proposal for this Run, or None if
-    the author never requested it. Reading details sends no RPC and saves nothing.
+    the author never requested it. writeback_receipts retains each explicit accept
+    attempt, including confirmed prefixes and diagnostics. Reading details sends
+    no RPC and saves nothing.
     """
 
     tab: str
@@ -44,3 +46,4 @@ class RecipeRunDetail:
     conditions: RecipeFieldObservation | None = None
     analyses: tuple[RecipeAnalysisDetail, ...] = ()
     writeback: WritebackProposal | None = None
+    writeback_receipts: tuple[WritebackReceipt, ...] = ()

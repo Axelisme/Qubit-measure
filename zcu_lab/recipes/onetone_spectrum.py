@@ -141,12 +141,15 @@ async def onetone_spectrum(
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return OnetoneSpectrumReport(
             frequency_mhz=report_number(analysis.result.freq),
             linewidth_mhz=report_number(analysis.result.fwhm),
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

@@ -157,12 +157,15 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return T2EchoReport(
             t2echo_us=report_number(analysis.result.t2e),
             t2echo_err_us=report_number(analysis.result.t2e_err),
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

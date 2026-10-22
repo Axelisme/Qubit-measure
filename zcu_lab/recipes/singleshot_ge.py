@@ -164,15 +164,18 @@ async def singleshot_ge(
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return SingleshotGEReport(
             fidelity=report_number(primary.result.fidelity),
             theta=report_number(primary.result.theta),
             threshold=report_number(primary.result.threshold),
             ge_radius=report_number(analysis.result.ge_radius),
             confusion=analysis.result.confusion,
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

@@ -281,6 +281,15 @@ class WritebackReceipt:
     items: tuple[WritebackItem, ...]
     error: str | None = None
 
+    def raise_for_error(self) -> None:
+        """Raise RuntimeError with the owner diagnostic unless status is completed.
+
+        The receipt retains its confirmed prefix. Authors may inspect it instead
+        of raising; accept_writeback always returns the receipt on write failure.
+        """
+        if self.status != "completed":
+            raise RuntimeError(self.error or f"Writeback {self.status}")
+
 
 @dataclass(frozen=True)
 class RecipeRun:

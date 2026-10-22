@@ -102,7 +102,8 @@ try:
     analysis = await tab.analyze("primary", result=FitSummary)
     decision = await tab.ask_writeback()
     if decision.accepted:
-        tab.accept_writeback(decision.items)
+        receipt = tab.accept_writeback(decision.items)
+        receipt.raise_for_error()
     return Report(value=analysis.result.value)
 finally:
     tab.save()
@@ -112,6 +113,8 @@ Analyze 不自動保存。`tab.save()` 同步保存 raw 與全部已完成階段
 如果要先保住 raw，可以在 Run 後再額外 Save 一次。
 不要在 Run 取得來源前進入 Save finalizer，避免保存失敗蓋掉原來的 Run 錯誤。
 回答本身不寫回，只有明確 accept_writeback 才寫已捕捉的項目。
+它回傳收據，`receipt.raise_for_error()` 在失敗時保留 owner 診斷並終止作者流程。
+不要以 decision.accepted 宣稱已寫入。Owner 先核對兩個 stages 的捕捉 revision，任何 draft 改動或替換都在第一筆寫入前拒絕。
 
 Run scope cancel 使 Run 回 partial，之後步驟仍繼續。
 Script scope cancel 讓無結果的 Analyze／ask_writeback／session.ask raise 普通 `RecipeCancelled`。

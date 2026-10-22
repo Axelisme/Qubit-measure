@@ -101,7 +101,8 @@ original `index`, captured `name`, fit estimates or a `failure` reason.
 For Q3/Q1, the first row has `index: 2`, not index 0. Use that original index
 in override paths. GE reports Primary `tones` and Post `post_tones` separately.
 
-`writeback_applied` records whether an accepted answer reached Apply.
+`writeback_applied` is true only when a completed receipt confirms applied items.
+A failed receipt ends the recipe with the owner diagnostic; finally Save still runs.
 It does not certify every fit or every saved format. `runs` identifies each tab,
 adapter and acquisition, with its operation status, partial flag and Save
 receipts. Full execution status also exposes owner conditions, summaries and

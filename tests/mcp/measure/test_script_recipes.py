@@ -205,7 +205,7 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         )
         assert reply.data["outcome"]["status"] == "completed"
         methods = [method for method, _ in client.transport.sent]
-        assert methods.index("tab.writeback_write") < methods.index("tab.save_data")
+        assert methods.index("tab.writeback_accept") < methods.index("tab.save_data")
     finally:
         client.context.session.close()
 
@@ -809,6 +809,7 @@ def test_mapping_writeback_round_trips_without_guessing_or_mutating_owner_values
         if method == "tab.writeback_preview":
             return {
                 "has_draft": True,
+                "revision": 1,
                 "items": [
                     {
                         "id": "param-0",
@@ -850,10 +851,12 @@ def test_mapping_writeback_round_trips_without_guessing_or_mutating_owner_values
         assert reply.data["outcome"]["status"] == "completed"
         assert proposed == {"pulse": {"gain": [0.2, None], "shape": "synthetic"}}
         writes = [
-            params["write"]
+            params["stages"]
             for method, params in client.transport.sent
-            if method == "tab.writeback_write"
+            if method == "tab.writeback_accept"
         ]
-        assert writes == [[{"id": "param-0"}]]
+        assert writes == [
+            [{"subtab_id": "analysis", "expected_revision": 1, "ids": ["param-0"]}]
+        ]
     finally:
         client.context.session.close()

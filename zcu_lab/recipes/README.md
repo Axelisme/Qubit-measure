@@ -54,7 +54,8 @@ try:
     analysis = await tab.analyze("primary", result=FitSummary)
     decision = await tab.ask_writeback()
     if decision.accepted:
-        tab.accept_writeback(decision.items)
+        receipt = tab.accept_writeback(decision.items)
+        receipt.raise_for_error()
     return Report(value=analysis.result.value)
 finally:
     tab.save()
@@ -75,6 +76,10 @@ Analyze 不會自動保存。各 recipe 在已有 Run 結果後進入 `try/final
 `ask_writeback()` 捕捉當次候選，再等待回答。回答本身不寫入校準。
 只有 `accept_writeback(decision.items)` 寫入被選擇且未變更的候選。
 略過時不寫入。原始目的地來自 Run 的 capture，不改用目前 aliases。
+接受時 owner 一次核對 Primary／Post 全部選定 draft revisions，任何候選改動或替換都拒絕整批。
+`accept_writeback` 回 `WritebackReceipt`，失敗收據保留已確認項目與錯誤。
+作者呼叫 `receipt.raise_for_error()` 將失敗交給 execution，`finally` 仍 Save。
+報告的 `writeback_applied` 只依完成收據中的已確認項目，不依回答的 accepted。
 
 Run scope cancel 只停止正在取得資料的 Run，回傳 partial，recipe 繼續後續分析。
 Script scope cancel 使沒有結果的 Analyze 或 Ask raise `RecipeCancelled`。

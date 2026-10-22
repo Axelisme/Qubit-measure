@@ -57,8 +57,15 @@ class _Interaction(BaseModel):
     is_analyzing: bool
 
 
-class _Written(BaseModel):
-    target: str
+class _AppliedPane(BaseModel):
+    subtab_id: Literal["analysis", "post_analysis"]
+    ids: tuple[str, ...]
+
+
+class _Acceptance(BaseModel):
+    status: Literal["completed", "failed"]
+    written: tuple[_AppliedPane, ...]
+    error: str | None
 
 
 class _TabSnapshot(BaseModel):
@@ -96,6 +103,7 @@ class _DestinationContext(BaseModel):
 
 
 class _Preview(BaseModel):
+    revision: int | None
     has_draft: bool
     items: tuple[_Candidate, ...]
     destination_context: _DestinationContext
@@ -137,6 +145,7 @@ class RecipeRuntime:
         self._run_ops: dict[str, int] = {}
         self._analysis_ops: dict[tuple[str, str], int] = {}
         self._candidates: dict[str, tuple[tuple[WritebackItem, str], ...]] = {}
+        self._writeback_revisions: dict[tuple[str, str], int] = {}
         self._pending_analysis: PendingAnalysis | None = None
         self._on_change = on_change
         self._images: list[PngImage] = []
@@ -432,6 +441,12 @@ class RecipeRuntime:
                     operation_handle=op,
                 )
             )
+            if preview.has_draft:
+                if preview.revision is None:
+                    raise GuiRpcError(
+                        "Writeback draft has no revision", reason="incompatible_wire"
+                    )
+                self._writeback_revisions[(tab, stage)] = preview.revision
             for candidate in preview.items if preview.has_draft else ():
                 item = WritebackItem(
                     candidate.target_name,
@@ -460,30 +475,54 @@ class RecipeRuntime:
             item not in tuple(item for item, _ in captured) for item in chosen
         ):
             raise ValueError("Unknown, duplicate or modified writeback candidate")
-        applied: list[WritebackItem] = []
+        stages: list[dict[str, object]] = []
         for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
-            selected = [
-                (item, identity)
+            ids = [
+                identity
                 for item, identity in captured
                 if item.stage == stage and item in chosen
             ]
-            if not selected:
-                continue
-            try:
-                reply = self._tools.gui.send_gui_rpc(
-                    "tab.writeback_write",
+            if ids:
+                stages.append(
                     {
-                        "tab_id": tab,
                         "subtab_id": pane,
-                        "write": [{"id": identity} for _, identity in selected],
-                    },
+                        "expected_revision": self._writeback_revisions[(tab, stage)],
+                        "ids": ids,
+                    }
                 )
-            except GuiRpcError as error:
-                return WritebackReceipt("failed", tuple(applied), str(error))
-            written = TypeAdapter(list[_Written]).validate_python(reply["written"])
-            names = {row.target for row in written}
-            applied.extend(item for item, _ in selected if item.name in names)
-        return WritebackReceipt("completed", tuple(applied))
+        try:
+            reply = _Acceptance.model_validate(
+                self._tools.gui.send_gui_rpc(
+                    "tab.writeback_accept",
+                    {"tab_id": tab, "stages": stages},
+                )
+            )
+        except GuiRpcError as error:
+            receipt = WritebackReceipt("failed", (), str(error))
+        else:
+            confirmed = {
+                (row.subtab_id, identity)
+                for row in reply.written
+                for identity in row.ids
+            }
+            applied = tuple(
+                item
+                for item, identity in captured
+                if item in chosen
+                and (
+                    "analysis" if item.stage == "primary" else "post_analysis",
+                    identity,
+                )
+                in confirmed
+            )
+            receipt = WritebackReceipt(reply.status, applied, reply.error)
+        with self._lock:
+            index = self._detail_index(tab)
+            detail = self._details[index]
+            self._details[index] = replace(
+                detail, writeback_receipts=(*detail.writeback_receipts, receipt)
+            )
+        return receipt
 
     def _snapshot(self, tab: str) -> _TabSnapshot:
         snapshots = _Snapshots.model_validate(

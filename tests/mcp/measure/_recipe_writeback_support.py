@@ -2,22 +2,27 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
     PostAnalysisPaneSnapshot,
     TabSnapshot,
 )
+from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
     WritebackService,
 )
+from zcu_tools.gui.app.measure.writeback.control import WritebackControlFacet
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.context_types import ContextTarget, PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -29,24 +34,48 @@ from tests.gui.app.measure.remote._helpers import dispatch_handler
 from ._script_recipe_support import SyntheticGui
 
 
+class RejectingContext(ContextService):
+    """Context collaborator rejects one setter after real committed writes."""
+
+    def set_parameter(
+        self,
+        target: ContextTarget,
+        path: str,
+        value: YamlValue,
+        *,
+        metadata: YamlMap | None = None,
+    ) -> None:
+        if path == "general.ext.rejected":
+            raise InvalidInputError("synthetic setter refused the value")
+        super().set_parameter(target, path, value, metadata=metadata)
+
+
 class WritebackGui(SyntheticGui):
     """Keep acquisition synthetic while dispatching real writeback RPC handlers."""
 
     render_view = None
 
-    def __init__(self, tmp_path: Path, *, module: bool = False) -> None:
+    def __init__(
+        self, tmp_path: Path, *, module: bool = False, partial: bool = False
+    ) -> None:
         super().__init__()
         self.owner = ThreadPoolExecutor(max_workers=1)
-        self.owner.submit(self.initialize, tmp_path, module=module).result()
+        try:
+            self.owner.submit(
+                self.initialize, tmp_path, module=module, partial=partial
+            ).result()
+        except BaseException:
+            self.owner.shutdown()
+            raise
 
-    def initialize(self, tmp_path: Path, *, module: bool) -> None:
+    def initialize(self, tmp_path: Path, *, module: bool, partial: bool) -> None:
         entry = ResultEntry.create(
             "entry",
             result_root=tmp_path / "results",
             database_root=tmp_path / "database",
         )
         entry.new_point("point")
-        self.context = ContextService(
+        self.context = RejectingContext(
             SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
             BaseEventBus(),
             bind_assets=ArbWaveformDatabase.info_at,
@@ -77,11 +106,32 @@ class WritebackGui(SyntheticGui):
                     )
                 ]
                 if module
+                else [
+                    ParameterWriteback("general.ext.second", "second", 30.0),
+                    ParameterWriteback("general.ext.rejected", "rejected", 40.0),
+                    ParameterWriteback("general.ext.later", "later", 50.0),
+                ]
+                if partial
                 else [ParameterWriteback("general.ext.second", "second", 30.0)],
                 parameters=self.context.read_context(),
                 experiment_name="synthetic",
             ),
         }
+        self.state = State(self.context.get_session_env())
+        self.state.add_tab(
+            "tab-1",
+            Session(adapter_name="synthetic", adapter=MagicMock(), cfg=MagicMock()),
+        )
+        tab = self.state.get_tab("tab-1")
+        tab.analysis.writeback_draft = self.drafts["analysis"]
+        tab.post_analysis.writeback_draft = self.drafts["post_analysis"]
+        self.writeback_control = WritebackControlFacet(
+            state=self.state,
+            guard=MagicMock(),
+            writeback=self.service,
+            resource_versions=lambda: {},
+            bus=BaseEventBus(),
+        )
 
     def respond(self, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.get_post_analyze_result":
@@ -103,6 +153,9 @@ class WritebackGui(SyntheticGui):
                 parameters=original.parameters,
                 experiment_name="replacement",
             )
+            self.state.get_tab("tab-1").post_analysis.writeback_draft = self.drafts[
+                "post_analysis"
+            ]
 
         self.owner.submit(replace).result()
 
@@ -140,19 +193,3 @@ class WritebackGui(SyntheticGui):
                 has_writeback_draft=True,
             ),
         )
-
-    def get_writeback_item_form_for_pane(self, tab_id: str, pane: str, session_id: str):
-        return self.service.get_item_form(self.drafts[pane], session_id)
-
-    def get_writeback_values_for_pane(
-        self, tab_id: str, pane: str, *, session_id: str | None = None
-    ):
-        return self.service.preview_values(self.drafts[pane], session_id=session_id)
-
-    def set_writeback_item_for_pane(
-        self, tab_id: str, pane: str, session_id: str, **changes: object
-    ) -> None:
-        self.service.edit_draft(self.drafts[pane], session_id, **changes)
-
-    def write_writeback_for_pane(self, tab_id, pane, changes):
-        return self.service.write_draft(self.drafts[pane], changes)

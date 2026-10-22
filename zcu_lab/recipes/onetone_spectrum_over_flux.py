@@ -187,13 +187,16 @@ async def onetone_spectrum_over_flux(
 
         # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
+        writeback_applied = False
         if decision.accepted:
-            tab.accept_writeback(decision.items)
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
         return OnetoneSpectrumOverFluxReport(
             flux_half=report_number(analysis.result.flx_half),
             flux_integer=report_number(analysis.result.flx_int),
             flux_period=report_number(analysis.result.flx_period),
-            writeback_applied=decision.accepted,
+            writeback_applied=writeback_applied,
         )
     finally:
         tab.save()

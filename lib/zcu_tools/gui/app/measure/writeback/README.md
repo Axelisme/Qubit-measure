@@ -38,3 +38,13 @@ DocumentStore 每次仍讀取磁碟 bytes，相同內容只重用已解析的 YA
 每次 Apply 都執行模型、清理政策與外部來源驗證，重新驗證 ledger 與附件。
 各列各自提交到固定目的地，錯誤分類與 applied 狀態由逐列結果決定。
 Apply 同步執行。
+
+## Captured acceptance
+
+每個 draft 的 revision 在建立、selection、target、parameter value 或 module Form 改動時遞增。
+Module Form 的 write／command 經同一 subscription 升號。替換 draft 不重用舊 revision。
+`accept_drafts` 在同一次 owner 呼叫核對全部 selected drafts 的 revision 與 IDs，再依輸入群組順序寫入。
+Writeback control 固定 Primary 在 Post 前，並在提交前檢查 permission、idle 與 active draft。
+任一 revision 過期就拒絕整批，錯誤列出變動群組、IDs 與前後 revision，不把 draft 還原成舊值。
+提交中的失敗回 confirmed IDs 成功前綴及診斷，不 retry／rollback。
+`apply_draft` 與單 pane `write_draft` 保留原有 raise 與 edit/write 契約。
