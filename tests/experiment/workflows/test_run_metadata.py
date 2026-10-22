@@ -31,13 +31,15 @@ def test_record_metadata_uses_workflow_identity_and_delivered_attempt(
     completed = workflows.Completed(source, stopped, facts)
     record = workflows.record_with_metadata(
         completed,
-        identity=workflows.RunIdentity(history.run_id, history.provenance),
+        identity=workflows.RunIdentity(
+            "0123456789abcdef0123456789abcdef", history.provenance
+        ),
         experiment_tag="synthetic/trace",
         snapshot=history.snapshot,
     )
     assert record.result is source.result
     assert record.metadata is not None
-    assert record.metadata.run_id == "20261006T010000Z-a1b2c3-000003-7"
+    assert record.metadata.run_id == "0123456789abcdef0123456789abcdef-000003-7"
     assert record.metadata.experiment == "synthetic/trace"
     assert record.metadata.snapshot == history.snapshot
     assert record.metadata.started_at == "2026-10-22T01:02:03+00:00"
