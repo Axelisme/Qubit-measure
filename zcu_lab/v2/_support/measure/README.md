@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-23，mux group wiring 與必要綁定
+**Last updated:** 2026-10-23，mux fine timing 候選
 
 # Measure domain support
 
@@ -15,9 +15,15 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
 Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch 與 freq 使用 Expr 初值。各 tone 的 ro_ch 是從固定 capture 的 group.wiring.ro_ch[i] 取出的整數初值，scalar Expr 不支援 indexing。操作員仍須確認通道與振幅。
 `mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones 與 group wiring。Blank 的 mixer_freq、length 與 ro_length 保持必填且未填，不猜時長。
-`mux/onetone_fine` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。Helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
-缺 leaf 或 null 的 kappa 不參與最小值。全未設時不加等待，trig_offset 保留來源的 time-of-flight offset。
-有 captured readout 時，Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。Blank 只補 trig_offset，不填 length 或 ro_length。
+`mux/onetone_fine` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。
+有 captured readout 時，helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
+此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 保留來源值。
+Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
+Fine 缺 slot 時，只有完整 group 的 kappa 都有效才填候選。mixer_freq 取完整 tone 頻率最小與最大值的中點，ro_length 取五倍 ringup 時間。
+trig_offset 取全部 resonators.ext.time_of_fly 最大值加 ringup，length 取 trig_offset + ro_length。
+任一 kappa 缺值時四欄留空；任一 frequency 缺值時 mixer_freq 留空；任一 time_of_fly 缺值時 trig_offset／length 留空。
+已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源，不擴充共用 metadata API。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
