@@ -305,6 +305,57 @@ def test_detached_rewrite_preserves_canonical_reference_targets(
         np.testing.assert_array_equal(file["vars/signal/values"], [4.0, 8.0])
 
 
+@pytest.mark.parametrize("target", ["vars/signal/values", "vars/signal/axes/x"])
+def test_dtype_change_keeps_object_and_region_references_canonical(
+    tmp_path: Path, target: str
+) -> None:
+    source = tmp_path / "dtype.h5"
+    variable = datafile.Variable(
+        np.array([1, 2, 3, 4]),
+        (datafile.Axis("x", "s", np.array([0, 1, 2, 3])),),
+        "V",
+    )
+    datafile.save(source, replace(_container(), vars={"signal": variable}))
+    with h5py.File(source, "r+") as file:
+        dataset = _dataset(file, target)
+        group = file.create_group("groups/references")
+        group.attrs["object"] = dataset.ref
+        group.attrs["region"] = dataset.regionref[1::2]
+        group.create_dataset("objects", data=[dataset.ref], dtype=h5py.ref_dtype)
+        group.create_dataset(
+            "regions", data=[dataset.regionref[1::2]], dtype=h5py.regionref_dtype
+        )
+    loaded = datafile.load(source)
+    source.unlink()
+    changed = datafile.Variable(
+        np.array([10.5, 20.5, 30.5, 40.5]),
+        (datafile.Axis("x", "s", np.array([0.5, 1.5, 2.5, 3.5])),),
+        "mV",
+    )
+    destination = tmp_path / "rewritten.h5"
+    datafile.save(destination, replace(loaded, vars={"signal": changed}))
+    expected = [20.5, 40.5] if target.endswith("values") else [1.5, 3.5]
+    with h5py.File(destination, "r") as file:
+        canonical = _dataset(file, target)
+        assert canonical.dtype == np.dtype("float64")
+        group = file["groups/references"]
+        for reference in (
+            group.attrs["object"],
+            _dataset(file, "groups/references/objects")[0],
+        ):
+            assert file[reference].id == canonical.id
+        for region in (
+            group.attrs["region"],
+            _dataset(file, "groups/references/regions")[0],
+        ):
+            assert file[region].id == canonical.id
+            np.testing.assert_array_equal(canonical[region], expected)
+    restored = datafile.load(destination).vars["signal"]
+    assert restored.unit == "mV"
+    np.testing.assert_array_equal(restored.values, changed.values)
+    np.testing.assert_array_equal(restored.axes[0].values, changed.axes[0].values)
+
+
 def test_opaque_group_references_remain_readable_after_rewrite(tmp_path: Path) -> None:
     source = tmp_path / "opaque.h5"
     with h5py.File(source, "w") as file:
