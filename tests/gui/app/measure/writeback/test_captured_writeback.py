@@ -141,6 +141,34 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
     assert not session.control.read_context().lookup("Q1.ext.later").present
 
 
+@pytest.mark.parametrize("readback_fails", [False, True])
+def test_acceptance_keeps_per_item_values_without_postcommit_readback(
+    session: WritebackSession, readback_fails: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = session.control.read_context()
+    draft = session.service.create_draft(
+        [
+            ParameterWriteback("Q1.ext.fit", "Fit", proposed_value={"gain": 0.1}),
+            ParameterWriteback("Q1.ext.fit.gain", "Gain", proposed_value=0.2),
+        ],
+        parameters=captured,
+        experiment_name="synthetic",
+    )
+    if readback_fails:
+        def unavailable(*args, **kwargs):
+            raise OSError("fixed-target read unavailable after commit")
+
+        monkeypatch.setattr(session.control, "read_target", unavailable)
+    ids = tuple(item.session_id for item in draft.items)
+    result = session.service.accept_drafts((WritebackSelection(draft, ids),))
+    assert result.applied_ids == (ids,)
+    assert result.error is None
+    assert [[item.value for item in group] for group in result.written] == [
+        [{"gain": 0.1}, 0.2]
+    ]
+    assert len(session.entry.ledger.events()) == 1
+
+
 def test_draft_detaches_author_element_identity(session: WritebackSession) -> None:
     identity = ElementIdentity(index=2, name="Q3")
     proposal = ParameterWriteback(

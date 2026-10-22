@@ -44,6 +44,36 @@ def evidence() -> WritebackEvidence:
     return WritebackEvidence(kind="test/fit", origin="notebook", run_id="run-1")
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_executor_returns_each_committed_value_and_failure_prefix(
+    point: PointView, fails: bool
+) -> None:
+    writer = target(point)
+    items = (
+        ParameterWriteback("Q1.ext.fit", {"gain": 0.1}),
+        ParameterWriteback("Q1.ext.fit.gain", 0.2),
+    )
+    if fails:
+        items += (ParameterWriteback("Q1.duration", "invalid"),)
+        with pytest.raises(WritebackApplyError) as caught:
+            apply_writeback(items, target=writer, evidence=evidence())
+        assert hasattr(caught.value, "result"), "Failure must retain confirmed values"
+        result = caught.value.result
+    else:
+        result = apply_writeback(items, target=writer, evidence=evidence())
+        assert hasattr(result, "committed"), "Executor must return confirmed values"
+    assert [(item.path, item.value) for item in result.committed] == [
+        ("Q1.ext.fit", {"gain": 0.1}),
+        ("Q1.ext.fit.gain", 0.2),
+    ]
+    events = writer.ledger.events()
+    assert len(events) == 1
+    assert events[0].id == result.event_id
+    assert events[0].kind == "accepted"
+    point.refresh()
+    assert point.Q1.ext.fit.gain == 0.2
+
+
 def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
     point: PointView,
 ) -> None:
