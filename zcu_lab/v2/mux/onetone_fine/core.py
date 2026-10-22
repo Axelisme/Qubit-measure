@@ -58,7 +58,23 @@ class MuxOnetoneModuleCfg(ConfigBase):
     """
 
     reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[MuxReadoutCfg, FieldMeta(label="Readout")]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description=(
+                "Without a slot, all group resonator kappas must be set. "
+                "mixer_freq=(min+max group tone freq)/2; "
+                "ro_length=5/(2*pi*min group kappa); "
+                "trig_offset=max group resonator.ext.time_of_fly+ro_length "
+                "(requires every flight time); length=trig_offset+ro_length. "
+                "Missing kappa leaves all four required fields blank. "
+                "Candidates are not device-confirmed (未經裝置確認); "
+                "capability checks run at Run. With a slot, keep its mixer and "
+                "ADC window, add ringup to its trigger and extend pulse coverage."
+            ),
+        ),
+    ]
 
 
 class MuxOnetoneSweepCfg(ConfigBase):

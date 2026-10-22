@@ -6,7 +6,6 @@ from zcu_tools.cfg_model import Expr, MuxReadoutSpec, Slot, Template, TemplateSe
 from zcu_tools.gui.form_adapter import FixedElements, FormContext
 
 from zcu_lab.components.mux import MuxGroupSchema
-from zcu_lab.templates import TEMPLATES
 
 from .ctx_helpers import t1_initial_time
 from .mux_bindings import require_mux_group, require_mux_qubits
@@ -32,18 +31,22 @@ def mux_readout_initial(
     are detached integers from the captured group wiring because scalar Expr
     does not support indexing. Missing/invalid Expr sources leave required input
     blank. The operator confirms wiring, gain and timing before Run; durations
-    remain unfilled. Missing capture, mux alias or
+    remain unfilled unless wait_for_ringup is selected. Missing capture, mux alias or
     group/mux raises ValueError; other alias/source faults propagate.
 
     wait_for_ringup opts spectroscopy into an editable Open/Reset timing seed.
-    Ignore absent/null member kappas; all unset leaves trig_offset equal to
-    the source time-of-flight offset. Otherwise require each set kappa to be
-    finite and positive in MHz, or raise ValueError (alias/source faults
-    propagate). Add 5/(2*pi*min(set kappas)) us to the captured scalar trigger
-    offset, or the blank template's zero offset. A minimum kappa of 1 MHz adds
-    approximately 0.795775 us. With a captured readout, preserve ro_length and
-    seed length=max(original length, trig_offset+ro_length) in us. Without one,
-    keep both required durations unfilled.
+    Require each set kappa to be finite and positive in MHz, or raise ValueError
+    (alias/source faults propagate). With a captured readout, ignore absent/null
+    kappas, add 5/(2*pi*min(set kappas)) us (zero if all unset) to its trigger,
+    preserve ro_length, and seed length=max(original length, trigger+ro_length).
+    Without a slot, require all group kappas before seeding any of mixer_freq,
+    trig_offset, ro_length or length; otherwise leave all four required and blank.
+    Seed mixer_freq=(min(freq)+max(freq))/2 MHz when all tone frequencies exist,
+    and ro_length=5/(2*pi*min(kappas)) us. Seed trig_offset=max(time_of_fly)+ro_length
+    and length=trig_offset+ro_length only when every resonator.ext.time_of_fly
+    exists. Missing/null frequency or flight time leaves its dependent fields
+    blank; invalid set values raise ValueError. These are editable candidates,
+    not device-confirmed settings; capability checks remain at Run.
     This spectroscopy exception uses a detached slot copy when available and
     replaces tones from the group on both paths. Open/Reset leaves editable
     timing; subsequent cfg output retains the operator's edits. No source is
@@ -103,22 +106,60 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
                 "kappa must be finite and positive in MHz"
             )
         kappas.append(kappa)
+    if not ctx.has("$mux.module.readout"):
+        return _blank_ringup_timing(ctx, group, kappas)
     wait_us = 5 / (2 * pi * min(kappas)) if kappas else 0.0
-    if ctx.has("$mux.module.readout"):
-        readout = parameters.library.module_spec(
-            parameters.library_key("$mux.module.readout")
-        )
-        if not isinstance(readout, MuxReadoutSpec):
-            raise TypeError("Mux readout slot must reference a MuxReadoutSpec")
-        trigger = readout.trig_offset + wait_us
-        length = max(readout.length, trigger + readout.ro_length)
-    else:
-        # Ringup can seed the trigger without inventing the required durations.
-        offset = TEMPLATES["readout/mux:blank"].seeds["trig_offset"]
-        if isinstance(offset, bool) or not isinstance(offset, (int, float)):
-            raise TypeError("Blank mux trig_offset seed must be a numeric scalar")
-        return {"trig_offset": offset + wait_us}
+    readout = parameters.library.module_spec(
+        parameters.library_key("$mux.module.readout")
+    )
+    if not isinstance(readout, MuxReadoutSpec):
+        raise TypeError("Mux readout slot must reference a MuxReadoutSpec")
+    trigger = readout.trig_offset + wait_us
+    length = max(readout.length, trigger + readout.ro_length)
     return {"trig_offset": trigger, "length": length}
+
+
+def _blank_ringup_timing(
+    ctx: FormContext, group: MuxGroupSchema, kappas: list[float]
+) -> dict[str, TemplateSeed]:
+    parameters = ctx.parameters
+    if parameters is None:
+        raise ValueError("Mux timing requires a parameter capture")
+    seeds: dict[str, TemplateSeed] = dict.fromkeys(
+        ("mixer_freq", "trig_offset", "ro_length", "length")
+    )
+    if len(kappas) != len(group.resonators):
+        return seeds
+    wait_us = 5 / (2 * pi * min(kappas))
+    seeds["ro_length"] = wait_us
+    for field in ("freq", "ext.time_of_fly"):
+        values: list[float] = []
+        for resonator in group.resonators:
+            source = parameters.lookup_point(f"{resonator}.{field}")
+            value = source.value
+            if not source.present or value is None:
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or (field == "ext.time_of_fly" and value < 0)
+            ):
+                requirement = (
+                    "finite nonnegative us"
+                    if field == "ext.time_of_fly"
+                    else "finite MHz"
+                )
+                raise ValueError(f"{resonator}.{field}: expected {requirement}")
+            values.append(value)
+        if len(values) != len(group.resonators):
+            continue
+        if field == "freq":
+            seeds["mixer_freq"] = (min(values) + max(values)) / 2
+        else:
+            trigger = max(values) + wait_us
+            seeds.update({"trig_offset": trigger, "length": trigger + wait_us})
+    return seeds
 
 
 def mux_relax_delay(ctx: FormContext, names: tuple[str, ...]) -> float | None:
