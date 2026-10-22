@@ -167,7 +167,7 @@ class RBExp(PersistableExperiment[RBResult, RBCfg]):
             (len(cfg.depths), len(cfg.seeds), 2, config.rounds, cfg.reps, ntones),
             on_update=update_view,
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             for depth, depth_step in sched.scan("depth", cfg.depths):
                 for seed, seed_step in depth_step.scan("seed", cfg.seeds):
                     pair = make_paired_sequences(depth, seed)

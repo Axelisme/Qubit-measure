@@ -131,7 +131,9 @@ def test_full_path_disambiguates_equal_sequences_under_different_parents() -> No
 
 
 @pytest.mark.parametrize("kind", ["workflow", "recipe", "run"])
-def test_full_live_leaf_path_selects_a_named_root_without_children(kind: RootKind) -> None:
+def test_full_live_leaf_path_selects_a_named_root_without_children(
+    kind: RootKind,
+) -> None:
     root = experiment.Scope(kind, name="synthetic")
     path = root.live_paths[0]
     assert path == f"{kind}:synthetic"

@@ -113,7 +113,7 @@ Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
 Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
 它們不讀目前 Form 或 library。Freq 取消保留全 sweep 已完成 rounds 的平均；
 Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
-Caller 先呼叫 RunContext.cancel_signal.raise_if_error()，不把 failure 的 partial data 報為成功。
+Caller 先呼叫 RunContext.scope.stop.raise_if_error()，不把 failure 的 partial data 報為成功。
 Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## 實驗角色與 device 操作

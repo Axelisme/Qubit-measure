@@ -17,6 +17,8 @@ class CancelResult:
     cancellation requested, scope not active, sequence mismatch, or the recipe
     admission refusal no run in progress. ambiguous refuses multiple matches.
     active_path is the unique live path at the check, stopping at the first fork.
+    ScriptHost root acceptance instead keeps the root path in its cached receipt;
+    acceptance does not wait for the loop notification or authored finally.
     candidates lists full matching paths only for an ambiguous refusal.
     """
 

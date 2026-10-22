@@ -64,7 +64,7 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 
     core = MuxAmpRabiExp()
     result = core.run(cfg, context=context)
-    context.cancel_signal.raise_if_error()
+    context.scope.stop.raise_if_error()
     source = RunRecord(cfg=cfg, result=result)
     outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 """
@@ -181,7 +181,7 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
         context supplies the board, plots and stop signal. Coordinates and IQ have
         shape (participants, points), in participant order, with normalized gains.
         Cancellation keeps completed averages and leaves unmeasured points NaN.
-        Call context.cancel_signal.raise_if_error() before reporting success;
+        Call context.scope.stop.raise_if_error() before reporting success;
         the caller also finishes/releases plots. Invalid cfg/build errors propagate.
         """
         # Prepare each gain grid and select readout tones in participant order.
@@ -219,7 +219,7 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
 
         # Store points first so each acquisition writes one complete tone vector.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(cfg, signals, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals, scope=context.scope) as sched:
             for pulses, step in sched.scan("point", scan.point_pulses):
                 # Reset, start all drives together, then read after the longest.
                 builder = (

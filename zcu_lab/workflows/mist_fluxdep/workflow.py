@@ -8,8 +8,10 @@ from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
     Failed,
     Live,
@@ -110,16 +112,17 @@ class MISTPoint(BaseModel):
     including partial, or is None on failed calibration/acquisition.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(extra="forbid")
 
     index: int
     flux: float
-    frequency: FrequencyResult
-    rabi: RabiResult
-    readout: ReadoutResult
-    success: bool
-    reason: str | None
-    gain_file: str | None
+    frequency: FrequencyResult | None = None
+    rabi: RabiResult | None = None
+    readout: ReadoutResult | None = None
+    success: bool = False
+    reason: str | None = None
+    gain_file: str | None = None
+    status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
 def mist_cfg(plan: MISTPlan, tun: MISTTunables, cal: CalibratedPi2) -> PowerDepCfg:
@@ -172,6 +175,113 @@ def _save_gain(plots: Plots, result: PowerDepResult, directory: Path) -> None:
     plots.save(name, directory / "gain.png")
 
 
+async def run_frequency_stage(
+    iteration: Scope,
+    inputs: CalibrationInputs,
+    point_record: MISTPoint,
+    plots: Plots,
+    *,
+    carry: CalCarry,
+) -> bool:
+    """Collect frequency calibration before checking whether this point was cancelled."""
+    point_record.frequency = await calibrate_frequency(
+        iteration,
+        plots=plots,
+        inputs=inputs,
+        flux=point_record.flux,
+        carry=carry,
+    )
+    if iteration.cancelled:
+        point_record.status = "skipped"
+    return iteration.cancelled
+
+
+async def run_rabi_stage(
+    iteration: Scope,
+    inputs: CalibrationInputs,
+    point_record: MISTPoint,
+    plots: Plots,
+    *,
+    carry: CalCarry,
+    estimate: float,
+) -> bool:
+    """Collect Rabi at the current frequency without starting work after point cancellation."""
+    assert point_record.frequency is not None
+    point_record.rabi = await calibrate_rabi(
+        iteration,
+        plots=plots,
+        inputs=inputs,
+        frequency=point_record.frequency,
+        carry=carry,
+        t1_estimate_us=estimate,
+    )
+    if iteration.cancelled:
+        point_record.status = "skipped"
+    return iteration.cancelled
+
+
+async def run_readout_stage(
+    iteration: Scope,
+    inputs: CalibrationInputs,
+    point_record: MISTPoint,
+    *,
+    carry: CalCarry,
+    estimate: float,
+) -> bool:
+    """Keep the existing Rabi dependency and readout cadence before point cancellation."""
+    assert point_record.rabi is not None
+    if point_record.rabi.status != "accepted" or readout_due(
+        inputs.point_index, inputs.tun
+    ):
+        point_record.readout = await calibrate_readout(
+            iteration,
+            inputs=inputs,
+            rabi=point_record.rabi,
+            carry=carry,
+            t1_estimate_us=estimate,
+        )
+    else:
+        point_record.readout = ReadoutResult(
+            "skipped",
+            "Readout flux-point cadence",
+            None,
+            None,
+            None,
+        )
+    if iteration.cancelled:
+        point_record.status = "skipped"
+    return iteration.cancelled
+
+
+MIST_MAP_NAME = "mist/vs_flux"
+
+
+def prepare_mist_map(plots: Plots) -> None:
+    """Retain the workflow map presentation even for an empty sweep."""
+    if MIST_MAP_NAME not in plots:
+        plots.subplots(MIST_MAP_NAME)
+
+
+def draw_mist_map(
+    plots: Plots,
+    plan: MISTPlan,
+    traces: NDArray[np.complex128],
+    gains: NDArray[np.float64],
+) -> None:
+    """Render the same live map before calibration and after acquiring a row."""
+    prepare_mist_map(plots)
+
+    def draw(figure: Figure) -> None:
+        figure.clear()
+        ax = figure.subplots()
+        if plan.fluxes:
+            projected = np.array([mist_signal2real(trace) for trace in traces])
+            ax.pcolormesh(gains, plan.fluxes, projected, shading="nearest")
+        ax.set(xlabel="MIST gain (a.u.)", ylabel=f"Flux ({plan.flux_unit})")
+
+    plots.draw(MIST_MAP_NAME, draw)
+
+
 @workflow("mist_fluxdep", "Calibrate and acquire MIST gain traces versus flux.")
 async def mist_fluxdep(
     env: WorkflowEnv[Calibrated], plan: MISTPlan, tun: Live[MISTTunables]
@@ -194,100 +304,85 @@ async def mist_fluxdep(
     carry = CalCarry(env.context)
     traces = np.full((len(plan.fluxes), plan.gain_points), complex(np.nan, np.nan))
     gains = np.linspace(plan.gain_start, plan.gain_stop, plan.gain_points)
-    name = "mist/vs_flux"
-    if name not in env.plots:
-        env.plots.subplots(name)
-
-    def draw_map(figure: Figure) -> None:
-        figure.clear()
-        ax = figure.subplots()
-        if plan.fluxes:
-            projected = np.array([mist_signal2real(trace) for trace in traces])
-            ax.pcolormesh(gains, plan.fluxes, projected, shading="nearest")
-        ax.set(xlabel="MIST gain (a.u.)", ylabel=f"Flux ({plan.flux_unit})")
-
-    for index, (flux, d) in enumerate(
-        zip(plan.fluxes, env.commit_dirs(), strict=False)
+    prepare_mist_map(env.plots)
+    for index, (flux, iteration) in enumerate(
+        zip(plan.fluxes, env.iterations(), strict=False)
     ):
-        env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
-        env.plots.draw(name, draw_map)
-        # Set this point before calibrating its drive and readout.
-        await set_flux(env, plan.flux_dev, flux, unit=plan.flux_unit)
-        captured = CalibrationInputs(
-            qub_pulse=plan.qub_pulse,
-            readout=plan.readout,
-            tun=tun.current.cal,
-            snapshot=plan.snapshot,
-            directory=d,
-        )
-        # Find the current transition frequency.
-        frequency = await calibrate_frequency(
-            env,
-            inputs=captured,
-            flux=flux,
-            carry=carry,
-        )
-        # Measure this point's pi and pi/2 durations.
-        rabi = await calibrate_rabi(
-            env,
-            inputs=replace(captured, tun=tun.current.cal),
-            frequency=frequency,
-            carry=carry,
-            t1_estimate_us=tun.current.guess_us,
-            point_index=index,
-        )
-        # Refresh readout only when the existing cadence or Rabi failure requires it.
-        if rabi.status != "accepted" or readout_due(index, tun.current.cal):
-            readout = await calibrate_readout(
-                env,
-                inputs=replace(captured, tun=tun.current.cal),
-                rabi=rabi,
-                carry=carry,
-                t1_estimate_us=tun.current.guess_us,
+        point_record = MISTPoint(index=index, flux=flux)
+        try:
+            d = iteration.dir
+            env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
+            draw_mist_map(env.plots, plan, traces, gains)
+            # Set this point before calibrating its drive and readout.
+            await set_flux(iteration, plan.flux_dev, flux, unit=plan.flux_unit)
+            if iteration.cancelled:
+                point_record.status = "skipped"
+                continue
+            captured = CalibrationInputs(
+                qub_pulse=plan.qub_pulse,
+                readout=plan.readout,
+                tun=tun.current.cal,
+                snapshot=plan.snapshot,
+                directory=d,
+                point_index=index,
             )
-        else:
-            readout = ReadoutResult(
-                "skipped", "Readout flux-point cadence", None, None, None
-            )
-        cal = current_point_calibration(rabi, carry)
-        reason = rabi.reason
-        success = False
-        gain_file = None
-        if cal is not None:
-            # The custom native sequence rebuilds its gain plot on each attempt.
-            outcome = await env.run(run_mist, mist_cfg(plan, tun.current, cal))
-            if isinstance(outcome, Failed):
-                reason = outcome.reason
-            else:
-                save_mist(
-                    outcome,
-                    d / "mist.h5",
-                    snapshot=plan.snapshot,
-                    identity=env.identity,
+            # Locate frequency, calibrate pulses, then refresh readout on cadence.
+            if (
+                await run_frequency_stage(
+                    iteration, captured, point_record, env.plots, carry=carry
                 )
-                gain_file = "mist.h5"
-                if outcome.partial_result:
-                    reason = "stopped"
+                or await run_rabi_stage(
+                    iteration,
+                    replace(captured, tun=tun.current.cal),
+                    point_record,
+                    env.plots,
+                    carry=carry,
+                    estimate=tun.current.guess_us,
+                )
+                or await run_readout_stage(
+                    iteration,
+                    replace(captured, tun=tun.current.cal),
+                    point_record,
+                    carry=carry,
+                    estimate=tun.current.guess_us,
+                )
+            ):
+                continue
+            assert point_record.rabi is not None
+            cal = current_point_calibration(point_record.rabi, carry)
+            reason = point_record.rabi.reason
+            success = False
+            gain_file = None
+            if cal is not None:
+                # The custom native sequence rebuilds its gain plot on each attempt.
+                outcome = await iteration.run(
+                    run_mist, mist_cfg(plan, tun.current, cal), name="MIST"
+                )
+                if isinstance(outcome, Failed):
+                    reason = outcome.reason
                 else:
-                    result = outcome.value.result
-                    traces[index] = result.signals
-                    gains = result.gains.copy()
-                    _save_gain(env.plots, result, d)
-                    success, reason = True, None
-        await env.commit(
-            MISTPoint(
-                index=index,
-                flux=flux,
-                frequency=frequency,
-                rabi=rabi,
-                readout=readout,
-                success=success,
-                reason=reason,
-                gain_file=gain_file,
-            ),
-            d,
-        )
-        env.plots.draw(name, draw_map)
-        if index == len(plan.fluxes) - 1:
-            env.plots.save(name, d / "map.png")
+                    save_mist(
+                        outcome,
+                        d / "mist.h5",
+                        snapshot=plan.snapshot,
+                        identity=env.identity,
+                    )
+                    gain_file = "mist.h5"
+                    if outcome.partial_result:
+                        reason = "stopped"
+                    else:
+                        result = outcome.value.result
+                        traces[index] = result.signals
+                        gains = result.gains.copy()
+                        _save_gain(env.plots, result, d)
+                        success, reason = True, None
+            point_record.success = success
+            point_record.reason = reason
+            point_record.gain_file = gain_file
+            point_record.status = "skipped" if iteration.cancelled else "completed"
+            draw_mist_map(env.plots, plan, traces, gains)
+            if index == len(plan.fluxes) - 1:
+                env.plots.save(MIST_MAP_NAME, d / "map.png")
+        finally:
+            iteration.commit(point_record)
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(len(plan.fluxes))

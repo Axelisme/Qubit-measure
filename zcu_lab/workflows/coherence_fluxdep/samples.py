@@ -102,13 +102,13 @@ def _last_completed(saved: SavedRecord[CoherencePoint]) -> str:
     point = saved.record
     references: list[str] = []
     # Validate every explicit reference, not just the snapshot chosen for the row.
-    for file in point.frequency.files:
+    for file in point.frequency.files if point.frequency is not None else ():
         load_trace(saved.directory, file, FreqExp().persistence_spec())
         references.append(file)
-    if point.rabi.file is not None:
+    if point.rabi is not None and point.rabi.file is not None:
         load_trace(saved.directory, point.rabi.file, LenRabiExp().persistence_spec())
         references.append(point.rabi.file)
-    if point.readout.file is not None:
+    if point.readout is not None and point.readout.file is not None:
         load_trace(
             saved.directory, point.readout.file, FreqGainExp().persistence_spec()
         )
@@ -162,7 +162,7 @@ def prepare_samples(
         point = saved.record
         fields: list[SampleField] = []
         try:
-            if point.frequency.status == "accepted":
+            if point.frequency is not None and point.frequency.status == "accepted":
                 fields.append(
                     SampleField(
                         name="freq_mhz",

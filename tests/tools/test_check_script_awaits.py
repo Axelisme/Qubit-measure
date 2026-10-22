@@ -90,7 +90,9 @@ def test_uniform_rule_allows_framework_calls_and_real_lab_helpers() -> None:
 
 
 @pytest.mark.parametrize("receiver", ["scope", "iteration"])
-def test_explicit_scope_receivers_allow_operations_but_not_scheduling(receiver: str) -> None:
+def test_explicit_scope_receivers_allow_operations_but_not_scheduling(
+    receiver: str,
+) -> None:
     source = (
         f"async def step({receiver}):\n"
         f"    await {receiver}.run(core, cfg, name='T1')\n"
@@ -100,7 +102,9 @@ def test_explicit_scope_receivers_allow_operations_but_not_scheduling(receiver: 
         f"    await {receiver}.commit(record)\n"
         f"    await gather({receiver}.run(core, cfg))\n"
     )
-    violations = check_script_awaits.check_sources({"zcu_lab/workflows/demo.py": source})
+    violations = check_script_awaits.check_sources(
+        {"zcu_lab/workflows/demo.py": source}
+    )
     assert [(violation.line, violation.target) for violation in violations] == [
         (7, f"gather({receiver}.run(core, cfg))")
     ]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from math import isfinite, nan
 from typing import TYPE_CHECKING
 
@@ -32,17 +32,21 @@ def draw_overnight_trend(
     """
     if not isfinite(start_interval_s) or start_interval_s <= 0:
         raise ValueError("Overnight trend interval must be finite and positive")
+    times: list[datetime] = []
     for point in points:
-        offset = point.actual_start.utcoffset()
+        actual_start = point.actual_start
+        if actual_start is None:
+            raise ValueError("Overnight trend requires an actual_start timestamp")
+        offset = actual_start.utcoffset()
         if offset is None or offset.total_seconds() != 0:
             raise ValueError("Overnight actual_start must be aware UTC")
+        times.append(actual_start)
     if "overnight_trend" not in plots:
         plots.subplots("overnight_trend", nrows=2, ncols=1, sharex=True)
 
     def draw(figure: Figure) -> None:
         figure.clear()
         axes = figure.subplots(2, 1, sharex=True, squeeze=False)[:, 0]
-        times = [point.actual_start for point in points]
         for axis, member in zip(axes, ("t1", "t2"), strict=True):
             values = [
                 point.t1_us if member == "t1" else point.t2_us for point in points

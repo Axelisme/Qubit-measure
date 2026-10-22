@@ -59,7 +59,7 @@ def make_control(tmp_path):
     @workflow("synthetic", "Synthetic form and record hosting")
     async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
         await env.wait_until(env.started_at)
-        await env.commit(Native(value=tun.current.value))
+        env.commit(Native(value=tun.current.value))
 
     attachment = WorkflowAttachment(
         script=script,
@@ -159,7 +159,7 @@ def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_pat
     @workflow("pausing", "Synthetic retained-worker pause")
     async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
         await env.call(operation)
-        await env.commit(Native(value=tun.current.value))
+        env.commit(Native(value=tun.current.value))
 
     control.configure(
         (

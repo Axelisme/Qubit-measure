@@ -130,13 +130,13 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
         )
 
         # 2. Set the external flux bias before measuring each spectrum.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
                 set_flux(
                     context.devices[step.cfg.jpa_flux_dev],
                     jpa_flux,
                     unit=step.cfg.flux_unit,
-                    stop=context.cancel_signal,
+                    stop=context.scope.stop,
                     progress=False,
                 )
 

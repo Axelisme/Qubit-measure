@@ -57,9 +57,15 @@ def test_each_env_run_reads_all_drivers_before_core_callback(rig: Rig) -> None:
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        for _ in range(2):
-            completed(await env.run(acquire, Cfg(dev={"flux": "flux"})))
-        await env.commit(Point(value=2))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            for _ in range(2):
+                completed(await iteration.run(acquire, Cfg(dev={"flux": "flux"})))
+            iteration.commit(Point(value=2))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -67,7 +73,7 @@ def test_each_env_run_reads_all_drivers_before_core_callback(rig: Rig) -> None:
     assert (selected.reads, unused.reads) == (2, 2)
     assert callbacks == [1, 1]
     document = json.loads(
-        (rig.paths.data_root / "commits/000001/record.json").read_text()
+        (rig.paths.data_root / "iteration-000001/record.json").read_text()
     )
     operations = document["operations"]
     journal_operations = [
@@ -94,7 +100,12 @@ def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        await env.run(acquire, Cfg())
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await iteration.run(acquire, Cfg())
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -129,7 +140,12 @@ def test_env_run_distinguishes_missing_devices_from_empty_port(
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        await env.run(acquire, Cfg())
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await iteration.run(acquire, Cfg())
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -153,7 +169,12 @@ def test_role_names_are_resolved_only_when_core_callback_uses_device(
         return 1
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        await env.run(acquire, Cfg(dev={"flux": "unavailable"}))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await iteration.run(acquire, Cfg(dev={"flux": "unavailable"}))
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")
@@ -172,12 +193,17 @@ def test_live_cfg_getter_is_detached_and_setup_preserves_complete_model(
     cfg = FakeDeviceInfo(address=driver.address, value=0.25, rampstep=0.05, output="on")
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        actual = env.get_device_cfg("flux")
-        assert isinstance(actual, FakeDeviceInfo)
-        assert actual.value == 0.1
-        actual.value = 99
-        assert env.get_device_cfg("flux").model_dump()["value"] == 0.1
-        completed(await env.setup_device("flux", cfg))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            actual = env.get_device_cfg("flux")
+            assert isinstance(actual, FakeDeviceInfo)
+            assert actual.value == 0.1
+            actual.value = 99
+            assert env.get_device_cfg("flux").model_dump()["value"] == 0.1
+            completed(await iteration.setup_device("flux", cfg))
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")

@@ -19,7 +19,9 @@ def test_call_uses_explicit_receiver_and_records_on_owner_loop() -> None:
 
     async def script() -> str:
         with root.child("calibration") as scope:
-            result = await host.call(lambda ctx: ctx.scope.path, scope=scope, name="T1", on_completed=record)
+            result = await host.call(
+                lambda ctx: ctx.scope.path, scope=scope, name="T1", on_completed=record
+            )
             assert host.live_paths == [scope.path]
             return result.result
 
@@ -27,7 +29,9 @@ def test_call_uses_explicit_receiver_and_records_on_owner_loop() -> None:
     assert seen == [(owner, 0)]
 
 
-def test_root_cancel_records_completion_before_raising_and_does_not_set_host_error() -> None:
+def test_root_cancel_records_completion_before_raising_and_does_not_set_host_error() -> (
+    None
+):
     root = Scope("workflow", name="synthetic")
     host = ScriptHost(root)
     assert getattr(host, "root", None) is root, "host must expose its exact root"
@@ -77,7 +81,7 @@ def test_real_completion_errors_take_precedence_over_root_cancel(failure: str) -
     async def script() -> None:
         await host.call(work, on_completed=record)
 
-    with pytest.raises(OSError) as raised:
+    with pytest.raises(OSError, match="recording failed") as raised:
         host.run(script())
     assert raised.value is error
     assert host.error is error

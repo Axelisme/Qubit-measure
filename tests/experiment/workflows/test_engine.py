@@ -44,8 +44,14 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
 
 
 async def points(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-    for _ in range(plan.count):
-        await env.commit(Point(value=tun.current.value))
+    iterations = env.iterations()
+    try:
+        iteration = next(iterations)
+        for _ in range(plan.count):
+            iteration.commit(Point(value=tun.current.value))
+            iteration = next(iterations)
+    finally:
+        iterations.close()
 
 
 def test_start_is_deferred_and_commits_precede_done(rig: Rig) -> None:
@@ -89,11 +95,17 @@ def test_nested_inputs_and_published_records_are_detached(rig: Rig) -> None:
     observed: list[list[int]] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        observed.append(plan.values.copy())
-        plan.values.append(99)
-        record = Point(value=tun.current.value)
-        await env.commit(record)
-        record.value = 100
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            observed.append(plan.values.copy())
+            plan.values.append(99)
+            record = Point(value=tun.current.value)
+            iteration.commit(record)
+            iteration = next(iterations)
+            record.value = 100
+        finally:
+            iterations.close()
 
     rig.start(script, plan=caller_plan)
     caller_plan.values.append(42)
@@ -112,21 +124,30 @@ def test_resume_keeps_commits_progress_and_author_locals(rig: Rig) -> None:
     calls: list[int] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        bar = env.pbar("points", plan.count)
-        await env.commit(Point(value=tun.current.value))
-        bar.set_progress(1)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            bar = env.pbar("points", plan.count)
+            iteration.commit(Point(value=tun.current.value))
+            iteration = next(iterations)
+            bar.set_progress(1)
 
-        def operation(ctx: CallContext) -> int:
-            calls.append(1)
-            if len(calls) == 1:
-                entered.set()
-                assert ctx.scope.stop.event.wait(10), "Pause reaches active operation"
-            return 7
+            def operation(ctx: CallContext) -> int:
+                calls.append(1)
+                if len(calls) == 1:
+                    entered.set()
+                    assert ctx.scope.stop.event.wait(10), (
+                        "Pause reaches active operation"
+                    )
+                return 7
 
-        value = completed(await env.call(operation)).value
-        assert env.pbar("points", plan.count) is bar
-        await env.commit(Point(value=value + tun.current.value))
-        bar.set_progress(2)
+            value = completed(await iteration.call(operation)).value
+            assert env.pbar("points", plan.count) is bar
+            iteration.commit(Point(value=value + tun.current.value))
+            iteration = next(iterations)
+            bar.set_progress(2)
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -157,14 +178,20 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
     stops: list[bool] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        def operation(ctx: CallContext) -> int:
-            entered.set()
-            assert release.wait(10), "Controller releases the operation in finally"
-            stops.append(ctx.scope.stop.is_set())
-            return 4
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
 
-        result = completed(await env.call(operation))
-        assert result.partial_result
+            def operation(ctx: CallContext) -> int:
+                entered.set()
+                assert release.wait(10), "Controller releases the operation in finally"
+                stops.append(ctx.scope.stop.is_set())
+                return 4
+
+            result = completed(await iteration.call(operation))
+            assert result.partial_result
+        finally:
+            iterations.close()
 
     rig.start(script)
     with running(rig) as future:
@@ -337,10 +364,16 @@ def test_progress_snapshot_error_does_not_replace_producer_cause_or_retain_worke
 
 def test_commit_journal_failure_does_not_publish_record(rig: Rig) -> None:
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        journal = rig.paths.metadata_root / "journal.jsonl"
-        journal.unlink()
-        journal.mkdir()
-        await env.commit(Point(value=1))
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            journal = rig.paths.metadata_root / "journal.jsonl"
+            journal.unlink()
+            journal.mkdir()
+            iteration.commit(Point(value=1))
+            iteration = next(iterations)
+        finally:
+            iterations.close()
 
     rig.start(script)
     final = rig.engine.execute("run")

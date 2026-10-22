@@ -216,7 +216,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
             buffer = SignalBuffer(
                 (len(lengths), 2, 2), dtype=np.float64, on_update=plot_fn
             )
-            with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+            with Schedule(cfg, buffer, scope=context.scope) as sched:
                 modules = sched.cfg.modules
                 inner_length_sweep = sched.cfg.sweep.length
                 assert isinstance(inner_length_sweep, SweepCfg), (
@@ -257,7 +257,7 @@ class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
                 on_update=lambda data: plot_fn(_average_rounds(data)),
             )
             programs: dict[float, ModularProgramV2] = {}
-            with Schedule(run_cfg, round_buffer, stop=context.cancel_signal) as sched:
+            with Schedule(run_cfg, round_buffer, scope=context.scope) as sched:
                 for _, rep in sched.repeat("round", rounds):
                     for length, step in rep.scan("length", lengths.tolist()):
                         modules = step.cfg.modules

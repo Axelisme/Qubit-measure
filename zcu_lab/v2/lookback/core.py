@@ -135,7 +135,7 @@ class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
             (len(times),),
             on_update=lambda data: viewer.update(times, lookback_signal2real(data)),
         )
-        with Schedule(run_cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
             _ = sched.prog_builder(context.soc, context.soccfg).run_program_decimated(
                 program
             )

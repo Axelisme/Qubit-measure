@@ -9,9 +9,7 @@ from zcu_tools.experiment.workflows import Live, WorkflowEnv
 from ._engine_fakes import Plan, Point, Rig, Tunables, completed
 
 
-@pytest.mark.parametrize(
-    "scope", ["acquire", "schedule", "run", "iteration", "workflow"]
-)
+@pytest.mark.parametrize("scope", ["acquire", "schedule", "run", "iteration"])
 def test_workflow_scope_ack_status_and_partial_facts(
     tmp_path: Path, scope: str
 ) -> None:
@@ -42,14 +40,18 @@ def test_workflow_scope_ack_status_and_partial_facts(
             schedule.release()
             return 11
 
-        first = completed(await env.call(acquire))
+        iterations = env.iterations()
+        iteration = next(iterations)
+        first = completed(await iteration.call(acquire))
         outcomes.append((first.partial_result, first.facts.stopped))
-        second = completed(await env.call(lambda ctx: ctx.scope.stop.is_set()))
+        second = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
         outcomes.append((second.partial_result, second.facts.stopped))
-        await env.commit(Point(value=11))
-        third = completed(await env.call(lambda ctx: ctx.scope.stop.is_set()))
+        iteration.commit(Point(value=11))
+        iteration = next(iterations)
+        third = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
         outcomes.append((third.partial_result, third.facts.stopped))
-        await env.commit(Point(value=12))
+        iteration.commit(Point(value=12))
+        iterations.close()
 
     rig.start(script)
     try:

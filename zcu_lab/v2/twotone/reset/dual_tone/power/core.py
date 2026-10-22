@@ -141,7 +141,7 @@ class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
         )
 
         # Sweep both reset gains in hardware and collect mean IQ.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             modules = sched.cfg.modules
             modules.tested_reset.set_param(
                 "gain1", sweep2param("gain1", sched.cfg.sweep.gain1)

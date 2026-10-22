@@ -18,7 +18,7 @@
 
 Recipe 函式本體直接列出開 tab、設定、Run、Analyze 與 writeback 問答，不把整段流程藏進 helper。
 檢查：從 async 函式本體依序指出步驟，確認接受 writeback 後才呼叫 `accept_writeback(items)`。Inputs 用 FormModel 宣告，由框架產生 MCP JSON schema，不渲染 recipe inputs 的 GUI Form。
-作者不寫取消分支，Run scope 返回 partial，script cancel 的普通 RecipeCancelled 讓已有 Run 的 finally 同步 Save。Analyze／Ask await 回非 Optional，不能以 None 作取消判斷。
+作者不寫取消分支，Run scope 返回 partial，script cancel 的普通 ScriptCancelled 讓已有 Run 的 finally 同步 Save。Analyze／Ask await 回非 Optional，不能以 None 作取消判斷。
 所有 lab async def 只 await env／tab／session 呼叫或有 lab 定義的 async helper，helpers 本身同樣受檢查。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫即使不 await 也拒絕，其他 async with／async for 不另禁。Quality gate 執行 AST 檢查，不追蹤 assignment aliases、動態分派或包裝，不是 type checker。
 來源：[recipe 操作流程](v2/experiment-authoring.md#2-在-recipe-函式本體寫出操作流程)。
 

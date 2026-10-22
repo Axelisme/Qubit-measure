@@ -52,17 +52,27 @@ def test_async_commits_heterogeneous_records_and_tracks_every_live_revision(
     async def script(
         env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
     ) -> Summary:
-        initial = tun.current
-        engine.update_tunables(
-            "run", Tunables(value=8), expected_revision=0, actor=w.Actor("user", "test")
-        )
-        latest = tun.current
-        initial_value = initial.value
-        initial.value = -1
-        assert tun.current.value == 8
-        await env.commit(FirstRecord(first=initial_value, latest=latest.value))
-        await env.commit(SecondRecord(value=tun.current.value))
-        return Summary(points=plan.count)
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            initial = tun.current
+            engine.update_tunables(
+                "run",
+                Tunables(value=8),
+                expected_revision=0,
+                actor=w.Actor("user", "test"),
+            )
+            latest = tun.current
+            initial_value = initial.value
+            initial.value = -1
+            assert tun.current.value == 8
+            iteration.commit(FirstRecord(first=initial_value, latest=latest.value))
+            iteration = next(iterations)
+            iteration.commit(SecondRecord(value=tun.current.value))
+            iteration = next(iterations)
+            return Summary(points=plan.count)
+        finally:
+            iterations.close()
 
     try:
         declared = w.workflow("example", "Commit two distinct record models")(script)
@@ -103,9 +113,11 @@ def test_async_commits_heterogeneous_records_and_tracks_every_live_revision(
             {"first": 3, "latest": 8},
             {"value": 8},
         ]
-        first = json.loads((paths.data_root / "commits/000001/record.json").read_text())
+        first = json.loads(
+            (paths.data_root / "iteration-000001/record.json").read_text()
+        )
         second = json.loads(
-            (paths.data_root / "commits/000002/record.json").read_text()
+            (paths.data_root / "iteration-000002/record.json").read_text()
         )
         assert first["started"]["revisions"] == [0, 1]
         assert second["started"]["revisions"] == [1]

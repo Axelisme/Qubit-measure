@@ -10,5 +10,6 @@
 2. [用 startup script 建立 entry 與 alias](02-startup-and-entry.md)：指定自己的 startup 與 entry-template，建立 point、保存 alias rows，並確認重開時保留哪些資料。
 3. [新增實驗與 GUI 表單](03-experiment.md)：複製 `twotone/power_dep`，逐檔修改 core、Form、adapter 與 operator guide，最後從 GUI New Tab 開啟新實驗。
 4. [為實驗加入 MCP recipe](04-recipe.md)：為新 adapter 註冊 recipe，串接 Run 與保存，再用 `recipe_guide` 讀取 operator 文件。
+5. [撰寫逐點 workflow](05-workflow.md)：傳顯式 Scope、逐步填入 point record，以同步 commit 保存 Failed、取消或正常完成前取得的成果。
 
 開始修改前先讀 [POLICY](../POLICY.md)，逐條核對寫法與檢查方式。各篇會連到 authoring 文件的對應段落，查契約時沿連結讀，不必先通讀所有框架文件。

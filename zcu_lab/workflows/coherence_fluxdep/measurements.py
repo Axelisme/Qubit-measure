@@ -7,26 +7,23 @@ from typing import Literal
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.experiment.workflows import Failed, WorkflowEnv
-from zcu_tools.plotting.plots import LinePlot
+from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.workflows import Failed
+from zcu_tools.plotting.plots import LinePlot, Plots
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
-from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg
 from zcu_lab.workflows.coherence_fluxdep.acquire import run_t2ramsey
 from zcu_lab.workflows.coherence_fluxdep.analysis import (
     analyze_t2echo_fluxdep,
     analyze_t2ramsey,
 )
 from zcu_lab.workflows.coherence_fluxdep.saving import save_t2ramsey
-from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan, T1Tunables, t1_cfg
-from zcu_lab.workflows.coherence_fluxdep.t2 import (
-    T2EchoTunables,
-    T2RamseyTunables,
-    t2echo_cfg,
-    t2ramsey_cfg,
-)
+from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
-from zcu_lab.workflows.common.calibration import Calibrated, CalibratedPi2, StageStatus
+from zcu_lab.workflows.common.calibration import StageStatus
 from zcu_lab.workflows.common.saving import save_t1, save_t2echo
 
 type LifetimeKind = Literal["t1", "t2ramsey", "t2echo"]
@@ -72,19 +69,17 @@ def history_guess(initial_us: float, history: LifetimeHistory) -> float:
     return guess
 
 
-def _plot(env: WorkflowEnv[Calibrated], kind: LifetimeKind) -> LinePlot:
+def _plot(plots: Plots, kind: LifetimeKind) -> LinePlot:
     name = f"{kind}/decay"
-    if name not in env.plots:
-        env.plots.subplots(name)
+    if name not in plots:
+        plots.subplots(name)
 
     def rebuild(figure: Figure) -> None:
         figure.clear()
         figure.subplots()
 
-    env.plots.draw(name, rebuild)
-    return env.plots.liveplot_1d(
-        name, "Time (us)", "Signal", axes=env.plots[name].axes[0]
-    )
+    plots.draw(name, rebuild)
+    return plots.liveplot_1d(name, "Time (us)", "Signal", axes=plots[name].axes[0])
 
 
 def _t2_rejection(fit: DecayFit, maximum: float) -> str | None:
@@ -96,7 +91,7 @@ def _t2_rejection(fit: DecayFit, maximum: float) -> str | None:
 
 
 def _finish(
-    env: WorkflowEnv[Calibrated],
+    plots: Plots,
     kind: LifetimeKind,
     fit: DecayFit,
     times: NDArray[np.float64],
@@ -113,21 +108,21 @@ def _finish(
         ax.plot(times, fit.fitted, label="fit")
         ax.set_title(f"{kind} = {fit.lifetime_us:.2f} us")
 
-    env.plots.draw(f"{kind}/decay", overlay)
-    env.plots.save(f"{kind}/decay", directory / f"{kind}-decay.png")
+    plots.draw(f"{kind}/decay", overlay)
+    plots.save(f"{kind}/decay", directory / f"{kind}-decay.png")
     return LifetimeResult(
         kind, "accepted", None, fit.lifetime_us, fit.error_us, filename
     )
 
 
 async def measure_t1(
-    env: WorkflowEnv[Calibrated],
-    plan: T1Plan,
-    tun: T1Tunables,
-    cal: CalibratedPi2,
-    guess_us: float,
+    scope: Scope,
+    cfg: T1Cfg,
     *,
+    tun: T1Tunables,
+    snapshot: RunSnapshot,
     directory: Path,
+    plots: Plots,
 ) -> LifetimeResult:
     """Measure energy relaxation to estimate T1 independently of dephasing.
 
@@ -140,12 +135,12 @@ async def measure_t1(
     filename. Unexpected errors propagate. History updates belong to the caller.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
-    plot = _plot(env, "t1")
-    outcome = await env.run(T1Exp().run, t1_cfg(plan, tun, cal, guess_us))
+    plot = _plot(plots, "t1")
+    outcome = await scope.run(T1Exp().run, cfg, name="T1")
     if isinstance(outcome, Failed):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
-    save_t1(outcome, directory / "t1.h5", snapshot=plan.snapshot, identity=env.identity)
+    save_t1(outcome, directory / "t1.h5", snapshot=snapshot, identity=scope.identity)
     if outcome.partial_result:
         return LifetimeResult("t1", "rejected", "stopped", None, None, "t1.h5")
     plot.update(outcome.value.result.times, outcome.value.result.signals.real)
@@ -164,18 +159,17 @@ async def measure_t1(
     )
     reason = None if accepted else "T1 fit rejected"
     return _finish(
-        env, "t1", fit, outcome.value.result.times, reason, directory=directory
+        plots, "t1", fit, outcome.value.result.times, reason, directory=directory
     )
 
 
 async def measure_ramsey(
-    env: WorkflowEnv[Calibrated],
-    plan: T1Plan,
-    tun: T2RamseyTunables,
-    cal: CalibratedPi2,
-    guess_us: float,
+    scope: Scope,
+    cfg: T2RamseyCfg,
     *,
+    snapshot: RunSnapshot,
     directory: Path,
+    plots: Plots,
 ) -> LifetimeResult:
     """Measure Ramsey fringes to estimate dephasing without an echo pulse.
 
@@ -192,16 +186,16 @@ async def measure_ramsey(
     Original overlong/mean-absolute-error gates apply, with rejected raw retained.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
-    plot = _plot(env, "t2ramsey")
-    outcome = await env.run(run_t2ramsey, t2ramsey_cfg(plan, tun, cal, guess_us))
+    plot = _plot(plots, "t2ramsey")
+    outcome = await scope.run(run_t2ramsey, cfg, name="Ramsey")
     if isinstance(outcome, Failed):
         return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
     save_t2ramsey(
         outcome,
         directory / "t2ramsey.h5",
-        snapshot=plan.snapshot,
-        identity=env.identity,
+        snapshot=snapshot,
+        identity=scope.identity,
     )
     if outcome.partial_result:
         return LifetimeResult(
@@ -214,7 +208,7 @@ async def measure_ramsey(
             "t2ramsey", "failed", fit.reason, None, None, "t2ramsey.h5"
         )
     return _finish(
-        env,
+        plots,
         "t2ramsey",
         fit,
         outcome.value.result.times,
@@ -224,13 +218,12 @@ async def measure_ramsey(
 
 
 async def measure_echo(
-    env: WorkflowEnv[Calibrated],
-    plan: T1Plan,
-    tun: T2EchoTunables,
-    cal: CalibratedPi2,
-    guess_us: float,
+    scope: Scope,
+    cfg: T2EchoCfg,
     *,
+    snapshot: RunSnapshot,
     directory: Path,
+    plots: Plots,
 ) -> LifetimeResult:
     """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
@@ -245,13 +238,16 @@ async def measure_echo(
     No extra T1 measurement or fallback is made; history belongs to the caller.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
-    plot = _plot(env, "t2echo")
-    outcome = await env.run(T2EchoExp().run, t2echo_cfg(plan, tun, cal, guess_us))
+    plot = _plot(plots, "t2echo")
+    outcome = await scope.run(T2EchoExp().run, cfg, name="Echo")
     if isinstance(outcome, Failed):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
     save_t2echo(
-        outcome, directory / "t2echo.h5", snapshot=plan.snapshot, identity=env.identity
+        outcome,
+        directory / "t2echo.h5",
+        snapshot=snapshot,
+        identity=scope.identity,
     )
     if outcome.partial_result:
         return LifetimeResult("t2echo", "rejected", "stopped", None, None, "t2echo.h5")
@@ -260,7 +256,7 @@ async def measure_echo(
     if isinstance(fit, Failed):
         return LifetimeResult("t2echo", "failed", fit.reason, None, None, "t2echo.h5")
     return _finish(
-        env,
+        plots,
         "t2echo",
         fit,
         outcome.value.result.times,

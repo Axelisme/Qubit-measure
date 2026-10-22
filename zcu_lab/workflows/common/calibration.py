@@ -11,7 +11,9 @@ import numpy as np
 from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.datafile import RunSnapshot
-from zcu_tools.experiment.workflows import Failed, WorkflowEnv
+from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.workflows import Failed
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 
@@ -175,6 +177,7 @@ class CalibrationInputs:
     tun: CalibrationTunables
     snapshot: RunSnapshot
     directory: Path
+    point_index: int
 
 
 @dataclass(frozen=True)
@@ -260,8 +263,9 @@ def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
 
 
 async def calibrate_frequency(
-    env: WorkflowEnv[Calibrated],
+    scope: Scope,
     *,
+    plots: Plots,
     inputs: CalibrationInputs,
     flux: float,
     carry: CalCarry,
@@ -290,10 +294,12 @@ async def calibrate_frequency(
     status: StageStatus = "rejected"
     reason = "No accepted frequency fit"
     for attempt, widen in enumerate(inputs.tun.qf_widen, start=1):
+        if scope.cancelled:
+            return FrequencyResult("skipped", "Point cancelled", None, tuple(filenames))
         # Rebuild the spectroscopy plot with expected and previous frequencies.
         name = "calibration/qubit_freq"
-        if name not in env.plots:
-            env.plots.subplots(name)
+        if name not in plots:
+            plots.subplots(name)
 
         def rebuild(figure: Figure) -> None:
             figure.clear()
@@ -301,9 +307,9 @@ async def calibrate_frequency(
             ax.axvline(hint, linestyle="--", label="expected")
             ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
 
-        env.plots.draw(name, rebuild)
-        plot = env.plots.liveplot_1d(
-            name, "Frequency (MHz)", "Signal", num_lines=2, axes=env.plots[name].axes[0]
+        plots.draw(name, rebuild)
+        plot = plots.liveplot_1d(
+            name, "Frequency (MHz)", "Signal", num_lines=2, axes=plots[name].axes[0]
         )
 
         # Sweep a widened span around the history estimate using retained readout.
@@ -325,7 +331,7 @@ async def calibrate_frequency(
                 )
             ),
         )
-        outcome = await env.run(run_qubit_freq, cfg)
+        outcome = await scope.run(run_qubit_freq, cfg, name="frequency")
         if isinstance(outcome, Failed):
             status, reason = "failed", outcome.reason
             continue
@@ -335,7 +341,7 @@ async def calibrate_frequency(
             outcome,
             inputs.directory / filename,
             snapshot=inputs.snapshot,
-            identity=env.identity,
+            identity=scope.identity,
         )
         filenames.append(filename)
         if outcome.partial_result:
@@ -370,13 +376,13 @@ async def calibrate_frequency(
 
 
 async def calibrate_rabi(
-    env: WorkflowEnv[Calibrated],
+    scope: Scope,
     *,
+    plots: Plots,
     inputs: CalibrationInputs,
     frequency: FrequencyResult,
     carry: CalCarry,
     t1_estimate_us: float,
-    point_index: int,
 ) -> RabiResult:
     """Measure Rabi oscillations to calibrate pi and pi/2 pulse durations here.
 
@@ -394,7 +400,7 @@ async def calibrate_rabi(
     propagate. Invalid timing raises before any acquisition. Await in a workflow.
     """
     # Require a valid plot index and this point's accepted frequency.
-    if type(point_index) is not int or point_index < 0:
+    if type(inputs.point_index) is not int or inputs.point_index < 0:
         raise ValueError("Rabi point index must be a nonnegative integer")
     _validate_calibration_inputs(0.0, t1_estimate_us)
     if frequency.status != "accepted":
@@ -426,7 +432,7 @@ async def calibrate_rabi(
             length=SweepCfg(start=start, stop=stop, expts=51, step=(stop - start) / 50)
         ),
     )
-    outcome = await env.run(LenRabiExp().run, cfg)
+    outcome = await scope.run(LenRabiExp().run, cfg, name="Rabi")
     if isinstance(outcome, Failed):
         return RabiResult("failed", outcome.reason, f01, None, None, None)
     # Save before fitting, so rejected fits retain their native trace.
@@ -434,7 +440,7 @@ async def calibrate_rabi(
         outcome,
         inputs.directory / "rabi.h5",
         snapshot=inputs.snapshot,
-        identity=env.identity,
+        identity=scope.identity,
     )
     if outcome.partial_result:
         return RabiResult("rejected", "stopped", f01, None, None, "rabi.h5")
@@ -461,8 +467,8 @@ async def calibrate_rabi(
         fit.pi2_length_us,
     )
     name = "calibration/len_rabi"
-    if name not in env.plots:
-        env.plots.subplots(name)
+    if name not in plots:
+        plots.subplots(name)
 
     def draw(figure: Figure) -> None:
         figure.clear()
@@ -472,10 +478,10 @@ async def calibrate_rabi(
         ax.set(
             xlabel="Pulse length (µs)",
             ylabel="Signal (a.u.)",
-            title=f"Length Rabi — flux point {point_index + 1}",
+            title=f"Length Rabi — flux point {inputs.point_index + 1}",
         )
 
-    env.plots.draw(name, draw)
+    plots.draw(name, draw)
     return RabiResult(
         "accepted", None, f01, fit.pi_length_us, fit.pi2_length_us, "rabi.h5"
     )
@@ -495,7 +501,7 @@ def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
 
 
 async def calibrate_readout(
-    env: WorkflowEnv[Calibrated],
+    scope: Scope,
     *,
     inputs: CalibrationInputs,
     rabi: RabiResult,
@@ -550,7 +556,7 @@ async def calibrate_readout(
             gain=SweepCfg(start=0.0, stop=0.2, expts=31, step=0.2 / 30),
         ),
     )
-    outcome = await env.run(FreqGainExp().run, cfg)
+    outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
     if isinstance(outcome, Failed):
         return ReadoutResult("failed", outcome.reason, None, None, None)
     # Save the landscape and choose its best point meeting the SNR threshold.
@@ -558,7 +564,7 @@ async def calibrate_readout(
         outcome,
         inputs.directory / "readout.h5",
         snapshot=inputs.snapshot,
-        identity=env.identity,
+        identity=scope.identity,
     )
     if outcome.partial_result:
         return ReadoutResult("rejected", "stopped", None, None, "readout.h5")

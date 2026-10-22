@@ -168,7 +168,7 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
             dtype=np.float64,
             on_update=plot_fn,
         )
-        with Schedule(cfg, buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
             sched.cfg.modules.probe_pulse.set_param(
                 "freq", sweep2param("freq", sched.cfg.sweep.freq)
             )

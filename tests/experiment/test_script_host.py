@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
-from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 
 if TYPE_CHECKING:
@@ -135,7 +135,7 @@ def test_release_delivers_partial_without_stopping_parent_or_next_operation() ->
     assert not iteration.child().partial_result
 
 
-def test_host_labels_calls_and_replaces_iteration_at_commit() -> None:
+def test_host_labels_calls_under_explicit_iteration_lifetimes() -> None:
     host = host_module().ScriptHost(Scope("workflow", name="test"))
     observed: list[str] = []
 
@@ -144,10 +144,11 @@ def test_host_labels_calls_and_replaces_iteration_at_commit() -> None:
         observed.append(host.active_path)
 
     async def script() -> None:
-        await host.call(observe)
-        await host.call(observe)
-        await host.commit()
-        await host.call(observe)
+        with host.root.branch("iteration") as iteration:
+            await host.call(observe, scope=iteration)
+            await host.call(observe, scope=iteration)
+        with host.root.branch("iteration") as iteration:
+            await host.call(observe, scope=iteration)
 
     host.run(script())
     assert observed == [
@@ -181,7 +182,7 @@ def test_call_runs_in_executor_and_author_finally_stays_on_worker() -> None:
     assert host.status == "completed"
 
 
-@pytest.mark.parametrize("scope", ["workflow", "run"])
+@pytest.mark.parametrize("scope", ["run"])
 def test_cooperative_cancel_never_cancels_author_and_starts_later_calls(
     scope: str,
 ) -> None:
@@ -290,7 +291,7 @@ def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() ->
         first = await host.call(blocking)
         attempts.append(first)
         delivered.set()
-        await host.commit()
+        await host.wait_until_resumed()
         second = await host.call(lambda ctx: ctx.scope.stop.is_set())
         attempts.append(second)
         return second.epoch
@@ -377,6 +378,7 @@ def test_public_control_serializes_on_worker_returns_value_and_transports_errors
             assert caught.value is failure
         finally:
             host.close()
-            future.result(timeout=3)
+            with pytest.raises(ScriptCancelled):
+                future.result(timeout=3)
     with pytest.raises(RuntimeError):
         host.control(lambda: 1)

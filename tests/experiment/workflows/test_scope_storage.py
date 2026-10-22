@@ -2,9 +2,9 @@
 
 import json
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 from threading import Event
-from datetime import timedelta
 
 import pytest
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, saved_run
 
-from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, running, paused
+from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, paused, running
 
 
 class Collection(BaseModel):
@@ -28,7 +28,9 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
     instance.close()
 
 
-def test_nested_scopes_create_directories_lazily_and_commit_snapshots_once(rig: Rig) -> None:
+def test_nested_scopes_create_directories_lazily_and_commit_snapshots_once(
+    rig: Rig,
+) -> None:
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         assert callable(getattr(env, "scope", None)), "env must expose explicit scopes"
         with env.scope("point") as point:
@@ -36,7 +38,10 @@ def test_nested_scopes_create_directories_lazily_and_commit_snapshots_once(rig: 
             assert list(rig.paths.data_root.iterdir()) == []
             with point.child("calibration") as calibration:
                 assert list(rig.paths.data_root.iterdir()) == []
-                assert calibration.dir == rig.paths.data_root / "point-000001/calibration-000001"
+                assert (
+                    calibration.dir
+                    == rig.paths.data_root / "point-000001/calibration-000001"
+                )
                 assert calibration.dir.is_dir()
                 record = Collection(value=7)
                 calibration.commit(record)
@@ -50,21 +55,31 @@ def test_nested_scopes_create_directories_lazily_and_commit_snapshots_once(rig: 
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
     rows = saved_run.read_records(rig.paths.metadata_root, Collection)
-    assert [(row.commit_seq, row.record.value) for row in rows] == [(1, 7), (2, 8), (3, 9)]
-    assert [row.directory.relative_to(rig.paths.data_root).as_posix() for row in rows] == [
-        "point-000001/calibration-000001", "point-000001", "."
+    assert [(row.commit_seq, row.record.value) for row in rows] == [
+        (1, 7),
+        (2, 8),
+        (3, 9),
     ]
+    assert [
+        row.directory.relative_to(rig.paths.data_root).as_posix() for row in rows
+    ] == ["point-000001/calibration-000001", "point-000001", "."]
     envelopes = [json.loads(row.record_path.read_text()) for row in rows]
     assert [envelope["scope_path"] for envelope in envelopes] == [
-        "workflow:example/point#1/calibration#1", "workflow:example/point#1", "workflow:example"
+        "workflow:example/point#1/calibration#1",
+        "workflow:example/point#1",
+        "workflow:example",
     ]
     assert [envelope["name"] for envelope in envelopes] == [None, None, "example"]
 
 
 @pytest.mark.parametrize("exit_kind", ["break", "exception"])
-def test_iterations_release_on_next_and_close_even_without_commit(rig: Rig, exit_kind: str) -> None:
+def test_iterations_release_on_next_and_close_even_without_commit(
+    rig: Rig, exit_kind: str
+) -> None:
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        assert callable(getattr(env, "iterations", None)), "env must expose iteration lifetimes"
+        assert callable(getattr(env, "iterations", None)), (
+            "env must expose iteration lifetimes"
+        )
         iterations = env.iterations()
         first = next(iterations)
         assert first.sequence == 1
@@ -76,7 +91,7 @@ def test_iterations_release_on_next_and_close_even_without_commit(rig: Rig, exit
         with pytest.raises(RuntimeError, match="released"):
             first.child("late")
         try:
-            for item, iteration in zip(range(2), env.iterations(), strict=False):
+            for _item, iteration in zip(range(2), env.iterations(), strict=False):
                 assert iteration.sequence == 3
                 if exit_kind == "exception":
                     raise LookupError("author failure")
@@ -101,13 +116,17 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
         return cfg.value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        assert callable(getattr(env, "scope", None)), "children need shared scope conveniences"
+        assert callable(getattr(env, "scope", None)), (
+            "children need shared scope conveniences"
+        )
         with env.scope("calibration") as scope:
             cfg = Cfg(value=7)
             record = completed(await scope.run(acquire, cfg, name="T1"))
             assert record.value.result == 8
             assert cfg.value == 7
-            await scope.setup_device("flux", FakeDeviceInfo(address="memory", value=0.25))
+            await scope.setup_device(
+                "flux", FakeDeviceInfo(address="memory", value=0.25)
+            )
             await scope.wait_until(env.started_at + timedelta(seconds=2))
             scope.commit(Collection(value=record.value.result))
 
@@ -118,18 +137,24 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
         assert paths == ["workflow:example/calibration#1/operation:T1#1"]
         assert rig.devices.values == [("flux", 0.25)]
         assert rig.clock.targets == [rig.clock.value]
-        assert [operation.kind for operation in rig.engine.records("run")[0].operations] == ["run", "setup_device", "wait_until"]
+        assert [
+            operation.kind for operation in rig.engine.records("run")[0].operations
+        ] == ["run", "setup_device", "wait_until"]
     finally:
         rig.close()
 
 
-def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(rig: Rig) -> None:
+def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(
+    rig: Rig,
+) -> None:
     seen: list[str] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         try:
+
             def stop(ctx: object) -> None:
                 rig.engine.stop("run")
+
             try:
                 await env.call(stop)
             except ScriptCancelled:
@@ -145,10 +170,14 @@ def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(rig:
     assert seen == ["cancelled", "finally"]
     assert final.lifecycle == "cancelled"
     assert final.reason is None
-    assert [record.encoded_record.value for record in rig.engine.records("run")] == [{"value": 3, "status": "collecting"}]
+    assert [record.encoded_record.value for record in rig.engine.records("run")] == [
+        {"value": 3, "status": "collecting"}
+    ]
 
 
-def test_paused_commit_publishes_synchronously_but_new_work_waits_for_resume(rig: Rig) -> None:
+def test_paused_commit_publishes_synchronously_but_new_work_waits_for_resume(
+    rig: Rig,
+) -> None:
     committed = Event()
     called = Event()
 
@@ -160,8 +189,12 @@ def test_paused_commit_publishes_synchronously_but_new_work_waits_for_resume(rig
 
     rig.start(script)
     with running(rig) as future:
-        assert committed.wait(10), "Author reaches synchronous commit after pause acknowledgement"
-        assert [record.encoded_record.value for record in rig.engine.records("run")] == [{"value": 7, "status": "collecting"}]
+        assert committed.wait(10), (
+            "Author reaches synchronous commit after pause acknowledgement"
+        )
+        assert [
+            record.encoded_record.value for record in rig.engine.records("run")
+        ] == [{"value": 7, "status": "collecting"}]
         assert not called.is_set()
         paused(rig)
         rig.engine.resume("run")
@@ -171,10 +204,17 @@ def test_paused_commit_publishes_synchronously_but_new_work_waits_for_resume(rig
 
 def test_operation_facts_use_iteration_birth_not_commit_count(rig: Rig) -> None:
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        assert callable(getattr(env, "iterations", None)), "iteration identity must be explicit"
+        assert callable(getattr(env, "iterations", None)), (
+            "iteration identity must be explicit"
+        )
         for value, iteration in zip(range(3), env.iterations(), strict=False):
-            outcome = completed(await iteration.call(lambda ctx: ctx.scope.path, name="probe"))
-            assert outcome.value == f"workflow:example/iteration#{value + 1}/operation:probe#1"
+            outcome = completed(
+                await iteration.call(lambda ctx: ctx.scope.path, name="probe")
+            )
+            assert (
+                outcome.value
+                == f"workflow:example/iteration#{value + 1}/operation:probe#1"
+            )
             assert outcome.facts.iteration == iteration.sequence
             if value == 1:
                 continue
@@ -187,4 +227,6 @@ def test_operation_facts_use_iteration_birth_not_commit_count(rig: Rig) -> None:
     assert [event["call_seq"] for event in events] == [1, 2, 3]
     records = rig.engine.records("run")
     assert [record.call_seq for record in records] == [1, 3]
-    assert [[operation.iteration for operation in record.operations] for record in records] == [[1], [3]]
+    assert [
+        [operation.iteration for operation in record.operations] for record in records
+    ] == [[1], [3]]

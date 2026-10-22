@@ -352,7 +352,7 @@ class MuxOnetoneFindExp(PersistableExperiment[MuxOnetoneFindResult, MuxOnetoneFi
         The live measurement plot has one magnitude curve against quantized MHz.
         Return (P,) complex IQ averaged over reps and rounds, with acquired
         points preserved and unacquired points NaN after cancellation. The caller
-        calls context.cancel_signal.raise_if_error() to distinguish acquisition
+        calls context.scope.stop.raise_if_error() to distinguish acquisition
         failure from a stopped/successful return.
         """
         # Prepare the entire hardware grid before starting acquisition.
@@ -369,7 +369,7 @@ class MuxOnetoneFindExp(PersistableExperiment[MuxOnetoneFindResult, MuxOnetoneFi
         )
 
         # Redeclare exactly one DAC tone and its original ADC at each frequency.
-        with Schedule(cfg, signals_buffer, stop=context.cancel_signal) as sched:
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for freq, step in sched.scan("freq", freqs.tolist()):
                 readout = base_readout.with_updates(
                     tones=[selected.with_updates(freq=freq)]
