@@ -101,7 +101,9 @@ changing flux range, circuit parameters, drive strength or higher-state observab
 The six circuits differ, so convergence evidence for Q1 alone does not certify Q2
 through Q6. Each uses native cutoff 40 and 21 retained levels as starting values,
 not as a convergence claim. The solver uses rtol 1e-8, atol 1e-10, maximum step
-0.1 ns and bath segments of 2 ns. Seeds 123 through 128 separate the six noise
+0.1 ns and bath segments of 2 ns. Q1's seed (123 by default) selects the
+composed environment's root stream. The backend derives distinct cavity streams
+from that root. Q2 through Q6 seeds do not control their corresponding noise
 streams. Startup performs no numerical warmup.
 
 ## Acceptance timings

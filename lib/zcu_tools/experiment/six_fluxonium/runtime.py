@@ -187,11 +187,13 @@ class SixFluxoniumSource:
         traces: dict[int, NDArray[np.float64]] = {}
         for group in groups:
             populations, channels, raw = self._prepare_group(request, snapshot, group)
-            # Disjoint routing partitions and physical cavities get separate
-            # local streams. ADCs within one group share a single path draw.
-            sequence = (request.sequence * 6 + group.cavity) * (
-                prod(request.point_dims) + 1
-            ) + int(group.points[0])
+            # Cantor-pair the fixed-radix acquire/cavity identity with the
+            # partition's first point, independent of request size. ADCs within
+            # one group still share a single path draw.
+            cavity_sequence = request.sequence * 6 + group.cavity
+            first_point = int(group.points[0])
+            diagonal = cavity_sequence + first_point
+            sequence = diagonal * (diagonal + 1) // 2 + first_point
             if request.mode == "integrated":
                 statistics = round_statistics(
                     populations,
