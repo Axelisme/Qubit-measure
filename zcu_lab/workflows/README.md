@@ -45,7 +45,9 @@ Saver 收 Completed、歷史 snapshot 與顯式 env.identity，不捕捉 evidenc
 `await env.commit(point, d)`。Point 必須是 Pydantic BaseModel。
 框架不解析原始檔，commit 前後都可寫入作者自己的檔案。
 
-Pause 保留等待中的 await，Resume 重試被中斷的 operation，不重跑整個 workflow。
+Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
+Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。
+兩種情況都不重跑整個 workflow。
 Stop 讓 operation 正常回傳 partial result。Failed 表示 Schedule acquisition 失敗；
 未處理的其他例外停止 run。
 
