@@ -133,7 +133,7 @@ class WorkflowController[F: FormModel, C]:
         *,
         on_finished: Callable[[RunStatus | None, Exception | None], None],
     ) -> None:
-        """Borrow runner and report paused/terminal native delivery to the view.
+        """Borrow runner and report terminal native delivery to the view.
 
         owner_id labels the run lease and progress. runner owns that progress
         service. on_finished receives authoritative native status (None before

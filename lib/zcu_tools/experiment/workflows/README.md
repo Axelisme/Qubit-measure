@@ -46,6 +46,8 @@ Stop set run scope，往下傳到 iteration 與 operation。作者收到 `Comple
 
 成功 commit 先追加並 flush `record_committed` journal，再發布 in-memory records。`record.json` 以同目錄 temporary 加 replace 寫入；這份副本寫入失敗只記 log，已 flush 的 journal 仍是 commit 權威。它不是 checkpoint，不支援 crash resume 或 fsync 承諾。
 
+RunIdentity 的 software provenance 在 workflow 啟動時保存，manifest 與 run_started.identity 各留既有副本。每次 operation 不另建 provenance 或 run_id。
+
 Record 信封保存 commit_seq、配置目錄、UTC 時間、record 型別名、encoded record、本輪 revisions 與 operations。Manifest 為每種出現的 record model 保存一次 JSON schema。這些 schema 只提供資訊，不作 runtime validator。Record encoder 把非有限值改成 null，只有 authored record/summary 序列化可降級成 repr；必要 metadata 與 I/O failure 不使用這項降級。
 
 ## Operation 事實與讀取

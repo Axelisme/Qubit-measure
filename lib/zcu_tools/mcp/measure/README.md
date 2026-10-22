@@ -235,7 +235,7 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 | `workflow_records` | `run_id` 與可選 `since=0`，回 commit_seq 嚴格大於 since 的 native records。 |
 | `workflow_figures` | `run_id`，只回 names，不 render。 |
 | `workflow_figure` | `run_id/name`，回識別與 validated PNG image content，text 不保留 base64。 |
-| `workflow_answer` | `run_id/answer`，answer 是符合 status 中 `pending_question.answer_schema` 的 JSON object。回 Start 的同一 pending handle，不宣稱已完成。 |
+| `workflow_answer` | `run_id/request_id/answer`，request_id 必須是原題 `pending_question.request_id`，answer 符合其 answer_schema。回 Start 的同一 pending handle，不宣稱已完成。 |
 
 Batch 是 `[{"path": ["field", 0, "leaf"], "value": ...}]`，路徑是 canonical
 欄位名與原始 list index。Form owner 決定 branch、expression、有效值與錯誤。
@@ -248,15 +248,23 @@ Start 省略/null batch 使用 shared GUI draft。明填 batch，包括 []，使
 工具表是固定手寫，沿 live catalog 的 timeout、權限及 session operation mapping。
 錯誤保留 code/message/reason/data，不重試、不回滾。Readonly 可查詢與 preview，
 mutation 仍受 holder、busy 與 RUN lease 限制。Terminal records/figures 可繼續讀取。
-Status 的 `pending_question` 是固定 `{question_type, question, answer_schema}`
-envelope；只有 `question` 含 authored fields，沒有問題時為 null。Schema 與 JSON
-轉換由 Engine/driver 擁有。Status 的 `last_exchange` 保留最近問題 envelope、接受的
-answer 或 null，以及 waiting/submitted/answered/cancelled。它與 GUI 共用 headless
-owner；submitted 不是已接受，錯型答案不記入 answer。錯欄位保留 paused 問題，
-回 `invalid_params/answer_validation`。
-Answer 與 execute 一樣會同步推進 generator，facet 將它排到 worker，保留同一
-RUN lease、operation 與 terminal delivery。UI owner thread 不 inline 續跑，也不
-另外呼叫 Resume。Stop 的 retained Ask drain 同樣在 worker，終局交付才釋放 RUN。
+Status 的 `pending_question` 是固定
+`{request_id, question_type, question, answer_schema}` envelope。只有 question 含
+作者欄位，沒有問題時為 null。原題 request_id 必須隨 answer 回傳。Engine 先比對
+ID，再驗 schema。錯 ID 或無 pending 問題回 `precondition_failed/question_mismatch`，
+data 帶目前 pending_request_id 或 null，不改 lifecycle、不記 accepted answer。
+錯欄位回 `invalid_params/answer_validation`，問題保留供重試。
+
+`last_exchange` 保留最近問題、已接受的 answer 或 null，以及
+waiting/submitted/answered/cancelled 狀態。它與 GUI 共用 headless owner。
+Submitted 不表示已接受，錯型答案不記入 answer。整個 coroutine 留在同一 worker，
+Pause、Ask、Resume 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
+並執行清理，terminal owner delivery 才釋放 RUN。
+
+Records 依 commit_seq 查詢，包含配置 directory、committed_at、實際讀過的 revisions、
+record_type 與 operations。配置目錄順序不等於 commit 順序。Operation facts 包含
+kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、
+outcome 與 reason。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
 
 ## 分析、互動與寫回
 

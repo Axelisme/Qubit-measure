@@ -373,18 +373,21 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         answered fact or lifecycle change. No new worker segment is started.
         """
 
+        self._require_question(request_id)
+        accepted_answer = answer.model_copy(deep=True)
+
         def deliver() -> None:
             pending = self._require_question(request_id)
-            self._host.answer(request_id, answer)
+            self._host.answer(request_id, accepted_answer)
             # The host ack guarantees validation and Future delivery. Keep this
             # callback memory-only; the author boundary or caller flushes later.
-            accepted = (pending, answer.model_copy(deep=True))
+            accepted = (pending, accepted_answer)
             with self._answer_lock:
                 self._accepted_answers.append(accepted)
 
         try:
             self._host.control(deliver)
-        except ValueError as error:
+        except (ValueError, RuntimeError) as error:
             current = self.pending_question()
             if current is None or current.request_id != request_id:
                 raise QuestionMismatch(
