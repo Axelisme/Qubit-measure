@@ -186,7 +186,9 @@ class NotebookExperiment(Generic[CoreT]):
                 run_id=run_id,
                 started_at=started_at,
                 finished_at=finished_at,
-                completion="stopped" if context.cancel_signal.is_set() else "complete",
+                completion=(
+                    "stopped" if context.cancel_signal.partial_result else "complete"
+                ),
                 provenance=provenance,
                 device_snapshot=device_snapshot,
             )
