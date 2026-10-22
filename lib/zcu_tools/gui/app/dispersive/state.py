@@ -1,7 +1,7 @@
 """Passive state container for dispersive-fit-gui — shared by Controller and services.
 
 Holds the single-flow analysis pipeline's state: the fluxonium inputs read from
-``params.json``, the one loaded one-tone spectrum, its preprocessing result, and
+a selected predictor file, the one loaded one-tone spectrum, its preprocessing result, and
 the ``g`` / ``bare_rf`` tuning + fit state, plus the optimistic-concurrency
 ``VersionTable``. Like fluxdep-gui / measure-gui, every State write happens only
 on the Qt main thread; workers never mutate State directly (their only side
@@ -10,7 +10,7 @@ effect is emitting a Qt signal whose main-thread slot writes here).
 Unlike fluxdep (a *collection* of spectra), dispersive is single-onetone /
 single-flow, so the aggregate holds one ``onetone`` rather than a dict. The
 ``fit_inputs`` field is the cross-app contract surface: it carries the
-``fluxdep_fit`` section fluxdep-gui wrote into ``params.json`` (params + flux
+predictor file fluxdep-gui wrote (params + flux
 alignment + a bare_rf seed), which dispersive consumes as its inputs.
 """
 
@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.analysis.spectrum import SpectrumData
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.owner import OwnerThreadGuard
 
 # VersionTable is the shared optimistic-concurrency mechanism (app-agnostic);
@@ -40,14 +40,13 @@ ONETONE_VERSION_KEY = "onetone"
 PREPROCESS_VERSION_KEY = "preprocess"
 FIT_VERSION_KEY = "fit"
 
-# bare_rf fallback when neither a prior dispersive section nor the fit's r_f is
-# present in params.json (the notebook's default, GHz).
+# Final bare_rf fallback when neither a dispersive file nor resonator supplies it.
 DEFAULT_BARE_RF = 5.0
 
 
 @dataclass(frozen=True)
 class FluxoniumInputs:
-    """The ``fluxdep_fit`` section of ``params.json``, dispersive's hard inputs.
+    """Selected predictor parameters, dispersive's hard inputs.
 
     Produced by fluxdep-gui and read by dispersive (the cross-app handoff). The
     fluxonium ``params`` = (EJ, EC, EL) GHz and the flux alignment drive the
@@ -57,9 +56,9 @@ class FluxoniumInputs:
     """
 
     params: tuple[float, float, float]  # (EJ, EC, EL) GHz
-    flux_half: float
-    flux_int: float
-    flux_period: float
+    flux_half: float  # zero-bias half-flux device value, native units
+    flux_bias: float  # additive device-value correction, native units
+    flux_period: float  # signed device-value change per flux quantum
     bare_rf_seed: float  # GHz
 
 
@@ -98,9 +97,10 @@ class DispFitState:
 class DispersiveState:
     """Passive GUI state container for the dispersive analysis pipeline."""
 
-    def __init__(self, project: ProjectInfo | None = None) -> None:
+    def __init__(self, project: AnalysisTarget | None = None) -> None:
         self._owner_guard = OwnerThreadGuard()
-        self.project: ProjectInfo = project if project is not None else ProjectInfo()
+        self.project = project
+        self.predictor: str | None = None  # selected entry-local JSON filename
         self.fit_inputs: FluxoniumInputs | None = None
         self.onetone: OnetoneEntry | None = None
         self.preprocess: PreprocessResult | None = None
@@ -111,20 +111,32 @@ class DispersiveState:
     # Writers (services call these on the Qt main thread only).
     # ------------------------------------------------------------------
 
-    def set_project(self, project: ProjectInfo) -> None:
+    def set_project(self, project: AnalysisTarget) -> None:
+        """Select a target and clear inputs/results belonging to the previous one."""
         self._assert_owner()
         self.project = project
+        self.predictor = None
+        self.fit_inputs = None
+        self.onetone = None
+        self.preprocess = None
+        self.disp_fit = DispFitState()
+        self.version.drop_prefix(ONETONE_VERSION_KEY)
+        self.version.drop_prefix(PREPROCESS_VERSION_KEY)
+        self.version.drop_prefix(FIT_VERSION_KEY)
         self.version.bump(PROJECT_VERSION_KEY)
 
-    def set_fit_inputs(self, inputs: FluxoniumInputs) -> None:
-        """Record the fluxdep_fit-derived inputs; seed the tuning bare_rf.
+    def set_fit_inputs(
+        self, inputs: FluxoniumInputs, *, predictor: str | None = None
+    ) -> None:
+        """Record predictor inputs and its local filename; seed the tuning bare_rf.
 
-        Loading params.json is a project-scoped change, so it bumps ``project``.
+        Loading a predictor is a project-scoped change, so it bumps ``project``.
         The bare_rf seed only fills the tuning state when it has no value yet (a
         prior session's bare_rf is not clobbered by a re-read of the inputs).
         """
         self._assert_owner()
         self.fit_inputs = inputs
+        self.predictor = predictor
         if self.disp_fit.bare_rf is None:
             self.disp_fit = replace(self.disp_fit, bare_rf=inputs.bare_rf_seed)
         self.version.bump(PROJECT_VERSION_KEY)

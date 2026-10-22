@@ -1,81 +1,97 @@
-"""ProjectService — read the fluxonium fit inputs from ``params.json``.
-
-The cross-app handoff: fluxdep-gui writes the ``fluxdep_fit`` section (EJ/EC/EL +
-flux alignment), dispersive reads it as its hard inputs (notebook cell 2). The
-``bare_rf`` seed is sourced by priority: a prior ``dispersive`` section's bare_rf
-→ the fit's ``plot_transitions.r_f`` → the default (5.0 GHz).
-
-Fast-fails clearly when ``fluxdep_fit`` is absent — it is the hard prerequisite,
-so the message points the user at running fluxdep-gui first.
-"""
+"""Entry-local predictor selection and dispersive resonator seed policy."""
 
 from __future__ import annotations
 
-import logging
+from pathlib import Path
 
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget, require_target
 from zcu_tools.gui.app.dispersive.state import (
     DEFAULT_BARE_RF,
     DispersiveState,
     FluxoniumInputs,
 )
-from zcu_tools.resources.qubit_params import (
-    QubitParams,
-    QubitParamsError,
-    params_path_for_result_dir,
-)
-
-logger = logging.getLogger(__name__)
+from zcu_tools.gui.session.aliases import AliasRow, AliasTable
+from zcu_tools.resources.dispersive_file import load_dispersive_file
+from zcu_tools.resources.entry import RoleResolutionError, document_value, snapshot
+from zcu_tools.resources.predictor_file import load_predictor_file
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 
-def default_params_path(result_dir: str) -> str:
-    """The conventional ``params.json`` location for a project (``<result_dir>``)."""
-    return params_path_for_result_dir(result_dir)
+def _bare_rf_seed(target: AnalysisTarget) -> float:
+    path = target.resource.dispersive_path / f"{target.component}.json"
+    if path.exists():
+        params = load_dispersive_file(path).params
+        if params.bare_rf is not None:
+            return params.bare_rf
+        if params.plot_transitions.r_f is not None:
+            return params.plot_transitions.r_f
+    aliases = AliasTable(
+        [AliasRow(k, v) for k, v in target.resource.load_aliases().aliases.items()]
+    )
+    document = snapshot(target.resource.setup)
+    try:
+        resonator = aliases.resolve("resonator", document)
+    except RoleResolutionError as exc:
+        # Only absent/unbound optional aliases fall through; malformed links fail.
+        if exc.reason not in ("Unknown alias", "Alias is not bound"):
+            raise
+        return DEFAULT_BARE_RF
+    component = document.components[resonator]
+    if "freq" not in type(component).model_fields:
+        return DEFAULT_BARE_RF
+    freq = document_value(document, f"{resonator}.freq")
+    if freq is None:
+        return DEFAULT_BARE_RF
+    if isinstance(freq, bool) or not isinstance(freq, (int, float)):
+        raise ValueError(f"Resonator {resonator!r} freq must be MHz")
+    return float(freq) * 1e-3
 
 
 class ProjectService:
-    """Reads ``params.json`` into the State's fluxonium fit inputs."""
+    """Read selected predictor files without changing setup or Database."""
 
     def __init__(self, state: DispersiveState) -> None:
         self._state = state
 
-    def load_fit_inputs(self, params_path: str | None = None) -> FluxoniumInputs:
-        """Read the ``fluxdep_fit`` section and record it as the fit inputs.
+    def list_predictors(self) -> tuple[str, ...]:
+        """List JSON filenames in the opened entry; no directory is created."""
+        root = require_target(self._state.project).resource.predictors_path
+        if not root.exists():
+            return ()
+        return tuple(
+            sorted(path.name for path in root.glob("*.json") if path.is_file())
+        )
 
-        ``params_path`` defaults to ``<result_dir>/params.json``. Fast-fails if the
-        file or its ``fluxdep_fit`` section is missing (the fluxdep step must have
-        run first). Returns the parsed inputs (also written into State).
+    def load_fit_inputs(self, predictor: str) -> FluxoniumInputs:
+        """Read an entry-local JSON filename, validate inputs, then publish.
+
+        Reject absolute paths, directory traversal, non-JSON names and other
+        models with ValueError. Missing/invalid/incomplete files propagate their
+        errors without replacing state. Seed priority is dispersive bare_rf,
+        plot_transitions.r_f, resonator alias freq (MHz to GHz), then 5 GHz.
+        An existing tuning value is retained.
         """
-        path = params_path or default_params_path(self._state.project.result_dir)
-        try:
-            loaded = QubitParams(path, readonly=True).require_dispersive_inputs(
-                default_bare_rf=DEFAULT_BARE_RF
-            )
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                f"params.json not found at {path!r} — run fluxdep-gui first to "
-                "produce the fluxdep_fit section dispersive reads"
-            ) from exc
-        except QubitParamsError as exc:
-            if exc.reason_code == "fluxdep_fit_missing":
-                raise ValueError(
-                    f"{path!r} has no 'fluxdep_fit' section — run fluxdep-gui first to "
-                    "fit (EJ, EC, EL) and the flux alignment"
-                ) from exc
-            raise ValueError(
-                f"Failed to read fluxdep_fit from {path!r}: {exc}"
-            ) from exc
-
+        target = require_target(self._state.project)
+        root = target.resource.predictors_path
+        path = root / predictor
+        if (
+            Path(predictor).name != predictor
+            or "/" in predictor
+            or "\\" in predictor
+            or path.suffix != ".json"
+            or not path.resolve().is_relative_to(root.resolve())
+        ):
+            raise ValueError("predictor must be an entry-local JSON filename")
+        loaded = load_predictor_file(path)
+        if not isinstance(loaded.params, FluxoniumParams):
+            raise ValueError("dispersive requires a fluxonium predictor")
+        model = loaded.params.build_predictor()
         inputs = FluxoniumInputs(
-            params=loaded.params,
-            flux_half=loaded.flux_half,
-            flux_int=loaded.flux_int,
-            flux_period=loaded.flux_period,
-            bare_rf_seed=loaded.bare_rf_seed,
+            params=model.params,
+            flux_half=model.flux_half,
+            flux_bias=model.flux_bias,
+            flux_period=model.flux_period,
+            bare_rf_seed=_bare_rf_seed(target),
         )
-        self._state.set_fit_inputs(inputs)
-        logger.debug(
-            "load_fit_inputs: params=%s bare_rf_seed=%s",
-            loaded.params,
-            loaded.bare_rf_seed,
-        )
+        self._state.set_fit_inputs(inputs, predictor=predictor)
         return inputs

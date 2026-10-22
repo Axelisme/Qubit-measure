@@ -11,14 +11,12 @@ or the socket server.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Literal, overload
 
 import numpy as np
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.app.fluxdep.remote.dto import PointcloudReply, SpectrumListReply
@@ -73,29 +71,15 @@ def _call(
 # ---------------------------------------------------------------------------
 
 
-def test_project_info_reports_state():
-    adapter = _adapter()
-    adapter.ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
-    info = _call(adapter, "project.info", {})
-    assert info["chip_name"] == "Q5_2D"
-    assert info["qub_name"] == "Q1"
-    # ProjectInfo derives both paths from chip/qubit in __post_init__
-    assert info["result_dir"] == os.path.join("result", "Q5_2D", "Q1")
-    assert info["data_root"] == os.path.join("Database", "Q5_2D", "Q1")
-
-
-# ---------------------------------------------------------------------------
-# state.check
-# ---------------------------------------------------------------------------
-
-
-def test_state_check_reflects_project_and_spectra(spectrum_hdf5):
+def test_state_check_reflects_project_and_spectra(spectrum_hdf5, fluxonium_entry):
     filepath, *_ = spectrum_hdf5
     adapter = _adapter()
     check = _call(adapter, "state.check", {})
     assert check == {"has_project": False, "spectrum_count": 0, "has_active": False}
 
-    adapter.ctrl.setup_project(ProjectInfo(chip_name="Q5_2D", qub_name="Q1"))
+    adapter.ctrl.setup_project(
+        str(fluxonium_entry.result_path.parent.parent), "synthetic"
+    )
     adapter.ctrl.load_spectrum(filepath, "OneTone")
     check = _call(adapter, "state.check", {})
     assert check["has_project"] is True

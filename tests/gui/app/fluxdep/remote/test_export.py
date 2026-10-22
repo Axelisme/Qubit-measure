@@ -7,16 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.io import load_spectrums
-from zcu_tools.analysis.fluxdep.search import ParamBounds
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.fluxdep.services.export import default_export_path
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
-from zcu_tools.resources.qubit_params import (
-    DispersiveFit,
-    FluxDepFit,
-    ParamsProject,
-    QubitParams,
-)
 
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, RouteReply
 
@@ -90,19 +82,17 @@ def test_spectrum_export_roundtrips_native_data_and_leaves_observations_unchange
 
 def test_export_defaults_create_only_and_explicit_overwrite_replaces_output(
     route_harness: RouteHarness,
-    tmp_path: Path,
+    fluxonium_entry,
 ) -> None:
     state = route_harness.ctrl.state
-    result_dir = tmp_path / "native-results"
-    route_harness.ctrl.setup_project(
-        ProjectInfo(chip_name="chip", qub_name="Q1", result_dir=str(result_dir))
-    )
+    result_path = fluxonium_entry.result_path
+    route_harness.ctrl.setup_project(str(result_path.parent.parent), "synthetic")
     state.put_spectrum(_entry("source"))
     client = route_harness.client()
     for method in ("project.info", "spectrum.list"):
         assert route_harness.request(client, method)["ok"]
     assert route_harness.request(client, "spectrum.snapshot", name="source")["ok"]
-    path = Path(default_export_path(str(result_dir)))
+    path = Path(default_export_path(str(result_path)))
     reply = route_harness.request(client, "export.spectrums")
     assert reply["ok"]
     assert "result" in reply
@@ -157,72 +147,11 @@ def test_export_readiness_failure_precedes_output_creation(
     assert not path.parent.exists()
 
 
-@pytest.mark.parametrize("custom_path", [False, True])
-def test_params_export_merges_sections_and_uses_first_aligned_even_if_empty(
-    route_harness: RouteHarness,
-    tmp_path: Path,
-    custom_path: bool,
-) -> None:
-    state = route_harness.ctrl.state
-    result_dir = tmp_path / "results"
-    route_harness.ctrl.setup_project(
-        ProjectInfo(chip_name="chip", qub_name="Q1", result_dir=str(result_dir))
-    )
-    state.put_spectrum(_entry("ignored-unaligned", aligned=False))
-    state.put_spectrum(_entry("first-aligned", empty=True))
-    state.put_spectrum(_entry("later-aligned"))
-    state.set_fit_params(
-        "db",
-        ParamBounds(EJ=(1, 2), EC=(2, 3), EL=(3, 4)),
-        {"transitions1": [(0, 1)], "r_f": 6.2},
-        None,
-        None,
-    )
-    state.set_fit_result((5.123456789, 1, 0.5))
-    path = (tmp_path / "custom" if custom_path else result_dir) / "params.json"
-    existing = QubitParams(str(path))
-    existing.ensure_project(ParamsProject(chip_name="existing", qub_name="Q0"))
-    existing.set_fluxdep_fit(
-        FluxDepFit(EJ=3, EC=2, EL=1, flux_half=0, flux_int=1, flux_period=2)
-    )
-    existing.set_dispersive_fit(DispersiveFit(g=0.2, bare_rf=6.4))
-    independent = existing.get_dispersive_fit()
-
-    client = route_harness.client()
-    for read in ("project.info", "spectrum.list", "fit.result"):
-        assert route_harness.request(client, read)["ok"]
-    for name in state.spectrums:
-        assert route_harness.request(client, "spectrum.snapshot", name=name)["ok"]
-    versions = state.version.snapshot()
-    requests = [{"savepath": str(path)}] if custom_path else [{}, {"savepath": None}]
-    for params in requests:
-        reply = route_harness.request(client, "fit.export_params", **params)
-        assert reply["ok"]
-        assert "result" in reply
-        assert reply["result"] == {
-            "savepath": str(path),
-            "params": {"EJ": 5.123456789, "EC": 1, "EL": 0.5},
-            "alignment_from": "first-aligned",
-        }
-        restored = QubitParams(str(path), readonly=True)
-        assert restored.get_dispersive_fit() == independent
-        assert restored.require_project().chip_name == "chip"
-        fit = restored.require_fluxdep_fit()
-        assert fit.params == (5.123456789, 1, 0.5)
-        assert fit.flux_half == 1.4
-        assert fit.flux_int == 2.4
-        assert fit.flux_period == 2
-        assert fit.plot_transitions == {"transitions1": [[0, 1]], "r_f": 6.2}
-        assert fit.timestamp is not None
-    assert state.version.snapshot() == versions
-
-
 @pytest.mark.parametrize(
     ("method", "params"),
     [
         ("export.spectrums", {"filepath": 123}),
         ("export.spectrums", {"overwrite": 1}),
-        ("fit.export_params", {"savepath": []}),
     ],
 )
 def test_malformed_export_is_rejected_without_writing(

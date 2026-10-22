@@ -57,7 +57,7 @@ Tools express decision points; a stage command enters that spectrum's stage:
   recorded result. Stale, absent or quality-less results return no overlay.
 - fluxdep_filter: edit the joint cloud (J6), then rerun fit.
 - fluxdep_export_spectrums / fluxdep_spectrum_load_processed: checkpoint and restore
-  sampled spectra, without Filter masks. fluxdep_fit_export_params writes params.json.
+  sampled spectra, without Filter masks. fluxdep_fit_export_params writes the selected entry/component predictor, setup and ledger.
 
 Edits remain drafts until finish. Finish publishes and returns that stage's evidence
 image; other edits return counts, ranges and changes. Field changes are [before, after];

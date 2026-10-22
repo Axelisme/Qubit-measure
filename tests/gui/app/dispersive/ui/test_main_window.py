@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
 from zcu_tools.gui.app.dispersive.controller import Controller
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 
@@ -11,7 +10,7 @@ def test_main_window_builds_with_pipeline_panel(qapp):
     from zcu_tools.gui.app.dispersive.ui.main_window import MainWindow
     from zcu_tools.gui.app.dispersive.ui.pipeline_panel import PipelinePanelWidget
 
-    state = DispersiveState(ProjectInfo(chip_name="C", qub_name="Q1"))
+    state = DispersiveState()
     window = MainWindow(Controller(state))
 
     assert isinstance(window.centralWidget(), PipelinePanelWidget)

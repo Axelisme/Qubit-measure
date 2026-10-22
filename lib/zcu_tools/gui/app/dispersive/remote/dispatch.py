@@ -19,8 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .service import RemoteControlAdapter
 
-from zcu_tools.gui.app.analysis_project.project import is_real_project
-from zcu_tools.gui.app.analysis_project.readonly_handlers import h_project_info
+from zcu_tools.gui.app.analysis_project.entry import target_payload
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.gui.remote.readonly_handlers import (
     h_resources_versions,
@@ -40,6 +39,19 @@ Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, 
 # ---------------------------------------------------------------------------
 
 
+def _h_project_info(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    del params
+    state = adapter.ctrl.state
+    target = state.project
+    return {
+        **target_payload(target),
+        "dispersive_path": str(target.resource.dispersive_path) if target else None,
+        "predictor": state.predictor,
+    }
+
+
 def _h_fit_inputs_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -50,7 +62,7 @@ def _h_fit_inputs_info(
             "has_inputs": False,
             "params": None,
             "flux_half": None,
-            "flux_int": None,
+            "flux_bias": None,
             "flux_period": None,
             "bare_rf_seed": None,
         }
@@ -59,7 +71,7 @@ def _h_fit_inputs_info(
         "has_inputs": True,
         "params": {"EJ": ej, "EC": ec, "EL": el},
         "flux_half": inputs.flux_half,
-        "flux_int": inputs.flux_int,
+        "flux_bias": inputs.flux_bias,
         "flux_period": inputs.flux_period,
         "bare_rf_seed": inputs.bare_rf_seed,
     }
@@ -99,7 +111,7 @@ def _h_state_check(
     del params
     state = adapter.ctrl.state
     return {
-        "has_project": is_real_project(state.project),
+        "has_project": state.project is not None,
         "has_fit_inputs": state.fit_inputs is not None,
         "has_onetone": state.onetone is not None,
         "has_preprocess": state.preprocess is not None,
@@ -113,7 +125,7 @@ def _h_state_check(
 
 
 _HANDLERS: dict[str, Handler] = {
-    "project.info": h_project_info,
+    "project.info": _h_project_info,
     "fit_inputs.info": _h_fit_inputs_info,
     "preprocess.status": _h_preprocess_status,
     "fit.result": _h_fit_result,

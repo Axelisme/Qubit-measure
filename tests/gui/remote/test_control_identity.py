@@ -15,6 +15,7 @@ from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 
 from tests.gui.app.fluxdep.remote._route_harness import (
     ImmediateOwnerScheduler,
@@ -42,6 +43,26 @@ def reason(reply: RouteReply, expected: str) -> None:
 
 
 @pytest.fixture
+def project_setup_params(tmp_path: Path) -> Iterator[dict[str, str]]:
+    kind = "qubit/fluxonium/control-identity"
+    component_registry.register(kind, ComponentSchema)
+    try:
+        entry = ResultEntry.create(
+            "control-entry",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+        entry.setup.add_component("Q1", kind=kind)
+        yield {
+            "project_root": str(tmp_path),
+            "entry": "control-entry",
+            "component": "Q1",
+        }
+    finally:
+        component_registry.unregister(kind)
+
+
+@pytest.fixture
 def control_rpc(tmp_path: Path) -> Iterator[RouteHarness]:
     harness = RouteHarness.create(str(tmp_path))
     try:
@@ -50,7 +71,9 @@ def control_rpc(tmp_path: Path) -> Iterator[RouteHarness]:
         harness.close()
 
 
-def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_rpc):
+def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(
+    control_rpc, project_setup_params
+):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
         "holder": "gui",
@@ -60,7 +83,7 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
     }
     link = raw_client(h)
     original = result(h.request(link, "project.info"))
-    reply = h.request(link, "project.setup", chip_name="changed", qub_name="q")
+    reply = h.request(link, "project.setup", **project_setup_params)
     reason(reply, "not_holder")
     assert not reply["ok"]
     assert reply["error"]["data"] == {"holder": "gui", "locked": False, "online": True}
@@ -72,7 +95,7 @@ def test_uninitialized_socket_reads_but_cannot_write_or_manage_control(control_r
 @pytest.mark.parametrize("dialog_type", [QDialog, QFileDialog, QMessageBox])
 @pytest.mark.parametrize("command", ["connect", "acquire"])
 def test_local_modal_refuses_owner_until_closed(
-    control_rpc, qapp, dialog_type, command
+    control_rpc, qapp, dialog_type, command, project_setup_params
 ):
     h = control_rpc
     link = raw_client(h)
@@ -93,7 +116,7 @@ def test_local_modal_refuses_owner_until_closed(
         assert reply["error"]["message"] == "Local 使用中"
         assert result(h.request(link, "control.status"))["holder"] == "gui"
         reason(
-            h.request(link, "project.setup", chip_name="bad", qub_name="bad"),
+            h.request(link, "project.setup", **project_setup_params),
             "not_holder",
         )
         assert result(h.request(link, "project.info")) == original
@@ -110,8 +133,10 @@ def test_local_modal_refuses_owner_until_closed(
         result(h.request(link, "control.connect", label="writer"))
     else:
         result(h.request(link, "control.acquire"))
-    result(h.request(link, "project.setup", chip_name="new", qub_name="q"))
-    assert result(h.request(link, "project.info"))["chip_name"] == "new"
+    result(h.request(link, "project.setup", **project_setup_params))
+    project = result(h.request(link, "project.info"))
+    assert project["entry"] == project_setup_params["entry"]
+    assert project["component"] == project_setup_params["component"]
 
 
 def test_remote_modal_allows_same_holder_reconnect_and_queries(control_rpc, qapp):
@@ -135,14 +160,16 @@ def test_remote_modal_allows_same_holder_reconnect_and_queries(control_rpc, qapp
         dialog.reject()
 
 
-def test_holder_writes_without_reading_business_state(control_rpc):
+def test_holder_writes_without_reading_business_state(
+    control_rpc, project_setup_params
+):
     h = control_rpc
     link = raw_client(h)
     assert result(h.request(link, "control.connect", label="writer"))["me"] is True
-    result(h.request(link, "project.setup", chip_name="new-chip", qub_name="new-qubit"))
+    result(h.request(link, "project.setup", **project_setup_params))
     project = result(h.request(link, "project.info"))
-    assert project["chip_name"] == "new-chip"
-    assert project["qub_name"] == "new-qubit"
+    assert project["entry"] == project_setup_params["entry"]
+    assert project["component"] == project_setup_params["component"]
 
 
 def test_connect_defaults_fixed_identity_and_idempotency(control_rpc):
@@ -233,7 +260,9 @@ def test_gui_lock_reclaim_unlock_and_watch_share_rpc_projection(control_rpc):
     assert result(h.request(b, "control.status"))["locked"] is False
 
 
-def test_readonly_same_label_never_writes_or_acquires(control_rpc):
+def test_readonly_same_label_never_writes_or_acquires(
+    control_rpc, project_setup_params
+):
     h = control_rpc
     assert result(h.request(raw_client(h), "control.status")) == {
         "holder": "gui",
@@ -251,7 +280,7 @@ def test_readonly_same_label_never_writes_or_acquires(control_rpc):
     )
     original = result(h.request(reader, "project.info"))
     reason(
-        h.request(reader, "project.setup", chip_name="bad", qub_name="bad"),
+        h.request(reader, "project.setup", **project_setup_params),
         "not_holder",
     )
     assert result(h.request(reader, "project.info")) == original
@@ -259,14 +288,16 @@ def test_readonly_same_label_never_writes_or_acquires(control_rpc):
         reason(h.request(reader, method), "readonly_connection")
 
 
-def test_queued_write_checks_current_holder_at_execution(tmp_path):
+def test_queued_write_checks_current_holder_at_execution(
+    tmp_path, project_setup_params
+):
     h = PumpedRouteHarness.create(str(tmp_path))
     try:
         a = raw_client(h)
         result(h.request(a, "control.status"))
         result(h.request(a, "control.connect"))
         original = result(h.request(a, "project.info"))
-        pending = h.request_async(a, "project.setup", chip_name="bad", qub_name="bad")
+        pending = h.request_async(a, "project.setup", **project_setup_params)
         h.ctrl.control_identity.reclaim_local()
         # The queued owner request runs after the explicit holder transfer.
         reason(h.wait(pending), "not_holder")

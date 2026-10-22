@@ -274,14 +274,15 @@ def test_ended_agent_filter_no_longer_routes_the_next_fit_entry(window):
     assert ctrl.interactive.current_cross_selection() is None
 
 
-@pytest.mark.parametrize("owner", ["load", "export", "result", "database"])
+@pytest.mark.parametrize("owner", ["load", "export", "result"])
 @pytest.mark.parametrize("cancel", [False, True])
 def test_local_chooser_preserves_path_and_cancel_contract(
-    window, tmp_path, spectrum_hdf5, owner, cancel
+    window, tmp_path, spectrum_hdf5, owner, cancel, fluxonium_entry
 ):
     view, ctrl = window
+    ctrl.setup_project(str(fluxonium_entry.result_path.parent.parent), "synthetic")
     target = tmp_path / "chosen.hdf5"
-    if owner in ("result", "database"):
+    if owner == "result":
         target = tmp_path
     elif owner != "export":
         target = Path(spectrum_hdf5[0])
@@ -296,7 +297,7 @@ def test_local_chooser_preserves_path_and_cancel_contract(
     ]
     choose_file(
         target,
-        browse_buttons[1 if owner == "database" else 0].click,
+        browse_buttons[0].click,
         cancel=cancel,
     )
     after = [edit.text() for edit in edits]

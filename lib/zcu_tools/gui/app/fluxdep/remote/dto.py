@@ -6,7 +6,7 @@ from typing import Literal, NotRequired, TypedDict
 
 from typing_extensions import TypedDict as ExtTypedDict
 
-from zcu_tools.gui.app.analysis_project.project import ProjectInfoPayload
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTargetPayload
 from zcu_tools.gui.app.fluxdep.state import SpecType
 from zcu_tools.gui.interactive.flux_pick import FluxPickInfo
 
@@ -431,7 +431,7 @@ class SelectionSnapshotReply(TypedDict):
 class ProjectSetupReply(TypedDict):
     """project is the applied native identity/path receipt; it grants no observation."""
 
-    project: ProjectInfoPayload
+    project: AnalysisTargetPayload
 
 
 class NameReply(TypedDict):
@@ -481,6 +481,8 @@ class ParamsExportedReply(TypedDict):
     savepath: str
     params: FitParametersReply
     alignment_from: str
+    component: str
+    analysis_id: str
 
 
 class OperationActivityReply(TypedDict):

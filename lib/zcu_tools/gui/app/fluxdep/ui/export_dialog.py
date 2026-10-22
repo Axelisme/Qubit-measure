@@ -1,7 +1,7 @@
 """ExportSpectrumsDialog — confirm the export path for spectrums.hdf5.
 
-The default path comes from the project's result dir (set/derived via the
-Project… dialog) as ``<result_dir>/data/fluxdep/spectrums.hdf5``. This dialog only
+The default path comes from the opened entry (selected via the
+Project… dialog) as ``<entry>/fluxdep/spectrums.hdf5``. This dialog only
 shows that path and lets the user override it via Browse. Returns the resolved
 filepath (or None on cancel).
 """
@@ -28,22 +28,18 @@ class ExportSpectrumsDialog(QDialog):
 
     def __init__(
         self,
-        result_dir: str,
+        result_path: str,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export spectrums.hdf5")
         self.resize(560, 130)
-        self._build_ui(default_export_path(result_dir))
+        self._build_ui(default_export_path(result_path))
 
     def _build_ui(self, default_path: str) -> None:
         root = QVBoxLayout(self)
 
-        root.addWidget(
-            QLabel(
-                "Set chip / qubit (or result dir) via Project… to change the default."
-            )
-        )
+        root.addWidget(QLabel("Open an entry via Project… to change the default."))
 
         self._content = QWidget()
         path_row = QHBoxLayout(self._content)

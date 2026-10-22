@@ -25,7 +25,9 @@ from __future__ import annotations
 # 9: a new Filter context starts from the published brush selection (the
 # pre-downsample selection; all-selected without a published mask), so
 # selection.interactive.open evidence reports that seed.
-WIRE_VERSION = 9
+# 10: project.setup opens an entry/component; fit.export_params writes predictor,
+# setup and analysis ledger and returns component/analysis_id.
+WIRE_VERSION = 10
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -48,4 +50,5 @@ WIRE_VERSION = 9
 # a locked stage stays shown with its inputs disabled.
 # 16: Filter Apply/Finish also publish the brush selection; a reopened Filter
 # starts from it, so an unchanged Finish reproduces the published kept mask.
-GUI_VERSION = 16
+# 17: entry/component dialog and entry-scoped predictor/setup export.
+GUI_VERSION = 17

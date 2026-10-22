@@ -2,7 +2,7 @@
 
 The v2 pipeline tail: take the cross-spectrum selection's *selected* (flux, freq)
 points, search a precomputed fluxonium database for the best (EJ, EC, EL), record
-it on State, and export it as ``params.json``.
+it on State, and export a component predictor and setup values.
 
 Pure, Qt-free, synchronous — like every fluxdep service. The slow ``search`` is
 wrapped in a worker thread by the GUI (``ui/analyze_panel``); the remote interface
@@ -36,6 +36,7 @@ from zcu_tools.analysis.fluxdep.search_models import (
     transition_requires_levels,
     validate_transition_levels,
 )
+from zcu_tools.gui.app.analysis_project.entry import require_target
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     PipelineStage,
@@ -44,27 +45,19 @@ from zcu_tools.gui.app.fluxdep.state import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
-from zcu_tools.resources.qubit_params import (
-    FluxDepFit,
-    ParamsProject,
-    QubitParams,
-    params_path_for_result_dir,
+from zcu_tools.resources.entry import snapshot
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorSource,
+    save_predictor_file,
 )
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from ..database import read_fluxdep_database_info
 
 logger = logging.getLogger(__name__)
 
 PbarFactory = Callable[..., BaseProgressBar]
-
-
-def default_params_path(result_dir: str) -> str:
-    """The notebook-layout default params.json path (``<result_dir>/params.json``).
-
-    ``result_dir`` is the project's result dir, which is always a concrete path
-    (``ProjectInfo`` derives it from chip/qubit eagerly).
-    """
-    return params_path_for_result_dir(result_dir)
 
 
 @dataclass(frozen=True)
@@ -79,6 +72,8 @@ class FitExportReceipt:
     savepath: str
     params: tuple[float, float, float]
     alignment_from: str
+    component: str
+    analysis_id: str
 
 
 @dataclass(frozen=True)
@@ -257,24 +252,25 @@ class FitService:
 
     # --- export ----------------------------------------------------------
 
-    def export_params(self, savepath: str | None = None) -> str:
-        """Return only the successful path from export_params_receipt.
+    def export_params(self) -> str:
+        """Return the predictor path after export_params_receipt completes.
 
-        Same owner-thread, default path, merge and failure contract as
-        export_params_receipt; no separate export or state mutation.
+        Uses the same setup/ledger writes and partial-failure contract.
         """
-        return self.export_params_receipt(savepath).savepath
+        return self.export_params_receipt().savepath
 
-    def export_params_receipt(self, savepath: str | None = None) -> FitExportReceipt:
-        """Merge the fit into params.json and return its captured output facts.
+    def export_params_receipt(self) -> FitExportReceipt:
+        """Write predictor JSON, declared setup fields, then analysis evidence.
 
-        Owner-thread command. None uses params.json under project.result_dir.
-        Independent sections are preserved. Calibration comes from the first
-        aligned spectrum, including empty sampled sources. FailedPreconditionError
-        reports no_fit_result, fit_stale (with root-change reasons) or
-        no_aligned_spectrum before I/O. Native I/O failures propagate; no receipt
-        is returned on failure. State and resource observations do not change.
+        Uses the opened entry and selected fluxonium component. Calibration is
+        the first aligned spectrum, including zero-point sources. Predictor bias
+        is zero because the fitted alignment has no additive correction; unknown
+        unit and source remain null. Only declared setup fields are changed.
+        Missing fit, stale inputs, missing alignment or no entry fail before I/O.
+        Writes are sequential, not a cross-file transaction. I/O/schema failure
+        preserves the successful prefix and returns no receipt. No retry/rollback.
         """
+        self._state.assert_owner_thread()
         fit = self._state.fit
         if fit.params is None:
             raise FailedPreconditionError(
@@ -296,29 +292,53 @@ class FitService:
                 reason_code="no_aligned_spectrum",
             )
 
-        project = self._state.project
-        path = (
-            savepath
-            if savepath is not None
-            else default_params_path(project.result_dir)
-        )
-
-        receipt = FitExportReceipt(path, fit.params, aligned.name)
-        EJ, EC, EL = receipt.params
-        params_file = QubitParams(path)
-        params_file.ensure_project(
-            ParamsProject(chip_name=project.chip_name, qub_name=project.qub_name)
-        )
-        params_file.set_fluxdep_fit(
-            FluxDepFit(
+        target = require_target(self._state.project)
+        target.resource.setup.refresh()
+        model = snapshot(target.resource.setup).components[target.component]
+        EJ, EC, EL = fit.params
+        predictor = PredictorFile(
+            model="fluxonium",
+            params=FluxoniumParams(
                 EJ=EJ,
                 EC=EC,
                 EL=EL,
                 flux_half=aligned.flux_half,
-                flux_int=aligned.flux_int,
                 flux_period=aligned.flux_period,
-                plot_transitions=fit.transitions,
-            )
+                flux_bias=0.0,
+            ),
+            flux_unit=None,
+            source=PredictorSource(run_id=None, created_at=None),
         )
-        logger.debug("export_params: %r -> %r", receipt.params, path)
-        return receipt
+        target.predictor_path.parent.mkdir(parents=True, exist_ok=True)
+        save_predictor_file(target.predictor_path, predictor)
+        values = {
+            "EJ": EJ,
+            "EC": EC,
+            "EL": EL,
+            "flux_half": aligned.flux_half,
+            "flux_int": aligned.flux_int,
+            "flux_period": aligned.flux_period,
+        }
+        with target.resource.setup.edit() as draft:
+            for field, value in values.items():
+                if field in type(model).model_fields:
+                    draft.set(f"{target.component}.{field}", value)
+        analysis_id = target.resource.record_analysis(
+            "fluxdep",
+            run_ids=[],
+            summary={
+                "component": target.component,
+                "predictor": str(target.predictor_path),
+                "EJ": EJ,
+                "EC": EC,
+                "EL": EL,
+                "alignment_from": aligned.name,
+            },
+        )
+        return FitExportReceipt(
+            str(target.predictor_path),
+            fit.params,
+            aligned.name,
+            target.component,
+            analysis_id,
+        )

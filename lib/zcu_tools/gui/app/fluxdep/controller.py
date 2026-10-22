@@ -23,7 +23,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
-from zcu_tools.gui.app.analysis_project.project import ProjectInfo
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -178,7 +178,15 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
     # --- project ---------------------------------------------------------
 
-    def setup_project(self, project: ProjectInfo) -> None:
+    def setup_project(
+        self, project_root: str, entry: str, component: str | None = None
+    ) -> None:
+        """Open an existing entry and select a fluxonium setup component.
+
+        Omitted component resolves the setup qubit alias. Invalid targets fail
+        before publication. Database is bound for API completeness, never saved.
+        """
+        project = AnalysisTarget.open(project_root, entry, component)
         self._state.set_project(project)
         self._emit(ProjectChangedPayload())
 
@@ -347,7 +355,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """Write the native spectrum collection and return its output path.
 
         Owner-thread command. None uses
-        <project.result_dir>/data/fluxdep/spectrums.hdf5.
+        <entry.result_path>/fluxdep/spectrums.hdf5.
         mode is the native h5py mode: x creates only, w replaces an existing
         file. Empty collection raises FailedPreconditionError (no_spectrums)
         before I/O. I/O errors propagate and may leave partial output.
@@ -515,25 +523,21 @@ class Controller(BaseController[FluxDepState, EventBus]):
         self.record_search_result(result, inputs)
         return result
 
-    def export_params(self, savepath: str | None = None) -> str:
-        """Merge the current fit into params.json and return its output path.
+    def export_params(self) -> str:
+        """Export to the selected entry/component and return the predictor path.
 
-        Owner-thread command. None uses params.json under project.result_dir.
-        Independent sections are preserved. Calibration comes from the first
-        aligned spectrum. FailedPreconditionError reports no_fit_result,
-        fit_stale (with root-change reasons) or no_aligned_spectrum before I/O;
-        native I/O errors propagate. State and resource observations do not change.
+        Same owner-thread, validation and partial-failure contract as
+        export_params_receipt.
         """
-        return self._fit.export_params(savepath)
+        return self._fit.export_params()
 
-    def export_params_receipt(self, savepath: str | None = None) -> FitExportReceipt:
-        """Merge the fit into params.json and return captured output facts.
+    def export_params_receipt(self) -> FitExportReceipt:
+        """Write predictor, declared setup fields and analysis ledger on owner.
 
-        Owner-thread command. None uses params.json under project.result_dir.
-        Independent sections are preserved. The receipt holds full-precision
-        (EJ, EC, EL) GHz and the first aligned spectrum used for calibration.
-        FailedPreconditionError reports no_fit_result, fit_stale (with root-change
-        reasons) or no_aligned_spectrum before I/O. Native I/O failures propagate;
-        no receipt is returned on failure. State and observations do not change.
+        Requires an opened entry/component, fresh fit and aligned source. Uses
+        the first aligned spectrum, even with zero sampled points. Receipt holds
+        predictor path, GHz params, calibration source, component and analysis ID.
+        Files are committed sequentially; I/O/schema failure preserves successful
+        prefix without retry or rollback. State observations remain unchanged.
         """
-        return self._fit.export_params_receipt(savepath)
+        return self._fit.export_params_receipt()
