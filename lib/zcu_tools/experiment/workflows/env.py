@@ -2,32 +2,66 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.datafile import JsonObject
 from zcu_tools.device import BaseDeviceInfo
+from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.progress_bar import BaseProgressBar
 
-from .models import Completed, Failed, MissingCapability, ProgressSnapshot
+from .models import (
+    Completed,
+    Failed,
+    MissingCapability,
+    OperationFact,
+    OperationKind,
+    OperationOutcome,
+    ProgressSnapshot,
+)
 from .ports import DevicePort, EnginePorts, ProgressFactory
-from .run import LiveUpdate, Run
 
 
 def _validate_model(value: object, model: type[BaseModel], label: str) -> None:
     if not isinstance(value, model):
         raise TypeError(f"{label} must be a {model.__name__} instance")
+
+
+class RunFunction[Cfg: ExpCfgModel, Result](Protocol):
+    """Core experiment callable, including bound Experiment.run methods.
+
+    cfg is an owned, mutable experiment configuration. context provides borrowed
+    hardware, plots, drivers and the cooperative operation cancellation token.
+    """
+
+    def __call__(self, cfg: Cfg, *, context: RunContext) -> Result: ...
+
+
+@dataclass
+class _Attempt:
+    number: int
+    started_at: datetime
+    finished_at: datetime
+    device_snapshot: Mapping[str, JsonObject] | None = None
+
+
+@dataclass(frozen=True)
+class _Value[T]:
+    # Distinguish arbitrary raw values (including Failed) from acquire failure.
+    value: T
 
 
 class Displays:
@@ -86,6 +120,9 @@ class EnvHooks:
     stopping: Callable[[], bool]
     experiment_failed: Callable[[str, str, BaseException], None]
     question: Callable[[Literal["waiting", "answered"]], None]
+    next_attempt: Callable[[], int]
+    operation_finished: Callable[[OperationFact], None]
+    device_setup: Callable[[str, BaseDeviceInfo], None]
 
 
 class WorkflowEnv[C]:
@@ -171,74 +208,133 @@ class WorkflowEnv[C]:
         Stop does not throw CancelledError, and does not suppress later calls.
         """
 
-        def invoke(ctx: CallContext) -> T | Failed:
-            value = fn(ctx)
-            error = ctx.stop_signal.error
-            if error is not None and error.status == "failed":
-                return Failed(error.reason)
-            return value
+        return await self._call("call", lambda ctx, attempt: fn(ctx))
 
+    async def _call[T](
+        self, kind: OperationKind, fn: Callable[[CallContext, _Attempt], T]
+    ) -> Completed[T] | Failed:
         while True:
-            outcome = await self._host.call(invoke)
+            attempts: list[_Attempt] = []
+
+            def invoke(
+                ctx: CallContext, attempts: list[_Attempt] = attempts
+            ) -> _Value[T] | Failed:
+                return self._invoke(fn, attempts, ctx)
+
+            try:
+                result = await self._host.call(invoke)
+            except BaseException as error:
+                self._record_attempt(
+                    kind, attempts, "raised", f"{type(error).__name__}: {error}"
+                )
+                raise
+            discard = (
+                result.epoch != self._host.epoch
+                and result.partial_result
+                and not self._hooks.stopping()
+            )
+            if isinstance(result.result, Failed):
+                self._record_attempt(kind, attempts, "failed", result.result.reason)
+            elif discard:
+                self._record_attempt(
+                    kind, attempts, "discarded", "Pause interrupted this attempt"
+                )
+            elif result.partial_result:
+                self._record_attempt(
+                    kind, attempts, "partial", "Operation stop token was set"
+                )
+            else:
+                self._record_attempt(kind, attempts, "completed")
             self._hooks.boundary()
             await self._host.wait_until_resumed()
-            if (
-                outcome.epoch != self._host.epoch
-                and outcome.partial_result
-                and not self._hooks.stopping()
-            ):
+            if discard:
                 continue
-            if isinstance(outcome.result, Failed):
-                return outcome.result
-            return Completed(outcome.result, partial_result=outcome.partial_result)
+            if isinstance(result.result, Failed):
+                return result.result
+            return Completed(result.result.value, partial_result=result.partial_result)
+
+    def _invoke[T](
+        self,
+        fn: Callable[[CallContext, _Attempt], T],
+        attempts: list[_Attempt],
+        ctx: CallContext,
+    ) -> _Value[T] | Failed:
+        started = self._ports.clock.now()
+        attempt = _Attempt(self._hooks.next_attempt(), started, started)
+        attempts.append(attempt)
+        try:
+            value = fn(ctx, attempt)
+            error = ctx.stop_signal.error
+            if error is not None:
+                if error.status == "failed":
+                    return Failed(error.reason)
+                raise error from error.exception
+            return _Value(value)
+        finally:
+            attempt.finished_at = self._ports.clock.now()
+
+    def _record_attempt(
+        self,
+        kind: OperationKind,
+        attempts: list[_Attempt],
+        outcome: OperationOutcome,
+        reason: str | None = None,
+    ) -> None:
+        if not attempts:
+            return  # Executor admission failed before an attempt started.
+        attempt = attempts[0]
+        self._hooks.operation_finished(
+            OperationFact(
+                kind,
+                attempt.number,
+                attempt.started_at,
+                attempt.finished_at,
+                attempt.device_snapshot,
+                outcome,
+                reason,
+            )
+        )
 
     async def run[Cfg: ExpCfgModel, Result](
-        self,
-        experiment: Callable[[Run[Cfg]], Result],
-        cfg: Cfg,
-        *,
-        live: LiveUpdate | None = None,
+        self, experiment: RunFunction[Cfg, Result], cfg: Cfg
     ) -> Completed[RunRecord[Cfg, Result]] | Failed:
-        """Run an experiment with a copied ExpCfgModel, without saving it.
+        """Run a core callable with a copied configuration, without saving it.
 
-        The callback receives the existing Run with its own cfg, operation
-        token, captured connected devices and optional live buffer callback.
-        Completed.value is a RunRecord: cfg reflects callback-return time and
-        result is the experiment data. Saver callers pass that record directly.
-        cfg must be an ExpCfgModel value, not a factory; dataclass/other BaseModel
-        inputs instead use env.call and construct the general Run explicitly.
-        Retry after Pause uses the same captured cfg. Device-capture, callback,
-        live and copy errors propagate; captured acquire failure returns Failed
-        and journals ExperimentFailed. Stop delivers partial/empty RunRecord.
+        experiment accepts (cfg, *, context: RunContext), including a bound
+        T1Exp().run. cfg must be an ExpCfgModel; other scans use raw env.call.
+        Each attempt builds RunContext with this operation token and borrowed
+        soc/soccfg/plots/devices, captures device settings, then invokes the core
+        callable with a fresh deepcopy of cfg. Completed.value is RunRecord with
+        callback-return cfg and result; savers consume that record directly.
+        Schedule acquire failure returns Failed; other exceptions propagate.
+        Stop delivers a partial/empty record. Pause retries the captured cfg.
+        Framework journal/commit envelopes retain attempt facts and snapshots;
+        provenance stays in the workflow manifest, not a per-operation identity.
         """
         _validate_model(cfg, ExpCfgModel, "env.run cfg")
         captured = deepcopy(cfg)
 
-        def invoke(ctx: CallContext) -> RunRecord[Cfg, Result]:
-            run = Run(
-                captured,
-                ctx.stop_signal,
-                device_snapshot=self.devices.capture_snapshot(),
-                soc=self._ports.soc,
+        def invoke(ctx: CallContext, attempt: _Attempt) -> RunRecord[Cfg, Result]:
+            context = RunContext(
+                soc=self.soc,
                 soccfg=self._ports.soccfg,
-                devices=self._ports.devices,
+                plots=self.plots,
+                devices=self.devices.get_connected_devices(),
+                cancel_signal=ctx.stop_signal,
             )
-            if live is not None:
-                run.bind_live(live)
-            result = experiment(run)
-            if run.live_error is not None:
-                raise run.live_error
-            outcome = run.outcome
-            if outcome.status == "failed":
-                cause = outcome.exception or RuntimeError(outcome.reason)
+            attempt.device_snapshot = capture_device_snapshot(context.devices)
+            current = deepcopy(captured)
+            result = experiment(current, context=context)
+            error = context.cancel_signal.error
+            if error is not None and error.status == "failed":
                 self._hooks.experiment_failed(
                     getattr(experiment, "__qualname__", type(experiment).__name__),
-                    outcome.reason or str(cause),
-                    cause,
+                    error.reason,
+                    error.exception or error,
                 )
-            return RunRecord(run.cfg, result)
+            return RunRecord(current, result)
 
-        return await self.call(invoke)
+        return await self._call("run", invoke)
 
     def get_device_cfg(self, name: str) -> BaseDeviceInfo:
         """Live-read detached typed settings; name/I/O errors propagate."""
@@ -254,9 +350,12 @@ class WorkflowEnv[C]:
         the device with an already-stopped token for cooperative empty work.
         """
         captured = deepcopy(cfg)
-        return await self.call(
-            lambda ctx: self.devices.setup_device(name, captured, ctx.stop_signal)
-        )
+
+        def invoke(ctx: CallContext, _attempt: _Attempt) -> None:
+            self.devices.setup_device(name, captured, ctx.stop_signal)
+            self._hooks.device_setup(name, captured)
+
+        return await self._call("setup_device", invoke)
 
     async def wait_until(self, target: datetime) -> Completed[None] | Failed:
         """Wait for an aware deadline through call; Stop cooperatively returns.
@@ -266,8 +365,9 @@ class WorkflowEnv[C]:
         """
         if target.tzinfo is None or target.utcoffset() is None:
             raise ValueError("Wait target must be timezone-aware")
-        return await self.call(
-            lambda ctx: self._ports.clock.wait_until(target, ctx.stop_signal)
+        return await self._call(
+            "wait_until",
+            lambda ctx, attempt: self._ports.clock.wait_until(target, ctx.stop_signal),
         )
 
     async def ask[A: Answer](self, question: Question[A]) -> A | None:

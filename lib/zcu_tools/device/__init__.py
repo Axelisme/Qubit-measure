@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import TypeAlias
 
-from .base import BaseDevice, BaseDeviceInfo, DeviceActivity, DeviceBusyError
+from .base import (
+    BaseDevice,
+    BaseDeviceInfo,
+    DeviceActivity,
+    DeviceBusyError,
+    DeviceMapping,
+)
 from .fake import FakeDevice, FakeDeviceInfo
 from .manager import (
     DeviceCloseFailure,
@@ -23,6 +29,7 @@ __all__ = [
     "BaseDevice",
     "BaseDeviceInfo",
     "DeviceActivity",
+    "DeviceMapping",
     "DeviceBusyError",
     # manager
     "DeviceManager",

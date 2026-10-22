@@ -38,7 +38,9 @@ class _RunView(Protocol):
     def stop(self) -> RunStatus: ...
     def answer(self, answer: Answer, *, request_id: str) -> RunStatus: ...
     def pending_question(self) -> PendingQuestion | None: ...
-    def parse_answer(self, mapping: Mapping[str, object]) -> Answer: ...
+    def parse_answer(
+        self, mapping: Mapping[str, object], *, request_id: str
+    ) -> Answer: ...
     def update_tunables(
         self, tunables: BaseModel, expected_revision: int, actor: Actor
     ) -> TunablesSnapshot: ...
@@ -126,9 +128,16 @@ class Engine[C]:
         pending = self.pending_question(run_id)
         return None if pending is None else pending.answer_type
 
-    def parse_answer(self, run_id: str, mapping: Mapping[str, object]) -> Answer:
-        """Validate wire fields against the current question, without delivery."""
-        return self._current(run_id).parse_answer(mapping)
+    def parse_answer(
+        self, run_id: str, mapping: Mapping[str, object], *, request_id: str
+    ) -> Answer:
+        """Validate fields for this request without accepting or delivering them.
+
+        Stale/absent IDs raise QuestionMismatch with the current pending ID before
+        schema validation. Wrong fields raise ValidationError; neither failure
+        changes the question, lifecycle or journal.
+        """
+        return self._current(run_id).parse_answer(mapping, request_id=request_id)
 
     def answer(self, run_id: str, answer: Answer, *, request_id: str) -> RunStatus:
         """Deliver to this exact question on the retained worker loop.

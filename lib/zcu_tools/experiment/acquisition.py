@@ -14,12 +14,12 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import TypeAdapter
 
 from zcu_tools.datafile import JsonObject, SoftwareProvenance
-from zcu_tools.device import BaseDevice
+from zcu_tools.device import DeviceMapping
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.program.v2.simulation import SimulationSoc
 from zcu_tools.resources.entry import new_run_id as generate_run_id
@@ -62,7 +62,7 @@ class AcquisitionEvidence:
 
 
 def capture_device_snapshot(
-    devices: Mapping[str, BaseDevice[Any]],
+    devices: DeviceMapping,
 ) -> dict[str, JsonObject]:
     """Read every connected driver once into detached JSON settings.
 

@@ -11,7 +11,7 @@ from pydantic import JsonValue, SerializeAsAny
 
 from zcu_tools.device import BaseDeviceInfo
 
-from .models import Actor, CommittedRecord, RunIdentity, RunPaths
+from .models import Actor, CommittedRecord, OperationFact, RunIdentity, RunPaths
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,17 @@ class RecordCommitted(CommittedRecord):
     """CommittedRecord's journal representation, tagged record_committed."""
 
     kind: Literal["record_committed"] = field(default="record_committed", init=False)
+
+
+@dataclass(frozen=True)
+class OperationFinished:
+    """Actual attempt evidence in commit scope call_seq, tagged operation_finished."""
+
+    call_seq: int
+    operation: OperationFact
+    kind: Literal["operation_finished"] = field(
+        default="operation_finished", init=False
+    )
 
 
 @dataclass(frozen=True)
@@ -156,6 +167,7 @@ class RunEnded:
 type JournalPayload = (
     RunStarted
     | RecordCommitted
+    | OperationFinished
     | DeviceSetup
     | ExperimentFailed
     | TunablesChanged

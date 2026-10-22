@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Literal
 
 from pydantic import JsonValue
 
-from zcu_tools.datafile import SoftwareProvenance
+from zcu_tools.datafile import JsonObject, SoftwareProvenance
 from zcu_tools.experiment.script_host import PendingQuestion
 
 type Lifecycle = Literal[
@@ -136,6 +137,30 @@ class EncodedRecord:
     error: str | None
 
 
+type OperationKind = Literal["run", "call", "setup_device", "wait_until"]
+type OperationOutcome = Literal["completed", "partial", "discarded", "failed", "raised"]
+
+
+@dataclass(frozen=True)
+class OperationFact:
+    """One actual executor attempt, retained even when Pause discards its value.
+
+    kind names run/call/setup_device/wait_until. attempt counts from one within
+    the current commit scope, including retries. started_at/finished_at are UTC
+    worker boundaries. device_snapshot is detached pre-call driver JSON for run,
+    otherwise None. outcome is completed, partial, discarded by Pause, failed
+    acquire, or raised exception. reason is a diagnostic or None on completion.
+    """
+
+    kind: OperationKind
+    attempt: int
+    started_at: datetime
+    finished_at: datetime
+    device_snapshot: Mapping[str, JsonObject] | None
+    outcome: OperationOutcome
+    reason: str | None
+
+
 @dataclass(frozen=True)
 class CommittedRecord:
     """One journal-authoritative record, independent of directory allocation.
@@ -155,6 +180,7 @@ class CommittedRecord:
     committed_at: datetime
     revisions: tuple[int, ...]
     record_type: str
+    operations: tuple[OperationFact, ...] = ()
 
 
 class QuestionMismatch(ValueError):

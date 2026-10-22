@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from io import StringIO
 
 from zcu_tools.datafile import JsonObject
-from zcu_tools.device import BaseDeviceInfo, FakeDevice, FakeDeviceInfo
+from zcu_tools.device import BaseDeviceInfo, DeviceMapping, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.acquisition import capture_device_snapshot
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.progress_bar.backend.tqdm import TQDMProgressBar
@@ -46,6 +46,10 @@ class RecordingDevices:
     def capture_snapshot(self) -> dict[str, JsonObject]:
         self.captures += 1
         return capture_device_snapshot(self.drivers)
+
+    def get_connected_devices(self) -> DeviceMapping:
+        self.captures += 1
+        return dict(self.drivers)
 
     def get_device_cfg(self, name: str) -> BaseDeviceInfo:
         if name in self.drivers:

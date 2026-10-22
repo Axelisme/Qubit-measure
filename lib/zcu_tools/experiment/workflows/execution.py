@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer
+from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.experiment.script_host import PendingQuestion, ScriptHost
 from zcu_tools.progress_bar import use_pbar_factory
 
@@ -20,7 +21,9 @@ from .declaration import WorkflowDefinition
 from .encoding import encode_record
 from .env import Displays, EnvHooks, WorkflowEnv
 from .journal import (
+    DeviceSetup,
     ExperimentFailed,
+    OperationFinished,
     Paused,
     PauseRequested,
     RecordCommitted,
@@ -36,6 +39,7 @@ from .models import (
     CommittedRecord,
     InvalidRunState,
     Lifecycle,
+    OperationFact,
     QuestionMismatch,
     RunIdentity,
     RunPaths,
@@ -172,6 +176,9 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._stopping,
                 self._experiment_failed,
                 self._question_boundary,
+                self._next_attempt,
+                self._operation_finished,
+                self._device_setup,
             ),
         )
         return await self._definition.script(
@@ -183,6 +190,21 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._scope_revision = self._tunables.revision
         self._revisions = []
         self._run_no = 0
+        self._attempt = 0
+        self._operations: list[OperationFact] = []
+
+    def _next_attempt(self) -> int:
+        with self._lock:
+            self._attempt += 1
+            return self._attempt
+
+    def _operation_finished(self, operation: OperationFact) -> None:
+        with self._lock:
+            self._artifacts.append(OperationFinished(self._commit_seq + 1, operation))
+            self._operations.append(deepcopy(operation))
+
+    def _device_setup(self, name: str, cfg: BaseDeviceInfo) -> None:
+        self._artifacts.append(DeviceSetup(name, cfg.model_copy(deep=True)))
 
     def _read_tunables(self) -> T:
         with self._lock:
@@ -205,6 +227,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._ports.clock.now(),
                 revisions,
                 record_type,
+                tuple(self._operations),
             )
             self._artifacts.publish_record(
                 directory,
@@ -300,11 +323,17 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         """Read the host's exact current request, including its unique request id."""
         return deepcopy(self._host.pending_question)
 
-    def parse_answer(self, mapping: Mapping[str, object]) -> Answer:
-        """Validate JSON against the current question without accepting an answer."""
+    def _require_question(self, request_id: str) -> PendingQuestion:
         pending = self.pending_question()
-        if pending is None:
-            raise InvalidRunState("parse_answer", self._lifecycle)
+        if pending is None or pending.request_id != request_id:
+            raise QuestionMismatch(
+                request_id, None if pending is None else pending.request_id
+            )
+        return pending
+
+    def parse_answer(self, mapping: Mapping[str, object], *, request_id: str) -> Answer:
+        """Match the exact request first, then validate fields without delivery."""
+        pending = self._require_question(request_id)
         return pending.answer_type.model_validate(mapping)
 
     def answer(self, answer: Answer, *, request_id: str) -> RunStatus:
@@ -314,11 +343,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         types/fields raise TypeError/ValidationError. Rejection publishes no
         answered fact or lifecycle change. No new worker segment is started.
         """
-        pending = self.pending_question()
-        if pending is None or pending.request_id != request_id:
-            raise QuestionMismatch(
-                request_id, None if pending is None else pending.request_id
-            )
+        self._require_question(request_id)
         try:
             self._host.answer(request_id, answer)
         except ValueError as error:

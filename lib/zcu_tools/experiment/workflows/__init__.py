@@ -5,7 +5,7 @@ from zcu_tools.experiment.script_host import CallContext, PendingQuestion
 from .declaration import WorkflowRegistry, WorkflowScript, workflow
 from .display import Dense, assemble_rows, assemble_scalars
 from .engine import Engine
-from .env import WorkflowEnv
+from .env import RunFunction, WorkflowEnv
 from .models import (
     Actor,
     CommittedRecord,
@@ -15,6 +15,7 @@ from .models import (
     InvalidRunState,
     Lifecycle,
     MissingCapability,
+    OperationFact,
     ProgressSnapshot,
     QuestionMismatch,
     RevisionConflict,
@@ -25,5 +26,4 @@ from .models import (
     TunablesSnapshot,
 )
 from .ports import Clock, DevicePort, EnginePorts, ProgressFactory
-from .run import LiveUpdate, Run
 from .tunables import Live

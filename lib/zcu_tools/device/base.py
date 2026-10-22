@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -78,6 +78,12 @@ class BaseDeviceInfo(ConfigBase):
                     f"Unknown field '{key}' for {self.__class__.__name__}."
                 )
         return super().with_updates(**kwargs)
+
+
+# Heterogeneous drivers keep their own Info type and lifecycle.
+type DeviceMapping = Mapping[
+    str, BaseDevice[Any]
+]  # tolerated(cast): Info is invariant; heterogeneous drivers have no common Info type.
 
 
 T_DeviceInfo = TypeVar("T_DeviceInfo", bound=BaseDeviceInfo)

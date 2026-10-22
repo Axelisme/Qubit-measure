@@ -1,11 +1,10 @@
 """Explicit capabilities for one QICK experiment run."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from zcu_tools.device.base import BaseDevice
+from zcu_tools.device.base import DeviceMapping
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.plotting.plots import Plots
 
@@ -22,7 +21,7 @@ class RunContext:
     soc: Any
     soccfg: Any
     plots: Plots
-    devices: Mapping[str, BaseDevice[Any]]
+    devices: DeviceMapping
     cancel_signal: StopSignal
 
     def __post_init__(self) -> None:
