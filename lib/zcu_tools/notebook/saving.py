@@ -288,7 +288,7 @@ class SavedRun(Generic[CfgT, ResultT]):
                 run_id=self.run_id,
                 origin="notebook",
             ),
-        )
+        ).event_id
 
     def _artifacts(self) -> tuple[SaveArtifact, ...]:
         artifacts = [

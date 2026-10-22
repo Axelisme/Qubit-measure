@@ -11,6 +11,8 @@ from zcu_tools.resources.entry import (
     PointView,
     ResultEntry,
     capture_point_storage,
+    document_value,
+    snapshot,
 )
 from zcu_tools.resources.entry.storage import bind_sample_table
 from zcu_tools.resources.entry.writeback import (
@@ -44,6 +46,36 @@ def evidence() -> WritebackEvidence:
     return WritebackEvidence(kind="test/fit", origin="notebook", run_id="run-1")
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_executor_returns_each_committed_value_and_failure_prefix(
+    point: PointView, fails: bool
+) -> None:
+    writer = target(point)
+    items = (
+        ParameterWriteback("Q1.ext.fit", {"gain": 0.1}),
+        ParameterWriteback("Q1.ext.fit.gain", 0.2),
+    )
+    if fails:
+        items += (ParameterWriteback("Q1.duration", "invalid"),)
+        with pytest.raises(WritebackApplyError) as caught:
+            apply_writeback(items, target=writer, evidence=evidence())
+        assert hasattr(caught.value, "result"), "Failure must retain confirmed values"
+        result = caught.value.result
+    else:
+        result = apply_writeback(items, target=writer, evidence=evidence())
+        assert hasattr(result, "committed"), "Executor must return confirmed values"
+    assert [(item.path, item.value) for item in result.committed] == [
+        ("Q1.ext.fit", {"gain": 0.1}),
+        ("Q1.ext.fit.gain", 0.2),
+    ]
+    events = writer.ledger.events()
+    assert len(events) == 1
+    assert events[0].id == result.event_id
+    assert events[0].kind == "accepted"
+    point.refresh()
+    assert document_value(snapshot(point), "Q1.ext.fit.gain") == 0.2
+
+
 def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
     point: PointView,
 ) -> None:
@@ -57,7 +89,7 @@ def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
         target=writer,
         evidence=evidence(),
     )
-    event = writer.ledger.get(event_id).event
+    event = writer.ledger.get(event_id.event_id).event
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
     assert [(write.path, write.value) for write in event.payload.writes] == [
@@ -133,7 +165,7 @@ def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
         raise AssertionError(
             "Sample Apply must accept finite numpy producer numbers, including nested JSON"
         ) from error
-    event = writer.ledger.get(event_id).event
+    event = writer.ledger.get(event_id.event_id).event
     assert isinstance(event.payload, AcceptedPayload)
     assert [(write.path, write.value) for write in event.payload.writes] == [
         ("Q1", expected)
@@ -145,7 +177,7 @@ def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
         "run_id": "run-1",
         "point": "a",
         "at": row["at"],
-        "source": event_id,
+        "source": event_id.event_id,
     }
     # Normalization must not replace values in the producer's original tree.
     assert isinstance(fields["freq"], np.float64)

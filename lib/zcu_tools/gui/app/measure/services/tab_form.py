@@ -32,6 +32,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form_adapter import (
     ElementsObservation,
+    FieldDiagnostic,
     Form,
     FormContext,
     LogicalEdit,
@@ -195,6 +196,23 @@ class TabFormResource:
             return result
         return self._form.to_cfg(result, self._sources.env)
 
+    def diagnostics(self) -> tuple[FieldDiagnostic, ...]:
+        """Return all current canonical errors and seed facts across every element.
+
+        Merges preview and lowered cfg errors, without capture, defaults, edits
+        or UI selection. Unknown calibration stays None. Revocation raises the
+        same RESOURCE_GONE precondition as other reads.
+        """
+        self._require_open()
+        preview = self.preview()
+        result = self.result()
+        messages = dict(preview.errors.messages) if preview.errors else {}
+        if isinstance(result, FormErrors):
+            messages.update(result.messages)
+        return self._form.diagnostics(
+            self.input, self._sources.env, FormErrors(messages) if messages else None
+        )
+
     def accept(self) -> AcceptedFormConfig:
         """Accept only the current valid cfg without a new source capture.
 
@@ -248,12 +266,17 @@ class TabFormResource:
         self._require_open()
         return self._form.read_logical_field(self._state.input, path, self._sources.env)
 
-    def edit_recipe_fields(self, edits: Sequence[LogicalEdit]) -> bool:
+    def edit_recipe_fields(
+        self, edits: Sequence[LogicalEdit], *, require_valid: bool = False
+    ) -> bool | FormErrors:
         """Admit and install one ordered logical batch under all mutation guards.
 
         edits retains duplicate paths and request indexes for adapter admission.
         Structural/source/ref-ancestor failures leave the entire resource intact.
-        Ordinary invalid drafts are installed, not rolled back. Return whether
+        With require_valid=True, validate the detached candidate through Form
+        result and native cfg lowering before installation. Return complete logical
+        FormErrors without installation/publication when it is invalid. Otherwise
+        ordinary invalid drafts are installed, not rolled back. Return whether
         input changed, not whether it is valid. Changed input notifies state and
         resource subscribers once, preserving base and the fixed source capture.
         Busy, revoked and notification-reentrant commands reject even empty edits.
@@ -262,6 +285,16 @@ class TabFormResource:
             candidate = self._form.prepare_logical_edits(
                 self._state.input, edits, self._sources.env
             )
+            if require_valid:
+                result = FormState(candidate.input).result(self._sources.env)
+                if not isinstance(result, FormErrors):
+                    result = self._form.to_cfg(result, self._sources.env)
+                if isinstance(result, FormErrors):
+                    errors = self._form.logical_errors(
+                        candidate.input, result, self._sources.env
+                    )
+                    if errors is not None:
+                        return errors
             return self._install_recipe_candidate(candidate)
 
     def select_recipe_module(
@@ -431,8 +464,8 @@ class TabFormResource:
 
         Call on the owner thread. aliases optionally overrides named bindings
         for this capture only; it never changes the global table. Expression
-        drafts, explicit selections and previously resolved direct defaults stay
-        intact, including invalid input. Subscribers receive one publication
+        drafts, explicit selections, resolved direct defaults and their original
+        seed sources/metadata stay intact, including invalid input. Subscribers receive one publication
         and can preview against the new capture. Capture or form-factory failures
         preserve the previous input, definition and sources. Busy, revoked and
         notification-reentrant calls raise CfgPreconditionError.
@@ -441,6 +474,8 @@ class TabFormResource:
             sources = self._capture(aliases)
             form = self._make_form(FormContext(sources.env.parameters))
             current = self._state.input
+            form.seed_sources = self._form.seed_sources
+            form.seed_metadata = self._form.seed_metadata
             state = FormState(
                 FormInput(form.model, current.data, selections=current.selections)
             )

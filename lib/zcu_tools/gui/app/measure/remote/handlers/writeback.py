@@ -269,7 +269,14 @@ def h_tab_writeback_write(
     follow_tab(adapter, tab_id, pane)
     try:
         result = adapter.writeback_control.write_writeback_for_pane(
-            tab_id, pane, changes
+            tab_id,
+            pane,
+            changes,
+            **(
+                {"submission_id": _submission_id(params)}
+                if params.get("submission_id") is not None
+                else {}
+            ),
         )
     except LibraryEntryInvalid as exc:
         raise entry_invalid_to_remote(exc) from exc
@@ -283,8 +290,9 @@ def h_tab_writeback_accept(
 
     stages contains subtab_id and ids for each selected pane. All IDs are checked
     before the first write. Values and destinations come from current owner drafts.
-    Return stage-qualified confirmed IDs and the first write diagnostic, not a
-    snapshot of the written values.
+    Return stage-qualified confirmed IDs and the first write diagnostic.
+    With a reserved submission_id, actual values remain queryable through
+    tab.writeback_receipt even if this handler's reply times out.
     """
     tab_id = str(params["tab_id"])
     try:
@@ -298,7 +306,15 @@ def h_tab_writeback_accept(
             ErrorCode.INVALID_PARAMS, "captured stages require nonempty item IDs"
         )
     try:
-        result = adapter.writeback_control.accept_writeback(tab_id, stages)
+        result = adapter.writeback_control.accept_writeback(
+            tab_id,
+            stages,
+            **(
+                {"submission_id": _submission_id(params)}
+                if params.get("submission_id") is not None
+                else {}
+            ),
+        )
     except LibraryEntryInvalid as exc:
         raise entry_invalid_to_remote(exc) from exc
     return {
@@ -308,6 +324,40 @@ def h_tab_writeback_accept(
             for stage, ids in zip(stages, result.applied_ids, strict=True)
         ],
         "error": result.error,
+    }
+
+
+def _submission_id(params: Mapping[str, object]) -> str:
+    identity = params["submission_id"]
+    if not isinstance(identity, str) or not identity:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "submission_id must be nonempty")
+    return identity
+
+
+def h_tab_writeback_begin(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Reserve a once-only ID without validating or writing the draft."""
+    return asdict(adapter.writeback_control.begin_writeback(str(params["tab_id"])))
+
+
+def h_tab_writeback_receipt(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Read retained confirmed values, not current draft or destination values."""
+    receipt = adapter.writeback_control.get_writeback_receipt(_submission_id(params))
+    return {
+        "submission_id": receipt.submission_id,
+        "tab_id": receipt.tab_id,
+        "status": receipt.status,
+        "completed": [
+            {
+                "subtab_id": row.subtab_id,
+                "item": _writeback_wire_value(asdict(row.item)),
+            }
+            for row in receipt.completed
+        ],
+        "error": receipt.error,
     }
 
 

@@ -48,7 +48,7 @@ def test_tab_get_mcp_preserves_complete_publication_without_focusing(mcp_tab):
     assert {tuple(item["path"]): item["value"] for item in observed["values"]}[
         ("gain",)
     ] == 0.1
-    assert set(observed) == {"input", "values", "errors"}
+    assert set(observed) == {"input", "values", "errors", "diagnostics"}
     assert observed["errors"] == []
     assert observed == call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"]
     assert call(sock, "tab.list_all")["result"]["active_tab_id"] == before

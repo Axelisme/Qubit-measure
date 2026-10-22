@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 Recipe 是操作 GUI tab 的 async 函式。Adapter 擁有 cfg、表單、量測與分析。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -35,6 +35,10 @@ Form 路徑是 tuple，字串指欄位，整數指完整清單中的原始位置
 `set(path, None)` 保留 GUI input，不代表停用。
 準備模組用字串 `"off"` 明確停用，null 會被 inputs model 拒絕。
 缺少必要校準時，在 Run 前 raise `RecipeNeedsParameters`。
+`tab.apply` 一次提交完整有序 batch。Mux recipe 在最後一批傳 `require_valid=True`，
+owner 驗證完整候選 cfg 後才安裝。缺值回 needs_parameters 與全部 indexed path／理由，
+本批欄位與 Run 都不執行。先前開 tab、Reset、library 與 inline 操作不回滾。
+Lookback Form 隱藏 reset 與 init_pulse，兩個 recipe 輸入只接受 `"off"`，不存取其 selector。
 
 所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
 或靜態解析到 `zcu_lab` 內定義的 helper，定義可用 def 或 async def。

@@ -28,7 +28,11 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
     from zcu_tools.resources.entry.storage import PointStorageBinding
-    from zcu_tools.resources.entry.writeback import WritebackEvidence, WritebackItem
+    from zcu_tools.resources.entry.writeback import (
+        WritebackEvidence,
+        WritebackItem,
+        WritebackResult,
+    )
 
 
 class ContextControlPort(Protocol):
@@ -120,14 +124,15 @@ class ContextControlPort(Protocol):
         items: tuple[WritebackItem, ...],
         *,
         evidence: WritebackEvidence,
-    ) -> str:
+    ) -> WritebackResult:
         """Accept at the fixed target through the context owner and shared loop.
 
         Nonempty writes require a captured SavedPoint in the opened entry.
         SavedPoint parameter/library values persist and samples append to entry
         JSONL. Successful prefix writes publish before later failures. Item failure raises
-        WritebackApplyError with accepted event_id, applied count and original
+        WritebackApplyError with the event ID, committed values, applied count and original
         cause. Target admission and ledger append errors propagate unchanged.
+        Return the accepted event ID and detached per-item actual values.
         No implicit point creation, saving, rollback or retry is provided.
         """
         ...
@@ -139,14 +144,14 @@ class ContextControlPort(Protocol):
         value: YamlValue,
         *,
         metadata: YamlMap | None = None,
-    ) -> None:
+    ) -> YamlValue:
         """Write a concrete point/general path using the captured target.
 
         Runs on the owner thread. metadata=None keeps the path's opaque
         metadata; a mapping replaces it in the same point commit ({} clears).
         Cross-entry/missing-selection/schema/metadata representation/conflict/
         I/O failures propagate. Nonselected SavedPoint writes do not select it.
-        Success follows resource validation/commit.
+        Return the detached actual value after resource validation/commit, without I/O.
         """
         ...
 
@@ -157,8 +162,8 @@ class ContextControlPort(Protocol):
         value: ModuleSpec,
         *,
         source: Provenance | None = None,
-    ) -> None:
-        """Write a Spec at a concrete module root; same target/source failures."""
+    ) -> YamlMap:
+        """Write a module; return its actual cached Spec mapping after commit."""
         ...
 
     def set_waveform(
@@ -168,8 +173,8 @@ class ContextControlPort(Protocol):
         value: WaveformSpec,
         *,
         source: Provenance | None = None,
-    ) -> None:
-        """Write a Spec at a waveform root; same target/source failures."""
+    ) -> YamlMap:
+        """Write a waveform; return its actual cached Spec mapping after commit."""
         ...
 
     def apply_library_change(
@@ -316,7 +321,7 @@ class ContextControlFacet(ContextControlPort):
         items: tuple[WritebackItem, ...],
         *,
         evidence: WritebackEvidence,
-    ) -> str:
+    ) -> WritebackResult:
         """Use ContextControlPort's ordered acceptance and prefix contract."""
         return self._context.apply_writeback(target, items, evidence=evidence)
 
@@ -327,8 +332,8 @@ class ContextControlFacet(ContextControlPort):
         value: YamlValue,
         *,
         metadata: YamlMap | None = None,
-    ) -> None:
-        self._context.set_parameter(target, path, value, metadata=metadata)
+    ) -> YamlValue:
+        return self._context.set_parameter(target, path, value, metadata=metadata)
 
     def set_module(
         self,
@@ -337,8 +342,8 @@ class ContextControlFacet(ContextControlPort):
         value: ModuleSpec,
         *,
         source: Provenance | None = None,
-    ) -> None:
-        self._context.set_module(target, path, value, source=source)
+    ) -> YamlMap:
+        return self._context.set_module(target, path, value, source=source)
 
     def set_waveform(
         self,
@@ -347,8 +352,8 @@ class ContextControlFacet(ContextControlPort):
         value: WaveformSpec,
         *,
         source: Provenance | None = None,
-    ) -> None:
-        self._context.set_waveform(target, path, value, source=source)
+    ) -> YamlMap:
+        return self._context.set_waveform(target, path, value, source=source)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange

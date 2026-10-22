@@ -136,6 +136,14 @@ class ExpAdapterProtocol(ArtifactHandover, InteractivePluginProvider, Protocol):
         """
         ...
 
+    def analysis_result_tone_count(self, result: Any) -> int:
+        """Return the measured tone count for result-read budgeting; zero for non-mux.
+
+        result is the captured Run/Load result, not current Form input. Do not
+        compute analysis or access devices. Return a nonnegative integer.
+        """
+        ...
+
     def analyze(self, req: AnalyzeRequest[Any, Any], *, plots: Plots) -> Any:
         """Run analysis on a completed run result."""
         ...

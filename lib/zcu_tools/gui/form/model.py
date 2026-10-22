@@ -386,12 +386,16 @@ class FormModel(BaseModel):
     """Actions mounted on occurrences of this active model, not its parent."""
 
     @classmethod
-    def default_input(cls, env: FormEnv) -> FormInput[Self]:
+    def default_input(
+        cls, env: FormEnv, *, defaults: Mapping[str, JsonValue] | None = None
+    ) -> FormInput[Self]:
         """Build isolated input from declared defaults and InputDefault metadata.
 
         Owner overrides must call super first, then add only owner build
         admission. Core owns defaults, shape, sources and expression evaluation.
         Calls defaults(env) before checking sources and assembling input.
+        A host may supply the already-built defaults mapping to retain seed
+        provenance without invoking defaults hooks twice. It is not mutated.
         Used missing library or device sources raise field_error with the
         consuming path. A text-field {"expr": text} default (int, float,
         complex or str, a choice leaf included) is evaluated once with
@@ -411,7 +415,7 @@ class FormModel(BaseModel):
         from ._structure import check_form_shape
 
         check_form_shape(cls)
-        data = cls.defaults(env)
+        data = cls.defaults(env) if defaults is None else defaults
         check_sources(cls, data, env)
         return FormInput(cls, evaluate_defaults(cls, data, env))
 

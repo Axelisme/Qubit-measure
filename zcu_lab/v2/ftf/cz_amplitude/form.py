@@ -3,7 +3,10 @@
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import mux_readout_initial
+from zcu_lab.v2._support.measure.mux_forms import (
+    mux_readout_initial,
+    mux_readout_seed_metadata,
+)
 
 from .._measure import captured_roles
 from .core import CZAmplitudeCfg
@@ -36,6 +39,7 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
                 },
             )
         )
+    readout = mux_readout_initial(ctx)
     return Form(
         CZAmplitudeCfg,
         tree={
@@ -44,7 +48,7 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
             "modules": {
                 "x180_f1": Slot("$f1.module.x180", copy=True),
                 "x180_f2": Slot("$f2.module.x180", copy=True),
-                "readout": mux_readout_initial(ctx),
+                "readout": readout,
             },
             "f1_centers": {
                 "g": Expr("$f1.ext.readout_cal.g_center"),
@@ -56,4 +60,4 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
             },
             "scales": Range.between(None, None, expts=101),
         },
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

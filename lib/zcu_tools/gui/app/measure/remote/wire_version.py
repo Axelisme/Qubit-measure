@@ -14,8 +14,9 @@ from __future__ import annotations
 # Scope status/cancel replies include live_paths and ambiguous candidates.
 # Analysis work failures carry failure_kind; current-draft writeback remains unchanged.
 # result_state.partial_result preserves inner cancellation independently of root Stop.
-WIRE_VERSION = 120
+# Writeback receipts, validated recipe batches, all-tone diagnostics and analysis recovery.
+WIRE_VERSION = 121
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 153
+GUI_VERSION = 154

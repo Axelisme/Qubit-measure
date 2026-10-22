@@ -42,6 +42,7 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry import (
     DestinationExistsError,
+    document_value,
     snapshot,
     source_path,
     validate_path_segment,
@@ -56,6 +57,7 @@ from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point
 from zcu_tools.resources.entry.writeback import (
     WritebackEvidence,
     WritebackItem,
+    WritebackResult,
     apply_writeback,
 )
 
@@ -94,14 +96,16 @@ class _ContextWritebackTarget:
 
     def set_parameter(
         self, path: str, value: JsonValue, metadata: YamlMap | None
-    ) -> None:
-        self._context.set_parameter(self._target, path, value, metadata=metadata)
+    ) -> YamlValue:
+        return self._context.set_parameter(self._target, path, value, metadata=metadata)
 
-    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> None:
-        self._context.set_module(self._target, path, value, source=source)
+    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> YamlMap:
+        return self._context.set_module(self._target, path, value, source=source)
 
-    def set_waveform(self, path: str, value: WaveformSpec, source: Provenance) -> None:
-        self._context.set_waveform(self._target, path, value, source=source)
+    def set_waveform(
+        self, path: str, value: WaveformSpec, source: Provenance
+    ) -> YamlMap:
+        return self._context.set_waveform(self._target, path, value, source=source)
 
     def append_sample(
         self,
@@ -111,8 +115,8 @@ class _ContextWritebackTarget:
         run_id: str,
         at: datetime,
         source: str,
-    ) -> None:
-        self._entry.samples(component).append(
+    ) -> JsonObject:
+        return self._entry.samples(component).append(
             run_id=run_id, point=self.point, at=at, source=source, **fields
         )
 
@@ -523,7 +527,7 @@ class ContextService:
         items: tuple[WritebackItem, ...],
         *,
         evidence: WritebackEvidence,
-    ) -> str:
+    ) -> WritebackResult:
         """Accept nonempty ordered concrete writes at a fixed SavedPoint.
 
         Validate the opened entry and captured SavedPoint before append.
@@ -539,7 +543,8 @@ class ContextService:
         before calling this entry point.
         Each successful item installs and publishes its actual content prefix,
         even when a later item fails. Detached point writes never select it.
-        Return the accepted ID on success. WritebackApplyError exposes event_id,
+        Return the accepted event and each owner's actual committed values.
+        WritebackApplyError retains this result's successful prefix, event_id,
         applied and original cause for item failures; append errors propagate
         unchanged. A same-entry selection change never redirects the target;
         cross-entry targets fail before append. No point creation, retry or
@@ -563,8 +568,8 @@ class ContextService:
         value: YamlValue,
         *,
         metadata: YamlMap | None = None,
-    ) -> None:
-        """Write one concrete component/general path in working units.
+    ) -> YamlValue:
+        """Write one concrete path and return its detached actual working-unit value.
 
         Use the captured target, not the current selection. SavedPoint writes
         one point file in the opened entry; a nonselected point stays unselected.
@@ -594,8 +599,9 @@ class ContextService:
             else info
             for info in self._points
         )
+        actual = document_value(document, path)
         if target != parameters.target:
-            return
+            return actual
         self._publish_write(
             ParameterContext(
                 point=document,
@@ -612,6 +618,7 @@ class ContextService:
             ),
             parameter=True,
         )
+        return actual
 
     def set_module(
         self,
@@ -620,8 +627,8 @@ class ContextService:
         value: ModuleSpec,
         *,
         source: Provenance | None = None,
-    ) -> None:
-        """Write a validated ModuleSpec at a concrete library root.
+    ) -> YamlMap:
+        """Write a module and return its detached actual cached Spec mapping.
 
         Target/publication/error rules match set_parameter. Omitted source is
         manual; explicit Provenance is validated by the library owner against
@@ -634,9 +641,10 @@ class ContextService:
         handle = self._write_library(entry, target, parameters)
         with handle.edit() as draft:
             draft.set_module(path, value, provenance=source)
-        if target != parameters.target:
-            return
         library = handle.snapshot()
+        actual = library.entry_value(path, kind="module")
+        if target != parameters.target:
+            return actual
         self._publish_write(
             ParameterContext(
                 point=parameters.document(),
@@ -647,6 +655,7 @@ class ContextService:
             ),
             parameter=False,
         )
+        return actual
 
     def set_waveform(
         self,
@@ -655,8 +664,8 @@ class ContextService:
         value: WaveformSpec,
         *,
         source: Provenance | None = None,
-    ) -> None:
-        """Write a WaveformSpec at a concrete waveforms root.
+    ) -> YamlMap:
+        """Write a waveform and return its detached actual cached Spec mapping.
 
         Target/publication/source/error rules match set_module. Owner rejects
         invalid roots/families/sources before installing any candidate.
@@ -667,9 +676,10 @@ class ContextService:
         handle = self._write_library(entry, target, parameters)
         with handle.edit() as draft:
             draft.set_waveform(path, value, provenance=source)
-        if target != parameters.target:
-            return
         library = handle.snapshot()
+        actual = library.entry_value(path, kind="waveform")
+        if target != parameters.target:
+            return actual
         self._publish_write(
             ParameterContext(
                 point=parameters.document(),
@@ -680,6 +690,7 @@ class ContextService:
             ),
             parameter=False,
         )
+        return actual
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange

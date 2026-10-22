@@ -1,4 +1,4 @@
-"""Session-owned completion of one analysis operation, without replay or recovery."""
+"""Session-owned analysis completion and read-only recovery, without replay."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ import base64
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from threading import Condition, Event, Lock, Thread
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from zcu_tools.gui.app.measure.remote.analysis_types import AnalysisPresentation
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage, ToolReply
 from zcu_tools.mcp.measure.operation_wait import await_operation
@@ -31,6 +32,41 @@ SaveStatus = Literal[
 ]
 
 
+class AnalysisRecoveryParams(TypedDict):
+    """Source-bound public RPC inputs: GUI tab and original native operation ID."""
+
+    tab_id: str
+    operation_id: int
+
+
+class AnalysisRecovery(TypedDict):
+    """Read-only route retained after Post result delivery fails.
+
+    rpc is tab.get_post_analyze_result; params use native RPC identity, not the
+    MCP handle. stage is post. op, when attached by MCP, is the session-local
+    handle for the same computation. Check snapshot source_operation_id first;
+    the source-bound RPC rejects replacements with result_superseded.
+    """
+
+    rpc: Literal["tab.get_post_analyze_result"]
+    params: AnalysisRecoveryParams
+    stage: Literal["post"]
+    op: NotRequired[int]
+
+
+class AnalysisReadPolicy(BaseModel):
+    """Owner-provided Post read policy consumed by standalone and recipe paths.
+
+    result_read_timeout_seconds is the read deadline, in seconds, within (0, 60].
+    An omitted field uses the 5-second non-mux budget. recovery is the owner's
+    source-bound read-only route, or None when the start supplied no route.
+    Invalid fields raise pydantic ValidationError; no retry is performed.
+    """
+
+    result_read_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    recovery: AnalysisRecovery | None = None
+
+
 class InvalidAnalysisValue(TypedDict):
     path: str
     reason: str
@@ -42,6 +78,8 @@ class AnalysisResult:
     params: dict[str, Any]
     operation_state: dict[str, Any]
     invalid: list[InvalidAnalysisValue]
+    # Owner-captured Run/stage/figure facts; None when no projection was supplied.
+    presentation: AnalysisPresentation | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +138,7 @@ class ExecutionSnapshot:
         Interactive handoff does not capture; done joins this completion.
         A failed read retains result/save/preview facts and reports error.
     error: Continuation failure with attempted phase/reason/code, or None.
+    recovery: Source-bound Post read route after result_read failure, else None.
     """
 
     execution: str
@@ -120,6 +159,7 @@ class ExecutionSnapshot:
     raw_data: RawDataState | None = None
     writeback: AnalysisWriteback | None = None
     error: ExecutionError | None = None
+    recovery: AnalysisRecovery | None = None
 
 
 def _invalid_analysis_values(value: object) -> list[InvalidAnalysisValue]:
@@ -172,6 +212,9 @@ def _analysis_result(
         params=deepcopy(params),
         operation_state=deepcopy(state),
         invalid=_invalid_analysis_values(reply.get("invalid")),
+        presentation=TypeAdapter(AnalysisPresentation | None).validate_python(
+            reply.get("presentation")
+        ),
     ), list(names)
 
 
@@ -224,6 +267,7 @@ class AnalysisExecution:
         self._completion_started = False
         self._gui_cancel: GuiCancel | None = None
         self._cancel_in_flight = False
+        self._read_policy = AnalysisReadPolicy()
 
     def bind_continuation(
         self, closed: Event, *, condition: Condition | None = None
@@ -363,7 +407,11 @@ class AnalysisExecution:
 
     def observe_start(self, started: dict[str, Any]) -> None:
         """Attach a delivered receipt to the already queryable execution."""
+        policy = AnalysisReadPolicy.model_validate(started)
+        if policy.recovery is not None:
+            policy.recovery["op"] = started["handle"]
         with self._condition:
+            self._read_policy = policy
             self._invalidated = deepcopy(started["invalidated_on_success"])
             self._snapshot = replace(
                 self._snapshot,
@@ -520,6 +568,9 @@ class AnalysisExecution:
                 error=ExecutionError(
                     phase, reason or "execution_failed", str(exc), code
                 ),
+                recovery=deepcopy(self._read_policy.recovery)
+                if phase == "result_read" and snapshot.stage == "post"
+                else None,
             )
             self._condition.notify_all()
 
@@ -583,7 +634,14 @@ class AnalysisExecution:
             if snapshot.stage == "primary"
             else "tab.get_post_analyze_result"
         )
-        reply = self._rpc("result_read", method, {"tab_id": snapshot.tab})
+        reply = self._rpc(
+            "result_read",
+            method,
+            {"tab_id": snapshot.tab},
+            timeout=self._read_policy.result_read_timeout_seconds
+            if snapshot.stage == "post"
+            else None,
+        )
         result, names = _analysis_result(reply, snapshot.stage)
         self._publish(
             result=result,

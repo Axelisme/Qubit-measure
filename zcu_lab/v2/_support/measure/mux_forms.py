@@ -2,7 +2,14 @@
 
 from math import isfinite, pi
 
-from zcu_tools.cfg_model import Expr, MuxReadoutSpec, Slot, Template, TemplateSeed
+from zcu_tools.cfg_model import (
+    Expr,
+    FieldMeta,
+    MuxReadoutSpec,
+    Slot,
+    Template,
+    TemplateSeed,
+)
 from zcu_tools.gui.form_adapter import FixedElements, FormContext
 
 from zcu_lab.components.mux import MuxGroupSchema
@@ -83,6 +90,49 @@ def mux_readout_initial(
         return Slot("$mux.module.readout", copy=True, set=seeds)
     seeds["gen_ch"] = Expr("$mux.wiring.gen_ch")
     return Template("readout/mux:blank", set=seeds)
+
+
+def mux_readout_seed_metadata(
+    initial: Slot | Template,
+) -> dict[tuple[str | int, ...], FieldMeta]:
+    """Describe only the readout seeds actually authored by mux_readout_initial.
+
+    initial is its returned Slot or Template, never a materialized cfg. Ref-only
+    slots declare nothing. Generated gain 0.1 and timing overrides are uncalibrated
+    candidates; untouched captured settings remain unknown. Paths are canonical
+    for the modules/readout field. No sources, devices or calibration are read.
+    """
+    if isinstance(initial, Slot) and not initial.copy:
+        return {}
+    prefix = ("modules", "readout", "module")
+    result: dict[tuple[str | int, ...], FieldMeta] = {}
+    tones = initial.set.get("tones")
+    if isinstance(tones, list):
+        for index, tone in enumerate(tones):
+            if tone.get("gain") == 0.1:
+                result[(*prefix, "tones", index, "gain")] = FieldMeta(
+                    description="Mux readout amplitude seed 0.1; operator confirmation required",
+                    calibration="uncalibrated",
+                )
+    formulas = {
+        "mixer_freq": "(min+max group resonator.freq)/2",
+        "ro_length": "5/(2*pi*min group resonator.kappa)",
+        "trig_offset": "max group resonator.ext.time_of_fly + ringup",
+        "length": "trig_offset + ro_length",
+    }
+    if isinstance(initial, Slot):
+        formulas.update(
+            {
+                "trig_offset": "captured readout.trig_offset + 5/(2*pi*min set group kappa)",
+                "length": "max(captured readout.length, trig_offset + captured readout.ro_length)",
+            }
+        )
+    for field, formula in formulas.items():
+        if field in initial.set:
+            result[(*prefix, field)] = FieldMeta(
+                description=formula, calibration="uncalibrated"
+            )
+    return result
 
 
 def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, TemplateSeed]:
