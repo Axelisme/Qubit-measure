@@ -7,15 +7,17 @@ from pathlib import Path
 import numpy as np
 from zcu_tools.datafile import (
     Axis,
-    CfgSnapshot,
+    Container,
+    ContainerAttrs,
     DataVariable,
-    ExperimentPayload,
     LabberMetadata,
     LabberPayload,
+    Variable,
 )
+from zcu_tools.experiment.metadata import CfgSnapshot
+from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.experiment.workflows.export import (
     FluxdepExportOutput,
-    PreparedFluxdepExport,
     validate_destinations,
     write_outputs,
 )
@@ -151,7 +153,7 @@ def _channels(
 
 def prepare_export(
     plan: CoherencePlan, points: tuple[SavedRecord[CoherencePoint], ...]
-) -> PreparedFluxdepExport:
+) -> PreparedRunData:
     """Prepare each enabled, actually measured lifetime on its own index grid.
 
     points are typed, validated saved commits, never Engine.records or journal.
@@ -171,19 +173,30 @@ def prepare_export(
             variables.update(_channels(plan, points, kind))
     if not variables:
         raise ValueError("No usable committed Coherence acquisition")
-    return PreparedFluxdepExport(
-        ExperimentPayload(
-            variables=variables,
-            metadata=LabberMetadata(
-                comment="Committed Coherence raw traces and accepted lifetimes"
-            ),
-            representation="grouped",
+    return PreparedRunData(
+        Container(
+            vars={
+                str(name): Variable(
+                    np.asarray(trace.z),
+                    tuple(
+                        Axis(axis.name, axis.unit, np.asarray(axis.values))
+                        for axis in reversed(trace.axes)
+                    ),
+                    trace.data.unit,
+                )
+                for name, trace in variables.items()
+            },
+            docs={},
+            groups={},
+            attrs=ContainerAttrs("3.0", "zcu_lab", "workflow-export", {}),
         ),
         CfgSnapshot(
             values=plan.model_dump(mode="json"),
             cfg_type="CoherencePlan",
             schema_version="1.0",
         ),
+        LabberMetadata(comment="Committed Coherence raw traces and accepted lifetimes"),
+        "independent",
     )
 
 

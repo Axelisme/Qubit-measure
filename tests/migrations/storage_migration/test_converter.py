@@ -8,7 +8,6 @@ from pathlib import Path
 import h5py as h5
 import numpy as np
 import pytest
-from zcu_tools.datafile import DataVariable, load_run_data
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -17,7 +16,7 @@ from migrations.storage_migration import (
     load_run_evidence,
     migrate_storage,
 )
-from tests._native_support import hdf_group
+from tests.migrations.storage_migration.containers import hdf_group, read_migrated
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -61,7 +60,7 @@ def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
     native = next(
         (request_data.database_root / request_data.name / "runs").glob("*/data.h5")
     )
-    stored = load_run_data(native)
+    stored = read_migrated(native)
     if unsupported:
         assert stored.metadata.device_snapshot is None
         pending = [
@@ -90,32 +89,10 @@ def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
         }
         assert not report.pending
     np.testing.assert_array_equal(
-        stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
+        stored.container.vars["signal"].values, [1 + 2j, 3 + 4j]
     )
     assert (
         request_data.database_root / request_data.name / "Labber/2025/10/scan.hdf5"
-    ).read_bytes() == original
-    assert not report.failures
-
-
-def test_native_links_to_preserved_labber_relative_to_entry_database(
-    request_data: MigrationRequest, mapping: MigrationMapping
-) -> None:
-    request_data, source = write_run(request_data)
-    original = source.read_bytes()
-    report = migrate_storage(
-        request_data,
-        mapping=mapping,
-        validate_cfg=validate_cfg,
-        validate_native=noop_validation,
-    )
-    native = next(
-        (request_data.database_root / request_data.name / "runs").glob("*/data.h5")
-    )
-    stored = load_run_data(native)
-    assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
-    assert (
-        request_data.database_root / request_data.name / stored.metadata.labber_path
     ).read_bytes() == original
     assert not report.failures
 
@@ -129,16 +106,15 @@ def test_native_is_readable_and_validated_before_source_removal(
 
     def validate(path: Path, tag: str, cfg_type: str) -> None:
         assert source.read_bytes() == before
-        stored = load_run_data(path)
+        stored = read_migrated(path)
         assert stored.metadata.experiment == tag
         assert stored.cfg.cfg_type == cfg_type
         assert stored.metadata.completion == "stopped"
         assert stored.metadata.snapshot.point == "point_at_acquisition"
         assert stored.metadata.snapshot.entry_name == "historical"
-        assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
         assert stored.cfg.values == {"frequency": 12.5}
         np.testing.assert_array_equal(
-            stored.payload.variables[DataVariable("signal")].z, [1 + 2j, 3 + 4j]
+            stored.container.vars["signal"].values, [1 + 2j, 3 + 4j]
         )
         observed.append(path)
 
@@ -152,7 +128,7 @@ def test_native_is_readable_and_validated_before_source_removal(
         request.database_root / request.name / "Labber" / "2025" / "10" / "scan.hdf5"
     )
     assert moved.read_bytes() == before
-    stored = load_run_data(observed[0])
+    stored = read_migrated(observed[0])
     assert stored.metadata.snapshot.entry_id == report.entry_id
     manifest = json.loads(manifest_path(request).read_text())
     assert request.run_evidence is not None

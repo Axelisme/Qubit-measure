@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from zcu_tools.datafile import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.plotting.plots import LinePlot, Plots

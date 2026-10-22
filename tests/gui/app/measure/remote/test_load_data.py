@@ -7,8 +7,10 @@ from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.datafile import StoredRun
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.datafile import Container
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
@@ -16,6 +18,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.gui._adapter_fakes import DummyAdapter
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._record_support import require_record
 
 from ._helpers import Fixture, dispatch_handler
 
@@ -35,11 +38,16 @@ class StoredAdapter(DummyAdapter):
     experiment_tag: ClassVar[str | None] = "test/load"
 
     def __init__(self) -> None:
-        self.received: list[StoredRun] = []
-        self.record = OpaqueRecord()
+        self.received: list[Container] = []
+        self.record = RunRecord[ExpCfgModel, OpaqueRecord](None, OpaqueRecord())
 
-    def restore(self, stored: StoredRun) -> RestoredRun[OpaqueRecord]:
+    def restore(
+        self, stored: Container
+    ) -> RestoredRun[RunRecord[ExpCfgModel, OpaqueRecord]]:
         self.received.append(stored)
+        self.record = RunRecord(
+            None, self.record.result, metadata_from_container(stored)
+        )
         return RestoredRun(self.record, "adapter cfg unavailable")
 
 
@@ -69,12 +77,12 @@ def test_registered_adapter_loads_opaque_record_and_cfg_diagnostic(stored_app) -
         reply = {"error": exc.reason}
 
     assert reply.get("cfg_issue") == "adapter cfg unavailable", reply
-    assert reply["result_type"] == "OpaqueRecord"
+    assert reply["result_type"] == "RunRecord"
     adapter = tab.adapter
     assert isinstance(adapter, StoredAdapter)
-    assert adapter.received[0].metadata == metadata
+    assert metadata_from_container(adapter.received[0]) == metadata
     assert tab.run.result is adapter.record
-    assert tab.run.metadata == metadata
+    assert require_record(tab.run).metadata == metadata
     assert tab.run.source_path == str(path)
     assert tab.cfg.input.data == before
     assert tab.cfg.env is env
@@ -93,7 +101,7 @@ def test_registered_load_rejects_file_before_adapter_and_keeps_result(
     else:
         path.unlink()
     tab = fx.state.get_tab(tab_id)
-    old = object()
+    old = RunRecord(None, object())
     fx.state.update_tab_result(tab_id, old)
     previous = tab.run
     with pytest.raises(RemoteError) as caught:

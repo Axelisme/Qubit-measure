@@ -7,7 +7,7 @@ import h5py as h5
 import numpy as np
 from pydantic import JsonValue
 
-from .native_models import JsonObject
+from .container_models import JsonObject
 
 
 class LabberSnapshotError(ValueError):

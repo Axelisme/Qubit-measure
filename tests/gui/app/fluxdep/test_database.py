@@ -9,7 +9,10 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-from zcu_tools.datafile import FluxdepDatabaseInfo, read_fluxdep_database_info
+from zcu_tools.gui.app.fluxdep.database import (
+    FluxdepDatabaseInfo,
+    read_fluxdep_database_info,
+)
 
 
 def database_file(tmp_path: Path, *, flux_key: str = "fluxs") -> Path:

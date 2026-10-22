@@ -80,6 +80,13 @@ Acquire 只停一次取得，schedule 停該段，iteration 跳過目前點，ru
 進行中的 call 先 drain 並保存 completion facts，再 raise。真實錯誤優先，不被取消覆蓋。
 終態為 cancelled，ScriptCancelled 不記 error。作者 finally 可以同步 commit 已有成果。
 
+未帶序號或 expected 的 workflow 根取消先由 Stop owner lock 記錄 StopRequested／manifest 並 latch，
+再呼叫 Host 設根 token。持久化不進 loop control callback。
+Host 已 drain、owner 尚未 finalization 時，Stop 仍可被 owner 接受並使終態 cancelled。
+帶序號或 expected 的根及其他 scope 只由 Host 核對，不寫 Stop 意圖。
+Terminal owner 對合法請求回 scope-not-active refusal，錯誤語法仍 raise ValueError。
+GUI Stop 與 Engine.stop 共用此 owner。清理例外或 control I/O failure 保留 failed 與原始 cause。
+
 ## Record 與目錄
 
 `scope.dir` 第一次使用才建立目錄。根是 data_root，iteration 是 `iteration-000001/`。
@@ -100,7 +107,8 @@ Encoder 將非有限值轉 null。只有作者 record/summary 序列化可降級
 
 作者自行保存 RunRecord、圖與其他原始檔，並在 record 記相對檔名。
 Saver 錯誤沿作者例外路徑傳播。Pause 或 Stop 不回滾檔案，框架不追蹤或刪除作者檔案。
-Lab saver 接 Completed、歷史 snapshot、identity 與 spec.tag，沿既有 RunMetadata 保存 facts。
+Lab saver 將 Completed、歷史 snapshot、identity 與 spec.tag 交給 record_with_metadata。
+此函式將 RunMetadata 裝入 RunRecord.metadata，保存入口只接 record，native 輸出通用 Container。
 Native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
 Completed.partial_result 決定 complete 或 stopped，不用 facts.stopped 代替。
 

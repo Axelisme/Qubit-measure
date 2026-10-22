@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load_run_data
+from zcu_tools.datafile import load
+from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
@@ -62,6 +63,7 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
     native_save_session,
 )
+from tests.gui.app.measure._record_support import require_metadata, require_record
 
 
 def _native_controls(
@@ -152,14 +154,16 @@ def role_load_session(
         )
         captured = session.context.read_context()
         assert captured is not None and captured.roles is not None
-        session.metadata = replace(
-            session.metadata,
-            snapshot=replace(session.metadata.snapshot, roles=captured.roles.names),
+        session.metadata = session.metadata.model_copy(
+            update={
+                "snapshot": replace(
+                    session.metadata.snapshot, roles=captured.roles.names
+                )
+            }
         )
         session.state.update_tab_result(
             "tab",
-            tab.run.result,
-            metadata=session.metadata,
+            replace(require_record(tab.run), metadata=session.metadata),
             parameters=captured,
         )
         session.save()
@@ -265,8 +269,10 @@ def test_native_load_historical_source_failure_preserves_previous_result(
     broken = replace(history, point="missing")
     session.state.update_tab_result(
         "tab",
-        tab.run.result,
-        metadata=replace(session.metadata, snapshot=broken),
+        replace(
+            require_record(tab.run),
+            metadata=session.metadata.model_copy(update={"snapshot": broken}),
+        ),
         parameters=tab.run.parameters,
     )
     session.save()
@@ -295,12 +301,14 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     tab = session.state.get_tab("tab")
     previous = tab.run
     history = replace(session.metadata.snapshot, roles={"source_qubit": "missing"})
-    metadata = replace(session.metadata, snapshot=history)
+    metadata = session.metadata.model_copy(update={"snapshot": history})
     session.state.update_tab_result(
-        "tab", previous.result, metadata=metadata, parameters=previous.parameters
+        "tab",
+        replace(require_record(previous), metadata=metadata),
+        parameters=previous.parameters,
     )
     session.save()
-    saved_metadata = tab.run.metadata
+    saved_metadata = require_record(tab.run).metadata
     events = session.entry.ledger.events()
     rows = session.context.get_alias_rows()
     service = LoadService(
@@ -317,7 +325,7 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
 
     loaded = tab.run.parameters
     assert loaded is not None and loaded is not previous.parameters
-    assert tab.run.metadata == saved_metadata
+    assert require_record(tab.run).metadata == saved_metadata
     assert loaded.roles is not None and loaded.roles.names == history.roles
     assert loaded.value("$source_qubit") == "missing"
     with pytest.raises(RoleResolutionError) as error:
@@ -367,12 +375,13 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     else:
         session.state.update_tab_result(
             "tab",
-            tab.run.result,
-            parameters=tab.run.parameters,
-            metadata=replace(
-                session.metadata,
-                snapshot=replace(session.metadata.snapshot, point=None),
+            replace(
+                require_record(tab.run),
+                metadata=session.metadata.model_copy(
+                    update={"snapshot": replace(session.metadata.snapshot, point=None)}
+                ),
             ),
+            parameters=tab.run.parameters,
         )
         session.save()
     control = ContextControlFacet(context=session.context)
@@ -380,8 +389,8 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
-    assert tab.run.metadata is not None
-    assert tab.run.metadata.run_id == session.metadata.run_id
+    assert require_record(tab.run).metadata is not None
+    assert require_metadata(tab.run).run_id == session.metadata.run_id
     assert tab.run.parameters is None
     if source == "empty":
         assert tab.run.storage is None
@@ -469,13 +478,15 @@ def test_native_load_retains_history_and_resaves_captured_source(
     started_at: str | None,
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
-        session.metadata = replace(
-            session.metadata, completion=completion, started_at=started_at
+        session.metadata = session.metadata.model_copy(
+            update={"completion": completion, "started_at": started_at}
         )
         session.state.update_tab_result(
             "tab",
-            session.state.get_tab("tab").run.result,
-            metadata=session.metadata,
+            replace(
+                require_record(session.state.get_tab("tab").run),
+                metadata=session.metadata,
+            ),
             parameters=session.state.get_tab("tab").run.parameters,
         )
         initial_report = session.save()
@@ -483,7 +494,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
             "Historical unknown evidence must be saveable"
         )
         path = session.native_data_path
-        stored = load_run_data(path)
+        stored = load(path)
         events = session.entry.ledger.events()
         service = LoadService(
             session.state,
@@ -504,13 +515,13 @@ def test_native_load_retains_history_and_resaves_captured_source(
             PointUseRequest("other-point")
         )
         tab = session.state.get_tab("tab")
-        record = tab.run.result
+        record = require_record(tab.run)
         assert isinstance(record, RunRecord)
         assert isinstance(record.cfg, SavingCfg)
         assert isinstance(record.result, SavingResult)
         np.testing.assert_array_equal(record.result.signal, [1 + 2j, 3 - 4j, 5 + 6j])
         assert outcome.result_type == "RunRecord"
-        assert tab.run.metadata == stored.metadata
+        assert require_record(tab.run).metadata == metadata_from_container(stored)
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is original_capture
@@ -518,12 +529,9 @@ def test_native_load_retains_history_and_resaves_captured_source(
 
         report = session.save()
 
-        assert report.run_id == stored.metadata.run_id
-        saved = load_run_data(path).metadata
-        assert (
-            replace(saved, labber_path=stored.metadata.labber_path) == stored.metadata
-        )
-        assert saved.labber_path != stored.metadata.labber_path
+        assert report.run_id == metadata_from_container(stored).run_id
+        saved = metadata_from_container(load(path))
+        assert saved == metadata_from_container(stored)
         assert all(event.kind == "saved" for event in session.entry.ledger.events())
         assert not other.ledger.events()
 
@@ -535,7 +543,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
     with native_save_session(tmp_path, qapp) as session:
         session.save()
         source = session.native_data_path
-        stored = load_run_data(source).metadata
+        stored = metadata_from_container(load(source))
         assert stored.snapshot.point == "p"
         session.entry.new_point("destination-point")
         control = ContextControlFacet(context=session.context)
@@ -594,10 +602,8 @@ def test_loaded_same_entry_different_point_resaves_original_run(
             )
             == source
         )
-        saved = load_run_data(source).metadata
-        assert replace(saved, labber_path=stored.labber_path) == stored
-        assert saved.labber_path != stored.labber_path
-        assert tab.run.metadata == saved
+        saved = metadata_from_container(load(source))
+        assert require_record(tab.run).metadata == saved
         assert tab.run.confirmed_run_id == stored.run_id
         assert (
             tab.run.parameters is not None
@@ -661,7 +667,7 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             captured_parameters=session.capture_parameters,
         )
         service.load_result("tab", str(source))
-        assert tab.run.metadata == load_run_data(source).metadata
+        assert require_record(tab.run).metadata == metadata_from_container(load(source))
         assert tab.run.parameters is None
         assert tab.run.storage is not None
         assert tab.run.storage.entry_id == captured.entry_id
@@ -702,7 +708,7 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
         session.save()
         declare_panes(session)
         path = session.native_data_path
-        stored = load_run_data(path)
+        stored = load(path)
         session.context.install_entry(session.entry)
         control = ContextControlFacet(context=session.context)
         assert session.state.session_env.parameters is None
@@ -723,9 +729,9 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
         outcome = service.load_result("tab", str(path))
 
         assert outcome.result_type == "RunRecord"
-        assert isinstance(tab.run.result, RunRecord)
-        metadata = tab.run.metadata
-        assert metadata is not None and metadata == stored.metadata
+        assert isinstance(require_record(tab.run), RunRecord)
+        metadata = require_record(tab.run).metadata
+        assert metadata is not None and metadata == metadata_from_container(stored)
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is None
@@ -755,8 +761,12 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
         tab = session.state.get_tab("tab")
         session.state.update_tab_result(
             "tab",
-            tab.run.result,
-            metadata=replace(session.metadata, experiment="test/different"),
+            replace(
+                require_record(tab.run),
+                metadata=session.metadata.model_copy(
+                    update={"experiment": "test/different"}
+                ),
+            ),
             parameters=tab.run.parameters,
         )
         session.save()
@@ -795,4 +805,4 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
 
         assert error.value.reason_code == "data_file_read_failed"
         assert tab.run is old_run
-        assert tab.run.metadata == session.metadata
+        assert require_record(tab.run).metadata == session.metadata

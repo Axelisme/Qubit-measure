@@ -9,8 +9,7 @@ or evaluated, and no definitions are registered on import.
 from collections.abc import Mapping
 from typing import Literal
 
-from zcu_tools.datafile import VariableSchema
-
+from migrations.legacy_labber import LegacyVariableSchema
 from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
@@ -131,7 +130,7 @@ _MODULE_NAMES = (
 def build_mapping(
     *,
     qubit_kind: Literal["qubit/fluxonium", "qubit/transmon"],
-    data_schemas: Mapping[tuple[str, str], tuple[VariableSchema, ...]],
+    data_schemas: Mapping[tuple[str, str], tuple[LegacyVariableSchema, ...]],
     native_tags: Mapping[tuple[str, str], str],
 ) -> MigrationMapping:
     """Return this lab's explicit R1/Q1/J1 conversion profile without any I/O.

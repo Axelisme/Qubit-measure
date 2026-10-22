@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from zcu_tools.datafile import JsonObject, SoftwareProvenance
+from zcu_tools.datafile import JsonObject
+from zcu_tools.experiment.metadata import SoftwareProvenance
 
 from .cfg_model import ExpCfgModel
 

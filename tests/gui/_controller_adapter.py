@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -31,7 +32,9 @@ class RecordingCfg(ExpCfgModel):
 
 
 class RecordingAdapter(
-    BaseAdapter[RecordingCfg, object, NoAnalysisResult, AnalyzeParams]
+    BaseAdapter[
+        RecordingCfg, RunRecord[RecordingCfg, object], NoAnalysisResult, AnalyzeParams
+    ]
 ):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
@@ -48,14 +51,19 @@ class RecordingAdapter(
         cfg: RecordingCfg,
         *,
         context: RunContext,
-    ) -> object:
-        return object()
+    ) -> RunRecord[RecordingCfg, object]:
+        return RunRecord(cfg, object())
 
-    def get_analyze_params(self, result: object, ctx: SessionEnv) -> AnalyzeParams:
+    def get_analyze_params(
+        self, result: RunRecord[RecordingCfg, object], ctx: SessionEnv
+    ) -> AnalyzeParams:
         return AnalyzeParams()
 
     def analyze(
-        self, req: AnalyzeRequest[object, AnalyzeParams], *, plots: Plots
+        self,
+        req: AnalyzeRequest[RunRecord[RecordingCfg, object], AnalyzeParams],
+        *,
+        plots: Plots,
     ) -> NoAnalysisResult:
         return NoAnalysisResult()
 

@@ -45,10 +45,8 @@ def known_node(node: h5.Group, name: str) -> h5.Group | h5.Dataset | None:
 
 
 def known_group(node: h5.Group, name: str) -> h5.Group:
-    """Return/create a local known group; external targets/wrong kinds raise ValueError."""
+    """Return a required local group; missing/external/wrong kinds raise ValueError."""
     child = known_node(node, name)
-    if child is None:
-        return node.create_group(name, track_order=True)
     if not isinstance(child, h5.Group):
         raise ValueError(f"{str(node.name).rstrip('/')}/{name}: expected group")
     return child

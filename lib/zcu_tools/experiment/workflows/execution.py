@@ -12,7 +12,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.experiment.scope import Scope, ScriptCancelled
+from zcu_tools.experiment.scope import Scope, ScriptCancelled, parse_cancel_scope
 from zcu_tools.experiment.script_host import PendingQuestion, ScriptHost
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.progress_bar import use_pbar_factory
@@ -355,30 +355,58 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._host.resume()
         return self.status()
 
-    def stop(self) -> RunStatus:
-        """Latch explicit Stop and release an Ask/gate without waiting for drain."""
+    def _request_stop(self) -> bool:
+        """Record and latch Stop under the owner lock; refuse terminal owners.
+
+        True includes an already recorded Stop. The caller signals the host only
+        after releasing this lock, keeping persistence outside loop callbacks.
+        """
         try:
             with self._lock:
-                if self._lifecycle in _TERMINAL or self._stop_requested:
-                    return self.status()
+                if self._lifecycle in _TERMINAL:
+                    return False
+                if self._stop_requested:
+                    return True
                 self._artifacts.append(
                     StopRequested(self._ports.clock.now(), self._call_seq)
                 )
                 self._artifacts.set_lifecycle("stopping")
                 self._lifecycle = "stopping"
                 self._stop_requested = True
+                return True
         except Exception as error:
             self._control_failure(error)
             raise
-        self._host.cancel()
+
+    def stop(self) -> RunStatus:
+        """Record explicit Stop, then release Ask/gate without waiting for drain."""
+        if self._request_stop():
+            self._host.cancel()
         return self.status()
 
     def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
-        """Delegate matching and root acceptance to Host; retain explicit Stop."""
-        result = self._host.cancel(scope, expected=expected)
-        if result.cancelled and self._host.root.cancelled:
-            self.stop()
-        return result
+        """Accept unnumbered root Stop at the owner; match other scopes on Host.
+
+        Root acceptance records and latches Stop before setting the live Host
+        token, even if Host drained before owner finalization. Numbered roots
+        and other scopes use Host's atomic match/set without recording Stop.
+        Terminal requests refuse; malformed syntax raises ValueError.
+        Persistence errors propagate and fail the run with their original cause.
+        Acknowledgement never waits for author/finally/executor drain.
+        """
+        label, sequence = parse_cancel_scope(scope, expected)
+        if label in {self._host.root.kind, self._host.root.path} and sequence is None:
+            if not self._request_stop():
+                return CancelResult(False, "scope not active", self._host.active_path)
+            result = self._host.cancel()
+            # Stop remains accepted if Host drained before owner finalization.
+            return CancelResult(
+                True, "scope cancellation requested", result.active_path
+            )
+        with self._lock:
+            if self._lifecycle in _TERMINAL:
+                return CancelResult(False, "scope not active", self._host.active_path)
+        return self._host.cancel(scope, expected=expected)
 
     def pending_question(self) -> PendingQuestion | None:
         """Read the host's exact current request, including its unique request id."""
@@ -467,7 +495,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 if self._executing and self._lifecycle not in _TERMINAL
                 else "failed"
             )
-        # Acknowledgement may wait for the loop; never retain the Engine lock.
+        # Root acceptance never waits for loop wake; release the owner lock first.
         self._host.cancel()
 
     def update_tunables(

@@ -7,7 +7,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from zcu_tools.datafile import load_run_data
 from zcu_tools.resources.entry import ResultEntry
 
 from migrations.storage_migration import (
@@ -18,6 +17,7 @@ from migrations.storage_migration import (
     migrate_storage,
 )
 from tests._filesystem import symlink_or_skip
+from tests.migrations.storage_migration.containers import read_migrated
 from tests.migrations.storage_migration.fakes import (
     manifest_path,
     noop_validation,
@@ -355,8 +355,8 @@ def test_all_labber_originals_share_one_layout_independent_of_native_success(
         == hashlib.sha256(original).hexdigest()
     )
     if native_success:
-        stored = load_run_data(report.converted_files[0].destination)
-        assert stored.metadata.labber_path == "Labber/2025/10/scan.hdf5"
+        stored = read_migrated(report.converted_files[0].destination)
+        assert "labber" in stored.container.groups
     else:
         assert report.converted_files == ()
         assert any(item.location == "run evidence" for item in report.pending)

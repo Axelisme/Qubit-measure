@@ -1,142 +1,125 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-22，metadata-only 讀取
 
-**讀者：** framework-dev。Native 與 Labber 檔案格式、讀寫與 metadata 契約。
+**讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
+## Container
 
-`zcu_tools.datafile` 是 Labber 與 native experiment data file 的 public
-facade。caller 優先從 package root import model 與 function。Facade 在 caller 首次選用公開名稱時
-載入該名稱的 owner。Path helpers 不要求 HDF5，HDF5 reader／writer 仍在使用時載入 h5py。
-`data.h5` 是單次 Experiment Result 的正規資料，Labber 是獨立 writer 產生的衍生輸出，供 Log Browser 使用。
+`datafile` 只處理數值陣列、有限 JSON 與 opaque HDF5 子樹，不解釋實驗欄位。
+公開名稱由 package root 按需載入。Path helpers 不要求 h5py。
+格式與依賴規則見 [ADR-0080](../../../docs/adr/0080-datafile-generic-container.md)。
+`datafile-standalone` import contract 禁止本 package import 其他 framework packages。
 
-`resources.entry.SaveLayout` 決定一般 Save 的 `Database/<name>/runs/<experiment>_<run_id>/data.h5`，使用完整 run_id，實驗名中的 `/` 轉 `_`。Result 圖片副本與 workflow 雙側路徑也由 resources owner 計算，見 [entry 輸出位置](../resources/entry/README.md#輸出位置)。Labber 新檔名維持 `<experiment>_<id6>_<序號>.hdf5`；離線遷移保留舊 Labber 原名。Datafile writer 只寫 caller 的 exact path，不解析目錄名還原 run_id，也不決定 entry 的存在或改名。Run 身分仍以 `RunMetadata` 為準，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
+一份 `zcu.container` 3.0 檔案有三個命名空間。
 
-- `save_run_data`／`load_run_data` 處理 native major 2 的 `zcu.experiment-data` HDF5，新檔為 2.2。
-  2.2 新增 workflow operation 身分，原 experiment 身分仍有效。
-  `RunMetadata.started_at` 可以是 UTC ISO 字串或 None，`completion` 接受
-  complete／partial／stopped／unknown。None 與 unknown 表示歷史證據缺失，
-  不從 run_id、檔名或檔案時間推算。正常量測仍提供開始時間與已知完成狀態。
-  2.1 以必填的空字串 attr 表示 started_at=None，completion 原樣寫 unknown。
-  Reader 接受 2.0 與同 major 的後續 minor。2.0 仍拒絕空 started_at 與 unknown completion；
-  所有版本的缺失 attr、非法型別與非 UTC 時間都明確失敗。
-  `ExperimentPayload` 使用 SI／離散單位與明示 single／grouped representation，
-  不同 variables 可以使用不同網格。`VariableSchema` 與
-  `validate_experiment_payload` 集中檢查 disk labels、units、dtype 與 shape。
-- `read_run_metadata(path)` 共用 native header 與 metadata／cfg envelope 解碼，回傳歷史 `RunMetadata`，不讀量測 arrays。它保留未知時間與 completion，不查 ledger，不保證 payload 完整或可供分析。格式／I/O 錯誤沿 native reader 契約拋出；GUI 檔案清單逐檔隔離錯誤。
-- `read_fluxdep_database_info(path)` 回 `FluxdepDatabaseInfo`，擁有 fluxonium search HDF5 的 dataset 名稱、shape 與有限值驗證。
-  Reader 只讀參數／flux ranges 與 energies 維度，不讀 energy values、不建立 search cache。
-  EJ／EC／EL ranges 為 GHz，flux range 為 normalized flux。
-  缺 dataset 與原生 I/O 失敗向 caller 傳遞，非法或空 table 回 ValueError。
-  Reader 不執行 search，也不接管既有 analysis search 的檔案 I/O。
-- `AnalysisDocument` 保存 analysis／post_analysis 窗格的參數與摘要。Summary 的直接 mapping 值將 numpy floating／integer scalar 轉為 Python float／int，轉後必須有限。
-  Parameters 與更深 nested 值仍只接受有限的 strict JSON，不遞迴轉換。
-  `encode_analysis_document` 輸出 `zcu.analysis-result` 1.0 UTF-8 bytes，不決定路徑或寫檔。Encoder 重查可修改的巢狀內容，不把非法值改成 null。
-- `validate_run_id` 僅接受兩種完整 native 身分 token。
-  Experiment 形態為 `[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}`。
-  Workflow operation 形態為 `[0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*`，
-  由 workflow run_id、六位 iteration 與無前導零的正整數 attempt 組成。
-  六位 iteration 可以為零。Native reader／writer 與離線 evidence 共用此規則。
-  驗證不檢查 calendar 語意，也不從 ID 推導歷史 started_at。
-  格式錯誤拋 ValueError，非字串拋 TypeError。
-- `validate_cfg_snapshot` 擁有 cfg 的 JSON、非空 cfg_type 與完整 major.minor 格式規則。
-  Native writer/reader 與離線 migration callback 共用它；純驗證不修改歷史值。
-  Concrete cfg 的欄位及支援 major 由該 cfg owner 驗證，不屬於檔案格式。
-- `SoftwareProvenance.simulation_id` is an optional opaque public environment identifier.
-  Native provenance stores it as a UTF-8 attr; files that omit the attr read as None.
-  It contains no seed, model truth or round inputs. Writers do not inspect environments.
-- `RunMetadata`、`RunSnapshot`、`CfgSnapshot` 是 caller 傳入的歷史資料，writer
-  不擷取 live context 或讀硬體。`RunMetadata.device_snapshot` 保存 Run 前固定的
-  JSON settings，key 是 device 名稱，value 是 get_info 設定。Native 沿既有 `/device`
-  寫入 shape `()` 的 UTF-8 JSON dataset。None 不建 dataset，空 mapping 寫 `{}`，
-  表示已捕捉但當次沒有裝置。單位沿 DeviceInfo 的儲存欄位，YOKO 的
-  value_unit 為 A／V，Fake 為 native；RF 保既有 Hz／dBm，不加 value_unit。
-  Snapshot 不另造單位欄位或換算值。
-  Save 不重讀或改寫為 sweep 後的設定。Reader 不讀硬體，拒絕非法 JSON 或 external-linked 已知資料。
-  Native saving 使用 caller 的 exact path，先寫同目錄 temp，
-  關檔後發布；`replace=True` 原子替換，失敗清理 temp 並保留原 destination。
-- `RunSnapshot` 只記 entry UUID、當時名稱、工作點、描述與角色對應，不記引用參數。
-  `/cfg` 保存完整 cfg 值，量測時間與 completion 由 caller 提供。
-- Native loading 預設只投影已知內容。明示 `preserve_unknown=True` 才取得
-  `NativeExtensions` detached HDF5 image。Generic caller 把 image 傳回 writer，
-  保留同 major minor 的未知 JSON／HDF5 內容與不改形 rewrite 的 references。
-  寫回版本一律取 max(來源版本, 2.2)：2.0 與 2.1 即使沒有新值也升為 2.2，
-  future-minor 保留原版本，不降版。
-  Typed experiment tuple 不是 lossless rewrite envelope，也沒有 legacy fallback。
+| 命名空間 | 公開值型別 | 契約 |
+|---|---|---|
+| `vars/<name>` | `Variable(values, axes, unit)` | 整數、浮點或複數 NumPy 陣列。軸按 NumPy 維度順序排列，各軸長度等於對應維度。Scalar 沒有軸。 |
+| `docs/<name>` | `JsonObject` | UTF-8 scalar dataset。只接受有限的 JSON object，不轉換 NumPy 值，不解釋鍵。 |
+| `groups/<name>` | `GroupSource` | 原樣複製生產者的 HDF5 子樹，包括 attributes、links 與內部 references。 |
 
-- `write_labber` 從同一 `ExperimentPayload` 輸出 single 或 canonical
-  common-grid grouped Labber，包括單成員 grouped。預設 `grouped_layout='common'`
-  要求所有 variables 共用 grid，不因 grid 不同自動切換。明填
-  `grouped_layout='independent'` 時接受明確宣告的 grouped 資料，各 variable
-  必須為 1D/2D，重用既有 marker-qualified
-  heterogeneous streaming v1 layout，完整寫入並標 finalized，不新增 schema 或 fallback。
-  每個 variable 的軸、數值與 per-inner-trace epoch timestamps 各自保存。
-  `load_grouped_labber_data` 讀回各自的 rank/grid；這不是 Labber Log Browser 驗收。
-  非法選項、representation 或 unsupported rank 在建立目的檔前拒絕。
-  它只寫 caller 的 exact path，
-  不加副檔名、不覆寫、不呼叫 native writer。兩個格式的失敗隔離由 caller 編排，
-  batch-level 保存流程不在 datafile。Labber 至少需要一個 step axis，coordinates
-  必須可表示成 real；scalar 在建立目的檔前拒絕，不影響 native 的 scalar 契約。
-- `encode_labber_comment`／`decode_labber_comment` 與 `LabberComment`
-  擁有 cfg/comment/timestamp envelope。不屬於 envelope 的手寫文字原樣保留；
-  可辨識 envelope 的欄位型別錯誤直接報錯，不猜歷史 cfg 或量測時間。
-- `validate_labber_payload`／`cast_labber_values` 擁有 Labber reader 的
-  label、unit、shape 與 numeric real/complex container 契約。
-  Experiment 只宣告 schema、換 memory units，並驗證 generated coordinate 語意。
-- `Axis`、`LabberPayload`、`LabberMetadata`、`LabberData` 描述單一
-  inner-first axes 的 Labber dataset。
-- `DataVariable`、`GroupedLabberData` 描述 grouped Labber 衍生輸出：同一 Labber file 內含多個 variable payload，metadata 共用。正規 Experiment Data File 的 variable 分組由 native payload 表示。
-- `save_labber_data` / `load_labber_data` 處理 single-variable file。
-  `save_labber_data`、`save_labber_trace_data` 與 `LabberData` 接受既有
-  `LabberMetadata` 的 `metadata=`，統一傳入 comment、tags、project、user 與 creation_time；
-  timestamps 仍屬於 payload。傳入的 metadata 保持同一物件，省略時建立預設值。
-- `load_labber_logs` 唯讀拆出未標記檔案的 root、Log_2、Log_3 等，各自保留
-  signal、inner-first axes、獨立 grid 與 epoch timestamps，不堆疊、不指定 domain variable。
-  Caller 明示順序對應與 schema；reader 拒絕不一致的已存 step dimensions。
-- `load_labber_device_snapshot` 唯讀取得 `Instrument config` 的 group 名稱與 attributes，
-  不存取儀器、不推論欄名或單位。缺 group 回 None，空 group 回 {}。
-  NumPy scalar／array 轉為 JSON scalar／list，空 array 為 []，bytes 嚴格解 UTF-8。
-  Complex 逐元素編碼為 `{real, imag}`，非有限值（含 complex 分量）編碼為
-  `{nonfinite: "nan" | "inf" | "-inf"}`。原數值與單位不換算。
-  不能表示的型別、非法 UTF-8 或非 attribute-only instrument group 回
-  `LabberSnapshotError`，不回部分 snapshot；I/O 錯誤原樣傳遞。
-  Caller 可以只隔離這個錯誤，省略 snapshot 並保留原 Labber，繼續處理量測資料。
-- `save_grouped_labber_data` / `load_grouped_labber_data` 處理 canonical one-shot
-  grouped v2。所有 variables 必須共享完全相同的 inner-first axes、shape 與
-  timestamps。saver 在建立目的檔前驗證 common-grid contract，並把 variables 寫成
-  root Labber log 的平行 scalar channels。ordered variable-to-channel attrs 保存 domain
-  identity；experiment loader 傳 required variables，省略 required variables 只用於
-  diagnostic inspection。
-- Runtime loader 要求 canonical grouped v2，對 unmarked grouped v1 明確報錯並保留原檔。
-  Marker-qualified streaming grouped v1 使用獨立 decoder。
-- `StreamingLabberVariableSpec` / `open_streaming_grouped_labber_data` 處理
-  grouped Labber file 的 partial-write use case。它保留 marker-qualified grouped v1
-  root/`Log_N` layout 與 heterogeneous axes，不共用 one-shot v2 decoder。
-  `open_streaming_labber_data`
-  是 single-log `save_labber_data` 的 streaming 對偶。caller 先宣告 full-shape
-  schema，writer 預建 nan-filled datasets，之後以 outer row slice 寫入並
-  flush。它是長掃 workflow 的 streaming primitive，不改變 one-shot save helper
-  的 complete-file 語意。
-- Streaming writer 對自己建立的 Labber `Data` layout 採 hard invariant：若
-  內部 HDF5 group / dataset 結構不符合預期，立即 raise，不做靜默 fallback。
-- Experiment semantic schema 住在 `zcu_tools.experiment.axes_spec`：
-  `GroupedAxesSpec` / `VariableSpec` 把 Result/Cfg 映射到這裡的 generic grouped
-  payload；`datafile` 不反向依賴 experiment Result 或 cfg。
-- Save helpers 寫入 caller 傳入的 formatted path；既有目的地 fast-fail，不自動
-  suffix 或覆寫。
-- Path helpers（`format_ext`、`reserve_labber_filepath`、datafolder helpers）由
-  facade re-export；`reserve_labber_filepath` 只供 caller / orchestration layer
-  預先決定 unique final path。
-- `format_ext` / `remove_ext` 只處理檔名 suffix，不改路徑中段的 `.h5` /
-  `.hdf5` 子串；`reserve_labber_filepath` 保留 Labber-style numeric sequence，
-  但孤立的數字尾碼可作為 caller 命名的一部分。
+三個命名空間可以為空。名稱必須是非空路徑段，不能含 `/` 或 NUL，也不能是 `.` 或 `..`。
+同一 variable 的軸名稱不能重複。不同命名空間可以重用名稱。
+每個 var 的 `values` dataset 以 dimension scales 連到 `axes/<axis-name>`。
+數值陣列可以包含 NaN；JSON 不能包含 NaN 或 Infinity。
 
-`labber.py` 擁有 uniform／trace writer，`labber_reader.py` 擁有完整讀取與 log 解碼。
-`labber_format.py` 集中 Labber 1.8.6 bookkeeping labels、compound dtypes 與 attribute／string 轉換，
-由 writer、reader、grouped 與 streaming 共用。`labber_writer.py` 保留 ExperimentPayload 到 Labber 的投影。
+`Container(vars, docs, groups, attrs)` 是讀寫共用的值型別。
+`ContainerAttrs(format_version, producer, kind, extra)` 保存根屬性。
+新檔由 caller 指定版本 `"3.0"` 與 producer，kind 可以是 None。
+extra 只接受有限 JSON scalar。JSON null 以 HDF5 null-dataspace attribute 表示。
+`format` 固定為 `"zcu.container"`，不能透過 extra 覆寫保留的 header keys。
 
-`datafile/` 內部 module 是責任拆分，不是額外 public import path。
+```python
+from pathlib import Path
+import numpy as np
+from zcu_tools.datafile import Axis, Container, ContainerAttrs, Variable, load, save
 
-datafile 只負責資料檔格式、讀寫及 streaming；Result 與 axes mapping 屬於
-`zcu_tools.experiment.axes_spec` 所在的 experiment 層，artifact policy 屬
-workflow，路徑意圖由 caller 決定。
+container = Container(
+    vars={"voltage": Variable(np.array([1.0, 2.0]), (Axis("time", "s", np.array([0.0, 1.0])),), "V")},
+    docs={"note": {"operator": "example"}},
+    groups={},
+    attrs=ContainerAttrs("3.0", "example-producer", None, {}),
+)
+save(Path("data.h5"), container)
+loaded = load(Path("data.h5"))
+save(Path("copy.h5"), loaded)
+```
+
+`save(path, container, *, replace=False)` 寫 caller 的 exact path。
+預設拒絕既有檔案。它先寫同目錄 temporary，關檔後才發布。
+`replace=True` 使用 atomic replace，失敗保留原目的檔並清理 temporary。
+這不是跨檔交易，也不承諾掉電恢復。
+
+`load(path)` 關檔後回傳 detached arrays、docs 與 groups。
+載入的 GroupSource 持有 detached file image，原檔刪除或改名後仍能寫回。
+Caller 也可以用 `GroupSource(existing_path, "/subtree")` 提供自己的子樹。
+若改變 vars 的形狀，groups 指向該 var 的 HDF5 references 不保證仍有效。
+
+`read_doc(path, name)` 回傳一份 detached `JsonObject`，只讀 header 與指定文件。
+它不讀 vars、其他 docs 或 groups。壞 vars 不阻礙合法文件讀取。
+名稱遵守命名空間的路徑段限制。缺文件 raise `KeyError`，錯誤包含來源檔與文件名。
+格式或文件非法 raise 指名來源檔的 `FormatError`，I/O 錯誤原樣傳遞。
+此入口與 load 接受相同的 3.x／2.x 格式；舊檔只提供相同投影的 cfg 與 metadata。
+讀到合法文件不代表整份容器可由 load 成功載入。
+
+`inspect(path)` 回傳 `ContainerInfo`，只讀 header、var schema 與 doc/group 名稱。
+它不載入數值或座標陣列，回傳 axes 的 values 為空陣列。
+它不解碼 docs，也不保證整份檔案可由 load 成功載入。
+格式錯誤回 `FormatError` 並標示來源路徑；檔案 I/O 錯誤原樣傳遞。
+
+## Append
+
+`open_append(path, *, vars, docs=None, producer, kind=None)` 建立新容器並回傳 context manager。
+vars 的 `VariableSchema(shape, axes, dtype, unit, fill_value)` 預先宣告完整形狀。
+axes 按 NumPy 順序，必須包含座標值。dtype 是數值 NumPy dtype。
+預設 fill_value 是 NaN，整數陣列須明填可表示的值。
+Writer 預建 HDF5 datasets，不在記憶體分配完整資料陣列。
+
+- `write_row(variable, row, values)` 寫外層第一維的一列，values 的形狀是 shape[1:]。允許重寫列。
+- `replace_doc(name, doc)` 整份替換或新增文件，不合併鍵。
+- 每次寫入後 flush。未寫列保留 fill_value。
+- `finalize()` 標記根屬性 finalized=True，之後拒絕寫入。
+- Context exit 只關檔，不自動 finalize。中斷後的 partial 檔仍可 load。
+
+finalized 是 caller 宣告的完成標記，不證明每個預定測點都已量測。
+Writer 不提供 resume、多 writer 或跨檔交易。
+
+## Versions and legacy native files
+
+Reader 接受 major 3 的任何 minor。`load` 回傳來源版本，`save` 原樣保留，不降 minor。
+未知的 vars、docs、groups 與 extra 根屬性沿 `load`、修改、`save` 保留。
+格式名稱錯誤或 major 不同時，reader 拒絕載入。
+
+同一個 `load` 長期支援 `zcu.experiment-data` 2.x。
+Reader 把舊 `/data` variables 轉為 NumPy 軸順序，把 `/cfg` 轉為
+`docs/cfg = {values, cfg_type, schema_version}`，把 run attrs、`/context`、`/device`、
+`/provenance` 轉為 `docs/metadata`。它保留缺少歷史時間的 None 與未知 completion。
+完整原始子樹保存在 `groups/legacy`，包括 timestamps 與未知節點。
+回傳的 attrs 已是 3.0，寫回一律產生新容器。
+批次轉換入口見 [migrations](../../../migrations/README.md#container-升級)。
+
+cfg、metadata、analysis、source 都是生產者的文件命名約定，不是容器的保留槽位。
+Experiment 擁有 run 型別與 cfg 驗證。Artifacts 擁有 analysis JSON 信封，見
+[experiment](../experiment/README.md)。
+
+## Labber
+
+Labber codec 與容器核心分開。`write_labber(path, container, *, metadata=None, grouped_layout="common")`
+只消費 vars，不解釋 docs 或 groups。Caller 以 `LabberMetadata` 明傳 comment、tags、project、user、creation_time。
+需要 cfg comment envelope 時，由 caller 使用 `encode_labber_comment`。
+
+Labber 至少需要一個 real step axis。單一 var 寫 single log，多個 vars 預設要求 common grid。
+明示 `grouped_layout="independent"` 時，各 rank-1/2 var 寫自己的 root／Log_N。
+內部 helper 直接寫 marker-qualified grouped v1，並標 finalized，不經中介容器檔案。
+`open_append` 不產生 Labber；量測中的逐列保存使用容器 append API。
+
+`read_labber(path)` 回 `(Container, LabberMetadata)`，保留 NumPy 軸順序。
+`groups/labber` 保存原始 Labber 子樹與 timestamps。
+需要直接讀 per-trace timestamps 時，可用 `load_labber_data`、`load_labber_logs` 或 `load_grouped_labber_data`。
+這些低層讀寫能力保留 Labber 的 inner-first axes 與完整 metadata，不推測實驗語意或做單位轉換。
+`load_labber_device_snapshot` 只讀 Instrument config attributes，不操作儀器。
+
+`paths` helpers 只處理 suffix 與 caller 明示的檔名規則。
+`reserve_labber_filepath` 計算當時未使用的序號路徑，不提供跨程序 reservation。
+保存位置、batch、ledger 與失敗隔離由 caller 擁有，見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。

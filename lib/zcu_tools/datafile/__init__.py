@@ -1,53 +1,41 @@
-"""Public facade for experiment data persistence.
+"""Standalone numeric-array/JSON containers and independent Labber codecs.
 
-Exports load their owner on first access, so path helpers do not require HDF5.
+Exports load their owner on first use, so path helpers do not require HDF5.
 """
-
-from __future__ import annotations
 
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .analysis_document import AnalysisDocument, encode_analysis_document
+    from .append import AppendWriter, open_append
     from .comment import LabberComment, decode_labber_comment, encode_labber_comment
-    from .fluxdep_database import FluxdepDatabaseInfo, read_fluxdep_database_info
+    from .container import inspect, load, read_doc, save
+    from .container_models import (
+        Axis,
+        Container,
+        ContainerAttrs,
+        ContainerInfo,
+        FormatError,
+        GroupSource,
+        JsonObject,
+        JsonScalar,
+        Variable,
+        VariableSchema,
+    )
     from .grouped import load_grouped_labber_data, save_grouped_labber_data
+    from .json_values import json_values_equal
     from .labber import save_labber_data, save_labber_trace_data
+    from .labber_container import read_labber
     from .labber_reader import load_labber_data, load_labber_logs
     from .labber_schema import cast_labber_values, validate_labber_payload
     from .labber_snapshot import LabberSnapshotError, load_labber_device_snapshot
     from .labber_writer import write_labber
     from .models import (
-        Axis,
         DataVariable,
         GroupedLabberData,
         LabberData,
         LabberMetadata,
         LabberPayload,
-    )
-    from .native import (
-        load_run_data,
-        read_run_metadata,
-        save_run_data,
-        validate_experiment_payload,
-    )
-    from .native_metadata import (
-        json_values_equal,
-        validate_cfg_snapshot,
-        validate_run_id,
-    )
-    from .native_models import (
-        AxisSchema,
-        CfgSnapshot,
-        ExperimentPayload,
-        JsonObject,
-        NativeExtensions,
-        RunMetadata,
-        RunSnapshot,
-        SoftwareProvenance,
-        StoredRun,
-        VariableSchema,
     )
     from .paths import (
         create_datafolder,
@@ -56,134 +44,108 @@ if TYPE_CHECKING:
         remove_ext,
         reserve_labber_filepath,
     )
-    from .streaming import (
-        StreamingGroupedLabberWriter,
-        StreamingLabberVariableSpec,
-        StreamingLabberWriter,
-        open_streaming_grouped_labber_data,
-        open_streaming_labber_data,
-    )
 
 __all__ = [
-    "FluxdepDatabaseInfo",
-    "read_fluxdep_database_info",
-    "AnalysisDocument",
-    "encode_analysis_document",
+    "save",
+    "load",
+    "read_doc",
+    "inspect",
+    "open_append",
+    "AppendWriter",
+    "Axis",
+    "Variable",
+    "VariableSchema",
+    "Container",
+    "ContainerAttrs",
+    "ContainerInfo",
+    "FormatError",
+    "GroupSource",
+    "JsonObject",
+    "JsonScalar",
     "LabberComment",
     "encode_labber_comment",
     "decode_labber_comment",
-    "AxisSchema",
-    "VariableSchema",
-    "ExperimentPayload",
-    "CfgSnapshot",
-    "RunSnapshot",
-    "SoftwareProvenance",
-    "RunMetadata",
-    "NativeExtensions",
-    "StoredRun",
-    "JsonObject",
-    "json_values_equal",
-    "validate_labber_payload",
-    "cast_labber_values",
-    "write_labber",
-    "save_run_data",
-    "load_run_data",
-    "read_run_metadata",
-    "validate_experiment_payload",
-    "validate_cfg_snapshot",
-    "validate_run_id",
-    "Axis",
     "LabberPayload",
     "LabberMetadata",
     "LabberData",
     "DataVariable",
     "GroupedLabberData",
+    "write_labber",
+    "read_labber",
+    "validate_labber_payload",
+    "cast_labber_values",
     "save_labber_data",
+    "save_labber_trace_data",
     "load_labber_data",
     "load_labber_logs",
-    "LabberSnapshotError",
-    "load_labber_device_snapshot",
     "save_grouped_labber_data",
     "load_grouped_labber_data",
-    "StreamingLabberVariableSpec",
-    "StreamingGroupedLabberWriter",
-    "StreamingLabberWriter",
-    "open_streaming_labber_data",
-    "open_streaming_grouped_labber_data",
-    "save_labber_trace_data",
+    "LabberSnapshotError",
+    "load_labber_device_snapshot",
+    "json_values_equal",
     "format_ext",
     "remove_ext",
     "reserve_labber_filepath",
-    "get_datafolder_path",
     "create_datafolder",
+    "get_datafolder_path",
 ]
 
 _EXPORT_MODULES = {
-    "FluxdepDatabaseInfo": ".fluxdep_database",
-    "read_fluxdep_database_info": ".fluxdep_database",
-    "AnalysisDocument": ".analysis_document",
-    "encode_analysis_document": ".analysis_document",
+    "save": ".container",
+    "load": ".container",
+    "read_doc": ".container",
+    "inspect": ".container",
+    "open_append": ".append",
+    "AppendWriter": ".append",
+    "Axis": ".container_models",
+    "Variable": ".container_models",
+    "VariableSchema": ".container_models",
+    "Container": ".container_models",
+    "ContainerAttrs": ".container_models",
+    "ContainerInfo": ".container_models",
+    "FormatError": ".container_models",
+    "GroupSource": ".container_models",
+    "JsonObject": ".container_models",
+    "JsonScalar": ".container_models",
     "LabberComment": ".comment",
-    "decode_labber_comment": ".comment",
     "encode_labber_comment": ".comment",
-    "load_grouped_labber_data": ".grouped",
-    "save_grouped_labber_data": ".grouped",
-    "load_labber_data": ".labber_reader",
-    "load_labber_logs": ".labber_reader",
-    "LabberSnapshotError": ".labber_snapshot",
-    "load_labber_device_snapshot": ".labber_snapshot",
-    "save_labber_data": ".labber",
-    "save_labber_trace_data": ".labber",
-    "cast_labber_values": ".labber_schema",
-    "validate_labber_payload": ".labber_schema",
-    "write_labber": ".labber_writer",
-    "Axis": ".models",
+    "decode_labber_comment": ".comment",
+    "LabberPayload": ".models",
+    "LabberMetadata": ".models",
+    "LabberData": ".models",
     "DataVariable": ".models",
     "GroupedLabberData": ".models",
-    "LabberData": ".models",
-    "LabberMetadata": ".models",
-    "LabberPayload": ".models",
-    "load_run_data": ".native",
-    "read_run_metadata": ".native",
-    "save_run_data": ".native",
-    "validate_experiment_payload": ".native",
-    "json_values_equal": ".native_metadata",
-    "validate_cfg_snapshot": ".native_metadata",
-    "validate_run_id": ".native_metadata",
-    "AxisSchema": ".native_models",
-    "CfgSnapshot": ".native_models",
-    "ExperimentPayload": ".native_models",
-    "JsonObject": ".native_models",
-    "NativeExtensions": ".native_models",
-    "RunMetadata": ".native_models",
-    "RunSnapshot": ".native_models",
-    "SoftwareProvenance": ".native_models",
-    "StoredRun": ".native_models",
-    "VariableSchema": ".native_models",
-    "create_datafolder": ".paths",
+    "write_labber": ".labber_writer",
+    "read_labber": ".labber_container",
+    "validate_labber_payload": ".labber_schema",
+    "cast_labber_values": ".labber_schema",
+    "save_labber_data": ".labber",
+    "save_labber_trace_data": ".labber",
+    "load_labber_data": ".labber_reader",
+    "load_labber_logs": ".labber_reader",
+    "save_grouped_labber_data": ".grouped",
+    "load_grouped_labber_data": ".grouped",
+    "LabberSnapshotError": ".labber_snapshot",
+    "load_labber_device_snapshot": ".labber_snapshot",
+    "json_values_equal": ".json_values",
     "format_ext": ".paths",
-    "get_datafolder_path": ".paths",
     "remove_ext": ".paths",
     "reserve_labber_filepath": ".paths",
-    "StreamingGroupedLabberWriter": ".streaming",
-    "StreamingLabberVariableSpec": ".streaming",
-    "StreamingLabberWriter": ".streaming",
-    "open_streaming_grouped_labber_data": ".streaming",
-    "open_streaming_labber_data": ".streaming",
+    "create_datafolder": ".paths",
+    "get_datafolder_path": ".paths",
 }
 
 
 def __getattr__(name: str) -> object:
-    """Load an exported persistence tool only when the caller selects it."""
+    """Load an exported codec or value type only when the caller selects it."""
     module_name = _EXPORT_MODULES.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module = import_module(module_name, __name__)
-    value = getattr(module, name)
+    value = getattr(import_module(module_name, __name__), name)
     globals()[name] = value
     return value
 
 
 def __dir__() -> list[str]:
-    """Include the public exports without loading their owners."""
+    """List public exports without loading their owners."""
     return sorted(set(globals()) | set(__all__))

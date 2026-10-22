@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from ._helpers import Fixture, call, mcp_client, open_client
@@ -75,7 +76,7 @@ def fx(qapp):
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_writeback_preview_accepts_matching_analysis_operation(fx, stage):
     tab = fx.ctrl.new_tab("fake")
-    fx.state.update_tab_result(tab, object())
+    fx.state.update_tab_result(tab, RunRecord(None, object()))
     _install_result(fx, tab, stage, 3.0, 101)
     with open_client(fx.service.port) as sock:
         result = call(
@@ -220,7 +221,7 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
     fx, stage
 ):
     tab = fx.ctrl.new_tab("fake")
-    fx.state.update_tab_result(tab, object())
+    fx.state.update_tab_result(tab, RunRecord(None, object()))
     if stage == "post_analysis":
         _install_result(fx, tab, "analysis", 1.0, 100)
     original = ScalarParams(0.3)
@@ -269,7 +270,7 @@ def test_operation_bound_run_figure_is_rejected(fx):
 
 def test_result_without_figure_does_not_report_a_saved_image(fx, tmp_path):
     tab = fx.ctrl.new_tab("fake")
-    fx.state.update_tab_result(tab, object())
+    fx.state.update_tab_result(tab, RunRecord(None, object()))
     fx.state.update_tab_analyze(tab, ScalarResult(3.0), None, source_operation_id=101)
     fx.service.render_view = None
     destination = tmp_path / "no-figure.png"
