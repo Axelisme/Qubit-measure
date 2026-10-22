@@ -162,7 +162,7 @@ def test_label_overlay_preserves_alias_readonly_admission() -> None:
 
     env = FormEnv()
     state = FormState(OverlayForm.default_input(env))
-    with pytest.raises(FormInputRejected, match="readonly"):
+    with pytest.raises(FormInputRejected, match="Readonly"):
         state.write({("gain",): 2.0}, env)
     assert state.input.data == {"gain": 1.0}
 
