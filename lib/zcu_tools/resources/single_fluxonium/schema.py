@@ -183,13 +183,16 @@ class Numerics(Values):
     """truncation: oscillator/retained sizes; solver: explicit numerical accuracy.
 
     seed: nonnegative integer root RNG seed or None (default: choose once at
-    startup, not per round). min_round_duration_s: finite nonnegative successful
+    startup, not per round). slow_envelope_segments_per_period: strict positive
+    integer midpoint subdivisions per carrier period, default 20.
+    min_round_duration_s: finite nonnegative successful
     round pacing floor in seconds, default 0.2; zero disables pacing. These
     values do not guarantee convergence and do not specify any pulse sequence.
     """
 
     truncation: Truncation
     solver: Solver
+    slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)] = 20
     seed: Index | None = None
     min_round_duration_s: Nonnegative = 0.2
 
