@@ -69,8 +69,8 @@ class RecipePicker(
             raise ValueError("Synthetic acquisition contains original tone 4 only")
         return make_flux_pick_plugin(
             FluxPickInputs(
-                np.ones((3, 3), dtype=np.complex128),
-                np.array([-2.0, 0.0, 2.0]),
+                np.ones((5, 3), dtype=np.complex128),
+                np.array([-2.0, -1.0, 0.0, 1.0, 2.0]),
                 np.array([4.0, 4.5, 5.0]),
             ),
             flux_half=params.half,
