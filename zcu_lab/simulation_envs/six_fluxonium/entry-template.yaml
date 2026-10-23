@@ -16,6 +16,7 @@ components:
       ch: 1
   R1:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7000.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -33,6 +34,7 @@ components:
       ch: 2
   R2:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7100.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -50,6 +52,7 @@ components:
       ch: 3
   R3:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7200.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -67,6 +70,7 @@ components:
       ch: 4
   R4:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7300.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -84,6 +88,7 @@ components:
       ch: 5
   R5:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7400.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -101,6 +106,7 @@ components:
       ch: 6
   R6:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7500.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -109,6 +115,8 @@ components:
     kind: device/current_source
   MG123456:
     kind: group/mux
+    mixer_freq: 7250 # MHz; mux generator LO setting.
+    time_of_fly: 0.4 # us; mux route, separate from resonator pulse routes.
     resonators: [R1, R2, R3, R4, R5, R6]
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
     wiring:

@@ -35,7 +35,7 @@ def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
         raise ValueError("One-tone timing requires a parameter capture")
     source = ctx.parameters.lookup_point("$resonator.kappa")
     kappa = source.value
-    trigger = "$resonator.ext.time_of_fly"
+    trigger = "$resonator.time_of_fly"
     if source.present and kappa is not None:
         if (
             isinstance(kappa, bool)

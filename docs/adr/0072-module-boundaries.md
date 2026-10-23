@@ -91,7 +91,11 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
-它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、選填的 mux wiring（文件層可未知，表單／Run 才必填）和一般 module／ext。
+它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、`mixer_freq`、`time_of_fly`、mux wiring（文件層可未知，表單／Run 才必填）和一般 module／ext。
+`mixer_freq` 是有限的 mux generator LO 設定值，單位 MHz；None 表示未知。無 readout slot 的 mux Form 從 `$mux.mixer_freq` 取初值，缺值留空必填，不由 tone 頻率或 κ 推算。
+Mux group 與 resonator 各自宣告頂層 `time_of_fly`，保存各自量測路徑的有限非負 flight time，單位 µs；None 表示尚未量測。不從 ext 讀取，也不自動搬移既有 entry。
+Mux fine 的無 slot trigger 初值為 `$mux.time_of_fly + 5/(2π·min κ)`，group TOF 或任一 κ 缺值時，trigger 與 pulse length 留空必填。Resonator 的 pulse 路徑 TOF 不供 mux 使用。
+2026-10-23，使用者要求：「mixer frequency屬性請加入到mux group中，並用於生成預設值。」並要求：「讓mux group有自己的time_of_fly屬性，也用於生成預設值。」後續裁定：「將time_of_fly轉正吧。不在放ext裡了。」time_of_fly 因而轉為 mux group 與 resonator 的頂層欄位。
 2026-10-23，使用者指出：「但kickstart應該是生成欄位讓用戶填，必填的話無法做到」。
 文件允許 `wiring: {}`；沒有 ADC wiring 時，各 tone 的 `ro_ch` 在表單中留空必填。
 Group 自己擁有 readout module，重排 resonators 不改 owner。

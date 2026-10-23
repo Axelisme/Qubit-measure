@@ -70,9 +70,9 @@ Pulse length 與 ro_length 留空必填，頻率缺失或無效時也留空必�
 `mux/onetone_fine` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
 Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
 Fine 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
-完整 group 的 kappa 都有效才推導其餘 mixer／timing 候選。Mixer 取 tone 頻率最小與最大值中點。
-Trigger 取全部 resonators.ext.time_of_fly 最大值加五倍 ringup 時間，pulse 長度取 trigger 加 window。
-任一 kappa 缺值時 mixer、trigger 與 pulse 長度留空；任一 time_of_fly 缺值時 trigger 與 pulse 長度留空。
+無 slot 的 mixer 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
+Trigger 取 `$mux.time_of_fly` 加五倍 ringup 時間，pulse 長度取 trigger 加 window。
+任一 kappa 或 group time_of_fly 缺值時，trigger 與 pulse 長度留空必填，不讀 resonator 的 pulse 路徑 TOF。
 上述缺值情境仍保留 1.0 us 的 ADC window。
 Readout 欄位說明列來源與未經裝置確認的限制，Run 仍執行 capability 檢查。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。

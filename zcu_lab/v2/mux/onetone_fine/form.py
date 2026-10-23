@@ -22,12 +22,12 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     still support resonator bring-up. With a slot, add five ringup times from
     the smallest set group kappa to its trigger and extend pulse coverage,
     preserving its ADC window; all kappas unset adds no wait. Without a slot,
-    always seed the ADC window at 1.0 us, independent of kappa. Require all
-    kappas for mixer, trigger and pulse length candidates. Use the extreme-
-    frequency midpoint as mixer and the largest group resonator.ext.time_of_fly
-    plus five ringup times as trigger. Pulse length is trigger plus ADC window.
-    Missing flight times leave trigger and pulse length blank. Missing any kappa
-    leaves mixer, trigger and pulse length blank. Invalid set sources reject
+    always seed the ADC window at 1.0 us, independent of kappa. Mixer reads
+    $mux.mixer_freq independently of kappa and tone frequencies; null stays
+    required and blank. Trigger uses $mux.time_of_fly plus five ringup times
+    from the smallest group kappa. Pulse length is trigger plus ADC window.
+    Missing group flight time or any kappa leaves trigger and pulse length
+    required and blank. Invalid set sources reject
     Open/Reset. Candidates remain editable and require device confirmation at Run.
     """
     # Check declared qubit/resonator pairs before choosing readout defaults.
