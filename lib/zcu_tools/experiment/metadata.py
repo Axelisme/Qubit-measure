@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from zcu_tools.datafile import JsonObject, LabberMetadata
+from zcu_tools.resources.entry.aliases import AliasValue
 
 _RUN_ID_PATTERN = (
     r"^(?:[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}|[0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*)$"
@@ -44,7 +45,8 @@ class RunSnapshot:
     """Historical entry state, never a live entry or hardware reference.
 
     entry_id identifies the entry; entry_name is its name at capture. point and
-    description are optional work-point labels. roles maps role to component name.
+    description are optional work-point labels. roles maps aliases to scalar names
+    or ordered name lists. Lists preserve acquisition order, not tone indexes.
     Writers never refresh these values from a live entry.
     """
 
@@ -53,8 +55,8 @@ class RunSnapshot:
     point: str | None
     description: str | None
     roles: Annotated[
-        Mapping[str, str],
-        PlainSerializer(dict, return_type=dict[str, str], when_used="json"),
+        Mapping[str, AliasValue],
+        PlainSerializer(dict, return_type=dict[str, AliasValue], when_used="json"),
     ]
 
 

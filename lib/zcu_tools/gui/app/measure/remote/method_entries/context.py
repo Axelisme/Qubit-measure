@@ -19,11 +19,14 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Apply the entire ordered alias table through the Inspect Apply owner. "
-            "rows is a list of exactly {alias: string, value: string}; [] clears it. "
-            "Values are concrete names, empty strings or backward $alias.field links. "
+            "rows is a list of exactly {alias: string, value: string | list[string]}; "
+            "rows=[] clears the table. Values are concrete names, empty strings, "
+            "backward $alias.field links, or ordered lists of nonempty names/links. "
+            "An empty value list is unbound. "
             "Syntax/order errors reject the whole table. An opened entry saves "
-            "aliases.yaml atomically before installing/publishing; without an entry "
-            "only memory changes. Storage failure preserves the old file/table. "
+            "the selected point aliases.yaml atomically before installing/publishing; "
+            "without a selected point, fails with no_context. "
+            "Storage failure preserves the old file/table. "
             "Returns {rows: [{alias, value}]} from the installed authored table, "
             "not proof of resolvability. For resolved rows read "
             "context.snapshot(path='aliases'); that read still requires a point. "

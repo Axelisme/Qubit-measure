@@ -1165,12 +1165,19 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
+        resolved = parameters.resolved_aliases()
+        required = self.get_template(template_id).placeholder_names()
+        lists = {
+            row.alias for row in resolved if isinstance(row.resolved, list)
+        } & required
+        if lists:
+            raise InvalidInputError(
+                f"Template aliases {', '.join(sorted(lists))} are lists; bind each to one name in Aliases"
+            )
         bindings = {
-            row.alias: row.resolved
-            for row in parameters.resolved_aliases()
-            if row.resolved is not None
+            row.alias: row.resolved for row in resolved if isinstance(row.resolved, str)
         }
-        missing = self.get_template(template_id).placeholder_names() - bindings.keys()
+        missing = required - bindings.keys()
         if missing:
             aliases = ", ".join(f"${alias}" for alias in sorted(missing))
             raise InvalidInputError(
