@@ -9,8 +9,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 import pytest
@@ -61,6 +63,80 @@ def _collect_jsonl_entries(log_dir: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("handler_fails", [False, True], ids=["success", "error"])
+def test_process_exit_closes_and_flushes_call_log(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, handler_fails: bool
+) -> None:
+    """Process-owned logging closes its sink after successful or failing calls."""
+    monkeypatch.delenv("ZCU_MCP_CALL_LOG", raising=False)
+    log_path = tmp_path / "calls.jsonl"
+    script = dedent(
+        """\
+        import atexit
+        import builtins
+        import json
+        import sys
+
+        opened = []
+
+        def report_closed():
+            print(json.dumps({"opened": len(opened),
+                              "closed": all(stream.closed for stream in opened)}))
+
+        # Observe after the process owner has run its later-registered cleanup.
+        atexit.register(report_closed)
+
+        from zcu_tools.mcp.core.call_log import wrap_handler
+
+        real_open = builtins.open
+
+        def recording_open(path, *args, **kwargs):
+            if str(path).endswith("-calls.jsonl"):
+                # Delegate real sink I/O to this test's isolated filesystem path.
+                stream = real_open(sys.argv[1], *args, **kwargs)
+                opened.append(stream)
+                return stream
+            return real_open(path, *args, **kwargs)
+
+        builtins.open = recording_open
+
+        def handler(arguments):
+            if arguments["fail"]:
+                raise ValueError("synthetic tool failure")
+            return {"value": 42}
+
+        wrapped = wrap_handler("exit_probe", handler)
+        try:
+            wrapped({"fail": sys.argv[2] == "True"})
+        except ValueError:
+            pass
+        """
+    )
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "always::ResourceWarning",
+            "-c",
+            script,
+            str(log_path),
+            str(handler_fails),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert child.returncode == 0, child.stderr
+    assert json.loads(child.stdout) == {"opened": 1, "closed": True}
+    assert "ResourceWarning" not in child.stderr
+    entries = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert len(entries) == 1
+    assert entries[0]["tool"] == "exit_probe"
+    assert entries[0]["status"] == ("error" if handler_fails else "success")
+    assert entries[0]["output"] == (None if handler_fails else {"value": 42})
 
 
 def test_success_entry_written(monkeypatch, tmp_path):
