@@ -171,8 +171,8 @@ class SaveResult:
 
     status is completed or failed; run_id is the acquisition identity, including
     all-output failures. outputs retains every reported path/status/diagnostic,
-    and reports retains each complete owner report in dispatch order. A later
-    RPC failure preserves the confirmed prefix with failed status. Reserved
+    and reports retains the complete owner report from the single Save RPC.
+    A transport failure propagates without claiming an unreceived report. Reserved
     outputs are not saved files. Repeated saves never accumulate success claims.
     """
 
@@ -331,14 +331,16 @@ class RecipeContext:
         """Bind the execution runtime; authors obtain this from session.context."""
         self._runtime = runtime
 
-    def read(self, source_path: str) -> YamlValue:
+    def read(self, source_path: str, *, missing_ok: bool = False) -> YamlValue:
         """Read one registered value.read key, such as device.flux.value.
 
-        Source/transport errors propagate. No tab needs to be open. This reads
-        the session-global source, not a tab's fixed Reset capture. It never
-        refreshes the separate sources observed by tab.read.
+        With missing_ok=True, an unregistered source returns None. Otherwise
+        unregistered sources raise GuiRpcError. Other source/transport errors
+        always propagate. No tab needs to be open. This reads the session-global
+        source, not a tab's fixed Reset capture. It never refreshes the separate
+        sources observed by tab.read.
         """
-        return self._runtime.read_source(source_path)
+        return self._runtime.read_source(source_path, missing_ok=missing_ok)
 
 
 class RecipeSession:
@@ -483,10 +485,10 @@ class RecipeTab:
         self._runtime.preview(self.tab, pane)
 
     def save(self) -> SaveResult:
-        """Synchronously save raw data then all completed artifacts.
+        """Synchronously save raw data and all completed artifacts once.
 
-        Both RPCs finish on the GUI owner; there is no Save operation to await.
-        Merge their complete reports, retain this attempt in runs, and propagate
+        One RPC finishes on the GUI owner; there is no Save operation to await.
+        Retain its complete report for this attempt in runs, and propagate
         transport/admission errors. Per-output failures remain in the report.
         Repeated saves are independent receipts, not accumulated success claims.
         """
