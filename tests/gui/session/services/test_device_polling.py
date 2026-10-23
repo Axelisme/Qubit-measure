@@ -11,12 +11,13 @@ from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.app.measure.services.operation_gate import OperationGate
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.device_models import (
     DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload
-from zcu_tools.gui.session.ports import OperationKind
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, OperationKind
 from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import on_device_disconnected
@@ -99,6 +100,7 @@ class _DeferredPollBackground:
 
     def __init__(self, workers: DeviceWorkers) -> None:
         self.submitted = False
+        self.closed = False
         self.background = workers.background()
         self._delivery: Callable[[], None] | None = None
 
@@ -115,6 +117,8 @@ class _DeferredPollBackground:
                 work, run_in_pool=False, on_done=on_done, on_error=on_error
             )
             return
+        if self.closed:
+            raise BackgroundAdmissionClosedError("executor closed")
         self.submitted = True
         try:
             result = work()
@@ -130,6 +134,68 @@ class _DeferredPollBackground:
         delivery = self._delivery
         self._delivery = None
         delivery()
+
+
+@pytest.mark.parametrize(
+    "skip",
+    ["missing", "memory_only", "connecting", "disconnecting", "gate", "closed"],
+)
+def test_poll_receipt_distinguishes_skipped_from_submitted_reads(
+    qapp, device_workers: DeviceWorkers, skip: str
+):
+    state = State(MagicMock())
+    bus = EventBus()
+    gate = OperationGate(bus)
+    bg = _DeferredPollBackground(device_workers)
+    svc, device = make_device_service(
+        device_workers, state=state, bus=bus, gate=gate, bg=bg
+    )
+    facet = DeviceControlFacet(bus=bus, device=svc, progress=MagicMock())
+    if skip != "missing":
+        connect_device(svc, device_connect_request())
+    statuses = {
+        "memory_only": DeviceStatus.MEMORY_ONLY,
+        "connecting": DeviceStatus.CONNECTING,
+        "disconnecting": DeviceStatus.DISCONNECTING,
+    }
+    if skip in statuses:
+        state.set_device_status("dev1", statuses[skip])
+    if skip == "gate":
+        gate.register(
+            99,
+            OperationKind.DEVICE_DISCONNECT,
+            owner_id="held",
+            origin_kind="user",
+            note="held mutation",
+            resource_id="dev1",
+        )
+    bg.closed = skip == "closed"
+    device.get_info.reset_mock()
+    try:
+        assert facet.try_poll_device_info("dev1") is False
+        assert bg.submitted is False
+        device.get_info.assert_not_called()
+    finally:
+        if skip == "gate":
+            gate.release(99)
+
+    if skip == "missing":
+        connect_device(svc, device_connect_request())
+    elif skip in statuses:
+        state.set_device_status("dev1", DeviceStatus.CONNECTED)
+    bg.closed = False
+    device.get_info.return_value = FakeDeviceInfo(address="addr", value=3.0)
+    before = state.version.get("device:dev1")
+    events: list[str | None] = []
+    facet.on_device_changed(lambda event: events.append(event.name))
+
+    assert facet.try_poll_device_info("dev1") is True
+    assert bg.submitted is True
+    assert state.version.get("device:dev1") == before
+    assert events == []
+    bg.deliver()
+    assert state.version.get("device:dev1") == before + 1
+    assert events == ["dev1"]
 
 
 def test_poll_device_info_changed_value_bumps_and_emits_on_main(

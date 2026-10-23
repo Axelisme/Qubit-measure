@@ -44,6 +44,8 @@ from zcu_tools.gui.session.events import (
     SocChangedPayload,
 )
 
+from tests.gui._qt_waits import qt_until
+
 from ._helpers import (
     Fixture,
     call,
@@ -626,6 +628,10 @@ def test_app_shutdown_triggers_request_shutdown(fx):
         resp = call(sock, "app.shutdown", {})
         assert resp["ok"] is True
         assert resp["result"]["shutting_down"] is True
+        qt_until(
+            lambda: fx.view.request_shutdown.called,
+            label="accepted shutdown owner continuation",
+        )
         assert fx.view.request_shutdown.called
     finally:
         sock.close()

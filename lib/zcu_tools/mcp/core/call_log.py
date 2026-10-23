@@ -16,18 +16,19 @@ Design decisions:
 - Never raises: every write is guarded by try/except so a log failure never
   breaks a tool call. Internal errors are written to stderr at most once.
 - Flush per line: each JSON line is flushed immediately so a crash never
-  loses the last entry.
+  loses the last entry. The process owns the sink and closes it at normal exit.
 - Field truncation at 8 KiB: large inputs/outputs (e.g. screenshots as
   base64) are truncated rather than written in full; they are only a hint.
 """
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import sys
 from collections.abc import Callable, Collection
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
@@ -105,8 +106,10 @@ def _get_log_file() -> TextIO | None:
     try:
         path = _log_path()
         _purge_old_call_logs(path.parent, _DEFAULT_RETAIN)
-        # tolerated: The process-lifetime singleton stays open for later tool calls; a local with would close it.
-        _log_file = open(path, "w", encoding="utf-8")  # noqa: SIM115
+        with ExitStack() as resources:
+            _log_file = resources.enter_context(open(path, "w", encoding="utf-8"))
+            # Transfer this sink to process exit, independent of module reloads.
+            atexit.register(resources.pop_all().close)
     # tolerated: Any log setup failure must leave tool execution available without a log file.
     except Exception as exc:  # noqa: BLE001
         if not _internal_error_reported:

@@ -65,7 +65,8 @@ def interact(
 
     Recipes supply their original analysis handle and phase admission. A reply
     for another operation cannot replace that execution's handoff. Done joins
-    the existing completion owner; PNG failure preserves the accepted receipt.
+    the existing completion owner and returns its next handoff or terminal result;
+    PNG failure preserves the accepted receipt.
     Native figure bytes are consumed into ToolReply.images only, without a JSON
     figure path, session temporary file or persistent identity. Other native
     committed state/commands/info fields are preserved. Later live reads may
@@ -84,7 +85,7 @@ def interact(
     if done and recipe is not None:
         # The recipe runtime already drains this GUI operation. Do not admit a
         # standalone completion runner, which would repeat result/save work.
-        return recipe.wait(300.0)
+        return recipe.wait(300.0, skip_interactive_op=reply["handle"])
     execution = ctx.session.executions.for_op(reply["handle"])
     if done:
         if execution is None:

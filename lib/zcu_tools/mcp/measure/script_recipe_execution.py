@@ -144,9 +144,14 @@ class ScriptRecipeExecution:
                 else "recipe",
             )
 
-    def wait(self, timeout: float) -> ToolReply:
+    def wait(
+        self, timeout: float, *, skip_interactive_op: int | None = None
+    ) -> ToolReply:
         """Wait up to 300 seconds for an explicit handoff or terminal result.
 
+        skip_interactive_op is the session handle just completed by done. Ignore
+        interactive publications for that same handle and wait for the next
+        handoff or terminal result. None accepts any interactive handoff.
         timeout must be finite/nonnegative. Expiry only returns current progress;
         it never cancels work, supplies an answer, or reconnects to the GUI.
         """
@@ -157,7 +162,15 @@ class ScriptRecipeExecution:
             self._condition.wait_for(
                 lambda: (
                     self._progress.status in SCRIPT_TERMINAL
-                    or self._progress.status in ("paused", "interactive")
+                    or self._progress.status == "paused"
+                    or (
+                        self._progress.status == "interactive"
+                        and (
+                            skip_interactive_op is None
+                            or self._progress.pending_analysis is None
+                            or self._progress.pending_analysis.op != skip_interactive_op
+                        )
+                    )
                 ),
                 min(timeout, 300.0),
             )
