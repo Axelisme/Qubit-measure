@@ -70,6 +70,39 @@ def nested_kind(registry_state_guard: None) -> Generator[str]:
 
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
+def test_open_invalid_component_reports_source_and_original_validation(
+    tmp_path: Path, required_kind: str, owner: str
+) -> None:
+    entry, results, database = create_entry(tmp_path)
+    entry.setup.add_component("N1", kind=required_kind, rate=1.0, title="ready")
+    source = results / "entry" / "setup.yaml"
+    if owner == "point":
+        entry.new_point("working")
+        source = results / "entry" / "points" / "working" / "point.yaml"
+    yaml = YAML(typ="rt")
+    stored = yaml.load(source)
+    stored["components"]["N1"]["rate"] = "not a rate"
+    yaml.dump(stored, source)
+    before = source.read_bytes()
+
+    def open_document() -> None:
+        if owner == "setup":
+            ResultEntry.open("entry", result_root=results, database_root=database)
+        else:
+            entry.use_point("working")
+
+    with pytest.raises(ValueError, match=r"N1\.rate") as failure:
+        open_document()
+
+    assert str(source.resolve()) in str(failure.value)
+    original = failure.value.__cause__
+    assert isinstance(original, ValidationError)
+    assert str(original) in str(failure.value)
+    assert "N1.rate" in str(failure.value)
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("owner", ["setup", "point"])
 @pytest.mark.parametrize("version", ["2.0", "2.2"])
 def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
     tmp_path: Path,

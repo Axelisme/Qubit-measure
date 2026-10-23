@@ -195,10 +195,13 @@ def test_open_validates_uuid_and_utc_created_at_before_publishing_entry(
         yaml.dump(document, stream)
     before = setup_path.read_bytes()
 
-    with pytest.raises(ValidationError) as failure:
+    with pytest.raises(ValueError, match=field) as failure:
         ResultEntry.open("entry", result_root=results, database_root=database)
 
-    assert ("general", field) in [error["loc"] for error in failure.value.errors()]
+    assert str(setup_path.resolve()) in str(failure.value)
+    original = failure.value.__cause__
+    assert isinstance(original, ValidationError)
+    assert ("general", field) in [error["loc"] for error in original.errors()]
     assert setup_path.read_bytes() == before
 
 

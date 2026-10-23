@@ -139,14 +139,14 @@ def test_refresh_minor_rejects_forbidden_data_without_publishing(
     assert document_meta(snapshot(view), "S1.rate") == metadata
     assert path.read_bytes() == bad_bytes
     if owner == "setup":
-        with pytest.raises(ValidationError, match="future"):
+        with pytest.raises(ValueError, match="future"):
             ResultEntry.open(
                 "entry",
                 result_root=entry.result_path.parent,
                 database_root=entry.database_path.parent,
             )
     else:
-        with pytest.raises(ValidationError, match="future"):
+        with pytest.raises(ValueError, match="future"):
             entry.use_point("a")
     assert path.read_bytes() == bad_bytes
 

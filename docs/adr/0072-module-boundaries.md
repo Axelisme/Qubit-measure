@@ -68,7 +68,7 @@ status: accepted
 
 2026-10-23，元件 wiring 依 kind 宣告。`BuiltinComponent` 只提供 `ext`、`module` 與 unsupported-field migration。Resonator 自宣告 `WiringSchema(ch, ro_ch)`，qubit 經 `QubitBaseSchema` 保留 `QubitWiringSchema(ch, lo_flux_ch)`。JPA 與 current source 沒有通道讀取者，不宣告 wiring。
 
-Mux group 自宣告 `MuxWiringSchema`，以 `gen_ch` 表示 mux generator，以 `ro_ch[i]` 表示 `resonators[i]` 的 ADC，並驗證兩列表等長。這些 ADC 不從 resonator 的單 tone `wiring.ro_ch` 推導。
+Mux group 自宣告 `MuxWiringSchema`，以 `gen_ch` 表示 mux generator，以 `ro_ch[i]` 表示 `resonators[i]` 的 ADC。`ro_ch` 為 None 時表示尚未接線，有值時才驗證兩列表等長。這些 ADC 不從 resonator 的單 tone `wiring.ro_ch` 推導。
 
 使用者指出：「mux group的屬性沒有寫好，simulation/FTF 的startup忘了寫mux group的gen_ch，而ro_ch沒有意義，因為有多個ro_ch」，並要求：「為什麼BuiltinComponent有那麼多無用的欄位，他不該是……儘量空的嗎？」
 
@@ -91,7 +91,9 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
-它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、必填的 mux wiring 和一般 module／ext。
+它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、選填的 mux wiring（文件層可未知，表單／Run 才必填）和一般 module／ext。
+2026-10-23，使用者指出：「但kickstart應該是生成欄位讓用戶填，必填的話無法做到」。
+文件允許 `wiring: {}`；沒有 ADC wiring 時，各 tone 的 `ro_ch` 在表單中留空必填。
 Group 自己擁有 readout module，重排 resonators 不改 owner。
 使用者於 2026-10-16 對專屬 group component 方案裁定：「我選B」。
 

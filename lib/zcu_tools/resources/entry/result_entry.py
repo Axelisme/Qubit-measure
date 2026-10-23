@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml import YAML
 
 from zcu_tools.cfg_model import WaveformAssetInfo
@@ -118,13 +118,16 @@ class ResultEntry:
         class EntrySetupDocument(SetupDocument):
             _source = source
 
-        self._setup_store = DocumentStore[SetupDocument](
-            source,
-            EntrySetupDocument,
-            format=PARAMETER_FORMAT,
-            supported_version=PARAMETER_VERSION,
-            validate=self._validate_setup,
-        )
+        try:
+            self._setup_store = DocumentStore[SetupDocument](
+                source,
+                EntrySetupDocument,
+                format=PARAMETER_FORMAT,
+                supported_version=PARAMETER_VERSION,
+                validate=self._validate_setup,
+            )
+        except ValidationError as exc:
+            raise ValueError(f"{source.resolve()}: {exc}") from exc
 
     def _validate_setup(self, document: SetupDocument) -> None:
         validate_view_components(document, source=self._result_path / "setup.yaml")
@@ -520,8 +523,10 @@ class ResultEntry:
         label follows new_point's single-segment path rules. Both point.yaml and
         module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
         raise ValueError and missing files raise FileNotFoundError. Original
-        models apply their required fields, defaults and validators. References
-        are resolved only on request. The view binds one Store and never reads setup.
+        models apply their required fields, defaults and validators. Schema
+        ValidationError becomes ValueError with the full document path and original
+        diagnostic. The original error remains its cause. References are resolved
+        only on request. The view binds one Store and never reads setup.
         No files are committed, other snapshots changed or active point selected.
         """
         directory = _entry_path(self._result_path / "points", label)
@@ -572,13 +577,18 @@ class ResultEntry:
         class EntryPointDocument(PointDocument):
             _source = source
 
-        return DocumentStore[PointDocument](
-            source,
-            EntryPointDocument,
-            format=PARAMETER_FORMAT,
-            supported_version=PARAMETER_VERSION,
-            validate=lambda document: validate_view_components(document, source=source),
-        )
+        try:
+            return DocumentStore[PointDocument](
+                source,
+                EntryPointDocument,
+                format=PARAMETER_FORMAT,
+                supported_version=PARAMETER_VERSION,
+                validate=lambda document: validate_view_components(
+                    document, source=source
+                ),
+            )
+        except ValidationError as exc:
+            raise ValueError(f"{source.resolve()}: {exc}") from exc
 
     @classmethod
     def list_names(cls, *, result_root: str | Path) -> tuple[str, ...]:
@@ -652,8 +662,9 @@ class ResultEntry:
 
         name must be a safe single path segment. The Result entry, points and
         records directories must exist; setup must validate its format and UUID.
-        Missing paths and invalid documents propagate their filesystem/schema
-        errors. Database is not inspected or created, regardless of its state.
+        Missing paths propagate filesystem errors. Schema ValidationError becomes
+        ValueError with the full document path and original diagnostic. The original
+        error remains its cause. Other schema errors propagate. Database is not inspected or created.
         """
         result_path = _entry_path(result_root, name)
         database_path = Path(database_root) / name
