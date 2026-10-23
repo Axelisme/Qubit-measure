@@ -36,13 +36,24 @@ class _NoArb:
 
 
 @pytest.fixture
+def registered_components() -> Generator[None]:
+    before = registry_state()
+    try:
+        register_fakes()
+        yield
+    finally:
+        restore_registry(before)
+
+
+@pytest.fixture
 def conflict_ui(
-    qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
+    qapp: QApplication,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    registered_components: None,
 ) -> Generator[
     tuple[ComponentDriver, Path, Path, ContextService, InspectDialog]
 ]:
-    before = registry_state()
-    register_fakes()
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
@@ -62,7 +73,7 @@ def conflict_ui(
     control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, setup=True)
     entry.new_point("second")
     service.use_point(PointUseRequest("second"))
-    control.add_component("Q1", "fake/drive/a", {"rate": 5300.0})
+    control.set_parameter(control.read_context().target, "Q1.rate", 5300.0)
     service.use_point(PointUseRequest("point"))
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param
@@ -92,7 +103,6 @@ def conflict_ui(
         dialog.hide()
         dialog.deleteLater()
         qapp.processEvents()
-        restore_registry(before)
 
 
 @pytest.mark.parametrize("conflict_ui", ["library"], indirect=True)
