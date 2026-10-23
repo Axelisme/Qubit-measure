@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date
+import logging
 from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt
@@ -20,6 +21,8 @@ from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsI
 from .results_comparison import ResultsComparison
 from .results_details import result_details
 from .results_gallery import ResultsGallery
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -205,7 +208,7 @@ class ResultsBrowser(QWidget):
     def _focused(self, runs: tuple[ResultRun, ...]) -> tuple[ResultRun, ...]:
         focus = self._focus
         return tuple(run for run in runs
-                     if (focus.experiment is None or run.experiment == focus.experiment)
+                     if (focus.experiment is None or (run.experiment or "Unknown experiment") == focus.experiment)
                      and (focus.point is None or (run.entry, run.point) == focus.point)
                      and (focus.run_key is None or run.key == focus.run_key))
 
@@ -282,6 +285,7 @@ class ResultsBrowser(QWidget):
         try:
             outcome = self._open_run(run)
         except Exception as error:
+            logger.exception("Cannot open saved history in a new tab")
             self._feedback.setText(f"Cannot open analysis tab: {error}")
         else:
             self._feedback.setText(f"Loaded history: {outcome.data_path}")

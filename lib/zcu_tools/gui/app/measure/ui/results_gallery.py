@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from qtpy.QtCore import QPoint, Qt, Signal
+from PyQt6.QtCore import pyqtSignal
+from qtpy.QtCore import QPoint, Qt
 from qtpy.QtGui import QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
     QGridLayout, QLabel, QMenu, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
@@ -16,8 +17,8 @@ from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsI
 class ResultImage(QLabel):
     """Clickable raster preview; left click selects, right click opens member actions."""
 
-    activated = Signal()
-    action_requested = Signal(str)
+    activated = pyqtSignal()
+    action_requested = pyqtSignal(str)
 
     def __init__(self, png: bytes, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -32,13 +33,13 @@ class ResultImage(QLabel):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
 
-    def mousePressEvent(self, event: QMouseEvent | None) -> None:
-        if event is not None and event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, ev: QMouseEvent | None) -> None:
+        if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
             self.activated.emit()
-        super().mousePressEvent(event)
+        super().mousePressEvent(ev)
 
-    def resizeEvent(self, event: QResizeEvent | None) -> None:
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
         self.setPixmap(self._image.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                          Qt.TransformationMode.SmoothTransformation))
 

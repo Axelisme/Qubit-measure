@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qtpy.QtCore import Signal
+from PyQt6.QtCore import pyqtSignal
 from qtpy.QtWidgets import QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget
 
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
@@ -15,7 +15,7 @@ class ResultsComparison(QWidget):
     an existing run preserves order and updates its selected figure only when supplied.
     """
 
-    pins_changed = Signal()
+    pins_changed = pyqtSignal()
 
     def __init__(self, index: ResultsIndex, parent: QWidget | None = None) -> None:
         super().__init__(parent)
