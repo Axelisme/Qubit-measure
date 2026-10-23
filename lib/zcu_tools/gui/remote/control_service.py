@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -305,7 +306,13 @@ class RemoteControlServiceBase:
             self._owner_scheduler.post(self._on_client_count_changed)
 
     def route(self, link: ClientLink, request: object) -> None:
-        """Handle one parsed, authenticated request on the IO thread."""
+        """Handle one parsed, authenticated request on the IO thread.
+
+        Owner-thread handlers taking more than 500 ms emit one warning with the
+        method and elapsed milliseconds, on success or failure. Only the handler
+        call is timed, excluding owner queueing, admission and reply processing.
+        Off-main handlers and declared request timeouts retain their policies.
+        """
         assert isinstance(request, Request)
         req = request
         # Subscription methods are state-owning (per-connection subscription
@@ -471,7 +478,15 @@ class RemoteControlServiceBase:
                 with bus.origin(request_origin):
                     try:
                         self._check_control(ctx, method)
-                        result = spec.handler(self, params)
+                        started_at = time.perf_counter()
+                        try:
+                            result = spec.handler(self, params)
+                        finally:
+                            elapsed_ms = (time.perf_counter() - started_at) * 1000
+                            if elapsed_ms > 500:
+                                logger.warning(
+                                    "owner handler %s took %.1f ms", method, elapsed_ms
+                                )
                         if not isinstance(result, dict):
                             raise TypeError(
                                 f"handler {method!r} returned non-dict result"

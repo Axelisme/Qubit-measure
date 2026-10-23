@@ -26,6 +26,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from hashlib import sha256
 from io import StringIO
 from math import isnan
 from pathlib import Path
@@ -458,6 +459,7 @@ class DocumentStore[T: BaseModel]:
         format: str,
         supported_version: FormatVersion = _SUPPORTED_VERSION,
         validate: Callable[[T], None] | None = None,
+        check_dependencies: Callable[[T], bool] | None = None,
         read_cleanup: Callable[[YamlMap, FormatVersion], tuple[str, ...]] | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
@@ -474,6 +476,15 @@ class DocumentStore[T: BaseModel]:
         Values use the same units in the document and typed model. Unit metadata
         belongs to the caller's schema and is not interpreted here. validate
         receives each typed model after schema validation and may raise to reject it.
+        Disk reads stat and hash the complete bytes. Unchanged content reuses a
+        detached validated snapshot without rerunning schema, validate or cleanup.
+        check_dependencies optionally receives a detached typed snapshot on each
+        unchanged-content read under the caller's existing lock. Return True
+        to reuse validation, or False to rerun cleanup and full validation using
+        the cached raw YAML. Exceptions propagate without publishing. The callback
+        should only check external dependency existence, not revalidate content.
+        Without it, external dependencies are rechecked only on changed content
+        or candidate validation during a nonempty edit.
 
         lock_path selects a shared sidecar, defaulting to path + ".lock".
         lock_timeout is FileLock's wait in seconds (negative waits indefinitely).
@@ -502,6 +513,7 @@ class DocumentStore[T: BaseModel]:
         self._format = format
         self._supported_version = supported_version
         self._validate = validate
+        self._check_dependencies = check_dependencies
         self._read_cleanup = read_cleanup
         self._lock_path = lock_path or Path(f"{path}.lock")
         self._lock_timeout = lock_timeout
@@ -510,8 +522,8 @@ class DocumentStore[T: BaseModel]:
         self._observers: dict[int, Callable[[DocumentChange], None]] = {}
         self._next_subscription_id = 0
         self._deferred_until_unlock: list[DocumentChange] = []
-        self._parsed_bytes: bytes | None = None
-        self._parsed_document: YamlMap | None = None
+        self._validated_key: tuple[int, bytes] | None = None
+        self._validated_read: tuple[YamlMap, YamlMap, T] | None = None
         if read_cleanup is None:
             self._document, _, self._snapshot = self._read()
         else:
@@ -574,13 +586,15 @@ class DocumentStore[T: BaseModel]:
         for path, value in disk_patches:
             raw_node = _lookup(document, path)
             _apply(document, path, _patch_node(raw_node, raw_node, value))
-        self._replace_document(document)
+        content = self._replace_document(document)
+        self._cache_read(content, (document, final_normalized, snapshot))
         return document, snapshot, tuple(path for path, _ in patches)
 
-    def _replace_document(self, document: YamlMap) -> None:
-        """Write a sibling temporary, atomically replace the file and clean up."""
-        content = StringIO()
-        YAML(typ="rt").dump(document, content)
+    def _replace_document(self, document: YamlMap) -> bytes:
+        """Atomically replace via a sibling temporary and return the written bytes."""
+        stream_text = StringIO()
+        YAML(typ="rt").dump(document, stream_text)
+        content = stream_text.getvalue().encode("utf-8")
         temporary: Path | None = None
         try:
             with NamedTemporaryFile(
@@ -591,11 +605,12 @@ class DocumentStore[T: BaseModel]:
                 delete=False,
             ) as stream:
                 temporary = Path(stream.name)
-                stream.write(content.getvalue().encode("utf-8"))
+                stream.write(content)
             atomic_replace(temporary, self._path)
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+        return content
 
     def _merge_patches(
         self,
@@ -647,9 +662,16 @@ class DocumentStore[T: BaseModel]:
         No lock is acquired here. Edit/refresh callers own their lock scope;
         initial construction may run while a different owner already holds it.
         """
+        size = self._path.stat().st_size
         original = self._path.read_bytes()
-        if original == self._parsed_bytes and self._parsed_document is not None:
-            raw = deepcopy(self._parsed_document)
+        key = (size, sha256(original).digest())
+        if key == self._validated_key and self._validated_read is not None:
+            # Transactions and dependency callbacks must never own the cache.
+            if self._check_dependencies is None or self._check_dependencies(
+                self._validated_read[2].model_copy(deep=True)
+            ):
+                return deepcopy(self._validated_read)
+            raw = deepcopy(self._validated_read[0])
         else:
             yaml = YAML(typ="rt")
             yaml.preserve_quotes = True
@@ -658,10 +680,6 @@ class DocumentStore[T: BaseModel]:
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         # tolerated(cast): Strict validation cannot narrow raw; its return drops round-trip nodes.
         document = cast(YamlMap, raw)
-        if original != self._parsed_bytes:
-            # Retain raw nodes, never cleanup or external validation outcomes.
-            self._parsed_document = deepcopy(document)
-            self._parsed_bytes = original
         removed: tuple[str, ...] = ()
         if self._read_cleanup is not None:
             version = validate_header(
@@ -675,14 +693,20 @@ class DocumentStore[T: BaseModel]:
         normalized, snapshot = self._model_snapshot(document)
         if removed:
             backup = self._backup_original(original)
-            self._replace_document(document)
+            original = self._replace_document(document)
             logging.getLogger(__name__).warning(
                 "%s: backed up to %s; removed entries: %s",
                 self._path,
                 backup,
                 ", ".join(removed),
             )
+        self._cache_read(original, (document, normalized, snapshot))
         return document, normalized, snapshot
+
+    def _cache_read(self, content: bytes, values: tuple[YamlMap, YamlMap, T]) -> None:
+        """Retain isolated read results only after validation and any write succeed."""
+        self._validated_read = deepcopy(values)
+        self._validated_key = (len(content), sha256(content).digest())
 
     def _backup_original(self, original: bytes) -> Path:
         """Copy pre-cleanup bytes without overwriting any existing sibling."""

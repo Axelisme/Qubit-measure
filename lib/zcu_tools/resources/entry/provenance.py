@@ -106,42 +106,59 @@ def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None
 
 
 def missing_sources(
-    provenances: Iterable[Provenance], ledger: Path, entry_id: str
+    provenances: Iterable[Provenance], ledger: Path | RecordsLedger, entry_id: str
 ) -> frozenset[str]:
     """Return all absent local event IDs after one ledger read.
 
-    ledger is this entry's ledger.jsonl path, entry_id its UUID. Manual sources
-    need no I/O. Duplicate IDs and requested attachments are checked once.
-    Ledger schema, attachment and I/O errors propagate even when other IDs are
-    absent. No results are cached; validate_sources remains the strict API.
+    ledger is this entry's ledger.jsonl path or its already scoped RecordsLedger.
+    entry_id opens path inputs; supplied handles own their scope and retain their
+    incremental index. The caller must supply the owning entry's handle.
+    Manual sources need no I/O. Duplicate IDs and requested attachments are checked
+    once. Attachments are fully read each call, never cached. Ledger schema,
+    attachment and I/O errors propagate even when other IDs are absent.
+    validate_sources remains the strict API.
     """
     sources = tuple(
         dict.fromkeys(p.source for p in provenances if p.source != "manual")
     )
     if not sources:
         return frozenset()
-    entries = RecordsLedger(ledger.parent, entry_id=entry_id).find_many(sources)
+    records = (
+        ledger
+        if isinstance(ledger, RecordsLedger)
+        else RecordsLedger(ledger.parent, entry_id=entry_id)
+    )
+    entries = records.find_many(sources)
     return frozenset(source for source, entry in entries.items() if entry is None)
 
 
 def validate_sources(
-    provenances: Iterable[Provenance], ledger: Path, entry_id: str
+    provenances: Iterable[Provenance], ledger: Path | RecordsLedger, entry_id: str
 ) -> None:
     """Validate all local sources with one ledger read, preserving input order.
 
-    ledger is this entry's ledger.jsonl path, entry_id its UUID. Manual sources
-    need no I/O. Duplicate event IDs and attachments are checked once per call.
-    Missing IDs raise MissingSourceError with the original KeyError cause;
-    ledger schema, attachment and I/O failures propagate unchanged.
+    ledger is this entry's ledger.jsonl path or an existing RecordsLedger bound
+    to that entry. entry_id is the UUID used to open a path; a supplied handle
+    already owns its scope and retains its incrementally validated event index.
+    The caller must supply the owning entry's handle, not one from another entry.
+    Manual sources need no I/O. Duplicate event IDs and attachments are checked
+    once per call. Attachments are fully read and validated on every call; only
+    ledger parsing is incremental. Missing IDs raise MissingSourceError with the
+    original KeyError cause; schema, attachment and I/O failures propagate unchanged.
     """
     sources = tuple(
         dict.fromkeys(p.source for p in provenances if p.source != "manual")
     )
     if not sources:
         return
+    records = (
+        ledger
+        if isinstance(ledger, RecordsLedger)
+        else RecordsLedger(ledger.parent, entry_id=entry_id)
+    )
     try:
-        RecordsLedger(ledger.parent, entry_id=entry_id).get_many(sources)
+        records.get_many(sources)
     except KeyError as exc:
         raise MissingSourceError(
-            f"{ledger}: source {exc.args[0]!r} does not exist"
+            f"{records.source_path}: source {exc.args[0]!r} does not exist"
         ) from exc

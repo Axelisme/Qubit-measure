@@ -6,9 +6,11 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from ruamel.yaml import YAML
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
@@ -60,6 +62,60 @@ def document() -> ModuleLibraryDocument:
                 waveforms={"base": ConstWaveformCfg(length=0.05)},
             )
         },
+    )
+
+
+@pytest.mark.parametrize("append_tail", [False, True])
+def test_nonempty_edits_parse_only_new_ledger_tail(
+    files: tuple[Path, Path], append_tail: bool
+) -> None:
+    _, ledger_path = files
+    events = tuple(
+        LedgerEvent(
+            id=str(uuid4()),
+            kind="accepted",
+            at=AT,
+            entry_id=ENTRY_ID,
+            origin="notebook",
+            payload=AcceptedPayload(
+                writes=(AcceptedWrite(path="Q1.pulses.pi.gain", value=0.25),)
+            ),
+        )
+        for _ in range(1000)
+    )
+    ledger_path.write_text("".join(event.model_dump_json() + "\n" for event in events))
+    value = document()
+    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData.from_provenance(
+        Provenance(events[0].id, "rabi", None, AT, 0.01)
+    )
+    write_document(files, value)
+    library = open_library(files)
+    # Warm the same public nonempty edit path used by repeated setters.
+    with library.edit() as draft:
+        draft.set_module("Q1.pulses.pi2", pulse(gain=0.2))
+    if append_tail:
+        with ledger_path.open("a") as stream:
+            stream.write(
+                events[0].model_copy(update={"id": str(uuid4())}).model_dump_json()
+                + "\n"
+            )
+
+    with patch.object(
+        TypeAdapter,
+        "validate_json",
+        autospec=True,
+        side_effect=TypeAdapter.validate_json,
+    ) as parsed:
+        for gain in (0.3, 0.4):
+            with library.edit() as draft:
+                draft.set_module("Q1.pulses.pi2", pulse(gain=gain))
+
+    assert library.snapshot().module_spec("Q1.pulses.pi2") == pulse(gain=0.4)
+    assert library.snapshot().meta("Q1.pulses.pi.gain") == Provenance(
+        events[0].id, "rabi", None, AT, 0.01
+    )
+    assert parsed.call_count == int(append_tail), (
+        "validated ledger history must not be reparsed by nonempty edits"
     )
 
 
@@ -503,6 +559,43 @@ def test_unchanged_library_bytes_recheck_attachments_without_reparsing_yaml(
         reload_library()
     assert load.call_count == 0
     assert library.snapshot().meta("Q1.pulses.pi.gain") is not None
+
+
+@pytest.mark.parametrize("action", ["refresh", "edit"])
+def test_unchanged_library_checks_dependencies_without_reading_attachment_content(
+    files: tuple[Path, Path], action: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = local_source(files)
+    value = document()
+    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData.from_provenance(source)
+    write_document(files, value)
+    library = open_library(files)
+    attachment = files[1].parent / f"{EVENT_ID}.json"
+    read_text = Path.read_text
+    attachment_reads: list[Path] = []
+
+    def observe_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == attachment:
+            attachment_reads.append(path)
+        return read_text(path, encoding="utf-8")
+
+    monkeypatch.setattr(Path, "read_text", observe_read)
+
+    def reload_library() -> None:
+        if action == "refresh":
+            library.refresh()
+        else:
+            with library.edit():
+                pass
+
+    reload_library()
+    reload_library()
+    assert attachment_reads == []
+    # Removing an event invalidates a cached library even when its bytes match.
+    files[1].unlink()
+    reload_library()
+    assert library.snapshot().module_keys() == ("Q1.pulses.pi2",)
+    assert library.snapshot().meta("Q1.pulses.pi.gain") is None
 
 
 def test_rename_preserves_complete_metadata_and_segment_boundaries() -> None:

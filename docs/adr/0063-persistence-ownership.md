@@ -118,9 +118,13 @@ Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic 
 
 參數容器框架只消費已註冊的 model 與角色宣告。具體 kinds、欄位與內建角色由 `zcu_lab.components` 擁有。Lib 外的組合根顯式傳入共用 ComponentRegistry，在 startup 註冊，不在 import 或 reload 時註冊。`.importlinter` 的 `entry-definitions-composition-only` 與 `framework-no-user` 禁止框架反向 import 定義。使用者 model 可用 validator 處理舊欄位；框架不猜兼容規則。
 
+2026-10-23 使用者對以下寫入慣例回覆「認同」：一次使用者動作、每份文件一筆交易，不承諾跨文件原子提交。Owner 寫入 API 以「一份文件的一組變更」為原形，單項寫入是長度 1 的批次，避免逐項重開同份文件、驗證與提交。
+
 DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。一般讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 的讀檔轉換在下一次 commit 寫回，未改節點保留原樣。
 
 ModuleLibrary 是讀取可寫檔的明確例外。Library owner 先驗 header、容器與可定址名稱，再逐條驗證 Spec 及所屬 provenance。壞 Spec、entry-local provenance 或不存在的本地事件使該 root 及附屬來源被移除，不影響合法兄弟。孤立或不可定址的 provenance、header 或容器錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤傳遞，不降級為壞條目。
+
+Library bytes 未變時，DocumentStore 不重 parse YAML、不重跑 Pydantic、cleanup 或完整 validate。Library owner 仍對快照內全部 provenance source 做依賴存在性檢查，以 ledger 的 event 索引確認事件存在，並對 attachment 做 stat；這不重驗未變 library 內容或附檔內容。依賴全部存在才沿用已驗證快照，bytes 改變或任一依賴缺失則走完整驗證、清理、備份與錯誤傳遞路徑。不存在的本地事件仍使所屬 root 移除，附檔缺失仍在當次讀取立即失敗，不等 library bytes 改變才回報。
 
 DocumentStore 的同一把 sidecar lock 涵蓋初始讀取、refresh、edit 進入及 commit 重讀的清理。清理候選通過完整驗證後，store 先將完整原檔逐 byte 複製成同目錄、不覆寫既有檔案的時間戳 .bak，再以 sibling temporary 與 atomic replace 清理主檔。成功後只寫一行 warning，列出備份路徑與移除 roots。合法檔與 header-only 不重寫；snapshot 仍只讀合法的已發布記憶體，不新增 GUI／MCP 顯示。
 

@@ -36,6 +36,7 @@ from zcu_tools.cfg_model import (
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
 from ..document_store import DocumentChange, DocumentValue
+from ..entry.ledger import RecordsLedger
 from ..entry.provenance import Provenance, ProvenanceData, validate_sources
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
@@ -79,10 +80,13 @@ class ModuleLibraryDocument(BaseModel):
     components: dict[str, ComponentLibrary] = Field(default_factory=dict)
     provenance: dict[str, ProvenanceData] = Field(default_factory=dict)
 
-    def validate_content(self, *, ledger: Path, entry_id: str) -> None:
+    def validate_content(self, *, ledger: Path | RecordsLedger, entry_id: str) -> None:
         """Validate persistent keys, Specs and local source evidence, without mutation.
 
-        ledger is the owning entry's records/ledger.jsonl; entry_id is its UUID.
+        ledger is the owning entry's records/ledger.jsonl path or its scoped
+        RecordsLedger handle. entry_id opens path inputs; handles already own
+        their entry scope and incremental index. Supplied handles must belong
+        to this document's entry. Every call fully validates source attachments.
         Reject invalid names, non-YAML values, invalid Spec source paths or missing
         local events. Ledger schema/attachment/I/O errors propagate. Manual sources
         do not consult the ledger. References and assets are not materialized.
@@ -515,7 +519,7 @@ class LibrarySnapshot:
 def _validate_document(
     document: ModuleLibraryDocument,
     *,
-    ledger: Path,
+    ledger: Path | RecordsLedger,
     entry_id: str,
 ) -> None:
     """Validate persistent Specs, addressable sources and local source evidence."""
@@ -551,13 +555,17 @@ class LibraryEdit:
         document: ModuleLibraryDocument,
         *,
         assets: WaveformAssetInfo | None,
-        ledger: Path,
+        ledger: Path | RecordsLedger,
         entry_id: str,
     ) -> None:
         """Bind a Store-owned draft and its scope; callers receive this from edit().
 
         document is the mutable draft, not the published snapshot. assets,
-        ledger and entry_id are the owning handle's fixed capabilities.
+        ledger and entry_id are the owning handle's fixed capabilities. ledger
+        accepts its scoped RecordsLedger or its records/ledger.jsonl path;
+        entry_id opens path inputs. Supplied handles must belong to this entry.
+        Candidate validation always reads source attachment contents, while a
+        retained handle reuses only its incrementally validated event index.
         ModuleLibrary expires this object when its with body exits.
         """
         self._document = document
@@ -702,7 +710,7 @@ class ModuleLibrary:
         """
         self._path = path.resolve()
         self._assets = assets
-        self._ledger = ledger.resolve()
+        self._ledger = RecordsLedger(ledger.resolve().parent, entry_id=entry_id)
         self._entry_id = entry_id
         # Defer composition: the store policy uses the document models above.
         from .library_store import open_library_store
