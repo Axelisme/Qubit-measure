@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.remote.wire import Request
 from zcu_tools.gui.session.context_types import EntryRequest
@@ -257,7 +258,11 @@ def test_results_figure_rejects_nonindexed_selectors(
 def test_results_figure_rejects_malformed_requests(
     results_rpc: ResultsRpc, params: dict[str, object]
 ) -> None:
-    assert results_rpc.error("results.figure", params)["code"] == "invalid_params"
+    with pytest.raises(RemoteError) as caught:
+        results_rpc.remote.route(
+            results_rpc.link, Request("results-test", "results.figure", params)
+        )
+    assert caught.value.code == ErrorCode.INVALID_PARAMS
 
 
 def test_results_figure_preserves_unexpected_file_read_failure(
