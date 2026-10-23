@@ -175,6 +175,7 @@ tries the next candidate in the following graph.
 | No drive, fixed or quantized varying flux without continuous waveform motion | `t4`, analytic secular propagation with basis changes between flux levels. The varying-flux path is also called T5, not a separate kernel. |
 | No drive, continuous waveform motion inside the row | `adiabatic_map`, population-preserving transport in instantaneous endpoint eigenbases. Gauss-Legendre quadrature integrates continuous energies from `FluxExpansion`; the quantized row bath supplies coherence decay. Ordered overlaps retain endpoint gauge and geometric phase. |
 | Driven continuous flux | `flux_dop853`, continuous Hamiltonian evaluation from `FluxExpansion`, with baths switching at quantized segment boundaries. |
+| One constant tone, `abs(f) < 0.03 GHz` | `slow_envelope`, midpoint full-Hamiltonian exponentials with secular Strang bath half-steps. DC uses one step. |
 | One constant tone, unshared driven input, duration at most 10 us | `single_tone_rwa` → `floquet_period` → `dyson` → `t6`. |
 | Other single constant tone | `dyson` → `single_tone_rwa` → `floquet_period` → `t6`. Dyson checks perturbative ratios and an analytic B2 bound, except that certified no-drive prefixes need no B2 check. Source and shared-prefix densities supply known inputs; other later rows use an arbitrary-input bound. |
 | One shaped tone | Choose canonical `single_tone_gate` keys in the lowest estimated mixed gate/Sambe cold plan using source-cumulative usage through the complete current acquire. Rejected or unamortized rows try `shaped_sambe`, without a reuse threshold. Remaining rows try `gate_cache`, `period_table` and `dop853` in acquire-wide amortized-cost order. |
@@ -183,9 +184,18 @@ tries the next candidate in the following graph.
 
 Expanded-RWA preparation is amortized over the complete acquire and source-cumulative exact prepare-key usage, not resident cache warmth. Prefix and worker subsets borrow the same plan. Exact-result memoization includes the selected route. Source usage counts distinct acquire content's complete row inventories, not repeated identical playback.
 
+`slow_envelope` uses `ModelSource.slow_envelope_segments_per_period`, a strict
+positive integer with default 20. A row has `max(1, ceil(duration_ns/(T_ns/segments)))`
+equal steps, where `T_ns = 1/abs(f_GHz)`. Its keys include the policy, phase, gain, duration, shift, level and
+port. Preparations store immutable density-independent unitaries and bath maps.
+The calibrated population tolerance is 1e-2, with about 1e-4 or less measured on
+21-level Q1 and a 1e-3 synthetic regression limit. It does not adapt to budget
+or certify arbitrary pulse strengths and coherences. Other constant tones retain
+the candidate order below.
+
 `t4` and `t6` are terminal in their domains. They must accept every dispatched
 no-tone or single constant-tone row respectively. They have no DOP853 fallback.
-The internal [registry](kernels/__init__.py) contains 16 families. T7 is the
+The internal [registry](kernels/__init__.py) contains 17 families. T7 is the
 single-tone `dyson` family; the two-tone `floquet` family has its own modal
 second-order Dyson implementation. Production `dop853` is terminal for valid
 ordinary rows. The direct-first two-tone chain retains its Floquet tail only
