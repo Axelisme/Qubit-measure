@@ -89,7 +89,8 @@ def write_yaml(source: Path, document: object) -> None:
 
 @pytest.mark.parametrize("missing", ["point.yaml", "module_cfg.yaml"])
 def test_use_point_classifies_required_document_absence(
-    entry: ResultEntry, missing: str,
+    entry: ResultEntry,
+    missing: str,
 ) -> None:
     entry.new_point("incomplete")
     (entry.result_path / "points" / "incomplete" / missing).unlink()

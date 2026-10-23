@@ -262,7 +262,8 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
 
 @pytest.mark.parametrize("fault", ["missing", "corrupt"])
 def test_native_load_missing_source_is_reported_but_corruption_preserves_previous_result(
-    role_load_session: NativeSaveSession, fault: str,
+    role_load_session: NativeSaveSession,
+    fault: str,
 ) -> None:
     session = role_load_session
     tab = session.state.get_tab("tab")
@@ -286,15 +287,18 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
         captured_parameters=session.capture_parameters,
     )
     if fault == "corrupt":
-        source = session.entry.result_path / "points" / str(history.point) / "point.yaml"
+        source = (
+            session.entry.result_path / "points" / str(history.point) / "point.yaml"
+        )
         source.write_text("format: invalid\\n", encoding="utf-8")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="format"):
             service.load_result("tab", str(session.native_data_path))
         assert tab.run is previous
     else:
         outcome = service.load_result("tab", str(session.native_data_path))
         assert "Historical point 'missing' is unavailable" in str(
-            outcome.analysis_source_issue)
+            outcome.analysis_source_issue
+        )
         assert tab.run.analysis_source_issue == outcome.analysis_source_issue
         assert tab.run.parameters is None
         assert require_metadata(tab.run).snapshot == broken
@@ -396,13 +400,12 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
-    reasons = {
+    assert loaded.analysis_source_issue == {
         "foreign": "Historical entry differs from the opened entry",
         "empty": "No active context is available",
         "pointless": "Historical metadata has no point",
-    }
-    assert loaded.analysis_source_issue == reasons[source]
-    assert tab.run.analysis_source_issue == reasons[source]
+    }[source]
+    assert tab.run.analysis_source_issue == loaded.analysis_source_issue
     assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
     assert tab.run.parameters is None

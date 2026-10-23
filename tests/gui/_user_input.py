@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMainWindow,
     QMenu,
     QPlainTextEdit,
     QScrollArea,
@@ -1159,6 +1160,7 @@ class ComponentDriver:
 
         Visible dialogs are grabbed separately beside it as ``<stem>-dialog-N.png``
         because top-level dialog windows are not included in QWidget.grab().
+        Owned top-level main windows are saved as ``<stem>-window-N.png``.
         The active visible popup belonging to this window is saved separately as
         ``<stem>-popup.png``. Other windows' popups are never captured.
         Raises OSError if Qt cannot save any image.
@@ -1172,6 +1174,11 @@ class ComponentDriver:
             )
             if not widget.grab().save(str(output), "PNG"):
                 raise OSError(f"Could not save screenshot: {output}")
+        for index, window in enumerate(self._window.findChildren(QMainWindow), 1):
+            if window.isVisible() and window.isWindow():
+                output = path.with_stem(f"{path.stem}-window-{index}")
+                if not window.grab().save(str(output), "PNG"):
+                    raise OSError(f"Could not save screenshot: {output}")
         popup = QApplication.activePopupWidget()
         if popup is not None and popup.isVisible():
             # isAncestorOf excludes child windows, so follow Qt's public parent chain.
