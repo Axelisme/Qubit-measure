@@ -72,4 +72,5 @@ def build_request(
         point_names=names,
         reps=loops["reps"],
         templates=templates,
+        relax_delay_us=prog.cfg_model.relax_delay,
     )

@@ -160,3 +160,4 @@ numerics:
     max_step_ns: 0.1
     bath_segment_ns: 2.0 # nearest 2 ns, at least one tick
   seed: 123
+  time_scale: 1.0

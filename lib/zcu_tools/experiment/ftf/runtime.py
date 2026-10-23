@@ -556,7 +556,7 @@ def ftf(
     private_replay: Path | None = None,
     workers: int = 1,
     warmup: bool | EnvironmentWarmup = False,
-    min_round_duration_s: float | None = None,
+    time_scale: float | None = None,
 ) -> SimulationEnvironment:
     """Build a fixed-profile FTF environment from named values or a YAML path.
 
@@ -580,11 +580,12 @@ def ftf(
     instead. It must not
     sample or mutate live devices. env.wait_ready() waits before caller timing;
     acquire also waits automatically. Failure status permits on-demand compiling.
-    min_round_duration_s overrides numerics.min_round_duration_s (default 0.2 s)
-    for successful binding rounds, including snapshot/execution time. None uses
+    time_scale overrides numerics.time_scale (default 1.0 = physical time)
+    for binding rounds, including snapshot/execution time. None uses
     settings; finite nonnegative values override them. Zero disables pacing for
     profiling/benchmarks without changing numeric settings or sampling. Slow rounds
-    and failed calls do not wait. Invalid durations raise ValueError.
+    and failed calls do not wait. Stop interrupts pacing at 10 ms checkpoints.
+    Invalid scales raise ValueError.
     numerics.telemetry.enabled defaults to True. Use
     settings.with_telemetry(enabled=False) for profiles/benchmarks without routing
     timers or I/O. numerics.telemetry.directory defaults to None, selecting
@@ -655,10 +656,8 @@ def ftf(
             coordinator.execute,
             backend_version=BACKEND_VERSION,
             seed=settings.numerics.seed,
-            min_round_duration_s=(
-                settings.numerics.min_round_duration_s
-                if min_round_duration_s is None
-                else min_round_duration_s
+            time_scale=(
+                settings.numerics.time_scale if time_scale is None else time_scale
             ),
             callbacks=SimulationCallbacks(
                 wait_ready=None if preparation is None else preparation.wait_ready,
