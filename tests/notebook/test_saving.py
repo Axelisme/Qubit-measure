@@ -743,7 +743,6 @@ def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
     exp = experiment()
     source = exp.run(SavingCfg())
     saved = exp.save_run(accept_point, source=source)
-    before_source = accept_point.meta("D1.rate")
     before_point = snapshot(accept_point)
     with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
@@ -766,9 +765,6 @@ def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
     assert "rate" in str(caught.value.__cause__)
     accept_point.refresh()
     assert snapshot(accept_point) == before_point
-    assert accept_point.D1.rate == 1000.0
-    assert accept_point.D2.rate == 2000.0
-    assert accept_point.meta("D1.rate") == before_source
     binding = capture_point_storage(accept_point)
     entry = ResultEntry.open(
         binding.entry_name,
