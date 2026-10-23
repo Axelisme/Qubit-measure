@@ -23,7 +23,7 @@ Probe starts from the `res_probe` template using `$resonator.freq` and
 `$resonator.wiring.ch`, with a 1 us constant pulse. Readout uses
 `$qubit.module.readout` when present, otherwise the `readout` template. The
 readout template needs resonator frequency, generator/ADC wiring and
-`$resonator.ext.time_of_fly`. Missing required sources stay Invalid; select a
+`$resonator.time_of_fly`. Missing required sources stay Invalid; select a
 valid module or fill the inline fields before Run.
 
 The initial gain range is 0 to 1 with 151 points. Reps starts at 1000 and Rounds

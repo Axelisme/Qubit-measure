@@ -28,8 +28,8 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
             },
             "sweep": {"length": Range.between(0.01, 3.5, expts=51)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "reps": 10000,
-            "rounds": 1,
+            "reps": 1000,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

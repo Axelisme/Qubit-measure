@@ -40,10 +40,27 @@ class MuxGroupSchema(BuiltinComponent):
     distinct qubit names. Lab Forms validate component kinds and each qubit's
     resonator against their fixed capture before Run. Reordering either list
     never changes this group's inherited module slots or ext ownership.
+    time_of_fly stores this mux route's measured flight time in us, or None
+    until known. Resonator pulse-route flight times are separate.
     """
 
     wiring: MuxWiringSchema = Field(
         description="Mux generator and ADC wiring in full resonator order."
+    )
+    mixer_freq: float | None = Field(
+        default=None,
+        strict=True,
+        allow_inf_nan=False,
+        json_schema_extra={"unit": "MHz"},
+        description="Mux generator mixer (LO) frequency in MHz; None until known.",
+    )
+    time_of_fly: float | None = Field(
+        default=None,
+        strict=True,
+        allow_inf_nan=False,
+        ge=0,
+        json_schema_extra={"unit": "us"},
+        description="Mux route flight time in us; None until measured.",
     )
     resonators: list[str] = Field(
         min_length=1,

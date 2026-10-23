@@ -40,7 +40,7 @@ Check the minimum duration and sweep spacing on the actual generator's clock gri
 Relax delay uses the same endpoint. Missing or null T1 uses a 30 us time scale,
 giving 150 us. Stored invalid T1 leaves the derived fields empty.
 These editable timing estimates affect this form only; stored calibration retains
-its values. Reps start at 1000 and rounds at 100. Reset refreshes sources and
+its values. Reps start at 1000 and rounds at 10. Reset refreshes sources and
 discards edits. After editing aliases, use Reset to refresh an already open form.
 
 ## Run and analyze

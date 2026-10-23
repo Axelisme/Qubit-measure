@@ -33,6 +33,6 @@ def make_form(ctx: FormContext) -> Form[IRBCfg]:
             "n_seeds": 20,
             "target_gate": "X90",
             "reps": 1000,
-            "rounds": 1,
+            "rounds": 10,
         },
     )

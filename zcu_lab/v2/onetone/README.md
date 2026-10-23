@@ -12,7 +12,7 @@
 [`range_find`](range_find/guide.md) 掃大範圍絕對 MHz、找多個凹陷並提議各 resonator 的 `freq`。
 Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Template 建立初值。
 
-- `kappa` 使用 MHz，時間使用 us。
+- `kappa` 使用 MHz，時間使用 us。TOF 讀 resonator 頂層 `$resonator.time_of_fly`，不從 ext 讀取。缺失或 null 時，trigger 與 pulse length 留空必填。
 - 未設 `kappa`（缺 leaf 或 null）時，`trig_offset = time_of_fly`。
   已設時，`trig_offset = time_of_fly + 5 / (2 * pi * kappa)`。
   `kappa = 1 MHz` 時，等待增量約為 `0.795775 us`。

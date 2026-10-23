@@ -35,7 +35,7 @@ def initial_readout_timing(ctx: FormContext) -> dict[str, TemplateSeed]:
         raise ValueError("One-tone timing requires a parameter capture")
     source = ctx.parameters.lookup_point("$resonator.kappa")
     kappa = source.value
-    trigger = "$resonator.ext.time_of_fly"
+    trigger = "$resonator.time_of_fly"
     if source.present and kappa is not None:
         if (
             isinstance(kappa, bool)
@@ -61,7 +61,7 @@ def initial_spectrum_tree(ctx: FormContext) -> dict[str, FormNode]:
 
     ctx supplies the fixed resonator capture used for timing and sweep expressions.
     Run supplies the hidden readout frequency. Return a fresh tree with 301 points
-    over freq ± 1.5*kappa, gain 0.05, 100 reps/rounds and 1 us relax delay.
+    over freq ± 1.5*kappa, gain 0.05, 1000 reps, 10 rounds and 1 us relax delay.
     Timing source failures propagate from initial_readout_timing.
     """
     return {
@@ -81,7 +81,7 @@ def initial_spectrum_tree(ctx: FormContext) -> dict[str, FormNode]:
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=301)
         },
         "relax_delay": 1.0,
-        "reps": 100,
-        "rounds": 100,
+        "reps": 1000,
+        "rounds": 10,
         "initial_delay": Hidden(),
     }

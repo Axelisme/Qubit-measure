@@ -8,7 +8,7 @@ The 2D sweep varies an external flux-bias device value and readout frequency to 
 
 ## Parameter sources
 
-Opening a tab or pressing Reset takes a fixed copy of the current parameters and evaluates starting expressions once into editable input values. The frequency sweep starts with 101 points at `$resonator.freq` ± `$resonator.kappa`, in MHz. The readout uses `$resonator.freq`, `$resonator.wiring.ch`, and `$resonator.wiring.ro_ch` for its frequency and channels. The ADC window starts at `$resonator.ext.default_probe_length` minus 0.1 us, and trigger timing starts at `$resonator.ext.time_of_fly` plus 0.05 us.
+Opening a tab or pressing Reset takes a fixed copy of the current parameters and evaluates starting expressions once into editable input values. The frequency sweep starts with 101 points at `$resonator.freq` ± `$resonator.kappa`, in MHz. The readout uses `$resonator.freq`, `$resonator.wiring.ch`, and `$resonator.wiring.ro_ch` for its frequency and channels. The ADC window starts at 0.99 us. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` us when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 us and trigger plus the ADC window.
 
 The flux sweep starts with 101 points from 1.1 × `$qubit.flux_int` − 0.1 × `$qubit.flux_half` to 1.1 × `$qubit.flux_half` − 0.1 × `$qubit.flux_int`, in the selected device unit. Missing or invalid required sources leave the affected fields empty and Invalid, blocking the run until valid values are supplied. For first bring-up before calibration, enter safe, user-approved frequency and flux bounds.
 

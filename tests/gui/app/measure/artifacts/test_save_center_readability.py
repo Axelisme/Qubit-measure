@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtGui import QPalette
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QTextEdit
 from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifacts import ArtifactDeclaration, ArtifactSaveCenter
 from zcu_tools.gui.app.measure.controller import Controller
@@ -232,9 +232,13 @@ def test_reports_show_inline_symbols_and_summary(saving_view, failed) -> None:
     labels = center.findChildren(QLabel)
     assert sum(label.text() == "✓" for label in labels) == (1 if failed else 2)
     if failed:
-        failure = next(label for label in labels if label.text().startswith("✗"))
-        assert "copy denied" in failure.text()
-        assert failure.wordWrap()
+        failure = next(
+            text
+            for text in center.findChildren(QTextEdit)
+            if text.toPlainText().startswith("✗")
+        )
+        assert "copy denied" in failure.toPlainText()
+        assert failure.isReadOnly()
     message = window.get_view_snapshot()["status"]
     assert session.metadata.run_id in message
     assert ("Saved 1 of 2 files; 1 failed" if failed else "Saved 2 files") in message

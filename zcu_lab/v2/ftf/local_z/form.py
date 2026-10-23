@@ -24,6 +24,8 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
     return Form(
         LocalZCfg,
         tree={
+            "reps": 1000,
+            "rounds": 10,
             "roles": roles,
             "modules": {
                 "x90_f1": Slot("$f1.module.x90", copy=True),

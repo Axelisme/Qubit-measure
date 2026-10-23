@@ -35,18 +35,22 @@ components:
     flux_unit: A
   R1:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7190.0 # MHz; model resonator r1 is 7.19 GHz.
     wiring:
       ch: 0
       ro_ch: 0
   R2:
     kind: resonator
+    time_of_fly: null # us; measure the single-tone readout route.
     freq: 7080.0 # MHz; model resonator r2 is 7.08 GHz.
     wiring:
       ch: 0
       ro_ch: 0
   MG12:
     kind: group/mux
+    mixer_freq: 7135 # MHz; mux generator LO setting.
+    time_of_fly: null # us; mux route, separate from resonator pulse routes.
     resonators: [R1, R2]
     qubits: [Q1, Q2]
     wiring:

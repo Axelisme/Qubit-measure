@@ -28,6 +28,6 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
             "initial_delay": Hidden(),
             "uniform": True,
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
         },
     )

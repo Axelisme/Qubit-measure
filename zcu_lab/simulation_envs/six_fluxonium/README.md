@@ -2,6 +2,10 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
+**Last updated:** 2026-10-23, group mixer and top-level time_of_fly.
+
+For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
+
 This environment has six uncoupled fluxonium qubits, one global DC source and
 six readout cavities. Each qubit has its own microwave line and its own DC flux
 offset and period. Changing the shared current changes all six qubits' flux.
@@ -94,8 +98,15 @@ Do not treat the physical YAML's parameters as a measured calibration.
 The template intentionally leaves calibration-dependent inputs incomplete.
 For `range_find`, supply the absolute frequency sweep, readout waveform length
 and trigger offset. The initial trigger expression has no measured
-`resonator.ext.time_of_fly` to read. For blank mux readout, supply mixer frequency,
-pulse length and ADC window, then review the trigger offset and all six tones.
+`resonator.time_of_fly` to read. Blank mux readout seeds its mixer from
+`$mux.mixer_freq`, 7250 MHz in this template. Missing or null mixer stays required
+and blank, independently of tone frequencies and kappa.
+The group's `time_of_fly: 0.4` us corresponds to the receivers' 400 ns delay.
+For `mux/onetone_fine`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`;
+the ADC window starts at 1.0 us and pulse length at trigger plus that window.
+Missing group TOF or any kappa leaves trigger and pulse length required and blank.
+Other mux forms still need pulse length and ADC window. Review all six tones
+and timing before Run. A readout slot keeps its mixer and existing timing rules.
 A qubit experiment also needs valid inputs for every tone, including tones
 excluded from Participants. Inspect form diagnostics before Run.
 

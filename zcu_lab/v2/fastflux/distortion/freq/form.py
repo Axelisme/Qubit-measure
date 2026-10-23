@@ -34,8 +34,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             },
             "readout_t": 2.0,
             "relax_delay": 1.0,
-            "reps": 100,
-            "rounds": 100,
+            "reps": 1000,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

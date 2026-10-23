@@ -35,7 +35,7 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
             "skew_penalty": 0.0,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=1),
             "reps": 1000,
-            "rounds": 1,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

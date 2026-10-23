@@ -10,7 +10,7 @@ Open and Reset take a snapshot of the current aliases, parameters and module cho
 
 Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
 The length sweep runs from 0.03 us to 4*pi_len. A missing or null stored pi_len uses a 1 us stop, including for arbitrary waveforms whose scalar length is absent. An invalid stored pi_len leaves the required stop empty for correction. A valid pi_len is a finite positive number, with booleans treated as invalid.
 

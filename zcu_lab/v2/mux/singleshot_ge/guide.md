@@ -55,7 +55,7 @@ error. The raw clouds remain evidence of acquisition, not accepted fidelity.
 
 ## Measurement and analysis
 
-Reps and rounds are fixed at one in the Form.
+The Form exposes shots, not reps or rounds. The core uses reps=shots and rounds=1.
 Shots sets the number of raw acquisitions in each probe-off/on preparation.
 Each tone's optional init pulse runs in both preparations on its drive generator.
 

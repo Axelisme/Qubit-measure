@@ -30,7 +30,7 @@ def make_form(ctx: FormContext) -> Form[OneToneFluxCfg]:
                 ),
             },
             "relax_delay": 0.1,
-            "reps": 100,
+            "reps": 1000,
             "rounds": 10,
             "initial_delay": Hidden(),
         },
