@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-24，只讀身分、ledger 快照與 point alias write-through
+**Last updated:** 2026-10-24，唯讀歷史事件 capability 與 point alias write-through
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -86,6 +86,8 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 Acquired 只保存 run 身分、tab、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 
+`ResultEntry.read_events_snapshot(name, *, result_root)` 封裝歷史 entry 的身分、records 路徑與 ledger 讀取。它不解析 component，也不建立 entry、檔案或 lock。缺 entry、records 或 ledger 回空 tuple；已有 entry 的身分、ledger schema 與 I/O 錯誤傳遞，重導路徑的 symlink 拒絕。
+
 `RecordsLedger.read_events_snapshot()` 供唯讀瀏覽完整事件清單，不取得或建立 sidecar lock。它沿用 events 的 schema、entry identity、重複 ID 與完整尾行驗證，不讀附檔，也不更新 handle 的增量索引。並行 append 的未完成尾行會報錯，caller 可稍後重新查詢。
 
 其餘讀取與追加都持同一 resolved path 的 sidecar lock。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。`dependencies_exist(event_ids)` 在同鎖內更新索引並 stat 每個不同 ID 的本地附檔，不讀取或驗證附檔 JSON。全部存在回 True，缺失回 False，其他 ledger、lock 與 I/O 錯誤傳遞；空 tuple 回 True 且不作 I/O。需要附檔內容驗證時使用 get、get_many 或 find_many。
@@ -106,7 +108,7 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 
 `ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。Figure 圖名為 `<section>_<name>_<member_name>`，各 token 原樣保留底線與 percent。每次保存選集使用新的 SaveLayout；同一 instance 中，不同 figure key 算到相同輸出路徑時，會拋出 ValueError 並列出路徑與兩個 key，不自動改名。同 key 可重算。Analysis 使用安全的 member_name 作檔名，producer 傳入 pane 名稱；section／artifact name 不參與 JSON 路徑。同 pane 可以跨 artifact 共用目的地，保存依選集順序覆寫。Data 與 analysis 不套用 figure 的碰撞檢查，不做批次內容去重或路徑衝突預檢。Symlink 不能讓目的地離開 entry root。
 
-`SaveLayout.run_path` 回傳 exact absolute run 目錄，不建立檔案。唯讀索引用它將 acquired 事件對應到圖檔-only run，不自行重組儲存版面。
+`SaveLayout.run_path` 回傳 exact absolute run 目錄，不建立檔案。歷史索引用 acquired 的完整 run_id 後綴對應圖檔-only run；儲存前綴是啟動名稱，不保證等於 metadata 的 experiment tag。
 
 Run 目錄為 `Database/<name>/runs/<experiment>_<run_id>/`，使用完整 run_id。Data 回傳其中的 data.h5 與當地日期樹內的 Labber 新檔名 `<experiment>_<id6>_<序號>.hdf5`。實驗名中的 `/` 轉 `_`，其餘沿用安全路徑段驗證。Id6 取 run_id 後六碼，短於六碼時保留全部。序號從 1 起避讓既有檔案。
 

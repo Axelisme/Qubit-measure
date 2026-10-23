@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import Enum
 
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QPoint, Qt
@@ -21,11 +22,29 @@ from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsI
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
+class ResultImageAction(Enum):
+    """Saved-image commands, independent of menu captions.
+
+    COPY_PATH copies the exact member path; ADD_TO_COMPARISON pins its run and
+    selected member; COPY_IMAGE copies decoded PNG pixels to the clipboard.
+    Values are stable command identifiers, never presentation text.
+    """
+
+    COPY_PATH = "copy_path"
+    ADD_TO_COMPARISON = "add_to_comparison"
+    COPY_IMAGE = "copy_image"
+
+
 class ResultImage(QLabel):
-    """Clickable raster preview; left click selects, right click opens member actions."""
+    """Clickable PNG raster; invalid PNG bytes raise ValueError.
+
+    activated emits on left click. action_requested emits one ResultImageAction
+    on context-menu selection; dismissing the menu emits nothing. The receiver
+    owns command execution; this widget only presents and requests actions.
+    """
 
     activated = pyqtSignal()
-    action_requested = pyqtSignal(str)
+    action_requested = pyqtSignal(ResultImageAction)
 
     def __init__(self, png: bytes, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -57,11 +76,19 @@ class ResultImage(QLabel):
 
     def _context_menu(self, point: QPoint) -> None:
         menu = QMenu(self)
-        for caption in ("Copy path", "Add to comparison", "Copy image"):
-            menu.addAction(caption)
-        action = menu.exec(self.mapToGlobal(point))
-        if action is not None:
-            self.action_requested.emit(action.text())
+        actions = [
+            (menu.addAction(caption), command)
+            for caption, command in (
+                ("Copy path", ResultImageAction.COPY_PATH),
+                ("Add to comparison", ResultImageAction.ADD_TO_COMPARISON),
+                ("Copy image", ResultImageAction.COPY_IMAGE),
+            )
+        ]
+        selected = menu.exec(self.mapToGlobal(point))
+        for action, command in actions:
+            if selected is action:
+                self.action_requested.emit(command)
+                break
         menu.deleteLater()
 
 
@@ -79,14 +106,25 @@ class ResultsGallery(QScrollArea):
         self,
         runs: tuple[ResultRun, ...],
         activate: Callable[[ResultRun, str], None],
-        action: Callable[[ResultRun, str, str], None],
+        action: Callable[[ResultRun, str, ResultImageAction], None],
         *,
         all_figures: bool = False,
     ) -> None:
         """Replace cards with each run's first PNG, or all PNGs when all_figures.
 
+        runs contains indexed runs from this gallery's ResultsIndex. By default
+        show each run's first indexed PNG; all_figures=True shows every member.
         Runs without PNGs have no card. Unreadable members retain their filename
-        and error. Left clicks call activate; context-menu actions call action.
+        and error instead of an interactive image.
+
+        Left clicks call activate(run, filename). Context-menu selections call
+        action(run, filename, command), where command is COPY_PATH,
+        ADD_TO_COMPARISON or COPY_IMAGE from ResultImageAction. filename is the
+        exact indexed PNG basename, suitable for ResultsIndex.read_figure.
+        Callbacks run synchronously on the Qt owner thread and may change focus,
+        replace this presentation, pin the run/member or copy its path/pixels.
+        This gallery does not execute commands or write saved results. Callback
+        exceptions are not caught; dismissing the menu invokes no callback.
         """
         old = self.takeWidget()
         if old is not None:

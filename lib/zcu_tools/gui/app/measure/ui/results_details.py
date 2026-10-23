@@ -24,7 +24,8 @@ def _lines(value: object, prefix: str = "") -> list[str]:
 def result_details(index: ResultsIndex, run: ResultRun) -> str:
     """Project one run's documents without cfg values/analysis summary root prefixes.
 
-    Parameters remain a separate named section. Per-document read failures are
+    Saved cfg_type/schema_version and analysis parameters have separate sections.
+    Per-document read failures are
     displayed beside the affected filename rather than hiding the run.
     """
     sections = [
@@ -42,7 +43,11 @@ def result_details(index: ResultsIndex, run: ResultRun) -> str:
         except (OSError, ValueError, KeyError) as error:
             sections.append(f"Cfg: {error}")
         else:
-            sections.extend(["\nCfg", *_lines(cfg.get("values", cfg))])
+            sections.append("\nCfg identity")
+            for field in ("cfg_type", "schema_version"):
+                if field in cfg:
+                    sections.append(f"{field} = {cfg[field]}")
+            sections.extend(["\nCfg values", *_lines(cfg.get("values", cfg))])
     for path in run.analysis_paths:
         try:
             document = index.read_analysis(run.key, path.name)

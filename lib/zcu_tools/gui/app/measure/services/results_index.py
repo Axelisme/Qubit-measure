@@ -3,7 +3,6 @@
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
 
@@ -15,9 +14,7 @@ from zcu_tools.experiment.native_persistence import read_run_metadata
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerEvent,
-    RecordsLedger,
     ResultEntry,
-    SaveLayout,
     validate_path_segment,
 )
 from zcu_tools.resources.entry.aliases import AliasValue
@@ -121,7 +118,9 @@ def scan_results(
     None selects all Database entries; entries limits to safe single-segment
     names (invalid names raise ValueError). Missing roots produce no runs.
     Inspect run directories even without native data; no ledger-only acquisitions
-    are listed. Preserve unknown identities rather than parsing directory names.
+    are listed. Without readable native metadata, match acquired events by the
+    complete _<run_id> directory suffix, regardless of the adapter name prefix.
+    Preserve unknown identities rather than guessing experiment or time from names.
     Isolate malformed native/doc files in ResultRun.issues. Ledger/schema errors
     propagate. Escaping symlinks raise ValueError. Never create files or locks.
     """
@@ -181,41 +180,14 @@ def _read_json(path: Path) -> JsonObject:
         raise ValueError(f"{path}: {error}") from error
 
 
-@dataclass(frozen=True)
-class _Acquisitions:
-    by_id: Mapping[str, LedgerEvent]
-    by_path: Mapping[Path, LedgerEvent]
-
-
-def _acquisitions(project: Path, entry: str) -> _Acquisitions:
-    result_root = _inside(project / "result", project / "result")
-    result = _inside(result_root / entry, result_root / entry)
-    if not result.exists():
-        return _Acquisitions({}, {})
-    identity = ResultEntry.read_identity(entry, result_root=result_root)
-    records = _inside(result, result / "records")
-    if not records.exists():
-        return _Acquisitions({}, {})
-    _inside(records, records / "ledger.jsonl")
-    events = RecordsLedger(
-        records, entry_id=str(identity.entry_id)
-    ).read_events_snapshot()
+def _acquisitions(project: Path, entry: str) -> Mapping[str, LedgerEvent]:
+    events = ResultEntry.read_events_snapshot(entry, result_root=project / "result")
     by_id: dict[str, LedgerEvent] = {}
-    by_path: dict[Path, LedgerEvent] = {}
     for event in events:
         if isinstance(event.payload, AcquiredPayload):
             payload = event.payload
-            layout = SaveLayout(
-                result_path=result,
-                database_path=project / "Database" / entry,
-                experiment=payload.experiment,
-                run_id=payload.run_id,
-                point=payload.point,
-                saved_at=datetime.fromisoformat(event.at),
-            )
             by_id[payload.run_id] = event
-            by_path[layout.run_path] = event
-    return _Acquisitions(by_id, by_path)
+    return by_id
 
 
 def _members(run: Path, folder: str, pattern: str) -> tuple[Path, ...]:
@@ -253,16 +225,25 @@ def _search_documents(
     return texts
 
 
-def _scan_run(entry: str, path: Path, acquisitions: _Acquisitions) -> ResultRun:
+def _scan_run(
+    entry: str, path: Path, acquisitions: Mapping[str, LedgerEvent]
+) -> ResultRun:
     data_path = _inside(path, path / "data.h5")
     data = data_path if data_path.is_file() else None
     figures = _members(path, "figures", "*.png")
     analysis = _members(path, "analysis", "*.json")
     issues: list[str] = []
     metadata = _metadata(data, issues)
-    event = acquisitions.by_path.get(path)
+    event = next(
+        (
+            event
+            for run_id, event in acquisitions.items()
+            if path.name.endswith(f"_{run_id}")
+        ),
+        None,
+    )
     if metadata is not None:
-        event = acquisitions.by_id.get(metadata.run_id)
+        event = acquisitions.get(metadata.run_id)
     payload = event.payload if event is not None else None
     acquired = payload if isinstance(payload, AcquiredPayload) else None
     run_id = metadata.run_id if metadata is not None else None

@@ -22,7 +22,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## GUI Service Architecture
 
 - [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理，以及 Results browser 的保存 cfg 唯讀檢視例外。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任。
 
 ## Cfg / Value Model
@@ -45,7 +45,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## Persistence
 
 - [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：容器只認 `vars`（陣列加具名軸）、`docs`（有限 JSON）、`groups`（opaque 子樹保真）三種表示法與根屬性 format／format_version／producer／kind；cfg、metadata、analysis 只是生產者命名慣例；API save／load／inspect／open_append；datafile 不 import 其他 package，由 datafile-standalone contract 檢查；save/load 共用含 ContainerAttrs 的 Container，舊 2.x 由同一 reader 讀、寫回 3.0。
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界，以及 alias 工作焦點的有序名稱清單。Container 3.0 的實驗文件由 experiment 擁有，保留未知歷史時間與完成狀態；datafile 長期讀取 legacy native 2.x，同 major 保真寫回不降 minor。data.h5 擁有 cfg 正本，ledger acquired 只記事實且讀取忽略未知欄位；Entry 只由 Result 構成，Database 首次 Save 才建立且改名不搬舊輸出。Run／圖片與雙側 workflow 路徑保留名稱前綴及完整 run_id，Labber 檔名維持實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界，以及 alias 工作焦點的有序名稱清單。Container 3.0 的實驗文件由 experiment 擁有，保留未知歷史時間與完成狀態；datafile 長期讀取 legacy native 2.x，同 major 保真寫回不降 minor。data.h5 擁有 cfg 正本，Results browser 唯讀檢視不改變 Load 不回填的邊界；ledger acquired 只記事實且讀取忽略未知欄位；Entry 只由 Result 構成，Database 首次 Save 才建立且改名不搬舊輸出。Run／圖片與雙側 workflow 路徑保留名稱前綴及完整 run_id，Labber 檔名維持實驗啟動名稱與 id6；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。
 - [0081 — Point 資料以磁碟為真相](0081-point-data-disk-sync.md)：參數、library、aliases 以檔案為權威，write-through、watcher 重載、各檔 revision 樂觀鎖、holder 門檻、agent 直接讀寫檔案加 `context.reload`，measure 固定工具不提供特化讀寫，`entry.info`／`context.reload` 經 `rpc_call` 存取；狀態 accepted。
 
 ## Experiment runtime／Workflows
