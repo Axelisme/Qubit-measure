@@ -36,7 +36,10 @@ exchange from the owner's `last_exchange`, including answers submitted through
 facet/RPC/MCP. Only accepted answers display 「已回答」; pending submissions display
 「回答已提交」. Cancelled questions display 「提問已取消」 and disable old answers.
 `WorkflowFigures` owns only named canvas presentation through `QtPlotHost`.
-Its selector separates Workflow and Current operation groups. Both use the
+It tiles workflow and current-operation figures together, up to four per page.
+Larger sets show Previous page / Next page controls and an `i / N` label.
+The hidden name model follows the current canvas: changing pages selects the
+first figure on that page, and clicking a tile selects that figure. It uses the
 headless owner's `WorkflowPlots.figures()` projection, with operation/<name>
 entries. Releasing an old operation removes its entire group before the next
 attempt presents figures. A refused close keeps the pane.
@@ -46,7 +49,7 @@ or disconnect the session.
 
 `ExpTabWidget` owns the left forms and ledgers, commands, subscriptions,
 progress and splitter width. Its concrete owned child `ExperimentFigureArea`
-owns the right-side canvases, figure paging and caches, interactive
+owns the right-side canvases, figure paging, named figure models and caches, interactive
 presentation and Data gallery. It keeps selection, signal blocking and canvas
 cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
@@ -54,12 +57,14 @@ remains the preview source; each failed pane read leaves only that preview empty
 Figure/container methods on the tab delegate to this owner. Results and Save
 policy stay with their existing owners.
 
-Run, Analysis and Post-Analysis show up to four figures per page in a two-column
-layout. Larger sets expose Previous page and Next page buttons with an i / N
-page indicator. Changing pages selects its first figure; clicking a canvas tile
-selects that figure for screenshots and current-figure reads. Re-presenting the
-same collection retains the page and current figure. Data groups raster previews
-by source stage and applies the same paging rule within each group. The
+Run, Analysis, Post-Analysis and Workflow share a two-column tiled layout with
+up to four figures per page. Larger sets show Previous page and Next page controls
+with an i / N label instead of a named selector. `named_figure_presentation` keeps
+the hidden name model and current tile in sync for experiment and workflow panes.
+Changing pages selects its first figure; clicking a canvas tile selects that
+figure for screenshots and current-figure reads. Re-presenting the same collection
+retains the page and current figure. Data groups raster previews by source stage
+and applies the same paging rule within each group. The
 app-local plot host passes the operation's original named collection through the
 render-host port after canvas attachment. It does not rename figures, copy their
 collection or change FigureContainer membership. Clearing a pane retires its

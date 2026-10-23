@@ -1,5 +1,8 @@
 """Tile small figure sets without changing FigureContainer stack membership."""
 
+from matplotlib.backend_bases import ResizeEvent
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.layout_engine import PlaceHolderLayoutEngine, TightLayoutEngine
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QEvent, QObject, QRect
 from qtpy.QtGui import QResizeEvent, QShowEvent
@@ -28,12 +31,19 @@ class FigurePaneLayout(QStackedWidget):
     presentationChanged = pyqtSignal()
 
     def set_tiled(self, *, tiled: bool) -> None:
-        """Enable paged tiling, or disable it for an interactive presentation."""
+        """Enable paged tiling, or disable it for an interactive presentation.
+
+        Multi-figure canvases without an active layout engine reflow labels on
+        resize. Authored layout engines and ordinary single-widget mode remain
+        unchanged.
+        """
         self._tiled = tiled
         for index in range(1, self.count()):
             widget = self.widget(index)
             if widget is not None:
                 widget.installEventFilter(self)
+                if isinstance(widget, FigureCanvasQTAgg):
+                    widget.mpl_connect("resize_event", self._fit_tile_labels)
         self._presentation_changed()
 
     def page_count(self) -> int:
@@ -102,6 +112,24 @@ class FigurePaneLayout(QStackedWidget):
                 widget.raise_()
             elif visible:
                 widget.setGeometry(self.rect())
+
+    def _fit_tile_labels(self, event: ResizeEvent) -> None:
+        widget = event.canvas
+        if (
+            not self._tiled
+            or self.count() <= 2
+            or not isinstance(widget, FigureCanvasQTAgg)
+            or self.indexOf(widget) < 1
+        ):
+            return
+        engine = widget.figure.get_layout_engine()
+        if engine is None or isinstance(engine, PlaceHolderLayoutEngine):
+            # Matplotlib has applied the Qt size, including deferred shows.
+            # Fixed fractional margins shrink with the tile, but glyphs do not.
+            # Reflow once at this canvas size;
+            # keep authored active engines and single-widget mode unchanged.
+            TightLayoutEngine().execute(widget.figure)
+            widget.draw_idle()
 
     def event(self, e: QEvent | None) -> bool:
         handled = super().event(e)

@@ -87,12 +87,17 @@ def fitdecaycos(
     ydata: NDArray[np.float64],
     fitparams: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
+    *,
+    decay_bounds: tuple[float, float] | None = None,
 ) -> FitResult:
     """Fit [y0, yscale, freq (1/x), phase (deg), decay_time] and covariance.
 
     Phase is unbounded during optimization and returned modulo 360 degrees.
     ``fitparams`` supplies initial guesses; non-None ``fixedparams`` entries
     hold those parameters fixed. Decay time uses the units of ``xdata``.
+    Optional decay_bounds=(lower, upper) constrains free decay time and clips
+    its initial guess; None keeps positive unbounded decay time. Fixed values
+    are not clipped. Invalid bounds raise ValueError.
     Automatic initialization expects regularly spaced coordinates in ascending
     or descending order.
     """
@@ -134,10 +139,12 @@ def fitdecaycos(
     # bounds
     yscale = fitparams[1]
     freq = fitparams[2]
-    decay_time = fitparams[4]
+    lower, upper = (0.0, np.inf) if decay_bounds is None else decay_bounds
+    if decay_bounds is not None:
+        fitparams[4] = min(max(fitparams[4], lower), upper)
     bounds = (
-        [-np.inf, -1.1 * np.abs(yscale), freq_bound[0], -np.inf, 0],
-        [np.inf, 1.1 * np.abs(yscale), freq_bound[1], np.inf, np.inf],
+        [-np.inf, -1.1 * np.abs(yscale), freq_bound[0], -np.inf, lower],
+        [np.inf, 1.1 * np.abs(yscale), freq_bound[1], np.inf, upper],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds, fixedparams)

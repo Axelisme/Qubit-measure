@@ -17,6 +17,7 @@ from .base import (
     fitexp,
     gauss_func,
 )
+from .quality import decay_time_bounds
 from .shared import FitTrace, ParameterSpec, fit_shared
 
 
@@ -31,8 +32,21 @@ def fit_decay(
     NDArray[np.float64],
     FitResult,
 ]:
-    """return [t1, t1err, fit_signals, (pOpt, pCov)]"""
-    pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params, fixedparams=fixedparams)
+    """Fit an exponential to xs/real_signals; return time, stderr, curve, fit.
+
+    xs contains acquired nonnegative delays; fit_params initializes the three
+    model parameters and non-None fixedparams fixes them. Free decay time uses
+    decay_time_bounds(xs); initial time is clipped. Invalid delay grids raise
+    ValueError and numeric fitting failures raise AnalysisFailed. Fixed times
+    remain unchanged for quality diagnostics to flag separately.
+    """
+    pOpt, pCov = fitexp(
+        xs,
+        real_signals,
+        fitparams=fit_params,
+        fixedparams=fixedparams,
+        decay_bounds=decay_time_bounds(xs),
+    )
 
     fit_signals = expfunc(xs, *pOpt)
 
@@ -56,9 +70,20 @@ def fit_dual_decay(
         FitParameters | tuple[float, float, float, float, float], NDArray[np.float64]
     ],
 ]:
-    """return [t1, t1err, t1b, t1berr, fit_signals, (pOpt, pCov)]"""
+    """Fit two exponential decays with free times bounded by decay_time_bounds(xs).
+
+    xs/real_signals are acquired nonnegative delays and observations. fit_params
+    initializes the five model parameters; non-None fixedparams fixes them.
+    Return longer time/error, shorter time/error, curve and (parameters,
+    covariance). Initial free times are clipped; fixed values are unchanged.
+    Invalid grids raise ValueError; numeric fitting failures raise AnalysisFailed.
+    """
     pOpt, pCov = fit_dualexp(
-        xs, real_signals, fitparams=fit_params, fixedparams=fixedparams
+        xs,
+        real_signals,
+        fitparams=fit_params,
+        fixedparams=fixedparams,
+        decay_bounds=decay_time_bounds(xs),
     )
 
     # make sure t1 is the longer one
@@ -185,9 +210,21 @@ def fit_decay_fringe(
     NDArray[np.float64],
     tuple[tuple[float, float, float, float, float], NDArray[np.float64]],
 ]:
-    """return [t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)]"""
+    """Fit a damped cosine with free time bounded by decay_time_bounds(xs).
+
+    xs/real_signals are acquired nonnegative delays and observations. fit_params
+    initializes [offset, amplitude, frequency, phase_degrees, time]; non-None
+    fixedparams fixes values. Return time/error, frequency/error in 1/x units,
+    curve and (parameters, covariance). Initial free time is clipped; fixed
+    values are unchanged. Invalid grids raise ValueError and numeric fitting
+    failures raise AnalysisFailed.
+    """
     pOpt, pCov = fitdecaycos(
-        xs, real_signals, fitparams=fit_params, fixedparams=fixedparams
+        xs,
+        real_signals,
+        fitparams=fit_params,
+        fixedparams=fixedparams,
+        decay_bounds=decay_time_bounds(xs),
     )
 
     fit_signals = decaycos(xs, *pOpt)
