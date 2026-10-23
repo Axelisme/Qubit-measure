@@ -169,6 +169,17 @@ Unreadable files return `precondition_failed/predictor_file_unavailable`; no ent
 returns `precondition_failed/no_entry`. Source conflicts and numeric
 parameter errors retain their existing predictor reasons in `method_entries`.
 
+## Shutdown receipt
+
+`app.shutdown` checks idle, unsaved-data policy and view availability before
+acceptance. Shared dispatch binds its owner-thread close continuation to the
+reply's terminal send. A blocked writer does not start shutdown. A complete
+success frame sent to the OS allows close; this is not a peer acknowledgement.
+Send, disconnect and enqueue failure also allow the accepted shutdown to close,
+and logs distinguish delivered from failed. A missing receipt does not prove
+that shutdown was rejected. The wire reply and existing timeout policy stay
+unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races.
+
 ## Wire contract
 
 - One connection has at most one in-flight RPC.

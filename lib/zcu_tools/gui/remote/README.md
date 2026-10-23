@@ -1,6 +1,6 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。共用 NDJSON RPC 傳輸、排程與連線契約。
 
@@ -28,6 +28,15 @@ into a decision tool and summarizes the app's full projections. The app owns
 prerequisites, drafts, publication, fit freshness and rendering; shared remote does
 not infer them. Readonly render methods return evidence without opening a Session.
 The same owner renderer supplies the GUI and MCP evidence.
+
+`NdjsonRpcEndpoint.reply_ok(on_complete=...)` binds a single reply's terminal
+send callback at enqueue. `ReplyDelivery.DELIVERED` means every byte of the success frame
+was sent to the OS socket, not that the peer acknowledged or consumed it.
+Encoding/enqueue/send failure and close/stop complete with `ReplyDelivery.FAILED`. Callbacks run
+once outside transport locks on the completing thread and must not block.
+`RemoteAppSpec.reply_continuations` maps accepted methods to owner-thread actions.
+Shared dispatch posts these actions after terminal send, including failure;
+handler rejection does not run an action. No new timeout or wire message is added.
 
 Response failure or timeout can follow a committed command. Transport neither
 rolls back domain effects nor retries requests. Event subscriptions keep their
