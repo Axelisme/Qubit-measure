@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import socket
+from collections.abc import Callable
 from threading import Event
 
 import pytest
@@ -20,6 +21,13 @@ from tests.gui.app.measure.remote._helpers import (
 pytestmark = pytest.mark.requires_loopback
 
 
+def _record_shutdown(fixture: Fixture, callback: Callable[[], None]) -> None:
+    view = fixture.view
+    if view is None:
+        raise RuntimeError("shutdown delivery requires a render-capable fixture")
+    view.request_shutdown.side_effect = callback
+
+
 @pytest.mark.parametrize("outcome", ["sent", "send_failure", "disconnect"])
 def test_shutdown_waits_for_reply_send_terminal_before_requesting_close(
     qapp, tmp_path, monkeypatch: pytest.MonkeyPatch, outcome: str
@@ -30,9 +38,7 @@ def test_shutdown_waits_for_reply_send_terminal_before_requesting_close(
     entered = Event()
     release = Event()
     shutdown_on_owner: list[bool] = []
-    fixture.view.request_shutdown.side_effect = lambda: shutdown_on_owner.append(
-        owner.is_owner_thread()
-    )
+    _record_shutdown(fixture, lambda: shutdown_on_owner.append(owner.is_owner_thread()))
     original_send = socket.socket.send
 
     def controlled_send(sock: socket.socket, data: bytes, flags: int = 0) -> int:
@@ -90,8 +96,8 @@ def test_shutdown_still_closes_after_accepted_reply_cannot_be_enqueued(
     port = fixture.start()
     rejected = Event()
     shutdown_after_rejection: list[bool] = []
-    fixture.view.request_shutdown.side_effect = lambda: shutdown_after_rejection.append(
-        rejected.is_set()
+    _record_shutdown(
+        fixture, lambda: shutdown_after_rejection.append(rejected.is_set())
     )
     original_put = queue.Queue.put_nowait
 
