@@ -175,7 +175,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         result_type=MuxOnetoneResult,
         cfg_type=MuxOnetoneCfg,
         cfg_schema_version="2.0",
-        tag="mux/onetone_fine",
+        tag="mux/onetone",
     )
 
     def run(self, config: MuxOnetoneCfg, *, context: RunContext) -> MuxOnetoneResult:

@@ -82,7 +82,7 @@ resonators share that pulse route. The mux group instead uses generator 0 and
 ADCs 0 through 5. Do not copy the pulse route into a mux readout module.
 Both routes assign each frequency to the nearest bare cavity; an exact tie
 between cavities raises an error. Choose a grid that avoids those midpoints.
-Use the measured centers to prepare `mux/onetone_fine`, then review its readout
+Use the measured centers to prepare `mux/onetone`, then review its readout
 module and writeback proposals. The mux group has no readout module slot until
 you create or accept one. Missing-slot forms use group wiring for the generator
 and ADCs when known; this does not supply a complete calibrated readout.
@@ -107,7 +107,7 @@ and trigger offset. The initial trigger expression has no measured
 `$mux.mixer_freq`, 7250 MHz in this template. Missing or null mixer stays required
 and blank, independently of tone frequencies and kappa.
 The group's `time_of_fly: 0.4` us corresponds to the receivers' 400 ns delay.
-For `mux/onetone_fine`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`;
+For `mux/onetone`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`;
 the ADC window starts at 1.0 us and pulse length at trigger plus that window.
 Missing group TOF or any kappa leaves trigger and pulse length required and blank.
 Other mux forms still need pulse length and ADC window. Review all six tones

@@ -125,7 +125,7 @@ class ConditionalPhaseExp(
         result_type=ConditionalPhaseResult,
         cfg_type=ConditionalPhaseCfg,
         cfg_schema_version="1.0",
-        tag="ftf/conditional_phase",
+        tag="two_qubit/conditional_phase",
     )
 
     def run(

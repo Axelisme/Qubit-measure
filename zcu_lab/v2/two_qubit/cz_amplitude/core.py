@@ -97,7 +97,7 @@ class CZAmplitudeExp(PersistableExperiment[CZAmplitudeResult, CZAmplitudeCfg]):
         result_type=CZAmplitudeResult,
         cfg_type=CZAmplitudeCfg,
         cfg_schema_version="1.0",
-        tag="ftf/cz_amplitude",
+        tag="two_qubit/cz_amplitude",
     )
 
     def run(self, config: CZAmplitudeCfg, *, context: RunContext) -> CZAmplitudeResult:

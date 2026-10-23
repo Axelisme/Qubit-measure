@@ -45,7 +45,7 @@ Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景，再以�
 
 沒有頻率排序依據時，每列 writeback 候選的 description 也顯示「dip 與元件身分配對待確認」。這個提示不封鎖 Apply。先核對 dip 與元件身分，再決定接受哪些列。需要改名單順序時，在 Analysis 修改 JSON 並重新 Analyze，候選才會重新配對。
 
-對照圖上的名稱與位置，逐列檢查目的地和頻率。取消不接受的列，再按 Apply Selected。這裡不提出 module、kappa 或 edelay。確認粗頻率後，另開或 Reset `onetone/freq` 做普通 channel 窄掃。需要 mux readout 校準時，另開或 Reset `mux/onetone_fine` 並核對 mux 接線，再執行窄掃。
+對照圖上的名稱與位置，逐列檢查目的地和頻率。取消不接受的列，再按 Apply Selected。這裡不提出 module、kappa 或 edelay。確認粗頻率後，另開或 Reset `onetone/freq` 做普通 channel 窄掃。需要 mux readout 校準時，另開或 Reset `mux/onetone` 並核對 mux 接線，再執行窄掃。
 
 ## 保存與讀回
 

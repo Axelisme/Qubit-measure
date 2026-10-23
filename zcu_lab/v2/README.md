@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-23，mux fine timing 候選
+**Last updated:** 2026-10-23，mux onetone timing 候選
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -8,11 +8,11 @@
 
 ## Reading routes
 
-- [FTF bring-up 與 CZ 校準](ftf/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
-  - 四分支 [conditional spectroscopy](ftf/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](ftf/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](ftf/chevron/guide.md) 提供雙線校準圖與分析。
-  - [CZ common-amplitude](ftf/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
-  - [Conditional phase](ftf/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
-  - [Local-Z](ftf/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
+- [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
+  - 四分支 [conditional spectroscopy](two_qubit/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](two_qubit/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](two_qubit/chevron/guide.md) 提供雙線校準圖與分析。
+  - [CZ common-amplitude](two_qubit/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
+  - [Conditional phase](two_qubit/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
+  - [Local-Z](two_qubit/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
@@ -43,13 +43,13 @@ Analyze／Load 從該次 cfg 取可編輯的名單初值，不讀目前 Form。
 每個 capture 中存在的名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
 不足 N 個凹陷時整次分析失敗。操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
-`mux/onetone_fine` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
+`mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
 Tone label 是可重複的顯示文字，不是 component 名稱，也不改變資料軸。
-`mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones。
+`mux/onetone` adapter 從 group 的 resonators 產生 readout tones。
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
-ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其餘 mixer／timing 候選，來源見 [fine guide](mux/onetone_fine/guide.md#無-readout-slot-的候選來源)。
+ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其餘 mixer／timing 候選，來源見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
 active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
@@ -67,9 +67,9 @@ Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 缺 slot 時從 blank mux 範本加 group tones，填入 resonator 校準頻率與名稱 label。
 Gen_ch 取 `$mux.wiring.gen_ch`，各 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，順序與 group resonators 相同，gain 填 0.1。
 Pulse length 與 ro_length 留空必填，頻率缺失或無效時也留空必填。
-`mux/onetone_fine` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
+`mux/onetone` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
 Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
-Fine 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
+Mux onetone 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
 無 slot 的 mixer 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 Trigger 取 `$mux.time_of_fly` 加五倍 ringup 時間，pulse 長度取 trigger 加 window。
 任一 kappa 或 group time_of_fly 缺值時，trigger 與 pulse 長度留空必填，不讀 resonator 的 pulse 路徑 TOF。

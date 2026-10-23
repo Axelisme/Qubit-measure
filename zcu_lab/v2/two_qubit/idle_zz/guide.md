@@ -6,7 +6,7 @@
 
 Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
 
-`ftf/idle_zz` 比較 spectator 的 I、Xπ 兩個名目分支。Target 可選 F1 或 F2，每個 shot 做 target π/2 → delay → 單一 phase projection → 一次完整 mux readout。所有 shots 直接保留，兩分支是在熱初態上施加不同 pulse 的 ensemble。
+`two_qubit/idle_zz` 比較 spectator 的 I、Xπ 兩個名目分支。Target 可選 F1 或 F2，每個 shot 做 target π/2 → delay → 單一 phase projection → 一次完整 mux readout。所有 shots 直接保留，兩分支是在熱初態上施加不同 pulse 的 ensemble。
 
 ## 開啟前確認
 

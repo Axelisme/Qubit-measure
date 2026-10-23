@@ -6,7 +6,7 @@
 
 Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
 
-`ftf/conditional_spectroscopy` 量四個熱初態上的名目準備分支。每 shot 做 `B00/01/10/11 → 雙線 weak probe → 可選 Xπ⊗Xπ → 完整 mux readout`。F1 是 branch 的第一個 bit，F2 是第二個 bit。B11 仍含熱 population，所有 shots 都保留，直接分析原始 ensemble。
+`two_qubit/conditional_spectroscopy` 量四個熱初態上的名目準備分支。每 shot 做 `B00/01/10/11 → 雙線 weak probe → 可選 Xπ⊗Xπ → 完整 mux readout`。F1 是 branch 的第一個 bit，F2 是第二個 bit。B11 仍含熱 population，所有 shots 都保留，直接分析原始 ensemble。
 
 ## 開啟前確認
 

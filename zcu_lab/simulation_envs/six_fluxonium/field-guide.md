@@ -63,7 +63,7 @@ budgets. The following measurements compare the cache-budget change.
 
 ## Cache budget measurements
 
-The 2026-10-23 check ran `range_find`, `mux/onetone_fine`,
+The 2026-10-23 check ran `range_find`, `mux/onetone`,
 `mux/twotone_spectrum` and `mux/amp_rabi` in that order. The check analyzed each
 Run. It closed range_find after fine analysis, fine after spectroscopy
 analysis, and spectroscopy then Rabi after Rabi analysis. Backend close followed
@@ -259,7 +259,7 @@ The entry template sets group `mixer_freq: 7250` MHz for readout centers from
 required and blank, without deriving a midpoint or depending on kappa.
 Group `time_of_fly: 0.4` us matches the receivers' `time_of_flight_ns: 400`.
 Resonator pulse routes have separate top-level `time_of_fly` values, initially null.
-For blank `mux/onetone_fine`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`,
+For blank `mux/onetone`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`,
 ro_length at 1.0 us, and length at trigger plus ro_length. Missing group TOF or
 any kappa leaves trigger and length required and blank. These editable seeds
 are not device-confirmed calibration. Readout slots retain their mixer and
@@ -309,7 +309,7 @@ These are workload examples, not a speed comparison between experiments.
 | Experiment | Requested sweep | Reps / rounds | Run wall time, s |
 | --- | --- | ---: | ---: |
 | `onetone/range_find` | 6900 to 7600 MHz, 300 points | 64 / 1 | 5.358448 |
-| `mux/onetone_fine` | Common offset -3 to 3 MHz, 41 points, all six tones | 64 / 1 | 12.762754 |
+| `mux/onetone` | Common offset -3 to 3 MHz, 41 points, all six tones | 64 / 1 | 12.762754 |
 | `mux/twotone_spectrum` | Per-qubit starting estimate +/-5 MHz, 41 joint points, Q1 through Q6 | 16384 / 1 | 4.051492 |
 | `mux/t1` | 0 to 100 us, 31 joint delays, Q1 through Q6 | 16384 / 1 | 11.602649 |
 

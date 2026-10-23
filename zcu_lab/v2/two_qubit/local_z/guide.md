@@ -6,7 +6,7 @@
 
 Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
 
-在幅度與 frequency 選定後，選 `ftf/local_z`。同一次 Run 分別量 F1、F2。每個 target 從 `B(00)` 熱初態做 X90、n 次雙線 CZ、projection 與完整 mux readout，另一 qubit 維持原熱態。X/Y projection 分別獨立 acquisition，所有 shots 保留原始熱 population。
+在幅度與 frequency 選定後，選 `two_qubit/local_z`。同一次 Run 分別量 F1、F2。每個 target 從 `B(00)` 熱初態做 X90、n 次雙線 CZ、projection 與完整 mux readout，另一 qubit 維持原熱態。X/Y projection 分別獨立 acquisition，所有 shots 保留原始熱 population。
 
 ## Run 前
 
