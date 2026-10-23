@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -21,32 +22,32 @@ from .mux_helpers import (
 
 
 class MuxSingleshotGEInputs(RecipeInputs):
-    """Experiment inputs; null retains captured Form values, overrides apply last."""
+    """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
-    participants: list[StrictInt] | None = Field(
-        default=None,
-        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
+    participants: list[StrictInt] | None | Keep = Field(
+        default=KEEP,
+        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
     )
 
-    initial_state: Literal["ground", "excited"] | None = Field(
-        None,
-        description="Prepared state for GE separation. Null retains analysis settings.",
+    initial_state: Literal["ground", "excited"] | None | Keep = Field(
+        default=KEEP,
+        description="Prepared state for GE separation. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    backend: Literal["pca", "center"] | None = Field(
-        None,
-        description="Rotation and threshold fit backend. Null retains analysis settings.",
+    backend: Literal["pca", "center"] | None | Keep = Field(
+        default=KEEP,
+        description="Rotation and threshold fit backend. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    logscale: bool | None = Field(
-        None,
-        description="Plot histograms on a logarithmic scale. Null retains analysis settings.",
+    logscale: bool | None | Keep = Field(
+        default=KEEP,
+        description="Plot histograms on a logarithmic scale. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    align_t1: bool | None = Field(
-        None,
-        description="Align the GE model with captured T1. Null retains analysis settings.",
+    align_t1: bool | None | Keep = Field(
+        default=KEEP,
+        description="Align the GE model with captured T1. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    length_ratio: float | None = Field(
-        None,
-        description="Integration length ratio for GE fitting. Null retains analysis settings.",
+    length_ratio: float | None | Keep = Field(
+        default=KEEP,
+        description="Integration length ratio for GE fitting. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
 
 
@@ -105,7 +106,7 @@ async def mux_singleshot_ge(
 ) -> MuxSingleshotGEReport:
     """Measure mux probe-off/on IQ clouds, fit GE separation, and review calibration.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drives are required;
     readout identities remain required for every tone.
     Set the IQ-cloud sample count with a shots override; there is no sweep n.
@@ -114,21 +115,19 @@ async def mux_singleshot_ge(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/singleshot_ge", inputs, target_alias="mux")
-
-    tab.select_sources(inputs)
-    tab.apply_inputs(
-        inputs,
-        {},
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            )
-        ],
+    tab = session.open_tab(
+        "mux/singleshot_ge", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
+    tab.set(
+        "participants",
+        [*inputs.participants]
+        if isinstance(inputs.participants, list)
+        else inputs.participants,
+    )
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
-    # Acquire paired shots before fitting GE separation.
     await tab.run()
     try:
         primary = await tab.analyze(
@@ -142,7 +141,7 @@ async def mux_singleshot_ge(
                     "align_t1": inputs.align_t1,
                     "length_ratio": inputs.length_ratio,
                 }.items()
-                if value is not None
+                if not isinstance(value, Keep)
             },
             result=MuxGESummary,
         )

@@ -1,11 +1,12 @@
 """Common-offset mux resonator spectroscopy with reviewed writeback."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, StrictInt, TypeAdapter
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
     FitQuality,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -13,69 +14,51 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.mux.onetone.gui import MuxOnetoneSummary, MuxOnetoneTone
+from zcu_lab.v2.mux.onetone.gui import MuxOnetoneSummary
 
 from .mux_helpers import ToneRangeInputs
 
 
 class MuxOnetoneInputs(RecipeInputs):
-    """Experiment inputs; null retains captured Form values, overrides apply last."""
+    """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
-    participants: list[StrictInt] | None = Field(
-        None,
-        description="Original tone indices in execution order; null keeps the captured Form selection.",
+    participants: list[StrictInt] | None | Keep = Field(
+        default=KEEP,
+        description="Original tone indices in execution order; omission keeps the Form selection; null clears it.",
     )
-    df: ToneRangeInputs | None = Field(
-        None,
-        description="Common MHz offset start/stop added to every base tone frequency; null keeps the Form range.",
+    df: ToneRangeInputs | None | Keep = Field(
+        default=KEEP,
+        description="Common MHz offset start/stop added to every base tone frequency; omission keeps the Form range; null clears its bounds.",
     )
-    n: int | None = Field(
-        None,
-        strict=True,
-        ge=2,
-        description="Shared offset sample count; null keeps Expts.",
+    n: Annotated[int, Field(strict=True, ge=2)] | None | Keep = Field(
+        default=KEEP,
+        description="Shared offset sample count; omission keeps Expts; null clears it.",
     )
-    reps: int | None = Field(
-        None,
-        strict=True,
-        gt=0,
-        description="Acquisition repetitions; null keeps the Form value.",
+    reps: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
+        default=KEEP,
+        description="Acquisition repetitions; omission keeps the Form value; null clears it.",
     )
-    rounds: int | None = Field(
-        None,
-        strict=True,
-        gt=0,
-        description="Averaging rounds; null keeps the Form value.",
+    rounds: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
+        default=KEEP,
+        description="Averaging rounds; omission keeps the Form value; null clears it.",
     )
 
-    model_type: Literal["hm", "t", "auto"] | None = Field(
-        None, description="Resonator fit model. Null retains analysis settings."
+    model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
+        default=KEEP,
+        description="Resonator fit model. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    fit_bg_amp_slope: bool | None = Field(
-        None,
-        description="Fit the amplitude background slope. Null retains analysis settings.",
+    fit_bg_amp_slope: bool | None | Keep = Field(
+        default=KEEP,
+        description="Fit the amplitude background slope. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    fit_bg_phase_curvature: bool | None = Field(
-        None,
-        description="Fit background phase curvature. Null retains analysis settings.",
+    fit_bg_phase_curvature: bool | None | Keep = Field(
+        default=KEEP,
+        description="Fit background phase curvature. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    edelay: float | None = Field(
-        None,
-        description="Manual cable-delay seed in inverse MHz. Null retains analysis settings.",
+    edelay: float | None | Keep = Field(
+        default=KEEP,
+        description="Manual cable-delay seed in inverse MHz. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-
-
-class CaptureRequest(BaseModel):
-    """Read the Reset's fixed identity bindings, not live global aliases."""
-
-    paths: list[str] = ["$mux.resonators"]
-    module_refs: list[str] = []
-
-
-class ResonatorCapture(BaseModel):
-    """Fixed Reset parameter reply: ordered resonator names or unavailable bindings."""
-
-    values: dict[str, list[str] | None]
 
 
 class MuxOnetoneToneReport(BaseModel):
@@ -106,25 +89,6 @@ class MuxOnetoneReport(RecipeReport):
     )
 
 
-def tone_report(
-    tone: MuxOnetoneTone, names: list[str] | None, diagnostic: str | None
-) -> MuxOnetoneToneReport:
-    """Pair the native original index only when the owner accepts the bindings."""
-    name = None
-    if names is not None and diagnostic is None and 0 <= tone.index < len(names):
-        name = names[tone.index]
-    return MuxOnetoneToneReport(
-        index=tone.index,
-        label=tone.label,
-        status=tone.status,
-        fit_quality=tone.fit_quality,
-        reason=tone.reason,
-        freq=report_number(tone.freq),
-        kappa=report_number(tone.kappa),
-        name=name,
-    )
-
-
 @recipe(
     "mux_onetone",
     description="Scan common MHz offsets for selected mux resonators, report fits and quality, and ask before writeback.",
@@ -134,7 +98,7 @@ async def mux_onetone(
 ) -> MuxOnetoneReport:
     """Common-offset mux resonator spectroscopy with reviewed writeback.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Active readout tones share a common frequency-offset scan.
     Readout identities remain required for every tone.
     n sets the common df Expts; df uses MHz offsets, reps/rounds set averaging.
@@ -143,27 +107,32 @@ async def mux_onetone(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/onetone", inputs, target_alias="mux")
-    capture = tab.call("tab.parameter_read", CaptureRequest(), result=ResonatorCapture)
-    names = capture.values.get("$mux.resonators")
-    tab.select_sources(inputs)
-
-    tab.apply_inputs(
-        inputs,
-        {
-            ("sweep", "df", "start"): None if inputs.df is None else inputs.df.start,
-            ("sweep", "df", "stop"): None if inputs.df is None else inputs.df.stop,
-            ("sweep", "df", "n"): inputs.n,
-            ("reps",): inputs.reps,
-            ("rounds",): inputs.rounds,
-        },
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            )
-        ],
+    tab = session.open_tab(
+        "mux/onetone", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
+    tab.set(
+        "participants",
+        [*inputs.participants]
+        if isinstance(inputs.participants, list)
+        else inputs.participants,
+    )
+    if isinstance(inputs.df, ToneRangeInputs):
+        tab.set("sweep.df.start", inputs.df.start)
+        tab.set("sweep.df.stop", inputs.df.stop)
+    elif inputs.df is None:
+        tab.set("sweep.df.start", None)
+        tab.set("sweep.df.stop", None)
+    tab.set("sweep.df.n", inputs.n)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
+
+    names = TypeAdapter(list[str] | None).validate_python(
+        tab.read_parameter("$mux.resonators", missing_ok=True)
+    )
+
     await tab.run()
     try:
         fit = await tab.analyze(
@@ -176,7 +145,7 @@ async def mux_onetone(
                     "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
                     "edelay": inputs.edelay,
                 }.items()
-                if value is not None
+                if not isinstance(value, Keep)
             },
             result=MuxOnetoneSummary,
         )
@@ -190,10 +159,27 @@ async def mux_onetone(
             receipt.raise_for_error()
             applied = bool(receipt.items)
 
-        tones = [
-            tone_report(tone, names, fit.result.resonators_diagnostic)
-            for tone in fit.result.tones
-        ]
+        tones: list[MuxOnetoneToneReport] = []
+        for tone in fit.result.tones:
+            name = None
+            if (
+                names is not None
+                and fit.result.resonators_diagnostic is None
+                and 0 <= tone.index < len(names)
+            ):
+                name = names[tone.index]
+            tones.append(
+                MuxOnetoneToneReport(
+                    index=tone.index,
+                    label=tone.label,
+                    status=tone.status,
+                    fit_quality=tone.fit_quality,
+                    reason=tone.reason,
+                    freq=report_number(tone.freq),
+                    kappa=report_number(tone.kappa),
+                    name=name,
+                )
+            )
         return MuxOnetoneReport(
             tones=tones,
             resonators_diagnostic=fit.result.resonators_diagnostic,
