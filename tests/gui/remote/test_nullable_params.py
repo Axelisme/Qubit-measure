@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import RemoteAppSpec, RemoteControlServiceBase
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, build_input_schema
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
@@ -125,11 +126,9 @@ def test_dispatch_nullable_base_distinguishes_absence_null_and_wrong_type() -> N
             "optional": None,
         }
         for params in ({}, {"base": 1}, {"base": False}, {"base": ""}):
-            reply = call(params)
-            assert reply["ok"] is False, reply
-            error = reply["error"]
-            assert isinstance(error, dict), reply
-            assert error["code"] == "invalid_params", reply
+            with pytest.raises(RemoteError) as caught:
+                call(params)
+            assert caught.value.code == ErrorCode.INVALID_PARAMS
         assert state.admitted == [
             {"base": None, "legacy": "old", "optional": "fallback"},
             {"base": "hash", "legacy": "old", "optional": None},
