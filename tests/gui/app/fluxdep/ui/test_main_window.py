@@ -6,7 +6,6 @@ block), and asserts the spectrum list reflects State.
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 
 import numpy as np
@@ -589,14 +588,13 @@ def test_empty_preview_reselect_can_commit_nonempty_points(qapp, onetone_control
         qapp.processEvents()
 
 
-def test_remove_focuses_next_spectrum(window, ctrl, spectrum_hdf5):
+def test_remove_focuses_next_spectrum(window, ctrl, spectrum_hdf5, tmp_path):
     filepath, *_ = spectrum_hdf5
     a = ctrl.load_spectrum(filepath, spec_type="OneTone")
     # second load replaces same basename; use a distinct file path via tmp copy
     import shutil
-    import tempfile
 
-    second_path = os.path.join(tempfile.mkdtemp(), "other.hdf5")
+    second_path = str(tmp_path / "other.hdf5")
     shutil.copy(filepath, second_path)
     b = ctrl.load_spectrum(second_path, spec_type="OneTone")
     ctrl.set_active_spectrum(a)

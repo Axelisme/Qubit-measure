@@ -21,7 +21,12 @@ def checkout(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> Path
     repo = Path(__file__).resolve().parents[1]
     tests = pytester.path / "tests"
     tests.mkdir()
-    for name in ("__init__.py", "conftest.py", "_cache_environment.py"):
+    for name in (
+        "__init__.py",
+        "conftest.py",
+        "_cache_environment.py",
+        "_temp_directory_guard.py",
+    ):
         shutil.copyfile(repo / "tests" / name, tests / name)
     shutil.copyfile(repo / "pyproject.toml", pytester.path / "pyproject.toml")
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join((str(repo), str(repo / "lib"))))

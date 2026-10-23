@@ -11,8 +11,8 @@ pytestmark = pytest.mark.uses_wall_clock
 
 
 @pytest.fixture
-def live_gui(qapp):
-    fx = Fixture(active_label="ctx001")
+def live_gui(tmp_path, qapp):
+    fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.start()
     try:
         yield fx
