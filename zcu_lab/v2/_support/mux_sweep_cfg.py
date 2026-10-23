@@ -41,24 +41,22 @@ class ToneRangeCfg(ConfigBase):
     )
 
 
-class MuxToneCfg(ConfigBase):
-    """One named original tone's required drive and independent pulse sweep.
+class MuxDriveToneCfg(ConfigBase):
+    """One named original tone's required fixed drive, without a pulse sweep.
 
     name is its nonempty capture-generated qubit name; full-list admission
     rejects duplicates. drive is required even when not participating. Its MHz
     frequency, normalized gain, degree phase and us delays must be fixed finite
-    values, with nonnegative delays and unswept waveform duration. sweep uses
-    MHz, normalized gain or us according to the leaf, with finite bounds.
+    values, with nonnegative delays and unswept waveform duration.
     Native pulse/waveform schemas own shape and clock conversion.
     """
 
     name: Annotated[str, FieldMeta(readonly=True)]
     drive: PulseCfg
-    sweep: ToneRangeCfg
 
     @model_validator(mode="after")
     def validate_tone(self) -> Self:
-        """Reject a nonfinite sweep or a nonfinite/swept drive for every element."""
+        """Reject a nonfinite or swept drive for every element."""
         # Sweeps describe the scan; source pulses must stay fixed until preparation.
         drive = self.drive
         for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
@@ -74,20 +72,29 @@ class MuxToneCfg(ConfigBase):
         return self
 
 
-def validate_mux_scan(
+class MuxToneCfg(MuxDriveToneCfg):
+    """One fixed drive with a required independent pulse-scan range.
+
+    Inherited name and drive identify the original tone. sweep holds finite
+    start/stop in MHz, normalized gain or us for twotone, amp or length scans.
+    Coherence uses a shared delay instead and does not use this range schema.
+    """
+
+    sweep: ToneRangeCfg
+
+
+def validate_mux_tones(
     cfg: ProgramV2Cfg,
     modules: MuxDriveModuleCfg,
-    tones: Sequence[MuxToneCfg],
+    tones: Sequence[MuxDriveToneCfg],
     participants: Sequence[str],
-    expts: int,
 ) -> None:
-    """Validate complete named tones, participants, shared count and drive channels.
+    """Validate complete named fixed drives, participants and independent channels.
 
     cfg provides shared positive reps/rounds and finite nonnegative delays in us.
-    expts must be a positive integer shared by all tones. tones must match the
-    full numeric readout length and contain finite range endpoints. Every drive
-    channel must be distinct and different from readout.gen_ch. Raise ValueError
-    with original indices/actual values; never read bindings or change inputs.
+    tones must match the full numeric readout length. Every drive channel must
+    be distinct and different from readout.gen_ch. Raise ValueError with original
+    indices/actual values; never read bindings or change inputs. No sweep is needed.
     """
     # Check shared averaging and readout dimensions before indexing full tones.
     if cfg.reps <= 0 or cfg.rounds <= 0:
@@ -100,19 +107,36 @@ def validate_mux_scan(
         )
     participant_indices([tone.name for tone in tones], participants)
 
-    # All tones share one zip point count but use independent drive channels.
-    if type(expts) is not int or expts <= 0:
-        raise ValueError("expts must be a positive integer")
+    # Every full-list tone must use an independent drive channel.
     channels: dict[int, int] = {}
     for i, tone in enumerate(tones):
-        if not all(math.isfinite(v) for v in (tone.sweep.start, tone.sweep.stop)):
-            raise ValueError(f"tones[{i}].sweep start/stop must be finite")
         drive = tone.drive
         if drive.ch == modules.readout.gen_ch or drive.ch in channels:
             raise ValueError(
                 f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={modules.readout.gen_ch}"
             )
         channels[drive.ch] = i
+
+
+def validate_mux_scan(
+    cfg: ProgramV2Cfg,
+    modules: MuxDriveModuleCfg,
+    tones: Sequence[MuxToneCfg],
+    participants: Sequence[str],
+    expts: int,
+) -> None:
+    """Validate fixed drives plus independent pulse ranges and a shared count.
+
+    cfg, modules, tones and participants obey validate_mux_tones. Each tone has
+    finite sweep start/stop in experiment units. expts is a positive integer
+    shared by all tones. Raise ValueError without changing inputs.
+    """
+    validate_mux_tones(cfg, modules, tones, participants)
+    if type(expts) is not int or expts <= 0:
+        raise ValueError("expts must be a positive integer")
+    for i, tone in enumerate(tones):
+        if not all(math.isfinite(v) for v in (tone.sweep.start, tone.sweep.stop)):
+            raise ValueError(f"tones[{i}].sweep start/stop must be finite")
 
 
 def participant_indices(names: Sequence[str], participants: Sequence[str]) -> list[int]:
