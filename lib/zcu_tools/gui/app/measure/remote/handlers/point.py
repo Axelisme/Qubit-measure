@@ -34,10 +34,22 @@ class EntryListReply(TypedDict):
     entries: list[str]
 
 
+class PointFile(TypedDict):
+    """Installed point file: document kind, absolute path and raw-byte SHA-256.
+
+    revision is None only for an absent aliases file.
+    """
+
+    document: Literal["parameters", "library", "aliases"]
+    path: str
+    revision: str | None
+
+
 class EntryInfoReply(TypedDict):
-    """entry is the cached opened identity, or None before opening."""
+    """entry is the opened identity or None; files lists installed point versions."""
 
     entry: PointEntry | None
+    files: list[PointFile]
 
 
 def h_entry_list(
@@ -53,13 +65,24 @@ def h_entry_list(
 def h_entry_info(
     adapter: RemoteControlAdapter, _params: Mapping[str, object]
 ) -> EntryInfoReply:
-    """Read cached EntryInfo as {entry}, with None before opening.
+    """Read cached entry identity and installed point files as {entry, files}.
 
-    params is empty. Paths are absolute owner roots converted to strings.
-    This metadata-only read establishes no full-context observation.
+    params is empty. entry is None before opening; files is [] without a point.
+    Paths are absolute owner paths converted to strings. File revisions describe
+    installed bytes, not unvalidated disk edits. No I/O or implicit refresh occurs.
     """
     info = adapter.ctrl.setup_control.get_entry_info()
-    return {"entry": _entry_projection(info) if info is not None else None}
+    return {
+        "entry": _entry_projection(info) if info is not None else None,
+        "files": [
+            {
+                "document": item.document,
+                "path": str(item.path),
+                "revision": item.revision,
+            }
+            for item in adapter.context_control.get_file_revisions()
+        ],
+    }
 
 
 def h_entry_new(

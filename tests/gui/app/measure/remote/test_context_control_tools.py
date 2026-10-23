@@ -146,7 +146,9 @@ def test_alias_apply_storage_failure_does_not_install_candidate(
     application.result("point.new", {"label": "base"})
     control.set_alias_rows(original)
     # A directory destination forces the real entry's atomic replacement to fail.
-    (info.result_path / "points" / "base" / "aliases.yaml").mkdir()
+    alias_path = info.result_path / "points" / "base" / "aliases.yaml"
+    alias_path.unlink()
+    alias_path.mkdir()
     error = rpc_error(application, "context.aliases_set", {"rows": []})
     assert error["code"] == ErrorCode.CONTROLLER_ERROR
     assert control.get_alias_rows() == original

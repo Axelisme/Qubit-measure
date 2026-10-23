@@ -52,7 +52,13 @@ def _recent_terminal_recipes(
 
 
 def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Read one execution, or GUI orientation with active and recent recipe IDs."""
+    """Read one execution, or GUI orientation with installed point file versions.
+
+    With no execution argument, files mirrors entry.info: ordered parameters,
+    library and aliases records with absolute paths and installed SHA-256
+    revisions. Missing aliases uses null; no selected point returns []. This
+    query does not read point files or implicitly refresh them.
+    """
     detail = arguments.get("detail", "summary")
     if detail not in ("summary", "full"):
         raise ValueError("detail must be summary or full")
@@ -65,7 +71,12 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     has_context = bool(session.read_internal("state.has_active_context", {})["value"])
     has_soc = bool(session.read_internal("state.has_soc", {})["value"])
 
-    entry = session.read_internal("entry.info", {})["entry"] if has_project else None
+    entry_info = (
+        session.read_internal("entry.info", {})
+        if has_project
+        else {"entry": None, "files": []}
+    )
+    entry = entry_info["entry"]
     soc = {"connected": has_soc, "mock": False}
     if has_soc:
         soc["mock"] = bool(session.read_internal("soc.info", {})["is_mock"])
@@ -100,6 +111,7 @@ def status(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]
     ]
     return {
         "entry": entry,
+        "files": entry_info["files"],
         "soc": soc,
         "context": {"active": session.read_internal("context.active", {})["label"]},
         "devices": [
@@ -295,7 +307,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Queries do not refresh guards, read files or attach images.",
+            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Global files mirrors entry.info with ordered parameters/library/aliases document, absolute path and installed SHA-256 revision; missing aliases uses null, no selected point returns []. For direct-file edits use rpc_call(context.reload) with the installed base revision. Queries do not refresh guards, read files or attach images.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

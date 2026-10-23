@@ -12,7 +12,47 @@ from ._params import (
 )
 from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
+_EXPECTED_REVISION = ParamSpec(
+    "expected_revision",
+    JsonType.STRING,
+    required=False,
+    omit_when_missing=True,
+    description=(
+        "Installed base SHA-256. Writers may omit to retain unguarded admission; "
+        "when present, compare with disk before writing. Null means missing aliases "
+        "only. context.reload requires this key and compares the installed base, "
+        "not the edited disk hash. Stale revisions return revision_mismatch."
+    ),
+)
+
 METHODS: tuple[RemoteMethodEntry, ...] = (
+    method_entry(
+        "context.reload",
+        "context_reload:h_context_reload",
+        MethodSpec(
+            10.0,
+            "Reload one edited file belonging to the currently selected point. "
+            "path must be the absolute parameters, library or aliases owner path "
+            "from entry.info.files. expected_revision must be explicitly supplied "
+            "and match the installed base, not the edited disk hash. Null expects "
+            "a missing aliases base. Read/validate/install/publish once without "
+            "writing or repairing disk. Return {document, path, revision}. "
+            "Invalid path/contents return invalid_params with path and cause; "
+            "stale base returns precondition_failed/revision_mismatch; non-holder "
+            "returns not_holder through dispatch. Failures retain installed state. "
+            "No hidden retry, selection change or refresh of fixed tab captures.",
+            (
+                required_string("path", "Absolute selected-point owner file path"),
+                ParamSpec(
+                    "expected_revision",
+                    JsonType.STRING,
+                    required=True,
+                    nullable=True,
+                    description="Required installed base SHA-256, or null for a missing aliases base",
+                ),
+            ),
+        ),
+    ),
     method_entry(
         "context.aliases_set",
         "context:h_context_aliases_set",
@@ -32,7 +72,17 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "context.snapshot(path='aliases'); that read still requires a point. "
             "Requires holder; allowed during Run, whose fixed capture is unchanged. "
             "No dialog/focus, point, metadata or ledger writes; no hidden read/retry.",
-            (required_json("rows", "Complete ordered list of {alias, value} rows"),),
+            (
+                required_json("rows", "Complete ordered list of {alias, value} rows"),
+                ParamSpec(
+                    "expected_revision",
+                    JsonType.STRING,
+                    required=False,
+                    nullable=True,
+                    omit_when_missing=True,
+                    description=_EXPECTED_REVISION.description,
+                ),
+            ),
         ),
     ),
     method_entry(
@@ -61,6 +111,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_json(
                     "value", "Submitted YAML value; top-level null is not supported"
                 ),
+                _EXPECTED_REVISION,
             ),
         ),
     ),
@@ -92,6 +143,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     "edits", "Nonempty list of {path: [segments], value} inputs"
                 ),
                 optional_string("save_as", "New entry key to write instead of name"),
+                _EXPECTED_REVISION,
             ),
         ),
     ),
@@ -181,7 +233,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "(partition is pulses/readout/reset); flat names and aliases are not accepted. "
             "Echoes {deleted: name}. Existing Form captures stay fixed; "
             "Reset captures the changed library.",
-            (required_string("name", "Concrete module key, e.g. Q1.pulses.pi"),),
+            (
+                required_string("name", "Concrete module key, e.g. Q1.pulses.pi"),
+                _EXPECTED_REVISION,
+            ),
         ),
     ),
     method_entry(
@@ -196,6 +251,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string(
                     "name", "Concrete waveform key, e.g. Q1.waveforms.drive"
                 ),
+                _EXPECTED_REVISION,
             ),
         ),
     ),
@@ -216,6 +272,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string(
                     "new", "New concrete module key, e.g. Q1.pulses.pi_half"
                 ),
+                _EXPECTED_REVISION,
             ),
         ),
     ),
@@ -235,6 +292,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 required_string(
                     "new", "New concrete waveform key, e.g. Q1.waveforms.drive_half"
                 ),
+                _EXPECTED_REVISION,
             ),
         ),
     ),
@@ -293,6 +351,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                         "value: Form input JSON}]. Expressions use {expr: text}."
                     ),
                 ),
+                _EXPECTED_REVISION,
             ),
         ),
     ),

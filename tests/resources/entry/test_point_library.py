@@ -1,5 +1,7 @@
 """Point-local library binding through ResultEntry public capabilities."""
 
+from hashlib import sha256
+
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
@@ -19,6 +21,44 @@ def library_assets() -> InMemoryWaveformAsset:
             time=np.array([0.0, 0.05]), idata=np.array([0.0, 1.0]), qdata=None
         ),
     )
+
+
+def test_point_and_library_revisions_follow_each_independent_owner(
+    entry: ResultEntry,
+) -> None:
+    import zcu_tools.resources.entry as entry_api
+
+    revision = getattr(entry_api, "document_revision", None)
+    assert callable(revision), "Entry views need a public installed revision query"
+    from zcu_tools.resources.entry import document_revision
+
+    point = entry.new_point("revision")
+    library = entry.module_library("revision")
+    assert hasattr(library, "document_revision"), "Libraries need installed revisions"
+    before_point = document_revision(point)
+    before_library = library.document_revision
+    point.description = "written now"
+    assert document_revision(point) != before_point
+    assert library.document_revision == before_library
+    assert (
+        document_revision(point).revision
+        == sha256(before_point.path.read_bytes()).hexdigest()
+    )
+    with library.edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
+    assert library.document_revision != before_library
+    assert (
+        library.document_revision.revision
+        == sha256(library.source_path.read_bytes()).hexdigest()
+    )
+    assert entry.module_library("revision").snapshot().waveform_keys() == (
+        "Q1.waveforms.base",
+    )
+    before_library.path.write_bytes(before_library.path.read_bytes() + b"# external\n")
+    installed = library.document_revision
+    assert library.document_revision == installed
+    library.refresh()
+    assert library.document_revision != installed
 
 
 def test_setup_library_is_initialized_independently_of_new_points(

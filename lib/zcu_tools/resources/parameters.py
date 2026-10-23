@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from zcu_tools.format_version import YamlMap
 
-from .document_store import DocumentChange, DocumentStore
+from .document_store import DocumentChange, DocumentRevision, DocumentStore
 from .parameter_fields import FieldView, set_model_value, stage_model
 from .parameter_metadata import (
     PARAMETER_FORMAT,
@@ -160,6 +160,11 @@ class ParameterView[T: BaseModel](FieldView):
         super().__init__(
             lambda: self._store.snapshot().components, self._edit_values, ""
         )
+
+    @property
+    def document_revision(self) -> DocumentRevision:
+        """Return this handle's installed raw-byte version without reading disk."""
+        return self._store.document_revision
 
     @contextmanager
     def _edit_values(self, _path: str) -> Generator[T]:

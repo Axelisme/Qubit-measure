@@ -423,7 +423,7 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
         },
         "recipe_guide": {
             "handler": partial(recipe_guide, ctx),
-            "description": "Read the named adapter's complete Markdown guide and resource_dir. Images remain relative to that directory and are not attached. Does not run a recipe, infer an adapter mapping or mutate the GUI.",
+            "description": "Read the named adapter's complete Markdown guide and resource_dir. Images remain relative to that directory and are not attached. Does not run a recipe, infer an adapter mapping or mutate the GUI. For point parameter/library/aliases edits, follow the server instructions' direct-file read/edit/context.reload contract.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"adapter": {"type": "string", "minLength": 1}},

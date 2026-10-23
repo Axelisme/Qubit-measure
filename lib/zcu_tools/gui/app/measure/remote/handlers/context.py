@@ -19,6 +19,7 @@ from zcu_tools.resources.entry import document_value
 from zcu_tools.resources.entry.aliases import AliasValue
 
 from ._wire_values import context_wire_value
+from .context_reload import check_writer_revision
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -60,6 +61,7 @@ def h_context_aliases_set(
                 f"rows[{index}].value must be a string or list of strings",
             ) from error
         rows.append(AliasRow(alias, binding))
+    check_writer_revision(adapter, "aliases", params)
     adapter.context_control.apply_alias_rows(tuple(rows))
     return {
         "rows": [
@@ -94,6 +96,7 @@ def h_context_set_parameter(
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, f"invalid parameter value: {exc}"
         ) from exc
+    check_writer_revision(adapter, "parameters", params)
     capture = adapter.context_control.read_context()
     if path.split(".")[1:2] == ["module"]:
         # Slots are stored point values, not materialized library parameters.
@@ -134,6 +137,7 @@ def h_context_ml_edit(
     if kind not in ("module", "waveform"):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown library kind {kind!r}")
     save_as = params["save_as"]
+    check_writer_revision(adapter, "library", params)
     errors = adapter.ctrl.edit_library_entry(
         kind,
         str(params["name"]),
@@ -360,6 +364,7 @@ def h_context_ml_create_from_role(
         item_kind = adapter.ctrl.template_kind(template_id)
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    check_writer_revision(adapter, "library", params)
     try:
         adapter.ctrl.create_from_template(item_kind, template_id, name, edits=edits)
     except LibraryEntryInvalid as exc:
@@ -382,7 +387,8 @@ def h_context_ml_create_from_role(
 def h_context_ml_del_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Delete concrete module params[name]; echo deleted, propagate owner errors."""
+    """Delete a concrete module; optional expected_revision guards its disk file."""
+    check_writer_revision(adapter, "library", params)
     name = str(params["name"])
     parameters = adapter.context_control.read_context()
     adapter.ctrl.apply_library_change(
@@ -394,7 +400,8 @@ def h_context_ml_del_module(
 def h_context_ml_rename_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Rename concrete module params[old/new]; echo renamed, propagate owner errors."""
+    """Rename a concrete module; optional expected_revision guards its disk file."""
+    check_writer_revision(adapter, "library", params)
     old = str(params["old"])
     new = str(params["new"])
     parameters = adapter.context_control.read_context()
@@ -408,7 +415,8 @@ def h_context_ml_rename_module(
 def h_context_ml_rename_waveform(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Rename concrete waveform params[old/new]; echo renamed, propagate owner errors."""
+    """Rename a concrete waveform; optional expected_revision guards its disk file."""
+    check_writer_revision(adapter, "library", params)
     old = str(params["old"])
     new = str(params["new"])
     parameters = adapter.context_control.read_context()
@@ -422,7 +430,8 @@ def h_context_ml_rename_waveform(
 def h_context_ml_del_waveform(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Delete concrete waveform params[name]; echo deleted, propagate owner errors."""
+    """Delete a concrete waveform; optional expected_revision guards its disk file."""
+    check_writer_revision(adapter, "library", params)
     name = str(params["name"])
     parameters = adapter.context_control.read_context()
     adapter.ctrl.apply_library_change(
