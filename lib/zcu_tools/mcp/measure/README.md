@@ -200,6 +200,8 @@ Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", r
 Run 前的 `RecipeNeedsParameters` 使 execution 終態為 needs_parameters，
 snapshot 列具名 missing paths、outcome=None，並釋放 admission。
 Cfg preflight 額外回 `parameter_errors: [{path, message}]`，保留 owner 的全部 typed paths 與理由，包含未參與的 tone。
+有作者說明的必填空白 errors message 包含欄位與父欄位的 label、unit 及 description。
+回覆時分開報告 readout slot found 與 form valid：slot lookup 只證明來源存在，`status.ready.can_run` 只檢查環境就緒；目標表單是否有效要另讀 `tab.get_cfg.errors`，recipe preflight 則讀 `parameter_errors`，不新增重複的 readiness 欄位。
 Missing 的可讀路徑如 `tones[5].sweep.stop`，parameter_errors 的同一路徑為 `["tones", 5, "sweep", "stop"]`。
 `await tab.run()` 也先讀完整 Form errors，有錯就回 needs_parameters，不送 run_start。
 RecipeOutcome 仍只有 completed／failed／cancelled，不把缺參包成失敗。

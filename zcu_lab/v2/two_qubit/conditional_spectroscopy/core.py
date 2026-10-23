@@ -39,9 +39,27 @@ BRANCH_LABELS = ("00", "01", "10", "11")
 class SpectroscopyModules(ConfigBase):
     """Calibrated preparation/contrast Xπ pulses and complete ordered mux readout."""
 
-    x180_f1: PulseCfg
-    x180_f2: PulseCfg
-    readout: MuxReadoutCfg
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+        ),
+    ]
 
 
 class SpectroscopyCfg(ProgramV2Cfg, ExpCfgModel):
@@ -59,9 +77,20 @@ class SpectroscopyCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: SpectroscopyModules
     roles: JointRoles
-    drive: DualLineCfg
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。首次範圍由操作者確認；已有校準時可沿用 coupler 的 cz_f1／cz_f2 slots，不假設它們適合作 weak probes。",
+        ),
+    ]
     frequency: Annotated[
-        SweepCfg, FieldMeta(unit="MHz", label="Common probe frequency")
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Frequency",
+            description="填入 common probe frequency 起訖值，單位 MHz。先用 twotone frequency 定位 F1/F2，再由操作者確認高能階掃描範圍。",
+        ),
     ]
     contrast: Annotated[bool, FieldMeta(label="Double Xπ contrast")] = True
     dc_device: Annotated[str | None, FieldMeta(label="Coupler DC source")] = None
