@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
-from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
@@ -27,6 +27,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry.writeback import ParameterUpdate
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure.remote._helpers import dispatch_handler
@@ -35,19 +36,14 @@ from ._script_recipe_support import SyntheticGui
 
 
 class RejectingContext(ContextService):
-    """Context collaborator rejects one setter after real committed writes."""
+    """Reject the Post point group after the Primary pane has committed."""
 
-    def set_parameter(
-        self,
-        target: ContextTarget,
-        path: str,
-        value: YamlValue,
-        *,
-        metadata: YamlMap | None = None,
-    ) -> YamlValue:
-        if path == "general.ext.rejected":
+    def set_parameters(
+        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+    ) -> tuple[YamlValue, ...]:
+        if any(update.path == "general.ext.rejected" for update in updates):
             raise InvalidInputError("synthetic setter refused the value")
-        return super().set_parameter(target, path, value, metadata=metadata)
+        return super().set_parameters(target, updates)
 
 
 class WritebackGui(SyntheticGui):
