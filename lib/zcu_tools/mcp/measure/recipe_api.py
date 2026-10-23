@@ -331,14 +331,16 @@ class RecipeContext:
         """Bind the execution runtime; authors obtain this from session.context."""
         self._runtime = runtime
 
-    def read(self, source_path: str) -> YamlValue:
+    def read(self, source_path: str, *, missing_ok: bool = False) -> YamlValue:
         """Read one registered value.read key, such as device.flux.value.
 
-        Source/transport errors propagate. No tab needs to be open. This reads
-        the session-global source, not a tab's fixed Reset capture. It never
-        refreshes the separate sources observed by tab.read.
+        With missing_ok=True, an unregistered source returns None. Otherwise
+        unregistered sources raise GuiRpcError. Other source/transport errors
+        always propagate. No tab needs to be open. This reads the session-global
+        source, not a tab's fixed Reset capture. It never refreshes the separate
+        sources observed by tab.read.
         """
-        return self._runtime.read_source(source_path)
+        return self._runtime.read_source(source_path, missing_ok=missing_ok)
 
 
 class RecipeSession:

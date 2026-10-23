@@ -414,16 +414,26 @@ class RecipeRuntime:
         self._tools.send_gui_rpc("tab.reset_cfg", params)
         return RecipeTab(self, tab, adapter)
 
-    def read_source(self, source_path: str) -> YamlValue:
+    def read_source(self, source_path: str, *, missing_ok: bool = False) -> YamlValue:
         """Read one registered session-global value source, without a tab capture.
 
         source_path is the owner's value.read key (for example
-        device.flux.value), not a Form path or expression. Missing sources and
-        transport/type errors propagate. This never refreshes tab.read sources.
+        device.flux.value), not a Form path or expression. With missing_ok=True,
+        return None only for an unregistered source. Other source/transport/type
+        errors propagate. This never refreshes tab.read sources.
         """
         if not source_path.strip():
             raise ValueError("Source path must be nonblank")
-        reply = self._tools.send_gui_rpc("value.read", {"key": source_path})
+        try:
+            reply = self._tools.send_gui_rpc("value.read", {"key": source_path})
+        except GuiRpcError as exc:
+            if (
+                missing_ok
+                and exc.code == "invalid_params"
+                and exc.reason == "unregistered_source"
+            ):
+                return None
+            raise
         return TypeAdapter(YamlValue).validate_python(reply["value"])
 
     @property
