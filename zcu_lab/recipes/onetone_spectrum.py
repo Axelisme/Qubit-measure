@@ -124,7 +124,6 @@ async def onetone_spectrum(
         calibration=FrequencySweepCalibration(
             "$resonator.freq", "$resonator.kappa", 3.0
         ),
-        session=session,
         scan=FrequencySweepRange(
             center_mhz=inputs.center_mhz, span_mhz=inputs.span_mhz, expts=inputs.points
         ),

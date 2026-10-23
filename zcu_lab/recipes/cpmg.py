@@ -200,7 +200,6 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),

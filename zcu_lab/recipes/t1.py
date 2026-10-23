@@ -132,7 +132,6 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),

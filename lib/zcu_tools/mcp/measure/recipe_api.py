@@ -171,8 +171,8 @@ class SaveResult:
 
     status is completed or failed; run_id is the acquisition identity, including
     all-output failures. outputs retains every reported path/status/diagnostic,
-    and reports retains each complete owner report in dispatch order. A later
-    RPC failure preserves the confirmed prefix with failed status. Reserved
+    and reports retains the complete owner report from the single Save RPC.
+    A transport failure propagates without claiming an unreceived report. Reserved
     outputs are not saved files. Repeated saves never accumulate success claims.
     """
 
@@ -483,10 +483,10 @@ class RecipeTab:
         self._runtime.preview(self.tab, pane)
 
     def save(self) -> SaveResult:
-        """Synchronously save raw data then all completed artifacts.
+        """Synchronously save raw data and all completed artifacts once.
 
-        Both RPCs finish on the GUI owner; there is no Save operation to await.
-        Merge their complete reports, retain this attempt in runs, and propagate
+        One RPC finishes on the GUI owner; there is no Save operation to await.
+        Retain its complete report for this attempt in runs, and propagate
         transport/admission errors. Per-output failures remain in the report.
         Repeated saves are independent receipts, not accumulated success claims.
         """

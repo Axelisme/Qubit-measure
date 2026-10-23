@@ -149,7 +149,6 @@ async def twotone_spectrum(
             tab,
             ("sweep", "freq"),
             calibration=FrequencySweepCalibration("$qubit.freq", "$qubit.kappa", 3.0),
-            session=session,
             scan=FrequencySweepRange(
                 center_mhz=inputs.center_mhz,
                 span_mhz=inputs.span_mhz,
@@ -160,7 +159,6 @@ async def twotone_spectrum(
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),

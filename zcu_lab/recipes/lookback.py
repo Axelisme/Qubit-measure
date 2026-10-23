@@ -125,7 +125,6 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         inputs.frequency_mhz,
         calibration=FrequencyCalibration(
             path="$resonator.freq",
