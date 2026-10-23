@@ -29,6 +29,14 @@ reference target. Its paired Rabi and T1 warm wall ratios were 0.999809 and
 records the current setting's higher RSS peak and unchanged numeric bytes.
 These observations do not attribute the remaining RSS to Qt.
 
+Single-tone plateaus with carrier magnitude below 30 MHz use `slow_envelope`
+instead of T6. It applies full-Hamiltonian midpoint exponentials with Strang
+bath half-steps. Top-level `numerics.slow_envelope_segments_per_period` sets the
+positive integer subdivisions per period, default 20, for all six qubits.
+Dense-reference population tolerance is 1e-2; the 21-level Q1 calibration
+measured about 1e-4 or less. Stronger drives, longer pulses and coherences need
+separate convergence checks. Carriers at or above 30 MHz keep the existing route.
+
 ## Trusted startup
 
 From the checkout root, launch the measure GUI with this trusted script:

@@ -1,6 +1,6 @@
 """Six independent circuits sharing one live DC current source."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
@@ -91,8 +91,9 @@ class SixQubits(Values):
 
 
 class SixFluxoniumNumerics(Values):
-    """Cache residency allowances in bytes, all strict nonnegative integers.
+    """Environment cache allowances and midpoint subdivisions.
 
+    Cache allowances are strict nonnegative integer byte counts.
     prepare_cache_bytes: environment-wide prepare arrays and estimated metadata,
         default 256 MiB. result_memo_bytes: environment-wide exact-result arrays
         and metadata, default 64 MiB. routing_cache_bytes: environment-wide
@@ -102,8 +103,12 @@ class SixFluxoniumNumerics(Values):
         default 8 MiB, not divided. Zero disables the corresponding residency.
     No fixed upper bound is imposed. Negative/noninteger values fail validation.
     These allowances exclude active work, models and process RSS.
+    slow_envelope_segments_per_period: strict positive integer midpoint
+        subdivisions per carrier period, default 20, overriding all six nested
+        single-qubit values when composing sources.
     """
 
+    slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)] = 20
     prepare_cache_bytes: Index = 256 * 1024**2
     result_memo_bytes: Index = 64 * 1024**2
     routing_cache_bytes: Index = 4 * 1024**2
@@ -123,7 +128,8 @@ class SixFluxoniumSettings(Values):
     Q1's seed selects the environment root stream. The maximum of the six
     min_round_duration_s values sets successful-round pacing. Per-qubit solver
     tolerances, truncations and physical calibrations remain independent.
-    numerics: environment cache residency allowances, default SixFluxoniumNumerics.
+    numerics: environment cache allowances and midpoint subdivisions, default
+    SixFluxoniumNumerics.
     No devices are created. Validation does not certify physical convergence.
     """
 
