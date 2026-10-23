@@ -1,6 +1,6 @@
 **Readers:** operator, agent. How to measure readout time of flight from the GUI or MCP and use the result to calibrate the trigger offset.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -11,6 +11,8 @@ Lookback fires the readout pulse and captures the decimated ADC trace versus tim
 ## Parameter sources
 
 Defaults use the tab's fixed resonator selection, captured when the form opens or resets. The `$resonator` alias identifies that resonator.
+
+The recipe requires `frequency_mhz` when no resonator frequency source or explicitly selected readout library supplies a frequency. An unregistered `$resonator.freq` source returns `needs_parameters(frequency_mhz)`, not a source error.
 
 - Pulse and ADC frequency start at `resonator.freq + resonator.kappa` in MHz. Missing or null `kappa` uses 1 MHz. Both stored values must be positive, finite real numbers, with booleans excluded. Missing or null frequency, invalid frequency or linewidth, or an absent resonator capture leaves frequency required and blank.
 - `resonator.wiring.ch` and `resonator.wiring.ro_ch` supply the generator and ADC channels through the readout slot.

@@ -60,7 +60,7 @@ class LookbackInputs(FormModel):
     )
     frequency_mhz: float | None = Field(
         None,
-        description="Readout frequency in MHz; explicit wins, then an explicitly selected readout library, then $resonator.freq.",
+        description="Readout frequency in MHz; explicit wins, then an explicitly selected readout library, then $resonator.freq. Required when neither the selected library nor a resonator frequency source supplies a frequency.",
     )
     readout_length_us: float | None = Field(
         None, description="ADC acquisition window in us; null keeps the GUI value."
