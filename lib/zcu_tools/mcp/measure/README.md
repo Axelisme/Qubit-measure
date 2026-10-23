@@ -87,7 +87,14 @@ Readonly、ref、selector、來源與 cfg admission 都由 Form owner 檢查，�
 結構或來源拒絕不留下成功前綴。預設保留一般 invalid draft，再拋 invalid_cfg。
 `require_valid=True` 先驗證 detached candidate 與完整 native cfg，無效時不安裝欄位。
 空 batch 可驗證目前 cfg。先前 open、Reset、library 與 inline 操作不回滾。
-七個 mux recipe 在最後一批 participants／overrides 明填 require_valid=True。
+八個 mux recipe 在最後一批 participants／overrides 明填 require_valid=True。
+
+Lab 新增 `mux_onetone`、`onetone_range_find`、`twotone_flux_dep` 三個工具，
+由注入的 `RECIPES` 產生 schema 與註冊，不在 framework 硬編工具表。
+它們分別操作 `mux/onetone`、`onetone/range_find`、`twotone/flux_dep`。
+用這些 adapter 名呼叫 `recipe_guide` 可讀各自的參數、分析與 writeback 說明。
+三者都先 Run，再 Analyze，經問答接受選定候選後才寫入，最後保存。
+Range find 的 `min_separation` 目前沿用 GUI 分析預設，待接 analyze updates。
 
 作者用 `await tab.run()`、`await tab.analyze("primary"|"post", result=T)`、
 `await tab.ask_writeback()` 與 `await session.ask(question)` 串接流程。
@@ -193,6 +200,8 @@ Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", r
 Run 前的 `RecipeNeedsParameters` 使 execution 終態為 needs_parameters，
 snapshot 列具名 missing paths、outcome=None，並釋放 admission。
 Cfg preflight 額外回 `parameter_errors: [{path, message}]`，保留 owner 的全部 typed paths 與理由，包含未參與的 tone。
+有作者說明的必填空白 errors message 包含欄位與父欄位的 label、unit 及 description。
+回覆時分開報告 readout slot found 與 form valid：slot lookup 只證明來源存在，`status.ready.can_run` 只檢查環境就緒；目標表單是否有效要另讀 `tab.get_cfg.errors`，recipe preflight 則讀 `parameter_errors`，不新增重複的 readiness 欄位。
 Missing 的可讀路徑如 `tones[5].sweep.stop`，parameter_errors 的同一路徑為 `["tones", 5, "sweep", "stop"]`。
 `await tab.run()` 也先讀完整 Form errors，有錯就回 needs_parameters，不送 run_start。
 RecipeOutcome 仍只有 completed／failed／cancelled，不把缺參包成失敗。

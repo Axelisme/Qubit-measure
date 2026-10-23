@@ -78,7 +78,9 @@ def qubfreq_signal2real(
 class FreqSweepCfg(ConfigBase):
     freq: Annotated[
         SweepCfg,
-        FieldMeta(label="Freq", unit="MHz", description="Qubit drive frequency sweep."),
+        FieldMeta(
+            label="Frequency", unit="MHz", description="Qubit drive frequency sweep."
+        ),
     ]
 
 
