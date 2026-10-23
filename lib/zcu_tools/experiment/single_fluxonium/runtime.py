@@ -476,7 +476,7 @@ def single_fluxonium(
             source.execute,
             backend_version=replay.BACKEND_VERSION,
             seed=settings.numerics.seed,
-            min_round_duration_s=settings.numerics.min_round_duration_s,
+            time_scale=settings.numerics.time_scale,
         )
         soc = SimulationSoc(soccfg, binding, routes=tuple((gen, adc) for gen in gens))
         return SimulationEnvironment(

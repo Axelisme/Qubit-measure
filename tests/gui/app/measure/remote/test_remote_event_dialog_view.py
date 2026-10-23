@@ -85,8 +85,8 @@ def event_serializers_guard(request: pytest.FixtureRequest) -> Generator[None]:
 
 
 @pytest.fixture()
-def fx(qapp):
-    f = Fixture()
+def fx(tmp_path, qapp):
+    f = Fixture(project_root=str(tmp_path / "project"))
     f.start()
     yield f
     f.stop()
@@ -262,7 +262,9 @@ def test_subscribe_then_run_started_arrives(fx):
         sock.close()
 
 
-def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch):
+def test_no_matching_subscription_skips_serializer_and_encode(
+    tmp_path, qapp, monkeypatch
+):
     from zcu_tools.gui.remote import control_service as service_module
 
     serializer = MagicMock(return_value={"tab_id": "tab-x"})
@@ -271,7 +273,7 @@ def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch)
         "EVENT_SERIALIZERS",
         {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
     ):
-        f = Fixture()
+        f = Fixture(project_root=str(tmp_path / "project"))
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
     f.start()
@@ -289,7 +291,7 @@ def test_no_matching_subscription_skips_serializer_and_encode(qapp, monkeypatch)
         f.stop()
 
 
-def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
+def test_multiple_subscribers_serialize_and_encode_once(tmp_path, qapp, monkeypatch):
     from zcu_tools.gui.remote import control_service as service_module
 
     serializer = MagicMock(return_value={"tab_id": "tab-x"})
@@ -298,7 +300,7 @@ def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
         "EVENT_SERIALIZERS",
         {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
     ):
-        f = Fixture()
+        f = Fixture(project_root=str(tmp_path / "project"))
     encode = MagicMock(wraps=service_module.encode_line)
     monkeypatch.setattr(service_module, "encode_line", encode)
     f.start()
@@ -327,14 +329,14 @@ def test_multiple_subscribers_serialize_and_encode_once(qapp, monkeypatch):
         f.stop()
 
 
-def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
+def test_serializer_failure_is_lazy_logged_and_isolated(tmp_path, qapp, caplog):
     serializer = MagicMock(side_effect=RuntimeError("broken serializer"))
     with patch.object(
         app_service_module,
         "EVENT_SERIALIZERS",
         {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
     ):
-        f = Fixture()
+        f = Fixture(project_root=str(tmp_path / "project"))
     later_subscriber = MagicMock()
     f.bus.subscribe(RunStartedPayload, later_subscriber)
     f.start()
@@ -354,14 +356,14 @@ def test_serializer_failure_is_lazy_logged_and_isolated(qapp, caplog):
         f.stop()
 
 
-def test_serializer_returning_none_only_runs_for_subscriber(qapp):
+def test_serializer_returning_none_only_runs_for_subscriber(tmp_path, qapp):
     serializer = MagicMock(return_value=None)
     with patch.object(
         app_service_module,
         "EVENT_SERIALIZERS",
         {**EVENT_SERIALIZERS, RunStartedPayload: serializer},
     ):
-        f = Fixture()
+        f = Fixture(project_root=str(tmp_path / "project"))
     f.start()
     sock = open_client(f.service.port)
     try:
@@ -378,10 +380,12 @@ def test_serializer_returning_none_only_runs_for_subscriber(qapp):
         f.stop()
 
 
-def test_push_encode_failure_is_logged_and_contained(qapp, monkeypatch, caplog):
+def test_push_encode_failure_is_logged_and_contained(
+    tmp_path, qapp, monkeypatch, caplog
+):
     from zcu_tools.gui.remote import control_service as service_module
 
-    f = Fixture()
+    f = Fixture(project_root=str(tmp_path / "project"))
     original_encode = service_module.encode_line
 
     def fail_push_only(payload):
@@ -545,7 +549,7 @@ def test_writer_queue_overflow_eventually_closes_wedged_client(
         assert not writer_errors, writer_errors
 
 
-def test_stop_unsubscribes_event_bus(qapp):
+def test_stop_unsubscribes_event_bus(tmp_path, qapp):
     bus_subs = EventSubscriptions()
     with (
         patch.object(
@@ -576,7 +580,7 @@ def test_stop_unsubscribes_event_bus(qapp):
         with patch.object(
             control_service_module, "EventSubscriptions", return_value=bus_subs
         ) as factory:
-            f = Fixture()
+            f = Fixture(project_root=str(tmp_path / "project"))
         try:
             factory.assert_called_once_with()
             controller_subs = [
@@ -747,10 +751,12 @@ def test_run_lifecycle_pushes_run_started_then_finished(fx):
         sock.close()
 
 
-def test_unauthenticated_subscribe_rejected(qapp):
+def test_unauthenticated_subscribe_rejected(tmp_path, qapp):
     from zcu_tools.gui.app.measure.remote import ControlOptions
 
-    f = Fixture(ControlOptions(port=0, token="s3cr3t"))
+    f = Fixture(
+        ControlOptions(port=0, token="s3cr3t"), project_root=str(tmp_path / "project")
+    )
     f.start()
     try:
         sock = open_client(f.service.port)

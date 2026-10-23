@@ -64,6 +64,7 @@ class FactoryCfg(ConfigBase):
     [("reset", "template"), ("reset", "factory"), ("refresh_sources", "factory")],
 )
 def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
+    tmp_path,
     qapp: QApplication,
     failure: str,
     command: str,
@@ -87,7 +88,7 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
                 return Form(FactoryCfg, {"pulse": Template("missing")})
             return Form(FactoryCfg, {"amount": 3.0})
 
-    application = Fixture(headless=True)
+    application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("factory", FactoryAdapter)
     error = ValueError if failure == "template" else RuntimeError
     match = "factory.*pulse" if failure == "template" else "factory source failed"
@@ -126,9 +127,10 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
 
 
 def test_open_edit_run_and_reset_use_public_form_authority(
+    tmp_path,
     qapp: QApplication,
 ) -> None:
-    application = Fixture(headless=True)
+    application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("trace", TraceAdapter)
     parameters = application.ctrl.context_control.read_context()
     application.ctrl.context_control.set_parameter(

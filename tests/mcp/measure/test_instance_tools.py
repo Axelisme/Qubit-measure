@@ -7,6 +7,15 @@ import pytest
 from ._support import make_client
 
 
+def test_fixed_tool_contract_is_available_without_gui_access(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    try:
+        assert all(callable(entry["handler"]) for entry in client.tools.values())
+        assert client.transport.sent == []
+    finally:
+        client.context.session.close()
+
+
 def test_fixed_rpc_tools_keep_their_own_transport_and_catalog(tmp_path: Path) -> None:
     first = make_client(tmp_path)
     second = make_client(tmp_path)

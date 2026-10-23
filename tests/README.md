@@ -31,6 +31,12 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
 相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
 
+Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的私有目錄，
+結束時還原。每個 xdist worker 各有自己的目錄。專案根與測試資料優先明確傳入 `tmp_path`。
+裸 `tempfile` 呼叫仍須負責清理。Session guard 檢查私有目錄中殘留的 `context-*`，
+讓 session 失敗並列出首次觀察到它的 nodeid。Guard 不掃描全域 `/tmp`，避免其他 lane
+同時跑測試造成誤報；顯式指定其他 `dir` 的呼叫與獨立 subprocess 不在此 guard 的範圍內。
+
 ## UI 驗證
 
 有 UI 改動的票，驗收須包含元件驅動情境。情境使用
@@ -63,6 +69,7 @@ Agent 在 review-done 前須跑完情境並親自看過每步截圖，留下精�
 ## 執行測試套件
 
 受管理 worktree 的 Python 指令按 [AGENTS.md](../AGENTS.md) 使用 `uv run --directory <worktree> --no-sync --`。
+同一 checkout 內並行的 pytest 呼叫各自使用 `.pytest-tmp/<pid>-<隨機字串>` basetemp，結束時只清理自己的目錄；明確指定 `--basetemp` 時沿用呼叫者的路徑。
 選集與平行化由 pytest CLI 決定。開始前確認所用環境安裝 GUI/client 測試需要的 optional dependency。
 
 pytest 全域 warning filter 只放第三方 noise（例如 `qick` / `scqubits` 在 Python 3.13

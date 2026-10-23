@@ -20,7 +20,9 @@ def test_recipe_guide_delivers_markdown_from_registered_adapter(
     class GuideAdapter(SampleAdapter):
         guide_path: ClassVar[Path | None] = Path("guide.md") if declared else None
 
-    fixture = Fixture(empty_project=True, headless=True)
+    fixture = Fixture(
+        project_root=str(tmp_path / "project"), empty_project=True, headless=True
+    )
     fixture.registry.register("guide-test", GuideAdapter)
     port = fixture.start()
     # Only guide delivery is observed, so the bridge is unused; the request

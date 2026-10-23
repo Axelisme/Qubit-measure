@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24, physical-time pacing
 
 **Readers:** framework-dev, lab-author. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -60,10 +60,11 @@ using the ADC sample interval. One scattering phase is always supplied explicitl
 Integrated rounds use ADC `round_statistics` and `PreparedRawShots`.
 Decimated rounds use ADC `sample_traces`. No environment-owned random sampler,
 synthetic second cavity or alternate IQ generator exists. QICK owns averaging,
-round hooks, Stop checkpoints and successful-round pacing. The default pacing
-floor is 0.2 s; settings may set it to zero. Integrated Stop is checked between
-evolution chunks and discards the interrupted round while retaining completed
-rounds. Pacing sleeps and ADC sampling remain synchronous.
+round hooks and Stop checkpoints. The binding paces each round to
+`time_scale * reps * sum(point timeline duration + relax_delay)`.
+`numerics.time_scale` defaults to 1.0 (physical time); zero disables waiting.
+Integrated Stop is checked between evolution chunks and during pacing, discarding
+the interrupted round while retaining completed rounds. ADC sampling remains synchronous.
 
 ## Reuse and lifetime
 

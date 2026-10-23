@@ -1,6 +1,6 @@
 # FTF YAML values
 
-**Last updated:** 2026-10-22，共用 simulation schema、YAML loader 與獨立 design
+**Last updated:** 2026-10-24, physical-time pacing
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
@@ -14,7 +14,7 @@
 
 可省略的 `design` map 以 entry qubit 名稱保存完整的獨立標稱值，不從 `chip` 或 `dc_bias` 補值。每筆必填正值 `ej_ghz/ec_ghz/el_ghz`、A/V `flux_unit`、有限的 `flux_half/flux_bias` 與有限非零 signed `flux_period`。缺欄位在載入時報 `design.<qubit>.<field>`。省略或空 map 表示沒有設計初猜。Startup 負責依 entry-template 驗證 qubit 名稱與 device 單位，再交 predictor 檔案 owner 保存；schema 不建立 predictor 或讀 entry。
 
-`numerics.min_round_duration_s` 是每個成功 binding round 的有限非負最短時間，單位秒。省略為 0.2，設 0 關閉補等，供 profile／benchmark 使用。此值由 `experiment.ftf` 接到 binding，不影響數值算法或 GUI 欄位。Builder 另提供 `ftf(..., min_round_duration_s=0)` 公開覆寫，無須改寫 YAML。
+`numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
 
 `numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False))` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../../experiment/ftf/README.md#routing-telemetry)。
 

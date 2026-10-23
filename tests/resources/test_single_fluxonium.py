@@ -58,6 +58,13 @@ numerics:
 """
 
 
+def test_fixed_round_duration_reports_time_scale_migration():
+    document = yaml.safe_load(DOCUMENT)
+    document["numerics"]["min_round_duration_s"] = 0.2
+    with pytest.raises(ValueError, match=r"numerics.min_round_duration_s.*time_scale"):
+        _parse(document)
+
+
 def _parse(document: object) -> "SingleFluxoniumSettings":
     # Import inside the call so an absent new API fails a test, not collection.
     try:

@@ -25,7 +25,11 @@ from ._helpers import Fixture, call, mcp_client, open_client
 
 @pytest.fixture()
 def library_client(qapp, tmp_path):
-    fx = Fixture(active_label="ctx001", templates=TEMPLATES)
+    fx = Fixture(
+        active_label="ctx001",
+        templates=TEMPLATES,
+        project_root=str(tmp_path / "project"),
+    )
     context = fx.ctrl.context_control
     context.set_waveform(
         context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)

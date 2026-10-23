@@ -103,7 +103,14 @@ def test_status_indexes_gui_operations_and_session_executions(
                 "name": "cooldown-A",
                 "result_path": "/results/cooldown-A",
                 "database_path": "/data/cooldown-A",
-            }
+            },
+            "files": [
+                {
+                    "document": "parameters",
+                    "path": "/results/cooldown-A/points/bias/point.yaml",
+                    "revision": "installed-sha",
+                }
+            ],
         },
         "state.has_context": {"value": True},
         "state.has_active_context": {"value": True},
@@ -172,6 +179,7 @@ def test_status_indexes_gui_operations_and_session_executions(
     pending_summary = client.call("status", {"execution": pending.snapshot().execution})
     assert client.call("status", {}) == {
         "entry": replies["entry.info"]["entry"],
+        "files": replies["entry.info"]["files"],
         "soc": {"connected": True, "mock": True},
         "context": {"active": "bias"},
         "devices": [{"name": "flux", "status": "connected", "connected": True}],

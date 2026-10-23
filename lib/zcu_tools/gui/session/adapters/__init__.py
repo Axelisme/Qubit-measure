@@ -5,3 +5,7 @@ Unlike the session leaf modules these DO pull in Qt (a driven adapter is the Qt
 side of a port), so import them only when building the UI, after the matplotlib
 backend is selected.
 """
+
+from .point_file_watcher import PointFileWatcher
+
+__all__ = ["PointFileWatcher"]

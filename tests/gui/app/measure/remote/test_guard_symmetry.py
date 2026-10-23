@@ -32,10 +32,10 @@ from zcu_tools.gui.session.context_types import (
 )
 
 
-def _make_controller(readiness: ContextReadiness) -> Controller:
+def _make_controller(readiness: ContextReadiness, *, tmp_path) -> Controller:
     from ._helpers import Fixture
 
-    fixture = Fixture(empty_project=True)
+    fixture = Fixture(empty_project=True, project_root=str(tmp_path / "project"))
     fixture.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
     if readiness is ContextReadiness.ACTIVE:
         fixture.ctrl.setup_control.new_point(
@@ -68,9 +68,9 @@ def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> ob
         raise remote_error_from_expected(exc) from exc
 
 
-def test_run_start_unselected_context_symmetry(qapp):
+def test_run_start_unselected_context_symmetry(tmp_path, qapp):
     """Unselected context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
-    ctrl = _make_controller(ContextReadiness.EMPTY)
+    ctrl = _make_controller(ContextReadiness.EMPTY, tmp_path=tmp_path)
     tab_id = ctrl.new_tab("fake")
 
     # UI path
@@ -90,9 +90,9 @@ def test_run_start_unselected_context_symmetry(qapp):
     assert "active file-backed context" in excinfo.value.message
 
 
-def test_analyze_without_run_result_symmetry(qapp):
+def test_analyze_without_run_result_symmetry(tmp_path, qapp):
     """ACTIVE context but no run result: both paths reject on the same guard."""
-    ctrl = _make_controller(ContextReadiness.ACTIVE)
+    ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
     tab_id = ctrl.new_tab("fake")
 
     with pytest.raises(GuardError, match="No run result"):
@@ -107,9 +107,9 @@ def test_analyze_without_run_result_symmetry(qapp):
     assert excinfo.value.reason == "no_run_result"
 
 
-def test_save_no_run_result_carries_reason(qapp):
+def test_save_no_run_result_carries_reason(tmp_path, qapp):
     """ACTIVE context, no run result: save fails with reason='no_run_result'."""
-    ctrl = _make_controller(ContextReadiness.ACTIVE)
+    ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
     tab_id = ctrl.new_tab("fake")
 
     with pytest.raises(RemoteError) as excinfo:

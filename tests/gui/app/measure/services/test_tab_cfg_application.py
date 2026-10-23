@@ -56,8 +56,8 @@ class SchemaAdapter(SampleAdapter):
 
 
 @pytest.fixture
-def application(qapp: QApplication) -> Generator[Fixture]:
-    fixture = Fixture(headless=True)
+def application(tmp_path, qapp: QApplication) -> Generator[Fixture]:
+    fixture = Fixture(headless=True, project_root=str(tmp_path / "project"))
     fixture.registry.register("cfg-contract", SchemaAdapter)
     try:
         yield fixture

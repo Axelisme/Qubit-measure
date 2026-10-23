@@ -35,7 +35,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
-from ..document_store import DocumentChange, DocumentValue
+from ..document_store import DocumentChange, DocumentRevision, DocumentValue
 from ..entry.ledger import RecordsLedger
 from ..entry.provenance import Provenance, ProvenanceData, validate_sources
 
@@ -724,6 +724,11 @@ class ModuleLibrary:
         """Return the absolute module_cfg.yaml path for external watchers."""
         return self._path
 
+    @property
+    def document_revision(self) -> DocumentRevision:
+        """Return the installed library bytes' version without disk I/O."""
+        return self._store.document_revision
+
     def snapshot(self) -> LibrarySnapshot:
         """Return an isolated copy of the published document, without file I/O or notice."""
         return LibrarySnapshot(self._store.snapshot(), assets=self._assets)
@@ -746,14 +751,15 @@ class ModuleLibrary:
         ):
             yield draft
 
-    def refresh(self) -> bool:
+    def refresh(self, *, strict: bool = False) -> bool:
         """Reload and publish changed valid content; return whether it changed.
 
-        Existing invalid entries are backed up and removed before publication.
-        Container/header, ledger I/O/schema and unexpected failures propagate
-        and retain published state.
+        By default invalid entries are backed up and removed before publication.
+        strict=True instead validates the whole external candidate without repair
+        or backup. Validation and I/O failures retain the installed snapshot and
+        revision. Strict reload never writes the document.
         """
-        return self._store.refresh()
+        return self._store.refresh(strict=strict)
 
     def subscribe(
         self, callback: Callable[[DocumentChange], None]

@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-23, local DC lines and shared coil.
+**Last updated:** 2026-10-24, physical-time pacing
 
 **Readers:** framework-dev, lab-author. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -69,8 +69,10 @@ unbound controls and ambiguous frequency assignments fail before evolution.
 The backend supports terminal readout only, as the single-model source does.
 Pulse ADC6 uses Q1's receiver gain, offset, phase, time of flight and noise PSD.
 Its physical cavity and incident-field calibration follow the frequency route.
-Q1's seed selects the environment root stream. The largest per-qubit pacing floor
-sets the minimum successful-round duration.
+Q1's seed selects the environment root stream. The largest per-qubit
+`numerics.time_scale` multiplies the round's physical duration, computed from reps
+and every point's timeline plus relaxation. All six default to 1.0 (physical
+time); all must be zero to disable waiting. Stop interrupts pacing at 10 ms checkpoints.
 
 ## Bounded statistics
 

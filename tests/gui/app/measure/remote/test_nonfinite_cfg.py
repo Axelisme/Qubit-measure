@@ -22,8 +22,8 @@ class FiniteCfg(ConfigBase):
 
 
 @pytest.fixture
-def live_cfg_resource(qapp):
-    fx = Fixture()
+def live_cfg_resource(tmp_path, qapp):
+    fx = Fixture(project_root=str(tmp_path / "project"))
     tab_id = "tab-live"
     resource = fx.prepare_tab(tab_id, SampleAdapter(), Form(FiniteCfg, {}))
     fx.start()

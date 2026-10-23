@@ -318,7 +318,12 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self._simulation_active = True
             try:
                 request = build_request(self, mode, soc.binding, sequence)
-                soc.install_request(request)
+                soc.install_request(
+                    request,
+                    pacing_cancel=kwargs.get("cancel_flag")
+                    if mode == "decimated"
+                    else None,
+                )
                 yield
             finally:
                 soc.release_request()

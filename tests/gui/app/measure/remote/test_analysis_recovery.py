@@ -56,8 +56,10 @@ class ToneAdapter(SampleAdapter):
 
 
 @pytest.mark.parametrize(("tones", "seconds"), [(0, 5), (1, 10), (6, 35), (20, 60)])
-def test_post_start_receipt_scales_read_budget_and_binds_recovery(qapp, tones, seconds):
-    fx = Fixture(headless=True)
+def test_post_start_receipt_scales_read_budget_and_binds_recovery(
+    tmp_path, qapp, tones, seconds
+):
+    fx = Fixture(headless=True, project_root=str(tmp_path / "project"))
     fx.start()
     sock = open_client(fx.service.port)
     fx.registry.register("tone-cost", ToneAdapter)

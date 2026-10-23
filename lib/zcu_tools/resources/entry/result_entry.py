@@ -18,13 +18,13 @@ from ruamel.yaml.error import YAMLError
 
 from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.format_version import YamlMap
-from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
-from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
+from .aliases import EntryAliases, load_entry_aliases_with_revision, save_entry_aliases
 from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -206,10 +206,23 @@ class ResultEntry:
         No component lookup or writes occur. Syntax validation belongs to the
         caller's alias table owner.
         """
-        aliases = load_entry_aliases(self._aliases_path(point))
-        return EntryAliases(aliases={}) if aliases is None else aliases
+        aliases, _ = self.load_aliases_with_revision(point=point)
+        return aliases
 
-    def save_aliases(self, aliases: EntryAliases, *, point: str | None = None) -> None:
+    def load_aliases_with_revision(
+        self, *, point: str | None = None
+    ) -> tuple[EntryAliases, DocumentRevision]:
+        """Read aliases and their exact validated byte revision together.
+
+        Selection and failures follow load_aliases. A missing aliases file
+        returns an empty table with revision=None, never a setup fallback.
+        """
+        aliases, revision = load_entry_aliases_with_revision(self._aliases_path(point))
+        return (EntryAliases(aliases={}) if aliases is None else aliases), revision
+
+    def save_aliases(
+        self, aliases: EntryAliases, *, point: str | None = None
+    ) -> DocumentRevision:
         """Atomically replace setup or point aliases with the named raw table.
 
         aliases is an EntryAliases containing ordered string bindings, not
@@ -220,9 +233,10 @@ class ResultEntry:
         after strict string validation, using sibling-temp replacement. Schema,
         YAML and I/O errors propagate; failed replacement retains the old file.
         Other alias tables, parameters, library, ledger and preferences do not
-        change. No multiwriter merge or crash guarantee is offered.
+        change. Return the exact written bytes' revision. No multiwriter merge
+        or crash guarantee is offered.
         """
-        save_entry_aliases(self._aliases_path(point), aliases)
+        return save_entry_aliases(self._aliases_path(point), aliases)
 
     def _aliases_path(self, point: str | None) -> Path:
         if point is None:
