@@ -13,15 +13,17 @@ has no coupler, qubit-qubit interaction or crosstalk matrix.
 components, wiring and aliases. Neither file supplies calibrated pulses or a
 module library. The [settings guide](field-guide.md) records units and model limits.
 
-Top-level `numerics` assigns the whole environment 256 MiB prepare, 64 MiB
-result-memo and 4 MiB routing cache budgets, divided across six sources. Each
-source retains a separate 8 MiB ADC allowance. These are residency caps, not
-process RSS limits. The [cache budget measurements](field-guide.md#cache-budget-measurements)
+Top-level `numerics` assigns the whole environment 768 MiB prepare, 64 MiB
+result-memo and 4 MiB routing cache budgets, divided across six sources.
+Each source receives 128 MiB for prepare and a separate 8 MiB ADC allowance.
+These are residency caps, not process RSS limits. The [cache budget measurements](field-guide.md#cache-budget-measurements)
 record a profiled old/new GUI peak reduction from 3239047168 to 2731724800 bytes.
-A reconciled candidate without the ownership profiler reached VmHWM 1559523328
-bytes, below the 1.5 GiB reference target. Its paired Rabi and T1 warm wall
-ratios were 0.999809 and 0.999689. The guide records the versions, workload and
-limits of these observations; it does not attribute the remaining RSS to Qt.
+With the earlier 256 MiB total prepare setting, a reconciled candidate without
+the ownership profiler reached VmHWM 1559523328 bytes, below the 1.5 GiB
+reference target. Its paired Rabi and T1 warm wall ratios were 0.999809 and
+0.999689. The guide's [768 MiB recheck](field-guide.md#768-mib-prepare-recheck)
+records the current setting's higher RSS peak and unchanged numeric bytes.
+These observations do not attribute the remaining RSS to Qt.
 
 ## Trusted startup
 
