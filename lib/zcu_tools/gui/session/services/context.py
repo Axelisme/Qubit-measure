@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
     LibraryChange,
     PointBindingError,
     PointFileRevision,
+    PointFileSyncStatus,
     SavedPoint,
     WorkingPointInfo,
 )
@@ -28,6 +28,8 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
+from zcu_tools.gui.session.services.context_writeback import ContextWritebackTarget
+from zcu_tools.gui.session.services.point_file_sync import PointFileSync
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
@@ -89,41 +91,6 @@ if TYPE_CHECKING:
     from zcu_tools.resources.entry.provenance import Provenance
 
 
-class _ContextWritebackTarget:
-    """Bind the context's target setters to the shared ordered execution loop."""
-
-    def __init__(
-        self, context: ContextService, target: SavedPoint, entry: ResultEntry
-    ) -> None:
-        self._context = context
-        self._target = target
-        self._entry = entry
-        self.entry_id = entry.entry_id
-        self.ledger = entry.ledger
-        self.point = target.point
-
-    def set_parameters(
-        self, updates: tuple[ParameterUpdate, ...]
-    ) -> tuple[YamlValue, ...]:
-        return self._context.set_parameters(self._target, updates)
-
-    def set_modules(self, updates: tuple[LibraryUpdate, ...]) -> tuple[YamlMap, ...]:
-        return self._context.set_modules(self._target, updates)
-
-    def append_sample(
-        self,
-        component: str,
-        fields: JsonObject,
-        *,
-        run_id: str,
-        at: datetime,
-        source: str,
-    ) -> JsonObject:
-        return self._entry.samples(component).append(
-            run_id=run_id, point=self.point, at=at, source=source, **fields
-        )
-
-
 class ContextService:
     """Own entry/point installation, fixed parameter captures, and global aliases.
 
@@ -170,6 +137,9 @@ class ContextService:
         self._binding_id = 0
         self._aliases = AliasTable(alias_rows)
         self._aliases_revision: DocumentRevision | None = None
+        self._file_sync = PointFileSync(
+            bus, installed=self.get_file_revisions, install=self._reload_point_file
+        )
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
 
@@ -238,6 +208,58 @@ class ContextService:
             PointFileRevision("parameters", parameters.path, parameters.revision),
             PointFileRevision("library", library.path, library.revision),
             PointFileRevision("aliases", aliases.path, aliases.revision),
+        )
+
+    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+        """Return recent selected-point observations without I/O; switches clear them."""
+        return self._file_sync.statuses()
+
+    def check_file_revision(self, expected: PointFileRevision) -> None:
+        """Compare a draft with disk; see PointFileSync.check_revision for failures."""
+        self._file_sync.check_revision(expected)
+
+    def reload_file(
+        self, path: Path, expected_revision: str | None
+    ) -> PointFileRevision:
+        """Strictly install one owner file; see PointFileSync.reload for failures.
+
+        Content facts follow installation. Old captures remain fixed. Caller
+        owns holder admission. No repair, backup or document writes occur.
+        """
+        return self._file_sync.reload(path, expected_revision)
+
+    def synchronize_files(self, *, admit_reload: bool) -> None:
+        """Scan point files with host execution-time admission; no repair or writes."""
+        self._file_sync.synchronize(admit_reload=admit_reload)
+
+    def _reload_point_file(self, file: PointFileRevision) -> PointFileRevision:
+        parameters = self._published_parameters()
+        if self._point is None or self._library is None:
+            raise RuntimeError("Selected point resources disappeared")
+        if file.document == "aliases":
+            saved, revision = self._require_open_entry().load_aliases_with_revision(
+                point=parameters.target.point
+            )
+            candidate = AliasTable(
+                tuple(AliasRow(name, value) for name, value in saved.aliases.items())
+            )
+            self._aliases_revision = revision
+            self._install_alias_rows(candidate)
+        else:
+            if file.document == "parameters":
+                self._point.refresh()
+            else:
+                self._library.refresh(strict=True)
+            current = ParameterContext(
+                point=snapshot(self._point),
+                library=self._library.snapshot(),
+                target=parameters.target,
+                roles=None,
+                storage=parameters.storage,
+            )
+            self._publish_write(current, parameter=file.document == "parameters")
+        return next(
+            item for item in self.get_file_revisions() if item.path == file.path
         )
 
     def get_predictors_path(self) -> Path | None:
@@ -591,7 +613,7 @@ class ContextService:
         entry.use_point(target.point)
         return apply_writeback(
             items,
-            target=_ContextWritebackTarget(self, target, entry),
+            target=ContextWritebackTarget(self, target, entry),
             evidence=evidence,
         )
 
@@ -910,6 +932,7 @@ class ContextService:
         *,
         active_label: str,
     ) -> None:
+        self._file_sync.clear()
         if not sources:
             self._source_binding = None
         else:
