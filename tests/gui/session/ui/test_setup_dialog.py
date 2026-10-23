@@ -628,7 +628,9 @@ def test_external_entry_creation_replaces_empty_hint_and_survives_reopen(
         qapp.processEvents()
         driver = ComponentDriver(dialog)
         driver.screenshot(tmp_path / "empty.png")
-        assert "No result entries yet" in driver.observe(object_name="setup_status").text
+        assert (
+            "No result entries yet" in driver.observe(object_name="setup_status").text
+        )
 
         # Another caller (e.g. RPC) installs an entry while Setup remains open.
         controller.setup_control.new_entry(EntryRequest("created-externally"))
@@ -643,7 +645,10 @@ def test_external_entry_creation_replaces_empty_hint_and_survives_reopen(
         qapp.processEvents()
         driver.screenshot(tmp_path / "reopened.png")
         assert driver.observe(object_name="result_entry").text == "created-externally"
-        assert "No result entries yet" not in driver.observe(object_name="setup_status").text
+        assert (
+            "No result entries yet"
+            not in driver.observe(object_name="setup_status").text
+        )
     finally:
         dialog.reject()
         controller.close()

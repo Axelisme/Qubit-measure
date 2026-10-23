@@ -233,4 +233,5 @@ class LoadDataDialog(QDialog):
         self._ax.set_xlabel("Frequency" if self._transpose else "Device value (flux)")
         self._ax.set_ylabel("Device value (flux)" if self._transpose else "Frequency")
         self._draw_preview_overlay(self._ax)
+        self._figure.tight_layout()
         self._canvas.draw_idle()
