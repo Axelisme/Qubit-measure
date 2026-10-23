@@ -25,3 +25,17 @@ Copies the source drive pulse into captured qubit.pulses.pi_amp and pi2_amp, rep
 ## Recommended
 
 Analysis takes a 'Skip points' count (default 0) to drop leading low-gain sweep points before the cosine fit; raise it only if the first few points are distorted. A gain sweep spanning roughly two pi amplitudes captures at least a full oscillation; widen it if no full period is visible.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Set a fixed drive frequency and pulse duration, plus readout timing. A prior pi calibration is not required for this sweep.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `amplitude_rabi` after inspecting the same Form errors.
+   points maps to gain Expts; gain_range supplies native endpoints. frequency_mhz and pulse_length_us override the fixed drive. skip changes only the existing analysis fit.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

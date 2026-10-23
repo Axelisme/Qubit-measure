@@ -3,32 +3,32 @@
 Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from typing import Literal
+
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
+
+from zcu_lab.v2.onetone.freq.gui import OnetoneSpectrumSummary
 
 from .helpers import (
     FrequencySweepCalibration,
     FrequencySweepRange,
-    report_number,
-    retain_scalar,
-    set_frequency_sweep,
+    frequency_sweep_edits,
 )
 
 
-class OnetoneSpectrumInputs(FormModel):
+class OnetoneSpectrumInputs(RecipeInputs):
     """Inputs for onetone spectrum; all units and null policies are declared per
     field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -54,8 +54,25 @@ class OnetoneSpectrumInputs(FormModel):
         None, description="Averaging round count; null keeps the GUI value."
     )
 
+    model_type: Literal["hm", "t", "auto"] | None = Field(
+        None,
+        description="Model type; null keeps the GUI analysis value. Analysis only.",
+    )
+    fit_bg_amp_slope: bool | None = Field(
+        None,
+        description="Fit amplitude background; null keeps the GUI analysis value. Analysis only.",
+    )
+    fit_bg_phase_curvature: bool | None = Field(
+        None,
+        description="Fit phase curvature; null keeps the GUI analysis value. Analysis only.",
+    )
+    edelay: float | None = Field(
+        None,
+        description="Electrical delay seed (us; blank = auto); null keeps the GUI analysis value. Analysis only.",
+    )
 
-class OnetoneSpectrumReport(FormModel):
+
+class OnetoneSpectrumReport(RecipeReport):
     """Onetone spectrum results and failure reason; cancellation returns no report."""
 
     frequency_mhz: float | None = Field(
@@ -63,26 +80,6 @@ class OnetoneSpectrumReport(FormModel):
     )
     linewidth_mhz: float | None = Field(
         description="Fitted full linewidth in MHz; null means not estimable."
-    )
-    writeback_applied: bool = Field(
-        description="Whether the selected calibration proposal was explicitly accepted and applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class OnetoneSpectrumSummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    freq: float | None = Field(
-        description="Owner freq in MHz; null retains an unavailable estimate."
-    )
-
-    fwhm: float | None = Field(
-        description="Owner fwhm in MHz; null retains an unavailable estimate."
     )
 
 
@@ -99,12 +96,9 @@ async def onetone_spectrum(
     Primary fits the spectrum to estimate resonator frequency and linewidth.
     Ask before applying the calibration, then save raw data and analysis.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    points → expts sets the sweep sample count.
+    Analysis controls: model_type, fit_bg_amp_slope, fit_bg_phase_curvature, edelay. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     for name, value in (
         ("reuse_tab_id", inputs.reuse_tab_id),
@@ -114,14 +108,12 @@ async def onetone_spectrum(
             raise ValueError(f"{name} must be a non-empty string or null")
     if inputs.span_mhz is not None and inputs.span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "onetone/freq",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("onetone/freq", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    missing = set_frequency_sweep(
+    tab.select_sources(inputs)
+
+    edits: list[FieldEdit] = []
+    sweep = frequency_sweep_edits(
         tab,
         ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
@@ -131,21 +123,33 @@ async def onetone_spectrum(
             center_mhz=inputs.center_mhz, span_mhz=inputs.span_mhz, expts=inputs.points
         ),
     )
+    missing = sweep.missing
+    edits.extend(sweep.edits)
     if missing:
         raise RecipeNeedsParameters(missing)
     if inputs.gain is not None:
         tab.select(("modules", "readout"), inline=True)
-        tab.set(("modules", "readout", "gain"), inputs.gain)
-    else:
-        retain_scalar(tab, ("modules", "readout", "gain"))
-    tab.set(("reps",), inputs.reps)
-    tab.set(("rounds",), inputs.rounds)
+        edits.append(FieldEdit(path=("modules", "readout", "gain"), value=inputs.gain))
+    tab.apply_inputs(
+        inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
+    )
 
-    # Acquire before analysis; the finally block saves raw and artifacts.
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=OnetoneSpectrumSummary)
+        analysis = await tab.analyze(
+            "primary",
+            result=OnetoneSpectrumSummary,
+            updates={
+                key: value
+                for key, value in {
+                    "model_type": inputs.model_type,
+                    "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
+                    "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
+                    "edelay": inputs.edelay,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             return OnetoneSpectrumReport(
                 frequency_mhz=None,
@@ -154,13 +158,13 @@ async def onetone_spectrum(
                 analysis_failure=analysis.reason,
             )
 
-        # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return OnetoneSpectrumReport(
             frequency_mhz=report_number(analysis.result.freq),
             linewidth_mhz=report_number(analysis.result.fwhm),

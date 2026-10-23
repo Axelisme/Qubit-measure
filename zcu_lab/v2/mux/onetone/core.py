@@ -106,42 +106,38 @@ class MuxOnetoneCfg(ProgramV2Cfg, ExpCfgModel):
     Inherited reps (default 1) is repetitions per round; rounds (default 1) is
     software acquisition rounds per offset. initial_delay and relax_delay are
     program delays in us (both default 1). No external devices are required.
-    active_tones selects original readout indices in execution/column order.
-    None selects all tones. Lists must be nonempty, unique integers in 0..N-1;
+    participants selects original readout indices in execution/column order.
+    Lists must be nonempty, unique integers in 0..N-1;
     bool, floating point and string indices are rejected without coercion.
     Saved data retains the full base readout, including inactive tones.
     """
 
     modules: MuxOnetoneModuleCfg
     sweep: MuxOnetoneSweepCfg
-    active_tones: Annotated[
-        list[StrictInt] | None,
+    participants: Annotated[
+        list[StrictInt],
         FieldMeta(
-            label="Active tones",
-            description="Original tone indices in column order; None measures all tones.",
+            label="Participants",
+            description="Original tone indices in execution/column order.",
         ),
-    ] = None
+    ]
 
-    @field_validator("active_tones")
+    @field_validator("participants")
     @classmethod
-    def validate_active_tones(
-        cls, value: list[int] | None, info: ValidationInfo
-    ) -> list[int] | None:
+    def validate_participants(cls, value: list[int], info: ValidationInfo) -> list[int]:
         """Reject empty, duplicate or out-of-range selections; preserve order.
 
         Pydantic validates strict integer elements before this check. Range is
         checked against the full readout when its own validation succeeded.
         """
-        if value is None:
-            return None
         if not value or len(set(value)) != len(value):
-            raise ValueError("active_tones must be nonempty and contain unique indices")
+            raise ValueError("participants must be nonempty and contain unique indices")
         modules = info.data.get("modules")
         if isinstance(modules, MuxOnetoneModuleCfg) and any(
             index < 0 or index >= len(modules.readout.tones) for index in value
         ):
             raise ValueError(
-                "active_tones indices must be in 0..N-1 of the full readout"
+                "participants indices must be in 0..N-1 of the full readout"
             )
         return value
 
@@ -184,7 +180,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         config supplies the base readout and common MHz offsets; it is unchanged.
         context supplies connected soc/soccfg, plots and cancellation. The live
         plot shows one magnitude curve per selected tone. Returned complex IQ is
-        averaged over reps and rounds, in active_tones order; unmeasured points
+        averaged over reps and rounds, in participants order; unmeasured points
         stay NaN after a stop. Call context.scope.stop.raise_if_error() to
         distinguish acquisition failure from a successful or stopped return.
         Invalid cfg or program settings raise.
@@ -193,11 +189,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
         cfg = deepcopy(config)
         base_readout = cfg.modules.readout
         dfs = sweep2array(cfg.sweep.df, "none")
-        indices = (
-            list(range(len(base_readout.tones)))
-            if cfg.active_tones is None
-            else cfg.active_tones
-        )
+        indices = cfg.participants
         tone_indices = np.asarray(indices, dtype=np.int64)
         active_readout = base_readout.with_updates(
             tones=[base_readout.tones[index] for index in indices]

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from io import StringIO
+
+from pydantic import TypeAdapter, ValidationError
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QAbstractItemView,
@@ -14,6 +17,8 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
@@ -25,6 +30,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
+from zcu_tools.resources.entry.aliases import AliasValue
 
 _EDIT_TRIGGERS = (
     QAbstractItemView.EditTrigger.DoubleClicked
@@ -72,7 +78,8 @@ class AliasPanel(QWidget):
         layout.addWidget(self._sync)
         hint = QLabel(
             "Enter a component name, leave a value empty, or use a $ link "
-            "to an earlier row (for example $qubit.resonator)."
+            "to an earlier row (for example $qubit.resonator), or an ordered "
+            "list such as [Q3, Q1]. An empty list is unbound."
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -124,9 +131,13 @@ class AliasPanel(QWidget):
         """Return True if draft rows, including live text, differ from loaded/applied.
 
         Transfer active editor text into the local table draft without closing
-        the editor or writing through control. Run on the owner's Qt thread.
+        the editor or writing through control. Invalid list text is unsaved.
+        Run on the owner's Qt thread.
         """
-        return self._draft_rows() != self._base
+        try:
+            return self._draft_rows() != self._base
+        except InvalidInputError:
+            return True
 
     def apply(self) -> bool:
         """Submit every shown row through control.apply_alias_rows().
@@ -155,8 +166,8 @@ class AliasPanel(QWidget):
                 "Use Revert to load the current point before applying."
             )
             return False
-        rows = self._draft_rows()
         try:
+            rows = self._draft_rows()
             self._sync.check(self._revision)
             self._control.apply_alias_rows(rows)
         except (FailedPreconditionError, InvalidInputError, OSError) as error:
@@ -236,7 +247,7 @@ class AliasPanel(QWidget):
             value = self._table.item(index, 1)
             if alias is None or value is None:
                 raise RuntimeError("Alias editor row is missing a cell")
-            rows.append(AliasRow(alias=alias.text(), value=value.text()))
+            rows.append(AliasRow(alias=alias.text(), value=_parse_value(value.text())))
         return tuple(rows)
 
     def _show_rows(self, rows: tuple[AliasRow, ...]) -> None:
@@ -250,7 +261,7 @@ class AliasPanel(QWidget):
         index = self._table.rowCount()
         self._table.insertRow(index)
         self._table.setItem(index, 0, QTableWidgetItem(row.alias))
-        self._table.setItem(index, 1, QTableWidgetItem(row.value))
+        self._table.setItem(index, 1, QTableWidgetItem(_display_value(row.value)))
         result = QTableWidgetItem()
         result.setFlags(result.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self._table.setItem(index, 2, result)
@@ -290,9 +301,14 @@ class AliasPanel(QWidget):
                 item.setText(row.error)
                 item.setForeground(error_colour(self._table))
             else:
-                item.setText(row.resolved or "")
+                item.setText(
+                    _display_value(row.resolved) if row.resolved is not None else ""
+                )
                 item.setForeground(self._table.palette().text())
-            item.setToolTip(row.error or row.resolved or "")
+            item.setToolTip(
+                row.error
+                or (_display_value(row.resolved) if row.resolved is not None else "")
+            )
 
     def _add_row(self) -> None:
         self._append_row(AliasRow(alias="", value=""))
@@ -306,6 +322,29 @@ class AliasPanel(QWidget):
         rows = {index.row() for index in self._table.selectedIndexes()}
         for index in sorted(rows, reverse=True):
             self._table.removeRow(index)
+
+
+def _display_value(value: AliasValue) -> str:
+    if isinstance(value, str):
+        return value
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = True
+    stream = StringIO()
+    yaml.dump(value, stream)
+    return stream.getvalue().strip()
+
+
+def _parse_value(text: str) -> AliasValue:
+    if not text.lstrip().startswith("["):
+        return text
+    try:
+        raw = YAML(typ="safe").load(text)
+        return TypeAdapter(list[str]).validate_python(raw, strict=True)
+    except (YAMLError, ValidationError) as error:
+        raise InvalidInputError(
+            f"Invalid alias list: {error}",
+            reason_code="alias_invalid",
+        ) from error
 
 
 __all__ = ["AliasPanel"]

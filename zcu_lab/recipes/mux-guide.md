@@ -11,16 +11,18 @@ participant and sweep contracts.
 | Input | Meaning | If omitted or null |
 | --- | --- | --- |
 | `target`, `reuse_tab_id` | Mux alias override and idle matching tab to Reset | Use global aliases and open a tab |
-| `participants` | Unique resonator names in execution order | Keep Active tones |
+| `participants` | Unique original readout indices in execution order | Keep Active tones |
 | `df` | `{start, stop}` common offset in MHz, added to each base frequency | Keep the Form range |
 | `n` | Shared offset point count, at least two | Keep Expts |
 | `reps`, `rounds` | Positive acquisition counts | Keep Form values |
+| `model_type` | Resonator model: `hm`, `t` or `auto` | Keep analysis settings |
+| `fit_bg_amp_slope`, `fit_bg_phase_curvature` | Fit the background slope or phase curvature | Keep analysis settings |
+| `edelay` | Manual cable-delay seed in inverse MHz | Keep analysis settings |
 | `library`, `inline`, `overrides` | Ordered source selections, copies and final edits | Keep Form values |
 
-Names map to original indices in the tab's fixed `$mux.resonators` capture,
-not display labels or current global aliases. Unknown names return
-`needs_parameters` with the legal list. Repeated bindings are ambiguous by name;
-use an original-index `active_tones` override with participants omitted.
+Indices address the complete captured readout list, not display labels or
+current global aliases. Empty, duplicate, negative and out-of-range indices
+return field errors before acquisition.
 Library selections precede inline copies. Participants, df/n and counts come
 next, then overrides. The complete batch must validate before Run.
 
@@ -40,9 +42,8 @@ raw data and fits, and ask before applying calibration updates.
 
 ## Mux flux maps
 
-Four recipes open the matching flat-cfg adapters. All four take Q names as
-participants, including onetone flux scans. This differs from `mux_onetone`,
-which takes resonator names.
+Four recipes open the matching flat-cfg adapters. All four take original full-tone indices as
+participants. `mux_onetone` uses the same index contract for its readout list.
 
 | Recipe | Frequency input | DC input |
 | --- | --- | --- |
@@ -61,12 +62,12 @@ DC points and two distinct frequency values.
 
 `target` overrides this Reset's mux alias. `reuse_tab_id` resets an idle
 matching tab. Both default to null, using global aliases and opening a new tab.
-`participants` is an optional ordered list of unique Q names. Null retains the
+`participants` is an optional ordered list of unique original tone indices. Null retains the
 Form selection. `library` selects captured modules, then `inline` copies them
 outer-first. Range/count edits follow, then `overrides` applies last. Integer
 paths always address original full-list positions. All optional fields default
-to null, retaining Form values. All tones must validate before Run, even when
-not selected. A short range list returns `needs_parameters` before acquisition.
+to null, retaining Form values. All readout identities must validate before Run. Drive/sweep
+values validate only for selected tones, and inactive drafts stay in the form. A short range list returns `needs_parameters` before acquisition.
 
 `flux_unit` optionally labels A, V or native; null keeps the Form label.
 The device owner checks it against each selected source. No values are rescaled.
@@ -80,7 +81,7 @@ The numeric bounds are illustrative, not device limits or known calibration.
 ```json
 {
   "target": "MG",
-  "participants": ["Q3", "Q1"],
+  "participants": [2, 0],
   "df": {"start": -2.0, "stop": 2.0},
   "n": 31,
   "flux": {"start": -0.01, "stop": 0.01},
@@ -221,10 +222,24 @@ All seven recipes accept the same optional inputs:
 | --- | --- | --- |
 | `target` | MuxGroup component name, such as `MG3`, for this tab's `$mux` binding | Use global aliases |
 | `reuse_tab_id` | An idle tab of the matching experiment, which the recipe resets | Open a new tab |
-| `participants` | Nonempty, unique qubit names in measurement order | Keep Reset defaults |
+| `participants` | Nonempty, unique original tone indices in measurement order | Keep Reset defaults |
 | `library` | A list of `{path, key}` library selections | Keep current selections |
 | `inline` | A list of `{path}` references to copy for local editing | Keep references |
 | `overrides` | A list of `{path, value}` field edits | Keep Form values |
+
+Analysis inputs go to the same Primary analysis operation, not to the measurement Form.
+Omitted or null analysis inputs retain that tab's analysis settings.
+They do not change the captured Run settings or writeback policy.
+
+| Recipe | Analysis inputs |
+| --- | --- |
+| `mux_twotone_spectrum` | `model_type`: `lor` or `sinc`; `plot_fit`: draw the fitted curve |
+| `mux_amp_rabi` | `skip`: points omitted before fitting |
+| `mux_len_rabi` | `decay`: fit the envelope; `fit_phase`: fit the phase offset |
+| `mux_t1` | `dual_exp`: fit two components; `skip`: points omitted before fitting |
+| `mux_t2ramsey` | `fit_fringe`: fit oscillations; `fit_phase`: fit their phase offset |
+| `mux_t2echo` | `fit_method`: `fringe` or `decay`; `fit_phase`: fit the fringe phase offset |
+| `mux_singleshot_ge` | `initial_state`: `ground` or `excited`; `backend`: `pca` or `center`; `logscale`, `align_t1`, `length_ratio` |
 
 The three pulse-scan recipes also accept:
 
@@ -244,22 +259,24 @@ Overrides run last and may replace earlier edits. Each list runs in
 the order supplied. A null library key retains and validates the current
 selection. A null override value retains that input. Copy referenced parents
 before their children, outermost first. The final participants/overrides batch
-requires a complete valid cfg, including nonparticipants. If it is invalid,
+requires a valid cfg with complete readout identities and valid active
+drive/sweep settings. Inactive settings may be blank. If it is invalid,
 the recipe returns needs_parameters with every owner-reported path and reason.
 It installs none of that batch and does not start Run. Earlier open, Reset,
 library selections and inline copies remain in the tab.
 
 Paths are JSON lists. Strings name fields and integers select positions in the
-complete tone list. For complete tones Q1/Q2/Q3, `participants: ["Q3", "Q1"]`
+complete tone list. For complete tones Q1/Q2/Q3, `participants: [2, 0]`
 measures original positions `[2, 0]`. Q3 edits still use position 2, not row 0
-or the string `Q3`.
+or the string `Q3`. Recipe participants accept integers only, not component names.
+Null participants leave the selection captured by Open or Reset unchanged.
 
 This example selects a Q3 pulse, copies it inline and changes its gain:
 
 ```json
 {
   "target": "MG3",
-  "participants": ["Q3", "Q1"],
+  "participants": [2, 0],
   "library": [{"path": ["tones", 2, "drive"], "key": "Q3.pulses.pi"}],
   "inline": [{"path": ["tones", 2, "drive"]}],
   "overrides": [{"path": ["tones", 2, "drive", "gain"], "value": 0.3}]
@@ -321,7 +338,8 @@ tones and ADC frequencies stay fixed.
 Choose each `tones[i].drive`. Use typed overrides to set MHz bounds at
 `tones[i].sweep.start` and `stop`, or supply the full `sweeps` list.
 Set shared `n` for all tones. The scans advance together by point number, not through every combination
-of frequencies.
+of frequencies. Set `model_type` to `lor` or `sinc` to select the fit model.
+Set `plot_fit` to false to hide the fitted curve without changing the fit.
 
 Successful report rows contain `freq` and `fwhm` in MHz with their errors.
 Inspect `measurement` and each `fit_i` for the peak and fit quality.

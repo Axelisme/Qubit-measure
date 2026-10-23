@@ -25,16 +25,23 @@ timing before running.
 
 The Tones picker selects the element to edit. Participants selects the qubits to
 run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique existing names, for example `["Q3", "Q1"]`. This runs original
+list of unique original indices, for example `[2, 0]`. This runs original
 positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-unknown participants block Run and remain editable for correction.
+out-of-range participants block Run and remain editable for correction.
 
-Every tone needs valid drives, including nonparticipants. Each tone uses its own
-drive generator, distinct from the readout generator. Errors in another picker element
-appear on the Tones row. Select that element and correct it to enable Run.
-Reps, rounds and recovery delay are shared. Recovery initially uses five times
-the largest captured T1, with the default for missing T1 values. A stored invalid
-T1 leaves recovery blank for correction.
+Selected tones need drives on independent generators, distinct from readout.
+Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
+these fields to None on other tones. The nullable fields remain editable.
+Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
+Alias list elements may use `$` links. A missing, unbound or empty row selects all
+original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+An out-of-group name stays visible as an invalid Participants draft until corrected.
+Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+
+Editing participants preserves every tone value. Fill any newly selected tone's
+missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
+tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
@@ -55,7 +62,7 @@ linear scaling with reps. Time a short Run at the intended pulse lengths first.
 
 ## Measurement and analysis
 
-Use const or flat_top drives for every tone, including nonparticipants.
+Use const or flat_top drives for every selected tone. Inactive drives may be blank.
 For flat_top, total length includes both ramps and must exceed their duration.
 Switch an arb source to a supported waveform explicitly before Run.
 

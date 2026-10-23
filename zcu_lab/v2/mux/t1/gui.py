@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -24,8 +26,12 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
+from zcu_lab.v2._support.measure.analyze_results import fit_quality_models
+from zcu_lab.v2._support.measure.mux_results import (
+    MuxSummaryFailure,
+    MuxSummaryTone,
+    captured_qubits,
+)
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 from zcu_lab.v2.twotone.time_domain.t1.gui import T1AnalyzeParams
@@ -37,6 +43,34 @@ from .form import make_form
 MuxT1RunResult: TypeAlias = RunRecord[MuxT1Cfg, MuxT1Result]
 
 
+class MuxT1FitSummary(MuxSummaryTone):
+    """Native fit estimates in experiment units and qualified owner quality."""
+
+    t1: float | None = Field(
+        description="Owner t1 in us; null retains an unavailable estimate."
+    )
+
+    t1_err: float | None = Field(
+        description="Owner t1_err in us; null retains an unavailable estimate."
+    )
+
+    t1b: float | None = Field(
+        description="Owner t1b in us; null retains an unavailable estimate."
+    )
+
+    t1b_err: float | None = Field(
+        description="Owner t1b_err in us; null retains an unavailable estimate."
+    )
+
+    fit_quality: dict[str, FitQuality] | None
+
+
+class MuxT1Summary(BaseModel):
+    """Owner tone rows in analysis order, retaining successes and failures."""
+
+    tones: list[MuxT1FitSummary | MuxSummaryFailure]
+
+
 @dataclass(frozen=True)
 class MuxT1AnalyzeResult(AnalyzeResultBase):
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
@@ -44,25 +78,43 @@ class MuxT1AnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxT1Fit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present original positions/names, numerical values, quality or failure."""
-        summaries: list[dict[str, object]] = []
+    def summary(self) -> MuxT1Summary:
+        """Return native tone estimates/failures with fixed identities and owner quality."""
+        summaries: list[MuxT1FitSummary | MuxSummaryFailure] = []
         for outcome in self.outcomes:
+            name = None if self.names is None else self.names[outcome.index]
+            element = (
+                None
+                if name is None
+                else ElementIdentity(index=outcome.index, name=name)
+            )
             if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
+                row = MuxSummaryFailure(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    failure=outcome.reason,
+                )
             else:
-                values = {
-                    "t1": outcome.fit.t1,
-                    "t1_err": outcome.fit.t1_err,
-                    "t1b": outcome.fit.t1b,
-                    "t1b_err": outcome.fit.t1b_err,
-                    "fit_quality": fit_quality_summary(
+                row = MuxT1FitSummary(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    t1=outcome.fit.t1,
+                    t1_err=outcome.fit.t1_err,
+                    t1b=outcome.fit.t1b,
+                    t1b_err=outcome.fit.t1b_err,
+                    fit_quality=fit_quality_models(
                         outcome.fit.fit_quality,
                         summary_path=f"summary.tones[{len(summaries)}].fit_quality",
                     ),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+                )
+            summaries.append(row)
+        return MuxT1Summary(tones=summaries)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the same owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 class MuxT1Adapter(

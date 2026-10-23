@@ -51,7 +51,7 @@ def test_native_model_list_generates_indexed_modules_sweeps_and_lowers():
     assert cfg.tones[1].drive.gain == 0.3
     assert cfg.tones[1].sweep.start == 10
     assert cfg.tones[1].sweep.stop == 14
-    assert cfg.participants == ["B", "A"]
+    assert cfg.participants == [1, 0]
 
 
 def test_native_model_list_defaults_are_projected_without_losing_values():
@@ -167,7 +167,7 @@ def test_hidden_module_list_keeps_values_and_sources_per_position():
                     "sweep": Range.between(3, 4, 3),
                 },
             ],
-            "participants": ["B", "A"],
+            "participants": [1, 0],
         },
         fixed_elements=(adapter.FixedElements(("tones",), "name", ("participants",)),),
     )
@@ -202,6 +202,65 @@ def test_hidden_module_list_keeps_values_and_sources_per_position():
     ]
     assert env.library is not None
     assert env.library.module_spec("Q.pulses.drive").model_dump()["freq"] == 100
+
+
+@pytest.mark.parametrize("inactive_index", [0, 1])
+def test_nullable_module_list_keeps_hidden_policy_with_explicit_none(inactive_index):
+    from zcu_tools.cfg_model import FormNode, PulseCfg, PulseSpec, Template, TemplateDef
+
+    class Tone(ConfigBase):
+        drive: PulseCfg | None = None
+
+    class Group(ConfigBase):
+        tones: list[Tone]
+
+    tones: list[FormNode] = [
+        {"drive": Template("pulse", set={"freq": Hidden(11.0)})},
+        {"drive": Template("pulse", set={"freq": Hidden(22.0)})},
+    ]
+    tones[inactive_index] = {"drive": None}
+    definition = adapter.Form(Group, {"tones": tones})
+    try:
+        definition.bind_templates(
+            {
+                "pulse": TemplateDef(
+                    PulseSpec,
+                    "Pulse",
+                    {
+                        "ch": 1,
+                        "nqz": 1,
+                        "gain": 0.3,
+                        "waveform.style": "const",
+                        "waveform.length": 0.2,
+                    },
+                )
+            },
+            adapter="synthetic",
+        )
+    except ValueError as error:
+        pytest.fail(
+            f"Explicit nullable None must not conflict with Hidden policy: {error}"
+        )
+    env = core.FormEnv()
+    state = core.FormState(definition.default_input(env))
+    active_index = 1 - inactive_index
+    target = state.describe(
+        ("tones", active_index, "drive", "module", "freq"), env
+    ).target
+    assert target is not None and target.hidden
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert cfg.tones[inactive_index].drive is None
+    drive = cfg.tones[active_index].drive
+    assert drive is not None and drive.freq == (22.0 if active_index else 11.0)
+    state.write({("tones", active_index, "drive"): None}, env)
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert [tone.drive for tone in cfg.tones] == [None, None]
 
 
 @pytest.mark.parametrize("second_path", ["gain", None])
@@ -266,7 +325,7 @@ def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
             adapter.FixedElements(("tones",), "label", ("participants",)),
         )
         tones: list[Element]
-        participants: list[str]
+        participants: list[int]
 
         @classmethod
         def defaults(cls, env: core.FormEnv) -> dict[str, JsonValue]:
@@ -276,7 +335,7 @@ def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
                     {"label": "A", "gain": 1},
                     {"label": "A" if duplicate else "B", "gain": 2},
                 ],
-                "participants": ["B"],
+                "participants": [1],
             }
 
     return Owner
@@ -302,7 +361,7 @@ def test_owner_refuses_identity_mutations_atomically_with_requested_path(path, v
     notifications = []
     state.subscribe(lambda: notifications.append(state.input))
     with pytest.raises(core.FormInputRejected, match="identity") as caught:
-        state.write({path: value, ("participants",): ["A"]}, core.FormEnv())
+        state.write({path: value, ("participants",): [0]}, core.FormEnv())
     assert caught.value.path == path
     assert state.input.same_as(before)
     assert state.base.same_as(base)
@@ -313,15 +372,15 @@ def test_owner_refuses_identity_mutations_atomically_with_requested_path(path, v
 def test_owner_allows_invalid_values_but_checks_every_element_and_participant():
     state = owner_state()
     env = core.FormEnv()
-    state.write({("tones", 0, "gain"): -1, ("participants",): ["B"]}, env)
+    state.write({("tones", 0, "gain"): -1, ("participants",): [1]}, env)
     errors = state.result(env)
     assert isinstance(errors, core.FormErrors)
     assert ("tones", 0, "gain") in errors.messages
     state.write({("tones", 0, "gain"): 3}, env)
     cases: list[tuple[JsonValue, core.FormPath]] = [
         ([], ("participants",)),
-        (["A", "A"], ("participants", 1)),
-        (["Q4"], ("participants", 0)),
+        ([0, 0], ("participants", 1)),
+        ([4], ("participants", 0)),
     ]
     for value, error_path in cases:
         state.write({("participants",): value}, env)
@@ -329,10 +388,10 @@ def test_owner_allows_invalid_values_but_checks_every_element_and_participant():
         errors = state.result(env)
         assert isinstance(errors, core.FormErrors)
         assert error_path in errors.messages
-    state.write({("participants",): ["B", "A"]}, env)
+    state.write({("participants",): [1, 0]}, env)
     result = state.result(env)
     assert isinstance(result, core.FormModel)
-    assert result.model_dump()["participants"] == ["B", "A"]
+    assert result.model_dump()["participants"] == [1, 0]
     assert [item["label"] for item in result.model_dump()["tones"]] == ["A", "B"]
 
 
@@ -348,7 +407,7 @@ def test_restored_identity_becomes_the_boundary_until_reset():
     state.restore_input(
         core.FormInput(
             state.input.model,
-            {"tones": [{"label": "saved", "gain": 5}], "participants": ["saved"]},
+            {"tones": [{"label": "saved", "gain": 5}], "participants": [0]},
         ),
         env,
     )
@@ -357,7 +416,7 @@ def test_restored_identity_becomes_the_boundary_until_reset():
     with pytest.raises(core.FormInputRejected, match="identity"):
         state.write({("tones", 0, "label"): "A"}, env)
     state.reset(state.input.model.default_input(env))
-    assert state.input.data["participants"] == ["B"]
+    assert state.input.data["participants"] == [1]
 
 
 def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
@@ -367,7 +426,7 @@ def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
         "Config",
         __base__=ConfigBase,
         tones=(list[Element], initial["tones"]),
-        participants=(list[str], initial["participants"]),
+        participants=(list[int], initial["participants"]),
     )
     resource = TabFormResource(
         lambda _ctx: adapter.Form(
@@ -391,8 +450,8 @@ def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
         assert caught.value.path == ("tones", 0, "label")
         assert resource.input.same_as(before)
         assert events == []
-        resource.write({("tones", 0, "gain"): 4, ("participants",): ["Q4"]})
-        assert resource.input.data["participants"] == ["Q4"]
+        resource.write({("tones", 0, "gain"): 4, ("participants",): [4]})
+        assert resource.input.data["participants"] == [4]
         assert isinstance(resource.result(), core.FormErrors)
         with pytest.raises(CfgPreconditionError, match="not valid") as caught:
             resource.accept()
@@ -441,7 +500,7 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
             state.select(("tones",), [], core.FormEnv())
         else:
             state.install_input(
-                core.FormInput(Commands, {"tones": [], "participants": ["B"]})
+                core.FormInput(Commands, {"tones": [], "participants": [1]})
             )
 
     with pytest.raises(core.FormInputRejected, match="identity"):
@@ -450,3 +509,41 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
     assert state.base.same_as(base)
     assert state.input.selections == before.selections
     assert events == []
+
+
+@pytest.mark.parametrize(
+    "participants, path",
+    [
+        ([0, 0], ("participants", 1)),
+        ([2], ("participants", 0)),
+        ([-1], ("participants", 0)),
+        ([True], ("participants", 0)),
+    ],
+)
+def test_participant_errors_keep_original_index_path(
+    participants: list[int], path: core.FormPath
+) -> None:
+    # Reuse the ordinary generated declaration, but supply a simple valid model
+    # so the assertion isolates index admission from missing drive/sweep values.
+    class Element(core.FormModel):
+        name: str
+
+    class Named(adapter.FixedElementsForm):
+        tones: list[Element]
+        participants: list[int]
+
+    Named.fixed_elements = (
+        adapter.FixedElements(("tones",), "name", ("participants",)),
+    )
+    state = core.FormState(
+        core.FormInput(
+            Named,
+            {
+                "tones": [{"name": "A"}, {"name": "B"}],
+                "participants": [value for value in participants],
+            },
+        )
+    )
+    result = state.result(core.FormEnv())
+    assert isinstance(result, core.FormErrors)
+    assert path in result.messages

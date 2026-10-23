@@ -86,7 +86,7 @@ class IndexedRpcAdapter(SampleAdapter):
             "IndexedRpcCfg",
             __base__=SampleCfg,
             tones=(list[NativeTone], ...),
-            participants=(list[str], ...),
+            participants=(list[int], ...),
         )
         return Form(
             cfg,

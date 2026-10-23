@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import Annotated
+from dataclasses import dataclass, field
 
 import numpy as np
 from matplotlib.figure import Figure
-from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import MHZ_TO_HZ, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -31,16 +28,11 @@ from zcu_lab.v2.onetone._shared import (
 
 
 class RangeFindCfg(LinearFreqCfg):
-    """Pulse-readout acquisition plus names used only by later analysis.
+    """Pulse-readout acquisition for a wide absolute-frequency survey.
 
-    resonators follows expected dip frequency in ascending MHz order. Run allows
-    an empty list; Analyze requires nonempty unique nonblank names. This list is
-    saved with the run and never changes the acquired frequency grid or IQ.
+    Fields match onetone/freq linear. Dip names belong to Analyze options,
+    not to acquisition or the saved cfg.
     """
-
-    resonators: Annotated[list[str], FieldMeta(label="Resonators")] = Field(
-        default_factory=list
-    )
 
 
 DEFAULT_MIN_SEPARATION_MHZ = 1.0
@@ -50,29 +42,27 @@ DEFAULT_MIN_SEPARATION_MHZ = 1.0
 class RangeFindOptions:
     """Choose frequency-ordered names and minimum spacing for coarse dip detection.
 
-    resonators must be a nonempty unique list of nonblank component-name strings.
+    resonators is a unique list of nonblank names, or empty to discover all dips.
     Names map to selected dips in ascending MHz order, not to a readout label.
     min_separation is finite positive MHz. The default 1 MHz separates typical
     MHz readout linewidths; increase it for broader resonators. Validation occurs
     on Analyze, allowing an empty initial GUI list to be edited before use.
     """
 
-    resonators: list[str]
+    resonators: list[str] = field(default_factory=list)
     min_separation: float = DEFAULT_MIN_SEPARATION_MHZ
 
     def validate(self) -> None:
-        """Reject empty/duplicate/non-string names and nonpositive/nonfinite MHz."""
+        """Reject blank/duplicate/non-string names and nonpositive/nonfinite MHz."""
         _validate_options(self.resonators, self.min_separation)
 
 
 def _validate_options(resonators: object, min_separation: object) -> None:
     # GUI editors and notebook callers can supply values outside annotations.
-    if (
-        not isinstance(resonators, list)
-        or not resonators
-        or any(not isinstance(name, str) or not name.strip() for name in resonators)
+    if not isinstance(resonators, list) or any(
+        not isinstance(name, str) or not name.strip() for name in resonators
     ):
-        raise ValueError("resonators must be a nonempty list of nonblank strings")
+        raise ValueError("resonators must be a list of nonblank strings")
     if len(set(resonators)) != len(resonators):
         raise ValueError("resonators must contain unique names")
     if (
@@ -86,19 +76,20 @@ def _validate_options(resonators: object, min_separation: object) -> None:
 
 @dataclass(frozen=True)
 class ResonatorDip:
-    """One named dip: freq is absolute MHz; depth is magnitude prominence in a.u.
+    """One dip: freq is absolute MHz; depth is magnitude prominence in a.u.
 
-    name comes from Options in frequency order, not from a readout label. depth
-    uses the background-subtracted, Gaussian-smoothed magnitude, not a fit.
+    name is None during discovery, or comes from Options in frequency order.
+    Names never select a readout channel. depth uses the background-subtracted,
+    Gaussian-smoothed magnitude, not a fit.
     """
 
-    name: str
+    name: str | None
     freq: float
     depth: float
 
 
 class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
-    """Acquire absolute MHz spectra and preserve the analysis name list in cfg."""
+    """Acquire absolute MHz spectra and find optionally named dips."""
 
     Options = RangeFindOptions
 
@@ -112,7 +103,7 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
     )
 
     def run(self, config: RangeFindCfg, *, context: RunContext) -> RangeFindResult:
-        """Reset then pulse/read out each FPGA-swept frequency, ignoring names.
+        """Reset then pulse/read out each FPGA-swept frequency.
 
         config supplies the same acquisition fields as onetone/freq linear.
         context supplies SoC, cancellation and live plots. Return absolute MHz
@@ -142,7 +133,7 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
         *,
         plots: Plots,
     ) -> tuple[ResonatorDip, ...]:
-        """Remove linear magnitude background and select N most prominent interior dips.
+        """Remove linear magnitude background and select prominent interior dips.
 
         source supplies matching (P,) absolute MHz and complex IQ arrays, P >= 11;
         cfg may be None. Partial/nonfinite scans and duplicate frequencies raise
@@ -153,11 +144,13 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
         must exceed five adjacent-difference noise estimates (MAD/0.67449/sqrt(2)),
         with a 1e-6 magnitude-range floor. Greedy descending prominence enforces
         min_separation in actual MHz; frequency-sorted dips receive the given names.
+        Empty names select all separated candidates without assigning names.
         Edge minima are excluded. depth is prominence in a.u., not linewidth.
 
         plots receives one measured-magnitude curve with red stars at the dips,
-        annotated by name and labeled with name, MHz frequency and depth.
-        Return all requested dips or raise ValueError naming the available count;
+        annotated by name or discovery index, MHz frequency and depth.
+        Return all discovered dips, or all requested named dips. Insufficient
+        named dips raise ValueError naming the available count;
         no partial success or proposals are produced here.
         """
         options.validate()
@@ -200,7 +193,7 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
                 for other in selected
             ):
                 selected.append(index)
-                if len(selected) == len(options.resonators):
+                if options.resonators and len(selected) == len(options.resonators):
                     break
         if len(selected) < len(options.resonators):
             raise ValueError(
@@ -213,8 +206,12 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
             for index, depth in zip(candidates, prominences, strict=True)
         }
         dips = tuple(
-            ResonatorDip(name, float(freqs[index]), depth_by_index[index])
-            for name, index in zip(options.resonators, sorted(selected), strict=True)
+            ResonatorDip(
+                options.resonators[position] if options.resonators else None,
+                float(freqs[index]),
+                depth_by_index[index],
+            )
+            for position, index in enumerate(sorted(selected))
         )
 
         plots.subplots("fit", nrows=1, figsize=(9, 4.5))
@@ -222,7 +219,8 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
         def draw(figure: Figure) -> None:
             (ax,) = figure.axes
             ax.plot(freqs, magnitude, label="Measured magnitude")
-            for dip in dips:
+            for position, dip in enumerate(dips, start=1):
+                label = dip.name if dip.name is not None else f"Dip {position}"
                 measured = magnitude[np.searchsorted(freqs, dip.freq)]
                 ax.plot(
                     dip.freq,
@@ -231,10 +229,10 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
                     color="red",
                     markersize=14,
                     linestyle="none",
-                    label=f"{dip.name}: {dip.freq:.6g} MHz, depth {dip.depth:.4g}",
+                    label=f"{label}: {dip.freq:.6g} MHz, depth {dip.depth:.4g}",
                 )
                 ax.annotate(
-                    dip.name,
+                    label,
                     (dip.freq, measured),
                     xytext=(8, 8),
                     textcoords="offset points",

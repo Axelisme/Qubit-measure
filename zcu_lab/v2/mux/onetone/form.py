@@ -3,9 +3,13 @@
 from zcu_tools.cfg_model import Hidden, Range
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
+from zcu_lab.v2._support.measure.mux_bindings import (
+    require_mux_group,
+    validate_mux_bindings,
+)
 from zcu_lab.v2._support.measure.mux_forms import (
     READOUT_ELEMENTS,
+    captured_mux_participants,
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
@@ -17,7 +21,8 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
 
     Generate one editable readout slot per group resonator. Preserve captured
     readout scalar settings when present, otherwise use the blank template.
-    Start with all tones selected and 101 offsets from -1 to 1 MHz. If the group
+    Capture $participants in resonator order and 101 offsets from -1 to 1 MHz.
+    Missing/unbound aliases select all original indices. If the group
     names qubits, invalid pairings raise at Open/Reset. Groups without qubits
     still support resonator bring-up. With a slot, add five ringup times from
     the smallest set group kappa to its trigger and extend pulse coverage,
@@ -34,10 +39,14 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     validate_mux_bindings(ctx.parameters)
 
     # The group owns readout slot count; individual values remain editable.
+    participants = captured_mux_participants(
+        ctx, require_mux_group(ctx.parameters).resonators
+    )
     readout = mux_readout_initial(ctx, wait_for_ringup=True)
     return Form(
         MuxOnetoneCfg,
         tree={
+            "participants": [index for index in participants],
             "reps": 1000,
             "rounds": 10,
             "modules": {
@@ -49,7 +58,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
         },
         fixed_elements=(READOUT_ELEMENTS,),
         field_order=(
-            "active_tones",
+            "participants",
             "modules",
             "sweep",
             "reps",

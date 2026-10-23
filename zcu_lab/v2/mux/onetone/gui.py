@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import ClassVar, Literal, TypeAlias
 
 import numpy as np
+from pydantic import BaseModel
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import MuxReadoutSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -41,6 +43,34 @@ from zcu_lab.v2.mux.onetone.form import make_form
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
 
 MuxOnetoneRunResult: TypeAlias = RunRecord[MuxOnetoneCfg, MuxOnetoneResult]
+
+
+class MuxOnetoneTone(BaseModel):
+    """Original index/display label, native fit status and optional owner estimates.
+
+    freq/kappa use MHz; theta0 uses rad and edelay inverse MHz. reason is the
+    native failure reason. fit_quality is the fitting owner's diagnostic type.
+    edelay_source records the seed source; persistable follows native policy.
+    """
+
+    index: int
+    label: str
+    status: Literal["success", "failed"]
+    freq: float | None = None
+    kappa: float | None = None
+    fit_quality: FitQuality | None = None
+    reason: str | None = None
+    theta0: float | None = None
+    edelay: float | None = None
+    edelay_source: Literal["global", "calibrated", "manual"] | None = None
+    edelay_persistable: bool | None = None
+
+
+class MuxOnetoneSummary(BaseModel):
+    """Native acquisition order and reason that scalar resonator writeback is unavailable."""
+
+    tones: list[MuxOnetoneTone]
+    resonators_diagnostic: str | None
 
 
 @dataclass(frozen=True)
@@ -83,26 +113,38 @@ class MuxOnetoneAnalyzeResult(AnalyzeResultBase):
     resonators: tuple[str, ...] | None
     resonators_diagnostic: str | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Expose each original tone's scalars/quality or failure, plus bindings."""
-        tones: list[dict[str, object]] = []
+    def summary(self) -> MuxOnetoneSummary:
+        """Return native fits/failures and the captured binding diagnostic."""
+        tones: list[MuxOnetoneTone] = []
         for outcome in self.outcomes:
-            row: dict[str, object] = {"index": outcome.index, "label": outcome.label}
             if isinstance(outcome, ToneFitFailure):
-                row.update(status="failed", reason=outcome.reason)
+                row = MuxOnetoneTone(
+                    index=outcome.index,
+                    label=outcome.label,
+                    status="failed",
+                    reason=outcome.reason,
+                )
             else:
-                row.update(
+                row = MuxOnetoneTone(
+                    index=outcome.index,
+                    label=outcome.label,
                     status="success",
                     freq=outcome.fit.freq,
                     kappa=outcome.fit.fwhm,
-                    fit_quality=outcome.fit.fit_quality.to_summary_dict(),
+                    fit_quality=outcome.fit.fit_quality,
                     theta0=outcome.fit.theta0,
                     edelay=outcome.fit.edelay,
                     edelay_source=outcome.edelay_source,
                     edelay_persistable=outcome.edelay_persistable,
                 )
             tones.append(row)
-        return {"tones": tones, "resonators_diagnostic": self.resonators_diagnostic}
+        return MuxOnetoneSummary(
+            tones=tones, resonators_diagnostic=self.resonators_diagnostic
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize only fields present in the native success/failure outcome."""
+        return self.summary().model_dump(mode="json", exclude_unset=True)
 
 
 def _validate_source(source: MuxOnetoneRunResult) -> MuxOnetoneCfg:
@@ -111,18 +153,14 @@ def _validate_source(source: MuxOnetoneRunResult) -> MuxOnetoneCfg:
         raise ValueError(
             "Mux FIT requires the saved complete cfg; current form is not a substitute"
         )
-    indices = (
-        cfg.active_tones
-        if cfg.active_tones is not None
-        else list(range(len(cfg.modules.readout.tones)))
-    )
+    indices = cfg.participants
     if (
         data.tone_indices.ndim != 1
         or data.tone_indices.dtype.kind not in "iu"
         or not np.array_equal(data.tone_indices, indices)
     ):
         raise ValueError(
-            "tone_indices must match saved cfg active_tones in original-index column order"
+            "tone_indices must match saved cfg participants in original-index column order"
         )
     if data.dfs.ndim != 1 or data.signals.shape != (data.dfs.size, len(indices)):
         raise ValueError(

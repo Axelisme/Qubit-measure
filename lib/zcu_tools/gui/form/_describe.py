@@ -292,7 +292,9 @@ def describe(
     tags = _description_tags((model,))
     if not path:
         return FormDescription(
-            path, None, _children(root_level(model, data, env, selections), tags)
+            path,
+            None,
+            _children(root_level(model, data, env, selections), tags),
         )
     target = resolve(model, data, path, env, selections)
     metadata = describe_field(target, roots=(model,))

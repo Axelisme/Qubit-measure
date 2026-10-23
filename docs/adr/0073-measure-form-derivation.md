@@ -140,7 +140,7 @@ Module／waveform 使用持久 Spec 與 FieldMeta。硬體專屬的不支援欄�
 Readout 的 `gen_ch` 與 `ro_ch` 必填且可編輯，`freq` 是唯一 generator／ADC 頻率。
 Readout 的 waveform 仍可引用 key，不推導通道或補值，見 [[0074]]。
 例如 `Template("readout", set={"gain": 0.1, "ro_length": 2.0})` 直接覆寫平鋪路徑。
-固定具名 model list 的推導、picker 與獨立 participants 清單由 [[0079]] 擴充。Framework 不接管 mux group 關係或 lab runtime 的名稱到原始 index 轉換。
+固定具名 model list 的推導、picker 與獨立 participants 清單由 [[0079]] 擴充。Framework 不接管 mux group 關係；lab 在 Open／Reset 捕捉邊界把 alias 名稱轉成原始 index。
 
 ### 捕捉來源與使用時驗證
 

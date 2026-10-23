@@ -9,11 +9,11 @@ redeclaring ``figure: Figure`` each.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from matplotlib.figure import Figure
-from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.fitting import FitQuality, QualityIssue
 from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
 
 if TYPE_CHECKING:
@@ -22,29 +22,49 @@ if TYPE_CHECKING:
 _FigureOnlyT = TypeVar("_FigureOnlyT", bound="FigureOnlyAnalyzeResult")
 
 
+def fit_quality_models(
+    qualities: Mapping[str, FitQuality] | None,
+    *,
+    summary_path: str = "summary.fit_quality",
+) -> dict[str, FitQuality] | None:
+    """Copy owner metrics, qualifying invalid paths without mutating core diagnostics.
+
+    qualities maps fit names to core diagnostics; None remains None.
+    summary_path is the JSON location of this map, including a mux row offset
+    where applicable. Values and writeback eligibility remain unchanged.
+    """
+    if qualities is None:
+        return None
+    return {
+        name: replace(
+            quality,
+            invalid=tuple(
+                QualityIssue(
+                    path=f"{summary_path}.{name}.{issue.path}", reason=issue.reason
+                )
+                for issue in quality.invalid
+            ),
+        )
+        for name, quality in qualities.items()
+    }
+
+
 def fit_quality_summary(
     qualities: Mapping[str, FitQuality] | None,
     *,
     summary_path: str = "summary.fit_quality",
 ) -> dict[str, dict[str, object]] | None:
-    """Project committed quality and qualify diagnostic paths under summary_path.
+    """Serialize qualified owner diagnostics; None retains unavailable quality.
 
-    qualities is the core-owned mapping, or None when unavailable. summary_path
-    locates that mapping in the returned GUI summary; indexed consumers supply
-    e.g. ``summary.tones[0].fit_quality``. The default preserves single-qubit
-    summaries. Values/acceptance are unchanged; no fit or validation is rerun.
+    summary_path locates the map in the returned JSON summary. No fit,
+    acceptance decision or input mutation occurs.
     """
-    if qualities is None:
-        return None
-    result = {}
-    for name, quality in qualities.items():
-        summary = quality.to_summary_dict()
-        summary["invalid"] = [
-            {"path": f"{summary_path}.{name}.{issue.path}", "reason": issue.reason}
-            for issue in quality.invalid
-        ]
-        result[name] = summary
-    return result
+    models = fit_quality_models(qualities, summary_path=summary_path)
+    return (
+        None
+        if models is None
+        else {name: quality.to_summary_dict() for name, quality in models.items()}
+    )
 
 
 @dataclass

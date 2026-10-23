@@ -33,7 +33,7 @@ class NativeTone(ConfigBase):
 
 class NativeGroup(ConfigBase):
     tones: list[NativeTone]
-    participants: list[str]
+    participants: list[int]
 
 
 def indexed_env() -> FormEnv:
@@ -76,7 +76,7 @@ def indexed_tree() -> dict[str, FormNode]:
                 "sweep": Range.between(10, 14, expts=3),
             },
         ],
-        "participants": ["B", "A"],
+        "participants": [1, 0],
     }
 
 
@@ -124,7 +124,7 @@ def native_defaults_form() -> Form[NativeGroup]:
                 )
             ]
         )
-        participants: list[str] = Field(default_factory=lambda: ["default"])
+        participants: list[int] = Field(default_factory=lambda: [0])
 
     return Form(DefaultGroup, {})
 

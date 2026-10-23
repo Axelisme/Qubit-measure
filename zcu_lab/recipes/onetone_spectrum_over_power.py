@@ -5,31 +5,27 @@ Both scan counts appear as Expts in the GUI.
 """
 
 from pydantic import Field
-from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter.sweep import LinRange
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+)
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 
 from .helpers import (
     FrequencySweepCalibration,
     FrequencySweepRange,
-    retain_scalar,
-    set_frequency_sweep,
+    frequency_sweep_edits,
 )
 
 
-class OnetoneSpectrumOverPowerInputs(FormModel):
+class OnetoneSpectrumOverPowerInputs(RecipeInputs):
     """Inputs for onetone spectrum over power; all units and null policies are
     declared per field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -58,7 +54,7 @@ class OnetoneSpectrumOverPowerInputs(FormModel):
     )
 
 
-class OnetoneSpectrumOverPowerReport(FormModel):
+class OnetoneSpectrumOverPowerReport(RecipeReport):
     """Completed onetone spectrum over power results; cancellation returns no
     report."""
 
@@ -80,11 +76,9 @@ async def onetone_spectrum_over_power(
     resonance changes with drive amplitude. Save the raw map and capture its Run
     preview only; this survey performs no analysis or writeback.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Owner, acquisition, save and analysis errors
-    propagate. Save raw data and completed artifacts once in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    freq_points → sweep.freq.expts; gain_points → sweep.gain.expts.
+    Analysis uses the captured GUI parameters; no fit controls are added.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     for name, value in (
         ("reuse_tab_id", inputs.reuse_tab_id),
@@ -94,14 +88,12 @@ async def onetone_spectrum_over_power(
             raise ValueError(f"{name} must be a non-empty string or null")
     if inputs.span_mhz is not None and inputs.span_mhz <= 0:
         raise ValueError("span_mhz must be positive")
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "onetone/power_dep",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("onetone/power_dep", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    missing = set_frequency_sweep(
+    tab.select_sources(inputs)
+
+    edits: list[FieldEdit] = []
+    sweep = frequency_sweep_edits(
         tab,
         ("sweep", "freq"),
         calibration=FrequencySweepCalibration(
@@ -113,32 +105,39 @@ async def onetone_spectrum_over_power(
             expts=inputs.freq_points,
         ),
     )
+    missing = sweep.missing
+    edits.extend(sweep.edits)
     if missing:
         raise RecipeNeedsParameters(missing)
     if inputs.gain_range is not None and inputs.gain_points is not None:
-        tab.set(
-            ("sweep", "gain"),
-            LinRange(
-                start=inputs.gain_range[0],
-                stop=inputs.gain_range[1],
-                n=inputs.gain_points,
-            ),
+        edits.append(
+            FieldEdit(
+                path=("sweep", "gain"),
+                value=LinRange(
+                    start=inputs.gain_range[0],
+                    stop=inputs.gain_range[1],
+                    n=inputs.gain_points,
+                ),
+            )
         )
     else:
-        tab.set(
-            ("sweep", "gain", "start"),
-            None if inputs.gain_range is None else inputs.gain_range[0],
+        edits.append(
+            FieldEdit(
+                path=("sweep", "gain", "start"),
+                value=None if inputs.gain_range is None else inputs.gain_range[0],
+            )
         )
-        tab.set(
-            ("sweep", "gain", "stop"),
-            None if inputs.gain_range is None else inputs.gain_range[1],
+        edits.append(
+            FieldEdit(
+                path=("sweep", "gain", "stop"),
+                value=None if inputs.gain_range is None else inputs.gain_range[1],
+            )
         )
-        tab.set(("sweep", "gain", "n"), inputs.gain_points)
-    retain_scalar(tab, ("modules", "readout", "gain"))
-    tab.set(("reps",), inputs.reps)
-    tab.set(("rounds",), inputs.rounds)
+        edits.append(FieldEdit(path=("sweep", "gain", "n"), value=inputs.gain_points))
+    tab.apply_inputs(
+        inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
+    )
 
-    # Acquire before analysis; the finally block saves raw and artifacts.
     await tab.run()
     try:
         tab.preview()

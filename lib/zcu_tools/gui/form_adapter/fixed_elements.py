@@ -105,6 +105,7 @@ class FixedElements:
     are allowed, and a newly active list establishes its own length boundary.
     Restore/Reset establish new boundaries in either mode. No sources, saved
     identities or secondary ordering are stored.
+    Participants is a nonempty, unique list[int].
     """
 
     list_path: FormWritePath
@@ -124,7 +125,7 @@ class FixedElements:
             )
 
     def check_declaration(self, model: type[BaseModel]) -> None:
-        """Require list[Model]; named mode also requires str name and list[str]."""
+        """Require list[Model], str names and list[int]."""
         info = _field(model, self.list_path)
         if get_origin(info.annotation) is not list:
             raise ValueError(f"{self.list_path!r}: fixed elements require list[Model]")
@@ -138,9 +139,12 @@ class FixedElements:
             raise ValueError(
                 f"{self.list_path!r}: {self.name_field!r} must name a str field"
             )
-        if _field(model, self.participants_path).annotation != list[str]:
+        participants = _field(model, self.participants_path).annotation
+        if get_origin(participants) is not list or members(
+            get_args(participants)[0]
+        ) != (int,):
             raise ValueError(
-                f"{self.participants_path!r}: participants require list[str]"
+                f"{self.participants_path!r}: participants require list[int]"
             )
 
     def names(self, data: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
@@ -236,9 +240,9 @@ class FixedElements:
     def validate_participants(self, data: dict[str, JsonValue]) -> None:
         """Raise a directed ordinary Pydantic error for illegal participant values.
 
-        Report empty, duplicate and unknown names at the declared field/index.
-        Never reorder or filter either list. Pydantic handles non-list shapes
-        and non-string entries before this successful-model check.
+        Report empty, duplicate and out-of-range original indices at their input
+        position. Never reorder or filter either list. Pydantic handles non-list
+        shapes and non-integer entries before this successful-model check.
         """
         if self.participants_path is None:
             return
@@ -248,17 +252,18 @@ class FixedElements:
             return
         if not values:
             raise field_error(self.participants_path, "Participants must not be empty")
-        seen: set[str] = set()
+        seen: set[int] = set()
         for index, value in enumerate(values):
-            if not isinstance(value, str):
+            if type(value) is not int:
                 continue
             if value in seen:
                 raise field_error(
                     (*self.participants_path, index), f"Duplicate participant {value!r}"
                 )
-            if value not in names:
+            if not 0 <= value < len(names):
                 raise field_error(
-                    (*self.participants_path, index), f"Unknown participant {value!r}"
+                    (*self.participants_path, index),
+                    f"Participant index {value} outside tones [0, {len(names)})",
                 )
             seen.add(value)
 
@@ -299,9 +304,26 @@ class FixedElementsForm(FormModel):
         for declaration in cls.fixed_elements:
             declaration.check_input_change(before, after, model=cls)
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_participant_types(cls, data: JsonValue) -> JsonValue:
+        """Reject non-integer raw participant entries, including booleans."""
+        if isinstance(data, dict):
+            for declaration in cls.fixed_elements:
+                path = declaration.participants_path
+                values = _at(data, path) if path is not None else None
+                if isinstance(values, list) and path is not None:
+                    for index, value in enumerate(values):
+                        if type(value) is not int:
+                            raise field_error(
+                                (*path, index),
+                                "Participant index must be an integer, not bool or text",
+                            )
+        return data
+
     @model_validator(mode="after")
     def validate_fixed_elements(self) -> Self:
-        """Validate participants without excluding any nonparticipating element."""
+        """Validate original indices without trimming or reordering the full list."""
         data: dict[str, JsonValue] = self.model_dump(mode="json")
         for declaration in self.fixed_elements:
             declaration.validate_participants(data)

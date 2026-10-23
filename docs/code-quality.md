@@ -1,6 +1,6 @@
 # 程式碼品質
 
-**讀者：** framework-dev、agent。查閱實作及 review 的品質判準。
+**讀者：** lab-author、framework-dev、agent。查閱實作及 review 的品質判準。
 
 通過機械檢查是必要證據，不代表設計容易理解。
 操作、測試與驗證流程以 [AGENTS.md](../AGENTS.md) 為準；工具使用方式見
@@ -153,6 +153,43 @@ Production 可以提供中性的注入接口，即使目前只有測試替換它
 例外須記錄適用範圍、理由、風險與重新檢視條件，並由任務指定的決策者確認；未指定時請使用者決定。
 持續適用的例外放在擁有該規則的文件，本次限定的例外放在任務決策紀錄。
 例外不自動豁免機械 gate，也不授權修改其設定。
+
+## zcu_lab 審查裁決
+
+「我會希望zcu_lab中的內容有最大化的可讀性，上手時間最短，實作內容一看就懂」
+
+這是 zcu_lab 的首要準則。在 zcu_lab 內，可讀性優先於 lib 的強型別、防禦分支與抽象規則。
+衝突時選一眼就懂的寫法，型別與驗證由 lib 在邊界承擔。不要在實驗定義中重做框架的檢查。
+lib 本身仍遵守前述品質判準。
+
+「加入自己的客製化修改也很自然」
+
+lab-author 改一段脈衝、多一個欄位或換分析步驟，應像改腳本，不必先理解基底或 helper 契約。
+lib 基底只提供可選的預設路徑，recipe 可以拆開使用，也可以直接插入或替換自己的步驟。
+不以強制的 `run_all` 或模板方法流程限制實驗。
+
+每個 cfg／表單／recipe 欄位要能用一句使用者術語說出它在這個實驗的用途，說不出就是殘留，review 時逐欄位問。
+
+Review 以「新人多久能看懂這個 recipe／core」裁決。請 reviewer 從 recipe 函式說出量測順序，
+或從 core 的 `run` 說出脈衝序列，再指出客製化改動要寫在哪裡。需要追進 helper 才能回答時，
+把量測動作放回主體。以下六項用來找出閱讀障礙，不以 class 數或型別完整性取代閱讀判斷：
+
+1. Recipe 主體是一串量測步驟。只讀函式就能知道開了哪張表單、改了什麼、量測與分析的順序、
+   何時問答、寫回及保存。共用的開 tab、選來源與套 overrides 管線由 lib 擁有。
+2. Recipe 不宣告分析結果的鏡像 model。直接引用分析 owner 匯出的型別，不重宣告
+   FitQuality、QualityIssue 或 summary 的同名欄位，也不在 recipe 重驗 owner 輸出。
+3. Recipe 的 class 只用於實驗輸入與報告。不要為串接幾個步驟增加 runner、policy 或 pipeline class。
+   這不禁止 core 宣告實驗需要的 cfg 與結果型別。
+4. Recipe helper 只做數字呈現等機械格式化，不藏量測判斷。掃描哪裡、用哪個脈衝、
+   何時重測或接受寫回，留在 recipe 主體。
+5. Core 的 class 數與每個抽象都納入 review，逐項說明它代表的實驗概念或隱藏的複雜度。
+   不能說明用途就改成直接寫法，但不為降低數字拆檔或搬走脈衝序列。
+6. Docstring 用使用者術語交代輸入、動作、結果與失敗。寫明單位、null 的保留語意、
+   `n → expts` 或 `points → expts` 對應及分析參數的效果，不以「typed pipeline」等實作詞代替說明。
+
+撰寫方式與目標骨架見 [Measure authoring](../zcu_lab/v2/measure-authoring.md#recipe-撰寫)。
+本節不要求順手清理所有既有 class，也不改變 [模組定位](adr/0072-module-boundaries.md#分層)
+的依賴方向或硬體授權。
 
 ## 參考來源
 

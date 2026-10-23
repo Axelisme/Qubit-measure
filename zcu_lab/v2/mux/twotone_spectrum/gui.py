@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -24,8 +26,12 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
+from zcu_lab.v2._support.measure.analyze_results import fit_quality_models
+from zcu_lab.v2._support.measure.mux_results import (
+    MuxSummaryFailure,
+    MuxSummaryTone,
+    captured_qubits,
+)
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 from zcu_lab.v2.twotone.freq.gui import FreqAnalyzeParams
@@ -35,6 +41,34 @@ from .core import MuxFreqCfg, MuxFreqExp
 from .form import make_form
 
 MuxFreqRunResult: TypeAlias = RunRecord[MuxFreqCfg, MuxSweepResult]
+
+
+class MuxTwotoneSpectrumFitSummary(MuxSummaryTone):
+    """Native fit estimates in experiment units and qualified owner quality."""
+
+    freq: float | None = Field(
+        description="Owner freq in MHz; null retains an unavailable estimate."
+    )
+
+    freq_err: float | None = Field(
+        description="Owner freq_err in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm: float | None = Field(
+        description="Owner fwhm in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm_err: float | None = Field(
+        description="Owner fwhm_err in MHz; null retains an unavailable estimate."
+    )
+
+    fit_quality: dict[str, FitQuality] | None
+
+
+class MuxTwotoneSpectrumSummary(BaseModel):
+    """Owner tone rows in analysis order, retaining successes and failures."""
+
+    tones: list[MuxTwotoneSpectrumFitSummary | MuxSummaryFailure]
 
 
 @dataclass(frozen=True)
@@ -48,25 +82,43 @@ class MuxFreqAnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxFreqFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present original positions/names, numerical values, quality or failure."""
-        summaries: list[dict[str, object]] = []
+    def summary(self) -> MuxTwotoneSpectrumSummary:
+        """Return native tone estimates/failures with fixed identities and owner quality."""
+        summaries: list[MuxTwotoneSpectrumFitSummary | MuxSummaryFailure] = []
         for outcome in self.outcomes:
+            name = None if self.names is None else self.names[outcome.index]
+            element = (
+                None
+                if name is None
+                else ElementIdentity(index=outcome.index, name=name)
+            )
             if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
+                row = MuxSummaryFailure(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    failure=outcome.reason,
+                )
             else:
-                values = {
-                    "freq": outcome.freq,
-                    "freq_err": outcome.freq_err,
-                    "fwhm": outcome.fwhm,
-                    "fwhm_err": outcome.fwhm_err,
-                    "fit_quality": fit_quality_summary(
+                row = MuxTwotoneSpectrumFitSummary(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    freq=outcome.freq,
+                    freq_err=outcome.freq_err,
+                    fwhm=outcome.fwhm,
+                    fwhm_err=outcome.fwhm_err,
+                    fit_quality=fit_quality_models(
                         {"fit": outcome.quality},
                         summary_path=f"summary.tones[{len(summaries)}].fit_quality",
                     ),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+                )
+            summaries.append(row)
+        return MuxTwotoneSpectrumSummary(tones=summaries)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the same owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 class MuxFreqAdapter(
