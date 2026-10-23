@@ -135,6 +135,16 @@ Templates use caller-authored `Template.bindings`.
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
 
+## Figure presentation
+
+Run、Analysis、Post-analysis 與 Data 的具名圖預覽，四張以內在同一頁平鋪，
+超過四張時每頁最多四張。上一頁／下一頁按鈕與 `i / N` 顯示目前頁次。
+換頁會將該頁第一張設為「目前圖」，點選 canvas tile 會改選該張。
+RPC screenshot 與 `get_current_figure_for_pane` 讀取這張原生 Figure。
+同一 FigureCollection 重送時保留頁次與目前圖，清空時隱藏分頁列。
+Data 預覽只保存圖名與 raster cache，分頁不移動原始 canvas。
+Workflow 圖形區沿用原有選單，不使用這組分頁列。
+
 ## Workflow hosting
 
 `Controller.session_services` exposes the existing session bundle. Workflow
