@@ -56,9 +56,9 @@ class MuxFluxPickParams:
 
     tone is the full readout index, not the participant row; an unacquired index
     raises ValueError at analysis start. flux_half and flux_int are finite
-    half/integer-flux DC values in the scanned device\'s native unit (cfg.flux_unit
+    half/integer-flux DC values in the scanned device's native unit (cfg.flux_unit
     labels A, V or native without conversion). Each None independently uses
-    that tone\'s Run-captured calibration, then the shared picker default if
+    that tone's Run-captured calibration, then the shared picker default if
     missing. Explicit values override only this analysis, never the capture.
     The picker folds the pair near the scan center using its existing period
     rule; nonfinite positions raise TypeError/ValueError. done publishes one

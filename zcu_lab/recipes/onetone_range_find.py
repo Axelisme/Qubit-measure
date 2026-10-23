@@ -5,12 +5,19 @@ from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter.sweep import LinRange
 from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
 
+from zcu_lab.v2.onetone.range_find.core import DEFAULT_MIN_SEPARATION_MHZ
+
 from .helpers import report_number
 from .mux_helpers import ToneRangeInputs
 
 
 class OnetoneRangeFindInputs(FormModel):
-    """Explicit MHz bounds; no calibration-derived frequency initial guess."""
+    """Explicit absolute MHz bounds and minimum dip spacing, without inferred bounds.
+
+    min_separation defaults to the analysis owner's 1 MHz. It must be finite
+    and positive; invalid values raise ValidationError before opening a tab.
+    It affects dip selection, not the acquisition grid or hardware channels.
+    """
 
     target: str | None = Field(
         None, description="Resonator Reset alias; null uses global aliases."
@@ -29,6 +36,13 @@ class OnetoneRangeFindInputs(FormModel):
     resonators: list[str] | None = Field(
         None,
         description="Dip names in ascending frequency order; null keeps the Form's captured initial list. Names do not select hardware.",
+    )
+    min_separation: float = Field(
+        default=DEFAULT_MIN_SEPARATION_MHZ,
+        strict=True,
+        gt=0,
+        allow_inf_nan=False,
+        description="Minimum spacing between selected dips in MHz; finite and > 0, default 1 MHz. Applied to this analysis, not acquisition.",
     )
     reps: int | None = Field(
         None,
@@ -90,8 +104,9 @@ async def onetone_range_find(
 
     freq and n are required. Null resonators retains the captured Form initial
     list; names label dips in ascending frequency order, not hardware channels.
-    min_separation uses the GUI analysis default. Analysis parameters can later
-    be supplied through analyze updates; this recipe does not yet expose them.
+    min_separation is finite positive MHz, default 1 MHz. It overrides the
+    owner's dip spacing through the same tracked Analyze operation, including
+    when reusing a tab. It does not change the acquired frequency grid.
     Expected analysis failures return a reason without writeback. The runtime
     owns cancellation and operation failures. Save once after acquisition.
     """
@@ -121,7 +136,11 @@ async def onetone_range_find(
     )
     await tab.run()
     try:
-        fit = await tab.analyze("primary", result=RangeFindSummary)
+        fit = await tab.analyze(
+            "primary",
+            result=RangeFindSummary,
+            updates={"min_separation": inputs.min_separation},
+        )
         if fit.result is None:
             return OnetoneRangeFindReport(resonators=[], analysis_failure=fit.reason)
         answer = await tab.ask_writeback()

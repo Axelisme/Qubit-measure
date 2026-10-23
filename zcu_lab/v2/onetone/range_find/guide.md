@@ -59,6 +59,9 @@ Labber 匯出包含絕對頻率與 complex IQ，不是 native Load 的替代來�
 Recipe 不猜頻率初值。`target` 指定這次 Reset 的 resonator alias，`reuse_tab_id` 可重用 idle matching tab。
 `resonators` 可提供由低頻到高頻的名稱，省略或 null 保留表單初值。
 `reps`、`rounds` 省略或 null 保留表單值。Run 前驗證完整欄位。
-分析沿用 GUI 的 `min_separation` 預設，目前 recipe 不收此參數。分析參數之後可經 analyze updates 設定。
+`min_separation` 指定選中凹陷之間的最小 MHz 距離，預設 1 MHz，必須是有限正數。
+例如 `min_separation: 5.0` 排除間距不足 5 MHz 的候選，不改 acquisition 的頻率點。
+Recipe 在同一個 Analyze operation 傳入此值，重用 tab 時也不沿用先前的 GUI 值。
+非正數或非有限值在開 tab 前拒絕。間距過大而找不到指定數量的凹陷時，分析失敗且不詢問寫回。
 Run、Analyze 後回覆每個 dip 的 name、freq、depth，以及 `identity_diagnostic`、`writeback_diagnostic`。
 Recipe 詢問 writeback，只接受選定候選，略過不寫入，最後保存 raw data 與分析。

@@ -468,9 +468,9 @@ class RecipeTab:
         the author decides whether to save, retry, skip or stop. Root cancellation
         raises ScriptCancelled after owner drain. Invalid stages, stale sources,
         incompatible summary fields, programming and transport errors propagate.
-        updates maps the adapter\'s analysis parameter names to ordinary values
+        updates maps the adapter's analysis parameter names to ordinary values
         in their declared units; no conversion or Form expression evaluation
-        occurs. None or an empty mapping keeps the owner\'s current parameters.
+        occurs. None or an empty mapping keeps the owner's current parameters.
         Explicit null values reach the owner unchanged. Unknown names and
         incompatible values fail owner validation before analysis starts.
         Updates and analysis share one tracked operation, including Post.
