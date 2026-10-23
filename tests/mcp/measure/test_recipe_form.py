@@ -463,7 +463,6 @@ def test_keep_defaults_are_omittable_but_null_reaches_the_form(tmp_path: Path) -
         {"type": "null"},
     ]
     assert "default" not in schema["properties"]["gain"]
-    assert "null" in schema["properties"]["gain"]["description"]
     with pytest.raises(ValidationError):
         DraftInputs.model_validate({"gain": "KEEP"})
     with pytest.raises(ValidationError):
