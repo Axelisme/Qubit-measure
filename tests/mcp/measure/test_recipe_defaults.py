@@ -456,6 +456,45 @@ def test_apply_inputs_admits_values_named_edits_and_overrides_together(
         client.context.session.close()
 
 
+@pytest.mark.parametrize(
+    ("path", "value", "source", "message"),
+    [
+        (("count",), 7, " ", "Edit source must be nonblank"),
+        (("count",), None, " ", "Edit source must be nonblank"),
+        (("tones", True), 7, "explicit", "Form paths require string fields or nonnegative integer indexes"),
+    ],
+)
+def test_apply_inputs_validates_superseded_and_null_edits(
+    tmp_path: Path,
+    path: api.FormPath,
+    value: int | None,
+    source: str,
+    message: str,
+) -> None:
+    @api.recipe("synthetic", "Validate authored edits even when their value is superseded")
+    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+        tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
+        tab.apply_inputs(
+            inputs, {}, edits=(
+                api.FieldEdit(path=path, value=value, source=source),
+                api.FieldEdit(path=("tones", 1) if len(path) > 1 else ("count",), value=11),
+            )
+        )
+        return Report(count=1)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        execution = client.context.session.recipes.start(client.context, "synthetic", {})
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == "failed", snapshot
+        assert snapshot.error is not None
+        assert message in snapshot.error.message
+        assert not [p for m, p in client.transport.sent if m == "tab.edit_recipe_fields"]
+    finally:
+        client.context.session.close()
+
+
 def test_apply_inputs_retains_named_edit_source_validation(tmp_path: Path) -> None:
     @api.recipe("synthetic", "Keep the supplied edit source for native admission")
     async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
