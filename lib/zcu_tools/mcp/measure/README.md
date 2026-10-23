@@ -95,7 +95,8 @@ Lab 新增 `mux_onetone`、`onetone_range_find`、`twotone_flux_dep` 三個工�
 它們分別操作 `mux/onetone`、`onetone/range_find`、`twotone/flux_dep`。
 用這些 adapter 名呼叫 `recipe_guide` 可讀各自的參數、分析與 writeback 說明。
 三者都先 Run，再 Analyze，經問答接受選定候選後才寫入，最後保存。
-Range find 的 `min_separation` 目前沿用 GUI 分析預設，待接 analyze updates。
+Range find 的 `min_separation` 透過同一 tracked Analyze 的 `updates` 傳給 owner。
+它使用 MHz，預設 1 MHz，必須有限且大於零，只影響 dip 選取，不改 acquisition grid。
 
 作者用 `await tab.run()`、`await tab.analyze("primary"|"post", result=T)`、
 `await tab.ask_writeback()` 與 `await session.ask(question)` 串接流程。
