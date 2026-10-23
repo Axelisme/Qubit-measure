@@ -48,7 +48,7 @@ class Plot2DSegment(AbsSegment):
         ax.yaxis.set_major_formatter(formatter)
 
         self.im = ax.imshow(
-            [[0, 1e-6]],
+            np.full((1, 2), np.nan),
             aspect="auto",
             origin="lower",
             interpolation="nearest",
@@ -142,7 +142,7 @@ class PlotNonUniform2DSegment(AbsSegment):
 
         self.im = NonUniformImage(ax, cmap=cmap, interpolation="nearest")
         self.im.set_extent((0, 1, 0, 1))
-        self.im.set_data([0, 1], [0, 1], [[0, 1e-6], [0, 1e-6]])
+        self.im.set_data([0, 1], [0, 1], np.full((2, 2), np.nan))
         self.im.set_clim(vmin=self.vmin, vmax=self.vmax)
         ax.add_image(self.im)
 

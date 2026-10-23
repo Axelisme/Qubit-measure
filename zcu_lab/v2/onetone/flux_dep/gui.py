@@ -83,7 +83,7 @@ class OneToneFluxDepAdapter(
         plots: Plots,
     ) -> FluxPickPlugin:
         result = req.run_result.result
-        inputs = FluxPickInputs(result.signals, result.values, result.freqs)
+        inputs = FluxPickInputs(result.signals, result.values, result.freqs * 1e-3)
         parameters = req.parameters
         flux_half = (
             None
