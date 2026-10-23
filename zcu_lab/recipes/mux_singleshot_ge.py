@@ -1,52 +1,52 @@
 """Measure mux probe-off/on IQ clouds, fit GE separation, and review calibration."""
 
-from pydantic import BaseModel, Field, StrictInt
-from zcu_tools.gui.form import FormModel
+from typing import Literal
+
+from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
+    RecipeInputs,
+    RecipeReport,
     RecipeSession,
     recipe,
+    report_number,
 )
 
-from .helpers import report_number
+from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
+from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEPostSummary, MuxGESummary
+
 from .mux_helpers import (
-    MuxInline,
-    MuxLibrary,
-    MuxSummaryFailure,
-    MuxSummaryTone,
     MuxToneReport,
-    mux_overrides,
 )
 
 
-class MuxSingleshotGEInputs(FormModel):
-    """Choose the mux group and ordered Form edits without inferring calibrations.
+class MuxSingleshotGEInputs(RecipeInputs):
+    """Experiment inputs; null retains captured Form values, overrides apply last."""
 
-    Optional fields default to null. Null keeps Form inputs, uses global mux
-    aliases and opens a new tab. The edit lists run in library, inline,
-    overrides order; participants precedes overrides.
-    """
-
-    target: str | None = Field(
-        default=None, description="Mux Reset alias; null uses global aliases."
-    )
-    reuse_tab_id: str | None = Field(
-        default=None, description="Idle matching tab to reset; null opens a tab."
-    )
     participants: list[StrictInt] | None = Field(
         default=None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
-    library: list[MuxLibrary] | None = Field(
-        default=None, description="Ordered module selections; null keeps the GUI value."
+
+    initial_state: Literal["ground", "excited"] | None = Field(
+        None,
+        description="Prepared state for GE separation. Null retains analysis settings.",
     )
-    inline: list[MuxInline] | None = Field(
-        default=None,
-        description="Ordered captured-module copies, ancestors first; null keeps the GUI value.",
+    backend: Literal["pca", "center"] | None = Field(
+        None,
+        description="Rotation and threshold fit backend. Null retains analysis settings.",
     )
-    overrides: list[FieldEdit] | None = Field(
-        default=None,
-        description="Ordered scalar edits at full tone positions; null keeps the GUI value.",
+    logscale: bool | None = Field(
+        None,
+        description="Plot histograms on a logarithmic scale. Null retains analysis settings.",
+    )
+    align_t1: bool | None = Field(
+        None,
+        description="Align the GE model with captured T1. Null retains analysis settings.",
+    )
+    length_ratio: float | None = Field(
+        None,
+        description="Integration length ratio for GE fitting. Null retains analysis settings.",
     )
 
 
@@ -85,13 +85,8 @@ class MuxGEPostToneReport(MuxToneReport):
     )
 
 
-class MuxSingleshotGEReport(FormModel):
-    """Report GE calibration scalars, Post radii and the writeback decision.
-
-    tones and post_tones preserve native row order, original identities and
-    failures for each stage. writeback_applied is true only after accepted
-    calibration items have been applied. This is not a joint confusion matrix.
-    """
+class MuxSingleshotGEReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     tones: list[MuxGEToneReport] = Field(
         description="Primary GE estimates or failures in native order."
@@ -99,54 +94,6 @@ class MuxSingleshotGEReport(FormModel):
     post_tones: list[MuxGEPostToneReport] = Field(
         description="Post radius estimates or failures in native order."
     )
-    writeback_applied: bool = Field(
-        default=False, description="Whether accepted calibration items were applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class MuxGEFitSummary(MuxSummaryTone):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    fidelity: float | None = Field(
-        description="Owner fidelity in dimensionless; null retains an unavailable estimate."
-    )
-
-    theta: float | None = Field(
-        description="Owner theta in rad; null retains an unavailable estimate."
-    )
-
-    threshold: float | None = Field(
-        description="Owner threshold in ADC units; null retains an unavailable estimate."
-    )
-
-    ge_s: float | None = Field(
-        description="Owner ge_s in ADC units; null retains an unavailable estimate."
-    )
-
-
-class MuxGESummary(BaseModel):
-    """Owner tone rows in analysis order, retaining successes and failures."""
-
-    tones: list[MuxGEFitSummary | MuxSummaryFailure]
-
-
-class MuxGEPostFitSummary(MuxSummaryTone):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    ge_radius: float | None = Field(
-        description="Owner ge_radius in ADC units; null retains an unavailable estimate."
-    )
-
-
-class MuxGEPostSummary(BaseModel):
-    """Owner Post tone rows in their own native analysis order."""
-
-    tones: list[MuxGEPostFitSummary | MuxSummaryFailure]
 
 
 @recipe(
@@ -156,45 +103,48 @@ class MuxGEPostSummary(BaseModel):
 async def mux_singleshot_ge(
     session: RecipeSession, inputs: MuxSingleshotGEInputs
 ) -> MuxSingleshotGEReport:
-    """Compare simultaneous probe-off/on shots and report each qubit's GE fit.
+    """Measure mux probe-off/on IQ clouds, fit GE separation, and review calibration.
 
-    target binds this Reset's mux alias; reuse_tab_id resets an idle matching
-    tab. library selects modules, inline copies captures outer-first, then
-    participants and overrides edit the Form. Paths use full original tone
-    positions, MHz, us and native gain. Null keeps GUI input. No missing pulse
-    calibration is supplied. Copy referenced ancestors before their children.
-    Fit Primary separation, then estimate Post radius and confusion.
-    Ask before applying calibration items. Save raw shots and completed artifacts
-    in the Run finalizer. Return ordered GE scalars, radii and the writeback
-    decision. Skipping writes nothing. Expected analysis failures return a reason
-    without writeback, retaining Primary estimates if only Post failed. Invalid
-    inputs and other operation failures propagate without undoing edits or saves.
+    Select library then inline sources; null keeps captured Form values.
+    Overrides run last. Only participant drive/sweep settings are required;
+    readout identities remain required for every tone.
+    Shared sweep n is set through overrides; indices are original tone positions.
+    Fit Primary GE separation and Post radius, then ask before writeback.
+    Save raw and completed artifacts after Run, including expected fit failures.
+    Operation errors propagate without rolling back earlier edits or saves.
     """
-    # Capture this group's defaults without changing global aliases.
-    tab = session.open_tab(
-        "mux/singleshot_ge",
-        aliases=None if inputs.target is None else {"mux": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("mux/singleshot_ge", inputs, target_alias="mux")
 
-    # Select modules before copying captures and editing original tone positions.
-    for selection in inputs.library or ():
-        tab.select(selection.path, ref=selection.key)
-    for copy in inputs.inline or ():
-        tab.select(copy.path, inline=True)
-    edits = [
-        FieldEdit(
-            path=("participants",),
-            value=None if inputs.participants is None else list(inputs.participants),
-        )
-    ]
-    edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits, require_valid=True)
+    tab.select_sources(inputs)
+    tab.apply_inputs(
+        inputs,
+        {},
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            )
+        ],
+    )
 
     # Acquire paired shots before fitting GE separation.
     await tab.run()
     try:
-        primary = await tab.analyze("primary", result=MuxGESummary)
+        primary = await tab.analyze(
+            "primary",
+            updates={
+                key: value
+                for key, value in {
+                    "initial_state": inputs.initial_state,
+                    "backend": inputs.backend,
+                    "logscale": inputs.logscale,
+                    "align_t1": inputs.align_t1,
+                    "length_ratio": inputs.length_ratio,
+                }.items()
+                if value is not None
+            },
+            result=MuxGESummary,
+        )
         if primary.result is None:
             return MuxSingleshotGEReport(
                 tones=[],

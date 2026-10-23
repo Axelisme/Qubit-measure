@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from pydantic import BaseModel
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -30,8 +32,12 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
+from zcu_lab.v2._support.measure.analyze_results import fit_quality_models
+from zcu_lab.v2._support.measure.mux_results import (
+    MuxSummaryFailure,
+    MuxSummaryTone,
+    captured_qubits,
+)
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions, GEPostAnalyzeOptions
 from zcu_lab.v2.singleshot.ge.gui import (
@@ -53,6 +59,41 @@ from .form import make_form
 MuxGERunResult: TypeAlias = RunRecord[MuxGECfg, MuxGEResult]
 
 
+class MuxGEFitSummary(MuxSummaryTone):
+    """Native state, fidelity, radian rotation and normalized-ADC GE estimates.
+
+    init_pops holds initial state populations. fit_quality retains core metrics
+    with diagnostic paths rooted at this output row.
+    """
+
+    initial_state: str
+    fidelity: float
+    theta: float
+    threshold: float
+    ge_s: float
+    init_pops: list[float]
+    fit_quality: dict[str, FitQuality] | None
+
+
+class MuxGESummary(BaseModel):
+    """Primary GE outcomes in native order, preserving failures and identities."""
+
+    tones: list[MuxGEFitSummary | MuxSummaryFailure]
+
+
+class MuxGEPostFitSummary(MuxSummaryTone):
+    """Normalized-ADC radius and single-qubit confusion matrix, not a joint matrix."""
+
+    ge_radius: float
+    confusion: list[list[float]]
+
+
+class MuxGEPostSummary(BaseModel):
+    """Post GE outcomes in their own native order with original tone identities."""
+
+    tones: list[MuxGEPostFitSummary | MuxSummaryFailure]
+
+
 @dataclass(frozen=True)
 class MuxGEAnalyzeResult(AnalyzeResultBase):
     """Primary per-index outcomes and full source names, absent without cfg."""
@@ -60,28 +101,45 @@ class MuxGEAnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxGEAnalysis | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present same-source GE calibration/quality or each retained failure."""
-        summaries: list[dict[str, object]] = []
+    def summary(self) -> MuxGESummary:
+        """Return native GE outcomes with fixed identities and owner diagnostics."""
+        summaries: list[MuxGEFitSummary | MuxSummaryFailure] = []
         for outcome in self.outcomes:
+            name = None if self.names is None else self.names[outcome.index]
+            element = (
+                None
+                if name is None
+                else ElementIdentity(index=outcome.index, name=name)
+            )
             if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
+                row = MuxSummaryFailure(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    failure=outcome.reason,
+                )
             else:
-                primary = outcome.primary
-                values = {
-                    "initial_state": primary.initial_state,
-                    "fidelity": primary.fidelity,
-                    "theta": primary.theta,
-                    "threshold": primary.threshold,
-                    "ge_s": primary.ge_s,
-                    "init_pops": primary.init_pops.tolist(),
-                    "fit_quality": fit_quality_summary(
-                        primary.fit_quality,
+                row = MuxGEFitSummary(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    initial_state=outcome.primary.initial_state,
+                    fidelity=outcome.primary.fidelity,
+                    theta=outcome.primary.theta,
+                    threshold=outcome.primary.threshold,
+                    ge_s=outcome.primary.ge_s,
+                    init_pops=outcome.primary.init_pops.tolist(),
+                    fit_quality=fit_quality_models(
+                        outcome.primary.fit_quality,
                         summary_path=f"summary.tones[{len(summaries)}].fit_quality",
                     ),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+                )
+            summaries.append(row)
+        return MuxGESummary(tones=summaries)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the same owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 @dataclass(frozen=True)
@@ -91,19 +149,37 @@ class MuxGEPostAnalyzeResult(PostAnalyzeResultBase):
     outcomes: tuple[MuxGEPostAnalysis | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present radius/confusion diagnostics, not a joint assignment matrix."""
-        summaries: list[dict[str, object]] = []
+    def summary(self) -> MuxGEPostSummary:
+        """Return native GE outcomes with fixed identities and owner diagnostics."""
+        summaries: list[MuxGEPostFitSummary | MuxSummaryFailure] = []
         for outcome in self.outcomes:
+            name = None if self.names is None else self.names[outcome.index]
+            element = (
+                None
+                if name is None
+                else ElementIdentity(index=outcome.index, name=name)
+            )
             if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
+                row = MuxSummaryFailure(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    failure=outcome.reason,
+                )
             else:
-                values = {
-                    "ge_radius": outcome.post.confusion.radius,
-                    "confusion": outcome.post.confusion.matrix.tolist(),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+                row = MuxGEPostFitSummary(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    ge_radius=outcome.post.confusion.radius,
+                    confusion=outcome.post.confusion.matrix.tolist(),
+                )
+            summaries.append(row)
+        return MuxGEPostSummary(tones=summaries)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the same owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 class MuxGEAdapter(

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -23,8 +25,12 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
+from zcu_lab.v2._support.measure.analyze_results import fit_quality_models
+from zcu_lab.v2._support.measure.mux_results import (
+    MuxSummaryFailure,
+    MuxSummaryTone,
+    captured_qubits,
+)
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
@@ -37,6 +43,42 @@ from .form import make_form
 MuxLenRabiRunResult: TypeAlias = RunRecord[MuxLenRabiCfg, MuxSweepResult]
 
 
+class MuxLenRabiFitSummary(MuxSummaryTone):
+    """Native fit estimates in experiment units and qualified owner quality."""
+
+    pi_len: float | None = Field(
+        description="Owner pi_len in us; null retains an unavailable estimate."
+    )
+
+    pi_len_err: float | None = Field(
+        description="Owner pi_len_err in us; null retains an unavailable estimate."
+    )
+
+    pi2_len: float | None = Field(
+        description="Owner pi2_len in us; null retains an unavailable estimate."
+    )
+
+    pi2_len_err: float | None = Field(
+        description="Owner pi2_len_err in us; null retains an unavailable estimate."
+    )
+
+    rabi_f: float | None = Field(
+        description="Owner rabi_f in MHz; null retains an unavailable estimate."
+    )
+
+    rabi_f_err: float | None = Field(
+        description="Owner rabi_f_err in MHz; null retains an unavailable estimate."
+    )
+
+    fit_quality: dict[str, FitQuality] | None
+
+
+class MuxLenRabiSummary(BaseModel):
+    """Owner tone rows in analysis order, retaining successes and failures."""
+
+    tones: list[MuxLenRabiFitSummary | MuxSummaryFailure]
+
+
 @dataclass(frozen=True)
 class MuxLenRabiAnalyzeResult(AnalyzeResultBase):
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
@@ -44,27 +86,45 @@ class MuxLenRabiAnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxLenRabiFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present original positions/names, numerical values, quality or failure."""
-        summaries: list[dict[str, object]] = []
+    def summary(self) -> MuxLenRabiSummary:
+        """Return native tone estimates/failures with fixed identities and owner quality."""
+        summaries: list[MuxLenRabiFitSummary | MuxSummaryFailure] = []
         for outcome in self.outcomes:
+            name = None if self.names is None else self.names[outcome.index]
+            element = (
+                None
+                if name is None
+                else ElementIdentity(index=outcome.index, name=name)
+            )
             if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
+                row = MuxSummaryFailure(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    failure=outcome.reason,
+                )
             else:
-                values = {
-                    "pi_len": outcome.pi_len,
-                    "pi_len_err": outcome.pi_len_err,
-                    "pi2_len": outcome.pi2_len,
-                    "pi2_len_err": outcome.pi2_len_err,
-                    "rabi_f": outcome.rabi_f,
-                    "rabi_f_err": outcome.rabi_f_err,
-                    "fit_quality": fit_quality_summary(
+                row = MuxLenRabiFitSummary(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    pi_len=outcome.pi_len,
+                    pi_len_err=outcome.pi_len_err,
+                    pi2_len=outcome.pi2_len,
+                    pi2_len_err=outcome.pi2_len_err,
+                    rabi_f=outcome.rabi_f,
+                    rabi_f_err=outcome.rabi_f_err,
+                    fit_quality=fit_quality_models(
                         {"fit": outcome.quality},
                         summary_path=f"summary.tones[{len(summaries)}].fit_quality",
                     ),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+                )
+            summaries.append(row)
+        return MuxLenRabiSummary(tones=summaries)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the same owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 class MuxLenRabiAdapter(

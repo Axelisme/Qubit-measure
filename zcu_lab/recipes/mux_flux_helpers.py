@@ -4,44 +4,26 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt, TypeAdapter
 from typing_extensions import TypedDict
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeTab
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeTab,
+)
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
 
-from .mux_helpers import MuxInline, MuxLibrary, ToneRangeInputs, mux_overrides
+from .mux_helpers import ToneRangeInputs
 
 
-class MuxFluxInputs(FormModel):
-    """Select captured sources and optional native-unit picker lines by Q name.
+class MuxFluxInputs(RecipeInputs):
+    """Experiment inputs; null retains captured Form values, overrides apply last."""
 
-    Null fields retain Form inputs. Picker maps may omit any participant; those
-    lines use the Run capture. Keys must name final selected participants.
-    Overrides apply last and use original full-list indices, never row order.
-    """
-
-    target: str | None = Field(
-        None, min_length=1, description="Mux Reset alias; null uses global aliases."
-    )
-    reuse_tab_id: str | None = Field(
-        None, min_length=1, description="Idle matching tab to Reset; null opens a tab."
-    )
     participants: list[StrictInt] | None = Field(
         None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
-    )
-    library: list[MuxLibrary] | None = Field(
-        None, description="Ordered captured module selections; null retains sources."
-    )
-    inline: list[MuxInline] | None = Field(
-        None,
-        description="Ordered captured-module copies, ancestors first; null retains sources.",
-    )
-    overrides: list[FieldEdit] | None = Field(
-        None,
-        description="Ordered scalar edits applied last at full original tone positions.",
     )
     flux_unit: Literal["A", "V", "native"] | None = Field(
         None,
@@ -110,24 +92,8 @@ class MuxFluxAnalysisUpdate(TypedDict, closed=True):
     """Initial integer-flux line in native DC units; null uses Run capture."""
 
 
-class MuxFluxPickSummary(BaseModel):
-    """Owner's accepted native DC lines and original Q identity, without defaults."""
-
-    tone: int = Field(description="Original acquired tone index, not participant row.")
-    qubit: str = Field(description="Q name from this Run's full cfg at tone.")
-    flx_half: float | None = Field(
-        description="Picked half-flux native DC value, or null if unavailable."
-    )
-    flx_int: float | None = Field(
-        description="Picked integer-flux native DC value, or null if unavailable."
-    )
-    flx_period: float | None = Field(
-        description="Native DC flux period, or null if unavailable."
-    )
-
-
-class MuxFluxToneReport(FormModel):
-    """One participant's selected lines and confirmed writeback outcome."""
+class MuxFluxToneReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     index: int = Field(description="Owner's original full-list tone index.")
     name: str = Field(description="Owner's captured Q name.")
@@ -136,20 +102,13 @@ class MuxFluxToneReport(FormModel):
         description="Integer-flux value in native DC units."
     )
     flux_period: float | None = Field(description="Period in native DC units.")
-    writeback_applied: bool = Field(
-        description="True only if the owner receipt confirms selected items."
-    )
 
 
-class MuxFluxReport(FormModel):
-    """Ordered completed participants; Save output statuses are separate in runs."""
+class MuxFluxReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     tones: list[MuxFluxToneReport] = Field(
         description="Completed picker outcomes in participant order, retaining original indices."
-    )
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Owner failure reason; null when all participant analyses completed.",
     )
 
 
@@ -205,18 +164,6 @@ def global_flux_edits(flux: ToneRangeInputs | None, n: int | None) -> list[Field
             )
         )
     return edits
-
-
-def mux_flux_final_edits(inputs: MuxFluxInputs) -> list[FieldEdit]:
-    """Append participant/unit retention edits, then caller's ordered overrides."""
-    return [
-        FieldEdit(
-            path=("participants",),
-            value=None if inputs.participants is None else list(inputs.participants),
-        ),
-        FieldEdit(path=("flux_unit",), value=inputs.flux_unit),
-        *mux_overrides(inputs.overrides),
-    ]
 
 
 def mux_flux_analysis_updates(

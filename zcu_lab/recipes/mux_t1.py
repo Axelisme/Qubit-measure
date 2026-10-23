@@ -1,52 +1,38 @@
 """Measure simultaneous T1 decays and ask before writing calibrations."""
 
-from pydantic import BaseModel, Field, StrictInt
-from zcu_tools.gui.form import FormModel
+from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
+    RecipeInputs,
+    RecipeReport,
     RecipeSession,
     recipe,
+    report_number,
 )
 
-from .helpers import report_number
+from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
+from zcu_lab.v2.mux.t1.gui import MuxT1Summary
+
 from .mux_helpers import (
-    MuxInline,
-    MuxLibrary,
-    MuxSummaryFailure,
-    MuxSummaryTone,
     MuxToneReport,
-    mux_overrides,
 )
 
 
-class MuxT1Inputs(FormModel):
-    """Choose the mux group and ordered Form edits without inferring calibrations.
+class MuxT1Inputs(RecipeInputs):
+    """Experiment inputs; null retains captured Form values, overrides apply last."""
 
-    Optional fields default to null. Null keeps Form inputs, uses global mux
-    aliases and opens a new tab. The edit lists run in library, inline,
-    overrides order; participants precedes overrides.
-    """
-
-    target: str | None = Field(
-        default=None, description="Mux Reset alias; null uses global aliases."
-    )
-    reuse_tab_id: str | None = Field(
-        default=None, description="Idle matching tab to reset; null opens a tab."
-    )
     participants: list[StrictInt] | None = Field(
         default=None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
-    library: list[MuxLibrary] | None = Field(
-        default=None, description="Ordered module selections; null keeps the GUI value."
+
+    dual_exp: bool | None = Field(
+        None,
+        description="Fit two decay components instead of one. Null retains analysis settings.",
     )
-    inline: list[MuxInline] | None = Field(
-        default=None,
-        description="Ordered captured-module copies, ancestors first; null keeps the GUI value.",
-    )
-    overrides: list[FieldEdit] | None = Field(
-        default=None,
-        description="Ordered scalar edits at full tone positions; null keeps the GUI value.",
+    skip: int | None = Field(
+        None,
+        description="Points to skip before fitting the decay. Null retains analysis settings.",
     )
 
 
@@ -69,97 +55,57 @@ class MuxT1ToneReport(MuxToneReport):
     )
 
 
-class MuxT1Report(FormModel):
-    """Report per-tone fits in native analysis order and the writeback decision.
-
-    tones retains failed rows with their reasons. writeback_applied is true only
-    after acceptance has returned; skipping the question writes nothing.
-    """
+class MuxT1Report(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     tones: list[MuxT1ToneReport] = Field(
         description="Native ordered fit estimates or failures with original tone identities."
     )
-    writeback_applied: bool = Field(
-        default=False, description="Whether accepted calibration items were applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class MuxT1FitSummary(MuxSummaryTone):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    t1: float | None = Field(
-        description="Owner t1 in us; null retains an unavailable estimate."
-    )
-
-    t1_err: float | None = Field(
-        description="Owner t1_err in us; null retains an unavailable estimate."
-    )
-
-    t1b: float | None = Field(
-        description="Owner t1b in us; null retains an unavailable estimate."
-    )
-
-    t1b_err: float | None = Field(
-        description="Owner t1b_err in us; null retains an unavailable estimate."
-    )
-
-
-class MuxT1Summary(BaseModel):
-    """Owner tone rows in analysis order, retaining successes and failures."""
-
-    tones: list[MuxT1FitSummary | MuxSummaryFailure]
 
 
 @recipe(
     "mux_t1", description="Run mux T1, save raw and analysis, and ask before Apply."
 )
 async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
-    """Excite selected qubits, scan a shared wait, and report their T1 decays.
+    """Measure simultaneous T1 decays and ask before writing calibrations.
 
-    target binds this Reset's mux alias; reuse_tab_id resets an idle matching
-    tab. library selects modules, inline copies captures outer-first, then
-    participants and overrides edit the Form. Integer paths use full original
-    tone positions, not participant rows. Null keeps GUI input. Frequencies use
-    MHz, times us and gains normalized units; sweep counts use n.
-    The GUI runs pi pulses, a shared delay and mux readout. No missing pulse
-    calibration or delay range is supplied by this recipe.
-    Analyze Primary, then ask before applying calibration items.
-    Save raw data and completed artifacts in the Run finalizer.
-    Return ordered estimates and the writeback decision after completion.
-    Expected top-level analysis failures return a reason without writeback.
-    Invalid inputs and other operation failures propagate;
-    completed edits and saves are not rolled back after a later failure.
+    Select library then inline sources; null keeps captured Form values.
+    Overrides run last. Only participant drive/sweep settings are required;
+    readout identities remain required for every tone.
+    Shared sweep n is set through overrides; indices are original tone positions.
+    Analyze with dual_exp, skip, then ask before writeback.
+    Save raw and completed artifacts after Run, including expected fit failures.
+    Operation errors propagate without rolling back earlier edits or saves.
     """
-    # Capture this group's defaults without changing global aliases.
-    tab = session.open_tab(
-        "mux/t1",
-        aliases=None if inputs.target is None else {"mux": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("mux/t1", inputs, target_alias="mux")
 
-    # Select sources before copying captures and editing original tone positions.
-    for selection in inputs.library or ():
-        tab.select(selection.path, ref=selection.key)
-    for copy in inputs.inline or ():
-        tab.select(copy.path, inline=True)
-    edits = [
-        FieldEdit(
-            path=("participants",),
-            value=None if inputs.participants is None else list(inputs.participants),
-        )
-    ]
-    edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits, require_valid=True)
+    tab.select_sources(inputs)
+    tab.apply_inputs(
+        inputs,
+        {},
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            )
+        ],
+    )
 
     # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()
     try:
-        fit = await tab.analyze("primary", result=MuxT1Summary)
+        fit = await tab.analyze(
+            "primary",
+            updates={
+                key: value
+                for key, value in {
+                    "dual_exp": inputs.dual_exp,
+                    "skip": inputs.skip,
+                }.items()
+                if value is not None
+            },
+            result=MuxT1Summary,
+        )
         if fit.result is None:
             return MuxT1Report(
                 tones=[],
