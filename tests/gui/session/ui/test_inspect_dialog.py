@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import asdict, dataclass, field
@@ -191,8 +192,13 @@ def _button(parent: QWidget, text: str) -> QPushButton:
 
 def _select(dialog: InspectDialog, name: str) -> None:
     tree = _child(dialog, QTreeWidget, "inspect.library")
-    (item,) = tree.findItems(
-        name, Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchRecursive
+    (item,) = (
+        row
+        for row in tree.findItems(
+            "*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive
+        )
+        if (data := row.data(0, Qt.ItemDataRole.UserRole)) is not None
+        and data[1] == name
     )
     tree.setCurrentItem(item)
 
@@ -207,6 +213,71 @@ def _group_fold(parent: QWidget, name: str) -> QLabel:
 
 def _library(session: _Session):
     return session.entry.module_library("point").snapshot()
+
+
+def test_library_filter_and_hierarchy_keep_leaf_edit_actions(
+    session: _Session, tmp_path: Path
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    dialog.resize(1100, 760)
+    ui = ComponentDriver(dialog)
+    evidence = Path(os.environ.get("INSPECT_FILTER_EVIDENCE", str(tmp_path)))
+
+    def rows():
+        return {
+            row.path: row
+            for row in ui.visible().tree_rows
+            if row.tree_name == "inspect.library"
+        }
+
+    ui.screenshot(evidence / "modules-default.png")
+    leaf = ("modules", "Q1", "pulses", "pi")
+    assert leaf in rows()
+    assert ("waveforms", "Q1", "waveforms", "base") in rows()
+    ui.press_key(Qt.Key.Key_Home, object_name="inspect.library")
+    ui.press_key(Qt.Key.Key_Left, object_name="inspect.library")
+    assert not rows()[("modules",)].expanded
+    assert ui.observe(object_name="inspect.library.filter").visible
+    ui.enter_text(
+        object_name="inspect.library.filter", value="q1.PULSES.pi", commit=False
+    )
+    ui.screenshot(evidence / "modules-filtered.png")
+    assert set(rows()) == {leaf[:depth] for depth in range(1, 5)}
+    assert all(rows()[leaf[:depth]].expanded for depth in range(1, 4))
+    ui.enter_text(object_name="inspect.library.filter", value="pi", commit=False)
+    assert leaf in rows()
+    ui.enter_text(object_name="inspect.library.filter", value="", commit=False)
+    assert not rows()[("modules",)].expanded
+    ui.enter_text(object_name="inspect.library.filter", value="PI", commit=False)
+    ui.expand_tree(leaf, object_name="inspect.library")
+    assert ui.observe(object_name="inspect.entry.name").text == PULSE
+    ui.enter_text(
+        object_name="inspect.entry.name", value="Q1.pulses.changed", commit=False
+    )
+    ui.click(object_name="inspect.entry.revert")
+    assert ui.observe(object_name="inspect.entry.name").text == PULSE
+    ui.press_key(Qt.Key.Key_Home, object_name="inspect.library")
+    ui.press_key(Qt.Key.Key_Down, object_name="inspect.library")
+    assert not ui.observe(object_name="inspect.entry.name").enabled
+    ui.expand_tree(leaf, object_name="inspect.library")
+    assert ui.observe(object_name="inspect.entry.name").text == PULSE
+    ui.enter_text(
+        object_name="inspect.entry.name", value="Q1.pulses.pi_v2", commit=False
+    )
+    ui.click(object_name="inspect.entry.apply")
+    assert ui.observe(object_name="inspect.entry.name").text == "Q1.pulses.pi_v2"
+    assert ("modules", "Q1", "pulses", "pi_v2") in rows()
+    assert ui.observe(object_name="inspect.entry.status").text == "Saved"
+    presenter.queue_confirm(True)
+    ui.click("Delete")
+    ui.enter_text(object_name="inspect.library.filter", value="", commit=False)
+    assert ("modules",) not in rows()
+    waveform = ("waveforms", "Q1", "waveforms", "base")
+    ui.expand_tree(waveform, object_name="inspect.library")
+    assert ui.observe(object_name="inspect.entry.name").text == WAVEFORM
+    ui.enter_text(object_name="inspect.library.filter", value="no-match", commit=False)
+    assert not rows()
 
 
 def test_entry_edit_is_unsaved_until_revert_or_apply(
@@ -453,7 +524,7 @@ def test_unsaved_save_rejects_local_parse_errors_and_keeps_the_draft(
     assert _child(dialog, QLineEdit, "form.input.freq").text() == "234"
     assert _status(dialog) == "Unsaved"
     selected = _child(dialog, QTreeWidget, "inspect.library").currentItem()
-    assert selected is not None and selected.text(0) == PULSE
+    assert selected is not None and selected.text(0) == "pi"
 
     commit_text(gain, "0.6")
     presenter.queue_save_discard_cancel("save")
