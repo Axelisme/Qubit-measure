@@ -21,6 +21,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     SavedPoint,
 )
+from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -66,6 +67,8 @@ class AliasPanel(QWidget):
         self._base: tuple[AliasRow, ...] = ()
         self._target: SavedPoint | None = None
         layout = QVBoxLayout(self)
+        self._sync = PointFileBanner(control, "aliases", self.revert, parent=self)
+        layout.addWidget(self._sync)
         hint = QLabel(
             "Enter a component name, leave a value empty, or use a $ link "
             "to an earlier row (for example $qubit.resonator)."
@@ -149,11 +152,13 @@ class AliasPanel(QWidget):
             return False
         rows = self._draft_rows()
         try:
+            self._sync.check(self._revision)
             self._control.apply_alias_rows(rows)
         except (FailedPreconditionError, InvalidInputError, OSError) as error:
             self._error.setText(str(error))
             return False
         self._base = rows
+        self._revision = self._sync.capture()
         self._error.clear()
         self._refresh_resolutions()
         return True
@@ -167,6 +172,7 @@ class AliasPanel(QWidget):
         """
         self._target = self._current_target()
         self._base = self._control.get_alias_rows()
+        self._revision = self._sync.capture()
         self._show_rows(self._base)
         self._refresh_resolutions()
 
@@ -180,6 +186,7 @@ class AliasPanel(QWidget):
         """
         if not self.is_unsaved():
             self.revert()
+        self._sync.refresh()
 
     def _current_target(self) -> SavedPoint | None:
         info = self._control.get_entry_info()
@@ -194,6 +201,7 @@ class AliasPanel(QWidget):
         Read-only disables Add, Remove, Revert and Apply and stops cell editing.
         A draft made before locking stays shown.
         """
+        self._sync.set_read_only(read_only=read_only)
         for button in (
             self._add_btn,
             self._remove_btn,

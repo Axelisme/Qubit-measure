@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import yaml
@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.context_types import PointFileRevision
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.component_editing import (
     edit_choices,
@@ -40,6 +41,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_error_foreground,
     show_error,
 )
+from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import (
@@ -84,6 +86,8 @@ class _EditTarget:
     completions: tuple[str, ...]
     initial: str
     write_depth: int
+    revision: PointFileRevision | None = None
+    draft: str | None = None
 
 
 class ComponentTreeWidget(QWidget):
@@ -108,7 +112,11 @@ class ComponentTreeWidget(QWidget):
     through a drop-down (references list the document's components matching
     the role); other text fields complete component names. All writes use the owner; errors stay visible in
     red below the tree as "<field>: <message>", with the full owner text as
-    the tooltip, without changing the rejected document. A setup/current
+    the tooltip, without changing the rejected document. A point edit captures
+    its file revision when the editor opens. A rejected value remains visible
+    and can be edited again; Keep never advances its baseline. Reload discards
+    retained text only after the owner validates and installs the source.
+    A setup/current
     selector controls the editing destination; "Add component…" opens an
     AddComponentDialog for that destination.
     """
@@ -129,7 +137,12 @@ class ComponentTreeWidget(QWidget):
         self._control = control
         self._read_only = False
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
+        self._drafts: dict[_RowKey, str] = {}
         layout = QVBoxLayout(self)
+        self._sync = PointFileBanner(
+            control, "parameters", self._reload_file, parent=self
+        )
+        layout.addWidget(self._sync)
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))
         self._destination = QComboBox()
@@ -165,19 +178,29 @@ class ComponentTreeWidget(QWidget):
     def set_read_only(self, *, read_only: bool) -> None:
         """Block Value editing and Add while preserving tree/destination browsing.
 
-        Re-render the cached document to close an active Value editor. Late
+        Lock any active Value editor without discarding its text. Late
         delegate submissions cannot write while read_only is True.
         """
         self._read_only = read_only
+        self._sync.set_read_only(read_only=read_only)
+        for editor in self._tree.findChildren(QLineEdit):
+            editor.setReadOnly(read_only)
+        for combo in self._tree.findChildren(QComboBox):
+            combo.setEnabled(not read_only)
+        self._add_btn.setEnabled(not read_only)
         self.refresh()
 
     def refresh(self) -> None:
         """Render the cached selected document; never implicitly refresh files.
 
-        Expanded rows and the current row survive a refresh. The error text is
-        cleared. FailedPreconditionError (no entry or no parameter context)
+        An active or rejected draft keeps its tree and original baseline.
+        Otherwise expanded rows and the current row survive a refresh and the
+        error text is cleared. FailedPreconditionError (no entry or no parameter context)
         empties the tree, shows the owner's message as a hint and disables Add.
         """
+        self.refresh_file_status()
+        if self._drafts:
+            return
         current = self._tree.currentItem()
         selected = _row_key(current) if current is not None else None
         self._tree.clear()
@@ -201,6 +224,14 @@ class ComponentTreeWidget(QWidget):
         self._filter.refresh()
         if selected in items:
             self._tree.setCurrentItem(items[selected])
+
+    def refresh_file_status(self) -> None:
+        """Update source notices without closing an active or rejected draft."""
+        self._sync.refresh()
+
+    def _reload_file(self) -> None:
+        self._drafts.clear()
+        self.refresh()
 
     def open_add_dialog(self) -> AddComponentDialog:
         """Open the Add component dialog for the current destination and return it.
@@ -284,9 +315,9 @@ class ComponentTreeWidget(QWidget):
         tree.setHeaderLabels(["Field", "Value", "Unit", "Metadata"])
         # Editing opens only on Value cells of editable rows, never on names.
         tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        tree.setItemDelegateForColumn(
-            _VALUE, _ValueDelegate(self._edit_target, self._submit_edit, tree)
-        )
+        delegate = _ValueDelegate(self._edit_target, self._submit_edit, tree)
+        delegate.closeEditor.connect(self._editor_closed)
+        tree.setItemDelegateForColumn(_VALUE, delegate)
         tree.itemDoubleClicked.connect(self._on_double_click)
         shortcut = QShortcut(QKeySequence(Qt.Key.Key_F2), tree)
         shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
@@ -479,23 +510,50 @@ class ComponentTreeWidget(QWidget):
         item = self._tree.itemFromIndex(index)
         if item is None:
             raise LookupError("Edited index has no tree row")
-        return self._edit_targets[_row_key(item)]
+        key = _row_key(item)
+        target = self._edit_targets[key]
+        if key not in self._drafts:
+            target = replace(
+                target, revision=None if self._is_setup() else self._sync.capture()
+            )
+            self._edit_targets[key] = target
+            self._drafts[key] = target.initial
+        return replace(target, draft=self._drafts[key])
+
+    def _editor_closed(self, *_args: object) -> None:
+        # Esc or an unchanged commit leaves no unsaved value behind.
+        for key in tuple(self._drafts):
+            if self._drafts[key] == self._edit_targets[key].initial:
+                self._drafts.pop(key)
 
     def _submit_edit(self, target: _EditTarget, raw: str) -> None:
         if self._read_only:
             return
+        key = (target.component, *target.segments)
+        self._drafts[key] = raw
+        item = self._tree.currentItem()
+        if item is not None and _row_key(item) == key:
+            item.setText(_VALUE, raw)
         if raw == target.initial:
-            return  # Unchanged text, including an unset row left empty, writes nothing.
+            self._drafts.pop(key, None)
+            return  # Unchanged text writes nothing.
+        try:
+            self._sync.check(target.revision)
+        except FailedPreconditionError as exc:
+            show_error(self._error, exc)
+            return
         try:
             value = parse_field_input(target.value_kind, raw)
         except ValueError as exc:
             show_error(self._error, exc, field=".".join(target.segments))
             return
-        for key in reversed(target.segments[target.write_depth :]):
-            nested: YamlMap = {key: value}
+        for segment in reversed(target.segments[target.write_depth :]):
+            nested: YamlMap = {segment: value}
             value = nested
         path = ".".join((target.component, *target.segments[: target.write_depth]))
-        self.edit_parameter(path, value, setup=self._is_setup())
+        if self.edit_parameter(path, value, setup=self._is_setup()):
+            self._drafts.pop(key, None)
+            self.refresh()
 
 
 class _ValueDelegate(QStyledItemDelegate):
@@ -503,8 +561,8 @@ class _ValueDelegate(QStyledItemDelegate):
 
     Qt's delegate commits on Enter or focus loss and closes without a commit
     on Esc. target(index) returns the edited row's _EditTarget; submit(target,
-    raw) receives the editor text. Only refresh rewrites the tree items, so a
-    rejected edit keeps showing the document value.
+    raw) receives the editor text. The host retains rejected text in the tree
+    and supplies it again when the user reopens that draft.
     """
 
     def __init__(
@@ -524,7 +582,7 @@ class _ValueDelegate(QStyledItemDelegate):
         target = self._target(index)
         if not target.choices:
             editor = QLineEdit(parent)
-            editor.setText(target.initial)
+            editor.setText(target.initial if target.draft is None else target.draft)
             if target.completions:
                 editor.setCompleter(QCompleter(list(target.completions), editor))
             return editor
@@ -534,7 +592,7 @@ class _ValueDelegate(QStyledItemDelegate):
         elif target.initial not in target.choices:
             combo.addItem(target.initial)  # Keep a dangling reference selectable.
         combo.addItems(list(target.choices))
-        combo.setCurrentText(target.initial)
+        combo.setCurrentText(target.initial if target.draft is None else target.draft)
         combo.activated.connect(lambda _row: self._finish(combo))
         return combo
 
