@@ -298,13 +298,21 @@ readout:
 | `ro_ch` | ADC readout index | 無單位，整數 ≥ 0 | 必填 |
 | `gain` | 場到 ADC sample 的轉換 | ADC sample units / sqrt(photons/ns)，有限 signed 數，可為 0 | 必填，不縮放另加的 noise |
 | `time_of_flight_ns` | 總讀取線延遲，同時決定波形抵達時間與 electronic-delay phase | ns，有限數，≥ 0 | 省略為 0；不接受 `null`、負數或非有限值 |
+| `background` | 固定的頻率相依複數 transmission 背景 | 下列五欄的 object | 可省略，省略或 `{}` 為平背景；不接受 `null` |
+| `background.ripple_depth` | 駐波反射振幅 | 無單位，有限數，0 ≤ depth < 1 | 省略為 0 |
+| `background.ripple_period_mhz` | 駐波頻率週期 | MHz，有限正數 | 省略為 1000 |
+| `background.ripple_phase_deg` | 駐波相位 | degree，有限 signed 數 | 省略為 0 |
+| `background.slope_db_per_ghz` | 振幅背景斜率 | dB/GHz，有限 signed 數 | 省略為 0 |
+| `background.pivot_ghz` | 斜率因子為 1 的絕對頻率 | GHz，有限 signed 數 | 省略為 0 |
 | `phase_deg` | 額外的 receiver phase | degree，有限 signed 數 | 省略為 0；不接受 `null` |
 | `offset_adc` | 每個 sample 的 I、Q offset | ADC sample units，有限二元素 `[I, Q]` | 省略為 `[0, 0]`；不接受 `null` |
 | `noise_psd_adc2_ns` | Two-sided white receiver noise spectral density | ADC²*ns，有限、對稱、positive-semidefinite 的 2×2 matrix，順序為 I、Q | 必填；零矩陣與 singular matrix 合法，不能省略代表無 noise |
 
 `time_of_flight_ns` 把物理輸出延後 τ，包含 lookback 的前導無訊號、ringup、ringdown 與 shaped envelope。它同時產生 `exp(-i*2*pi*f*τ)`，f 使用絕對 carrier frequency。τ = 400 ns 時，額外相位斜率約為 -2.513 rad/MHz。沒有獨立 edelay 旋鈕，也不需要為了此延遲修改 pulse 或 trigger metadata。
 
-ADC 先延後物理場，再解調並取共軛，轉成微波分析的 I+iQ。接著套 gain 與 `phase_deg`，加入 offset，最後加入 noise。前導無訊號區仍有 offset 與 noise。共軛不翻轉 offset 或 noise 的 I/Q covariance，receiver phase 也不旋轉 noise。
+ADC 先延後物理場，再解調並取共軛，轉成微波分析的 I+iQ。每個 incident carrier 的線路響應先乘 `background` 的 B(f)，f 為該 carrier 的絕對頻率，再套 gain 與 `phase_deg`。各 carrier 相加後只加入一次 offset，最後加入 noise。前導無訊號區仍有 offset 與 noise。共軛不翻轉 offset 或 noise 的 I/Q covariance，receiver phase 也不旋轉 noise。
+
+`background` 的複數漣漪同時改變振幅與相位，斜率項在 `pivot_ghz` 為 1。它不影響腔內場、Stark shift 或 noise PSD。公式見 [ADC 契約](../../../lib/zcu_tools/simulate/adc/README.md)。背景固定，不會隨 round 漂移。
 
 矩陣的對角項是 I、Q 的 PSD，非對角項是相關 PSD，兩個非對角值必須相等。非對角項可為負，但整體仍須 positive-semidefinite。這個矩陣不是每個 sample 的 covariance，也不是三迴路 map。
 

@@ -73,6 +73,38 @@ def test_numeric_model_receiver_and_policy_are_exact_keys(change):
     assert result.sums.tobytes() == expected.sums.tobytes()
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ripple_depth", 0.2),
+        ("ripple_period_ghz", 0.04),
+        ("ripple_phase_rad", 0.3),
+        ("slope_db_per_ghz", -3.0),
+        ("pivot_ghz", 7.0),
+    ],
+)
+def test_background_parameters_are_exact_receiver_cache_keys(field, value):
+    holder = adc.ReadoutCache()
+    inputs = batch()
+    holder.responses(inputs)
+    changed = replace(
+        inputs,
+        model=replace(
+            inputs.model, receiver=replace(inputs.model.receiver, **{field: value})
+        ),
+    )
+    actual = holder.responses(changed)
+    assert holder.builds == 2
+    expected = adc.ConditionalReadout(changed.model).responses(changed)
+    np.testing.assert_array_equal(actual.sums, expected.sums)
+    cavity = adc.CavityAverageCache()
+    before = cavity.average(inputs.model, inputs.pulses[0], 3.0, 15.0)
+    after = cavity.average(changed.model, changed.pulses[0], 3.0, 15.0)
+    assert cavity.misses == 2
+    # Receiver backgrounds cannot alter photon occupations or Stark inputs.
+    np.testing.assert_array_equal(after.field_products, before.field_products)
+
+
 def test_absolute_timing_and_trace_requests_keep_their_original_numeric_paths():
     holder = cache()
     for inputs in (

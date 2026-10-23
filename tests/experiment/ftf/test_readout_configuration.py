@@ -4,9 +4,11 @@ from dataclasses import replace
 
 import pytest
 from zcu_tools.experiment import ftf as ftf_module
+from zcu_tools.experiment.ftf.preparation import preparation_key
 from zcu_tools.experiment.ftf.readout import readout_configuration
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.experiment._ftf_templates import request
 from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
@@ -49,6 +51,49 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
         ),
     )
     assert config.pulse == readout_configuration(parse_ftf(ftf_document())).pulse
+
+
+def test_readout_configuration_preserves_background_for_pulse_and_mux() -> None:
+    document = dual_readout_document()
+    background = {
+        "ripple_depth": 0.1,
+        "ripple_period_mhz": 30.0,
+        "ripple_phase_deg": 45.0,
+        "slope_db_per_ghz": -3.0,
+        "pivot_ghz": 7.0,
+    }
+    readout = document["readout"]
+    assert isinstance(readout, dict)
+    readout["adc"]["background"] = background
+    for receiver in readout["mux"]["adc"]:
+        receiver["background"] = background
+    settings = parse_ftf(document)
+    config = readout_configuration(settings)
+    assert config.mux is not None
+    for receiver in (config.pulse, *config.mux.receivers):
+        for field, expected in background.items():
+            assert getattr(receiver, field) == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ripple_depth", 0.2),
+        ("ripple_period_mhz", 30.0),
+        ("ripple_phase_deg", 45.0),
+        ("slope_db_per_ghz", -3.0),
+        ("pivot_ghz", 7.0),
+    ],
+)
+def test_preparation_key_accepts_receiver_background_and_distinguishes_changes(
+    field, value
+):
+    config = readout_configuration(parse_ftf(ftf_document()))
+    acquire = request()
+    before = preparation_key(acquire, config)
+    changed = replace(config, pulse=replace(config.pulse, **{field: value}))
+    assert preparation_key(acquire, changed) != before
+    assert preparation_key(acquire, config) == before
 
 
 def mux_configuration(channels: tuple[int, ...] = (4, 1)):

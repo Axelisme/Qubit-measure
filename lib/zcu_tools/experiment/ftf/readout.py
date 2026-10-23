@@ -6,6 +6,7 @@ import numpy as np
 
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.resources.ftf.schema import Receiver
+from zcu_tools.resources.simulation_schema import ReceiverBackground
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,13 @@ class FTFReceiverConfig:
     gain: signed field-to-ADC amplitude gain; phase_deg: additive IQ phase.
     noise_psd_adc2_ns: symmetric positive-semidefinite two-sided noise PSD.
     offset_adc: per-sample I/Q offset. time_of_flight_ns: nonnegative line delay.
+    ripple_depth: finite reflected amplitude in [0,1), default zero.
+    ripple_period_mhz: finite positive standing-wave period in MHz, default 1000.
+    ripple_phase_deg: finite standing-wave phase in degrees, default zero.
+    slope_db_per_ghz: finite amplitude slope in dB/GHz, default zero.
+    pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
+        These five scalars describe fixed transmission before receiver gain/phase;
+        zero depth and slope give unity without changing physical cavities.
     All numeric values must be finite. Invalid calibration raises ValueError.
     """
 
@@ -26,8 +34,20 @@ class FTFReceiverConfig:
     phase_deg: float = 0.0
     offset_adc: tuple[float, float] = (0.0, 0.0)
     time_of_flight_ns: float = 0.0
+    ripple_depth: float = 0.0
+    ripple_period_mhz: float = 1000.0
+    ripple_phase_deg: float = 0.0
+    slope_db_per_ghz: float = 0.0
+    pivot_ghz: float = 0.0
 
     def __post_init__(self) -> None:
+        ReceiverBackground(
+            ripple_depth=self.ripple_depth,
+            ripple_period_mhz=self.ripple_period_mhz,
+            ripple_phase_deg=self.ripple_phase_deg,
+            slope_db_per_ghz=self.slope_db_per_ghz,
+            pivot_ghz=self.pivot_ghz,
+        )
         if type(self.ro_ch) is not int or self.ro_ch < 0:
             raise ValueError("receiver ro_ch must be a nonnegative integer")
         if not np.isfinite([self.gain, self.phase_deg, self.time_of_flight_ns]).all():
@@ -122,6 +142,11 @@ def _receiver_configuration(adc: Receiver) -> FTFReceiverConfig:
         adc.phase_deg,
         adc.offset_adc,
         adc.time_of_flight_ns,
+        ripple_depth=adc.background.ripple_depth,
+        ripple_period_mhz=adc.background.ripple_period_mhz,
+        ripple_phase_deg=adc.background.ripple_phase_deg,
+        slope_db_per_ghz=adc.background.slope_db_per_ghz,
+        pivot_ghz=adc.background.pivot_ghz,
     )
 
 

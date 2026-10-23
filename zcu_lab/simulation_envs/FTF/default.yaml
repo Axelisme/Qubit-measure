@@ -121,6 +121,12 @@ readout:
     gain: 100.0 # ADC sample units / sqrt(photons/ns)
     phase_deg: 0.0
     time_of_flight_ns: 400.0 # Total line delay, including electronic-delay phase.
+    background:
+      ripple_depth: 0.1
+      ripple_period_mhz: 30.0
+      ripple_phase_deg: 0.0
+      slope_db_per_ghz: -3.0
+      pivot_ghz: 7.0
     offset_adc: [0.0, 0.0] # I, Q
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
     noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
@@ -132,12 +138,24 @@ readout:
         gain: 100.0
         phase_deg: 0.0
         time_of_flight_ns: 400.0
+        background:
+          ripple_depth: 0.1
+          ripple_period_mhz: 30.0
+          ripple_phase_deg: 0.0
+          slope_db_per_ghz: -3.0
+          pivot_ghz: 7.0
         offset_adc: [0.0, 0.0]
         noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
       - ro_ch: 2
         gain: 100.0
         phase_deg: 0.0
         time_of_flight_ns: 400.0
+        background:
+          ripple_depth: 0.1
+          ripple_period_mhz: 30.0
+          ripple_phase_deg: 0.0
+          slope_db_per_ghz: -3.0
+          pivot_ghz: 7.0
         offset_adc: [0.0, 0.0]
         noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
 
