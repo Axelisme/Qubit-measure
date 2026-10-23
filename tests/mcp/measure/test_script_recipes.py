@@ -6,7 +6,8 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
+from zcu_tools.gui.form_adapter.sweep import LinRange
+from zcu_tools.mcp.measure.recipe_api import Expr, FieldEdit, RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
@@ -524,6 +525,49 @@ def test_save_transport_failure_does_not_claim_an_unreceived_report(
         assert outcome is not None
         saved = outcome.runs[0].saves
         assert saved == ()
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("method", ["set", "apply"])
+@pytest.mark.parametrize("value_kind", ["expression", "range"])
+def test_form_writes_roundtrip_named_values_through_the_owner(
+    tmp_path: Path, method: str, value_kind: str
+) -> None:
+    from ._recipe_support import LookbackGui
+
+    path = ("rounds",) if value_kind == "expression" else ("sweep",)
+    value = (
+        Expr(text="2 + 3")
+        if value_kind == "expression"
+        else LinRange(start=10.0, stop=20.0, n=7)
+    )
+    expected = (
+        5
+        if value_kind == "expression"
+        else {"kind": "linrange", "start": 10.0, "stop": 20.0, "n": 7}
+    )
+
+    @recipe("synthetic", "Roundtrip named Form values")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("lookback")
+        if method == "set":
+            tab.set(path, value)
+        else:
+            tab.apply([FieldEdit(path=path, value=value)])
+        observed = tab.read(path)
+        assert observed.value == expected
+        assert observed.errors == ()
+        return Report(count=inputs.count)
+
+    gui = LookbackGui()
+    client = make_client(tmp_path, gui, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == "completed", snapshot.error
+        assert gui.owner.read_recipe_field(path).value == expected
     finally:
         client.context.session.close()
 
