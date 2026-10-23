@@ -166,6 +166,12 @@ does not drain services or disconnect hardware.
 Qt workflow panes display these owners and forward commands. A busy workflow's
 local Stop remains available under Remote control. It reclaims locked Local before
 requesting Stop through the same facet; other mutations still require the holder.
+Tunables Discard restores the latest accepted input and clears local invalid text.
+Before Start, it restores the captured form base. It is enabled only for a changed
+draft while editing is allowed. Running, pausing and paused runs allow tunables
+edits and Apply; stopping locks edits, Apply and Discard. Entering paused selects
+Tunables and shows 「Resume 會重做未提交的點；可先 Apply 新的 tunables」.
+Resume or Stop hides the hint. A new Ask still selects its question page.
 Measure remote calls the same facet without a pane, toggle or selected-tab
 dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
