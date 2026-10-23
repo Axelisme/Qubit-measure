@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -44,6 +45,24 @@ class T2RamseyAnalyzeParams:
     fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = True
 
 
+class T2RamseySummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    t2r: float | None = Field(
+        description="Owner t2r in us; null retains an unavailable estimate."
+    )
+
+    t2r_err: float | None = Field(
+        description="Owner t2r_err in us; null retains an unavailable estimate."
+    )
+
+    detune: float | None = Field(
+        description="Owner detune in MHz; null retains an unavailable estimate."
+    )
+
+    fit_fringe: bool = Field(description="Owner fit_fringe.")
+
+
 @dataclass
 class T2RamseyAnalyzeResult(AnalyzeResultBase):
     t2r: float
@@ -53,6 +72,18 @@ class T2RamseyAnalyzeResult(AnalyzeResultBase):
     detune: float
     fit_fringe: bool
     fit_quality: dict[str, dict[str, object]] | None = None
+
+    def summary(self) -> T2RamseySummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return T2RamseySummary(
+            t2r=self.t2r,
+            t2r_err=self.t2r_err,
+            detune=self.detune,
+            fit_fringe=self.fit_fringe,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class T2RamseyAdapter(

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -76,6 +77,30 @@ class RangeFindParams:
         return options
 
 
+class ResonatorDipSummary(BaseModel):
+    """One frequency-ordered dip; null scalars retain unavailable estimates."""
+
+    name: str = Field(description="Captured resonator name, not a hardware channel.")
+    freq: float | None = Field(description="Absolute dip frequency in MHz.")
+    depth: float | None = Field(
+        description="Background-relative magnitude depth in a.u."
+    )
+
+
+class RangeFindSummary(BaseModel):
+    """Dip estimates and captured identity/writeback limitations."""
+
+    resonators: list[ResonatorDipSummary] = Field(
+        description="Dips in ascending frequency order."
+    )
+    writeback_diagnostic: str | None = Field(
+        description="Reason some proposals were omitted; null when none were omitted."
+    )
+    identity_diagnostic: str | None = Field(
+        description="Pairing uncertainty; null is not proof of identity."
+    )
+
+
 @dataclass
 class RangeFindAnalysis(AnalyzeResultBase):
     """Frequency-ordered dips and captured writeback eligibility.
@@ -93,16 +118,19 @@ class RangeFindAnalysis(AnalyzeResultBase):
     diagnostic: str | None
     identity_diagnostic: str | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Show dip values, omitted-proposal reasons and pairing uncertainty."""
-        return {
-            "resonators": [
-                {"name": dip.name, "freq": dip.freq, "depth": dip.depth}
+    def summary(self) -> RangeFindSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return RangeFindSummary(
+            resonators=[
+                ResonatorDipSummary(name=dip.name, freq=dip.freq, depth=dip.depth)
                 for dip in self.dips
             ],
-            "writeback_diagnostic": self.diagnostic,
-            "identity_diagnostic": self.identity_diagnostic,
-        }
+            writeback_diagnostic=self.diagnostic,
+            identity_diagnostic=self.identity_diagnostic,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return self.summary().model_dump()
 
 
 class RangeFindAdapter(

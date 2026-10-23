@@ -5,35 +5,33 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
 
+from zcu_lab.v2.twotone.time_domain.t1.gui import T1Summary
+
 from .helpers import (
     FrequencyCalibration,
-    apply_frequency,
     choose_frequency,
-    report_number,
     require_pi,
     select_or_disable,
 )
 
 
-class T1Inputs(FormModel):
+class T1Inputs(RecipeInputs):
     """Inputs for t1; all units and null policies are declared per field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -59,8 +57,17 @@ class T1Inputs(FormModel):
         None, description="Averaging round count; null keeps the GUI value."
     )
 
+    dual_exp: bool | None = Field(
+        None,
+        description="Dual exponential; null keeps the GUI analysis value. Analysis only.",
+    )
+    skip: int | None = Field(
+        None,
+        description="Skip leading points; null keeps the GUI analysis value. Analysis only.",
+    )
 
-class T1Report(FormModel):
+
+class T1Report(RecipeReport):
     """T1 results and failure reason; cancellation returns no report."""
 
     t1_us: float | None = Field(
@@ -75,34 +82,6 @@ class T1Report(FormModel):
     t1b_err_us: float | None = Field(
         description="Second relaxation uncertainty in us; null without a second fit or when not estimable."
     )
-    writeback_applied: bool = Field(
-        description="Whether the selected calibration proposal was explicitly accepted and applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class T1Summary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    t1: float | None = Field(
-        description="Owner t1 in us; null retains an unavailable estimate."
-    )
-
-    t1_err: float | None = Field(
-        description="Owner t1_err in us; null retains an unavailable estimate."
-    )
-
-    t1b: float | None = Field(
-        description="Owner t1b in us; null retains an unavailable estimate."
-    )
-
-    t1b_err: float | None = Field(
-        description="Owner t1b_err in us; null retains an unavailable estimate."
-    )
 
 
 @recipe(
@@ -116,21 +95,15 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     read out the qubit. Fit the decay to estimate the relaxation
     time, and ask before applying the proposed T1; skipping writes nothing.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    points → expts sets the sweep sample count.
+    Analysis controls: dual_exp, skip. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "twotone/t1",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("twotone/t1", inputs, target_alias="qubit")
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select_sources(inputs)
+    edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
@@ -142,7 +115,7 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     missing.extend(frequency.missing)
     if frequency.edit is not None:
         tab.select(("modules", "readout"), inline=True)
-        apply_frequency(tab, frequency.edit)
+        edits.append(frequency.edit)
     if (
         parameter := require_pi(
             tab, ("modules", "pi_pulse"), inputs.pi_ref, required="pi_ref"
@@ -151,16 +124,30 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set(("sweep", "length", "stop"), inputs.max_delay_us)
-    tab.set(("sweep", "length", "n"), inputs.points)
-    tab.set(("reps",), inputs.reps)
-    tab.set(("rounds",), inputs.rounds)
-
-    # Acquire before analysis; the finally block saves raw and artifacts.
+    tab.apply_inputs(
+        inputs,
+        {
+            ("sweep", "length", "stop"): inputs.max_delay_us,
+            ("sweep", "length", "n"): inputs.points,
+            ("reps",): inputs.reps,
+            ("rounds",): inputs.rounds,
+        },
+        edits=edits,
+    )
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=T1Summary)
+        analysis = await tab.analyze(
+            "primary",
+            result=T1Summary,
+            updates={
+                key: value
+                for key, value in {
+                    "dual_exp": inputs.dual_exp,
+                    "skip": inputs.skip,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             return T1Report(
                 t1_us=None,
@@ -170,8 +157,6 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
-
-        # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:

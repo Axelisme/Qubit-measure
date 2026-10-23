@@ -84,7 +84,9 @@ def _completion_candidates(env: FormEnv) -> tuple[str, ...]:
         name = f"${row.alias}"
         candidates.append(name)
         component = (
-            point.components.get(row.resolved) if row.resolved is not None else None
+            point.components.get(row.resolved)
+            if isinstance(row.resolved, str)
+            else None
         )
         if component is not None:
             candidates.extend(

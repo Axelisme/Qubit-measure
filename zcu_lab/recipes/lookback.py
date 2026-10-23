@@ -2,50 +2,28 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
+from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
     RecipeSession,
-    RecipeTab,
     recipe,
+    report_number,
 )
 from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 
+from zcu_lab.v2.lookback.gui import LookbackSummary
+
 from .helpers import (
     FrequencyCalibration,
-    apply_frequency,
     choose_frequency,
-    report_number,
-    retain_scalar,
 )
 
 
-def _set_readout_timing(
-    tab: RecipeTab, readout_length_us: float | None, trigger_offset_us: float | None
-) -> None:
-    """Keep omitted key values and provenance; convert only for explicit edits."""
-    for field, value in (
-        (("modules", "readout", "ro_length"), readout_length_us),
-        (("modules", "readout", "trig_offset"), trigger_offset_us),
-    ):
-        if value is not None:
-            tab.select(("modules", "readout"), inline=True)
-            tab.set(field, value)
-        else:
-            retain_scalar(tab, field)
-
-
-class LookbackInputs(FormModel):
+class LookbackInputs(RecipeInputs):
     """Inputs for lookback; all units and null policies are declared per field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -72,28 +50,24 @@ class LookbackInputs(FormModel):
         None, description="Averaging round count; null keeps the GUI value."
     )
 
+    ratio: float | None = Field(
+        None,
+        description="Threshold ratio; null keeps the GUI analysis value. Analysis only.",
+    )
+    smooth: float | None = Field(
+        None,
+        description="Smooth sigma; null keeps the GUI analysis value. Analysis only.",
+    )
+    plot_fit: bool | None = Field(
+        None, description="Plot fit; null keeps the GUI analysis value. Analysis only."
+    )
 
-class LookbackReport(FormModel):
+
+class LookbackReport(RecipeReport):
     """Lookback results and failure reason; cancellation returns no report."""
 
     trigger_offset_us: float | None = Field(
         description="Proposed ADC trigger offset in us; null means not estimable."
-    )
-    writeback_applied: bool = Field(
-        description="Whether the selected calibration proposal was explicitly accepted and applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class LookbackSummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    predict_offset: float | None = Field(
-        description="Owner predict_offset in us; null retains an unavailable estimate."
     )
 
 
@@ -108,20 +82,14 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
     Primary estimates the trigger offset from the rising signal envelope.
     Ask before applying the timing proposal, then save raw trace and analysis.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    No n → expts input: acquisition uses the readout duration and rounds.
+    Analysis controls: ratio, smooth, plot_fit. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "lookback",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("lookback", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select_sources(inputs)
+    edits: list[FieldEdit] = []
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
@@ -136,23 +104,36 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
         raise RecipeNeedsParameters(frequency.missing)
     if frequency.edit is not None:
         tab.select(("modules", "readout"), inline=True)
-        apply_frequency(tab, frequency.edit)
-    _set_readout_timing(tab, inputs.readout_length_us, inputs.trigger_offset_us)
-    tab.set(("rounds",), inputs.rounds)
-
-    # Acquire before analysis; the finally block saves raw and artifacts.
+        edits.append(frequency.edit)
+    for field, value in (
+        (("modules", "readout", "ro_length"), inputs.readout_length_us),
+        (("modules", "readout", "trig_offset"), inputs.trigger_offset_us),
+    ):
+        if value is not None:
+            tab.select(("modules", "readout"), inline=True)
+            edits.append(FieldEdit(path=field, value=value))
+    tab.apply_inputs(inputs, {("rounds",): inputs.rounds}, edits=edits)
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=LookbackSummary)
+        analysis = await tab.analyze(
+            "primary",
+            result=LookbackSummary,
+            updates={
+                key: value
+                for key, value in {
+                    "ratio": inputs.ratio,
+                    "smooth": inputs.smooth,
+                    "plot_fit": inputs.plot_fit,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             return LookbackReport(
                 trigger_offset_us=None,
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
-
-        # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:

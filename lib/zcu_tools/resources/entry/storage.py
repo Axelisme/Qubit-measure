@@ -9,6 +9,7 @@ from uuid import UUID
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from ._path_segments import validate_path_segment
+from .aliases import AliasValue
 from .ledger import RecordsLedger
 from .points import PointView
 from .roles import RoleView, capture_role_components
@@ -23,7 +24,7 @@ class PointStorageBinding:
     point is the bound label and description is its cached text or None.
     result_path and database_path are absolute entry directories, not roots.
     ledger is a RecordsLedger bound to that entry's existing records directory.
-    roles is an isolated, read-only mapping of captured roles to concrete names;
+    roles is a detached mapping of captured aliases to scalar names or ordered lists;
     it is empty when capture_point_storage was called without a RoleView.
     """
 
@@ -34,7 +35,7 @@ class PointStorageBinding:
     result_path: Path
     database_path: Path
     ledger: RecordsLedger
-    roles: Mapping[str, str]
+    roles: Mapping[str, AliasValue]
 
 
 def bind_sample_table(result_path: Path, component: str) -> JsonlSampleTable:

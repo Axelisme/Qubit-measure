@@ -5,35 +5,33 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
 
+from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoSummary
+
 from .helpers import (
     FrequencyCalibration,
-    apply_frequency,
     choose_frequency,
-    report_number,
     require_pi,
     select_or_disable,
 )
 
 
-class T2EchoInputs(FormModel):
+class T2EchoInputs(RecipeInputs):
     """Inputs for t2echo; all units and null policies are declared per field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -68,8 +66,17 @@ class T2EchoInputs(FormModel):
         None, description="Averaging round count; null keeps the GUI value."
     )
 
+    fit_method: Literal["fringe", "decay"] | None = Field(
+        None,
+        description="Fit method; null keeps the GUI analysis value. Analysis only.",
+    )
+    fit_phase: bool | None = Field(
+        None,
+        description="Fit phase offset (fringe only); null keeps the GUI analysis value. Analysis only.",
+    )
 
-class T2EchoReport(FormModel):
+
+class T2EchoReport(RecipeReport):
     """T2 Echo results and failure reason; cancellation returns no report."""
 
     t2echo_us: float | None = Field(
@@ -77,26 +84,6 @@ class T2EchoReport(FormModel):
     )
     t2echo_err_us: float | None = Field(
         description="Refocused coherence uncertainty in us; null means not estimable."
-    )
-    writeback_applied: bool = Field(
-        description="Whether the selected calibration proposal was explicitly accepted and applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class T2EchoSummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    t2e: float | None = Field(
-        description="Owner t2e in us; null retains an unavailable estimate."
-    )
-
-    t2e_err: float | None = Field(
-        description="Owner t2e_err in us; null retains an unavailable estimate."
     )
 
 
@@ -110,21 +97,15 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     Ask before applying the proposed calibration, then save raw IQ and analysis.
     Skipping writes nothing.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    points → expts sets the sweep sample count.
+    Analysis controls: fit_method, fit_phase. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "twotone/t2echo",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("twotone/t2echo", inputs, target_alias="qubit")
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select_sources(inputs)
+    edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
@@ -136,7 +117,7 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     missing.extend(frequency.missing)
     if frequency.edit is not None:
         tab.select(("modules", "readout"), inline=True)
-        apply_frequency(tab, frequency.edit)
+        edits.append(frequency.edit)
     if (
         parameter := require_pi(
             tab, ("modules", "pi_pulse"), inputs.pi_ref, required="pi_ref"
@@ -151,17 +132,31 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set(("sweep", "length", "stop"), inputs.max_delay_us)
-    tab.set(("sweep", "length", "n"), inputs.points)
-    tab.set(("reps",), inputs.reps)
-    tab.set(("rounds",), inputs.rounds)
-    tab.set(("extras", "detune_ratio"), inputs.detune_ratio)
-
-    # Acquire before analysis; the finally block saves raw and artifacts.
+    tab.apply_inputs(
+        inputs,
+        {
+            ("sweep", "length", "stop"): inputs.max_delay_us,
+            ("sweep", "length", "n"): inputs.points,
+            ("reps",): inputs.reps,
+            ("rounds",): inputs.rounds,
+            ("extras", "detune_ratio"): inputs.detune_ratio,
+        },
+        edits=edits,
+    )
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=T2EchoSummary)
+        analysis = await tab.analyze(
+            "primary",
+            result=T2EchoSummary,
+            updates={
+                key: value
+                for key, value in {
+                    "fit_method": inputs.fit_method,
+                    "fit_phase": inputs.fit_phase,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             return T2EchoReport(
                 t2echo_us=None,
@@ -169,8 +164,6 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
-
-        # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:

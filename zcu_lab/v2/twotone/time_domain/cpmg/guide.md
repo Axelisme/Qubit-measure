@@ -27,3 +27,17 @@ Run displays normalized IQ versus pulse count and time. Save the raw data, then 
 Incomplete rows or rejected fits have null T2 values in the summary. Analysis fails when every row fails its fit checks. Extend the time window if the decay is unresolved. Review each accepted T_CPMG value; calibration stays unchanged.
 
 The cpmg recipe follows the same Run, save and Analyze steps. Use max_n with points for Log input, or times for an explicit list. min_length_us, max_length_us and length_points set the shared time window. Reusing a tab resets it before applying overrides.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Obtain calibrated pi and pi/2 pulses. Set positive refocusing counts and the shared evolution-time window.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `cpmg` after inspecting the same Form errors.
+   max_n/points produces the count grid, or supply times. length_points maps to length_expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

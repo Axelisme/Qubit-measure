@@ -7,14 +7,15 @@ length_points → length_expts: the GUI Time points input is the shared time-win
 from math import isfinite
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
+from pydantic import Field
 from zcu_tools.gui.form_adapter.log_points import (
     PositiveExplicitIntegerPoints,
     PositiveLogIntegerPoints,
 )
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
+    RecipeInputs,
+    RecipeReport,
     RecipeSession,
     recipe,
 )
@@ -24,10 +25,10 @@ from zcu_tools.mcp.measure.recipe_contracts import (
 )
 
 from zcu_lab.v2.twotone.time_domain.cpmg.core import CPMG_SweepCfg
+from zcu_lab.v2.twotone.time_domain.cpmg.gui import CPMGSummary
 
 from .helpers import (
     FrequencyCalibration,
-    apply_frequency,
     choose_frequency,
     require_pi,
     select_or_disable,
@@ -66,17 +67,9 @@ def _validate_time_window(
     _positive_integer("length_points", points, minimum=2)
 
 
-class CPMGInputs(FormModel):
+class CPMGInputs(RecipeInputs):
     """Inputs for cpmg; all units and null policies are declared per field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -128,8 +121,21 @@ class CPMGInputs(FormModel):
         None, description="Averaging round count; null keeps the GUI value."
     )
 
+    fit_fringe: bool | None = Field(
+        None,
+        description="Fit fringes; null keeps the GUI analysis value. Analysis only.",
+    )
+    t2r: float | None = Field(
+        None,
+        description="Ramsey T2 reference (us); null keeps the GUI analysis value. Analysis only.",
+    )
+    t1: float | None = Field(
+        None,
+        description="T1 reference (us); null keeps the GUI analysis value. Analysis only.",
+    )
 
-class CPMGReport(FormModel):
+
+class CPMGReport(RecipeReport):
     """CPMG results and failure reason; cancellation returns no report."""
 
     counts: list[int] = Field(
@@ -142,21 +148,6 @@ class CPMGReport(FormModel):
         description="Coherence uncertainties in us; rejected rows are null."
     )
 
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class CPMGSummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    ns: list[int] = Field(description="Owner ns values.")
-
-    t2s: list[float | None] = Field(description="Owner t2s values.")
-
-    t2errs: list[float | None] = Field(description="Owner t2errs values.")
-
 
 @recipe(
     "cpmg", description="Measure CPMG coherence over positive pi-pulse counts and time."
@@ -168,12 +159,9 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     Fit T_CPMG for each count, then save raw IQ and completed artifacts.
     No calibration is written.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    points sets the pulse-count grid; length_points → length_expts sets the shared time count.
+    Analysis controls: fit_fringe, t2r, t1. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     for name, value in (
         ("reuse_tab_id", inputs.reuse_tab_id),
@@ -192,14 +180,11 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     _positive_integer("rounds", inputs.rounds)
     if inputs.detune_ratio is not None and (not isfinite(inputs.detune_ratio)):
         raise ValueError("detune_ratio must be finite or null")
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "twotone/cpmg",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("twotone/cpmg", inputs, target_alias="qubit")
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select_sources(inputs)
+    edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
@@ -211,7 +196,7 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     missing.extend(frequency.missing)
     if frequency.edit is not None:
         tab.select(("modules", "readout"), inline=True)
-        apply_frequency(tab, frequency.edit)
+        edits.append(frequency.edit)
     if (
         parameter := require_pi(
             tab, ("modules", "pi_pulse"), inputs.pi_ref, required="pi_ref"
@@ -226,26 +211,45 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set(
-        ("sweep", "times"),
-        None if counts is None else PositiveExplicitIntegerPoints(values=counts),
+    edits.append(
+        FieldEdit(
+            path=("sweep", "times"),
+            value=None
+            if counts is None
+            else PositiveExplicitIntegerPoints(values=counts),
+        )
     )
-    tab.apply(
+    edits.extend(
         (
             FieldEdit(path=("extras", "min_length_us"), value=inputs.min_length_us),
             FieldEdit(path=("extras", "max_length_us"), value=inputs.max_length_us),
             FieldEdit(path=("extras", "length_points"), value=inputs.length_points),
         )
     )
-    tab.set(("detune_ratio",), inputs.detune_ratio)
-    tab.set(("reps",), inputs.reps)
-    tab.set(("rounds",), inputs.rounds)
-
-    # Acquire before analysis; the finally block saves raw and artifacts.
+    tab.apply_inputs(
+        inputs,
+        {
+            ("detune_ratio",): inputs.detune_ratio,
+            ("reps",): inputs.reps,
+            ("rounds",): inputs.rounds,
+        },
+        edits=edits,
+    )
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=CPMGSummary)
+        analysis = await tab.analyze(
+            "primary",
+            result=CPMGSummary,
+            updates={
+                key: value
+                for key, value in {
+                    "fit_fringe": inputs.fit_fringe,
+                    "t2r": inputs.t2r,
+                    "t1": inputs.t1,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             failure_counts = [] if counts is None else counts
             return CPMGReport(

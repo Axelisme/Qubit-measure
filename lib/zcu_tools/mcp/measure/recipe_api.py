@@ -13,7 +13,7 @@ from inspect import Parameter, iscoroutinefunction, signature
 from math import isfinite
 from typing import TYPE_CHECKING, Literal, Protocol, get_type_hints
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from zcu_tools.analysis.fitting.quality import FitQuality as FitQuality
 from zcu_tools.analysis.fitting.quality import QualityIssue as QualityIssue
@@ -169,10 +169,14 @@ class InlineSelection(BaseModel):
 class RecipeInputs(BaseModel):
     """Optional source and edit inputs shared by experiment recipes.
 
-    Add experiment fields in a subclass. None keeps the corresponding Form
-    input or global alias. These inputs do nothing until passed to a session
-    or tab method; authors may instead use open_tab, select and apply directly.
+    Add experiment fields in a subclass. Unknown fields and non-finite numeric
+    inputs fail validation; recipe admission records failed before binding the
+    GUI or starting measurement. None keeps the corresponding Form input or
+    global alias. These inputs do nothing until passed to a session or tab
+    method; authors may instead use open_tab, select and apply directly.
     """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     target: str | None = Field(
         default=None,
@@ -591,24 +595,27 @@ class RecipeTab:
         inputs: RecipeInputs,
         values: Mapping[FormPath, FormValue],
         *,
+        edits: Sequence[FieldEdit] = (),
         require_valid: bool = True,
     ) -> None:
-        """Apply non-None experiment values, then overrides, in one ordered batch.
+        """Apply experiment values, named edits, then overrides as one candidate.
 
         values maps logical Form paths to native values in field units. Mapping
-        iteration order is retained. None values keep current Form input; the
-        same retention rule applies to inputs.overrides. No source selection
-        occurs here. require_valid=True checks the complete cfg atomically and
-        raises RecipeNeedsParameters on rejection. False follows apply's draft
+        iteration order is retained. edits preserves each supplied path, value
+        and source, for example a calibration or linewidth-derived edit. None
+        values retain Form input in all three groups. No source selection occurs
+        here. require_valid=True checks the complete cfg atomically and raises
+        RecipeNeedsParameters on rejection. False follows apply's draft
         commit/raise semantics. Prior custom edits/selections are not rolled back.
         """
-        edits = [
+        batch = [
             FieldEdit(path=path, value=value)
             for path, value in values.items()
             if value is not None
         ]
-        edits.extend(inputs.overrides or ())
-        self.apply(edits, require_valid=require_valid)
+        batch.extend(edits)
+        batch.extend(inputs.overrides or ())
+        self.apply(batch, require_valid=require_valid)
 
     def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
         """Call one named RPC and decode its reply as result, without retries.

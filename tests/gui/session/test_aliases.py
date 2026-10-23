@@ -36,6 +36,75 @@ def point() -> PointDocument:
     )
 
 
+def list_table(rows: tuple[AliasRow, ...]) -> AliasTable:
+    """Lists are authored alias values, not malformed scalar inputs."""
+    try:
+        return AliasTable(rows)
+    except (AttributeError, ValueError) as error:
+        pytest.fail(f"Ordered alias lists must be accepted: {error}")
+
+
+def test_ordered_list_resolves_links_and_scalar_reads_refuse_it(
+    point: PointDocument,
+) -> None:
+    table = list_table(
+        (
+            AliasRow("qubit", "Q1"),
+            AliasRow("participants", ["$qubit.partner", "Q2"]),
+        )
+    )
+    assert table.names(point, {}) == {"qubit": "Q1", "participants": ["R1", "Q2"]}
+    with pytest.raises(RoleResolutionError, match="list"):
+        table.resolve("participants", point)
+    assert table.rows[1].value == ["$qubit.partner", "Q2"]
+
+
+def test_empty_list_is_unbound_and_list_elements_do_not_fallback(
+    point: PointDocument,
+) -> None:
+    table = list_table((AliasRow("participants", []),))
+    assert table.names(point, {}) == {}
+    with pytest.raises(RoleResolutionError, match="not bound") as empty:
+        table.resolve("participants", point)
+    assert empty.value.reason == "Alias is not bound"
+    table.replace(
+        (AliasRow("unbound", ""), AliasRow("participants", ["$unbound.partner", "Q2"]))
+    )
+    with pytest.raises(RoleResolutionError, match="unbound") as element:
+        table.names(point, {})
+    assert element.value.reason == "Alias list element is not bound"
+    assert "$participants[0]" in str(element.value)
+    assert "$unbound.partner" in str(element.value)
+
+
+@pytest.mark.parametrize("value", [["bad.name"], ["$later.partner"], [""]])
+def test_invalid_list_replacement_is_atomic(
+    point: PointDocument, value: list[str]
+) -> None:
+    table = list_table((AliasRow("participants", ["Q2", "Q1"]),))
+    with pytest.raises(InvalidInputError):
+        table.replace((AliasRow("participants", value),))
+    assert table.names(point, {}) == {"participants": ["Q2", "Q1"]}
+
+
+def test_alias_lists_are_detached_on_install_and_read(point: PointDocument) -> None:
+    value = ["Q2", "Q1"]
+    table = list_table((AliasRow("participants", value),))
+    value.clear()
+    shown = table.rows[0].value
+    if isinstance(shown, list):
+        shown.clear()
+    assert table.names(point, {}) == {"participants": ["Q2", "Q1"]}
+
+
+def test_list_cannot_be_used_as_a_scalar_link_root(point: PointDocument) -> None:
+    table = list_table(
+        (AliasRow("participants", ["Q1"]), AliasRow("sense", "$participants.partner"))
+    )
+    with pytest.raises(RoleResolutionError, match="list"):
+        table.resolve("sense", point)
+
+
 def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> None:
     setup = SetupDocument.model_construct(
         general=SetupGeneral(

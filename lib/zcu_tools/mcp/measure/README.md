@@ -145,6 +145,10 @@ Path 使用原始 list index，inline 清單先列祖先再列子項。
 選 library、複製 inline，最後將非 None 的 values 與 overrides 交同一批 apply。
 values 的 key 是 FormPath tuple，value 使用該欄位的原生單位。
 None 保留 Form 輸入，overrides 排在實驗值之後。
+分拆路徑的 `tab.apply_inputs(inputs, values, edits=...)` 可接收已具名的 FieldEdit 清單。
+它依序提交非 None values、保留 path/value/source 的 edits、最後是 inputs.overrides。
+三組共用一次完整候選驗證。edits 的 None 也保留 Form，不先提交不完整欄位。
+prepare_tab 不接 edits；有校準來源標記或中途自訂操作時用分拆步驟。
 預設 require_valid=True，回 tab 前會驗完整 cfg，不會 Run、Analyze、Save 或寫回。
 捷徑的 values 必須補齊本次量測所需的欄位。
 require_valid=False 沿用 apply 的 invalid draft 提交後拋錯語意，不保證無效輸入能繼續執行。

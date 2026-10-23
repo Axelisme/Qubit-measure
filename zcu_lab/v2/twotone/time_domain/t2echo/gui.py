@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -49,16 +50,34 @@ class T2EchoAnalyzeParams:
     )
 
 
+class T2EchoSummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    t2e: float | None = Field(
+        description="Owner t2e in us; null retains an unavailable estimate."
+    )
+
+    t2e_err: float | None = Field(
+        description="Owner t2e_err in us; null retains an unavailable estimate."
+    )
+
+
 @dataclass
 class T2EchoAnalyzeResult(AnalyzeResultBase):
     t2e: float
     t2e_err: float
     fit_quality: Mapping[str, FitQuality] | None = None
 
+    def summary(self) -> T2EchoSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return T2EchoSummary(
+            t2e=self.t2e,
+            t2e_err=self.t2e_err,
+        )
+
     def to_summary_dict(self) -> dict[str, object]:
         return {
-            "t2e": self.t2e,
-            "t2e_err": self.t2e_err,
+            **self.summary().model_dump(),
             "fit_quality": fit_quality_summary(self.fit_quality),
         }
 

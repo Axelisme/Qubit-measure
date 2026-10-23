@@ -106,7 +106,13 @@ Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<
 
 使用者於 2026-10-20 裁定：「採用乙，alias. yaml的獨立檔案，找不到就視內容為空，與其他兩個資料容器並列」。
 
-`EntryAliases` 保留名稱到原字串的 mapping 順序、空列與 `$` softlinks，不保存解析後名稱。檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 與缺檔都讀成空表。格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
+使用者於 2026-10-23 對 alias 表加 participants 列的選項裁定：「甲」。Alias 保存目前工作焦點，parameters 保存元件事實。慣例列 `participants` 保存本次要量的有序名稱，例如 `[Q3, Q1]`，不在元件 schema 加入本次工作選取。
+
+`AliasValue = str | list[str]` 由 resources 的 alias 資料 owner 定義。Session rows、事件、保存與 remote 邊界沿用這個型別。`EntryAliases` 保留 mapping 順序、空字串、空清單與 `$` softlinks。清單以 YAML list 保存，元素可為非空識別名或 backward `$alias.field` link。Session AliasTable 逐元素驗證與解析，保持順序；錯誤元素拒絕整次讀取，不略過或取首項。空清單與空字串皆未綁。缺列、未綁與 invalid 的公開讀取失敗由 session 指名 alias。元件及 device 的實際可讀性仍由原 owner 判斷，表的保存不檢查裝置可用性，也不將 alias 的名稱轉成 tone index。
+
+`EntryAliases` 保存 authored 值，不保存解析後名稱。Run snapshot、storage 及 acquired metadata 則固定當次解析後的單一名稱或有序名稱清單。歷史載入不重展全域表；單一名稱消費者遇清單明確拒絕。Alias 資料型別由 resources 擁有，experiment／frontends 向下引用，不反向依賴 session。這條依賴由 `layers` 的 C8 及 `top-level-acyclic` 的 C9 contract 約束。
+
+檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 與缺檔都讀成空表。格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
 
 Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。未選 point 時 Apply 以 `FailedPreconditionError(no_context)` 拒絕，不寫 setup。普通 `set_alias_rows` 只改 memory，不要求 point。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
 

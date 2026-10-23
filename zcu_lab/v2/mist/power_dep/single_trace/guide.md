@@ -67,3 +67,17 @@ Offline `white_noise` exercises the pulse sequence, sweep, readout and saving
 with a simulated device. Its output is noise only. Establish MIST onset and
 calibrated photon number with a suitable physical model or hardware
 measurement.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Set probe gain endpoints and verify probe/readout timing. Supply GE calibration where the Form requests it.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `mist_power_trace` after inspecting the same Form errors.
+   The captured Form supplies gain Expts. probe_ref/readout_ref select modules. g0, e0 and ac_coeff update the existing display analysis.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
