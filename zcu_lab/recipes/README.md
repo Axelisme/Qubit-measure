@@ -73,7 +73,9 @@ Overrides 省略為空 list，不接受 null。重複路徑不去重，也不過
 `check_ready` 唯讀、不 Run、不刷新 capture，缺值拋 `RecipeNeedsParameters` 並列全部 path／reason。
 先前成功編輯不回滾。Run admission 仍會再次驗證。
 Lookback 不提供 reset／init_pulse 輸入，也不存取這兩個隱藏 selector。
-Analysis updates 只濾 KEEP，明填 null 原樣交分析 owner。
+Analysis updates 直接傳 dict，例如 `updates={"dual_exp": inputs.dual_exp, "skip": inputs.skip}`。
+`tab.analyze` 送 owner 前略過 KEEP 項，明填 null 原樣交分析 owner。
+全 KEEP 與不帶 updates 相同，保留 owner 的分析參數。
 
 所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
 或靜態解析到 `zcu_lab` 內定義的 helper，定義可用 def 或 async def。

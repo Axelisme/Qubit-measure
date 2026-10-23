@@ -139,14 +139,10 @@ async def onetone_spectrum(
             "primary",
             result=OnetoneSpectrumSummary,
             updates={
-                key: value
-                for key, value in {
-                    "model_type": inputs.model_type,
-                    "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
-                    "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
-                    "edelay": inputs.edelay,
-                }.items()
-                if not isinstance(value, Keep)
+                "model_type": inputs.model_type,
+                "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
+                "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
+                "edelay": inputs.edelay,
             },
         )
         if analysis.result is None:

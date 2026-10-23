@@ -147,12 +147,8 @@ async def mux_len_rabi(
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "decay": inputs.decay,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if not isinstance(value, Keep)
+                "decay": inputs.decay,
+                "fit_phase": inputs.fit_phase,
             },
             result=MuxLenRabiSummary,
         )

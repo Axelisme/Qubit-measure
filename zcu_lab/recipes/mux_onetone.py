@@ -138,14 +138,10 @@ async def mux_onetone(
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "model_type": inputs.model_type,
-                    "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
-                    "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
-                    "edelay": inputs.edelay,
-                }.items()
-                if not isinstance(value, Keep)
+                "model_type": inputs.model_type,
+                "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
+                "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
+                "edelay": inputs.edelay,
             },
             result=MuxOnetoneSummary,
         )

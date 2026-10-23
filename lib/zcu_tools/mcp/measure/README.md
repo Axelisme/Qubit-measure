@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-24（recipe Form 契約與作者範例）
+**Last updated:** 2026-10-23（analysis updates 由 RecipeTab 略過 KEEP）
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -482,9 +482,11 @@ Post 結果讀取失敗時，execution 回覆保留同一份 `recovery`；依上
 這個自動保存是 standalone 工具契約，不適用 recipe 的 `await tab.analyze()`；
 recipe 作者另外明確 `tab.save()`。
 
-`RecipeTab.analyze(stage, result=T, updates=...)` 接受 `Mapping[str, YamlValue]`。
+`RecipeTab.analyze(stage, result=T, updates=...)` 接受 `Mapping[str, YamlValue | Keep]`。
+Recipe 直接傳 dict，例如 `updates={"dual_exp": inputs.dual_exp, "skip": inputs.skip}`。
 Key 是 adapter 的具名分析參數，value 使用該欄位的原生單位，不求值 Form Expr 或換算單位。
-省略或空 mapping 保留 owner 參數，明填 null 原樣傳給 owner。
+RecipeTab 送 owner 前略過 KEEP 項，明填 null 原樣傳給 owner。
+省略、空 mapping 或全 KEEP 都保留 owner 參數。
 Owner 在同一個 tracked Primary／Post operation 驗證並套用更新，不先開另一個分析 operation。
 `interactive=True` 仍交付 PendingAnalysis，由 `tab_interact` 的 done 完成原 operation，恢復原 recipe await。
 `answer` 只回答 recipe 明確提出的問題，不控制 picker，也不直接寫回。

@@ -141,12 +141,8 @@ async def mux_twotone_spectrum(
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "model_type": inputs.model_type,
-                    "plot_fit": inputs.plot_fit,
-                }.items()
-                if not isinstance(value, Keep)
+                "model_type": inputs.model_type,
+                "plot_fit": inputs.plot_fit,
             },
             result=MuxTwotoneSpectrumSummary,
         )

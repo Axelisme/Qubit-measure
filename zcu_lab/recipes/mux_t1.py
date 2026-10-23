@@ -96,12 +96,8 @@ async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "dual_exp": inputs.dual_exp,
-                    "skip": inputs.skip,
-                }.items()
-                if not isinstance(value, Keep)
+                "dual_exp": inputs.dual_exp,
+                "skip": inputs.skip,
             },
             result=MuxT1Summary,
         )

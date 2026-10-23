@@ -118,15 +118,11 @@ async def mist_flux_dep(
             "primary",
             result=MistFluxDepAnalysis,
             updates={
-                key: value
-                for key, value in {
-                    "flux_half": inputs.flux_half,
-                    "flux_period": inputs.flux_period,
-                    "ac_coeff": inputs.ac_coeff,
-                    "secondary_xaxis": inputs.secondary_xaxis,
-                    "auto_range": inputs.auto_range,
-                }.items()
-                if not isinstance(value, Keep)
+                "flux_half": inputs.flux_half,
+                "flux_period": inputs.flux_period,
+                "ac_coeff": inputs.ac_coeff,
+                "secondary_xaxis": inputs.secondary_xaxis,
+                "auto_range": inputs.auto_range,
             },
         )
         if analysis.result is None:

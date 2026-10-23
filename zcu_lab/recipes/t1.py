@@ -113,12 +113,8 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
             "primary",
             result=T1Summary,
             updates={
-                key: value
-                for key, value in {
-                    "dual_exp": inputs.dual_exp,
-                    "skip": inputs.skip,
-                }.items()
-                if not isinstance(value, Keep)
+                "dual_exp": inputs.dual_exp,
+                "skip": inputs.skip,
             },
         )
         if analysis.result is None:

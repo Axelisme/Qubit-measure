@@ -118,12 +118,8 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
             "primary",
             result=T2EchoSummary,
             updates={
-                key: value
-                for key, value in {
-                    "fit_method": inputs.fit_method,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if not isinstance(value, Keep)
+                "fit_method": inputs.fit_method,
+                "fit_phase": inputs.fit_phase,
             },
         )
         if analysis.result is None:

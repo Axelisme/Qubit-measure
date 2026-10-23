@@ -122,15 +122,11 @@ async def singleshot_ge(
             "primary",
             result=GESummary,
             updates={
-                key: value
-                for key, value in {
-                    "initial_state": inputs.initial_state,
-                    "backend": inputs.backend,
-                    "logscale": inputs.logscale,
-                    "align_t1": inputs.align_t1,
-                    "length_ratio": inputs.length_ratio,
-                }.items()
-                if not isinstance(value, Keep)
+                "initial_state": inputs.initial_state,
+                "backend": inputs.backend,
+                "logscale": inputs.logscale,
+                "align_t1": inputs.align_t1,
+                "length_ratio": inputs.length_ratio,
             },
         )
         if primary.result is None:

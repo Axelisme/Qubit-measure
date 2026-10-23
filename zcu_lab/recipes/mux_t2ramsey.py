@@ -103,12 +103,8 @@ async def mux_t2ramsey(
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "fit_fringe": inputs.fit_fringe,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if not isinstance(value, Keep)
+                "fit_fringe": inputs.fit_fringe,
+                "fit_phase": inputs.fit_phase,
             },
             result=MuxCoherenceSummary,
         )

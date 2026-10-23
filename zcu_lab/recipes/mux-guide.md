@@ -148,7 +148,8 @@ Primary analysis per participant. Updates and Analyze use that same operation.
 Each Q receives both `flux_half` and `flux_int`. An unspecified line is sent as
 null so the owner uses that Q's Run capture, not the previous Q's explicit line.
 This per-Q reset is required even when the caller omits both maps. Other
-analysis updates omit only KEEP and pass explicit null unchanged.
+analysis updates are passed as dicts; `tab.analyze` omits KEEP entries before
+sending them to the owner and passes explicit null unchanged.
 When the reply contains `PendingAnalysis`, use `tab_interact` without payload
 to inspect state and available commands. Move the native half/integer lines
 with its commands and finish with `done`. This settles that analysis and resumes

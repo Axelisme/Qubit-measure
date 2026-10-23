@@ -164,13 +164,9 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
             "primary",
             result=CPMGSummary,
             updates={
-                key: value
-                for key, value in {
-                    "fit_fringe": inputs.fit_fringe,
-                    "t2r": inputs.t2r,
-                    "t1": inputs.t1,
-                }.items()
-                if not isinstance(value, Keep)
+                "fit_fringe": inputs.fit_fringe,
+                "t2r": inputs.t2r,
+                "t1": inputs.t1,
             },
         )
         if analysis.result is None:

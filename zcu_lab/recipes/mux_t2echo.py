@@ -105,12 +105,8 @@ async def mux_t2echo(
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "fit_method": inputs.fit_method,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if not isinstance(value, Keep)
+                "fit_method": inputs.fit_method,
+                "fit_phase": inputs.fit_phase,
             },
             result=MuxCoherenceSummary,
         )
