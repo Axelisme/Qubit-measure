@@ -741,6 +741,7 @@ class MainWindow(QMainWindow):
             {
                 name: (entry.flux_half, entry.flux_int)
                 for name, entry in self._ctrl.state.spectrums.items()
+                if entry.can_seed_alignment
             },
             parent=self,
             start_dir=raw_spectrum_dir(self._ctrl.state.project),
