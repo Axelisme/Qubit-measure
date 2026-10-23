@@ -228,6 +228,98 @@ def test_apply_inputs_preserves_owner_validation_failures(
         client.context.session.close()
 
 
+@pytest.mark.parametrize("rejected", [False, True])
+def test_apply_inputs_admits_values_named_edits_and_overrides_together(
+    tmp_path: Path, rejected: bool
+) -> None:
+    class Inputs(api.RecipeInputs):
+        pass
+
+    gui = SyntheticGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "tab.edit_recipe_fields" and rejected:
+            return {
+                "changed": False,
+                "errors": [{"path": ["pulse", "length"], "message": "Required"}],
+            }
+        return gui.respond(method, params)
+
+    @api.recipe("synthetic", "Admit derived edits and final overrides as one candidate")
+    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
+        tab.apply_inputs(
+            inputs,
+            {("count",): 3, ("retained",): None},
+            edits=(
+                api.FieldEdit(path=("count",), value=7, source="$calibration.count"),
+                api.FieldEdit(path=("retained",), value=None, source="linewidth"),
+            ),
+        )
+        return Report(count=1)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = client.context.session.recipes.start(
+            client.context,
+            "synthetic",
+            {"overrides": [{"path": ["count"], "value": 11}]},
+        )
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == ("needs_parameters" if rejected else "completed"), (
+            snapshot
+        )
+        assert [
+            p for m, p in client.transport.sent if m == "tab.edit_recipe_fields"
+        ] == [
+            {
+                "tab_id": "tab-1",
+                "edits": [
+                    {"path": ["count"], "value": 3},
+                    {"path": ["count"], "value": 7},
+                    {"path": ["count"], "value": 11},
+                ],
+                "require_valid": True,
+            }
+        ]
+        if rejected:
+            assert [(e.path, e.message) for e in snapshot.parameter_errors] == [
+                (("pulse", "length"), "Required")
+            ]
+        assert gui.runs == 0
+    finally:
+        client.context.session.close()
+
+
+def test_apply_inputs_retains_named_edit_source_validation(tmp_path: Path) -> None:
+    @api.recipe("synthetic", "Keep the supplied edit source for native admission")
+    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+        tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
+        tab.apply_inputs(
+            inputs,
+            {},
+            edits=(api.FieldEdit(path=("count",), value=7, source=" "),),
+        )
+        return Report(count=1)
+
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
+    try:
+        execution = client.context.session.recipes.start(
+            client.context, "synthetic", {}
+        )
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == "failed"
+        assert snapshot.error is not None
+        assert snapshot.error.message == "Edit source must be nonblank"
+        assert not [
+            p for m, p in client.transport.sent if m == "tab.edit_recipe_fields"
+        ]
+    finally:
+        client.context.session.close()
+
+
 def test_owner_analysis_diagnostics_flow_into_recipe_report(tmp_path: Path) -> None:
     class Inputs(api.RecipeInputs):
         pass
