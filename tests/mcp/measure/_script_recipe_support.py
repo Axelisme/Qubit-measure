@@ -142,7 +142,11 @@ class SyntheticGui:
         if method == "tab.get_analyze_result":
             return {"summary": {"estimate": 3.5}, "invalid": []}
         if method in {"tab.save_data", "tab.save_artifacts"}:
-            section = "measurement_data" if method == "tab.save_data" else "analysis"
+            sections = (
+                ("measurement_data",)
+                if method == "tab.save_data"
+                else ("measurement_data", "analysis")
+            )
             return {
                 "run_id": f"native-{self.runs}",
                 "artifacts": {
@@ -153,7 +157,7 @@ class SyntheticGui:
                                 "data": [
                                     {
                                         "format": "data_h5"
-                                        if method == "tab.save_data"
+                                        if section == "measurement_data"
                                         else "json",
                                         "path": "/synthetic/output",
                                         "status": "saved",
@@ -163,6 +167,7 @@ class SyntheticGui:
                             },
                         }
                     }
+                    for section in sections
                 },
             }
         raise AssertionError(f"Unexpected GUI request: {method}")
