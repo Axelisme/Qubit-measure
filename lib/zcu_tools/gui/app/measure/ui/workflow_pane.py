@@ -185,10 +185,20 @@ class WorkflowPane(QWidget):
         scroll.setWidget(body)
         column.addWidget(scroll)
         if kind == "tunables":
+            self._pause_hint = QLabel(
+                "Resume 會重做未提交的點；可先 Apply 新的 tunables", page
+            )
+            self._pause_hint.setObjectName("workflow.pause_hint")
+            self._pause_hint.setWordWrap(True)
+            make_label_selectable(self._pause_hint)
+            column.addWidget(self._pause_hint)
             button = QPushButton("Apply", page)
             button.clicked.connect(lambda: self._command("Apply"))
             self._apply = button
             column.addWidget(button)
+            self._discard = QPushButton("Discard", page)
+            self._discard.clicked.connect(lambda: self._command("Discard"))
+            column.addWidget(self._discard)
         self._subtabs.addTab(page, caption)
 
     def _bind_form(self, kind: FormKind, *, editable: bool) -> None:
@@ -210,12 +220,25 @@ class WorkflowPane(QWidget):
             self._states[kind] = state
             self._envs[kind] = env
             self._editing.pop(kind, None)
+            if kind == "tunables":
+                lifetime.add_cleanup(state.subscribe(self._refresh_discard))
+                editor.errors_changed.connect(self._refresh_discard)
         elif self._envs[kind] is not env:
             editor.refresh(env)
             self._envs[kind] = env
         if self._editing.get(kind) != editable:
             editor.set_editing_enabled(enabled=editable)
             self._editing[kind] = editable
+
+    def _refresh_discard(self) -> None:
+        state = self._states["tunables"]
+        self._discard.setEnabled(
+            self._editing.get("tunables", False)
+            and (
+                state.is_dirty
+                or self._editors["tunables"].local_parse_errors() is not None
+            )
+        )
 
     def set_writable(self, *, writable: bool) -> None:
         """Set local command availability; the next refresh applies it to controls."""
@@ -237,6 +260,9 @@ class WorkflowPane(QWidget):
         lifecycle = "pending" if snapshot.busy else "idle"
         if status is not None:
             lifecycle = status.lifecycle
+        if lifecycle == "paused" and self._status.text() != "paused":
+            self._subtabs.setCurrentIndex(1)
+        self._pause_hint.setVisible(lifecycle == "paused")
         self._status.setText(lifecycle)
         self._scope_labels["active_path"].setText(
             "" if status is None else status.active_path
@@ -254,8 +280,13 @@ class WorkflowPane(QWidget):
         )
         idle = writable and not lease_active and not snapshot.busy
         self._bind_form("plan", editable=idle)
-        self._bind_form("tunables", editable=writable and (idle or snapshot.busy))
+        self._bind_form(
+            "tunables",
+            editable=writable
+            and (idle or lifecycle in {"running", "pausing", "paused"}),
+        )
         self._project_controls(snapshot, lifecycle, idle=idle)
+        self._refresh_discard()
         if snapshot.error is not None:
             self._message.setText(snapshot.error)
         elif (
@@ -292,7 +323,7 @@ class WorkflowPane(QWidget):
         )
         self._buttons["Stop"].setEnabled(snapshot.busy)
         self._apply.setEnabled(
-            writable and accepted and lifecycle in {"running", "paused"}
+            writable and accepted and lifecycle in {"running", "pausing", "paused"}
         )
 
     def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:
@@ -368,6 +399,10 @@ class WorkflowPane(QWidget):
                 if isinstance(result, FormErrors)
                 else ""
             )
+        elif command == "Discard":
+            self._control.discard_tunables(self._tab_id)
+            self._editors["tunables"].discard_local_text()
+            self._message.clear()
         elif run_id is None:
             raise RuntimeError("Workflow has not started")
         elif command == "Pause":
