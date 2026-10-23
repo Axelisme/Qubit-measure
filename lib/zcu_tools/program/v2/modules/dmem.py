@@ -40,6 +40,13 @@ def _encode_uint32_as_int32(value: int) -> int:
 
 
 class LoadValue(Module):
+    """Load a scalar table value selected by an index register.
+
+    Empty tables emit no runtime lookup and are only valid on paths that do not
+    execute the lookup. The destination is still declared at compile time unless
+    use_existed=True, so consumers on those paths can resolve its register name.
+    """
+
     def __init__(
         self,
         name: str,
@@ -81,6 +88,10 @@ class LoadValue(Module):
         return self._is_compressed
 
     def init(self, prog: ModularProgramV2) -> None:
+        # QICK resolves all emitted consumers before unreachable code is removed.
+        if not self.use_existed:
+            prog.add_reg(self.val_reg)
+
         if self._is_empty:
             logger.debug(
                 "LoadValue.init: short-circuit empty values name='%s' (no dmem allocated)",
@@ -89,9 +100,6 @@ class LoadValue(Module):
             return
 
         self.offset = prog.add_dmem(self._packed_values)
-
-        if not self.use_existed:
-            prog.add_reg(self.val_reg)
 
         logger.debug(
             "LoadValue.init: name='%s', auto_compress=%s, compressed=%s, "
