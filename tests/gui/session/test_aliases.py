@@ -64,13 +64,17 @@ def test_empty_list_is_unbound_and_list_elements_do_not_fallback(
 ) -> None:
     table = list_table((AliasRow("participants", []),))
     assert table.names(point, {}) == {}
-    with pytest.raises(RoleResolutionError, match="not bound"):
+    with pytest.raises(RoleResolutionError, match="not bound") as empty:
         table.resolve("participants", point)
+    assert empty.value.reason == "Alias is not bound"
     table.replace(
         (AliasRow("unbound", ""), AliasRow("participants", ["$unbound.partner", "Q2"]))
     )
-    with pytest.raises(RoleResolutionError, match="unbound"):
+    with pytest.raises(RoleResolutionError, match="unbound") as element:
         table.names(point, {})
+    assert element.value.reason == "Alias list element is not bound"
+    assert "$participants[0]" in str(element.value)
+    assert "$unbound.partner" in str(element.value)
 
 
 @pytest.mark.parametrize("value", [["bad.name"], ["$later.partner"], [""]])
