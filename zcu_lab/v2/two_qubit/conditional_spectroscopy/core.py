@@ -135,7 +135,7 @@ class SpectroscopyExp(PersistableExperiment[SpectroscopyResult, SpectroscopyCfg]
         result_type=SpectroscopyResult,
         cfg_type=SpectroscopyCfg,
         cfg_schema_version="1.0",
-        tag="ftf/conditional_spectroscopy",
+        tag="two_qubit/conditional_spectroscopy",
     )
 
     def run(

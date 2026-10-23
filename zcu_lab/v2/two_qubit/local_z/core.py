@@ -108,7 +108,7 @@ class LocalZExp(PersistableExperiment[LocalZResult, LocalZCfg]):
         result_type=LocalZResult,
         cfg_type=LocalZCfg,
         cfg_schema_version="1.0",
-        tag="ftf/local_z",
+        tag="two_qubit/local_z",
     )
 
     def run(self, config: LocalZCfg, *, context: RunContext) -> LocalZResult:

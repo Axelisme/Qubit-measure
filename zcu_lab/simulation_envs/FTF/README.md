@@ -57,7 +57,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。
 模擬範本的 `MG12.time_of_fly: 0.4` us 對應 `ftf.yaml` 的 mux receivers 400 ns。Kickstart 的 group TOF 留 null，R1／R2 的頂層 `time_of_fly` 也留 null，等待各自路徑的量測。
-`mux/onetone_fine` 缺 slot 時，trigger 初值取 group TOF 加 `5/(2π·min κ)`，length 取 trigger 加固定 1.0 us ADC window。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填，mixer 不受影響。有 slot 時沿用 slot mixer 與既有 timing 規則。
+`mux/onetone` 缺 slot 時，trigger 初值取 group TOF 加 `5/(2π·min κ)`，length 取 trigger 加固定 1.0 us ADC window。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填，mixer 不受影響。有 slot 時沿用 slot mixer 與既有 timing 規則。
 R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 1`、`ro_ch: [1, 2]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
 範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從已知的 group wiring 補通道，tone gain 補 0.1。文件允許 `wiring: {}`；`ro_ch` 未知時，各 tone ADC 留空必填，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。

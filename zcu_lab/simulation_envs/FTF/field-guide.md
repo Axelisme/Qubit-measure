@@ -378,14 +378,14 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 
 MG12 的 `mixer_freq: 7135` MHz 是 group LO 設定，無 slot 表單從 `$mux.mixer_freq` 取初值，缺值留空必填。它不依賴 tone 頻率或 κ。
 模擬範本的頂層 `MG12.time_of_fly: 0.4` us 來自 mux receivers 的 `time_of_flight_ns: 400`。Kickstart 的 group TOF 留 null；resonator 的 pulse 路徑 TOF 是各自的頂層 `time_of_fly`，不供 mux 使用。
-Fine 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，ro_length 固定 1.0 us，length 是 trigger 加 ro_length。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填。這些初值未經裝置確認，有 slot 時保留既有 mixer 與 timing 規則。
+Mux onetone 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，ro_length 固定 1.0 us，length 是 trigger 加 ro_length。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填。這些初值未經裝置確認，有 slot 時保留既有 mixer 與 timing 規則。
 
 需要沿用完整校準模組時，另做以下設定：
 
 1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 1`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 1／2，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
 2. 在 Inspect 把該 library key 填入 `MG12.module.readout`。Startup 已把 `mux` alias 指向 MG12，不需更改 R1／R2 的 pulse wiring。
 3. Open 或 Reset `mux/twotone_spectrum` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，通道來自 MG12 wiring，gain 為 0.1；其餘必填輸入仍須補齊。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
-4. Open 或 Reset `mux/onetone_fine` 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 1／2，gain 為 0.1。每次都要核對 R1→1、R2→2，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
+4. Open 或 Reset `mux/onetone` 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 1／2，gain 為 0.1。每次都要核對 R1→1、R2→2，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
 
 Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 

@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 one-tone 表單的 readout timing 初值與共用來源。
 
-**Last updated:** 2026-10-23，mux fine 初值來源
+**Last updated:** 2026-10-23，mux onetone 初值來源
 
 `freq`、`power_dep`、`flux_dep`、`range_find` 的 `make_form` 共用
 [`_form_shared.py`](_form_shared.py) 的 `initial_readout_timing`。
@@ -26,10 +26,10 @@ Open／Reset 從固定 capture 讀取 resonator 校準，並以 `readout` Templa
 
 ## Mux 初值
 
-[`mux/onetone_fine`](../mux/onetone_fine/form.py) 啟用 `mux_readout_initial` 的 ringup 初值政策。
+[`mux/onetone`](../mux/onetone/form.py) 啟用 `mux_readout_initial` 的 ringup 初值政策。
 有 captured readout Slot 時，副本保留來源的 `ro_length`，在原 `trig_offset` 上增加 ringup 等待。
 缺 slot 時，從完整 group 校準推導 mixer 與 timing 候選，不沿用 blank Template 的 offset 或積分窗。
-兩條路徑的公式、缺值條件與無效來源錯誤以 [fine guide](../mux/onetone_fine/guide.md#無-readout-slot-的候選來源) 為準。
+兩條路徑的公式、缺值條件與無效來源錯誤以 [mux onetone guide](../mux/onetone/guide.md#無-readout-slot-的候選來源) 為準。
 
 Tone 槽位沿 group 順序產生。Timing 在 Open／Reset 後保持可編輯，cfg 輸出保留操作員的編輯。
 候選未經裝置確認，Run 前須核對 mixer、接線、功率與 timing。
