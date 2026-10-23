@@ -603,8 +603,10 @@ class RecipeTab:
         values maps logical Form paths to native values in field units. Mapping
         iteration order is retained. edits preserves each supplied path, value
         and source, for example a calibration or linewidth-derived edit. None
-        values retain Form input in all three groups. No source selection occurs
-        here. require_valid=True checks the complete cfg atomically and raises
+        values retain Form input in all three groups. For an exact repeated path,
+        the last non-None edit wins, including its source. Distinct ancestor and
+        descendant paths still reach owner admission and are rejected as overlaps.
+        No source selection occurs here. require_valid=True checks the complete cfg atomically and raises
         RecipeNeedsParameters on rejection. False follows apply's draft
         commit/raise semantics. Prior custom edits/selections are not rolled back.
         """
@@ -615,7 +617,11 @@ class RecipeTab:
         ]
         batch.extend(edits)
         batch.extend(inputs.overrides or ())
-        self.apply(batch, require_valid=require_valid)
+        final: dict[FormPath, FieldEdit] = {}
+        for edit in batch:
+            if edit.value is not None:
+                final[edit.path] = edit
+        self.apply(tuple(final.values()), require_valid=require_valid)
 
     def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
         """Call one named RPC and decode its reply as result, without retries.

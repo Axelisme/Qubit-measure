@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, Field, JsonValue, TypeAdapter
+from zcu_tools.analysis.fitting.quality import FitQuality, QualityIssue
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.remote.form_errors import recipe_form_errors
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.form import FormEnv, FormErrors
 from zcu_tools.gui.form_adapter import Form, LogicalEdit
-from zcu_tools.analysis.fitting.quality import FitQuality, QualityIssue
 from zcu_tools.mcp.measure import recipe_api as api
 from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 
@@ -366,16 +366,22 @@ def test_apply_inputs_last_nonnull_value_reaches_atomic_form_admission(
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = client.context.session.recipes.start(
-            client.context, "synthetic", {"overrides": [
-                {"path": ["count"], "value": override},
-                {"path": ["count"], "value": None},
-                {"path": ["calibrated"], "value": None},
-                {"path": ["retained"], "value": None},
-            ]}
+            client.context,
+            "synthetic",
+            {
+                "overrides": [
+                    {"path": ["count"], "value": override},
+                    {"path": ["count"], "value": None},
+                    {"path": ["calibrated"], "value": None},
+                    {"path": ["retained"], "value": None},
+                ]
+            },
         )
         execution.join()
         snapshot = execution.snapshot()
-        assert snapshot.status == ("completed" if override > 0 else "needs_parameters"), snapshot
+        assert snapshot.status == (
+            "completed" if override > 0 else "needs_parameters"
+        ), snapshot
         assert admissions == [True]
         if override > 0:
             assert owner.read_recipe_field(("count",)).value == 11
