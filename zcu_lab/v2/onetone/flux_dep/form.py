@@ -3,6 +3,9 @@
 from zcu_tools.cfg_model import AliasName, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 from zcu_lab.v2.onetone._form_shared import initial_readout_timing
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
 
@@ -12,6 +15,16 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     timing = initial_readout_timing(ctx)
     return Form(
         FluxDepCfg,
+        field_order=(
+            "modules",
+            "flux_dev",
+            "flux_unit",
+            "sweep",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "modules": {
                 "reset": Hidden(),
@@ -43,4 +56,4 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
             "rounds": 10,
             "initial_delay": Hidden(),
         },
-    )
+    ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))
