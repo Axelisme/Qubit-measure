@@ -186,7 +186,7 @@ def test_poll_receipt_distinguishes_skipped_from_submitted_reads(
     bg.closed = False
     device.get_info.return_value = FakeDeviceInfo(address="addr", value=3.0)
     before = state.version.get("device:dev1")
-    events: list[str] = []
+    events: list[str | None] = []
     facet.on_device_changed(lambda event: events.append(event.name))
 
     assert facet.try_poll_device_info("dev1") is True
