@@ -1,9 +1,9 @@
-"""Six single-model sources, one global current and bounded ADC composition."""
+"""Six single-model sources, seven DC currents and bounded ADC composition."""
 
 import logging
 from dataclasses import replace
 from hashlib import sha256
-from math import prod
+from math import isfinite, prod
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +37,7 @@ from zcu_tools.resources.six_fluxonium import (
     load_six_fluxonium,
     parse_six_fluxonium,
 )
+from zcu_tools.resources.six_fluxonium.schema import CircuitBias
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
@@ -50,11 +51,24 @@ from .results import CavityRound, combine_integrated
 from .routing import RoutedGroup, route_request
 
 
+def _reduced_flux(
+    bias: CircuitBias, coil_current: float, local_current: float
+) -> float:
+    return (coil_current - bias.coil_offset) / bias.coil_period + (
+        local_current - bias.offset
+    ) / bias.period
+
+
 def _single_settings(
-    settings: SixFluxoniumSettings, cavity: int, channel: int, gen: int
+    settings: SixFluxoniumSettings,
+    cavity: int,
+    channel: int,
+    gen: int,
+    flux_phi0: float,
 ) -> SingleFluxoniumSettings:
-    qubits, dc = settings.qubits.ordered(), settings.dc_source
+    qubits = settings.qubits.ordered()
     qubit = qubits[cavity]
+    dc = qubit.dc_bias.source
     # Pulse ADC6 has Q1's receiver calibration; the selected cavity supplies
     # its physical resonator and incident-field calibration, never another ADC.
     adc = qubits[channel if channel < 6 else 0].readout.adc.model_copy(
@@ -65,14 +79,15 @@ def _single_settings(
         version=qubit.version,
         chip=qubit.chip,
         dc_bias=DCBias(
-            offset_phi0=qubit.dc_bias.offset_phi0,
+            offset_phi0=flux_phi0,
             source=DCSource(
                 name=dc.name,
                 unit=dc.unit,
                 limits=dc.limits,
                 initial=dc.initial,
                 ramp_step=dc.ramp_step,
-                flux_per_unit=qubit.dc_bias.flux_per_unit,
+                # Six owns both current conversions; single receives fixed flux.
+                flux_per_unit=0.0,
             ),
         ),
         drive_line=qubit.drive_line,
@@ -92,11 +107,13 @@ def _single_settings(
 
 
 class SixFluxoniumSource:
-    """Serialized six-model backend with one shared live DC driver.
+    """Serialized six-model backend with six local DC drivers and one coil.
 
-    settings: validated six-system material. devices: manager retaining the
-    addressed global FakeDevice. Six SingleFluxoniumSources retain that exact
-    driver, independent oscillator/evolution/ADC caches and physical parameters.
+    settings: validated six-system material. devices: manager retaining seven
+    addressed FakeDevices. This source retains those exact drivers. The six
+    SingleFluxoniumSources keep independent oscillator/evolution/ADC caches and
+    physical parameters. Each preparation receives the sum of local and coil
+    reduced flux as a fixed offset, without changing single-source contracts.
     settings.numerics provides environment-wide prepare/result/routing byte caps;
     each source receives one sixth, rounded down. ADC bytes apply per source.
     No joint Hilbert space or pulsed flux route is created. Call snapshot/execute
@@ -105,9 +122,26 @@ class SixFluxoniumSource:
 
     def __init__(self, settings: SixFluxoniumSettings, devices: DeviceManager) -> None:
         self.settings = settings
+        self._dc_sources = (
+            settings.dc_source,
+            *(q.dc_bias.source for q in settings.qubits.ordered()),
+        )
+        self._dc_devices = tuple(
+            devices.get_all_devices().get(dc.name) for dc in self._dc_sources
+        )
         self.sources = tuple(
             SingleFluxoniumSource(
-                _single_settings(settings, index, index, 0),
+                _single_settings(
+                    settings,
+                    index,
+                    index,
+                    0,
+                    _reduced_flux(
+                        qubit.dc_bias,
+                        settings.dc_source.initial,
+                        qubit.dc_bias.source.initial,
+                    ),
+                ),
                 devices,
                 readout_kind="mux",
                 engine=Engine(
@@ -118,39 +152,74 @@ class SixFluxoniumSource:
                 ),
                 readout_cache_bytes=settings.numerics.adc_cache_bytes,
             )
-            for index in range(6)
+            for index, qubit in enumerate(settings.qubits.ordered())
         )
         self._closed = False
         self._identity = sha256(settings.model_dump_json().encode()).hexdigest()
 
     def snapshot(self) -> EnvironmentSnapshot:
-        """Capture the one live A value with full settings identity, without reset.
+        """Capture seven live A values with full settings identity, without reset.
 
-        Invalid current/unit or a missing driver raises ValueError. A closed
-        source raises RuntimeError. Each qubit converts this current using its
-        own offset_phi0 and flux_per_unit during physical preparation.
+        Return coil_bias followed by Q1_bias..Q6_bias, retaining native currents,
+        not combined flux. Invalid current/unit or a missing driver raises
+        ValueError. A closed source raises RuntimeError. Registry removal or
+        renaming does not replace bound drivers or restore startup currents.
         """
         if self._closed:
             raise RuntimeError("six-fluxonium source is closed")
-        captured = self.sources[0].snapshot()
-        return EnvironmentSnapshot("six-fluxonium-v1", self._identity, captured.values)
+        values = []
+        for dc, device in zip(self._dc_sources, self._dc_devices, strict=True):
+            if device is None:
+                raise ValueError(f"{dc.name}: missing startup device")
+            info = device.get_info()
+            if not isinstance(info, FakeDeviceInfo) or info.value_unit != dc.unit:
+                raise ValueError(f"{dc.name}.unit: fixed source unit mismatch")
+            values.append((dc.name, info.value))
+        snapshot = EnvironmentSnapshot(
+            "six-fluxonium-v1", self._identity, tuple(values)
+        )
+        self._currents(snapshot)
+        return snapshot
+
+    def _currents(self, snapshot: EnvironmentSnapshot) -> dict[str, float]:
+        currents = dict(snapshot.values)
+        if len(snapshot.values) != 7 or set(currents) != {
+            dc.name for dc in self._dc_sources
+        }:
+            raise ValueError(
+                "DC snapshot requires exactly seven matching current sources"
+            )
+        for dc in self._dc_sources:
+            value = currents[dc.name]
+            if not isfinite(value) or not dc.limits[0] <= value <= dc.limits[1]:
+                raise ValueError(f"{dc.name}.value: nonfinite or outside source limits")
+        return currents
 
     def _prepare_group(
         self,
         request: AcquireRequest,
-        snapshot: EnvironmentSnapshot,
+        currents: dict[str, float],
         group: RoutedGroup,
         *,
         cancel: CancellationQuery | None = None,
     ) -> tuple[NDArray[np.float64], tuple[ChannelReadout, ...], PreparedRawShots]:
         source = self.sources[group.cavity]
+        bias = self.settings.qubits.ordered()[group.cavity].dc_bias
+        flux = _reduced_flux(
+            bias, currents[self.settings.dc_source.name], currents[bias.source.name]
+        )
         channels = []
         batches: dict[int, ReadoutBatch] = {}
         populations = None
         count = len(group.points)
         for channel in group.channels:
             source.settings = _single_settings(
-                self.settings, group.cavity, channel, group.gen_ch
+                self.settings, group.cavity, channel, group.gen_ch, flux
+            )
+            snapshot = EnvironmentSnapshot(
+                "single-fluxonium-v1",
+                source.identity,
+                ((bias.source.name, currents[bias.source.name]),),
             )
             subrequest = replace(
                 request,
@@ -204,12 +273,13 @@ class SixFluxoniumSource:
             raise ValueError("round index must be a nonnegative integer")
         if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
             raise ValueError("six-fluxonium RNG version mismatch")
+        currents = self._currents(snapshot)
         groups = route_request(self.settings, request)
         rounds = []
         traces: dict[int, NDArray[np.float64]] = {}
         for group in groups:
             populations, channels, raw = self._prepare_group(
-                request, snapshot, group, cancel=round_request.cancel
+                request, currents, group, cancel=round_request.cancel
             )
             # Cantor-pair the fixed-radix acquire/cavity identity with the
             # partition's first point, independent of request size. ADCs within
@@ -290,10 +360,10 @@ class SixFluxoniumSource:
 def six_fluxonium(
     configuration: SixFluxoniumSettings | str | Path,
 ) -> SimulationEnvironment:
-    """Build one global DC FakeDevice, six independent models and a bound SoC.
+    """Build seven DC FakeDevices, six independent models and a bound SoC.
 
     configuration is validated material or a YAML path relative to cwd. Startup
-    applies global initial current once. No hardware or numerical warmup runs.
+    applies each initial current once. No hardware or numerical warmup runs.
     The host owns devices after return and calls close_backend after work drains.
     Mux gen0 binds ADC0..5; pulse gen13 binds ADC6. Microwave gens1..6 bind those
     ADCs for transport admission; numeric routing keeps each control on its own
@@ -309,19 +379,22 @@ def six_fluxonium(
     devices = DeviceManager()
     source = None
     try:
-        dc = settings.dc_source
-        device = FakeDevice(address=dc.name, fast_mode=True, value_unit=dc.unit)
-        devices.register_device(dc.name, device)
-        device.setup(
-            FakeDeviceInfo(
-                address=device.address,
-                value_unit=dc.unit,
-                output="on",
-                value=dc.initial,
-                rampstep=dc.ramp_step,
-            ),
-            progress=False,
-        )
+        for dc in (
+            settings.dc_source,
+            *(q.dc_bias.source for q in settings.qubits.ordered()),
+        ):
+            device = FakeDevice(address=dc.name, fast_mode=True, value_unit=dc.unit)
+            devices.register_device(dc.name, device)
+            device.setup(
+                FakeDeviceInfo(
+                    address=device.address,
+                    value_unit=dc.unit,
+                    output="on",
+                    value=dc.initial,
+                    rampstep=dc.ramp_step,
+                ),
+                progress=False,
+            )
         source = SixFluxoniumSource(settings, devices)
         soccfg = make_mux_mock_soccfg(14, 7, gen_ch=0, ro_chs=tuple(range(6)))
         binding = SimulationBinding(
@@ -343,7 +416,7 @@ def six_fluxonium(
             soc,
             soccfg,
             devices,
-            "Six independent fluxonium cavities with one global DC source",
+            "Six independent fluxonium cavities with six local DC sources and one coil",
             close_backend=source.close,
         )
     except Exception as error:

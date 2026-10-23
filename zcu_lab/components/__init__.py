@@ -17,13 +17,14 @@ from .base import (
 )
 from .fluxonium import QubitSchema
 from .jpa import JpaSchema
-from .mux import MuxGroupSchema, MuxWiringSchema
+from .mux import CoilFluxCalibration, MuxGroupSchema, MuxWiringSchema
 from .qubit import QubitBaseSchema, QubitWiringSchema
 from .resonator import ResonatorSchema
 from .transmon import TransmonSchema
 
 __all__ = [
     "BuiltinComponent",
+    "CoilFluxCalibration",
     "Duration",
     "Energy",
     "Flux",

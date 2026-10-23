@@ -12,15 +12,16 @@ from zcu_tools.resources.entry import DestinationExistsError, load_entry_templat
 
 
 def startup(ctx: StartupContext) -> None:
-    """Open six-fluxonium-demo/initial and install mock SoC and global DC driver.
+    """Open six-fluxonium-demo/initial and install mock SoC and seven DC drivers.
 
     ctx is the GUI's typed startup capability on its background worker, after
     component/adapter registration. New entries use adjacent entry-template.yaml
     and seed point aliases once; existing entries reopen unchanged. Physical
     values come only from adjacent default.yaml. No hardware, acquire or numeric
     warmup runs during startup. The mock SoC evolves each qubit independently
-    on demand. All six qubits share flux_bias in A with per-qubit flux offsets
-    and periods. No fast-flux line is installed. Single-tone scans use pulse
+    on demand. Q1_bias..Q6_bias each affect only their own qubit. The shared
+    coil_bias affects all six. Both contributions use per-qubit offsets and
+    periods in A. No fast-flux line is installed. Single-tone scans use pulse
     gen13/ADC6; mux uses gen0/ADC0..5.
 
     Successfully registered drivers become GUI-owned. The on-close callback

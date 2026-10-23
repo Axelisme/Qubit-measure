@@ -49,7 +49,7 @@ or disconnect the session.
 
 `ExpTabWidget` owns the left forms and ledgers, commands, subscriptions,
 progress and splitter width. Its concrete owned child `ExperimentFigureArea`
-owns the right-side canvases, named figure models and caches, interactive
+owns the right-side canvases, figure paging, named figure models and caches, interactive
 presentation and Data gallery. It keeps selection, signal blocking and canvas
 cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
@@ -58,10 +58,13 @@ Figure/container methods on the tab delegate to this owner. Results and Save
 policy stay with their existing owners.
 
 Run, Analysis, Post-Analysis and Workflow share a two-column tiled layout with
-up to four figures per page. Larger sets show page controls instead of a named
-selector. `named_figure_presentation` keeps the hidden name model and current tile
-in sync for experiment and workflow panes. Data groups raster previews by source
-stage and applies the same paging rule within each group. The
+up to four figures per page. Larger sets show Previous page and Next page controls
+with an i / N label instead of a named selector. `named_figure_presentation` keeps
+the hidden name model and current tile in sync for experiment and workflow panes.
+Changing pages selects its first figure; clicking a canvas tile selects that
+figure for screenshots and current-figure reads. Re-presenting the same collection
+retains the page and current figure. Data groups raster previews by source stage
+and applies the same paging rule within each group. The
 app-local plot host passes the operation's original named collection through the
 render-host port after canvas attachment. It does not rename figures, copy their
 collection or change FigureContainer membership. Clearing a pane retires its

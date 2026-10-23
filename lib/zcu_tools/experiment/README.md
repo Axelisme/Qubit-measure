@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-23，Six-fluxonium composition
+**Last updated:** 2026-10-23，Six-fluxonium local lines and coil
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -63,7 +63,8 @@ traces. Hosts can call the optional `SimulationEnvironment.close_backend` after
 acquisition drains; device cleanup remains separate.
 
 [`six_fluxonium`](six_fluxonium/README.md) composes six independent single-cavity
-sources with one global DC driver. Mux gen0/ADC0..5 and pulse gen13/ADC6 use
+sources with six local DC drivers and one shared coil. Each circuit uses the sum
+of its local and coil reduced flux. Mux gen0/ADC0..5 and pulse gen13/ADC6 use
 per-point nearest-bare-cavity routing. Sparse integrated histograms preserve
 marginal counts without building a joint model; raw shots retain physical ADC
 sources independently of backend lifetime.

@@ -80,6 +80,23 @@ Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux 
 九個 FTF Forms 有 readout slot 時同樣引用 library。八張缺 slot 時提供 blank mux 範本，rb 缺 slot 時保持 Invalid。
 操作員必須確認通道與功率；範本不是硬體安全預設。
 
+## Mux flux maps
+
+`mux/onetone_flux_global` 與 `mux/twotone_flux_global` 掃 group 的 coil source。
+`mux/onetone_flux_local` 與 `mux/twotone_flux_local` 同步掃各 participant 的局部 DC 線。
+外層以軟體設值並等待 settle，內層重用既有 onetone host sweep 或 twotone hardware sweep。
+Local 每 tone 有自己的 Start／Stop，共用 `flux_expts`。Global 使用一個 `flux` 範圍。
+四份 cfg 與 native 保存形狀都是 flat：`modules`、`reps`、`rounds`、`initial_delay`、`relax_delay` 在 top-level。
+Onetone 的 `frequency.df` 是共用 MHz offset；twotone 的 `frequency.tones` 保存各 Q 的 drive 與 MHz 範圍，
+`frequency.expts` 是共用硬體點數。四張表單依 participants、tones、modules、frequency／DC scan、averaging、timing 排列。
+Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Reset／Refresh 的差異。
+`participants` 保存 Q 名與執行順序，tone index 始終是完整 group 的原始序號。
+Stop 保留已完成的 flux 點，未完成點留 NaN。Analyze 每次用原始 `tone` index 選一個 participant，
+沿既有 half／integer line picker 校準。Local 提各 Q 的 flux scalar，global 提 group `coil_flux` 中該 Q 的校準，
+不覆蓋其他 Q。目的地只取 Run／Load capture。四個 guide 列出初值與操作路徑。
+Native 保存 tone-major 三維 IQ 與各 tone 的 DC／MHz 座標。Labber 不支援這種三維獨立 grid，
+Save 以各 output 的 status 回報其失敗，不影響成功保存的 native 資料。
+
 ## Mux qubit numeric cores
 
 `mux/twotone_spectrum` 與 `mux/amp_rabi` 提供可 import 的 typed cfg、public `run`、分析與 native persistence。

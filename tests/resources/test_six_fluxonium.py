@@ -12,8 +12,10 @@ from ._six_fluxonium_data import six_document
 def parse(document):
     try:
         return api.parse_six_fluxonium(document)
-    except NotImplementedError:
-        pytest.fail("six-fluxonium parser must validate complete independent material")
+    except (NotImplementedError, ValueError) as error:
+        pytest.fail(
+            f"six-fluxonium parser must accept independent local and coil material: {error}"
+        )
 
 
 def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
@@ -54,6 +56,7 @@ def test_cache_budgets_reject_noninteger_or_negative_bytes(field, value):
         ("drive", "drive_line.gen_ch"),
         ("adc", "readout.adc.ro_ch"),
         ("source", "dc_source.name"),
+        ("local_source", "qubits.Q2.dc_bias.source.name"),
         ("mux", "mux_gen_ch"),
         ("pulse", "pulse_gen_ch"),
         ("pulse_adc", "pulse_ro_ch"),
@@ -81,11 +84,31 @@ def test_invalid_topology_or_material_is_rejected(defect, diagnostic):
         document["dc_source"]["name"] = "other"
     else:
         q = document["qubits"]["Q2"]
-        if defect == "drive":
+        if defect == "local_source":
+            q["dc_bias"]["source"]["name"] = "Q1_bias"
+        elif defect == "drive":
             q["drive_line"]["gen_ch"] = 12
         elif defect == "adc":
             q["readout"]["adc"]["ro_ch"] = 0
         else:
             q["readout"]["resonator"]["frequency_ghz"] = float("nan")
     with pytest.raises(ValueError, match=diagnostic):
-        parse(document)
+        api.parse_six_fluxonium(document)
+
+
+@pytest.mark.parametrize("field", ["offset", "period", "coil_offset", "coil_period"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), True, "0.1"])
+def test_current_calibrations_require_finite_numeric_values(field, value):
+    document = six_document()
+    document["qubits"]["Q3"]["dc_bias"][field] = value
+    reason = "finite number" if isinstance(value, float) else "valid number"
+    with pytest.raises(ValueError, match=rf"qubits.Q3.dc_bias.{field}: [^;]*{reason}"):
+        api.parse_six_fluxonium(document)
+
+
+@pytest.mark.parametrize("field", ["period", "coil_period"])
+def test_current_calibrations_reject_zero_period(field):
+    document = six_document()
+    document["qubits"]["Q3"]["dc_bias"][field] = 0.0
+    with pytest.raises(ValueError, match=rf"qubits.Q3.dc_bias.{field}: [^;]*nonzero"):
+        api.parse_six_fluxonium(document)

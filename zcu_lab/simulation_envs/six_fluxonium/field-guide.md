@@ -6,9 +6,10 @@
 
 `default.yaml` uses `zcu.six-fluxonium` version 1.
 `entry-template.yaml` uses `zcu.entry-template` version 1.0.
-The template creates Q1 through Q6, R1 through R6, one shared `flux_bias`
-current source and group `MG123456`. Each qubit references `flux_bias`.
-Alias `flux_dev` binds directly to `flux_bias`. Tone i follows the group's
+The template creates Q1 through Q6, R1 through R6, local current sources
+`Q1_bias` through `Q6_bias`, shared `coil_bias` and group `MG123456`.
+Each qubit references its own local source. The group references `coil_bias`.
+Alias `flux_dev` binds to `$qubit.flux_source`. Tone i follows the group's
 ordered resonator list R1 through R6 and its corresponding qubit list Q1 through Q6.
 Group ADC wiring follows the same order. Resonator single-tone wiring is a
 separate field, not a source from which the mux form infers ADCs.
@@ -21,12 +22,13 @@ separate field, not a source from which the mux form infers ADCs.
 
 The top-level settings declare `mux_gen_ch: 0`, `pulse_gen_ch: 13` and
 `pulse_ro_ch: 6`. Top-level `dc_source` holds the shared device's name, unit,
-limits, initial current and ramp step. Each qubit's `dc_bias` contains only
-`offset_phi0` and `flux_per_unit`, not a per-qubit source. Each nested Q1 through
-Q6 value keeps `format`, `version`, `chip`, `drive_line`, `readout` and `numerics`.
-Its readout generator is 0 and its ADC is its mux tone index.
-The schema rejects per-qubit sources and `flux_line` sections. There is no
-legacy schema fallback. Generators 7 through 12 are not configured.
+limits, initial current and ramp step. Each qubit's `dc_bias` contains its local
+`source` settings and `offset`, `period`, `coil_offset`, `coil_period` in A.
+Each nested Q1 through Q6 value keeps `format`, `version`, `chip`, `drive_line`,
+`readout` and `numerics`. Its readout generator is 0 and its ADC is its mux tone
+index. The schema requires source names `coil_bias` and matching `Qn_bias`.
+It rejects zero periods, nonfinite calibrations and `flux_line` sections.
+Old `offset_phi0`/`flux_per_unit` six-system documents have no schema fallback. Generators 7 through 12 are not configured.
 Each resonator component instead declares
 pulse wiring `ch: 13`, `ro_ch: 6`. `onetone/range_find` uses that pulse route.
 
@@ -216,22 +218,32 @@ to the same live DC current.
 
 ## DC and control units
 
-The single global DC FakeDevice `flux_bias` has unit A, limits -0.02 to 0.02 A,
-initial current 0 A and ramp step 1e-6 A. Each qubit's reduced DC flux equals
-`offset_phi0 + flux_per_unit * current_A`. A current change therefore moves all
-six operating points, with different offsets and periods. Startup applies the
-initial current once. Acquisition reads the live device value.
+The seven DC FakeDevices `Q1_bias` through `Q6_bias` and `coil_bias` use A.
+Each has limits -0.02 to 0.02 A, initial current 0 A and ramp step 1e-6 A.
+Startup applies each initial current once. Each round captures all seven live
+currents, retaining those raw A values in its detached snapshot.
 
-| Qubit | offset_phi0 | flux_per_unit, Phi0/A | Current per period, mA |
-| --- | ---: | ---: | ---: |
-| Q1 | 0.50 | 100 | 10 |
-| Q2 | 0.45 | 80 | 12.5 |
-| Q3 | 0.55 | 120 | 8.333333 |
-| Q4 | 0.40 | 90 | 11.111111 |
-| Q5 | 0.60 | 110 | 9.090909 |
-| Q6 | 0.50 | 70 | 14.285714 |
+For qubit i, reduced flux equals
+`(I_coil - coil_offset_i)/coil_period_i + (I_local_i - offset_i)/period_i`.
+Changing `Qn_bias` moves only Qn's operating point. Changing `coil_bias` moves
+all six. The two contributions add, with no local-line crosstalk. Each offset
+is a zero-flux current. Each period is a signed nonzero current per Phi0.
+Negative periods reverse flux direction.
 
-The period is `1 / flux_per_unit` A. The table rounds repeating decimals.
+| Qubit | Local offset, mA | Local period, mA | Coil offset, mA | Coil period, mA | Flux at zero currents, Phi0 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Q1 | -1.0 | 2.0 | 0 | 10 | 0.50 |
+| Q2 | -1.125 | 2.5 | 0 | 12.5 | 0.45 |
+| Q3 | -0.99 | 1.8 | 0 | 8.333333 | 0.55 |
+| Q4 | -0.88 | 2.2 | 0 | 11.111111 | 0.40 |
+| Q5 | -1.68 | 2.8 | 0 | 9.090909 | 0.60 |
+| Q6 | -1.5 | 3.0 | 0 | 14.285714 | 0.50 |
+
+The table rounds repeating decimals. YAML stores these coefficients in A.
+For Q1, local current 0.1 mA and coil current 1 mA give reduced flux 0.65.
+Each single-circuit backend receives the summed fixed flux. It does not read
+other qubits' local lines. Calibrations written to an entry do not change these
+physical settings.
 Microwave calibration multiplies full charge n in GHz per normalized DAC gain.
 It does not normalize by n01. This environment has no fast-flux pulse calibration
 or filter. The single-fluxonium [source-lines guide](../single_fluxonium/field-guide.md#source-lines)
@@ -286,7 +298,9 @@ streams. Startup performs no numerical warmup.
 The 2026-10-23 offscreen walkthrough loaded this environment's `startup.py`
 into the measure GUI with the production experiment catalog and backend.
 The window showed `six-fluxonium-demo / initial` and `Startup complete`.
-The device list contained only the connected `flux_bias` FakeDevice.
+This earlier acceptance run used the former single-global-line topology.
+Its device list contained only the connected `flux_bias` FakeDevice. The current
+topology installs seven devices; the timings below are not a seven-device recheck.
 No hardware connection or remote-control socket was opened.
 A separate call to the public launcher `main(argv)` loaded the same script,
 showed the window, then closed through GUI shutdown and returned exit code 0.

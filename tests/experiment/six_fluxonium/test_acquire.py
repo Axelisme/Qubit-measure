@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.dmem import LoadWord
@@ -15,6 +16,7 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound, SimulationBinding
 from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
@@ -31,9 +33,10 @@ def environment(document=None):
         env = six_fluxonium(
             parse_six_fluxonium(six_document() if document is None else document)
         )
-    except NotImplementedError:
+    except (NotImplementedError, ValueError) as error:
         pytest.fail(
-            "six independent physical models must assemble a working acquire environment"
+            "six independent physical models must accept local and coil material "
+            f"and assemble a working acquire environment: {error}"
         )
     try:
         yield env
@@ -192,10 +195,10 @@ def test_decimated_channels_keep_declared_order_and_companion_sums():
             )
 
 
-def test_drive_affects_only_its_own_cavity_with_global_dc_live_refresh():
+def test_drive_affects_only_its_own_cavity():
     document = six_document()
     for q in document["qubits"].values():
-        q["dc_bias"]["offset_phi0"] = 0.5
+        q["dc_bias"]["offset"] = -0.35 * q["dc_bias"]["period"]
         q["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
     with environment(document) as env:
         baseline = mux_program(
@@ -215,10 +218,93 @@ def test_drive_affects_only_its_own_cavity_with_global_dc_live_refresh():
         )
         assert changes[2] > 0.1
         assert np.max(changes[[0, 1, 3, 4, 5]]) < 0.1
-        source = env.create_device("FakeDevice", "flux_bias")
-        assert env.soc.binding.capture_snapshot().values == (("flux_bias", 0.0),)
-        source.set_value(0.2)
-        assert env.soc.binding.capture_snapshot().values == (("flux_bias", 0.2),)
+
+
+@pytest.mark.parametrize("target", range(6))
+def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(target):
+    document = six_document()
+    for qubit in document["qubits"].values():
+        qubit["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
+    try:
+        settings = parse_six_fluxonium(document)
+    except ValueError as error:
+        pytest.fail(f"six-cavity material must accept local and coil DC lines: {error}")
+    bias = settings.qubits.ordered()[target].dc_bias
+    with environment(document) as env:
+        local = env.create_device("FakeDevice", f"Q{target + 1}_bias")
+        coil = env.create_device("FakeDevice", "coil_bias")
+        initial = env.soc.binding.capture_snapshot()
+        assert dict(initial.values) == {
+            "coil_bias": 0.0,
+            **{f"Q{i}_bias": 0.0 for i in range(1, 7)},
+        }
+
+        mux_program(env, order=tuple(range(6)), cavities=tuple(range(6))).acquire(
+            env.soc, progress=False
+        )
+        request = request_of(env)
+        samples = {window.channel: window.samples for window in request.readouts}
+
+        def acquire(binding: SimulationBinding):
+            # Keep the complete RNG identity fixed, including rounding noise.
+            result = binding.execute(
+                RoundRequest(request, binding.capture_snapshot(), 0)
+            )
+            if not isinstance(result, IntegratedRound):
+                raise AssertionError(
+                    "integrated request must return integrated statistics"
+                )
+            return np.asarray(
+                [
+                    channel.sums / (request.reps * samples[channel.channel])
+                    for channel in result.statistics.channels
+                ]
+            )
+
+        baseline = acquire(env.soc.binding)
+        local.set_value(0.13 * bias.period)
+        local_only = acquire(env.soc.binding)
+        assert np.linalg.norm(local_only[target] - baseline[target]) > 1e-5
+        others = [i for i in range(6) if i != target]
+        np.testing.assert_allclose(local_only[others], baseline[others], atol=1e-10)
+
+        local.set_value(0)
+        coil.set_value(0.2)
+        coil_only = acquire(env.soc.binding)
+        for i in range(6):
+            assert np.linalg.norm(coil_only[i] - baseline[i]) > 1e-5
+
+        # The opposite local reduced flux cancels coil on this circuit only.
+        compensation = -0.2 * bias.period / bias.coil_period
+        local.set_value(compensation)
+        combined = acquire(env.soc.binding)
+        np.testing.assert_allclose(combined[target], baseline[target], atol=1e-10)
+        np.testing.assert_allclose(combined[others], coil_only[others], atol=1e-10)
+        assert dict(env.soc.binding.capture_snapshot().values) == {
+            "coil_bias": 0.2,
+            **{
+                f"Q{i}_bias": compensation if i == target + 1 else 0.0
+                for i in range(1, 7)
+            },
+        }
+        assert all(value == 0.0 for _, value in initial.values)
+
+    reference_document = six_document()
+    # Local offset contributes 0.25+0.01*i and coil offset contributes 0.15.
+    # Adding 0.13 local flux therefore gives 0.53..0.58 on the selected circuit.
+    baseline_fluxes = (0.40, 0.41, 0.42, 0.43, 0.44, 0.45)
+    shifted_fluxes = (0.53, 0.54, 0.55, 0.56, 0.57, 0.58)
+    for i, qubit in enumerate(reference_document["qubits"].values()):
+        qubit["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
+        ref_bias = qubit["dc_bias"]
+        ref_bias["offset"] = 0.0
+        ref_bias["coil_offset"] = 0.0
+        expected_flux = shifted_fluxes[i] if i == target else baseline_fluxes[i]
+        ref_bias["source"]["initial"] = expected_flux * ref_bias["period"]
+    with environment(reference_document) as reference:
+        np.testing.assert_allclose(
+            acquire(reference.soc.binding), local_only, atol=1e-10
+        )
 
 
 @pytest.mark.parametrize("output", ["integrated", "deferred_raw", "decimated"])

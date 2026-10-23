@@ -10,7 +10,7 @@ components:
     EL: 1.0 # GHz; 示意，量測後填
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R1
-    flux_source: flux_bias
+    flux_source: Q1_bias
     flux_unit: A
     wiring:
       ch: 1
@@ -28,7 +28,7 @@ components:
     EL: 0.8 # GHz; 示意，量測後填
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R2
-    flux_source: flux_bias
+    flux_source: Q2_bias
     flux_unit: A
     wiring:
       ch: 2
@@ -46,7 +46,7 @@ components:
     EL: 0.6 # GHz; 示意，量測後填
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R3
-    flux_source: flux_bias
+    flux_source: Q3_bias
     flux_unit: A
     wiring:
       ch: 3
@@ -64,7 +64,7 @@ components:
     EL: 1.2 # GHz; 示意，量測後填
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R4
-    flux_source: flux_bias
+    flux_source: Q4_bias
     flux_unit: A
     wiring:
       ch: 4
@@ -82,7 +82,7 @@ components:
     EL: 0.5 # GHz; 示意，量測後填
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R5
-    flux_source: flux_bias
+    flux_source: Q5_bias
     flux_unit: A
     wiring:
       ch: 5
@@ -100,7 +100,7 @@ components:
     EL: 0.9 # GHz; 示意，量測後填
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R6
-    flux_source: flux_bias
+    flux_source: Q6_bias
     flux_unit: A
     wiring:
       ch: 6
@@ -111,7 +111,19 @@ components:
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
       ro_ch: 6
-  flux_bias:
+  Q1_bias:
+    kind: device/current_source
+  Q2_bias:
+    kind: device/current_source
+  Q3_bias:
+    kind: device/current_source
+  Q4_bias:
+    kind: device/current_source
+  Q5_bias:
+    kind: device/current_source
+  Q6_bias:
+    kind: device/current_source
+  coil_bias:
     kind: device/current_source
   MG123456:
     kind: group/mux
@@ -119,6 +131,8 @@ components:
     time_of_fly: null # us; measure the mux route separately from pulse routes.
     resonators: [R1, R2, R3, R4, R5, R6]
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
+    flux_source: coil_bias
+    coil_flux: {} # Calibrations keyed by qubit name, filled after measurement.
     wiring:
       gen_ch: 0
       ro_ch: [0, 1, 2, 3, 4, 5]
@@ -129,4 +143,4 @@ aliases:
     mux: MG123456
     qubit: Q1
     resonator: $qubit.resonator
-    flux_dev: flux_bias
+    flux_dev: $qubit.flux_source
