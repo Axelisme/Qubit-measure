@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Configure the scan
 
 Pi pulse counts accepts Log or List input. Log uses a maximum count and requested point count. It starts at 1 and retains the maximum count. It rounds geometrically spaced values to integers and removes duplicates. A maximum greater than 1 requires at least two requested points. A maximum of 1 accepts one point and returns `[1]`. Use List for any other single count. The resulting list may have fewer points than requested. List accepts a nonempty JSON array of positive integers, such as `[1, 2, 4, 8]`. Zero, negative counts and fractional counts are invalid.

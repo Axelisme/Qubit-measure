@@ -1,4 +1,7 @@
-"""Measure Rabi oscillations versus pulse length to calibrate rotation durations."""
+"""Measure Rabi oscillations versus pulse length to calibrate rotation durations.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 

@@ -36,11 +36,41 @@ from .analysis import ConditionalPhaseAnalysis, analyze_phase
 class PhaseModules(ConfigBase):
     """Calibrated preparation, tomography and complete mux inputs."""
 
-    x180_f1: PulseCfg
-    x180_f2: PulseCfg
-    x90_f1: PulseCfg
-    x90_f2: PulseCfg
-    readout: MuxReadoutCfg
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x90_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x90_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+        ),
+    ]
 
 
 class ConditionalPhaseCfg(ProgramV2Cfg, ExpCfgModel):
@@ -55,14 +85,39 @@ class ConditionalPhaseCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: PhaseModules
     roles: JointRoles
-    drive: DualLineCfg
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+        ),
+    ]
     target: Literal["f1", "f2"] = "f1"
-    frequency: Annotated[SweepCfg, FieldMeta(unit="MHz", label="Common CZ frequency")]
+    frequency: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Frequency",
+            description="填入 common CZ frequency 起訖值，單位 MHz。先用 conditional spectroscopy／chevron 定位雙線 CZ pulse。",
+        ),
+    ]
     gate_counts: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
         default_factory=lambda: [1, 3, 5], min_length=1
     )
-    f1_centers: GECenters | None = None
-    f2_centers: GECenters | None = None
+    f1_centers: Annotated[
+        GECenters | None,
+        FieldMeta(
+            label="F1 GE centers",
+            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ] = None
+    f2_centers: Annotated[
+        GECenters | None,
+        FieldMeta(
+            label="F2 GE centers",
+            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ] = None
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

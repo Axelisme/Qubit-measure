@@ -26,6 +26,20 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         IdleZZCfg,
+        field_order=(
+            "roles",
+            "modules",
+            "target",
+            "dc_device",
+            "dc_unit",
+            "detune",
+            "delay",
+            "dc_values",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "reps": 1000,
             "rounds": 10,

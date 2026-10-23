@@ -53,8 +53,8 @@ class PowerDepModuleCfg(ConfigBase):
 
 
 class PowerDepSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
 def _positive_snr_or_none(value: float | None) -> float | None:

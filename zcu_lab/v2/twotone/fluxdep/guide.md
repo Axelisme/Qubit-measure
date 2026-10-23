@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Parameter sources
 
 Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.05 us from the sources captured at Open/Reset. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Open and Reset leave both frequency endpoints blank and required, with 1001 points. Enter a reviewed drive-frequency window before Run. Flux spans 10% beyond qubit.flux_int and qubit.flux_half over 101 points; missing calibration leaves its endpoints Invalid. Both sweeps remain editable. Existing edits persist until Reset restores these starting values.
@@ -19,3 +21,21 @@ After the run, the user drags two lines on the 2D map to mark the half-flux and 
 ## Recommended
 
 Use after onetone/flux_dep has established the flux period and twotone/freq has found 'qubit.freq'. Calibrated readout and a verified qubit-drive window are prerequisites; otherwise the arc is usually invisible. Default sweep: flux has 101 points from 1.1 * qubit.flux_int − 0.1 * qubit.flux_half to 1.1 * qubit.flux_half − 0.1 * qubit.flux_int. Frequency has 1001 points and blank endpoints for the operator to fill. For a later model survey use a wide flux range and a broad frequency window at moderate drive gain to capture the full arc, then narrow both. For consecutive flux sweeps, reverse the sweep direction (swap start/stop) on the next run so the flux source need not ramp back across the full range first. Inspect the 2D map with gui_tab_get_figure (subtab_id='run'). Confirm 'flux_dev' points at a connected device before running.
+
+## MCP recipe
+
+Use `twotone_flux_dep` with required `center_mhz`, `span_mhz` and `freq_points`
+for the qubit-drive scan. The endpoints are center minus/plus half the full span.
+Also supply `flux_device`, exact cached `flux_unit`, two distinct native
+`flux_range` endpoints and `flux_points`. No coordinate conversion occurs.
+The recipe reads the cached device snapshot but does not connect the device.
+`target` overrides the qubit alias for this Reset. `reuse_tab_id` resets an idle
+matching tab. `readout_ref` selects a captured readout, and `gain` overrides the
+drive amplitude. Null keeps the Form values. `reps` and `rounds` are optional.
+
+After Run, `analyze(interactive=True)` hands the operation to the flux picker.
+Move the half/integer lines and finish with Done. The recipe then asks before
+applying selected qubit flux calibration items. Skip writes nothing.
+The report contains `flux_half`, `flux_integer`, `flux_period` and
+`writeback_applied`. Expected analysis failure returns `analysis_failure`
+without writeback. Save retains raw data and completed analysis artifacts.
