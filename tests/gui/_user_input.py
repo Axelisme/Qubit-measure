@@ -186,6 +186,18 @@ class ComponentDriver:
             parent = parent.parentWidget()
         return False
 
+    def resize_window(self, width: int, height: int) -> None:
+        """Resize the shown window in logical pixels and flush its Qt layout.
+
+        Hidden or modal-blocked windows are not resized. Nonpositive dimensions
+        raise ValueError. Qt may enforce the window's minimum size.
+        """
+        if width <= 0 or height <= 0:
+            raise ValueError("Window dimensions must be positive")
+        if self._can_interact(self._window):
+            self._window.resize(width, height)
+        QApplication.processEvents()
+
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.
 
