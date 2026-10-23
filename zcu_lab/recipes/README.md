@@ -13,7 +13,9 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`，只加實驗欄位，逐欄寫單位、預設與 null 政策。
-`RecipeInputs` 提供 target、reuse_tab_id、library、inline、overrides。
+`RecipeInputs` 提供 target、reuse_tab_id 與 overrides，不提供通用 library／inline 輸入。
+可省略的實驗欄位宣告為 `T | None | Keep = KEEP`。省略保留 Form 值，明填 null 原樣交 owner。
+KEEP 是 Python 省略標記，不是 JSON 值。Schema 隱藏 Keep 分支與 KEEP default，欄位不列 required。
 Mux 的 participants 使用完整 tones 清單的原始 index，逐 tone 範圍清單保留原始順序，見下方 mux guide。
 框架從這個 model 產生 MCP JSON schema，不另維護手寫 schema。
 Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。
@@ -22,35 +24,56 @@ Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。
 各模組的 `DEFINITION` 指向裝飾後的宣告。組合根把 `RECIPES` 注入框架。
 Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須重啟 MCP server。
 
-`helpers.py` 保留既有 frequency／flux 選源、範圍與裝置單位政策。
-非 mux helper 回傳具名計算結果或 FieldEdit，不提交半套 cfg。
-Recipe 明寫 selector 的選取，再把計算結果交最後一批 apply_inputs。
-數字回報使用 lib 的 report_number，不改單位或精度。
-`mux_helpers.py` 擁有 mux 的 start/stop 範圍輸入、完整 tone 範圍的 FieldEdit 組裝與 tone report 共用欄位。
-它們不是獨立 recipe。參數推導不放進 framework。
+掃描端點、flux 範圍與裝置單位檢查直接寫在 recipe 主體，不另設選源 helper。
+數字回報使用 lib 的 `report_number`，不改單位或精度。
+`mux_helpers.py` 只共用 tone 範圍輸入與報告欄位，不組裝 Form edits。
+`mux_flux_helpers.py` 共用四個 flux recipe 的輸入、報告與逐 Q 分析 updates。
+Updates helper 只把完整 tones 的原始位置與 Q 名對應到分析參數，不改量測設定或選來源。
+每個 Q 都明送 `flux_half`／`flux_int`，未指定的線送 null，讓 owner 使用該 Q 的 Run capture。
+這是避免沿用上一個 Q 顯式線的 reset 指令，不是把所有省略欄位轉成 null。
 
 ## 作者可呼叫的操作
 
-`session.open_recipe_tab(adapter, inputs, target_alias="qubit")` 開啟或 Reset 非 mux tab。
-Range find 使用 target_alias="resonator"。`tab.select_sources(inputs)` 先選 library 再複製 inline。
-來源選好後可插入自己的步驟，最後用 `tab.apply_inputs(inputs, values, edits=...)`。
-它依序處理非 None values、保留來源標記的具名 edits、inputs.overrides。
-同一 exact path 取最後一個非 None 值，只驗一次完整候選；祖先與子路徑重疊仍整批拒絕。
-不需要中途步驟時用 `session.prepare_tab(..., values=...)`，它不 Run。
-既有 `session.open_tab(adapter, aliases=..., reuse=...)` 仍可直接使用。
-Alias override 只供這次固定 capture，不更改全域 aliases 或 GUI focus。
-`session.context.read(source_path)` 讀 session 的值，不需要先開 tab。
-`tab.read(path)` 則讀該 tab 已捕捉的 Form 來源。
+`session.open_tab(adapter, target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id)`
+開啟或 Reset tab。Range find 的 mapping key 是 `resonator`，mux 是 `mux`。
+Target mapping 的省略／KEEP／null 項目沿用全域 alias，只對這次 capture 生效。
+Reuse 是 idle matching tab ID，省略／KEEP／null 開新 tab。不改全域 aliases 或 GUI focus。
+`session.context.read(source_path)` 讀 session 值，不需要先開 tab。
+`tab.read_parameter(path, missing_ok=False)` 讀 tab 固定捕捉的參數。
+`session.device_unit(name)` 讀裝置快取的 flux 單位，不碰硬體或刷新快取。
+`tab.read(path)` 回 `FormField`，仍用 typed tuple，例如 `("tones", 2, "drive")`。
 
-Form 路徑是 tuple，字串指欄位，整數指完整清單中的原始位置。
-`tab.set`、`tab.select`、`tab.apply` 與 `tab.call` 同步完成。
-`set(path, None)` 保留 GUI input，不代表停用。
-準備模組用字串 `"off"` 明確停用，null 會被 inputs model 拒絕。
-缺少必要校準時，在 Run 前 raise `RecipeNeedsParameters`。
-`tab.apply` 一次提交完整有序 batch。Mux recipe 在最後一批傳 `require_valid=True`，
-owner 驗證完整候選 cfg 後才安裝。缺值回 needs_parameters 與全部 indexed path／理由，
-本批欄位與 Run 都不執行。先前開 tab、Reset、library 與 inline 操作不回滾。
-Lookback Form 隱藏 reset 與 init_pulse，兩個 recipe 輸入只接受 `"off"`，不存取其 selector。
+寫入使用非空 dotted string，例如 `"tones.2.drive.gain"`，索引指完整清單的原始位置。
+`tab.set(path, value)` 原樣替換欄位，不選來源、不自動 convert。
+`tab.select(path, option)` 使用 owner 的精確 option label 或 captured module key。
+單 kind 的 inline label 是 `"Inline"`，多 kind 是 `"Inline: <kind>"`。
+`tab.command(path, "to_inline")` 複製固定來源，保留原 module／waveform family。
+三者同步完成。Set／select 收到 KEEP 不發 mutation，None 原樣交 owner。
+Nullable selector 用 None 關閉，非 nullable 由 owner 拒絕，不用字串 `"off"`。
+
+明填 scalar 前先讀 selector.mode，只有 ref 才 command to_inline，已 inline 直接 set。
+巢狀 waveform 也按同一規則，不以固定 const 或 select Inline 作可寫前置。
+全部 scalar 省略時不切來源。來源壞掉不 fallback，讓 owner 回報路徑與原因。
+Center／span 必須成對提供或成對省略，缺一個就回 needs_parameters 指名另一欄。
+兩者省略不 set，不從現有 endpoints 或校準推算。Null 不參與算術，原樣交 owner。
+完整 tone 範圍清單必須與完整 tones 等長，缺少或多出的原始位置都要回報。
+
+`FieldEdit` 只含 dotted path 與 value。Value 與 set 同契約，object 與巢狀 list 保留內容，
+Expr 與具名 native model 也可用。Owner 驗證欄位 schema，selector 選項仍用 select。
+主體先設實驗值，再逐筆套 overrides，最後驗整份 Form／cfg：
+
+```python
+for edit in inputs.overrides:
+    tab.set(edit.path, edit.value)
+tab.check_ready()
+```
+
+Overrides 省略為空 list，不接受 null。重複路徑不去重，也不過濾 null。
+每次操作允許尚未 ready 的合法草稿，結構、來源與 readonly 錯誤立即拒絕。
+`check_ready` 唯讀、不 Run、不刷新 capture，缺值拋 `RecipeNeedsParameters` 並列全部 path／reason。
+先前成功編輯不回滾。Run admission 仍會再次驗證。
+Lookback 不提供 reset／init_pulse 輸入，也不存取這兩個隱藏 selector。
+Analysis updates 只濾 KEEP，明填 null 原樣交分析 owner。
 
 所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
 或靜態解析到 `zcu_lab` 內定義的 helper，定義可用 def 或 async def。
@@ -143,10 +166,10 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | MCP tool | Adapter | 掃描與回報 |
 | --- | --- | --- |
 | `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
-| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 只作 Analyze 命名，不進 acquisition cfg。省略、null 或空清單先回無名凹陷，不提案寫回。回覆每 dip 的可選 name、freq、depth 與 `identity_diagnostic`。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
+| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 只作 Analyze 命名，不進 acquisition cfg。省略保留分析名單，null 原樣交分析 owner，空清單做無名探索。只有明填非空名單才詢問寫回。回覆每 dip 的可選 name、freq、depth 與 `identity_diagnostic`。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
-三者依序 Run、Analyze、ask_writeback，只接受回答選定的候選，最後 Save。
+三者先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 四個 `mux_{onetone,twotone}_flux_{global,local}` recipe 共用 flat cfg 路徑，
 逐 participant 用原始 tone index 開啟 native picker，再分別詢問選定寫回。
 `df/n`、`sweeps/n` 與 `flux/flux_n`、`flux_sweeps/flux_n` 的形狀及預選線範例見

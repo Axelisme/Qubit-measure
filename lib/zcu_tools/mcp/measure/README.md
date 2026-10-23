@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-24（recipe Form 操作與省略輸入）
+**Last updated:** 2026-10-24（recipe Form 契約與作者範例）
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -151,8 +151,8 @@ Analyze 用 TypeAdapter 將 owner summary 驗證為 T，不補欄位或修資料
 `interactive=True` 明確開啟互動交接，公開 `PendingAnalysis(tab, stage, op)`。
 Status／wait 提前回 `status="interactive"`，GUI 完成同一 operation 後原 await 繼續，不建第二個 runner。
 
-`tab.writeback_proposal()` 捕捉 completed stages 的候選。
-`ask_writeback()` 等待經 evidence 驗證的 `WritebackAnswer`，回答不寫入。
+`ask_writeback()` 捕捉 completed stages 的候選，再等待經 evidence 驗證的 `WritebackAnswer`。
+回答不寫入。
 只有 `tab.accept_writeback(decision.items)` 寫入選定 IDs 對應的 owner 當下 draft 值與目的地。
 Unknown、重複或經作者修改的 captured 項目在第一筆寫入前拒絕。
 Recipe 將選定 IDs 一次交給 `tab.writeback_accept`，不帶 `expected_revision`，preview 也不回 revision。
@@ -209,7 +209,10 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
     tab = session.open_tab(
         "synthetic", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.pulse", "Inline")
+    if not isinstance(inputs.gain, Keep):
+        selector = tab.read(("modules", "pulse")).selector
+        if selector is not None and selector.mode == "ref":
+            tab.command("modules.pulse", "to_inline")
     tab.set("modules.pulse.gain", inputs.gain)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
@@ -222,6 +225,11 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
 ```
 
 來源選擇、編輯、驗證與 Run 都由主體明寫。分析、問答、寫回與保存仍是各自獨立的操作。
+明填 scalar 前只檢查 selector.mode，ref 才 command to_inline，已 inline 直接 set。
+單 kind module 與巢狀 waveform 同規則，不以選 Inline 或固定 const 改掉原 family。
+全部 scalar 省略時不切來源，來源故障不 fallback。
+Center／span 必須成對提供或省略，缺一個就回 needs_parameters 指名另一欄。
+不從現有 endpoints 或校準推算，null 原樣交 owner、不參與算術。
 
 `RecipeReport` 提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics。
 作者填入 owner 的事實，基底不決定 fit 是否可接受，也不自動寫回。
