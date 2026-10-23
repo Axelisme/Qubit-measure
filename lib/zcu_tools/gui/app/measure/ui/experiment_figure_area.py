@@ -16,6 +16,7 @@ from .data_figure_preview_gallery import DataFigurePreviewGallery
 from .figure_pager import FigurePager
 from .figure_pane_layout import FigurePaneLayout
 from .interactive_frontend import InteractiveFrontend
+from .named_figure_presentation import present_named_figure_tiles, sync_figure_selection
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -82,7 +83,7 @@ class ExperimentFigureArea(QWidget):
             self._analysis_selection_model.setAccessibleName("Analysis figure")
             self._analysis_selection_model.hide()
             self._analysis_stack.currentChanged.connect(
-                lambda index: self._sync_selection(
+                lambda index: sync_figure_selection(
                     self._analysis_selection_model, index
                 )
             )
@@ -109,7 +110,7 @@ class ExperimentFigureArea(QWidget):
             self._post_selection_model.setAccessibleName("Post-analysis figure")
             self._post_selection_model.hide()
             self._post_stack.currentChanged.connect(
-                lambda index: self._sync_selection(self._post_selection_model, index)
+                lambda index: sync_figure_selection(self._post_selection_model, index)
             )
             post_right.addWidget(self._post_selection_model)
             post_right.addWidget(FigurePager(self._post_stack, "post_analysis"))
@@ -136,7 +137,7 @@ class ExperimentFigureArea(QWidget):
         self._run_selection_model.setAccessibleName("Run figure")
         self._run_selection_model.hide()
         self._run_stack.currentChanged.connect(
-            lambda index: self._sync_selection(self._run_selection_model, index)
+            lambda index: sync_figure_selection(self._run_selection_model, index)
         )
         run_right.addWidget(self._run_selection_model)
         run_right.addWidget(FigurePager(self._run_stack, "run"))
@@ -438,27 +439,13 @@ class ExperimentFigureArea(QWidget):
                 if attach or container.contains_figure(figure)
             ]
         )
-        selection_model.blockSignals(True)
-        try:
-            selection_model.clear()
-            selection_model.addItems(names)
-            if selected in names:
-                selection_model.setCurrentText(selected)
-        finally:
-            selection_model.blockSignals(False)
-        selected = selection_model.currentText()
         if not names and attach:
             container.clear_dynamic_canvases()
-        elif figures is not None and names:
-            if attach:
-                self._draw_named_figures(figures, container, names)
-            figure = figures[selected]
-            attach_existing_figure_to_container(figure, container)
-        for index in range(1, stack.count()):
-            canvas = stack.widget(index)
-            if canvas is not None:
-                canvas.setObjectName(f"figures.tile.{pane}.{index - 1}")
-        stack.set_tiled(tiled=bool(names))
+        elif figures is not None and names and attach:
+            self._draw_named_figures(figures, container, names)
+        present_named_figure_tiles(
+            stack, selection_model, names, selected=selected, pane=pane
+        )
         self._refresh_data_gallery()
 
     @staticmethod
@@ -471,15 +458,6 @@ class ExperimentFigureArea(QWidget):
             if not callable(draw):
                 raise RuntimeError("Attached figure canvas does not support draw()")
             draw()
-
-    @staticmethod
-    def _sync_selection(model: QComboBox, stack_index: int) -> None:
-        # The hidden combo stores names only; canvas/page selection is authoritative.
-        model.blockSignals(True)
-        try:
-            model.setCurrentIndex(stack_index - 1)
-        finally:
-            model.blockSignals(False)
 
     def _refresh_data_gallery(self) -> None:
         """Refresh Data gallery from current pane figures when Data is visible (S2)."""
