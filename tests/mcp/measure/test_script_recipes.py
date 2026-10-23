@@ -64,10 +64,8 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
         assert len(run.saves) == 1
         assert {output.format for output in run.saves[0].outputs} == {"data_h5", "json"}
         methods = [name for name, _ in client.transport.sent]
-        assert (
-            methods.index("tab.get_analyze_result")
-            < methods.index("tab.save_data")
-            < methods.index("tab.save_artifacts")
+        assert methods.index("tab.get_analyze_result") < methods.index(
+            "tab.save_artifacts"
         )
         assert (
             next(
@@ -277,7 +275,9 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         )
         assert reply.data["outcome"]["status"] == "completed"
         methods = [method for method, _ in client.transport.sent]
-        assert methods.index("tab.writeback_accept") < methods.index("tab.save_data")
+        assert methods.index("tab.writeback_accept") < methods.index(
+            "tab.save_artifacts"
+        )
     finally:
         client.context.session.close()
 
@@ -497,7 +497,7 @@ def test_interactive_analysis_hands_off_then_continues_after_owner_completion(
         client.context.session.close()
 
 
-def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
+def test_save_transport_failure_does_not_claim_an_unreceived_report(
     tmp_path: Path,
 ) -> None:
     gui = SyntheticGui()
@@ -507,7 +507,7 @@ def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
             raise OSError("Artifact transport failed")
         return gui.respond(method, params)
 
-    @recipe("synthetic", "Retain confirmed raw Save before a later failure")
+    @recipe("synthetic", "Report only confirmed owner Save receipts")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
         await tab.run()
@@ -523,10 +523,7 @@ def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
         outcome = snapshot.outcome
         assert outcome is not None
         saved = outcome.runs[0].saves
-        assert len(saved) == 1
-        assert saved[0].status == "failed"
-        assert saved[0].outputs[0].status == "saved"
-        assert saved[0].outputs[0].format == "data_h5"
+        assert saved == ()
     finally:
         client.context.session.close()
 
