@@ -707,6 +707,28 @@ def test_choose_option_interacts_with_active_modal_popup_but_not_blocked_window(
         dialog.deleteLater()
 
 
+def test_choose_option_selects_existing_item_in_editable_combo(
+    choice_surface, qapp, tmp_path: Path
+) -> None:
+    combo = choice_surface.findChild(QComboBox, "choice")
+    combo.setEditable(True)
+    combo.setCurrentText("")
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(choice_surface)
+    driver.screenshot(tmp_path / "01-empty-editable-choice.png")
+    assert driver.observe(object_name="choice").text == ""
+
+    driver.choose_option("Selection:", "Three")
+    driver.screenshot(tmp_path / "02-selected-existing-option.png")
+    assert driver.observe(object_name="choice").text == "Three"
+    assert driver.observe(object_name="choice_status").text == "Three"
+
+    driver.choose_option(object_name="choice", value="One")
+    driver.screenshot(tmp_path / "03-changed-existing-option.png")
+    assert driver.observe(object_name="choice").text == "One"
+    assert driver.observe(object_name="choice_status").text == "One"
+
+
 def test_choose_option_and_context_action_use_visible_captions(choice_surface) -> None:
     driver = _user_input.ComponentDriver(choice_surface)
     driver.choose_option("Selection:", "Three")
