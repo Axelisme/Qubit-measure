@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, create_model
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -90,6 +90,37 @@ def test_string_envelopes_share_preview_result_and_restore(
     literal = state.result(name_env)
     assert isinstance(literal, NamesForm)
     assert literal.name == "$device" and literal.optional is None
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [{"expr": "$device"}, {"expr": "1 / 0", "other": "$device"}],
+    ids=["envelope-shaped", "multiple-keys"],
+)
+@pytest.mark.parametrize("annotation", [dict[str, str], Mapping[str, str]])
+def test_literal_mapping_expr_key_is_data_through_defaults_write_preview_and_restore(
+    name_env: FormEnv, literal: dict[str, str], annotation: object
+) -> None:
+    model = create_model(
+        "LiteralMapping",
+        __base__=FormModel,
+        mapping=(annotation, literal),
+        name=(str, ""),
+    )
+    state = FormState(model.default_input(name_env))
+    assert state.input.data["mapping"] == literal
+    state.write({("mapping",): literal, ("name",): {"expr": "$device"}}, name_env)
+    result = state.result(name_env)
+    assert not isinstance(result, FormErrors), result
+    assert result.model_dump() == {"mapping": literal, "name": "yoko1"}
+    preview = state.preview(name_env)
+    assert preview.errors is None
+    assert preview.values[("mapping",)] == literal
+    saved = FormInput.from_json(model, state.input.to_json())
+    restored = FormState(model.default_input(name_env))
+    assert restored.restore_input(saved, name_env) == ()
+    assert restored.input.data == state.input.data
+    assert restored.result(name_env) == result
 
 
 @pytest.mark.parametrize("expression", ["$missing", "$unbound", "1 + 2"])
