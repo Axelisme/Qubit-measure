@@ -109,15 +109,15 @@ Core、widget 與 host 不辨識 mux group。
 
 Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。
 
-Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。Readout 身分欄位全 tone 必填。Drive 與逐 tone sweep 是 nullable，只有 participants 必填並檢查 drive 與 channel。未參與的欄位保留原始草稿，不求值、不驗證，結果投影為 None。清單不裁剪、不重新編號。
+Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。Readout 身分欄位全 tone 必填。Drive 與逐 tone sweep 是 nullable，只有 participants 必填並檢查 drive 與 channel。Open／Reset 先選定 participants，再替其 drive／sweep 填初值，其餘填 None。欄位保持一般 nullable 編輯，非 None 值照常驗證。清單不裁剪、不重新編號。
 
 `participants: list[int]` 必須非空、無重複，且每個值都是完整 tones 的合法原始索引。順序就是執行與資料 column 順序。例如完整元素為 Q1、Q2、Q3，participants 為 `[2, 0]` 時先量 Q3，再量 Q1。只選 Q2 時仍是 `[1]`。名稱只供 label、錯誤與回覆顯示，recipe 與 runtime 不再以名稱查位置。Program／raw 接口不改，framework 不解讀 mux group。
 
 使用者於 2026-10-23 裁定：「然後participants用list of index好了，不要用list of str」。對非 participant 可留空的甲案，使用者答「甲」。原始索引讓子集與執行順序共用同一座標，不再需要名稱查表。未量測的 drive／sweep 不應阻擋 Run，但所有 readout tones 都參與讀出，所以其身分與通道仍須完整。
 
-Core 提供中立的 `FieldApplicability(dependency, value, paths)`，唯一條件是 dependency 求值後的清單包含 value。`FormModel.applicability(data)` 只產生宣告。Core 從同一份 input 求值 dependency，將不適用的 nullable paths 投影為 None，跳過其來源與值驗證。缺失或無效的 dependency 仍阻擋 Run。宣告錯誤直接 raise，不提供規則 DSL、條件組合或 callback registry。
+一般編輯 participants 不重設 tone 值。新加入的 tone 若仍為 None，cfg validator 在原始 tone 路徑提示「填入 …」。移出的 tone 保留原值。掃描、drive 與 channel 檢查只遍歷 participants，readout 身分仍全 tone 必填。初值政策由 lab 擁有，Core 不辨識參與名單。
 
-`gui.form_adapter.FixedElements(..., participant_fields=...)` 依完整 raw list 的原始索引產生宣告。Widgets 只消費 description 的 `disabled`，不解讀 participants。停用不改 readonly 政策，也不丟棄 input。切回適用時，Core 立即驗證保留的草稿並呈現空值或無效值錯誤。
+使用者於 2026-10-23 裁定：「這機制有點太複雜了，我的想法是預設participant以外的tone都初始化填None」。此為 Open／Reset 初值規則，不在編輯時改值或停用欄位。
 
 使用者於 2026-10-18 裁定：「那設定也不用逐個toggle了，直接[Q1,Q2]這樣就好。」同日授權「可以，之後就交給advisor，我就不直接對話」。顧問據此採具名 list，未採使用者仍不確定的 mapping 傾向。理由是 list 的位置直接保存原始 tone index，不需依賴 mapping 順序或另一張對照表。保存還原及下節契約同樣由顧問代裁，待使用者覆核。
 
@@ -141,7 +141,7 @@ Recipe 輸入包含以完整原始索引表示的 participants，以及與 MCP �
 - `gui.form_adapter` 擁有生成、領域 converter 與共用繼承宣告，沿用 `form-adapter-no-host`。實驗的初值政策仍歸實驗，見 [[0073]]。
 - `gui.widgets.form` 消費 description、呈現 picker／選單，沿用 `form-editor-no-host`。
 - Host 擁有 capture、guard、生命週期與提交，remote 投影 owner 的結果。MCP 只依賴公開 remote 契約，沿用 C13 `mcp-remote-only`。
-- Lab 擁有 mux cfg、來源關係、名稱到原始 index 的 runtime 轉換，以及實驗 recipe 接線。C15 保護實驗 core 不依賴 GUI，C16 禁止 framework 反向依賴 lab。分層與無循環沿用 C8、C9。
+- Lab 擁有 mux cfg、來源關係、Open／Reset 的 participants 索引選定與 tone 初值，以及實驗 recipe 接線。C15 保護實驗 core 不依賴 GUI，C16 禁止 framework 反向依賴 lab。分層與無循環沿用 C8、C9。
 
 本篇不新增跨 package 依賴方向，不放寬 ignore_imports。共用機制供 measure、workflows、Inspect、New Entry 與 writeback 使用，各宿主的 Apply／Cancel、Run admission 及關閉規則不變。
 

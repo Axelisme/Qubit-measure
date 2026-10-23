@@ -9,6 +9,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
     mux_relax_delay,
+    mux_tone_initials,
 )
 
 from .core import MuxT2RamseyCfg
@@ -18,12 +19,14 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
     """Build the complete fixed name list from this Open/Reset capture.
 
     Readout identity stays required for every position. Only participant drive
-    and sweep fields validate; inactive drafts stay grey and are retained.
+    and sweep fields are required. Other tones start with None in those fields;
+    all nullable fields remain editable and ordinary edits retain their values.
     Binding/source faults propagate; Reset alone recaptures. Shared controls
     apply to every branch. No native conversion or device access occurs.
     """
     names = captured_mux_names(ctx)
-    tones: list[FormNode] = [
+    participants = list(range(len(names)))
+    tones: list[dict[str, FormNode]] = [
         {
             "name": name,
             "drive": Slot(f"{name}.module.x90")
@@ -41,8 +44,8 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
                 "reset": Slot("$mux.module.reset"),
                 "readout": readout,
             },
-            "tones": tones,
-            "participants": list(range(len(names))),
+            "tones": mux_tone_initials(tones, participants, fields=("drive",)),
+            "participants": [index for index in participants],
             "delay": Range.between(0.0, 30.0, expts=101),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
@@ -50,9 +53,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
             "rounds": 10,
         },
         fixed_elements=(
-            FixedElements(
-                ("tones",), "name", ("participants",), participant_fields=(("drive",),)
-            ),
+            FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
         field_order=(

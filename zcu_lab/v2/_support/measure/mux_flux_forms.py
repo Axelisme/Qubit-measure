@@ -8,6 +8,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     captured_mux_names,
     mux_readout_initial,
     mux_readout_seed_metadata,
+    mux_tone_initials,
 )
 from zcu_lab.v2._support.mux_flux import FluxFrequencyCfg, GlobalFluxCfg, LocalFluxCfg
 from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
@@ -35,10 +36,11 @@ def make_flux_form[
     remain uncalibrated candidates. Refresh preserves inputs and seed capture.
     """
     names = captured_mux_names(ctx)
+    participants = list(range(len(names)))
     group = require_mux_group(ctx.parameters)
     readout = mux_readout_initial(ctx, wait_for_ringup=not twotone)
     tree: dict[str, FormNode] = {
-        "participants": list(range(len(names))),
+        "participants": list[FormNode](participants),
         "modules": {
             "reset": Slot("$mux.module.reset") if twotone else Hidden(),
             "readout": readout,
@@ -70,21 +72,29 @@ def make_flux_form[
     )
     if twotone:
         tree["frequency"] = {
-            "tones": [
-                {
-                    "name": name,
-                    "drive": Template(
-                        "qub_probe",
-                        bindings={"qubit": name},
-                        set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
-                    ),
-                    "sweep": {
-                        "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
-                        "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
-                    },
-                }
-                for name in names
-            ],
+            "tones": mux_tone_initials(
+                [
+                    {
+                        "name": name,
+                        "drive": Template(
+                            "qub_probe",
+                            bindings={"qubit": name},
+                            set={
+                                "freq": Hidden(0.0),
+                                "gain": 0.1,
+                                "waveform.length": 1.0,
+                            },
+                        ),
+                        "sweep": {
+                            "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
+                            "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
+                        },
+                    }
+                    for name in names
+                ],
+                participants,
+                fields=("drive", "sweep"),
+            ),
             "expts": 301,
         }
         fixed.append(
@@ -92,7 +102,6 @@ def make_flux_form[
                 ("frequency", "tones"),
                 "name",
                 ("participants",),
-                participant_fields=(("drive",), ("sweep",)),
             )
         )
         metadata[("frequency", "expts")] = FieldMeta(
@@ -117,22 +126,24 @@ def make_flux_form[
                 calibration="uncalibrated",
             )
     if local:
-        fixed.append(
-            FixedElements(
-                ("tones",), "name", ("participants",), participant_fields=(("sweep",),)
-            )
+        fixed.append(FixedElements(("tones",), "name", ("participants",)))
+        tree["tones"] = mux_tone_initials(
+            [
+                {
+                    "name": name,
+                    "flux_dev": captured_flux_source(ctx, f"{name}.flux_source"),
+                    "sweep": {
+                        "start": Expr(
+                            f"1.1 * {name}.flux_int - 0.1 * {name}.flux_half"
+                        ),
+                        "stop": Expr(f"1.1 * {name}.flux_half - 0.1 * {name}.flux_int"),
+                    },
+                }
+                for name in names
+            ],
+            participants,
+            fields=("sweep",),
         )
-        tree["tones"] = [
-            {
-                "name": name,
-                "flux_dev": captured_flux_source(ctx, f"{name}.flux_source"),
-                "sweep": {
-                    "start": Expr(f"1.1 * {name}.flux_int - 0.1 * {name}.flux_half"),
-                    "stop": Expr(f"1.1 * {name}.flux_half - 0.1 * {name}.flux_int"),
-                },
-            }
-            for name in names
-        ]
         tree["flux_expts"] = 101
         metadata[("flux_expts",)] = FieldMeta(
             description="Shared 101-point zipped local DC scan candidate",

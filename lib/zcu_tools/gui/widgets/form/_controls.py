@@ -777,8 +777,6 @@ class FieldRow:
         fold stays as built or as the user last set it.
         """
         self.field = field
-        self.widget.setEnabled(not field.disabled)
-        editable = editable and not field.disabled
         self._sync_field_commands(editable=editable)
         for action in self._commands:
             action.setEnabled(editable)
@@ -789,8 +787,7 @@ class FieldRow:
             self._display_picker()
             shown = ""
             effective = (
-                not field.disabled
-                and field.kind in ("integer", "number", "complex")
+                field.kind in ("integer", "number", "complex")
                 and field.present
                 and not _expression(field)
                 and field.value != field.raw

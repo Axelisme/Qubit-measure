@@ -31,7 +31,7 @@ Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
-所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Form 的 FixedElements 宣告 drive、Echo pi_pulse 與逐 tone sweep 的適用性，未參與欄位灰掉且不驗證，readout 身分始終必填。切回 participant 時立即驗證保留草稿。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填或停用集合。
+所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Reset 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
 

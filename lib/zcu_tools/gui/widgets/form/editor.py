@@ -425,7 +425,7 @@ class FormEditor[F: FormModel](QWidget):
         messages: dict[FormPath, str] = {
             path: local.error
             for path, local in self._local.items()
-            if path in self._rows and not self._rows[path].field.disabled
+            if path in self._rows
         }
         return FormErrors(messages) if messages else None
 

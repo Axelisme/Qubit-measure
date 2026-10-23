@@ -515,7 +515,9 @@ class Section:
         return {
             name: {"kind": "linrange"}
             for name, info in self.core.model_fields.items()
-            if name in self.model.model_fields and SweepCfg in _members(info.annotation)
+            if name in self.model.model_fields
+            and SweepCfg in _members(info.annotation)
+            and not (info.default is None and name not in self.tree)
         }
 
     def _native_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
@@ -548,6 +550,10 @@ class Section:
                 data[name] = [
                     child.default_data(env) for child in self.element_seeds[name]
                 ]
+            elif node is None and type(None) in _members(
+                self.core.model_fields[name].annotation
+            ):
+                data[name] = None
             elif name in self.children:
                 data[name] = self.children[name].default_data(env)
             elif name in self.modules:

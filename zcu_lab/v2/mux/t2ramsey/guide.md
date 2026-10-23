@@ -30,9 +30,10 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Unselected drive/sweep fields are grey and may remain blank. Their raw drafts
-stay in the form without evaluation or validation. Adding a participant restores
-its draft and reports missing or invalid settings immediately. Every readout
+Open/Reset fills selected tones' drive defaults and sets
+these fields to None on other tones. The nullable fields remain editable.
+Editing participants preserves every tone value. Fill any newly selected tone's
+missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
 tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example

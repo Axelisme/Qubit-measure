@@ -11,6 +11,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
     mux_relax_delay,
+    mux_tone_initials,
 )
 from zcu_lab.v2._support.measure.rabi_initial_values import len_rabi_initial_values
 
@@ -21,12 +22,14 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     """Build the complete fixed name list from this Open/Reset capture.
 
     Readout identity stays required for every position. Only participant drive
-    and sweep fields validate; inactive drafts stay grey and are retained.
+    and sweep fields are required. Other tones start with None in those fields;
+    all nullable fields remain editable and ordinary edits retain their values.
     Binding/source faults propagate; Reset alone recaptures. Shared controls
     apply to every branch. No native conversion or device access occurs.
     """
     names = captured_mux_names(ctx)
-    tones: list[FormNode] = []
+    participants = list(range(len(names)))
+    tones: list[dict[str, FormNode]] = []
     for name in names:
         drive, stop = len_rabi_initial_values(ctx.parameters, qubit=name)
         # Core requires const/flat_top and replaces each total duration.
@@ -46,24 +49,23 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
                 "reset": Slot("$mux.module.reset"),
                 "readout": readout,
             },
-            "tones": tones,
+            "tones": mux_tone_initials(
+                tones,
+                participants,
+                fields=(
+                    "drive",
+                    "sweep",
+                ),
+            ),
             "expts": 101,
-            "participants": list(range(len(names))),
+            "participants": [index for index in participants],
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },
         fixed_elements=(
-            FixedElements(
-                ("tones",),
-                "name",
-                ("participants",),
-                participant_fields=(
-                    ("drive",),
-                    ("sweep",),
-                ),
-            ),
+            FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
         field_order=(

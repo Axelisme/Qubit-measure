@@ -199,6 +199,7 @@ from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxDriveToneCfg,
+    require_tone_value,
     validate_participants,
 )
 from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
@@ -299,6 +300,7 @@ class MuxGECfg(ExpCfgModel):
         channels: set[int] = set()
         for index in self.participants:
             tone = self.tones[index]
+            require_tone_value(tone.drive, ("tones", index, "drive"))
             tone.validate_pulses()
             if (
                 tone.require_drive().ch in channels

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import get_args, get_origin
 
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError
 
@@ -279,29 +279,6 @@ def _active_leaf(value: BaseModel, path: FormPath) -> bool:
     return True
 
 
-def evaluate_dependency(
-    info: FieldInfo, value: JsonValue, path: FormWritePath, env: FormEnv
-) -> list[JsonValue] | None:
-    """Decode a membership dependency with its field constraints.
-
-    Return its validated list, or None on ordinary decoding/validation failure.
-    The full input still validates the dependency and reports its normal errors;
-    this helper only determines which nullable subtrees should be consumed.
-    Unexpected evaluator/provider failures propagate.
-    """
-    decoding = _Decoding(env, {})
-    decoded = _decode(info, value, path, decoding)
-    if decoding.errors:
-        return None
-    try:
-        values = TypeAdapter[JsonValue](info.rebuild_annotation()).validate_python(
-            decoded
-        )
-    except ValidationError:
-        return None
-    return values if isinstance(values, list) else None
-
-
 def result[F: FormModel](
     model: type[F],
     data: dict[str, JsonValue],
@@ -309,11 +286,8 @@ def result[F: FormModel](
     selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> F | FormErrors:
     """Evaluate one detached input and return its model or canonical errors."""
-    from ._applicability import project
-
-    projected = project(model, data, env)
-    decoding = _start(model, projected, env, selections)
-    ordinary = _decode_model(model, projected, (), decoding)
+    decoding = _start(model, data, env, selections)
+    ordinary = _decode_model(model, data, (), decoding)
     return _validate(model, ordinary, decoding, data)
 
 
@@ -324,9 +298,6 @@ def preview(
     selections: Mapping[FormWritePath, JsonValue] | None = None,
 ) -> FormPreview:
     """Share decoding/validation while retaining non-failing leaves for display."""
-    from ._applicability import project
-
-    data = project(model, data, env)
     decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
     failed_decoding = tuple(decoding.errors)
@@ -492,13 +463,10 @@ def evaluate_defaults(
     propagate. Envelopes inside whole sequences or mappings, malformed
     envelopes and every other value are copied unchanged. data is not edited.
     """
-    from ._applicability import disabled_paths
-
     evaluated = copy_object(data)
-    inactive = disabled_paths(model, data, env)
     # Leaf path -> the object in evaluated that holds that leaf.
     substituted: dict[FormWritePath, dict[str, JsonValue]] = {}
-    _evaluate_section(model, evaluated, env, (), substituted, inactive)
+    _evaluate_section(model, evaluated, env, (), substituted)
     if not substituted:
         return evaluated
     checked = result(model, evaluated, env)
@@ -517,27 +485,22 @@ def _evaluate_section(
     env: FormEnv,
     prefix: FormWritePath,
     substituted: dict[FormWritePath, dict[str, JsonValue]],
-    inactive: tuple[FormWritePath, ...],
 ) -> None:
-    """Evaluate applicable Expr leaves in place without touching disabled drafts."""
+    """Evaluate authored Expr leaves in place."""
     for name, value in tuple(data.items()):
         info = model.model_fields.get(name)
         if info is None:
             continue
         path = (*prefix, name)
-        if path in inactive:
-            continue
         element = list_model(info)
         if element is not None and isinstance(value, list):
             for index, item in enumerate(value):
                 if isinstance(item, dict):
-                    _evaluate_section(
-                        element, item, env, (*path, index), substituted, inactive
-                    )
+                    _evaluate_section(element, item, env, (*path, index), substituted)
             continue
         child = selected(info, value)
         if child is not None and isinstance(value, dict):
-            _evaluate_section(child, value, env, path, substituted, inactive)
+            _evaluate_section(child, value, env, path, substituted)
             continue
         text_field = expression_allowed(info, path)
         text = expr_text(value)

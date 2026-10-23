@@ -5,6 +5,7 @@ from math import isfinite, pi
 from zcu_tools.cfg_model import (
     Expr,
     FieldMeta,
+    FormNode,
     MuxReadoutSpec,
     Slot,
     Template,
@@ -18,6 +19,28 @@ from .ctx_helpers import t1_initial_time
 from .mux_bindings import require_mux_group, require_mux_qubits
 
 READOUT_ELEMENTS = FixedElements(("modules", "readout", "module", "tones"))
+
+
+def mux_tone_initials(
+    tones: list[dict[str, FormNode]],
+    participants: list[int],
+    *,
+    fields: tuple[str, ...],
+) -> list[FormNode]:
+    """Build Open/Reset tone seeds after choosing original participant indices.
+
+    tones is the complete ordered authored list. Keep selected seeds and every
+    identity field; set the listed nullable drive/sweep fields to None elsewhere.
+    Return new dictionaries without editing the caller's trees. Ordinary edits
+    never call this helper, so adding/removing participants preserves draft values.
+    """
+    return [
+        {
+            **tone,
+            **({field: None for field in fields} if index not in participants else {}),
+        }
+        for index, tone in enumerate(tones)
+    ]
 
 
 def captured_mux_names(ctx: FormContext) -> tuple[str, ...]:

@@ -27,6 +27,7 @@ from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
     ToneRangeCfg,
+    require_tone_value,
     validate_participants,
 )
 from zcu_lab.v2.mux.onetone.core import (
@@ -127,6 +128,11 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
             t.name for t in self.frequency.tones
         ]:
             raise ValueError("flux tone names must match the full frequency tone order")
+        if isinstance(self.frequency, FluxFrequencyCfg):
+            for index in self.participants:
+                tone = self.frequency.tones[index]
+                require_tone_value(tone.drive, ("frequency", "tones", index, "drive"))
+                require_tone_value(tone.sweep, ("frequency", "tones", index, "sweep"))
         self.inner_cfg()
         return self
 
@@ -198,6 +204,7 @@ class LocalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
             raise ValueError("local flux lines must use distinct devices")
         for index in self.participants:
             tone = self.tones[index]
+            require_tone_value(tone.sweep, ("tones", index, "sweep"))
             make_sweep(
                 tone.require_sweep().start, tone.require_sweep().stop, self.flux_expts
             )
