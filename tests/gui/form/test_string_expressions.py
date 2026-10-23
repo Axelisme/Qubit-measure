@@ -99,7 +99,7 @@ def test_string_envelopes_share_preview_result_and_restore(
 )
 @pytest.mark.parametrize("annotation", [dict[str, str], Mapping[str, str]])
 def test_literal_mapping_expr_key_is_data_through_defaults_write_preview_and_restore(
-    name_env: FormEnv, literal: dict[str, str], annotation: object
+    name_env: FormEnv, literal: dict[str, JsonValue], annotation: object
 ) -> None:
     model = create_model(
         "LiteralMapping",
