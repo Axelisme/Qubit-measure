@@ -17,9 +17,17 @@ from zcu_tools.resources.entry.schema import (
     ("required", "expected", "message"),
     [
         ({"qubit"}, {"qubit": "Q1"}, None),
-        ({"participants"}, None, "Template aliases participants are lists; bind each to one name in Aliases"),
+        (
+            {"participants"},
+            None,
+            "Template aliases participants are lists; bind each to one name in Aliases",
+        ),
         ({"unbound", "broken", "absent"}, None, "missing: absent, broken, unbound"),
-        ({"qubit", "participants", "absent"}, None, "Template aliases participants are lists; bind each to one name in Aliases"),
+        (
+            {"qubit", "participants", "absent"},
+            None,
+            "Template aliases participants are lists; bind each to one name in Aliases",
+        ),
     ],
 )
 def test_scalar_alias_admission_preserves_lists_and_missing_diagnostics(
@@ -37,13 +45,24 @@ def test_scalar_alias_admission_preserves_lists_and_missing_diagnostics(
         missing_calls.append(missing)
         return f"missing: {', '.join(sorted(missing))}"
 
-    assert hasattr(aliases, "scalar_alias_bindings"), "Alias owner must expose scalar admission"
+    assert hasattr(aliases, "scalar_alias_bindings"), (
+        "Alias owner must expose scalar admission"
+    )
     if message is None:
-        assert aliases.scalar_alias_bindings(rows, required, missing_message=missing_message) == expected
+        assert (
+            aliases.scalar_alias_bindings(
+                rows, required, missing_message=missing_message
+            )
+            == expected
+        )
     else:
         with pytest.raises(InvalidInputError, match=message):
-            aliases.scalar_alias_bindings(rows, required, missing_message=missing_message)
-    assert missing_calls == ([required] if "absent" in required and "participants" not in required else [])
+            aliases.scalar_alias_bindings(
+                rows, required, missing_message=missing_message
+            )
+    assert missing_calls == (
+        [required] if "absent" in required and "participants" not in required else []
+    )
     assert rows[1].resolved == ["Q1", "Q2"]
 
 

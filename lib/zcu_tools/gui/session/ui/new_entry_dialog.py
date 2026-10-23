@@ -20,7 +20,8 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.cfg_model import Template, TemplateDef
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import scalar_alias_bindings
 from zcu_tools.gui.session.library_entry import (
     LIBRARY_WRITE_ERRORS,
     LibraryEntryInvalid,
@@ -170,25 +171,17 @@ class NewEntryDialog(QDialog):
         except FailedPreconditionError as exc:
             self._show_error(str(exc))
             return
-        resolved = parameters.resolved_aliases()
-        required = self._templates[template_id].placeholder_names()
-        lists = {
-            row.alias for row in resolved if isinstance(row.resolved, list)
-        } & required
-        if lists:
-            self._show_error(
-                f"Template aliases {', '.join(sorted(lists))} are lists; bind each to one name in Aliases"
+        try:
+            bindings = scalar_alias_bindings(
+                parameters.resolved_aliases(),
+                self._templates[template_id].placeholder_names(),
+                missing_message=lambda missing: (
+                    f"template 需要綁定 {'、'.join(f'{{{name}}}' for name in sorted(missing))}，"
+                    "請先在 Aliases 設定同名 alias"
+                ),
             )
-            return
-        bindings = {
-            row.alias: row.resolved for row in resolved if isinstance(row.resolved, str)
-        }
-        missing = required - bindings.keys()
-        if missing:
-            names = "、".join(f"{{{name}}}" for name in sorted(missing))
-            self._show_error(
-                f"template 需要綁定 {names}，請先在 Aliases 設定同名 alias"
-            )
+        except InvalidInputError as exc:
+            self._show_error(str(exc))
             return
         entry = new_library_entry(
             parameters,

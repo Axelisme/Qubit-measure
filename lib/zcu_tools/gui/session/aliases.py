@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence, Set
 from copy import deepcopy
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -47,6 +47,36 @@ class ResolvedAliasRow:
     value: AliasValue
     resolved: AliasValue | None
     error: str | None = None
+
+
+def scalar_alias_bindings(
+    rows: Sequence[ResolvedAliasRow],
+    required: Set[str],
+    *,
+    missing_message: Callable[[set[str]], str],
+) -> dict[str, str]:
+    """Admit scalar bindings from a fixed resolved-alias projection.
+
+    rows comes from ParameterContext.resolved_aliases(); required contains the
+    consumer's placeholder names. Return all resolved scalar rows, without
+    mutating the projection. Required lists raise InvalidInputError before
+    missing checks. Absent, unbound and failed rows count as missing.
+    Only when names are missing, call missing_message with their set to format
+    the consumer's diagnostic, then raise InvalidInputError with that message.
+    The callback formats text only; it does not decide admission.
+    """
+    lists = {row.alias for row in rows if isinstance(row.resolved, list)} & required
+    if lists:
+        raise InvalidInputError(
+            f"Template aliases {', '.join(sorted(lists))} are lists; bind each to one name in Aliases"
+        )
+    bindings = {
+        row.alias: row.resolved for row in rows if isinstance(row.resolved, str)
+    }
+    missing = set(required) - bindings.keys()
+    if missing:
+        raise InvalidInputError(missing_message(missing))
+    return bindings
 
 
 class AliasTable:
