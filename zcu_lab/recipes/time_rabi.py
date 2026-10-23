@@ -160,7 +160,6 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     frequency = choose_frequency(
         tab,
         ("modules", "qub_pulse", "freq"),
-        session,
         inputs.frequency_mhz,
         calibration=FrequencyCalibration(path="$qubit.freq", required="frequency_mhz"),
     )
@@ -171,7 +170,6 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),

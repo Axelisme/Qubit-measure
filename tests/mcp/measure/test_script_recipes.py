@@ -6,7 +6,8 @@ from threading import Event, get_ident
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
+from zcu_tools.gui.form_adapter.sweep import LinRange
+from zcu_tools.mcp.measure.recipe_api import Expr, FieldEdit, RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
@@ -64,10 +65,8 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
         assert len(run.saves) == 1
         assert {output.format for output in run.saves[0].outputs} == {"data_h5", "json"}
         methods = [name for name, _ in client.transport.sent]
-        assert (
-            methods.index("tab.get_analyze_result")
-            < methods.index("tab.save_data")
-            < methods.index("tab.save_artifacts")
+        assert methods.index("tab.get_analyze_result") < methods.index(
+            "tab.save_artifacts"
         )
         assert (
             next(
@@ -277,7 +276,9 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
         )
         assert reply.data["outcome"]["status"] == "completed"
         methods = [method for method, _ in client.transport.sent]
-        assert methods.index("tab.writeback_accept") < methods.index("tab.save_data")
+        assert methods.index("tab.writeback_accept") < methods.index(
+            "tab.save_artifacts"
+        )
     finally:
         client.context.session.close()
 
@@ -542,7 +543,7 @@ def test_post_analysis_updates_share_the_started_operation(tmp_path: Path) -> No
         client.context.session.close()
 
 
-def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
+def test_save_transport_failure_does_not_claim_an_unreceived_report(
     tmp_path: Path,
 ) -> None:
     gui = SyntheticGui()
@@ -552,7 +553,7 @@ def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
             raise OSError("Artifact transport failed")
         return gui.respond(method, params)
 
-    @recipe("synthetic", "Retain confirmed raw Save before a later failure")
+    @recipe("synthetic", "Report only confirmed owner Save receipts")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
         await tab.run()
@@ -568,10 +569,50 @@ def test_save_preserves_raw_receipt_when_artifact_dispatch_fails(
         outcome = snapshot.outcome
         assert outcome is not None
         saved = outcome.runs[0].saves
-        assert len(saved) == 1
-        assert saved[0].status == "failed"
-        assert saved[0].outputs[0].status == "saved"
-        assert saved[0].outputs[0].format == "data_h5"
+        assert saved == ()
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("method", ["set", "apply"])
+@pytest.mark.parametrize("value_kind", ["expression", "range"])
+def test_form_writes_roundtrip_named_values_through_the_owner(
+    tmp_path: Path, method: str, value_kind: str
+) -> None:
+    from ._recipe_support import LookbackGui
+
+    path = ("rounds",) if value_kind == "expression" else ("sweep",)
+    value = (
+        Expr(text="2 + 3")
+        if value_kind == "expression"
+        else LinRange(start=10.0, stop=20.0, n=7)
+    )
+    expected = (
+        5
+        if value_kind == "expression"
+        else {"kind": "linrange", "start": 10.0, "stop": 20.0, "n": 7}
+    )
+
+    @recipe("synthetic", "Roundtrip named Form values")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("lookback")
+        if method == "set":
+            tab.set(path, value)
+        else:
+            tab.apply([FieldEdit(path=path, value=value)])
+        observed = tab.read(path)
+        assert observed.value == expected
+        assert observed.errors == ()
+        return Report(count=inputs.count)
+
+    gui = LookbackGui()
+    client = make_client(tmp_path, gui, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == "completed", snapshot.error
+        assert gui.owner.read_recipe_field(path).value == expected
     finally:
         client.context.session.close()
 
