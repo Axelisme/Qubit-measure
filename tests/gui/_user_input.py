@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QStyle,
     QStyleOptionButton,
+    QStyleOptionComboBox,
     QTabBar,
     QTableWidget,
     QTableWidgetItem,
@@ -604,7 +605,20 @@ class ComponentDriver:
             & Qt.ItemFlag.ItemIsEnabled
         ):
             return
-        mouse_click(widget, widget.rect().center())
+        # Editable combos reserve their center for text; only the arrow opens them.
+        option = QStyleOptionComboBox()
+        option.initFrom(widget)
+        option.editable = widget.isEditable()
+        style = widget.style()
+        if style is None:
+            raise RuntimeError("Combo has no style for its arrow geometry")
+        arrow = style.subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxArrow,
+            widget,
+        )
+        mouse_click(widget, arrow.center())
         try:
             view = widget.view()
             if view is None:

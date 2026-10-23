@@ -1,6 +1,6 @@
 """Deterministic injected ports shared by synthetic async workflow tests."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from io import StringIO
 
@@ -68,8 +68,13 @@ class RecordingDevices:
 class RecordingBar(TQDMProgressBar):
     """Silent runtime progress bar with observable close lifecycle."""
 
-    def __init__(self, **kwargs: object) -> None:
-        super().__init__(**kwargs, file=StringIO())
+    def __init__(
+        self,
+        iterable: Iterable[object] | None = None,
+        desc: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(iterable=iterable, desc=desc, **kwargs, file=StringIO())
         self.closed = False
 
     def close(self) -> None:
