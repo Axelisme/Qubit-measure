@@ -1,7 +1,7 @@
 """Native Load retains history and rejects unsafe saves through public services."""
 
 from collections.abc import Iterator, Mapping
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -294,8 +294,8 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
     else:
         outcome = service.load_result("tab", str(session.native_data_path))
         assert "Historical point 'missing' is unavailable" in str(
-            asdict(outcome).get("analysis_source_issue"))
-        assert asdict(tab.run).get("analysis_source_issue") == asdict(outcome).get("analysis_source_issue")
+            outcome.analysis_source_issue)
+        assert tab.run.analysis_source_issue == outcome.analysis_source_issue
         assert tab.run.parameters is None
         assert require_metadata(tab.run).snapshot == broken
     assert session.entry.ledger.events() == events
@@ -401,8 +401,8 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
         "empty": "No active context is available",
         "pointless": "Historical metadata has no point",
     }
-    assert asdict(loaded).get("analysis_source_issue") == reasons[source]
-    assert asdict(tab.run).get("analysis_source_issue") == reasons[source]
+    assert loaded.analysis_source_issue == reasons[source]
+    assert tab.run.analysis_source_issue == reasons[source]
     assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
     assert tab.run.parameters is None
