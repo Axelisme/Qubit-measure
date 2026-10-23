@@ -131,14 +131,14 @@ def test_figure_drilldown_details_scroll_and_pins(populated_browser: ComponentDr
     assert "tones[0].freq = 5100.0" in details
     assert "Parameters · analysis.json" in details and "n_iter = 12" in details
     assert "alpha / p1" in ui.observe(object_name="results.figure.0").tooltip
-    ui.invoke_context_action("Add to comparison", object_name="results.figure.1")
+    ui.invoke_context_action(action="Add to comparison", object_name="results.figure.1")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
     ui.click("Add to comparison")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
     assert any("20261021T010000Z-aaaaaa" in row.text for row in ui.list_rows())
-    ui.invoke_context_action("Copy path", object_name="results.figure.1")
+    ui.invoke_context_action(action="Copy path", object_name="results.figure.1")
     assert "Copied path:" in ui.observe(object_name="results.feedback").text
-    ui.invoke_context_action("Copy image", object_name="results.figure.1")
+    ui.invoke_context_action(action="Copy image", object_name="results.figure.1")
     assert ui.observe(object_name="results.feedback").text == "Copied image: plot-1.png"
     ui.screenshot(tmp_path / "run-details-pinned.png")
 
