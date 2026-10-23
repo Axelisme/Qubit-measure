@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from shutil import copyfile
+from tempfile import TemporaryDirectory
 
 import pytest
 from qtpy.QtCore import Qt
@@ -21,13 +23,32 @@ def dialog(qapp):
     d.deleteLater()
 
 
+@pytest.fixture
+def preview_dialog(qapp, spectrum_hdf5, monkeypatch):
+    """Open Browse at the visible fixture directory used to resolve driver input."""
+    with (
+        TemporaryDirectory(prefix="spectrum-chooser-", dir=Path.cwd()) as directory,
+        monkeypatch.context() as context,
+    ):
+        context.chdir(directory)
+        filename = Path("spectrum with spaces.hdf5")
+        copyfile(spectrum_hdf5[0], filename)
+        d = LoadSpectrumDialog({"existing.hdf5": (0.5, 1.5)}, start_dir=directory)
+        try:
+            yield d, filename
+        finally:
+            d.deleteLater()
+            qapp.processEvents()
+
+
 def test_preview_axis_labels_follow_transpose_and_restore(
-    dialog, spectrum_hdf5, qapp, tmp_path: Path
+    preview_dialog, qapp, tmp_path: Path
 ):
+    dialog, filename = preview_dialog
     dialog.show()
     qapp.processEvents()
     driver = ComponentDriver(dialog)
-    driver.choose_file("Browse…", Path(spectrum_hdf5[0]))
+    driver.choose_file("Browse…", filename, evidence=tmp_path / "chooser.png")
     driver.screenshot(tmp_path / "original.png")
     original = driver.plots().axes[0]
     assert (original.xlabel, original.ylabel) == ("Device value (flux)", "Frequency")
