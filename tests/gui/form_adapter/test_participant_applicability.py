@@ -48,17 +48,15 @@ def definition() -> adapter.Form[Group]:
         )
     except TypeError as exc:
         pytest.fail(f"Adapter must declare participant-owned nullable fields: {exc}")
-    tree: dict[str, FormNode] = {
-        "tones": [
-            {"name": "A", "readout": 6000, "sweep": Range.between(1, 2, 3)},
-            {
-                "name": "B",
-                "readout": 6100,
-                "sweep": Range(start=None, stop=None),
-            },
-        ],
-        "participants": [0],
-    }
+    tones: list[FormNode] = [
+        {"name": "A", "readout": 6000, "sweep": Range.between(1, 2, 3)},
+        {
+            "name": "B",
+            "readout": 6100,
+            "sweep": Range(start=None, stop=None, expts=3),
+        },
+    ]
+    tree: dict[str, FormNode] = {"tones": tones, "participants": [0]}
     return adapter.Form(Group, tree, fixed_elements=(declaration,))
 
 
