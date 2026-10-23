@@ -157,6 +157,8 @@ Adapter 的 data_item 與 analysis_item 只交框架固定內容，不選格式�
 
 LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 RunRecord envelope、record.metadata 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單。原始 cfg 保存在 native 資料檔，透過公開 datafile.load 離線讀取為 Container，GUI 不提供檢視入口。使用者裁定、metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
 
+使用者於 2026-10-24 裁定：「只在 open_tab_from_file 路徑隔離 make_form 失敗，tab 照常建立並 Load，表單區與 Run 顯示 factory 原文錯誤，Reset 走一般 fail-fast；一般 new-tab／Reset 不變」。歷史結果的 Load admission 不要求目前來源能建立量測表單。Framework tab owner 只在這條建立路徑隔離 adapter.make_form，保留明確無 Form 狀態，不改 lab adapter，也不偽造空 Form 或反填 cfg。範本綁定、defaults 與 Load 失敗仍傳出。Load 失敗清除新 tab 並恢復原焦點，不留下 partial tab。無 Form 的 Reset preparation 任一步失敗，表單區與 Run 改顯示本次錯誤，原 exception 仍傳出。已有 Form 的 Reset 失敗保舊。Factory 原因與 Reset 恢復契約見 [[0073]]。
+
 使用者於 2026-10-14 裁定：「擴充空間，那這兩個功能的定位應該是gui框架下的一個子模塊，對外解耦，對內可擴充。」並釐清：「Artifact目前，一個Artifact是一個寫入單位，但內部支援多個不同的項目。」對 adapter 只交內容、框架決定格式回答：「好，同意做法一」。
 
 GUI handover 與 Qt-free experiment 核心分層，依 GUI → experiment → datafile／resources 的 C8、C9 contracts；共用核心另由 artifacts-core-no-ui 禁止 GUI／Qt 依賴。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與兩個子模組一併實作。

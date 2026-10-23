@@ -1,6 +1,6 @@
 """Starting values for jpa/flux_onetone; Qt-free declarations."""
 
-from zcu_tools.cfg_model import AliasName, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.jpa.flux_onetone.core import OneToneFluxCfg
@@ -8,7 +8,13 @@ from zcu_lab.v2.jpa.flux_onetone.core import OneToneFluxCfg
 
 def make_form(ctx: FormContext) -> Form[OneToneFluxCfg]:
     """Build starting values and shape from the captured source availability."""
-    del ctx
+    flux_source = (
+        ctx.parameters.lookup_point("$jpa.flux_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if flux_source is not None and not isinstance(flux_source, str):
+        raise ValueError("$jpa.flux_source must name a device")
     return Form(
         OneToneFluxCfg,
         tree={
@@ -21,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[OneToneFluxCfg]:
                     set={"freq": Hidden(0.0)},
                 ),
             },
-            "jpa_flux_dev": AliasName("flux_dev"),
+            "jpa_flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
                 "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),

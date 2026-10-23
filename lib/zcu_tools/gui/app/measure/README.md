@@ -215,6 +215,13 @@ Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
 and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.
+Only `open_tab_from_file` isolates adapter `make_form` failure so native history
+can still load without a Form. Template binding and default construction still
+fail before publication. The form area and disabled Run show the factory reason.
+Reset uses the normal source capture and factory: success installs a real Form;
+any preparation failure propagates unchanged, leaving no Form and updating the
+visible reason, including capture, template binding and defaults failures. Native cfg
+never supplies form input. See ADR-0073 and ADR-0067.
 Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Setup and each point own independent alias files. Open/Refresh/Reset capture the selected point's table. Inspect Apply, RPC and startup Apply save only that point; without a selected point they fail with no_context. Missing files are empty, without setup or preset fallback. Inspect alias drafts capture entry/point identity. Clean drafts follow selection; dirty drafts reject Apply to another target until Revert loads the current point.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.

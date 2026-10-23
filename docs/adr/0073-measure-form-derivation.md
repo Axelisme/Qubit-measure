@@ -156,6 +156,8 @@ Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 sel
 不加舊版雙讀或 native cfg 反向回填，見 [[0079]]。
 Load 只載分析／writeback 所需結果，不覆蓋表單。
 
+使用者於 2026-10-24 裁定：「只在 open_tab_from_file 路徑隔離 make_form 失敗，tab 照常建立並 Load，表單區與 Run 顯示 factory 原文錯誤，Reset 走一般 fail-fast；一般 new-tab／Reset 不變」。歷史結果不應依賴目前來源能否建立量測表單。這條建立路徑因此允許明確的無 Form 狀態，不建立空 Form、不補來源，也不從 native cfg 反填。隔離只包 adapter.make_form，範本綁定、defaults 與 Load 錯誤仍傳出。無 Form 時表單區顯示原文，Run 停用並顯示同一原因。Reset 仍重新捕捉來源並呼叫 factory，成功才安裝正常 Form。同日補充裁定，無 Form 的 Reset preparation 中，capture、make_form、範本綁定或 defaults 任一步失敗，都更新表單區與 Run 的本次錯誤，並原樣 re-raise。這只更新診斷，不把失敗轉成成功。一般 new-tab 的失敗及既有 Form 的 Reset 保舊契約不變。Load 的清理邊界見 [[0067]]。
+
 資源擁有 mutation guard、通知與撤銷。Editor 只讀借用的 state，write 與 run_command
 成對交回資源。Subscriber 故障記 log 後繼續，不回滾已提交 input。
 Measure 不再使用 CfgSchema 的跨 tab refresh／Unavailable 恢復模型。
@@ -180,9 +182,20 @@ Session、startup 與 FormEnv 不提供模板綁定預設值。模板展開不�
 
 Core 用 `flux_dev: str` 等具名欄位取代 `dev: Mapping[str, str]`。
 可選裝置使用 `str | None`。Core 不認得 alias 或 session，透過
-`context.devices[cfg.flux_dev]` 取得 driver。Form 用 `AliasName("flux_dev")`
-在 Open／Reset 把 alias 解析為 direct 字串；既有 input 不隨 alias 表更新。
-缺名稱或不在捕捉的候選清單時由表單報錯，不使用靜態裝置 fallback。
+`context.devices[cfg.flux_dev]` 取得 driver。Form 在 Open／Reset 從實驗對象的
+來源欄位讀取 direct 裝置名稱，單 qubit 用 `$qubit.flux_source`，mux 全域線圈用
+`$mux.flux_source`，JPA 用 `$jpa.flux_source` 與 `$jpa.rf_source`。
+初值可覆寫，既有 input 不隨 alias 表或元件參數更新。
+缺來源時欄位留空，必填欄位由表單報錯，可選欄位保留 None 的原有語意。
+不使用靜態裝置 fallback，也不從 cache 推測裝置。
+
+Alias 表選擇實驗元件，不再用 `flux_dev`、`coupler_flux_dev` 或 `jpa_rf_dev` 列選裝置。
+新 entry 範本只保存元件焦點 aliases，既有 point 的 aliases.yaml 不遷移。
+`resonator` 元件 alias 與既有 readout 推導不變。
+Sample writeback 從固定 Run／Load capture 的元件來源欄位讀名稱，再取該次 device snapshot 的座標。
+缺來源時只省略 Sample proposal 並記 unavailable reason。
+
+使用者 2026-10-23：「我認為flux_dev應該是由qubit/resonator推導，而不是意圖，因為沒有對象是以device為目標的」。
 
 Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，helper 寫 caller
 指定的具名欄位。它只比 cached unit，不換算、不連裝置。受影響 cfg 升 major，

@@ -38,7 +38,7 @@ The recipe can omit `center_mhz` and `span_mhz`. Omitted center uses current `$r
 
 Run after lookback and an initial onetone/freq, before any twotone flux mapping, to find `$qubit.flux_int` and the period from the resonator map.
 
-Review `flux_dev`. Opening a tab or pressing Reset resolves `$flux_dev` once from the alias table to a connected-device name. A missing or unbound alias leaves the required field empty and Invalid. Confirm the device and `flux_unit`, which starts as `A`. The selected unit labels the values as entered. Supply device-native values in that unit.
+Review `flux_dev`. Opening a tab or pressing Reset reads `$qubit.flux_source` once into an editable direct device name. A missing source leaves the required field empty and Invalid. Confirm the device and `flux_unit`, which starts as `A`. The selected unit labels the values as entered. Supply device-native values in that unit.
 
 The calibrated sweep uses 101 flux points across the padded interval between `$qubit.flux_int` and `$qubit.flux_half`, and 101 frequency points at `$resonator.freq` ± `$resonator.kappa` MHz. Start at a low readout gain, about 0.005, to stay below punch-out so the dip tracks cleanly. If poor SNR makes the dip hard to see, raise the gain toward 0.05 while keeping the frequency window tight.
 

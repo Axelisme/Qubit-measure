@@ -18,15 +18,6 @@ from zcu_tools.mcp.measure.recipe_contracts import MissingParameter
 from zcu_tools.mcp.measure.session import GuiRpcError
 
 
-def report_number(value: float | None) -> float | None:
-    """Keep a finite fit scalar, replacing absent or nonfinite values with null.
-
-    Units are unchanged. This matches the native summary's nonfinite-to-null
-    presentation and does not select fits, change quality or authorize writeback.
-    """
-    return value if value is not None and isfinite(value) else None
-
-
 def _finite(value: object) -> TypeGuard[int | float]:
     return (
         isinstance(value, (int, float))

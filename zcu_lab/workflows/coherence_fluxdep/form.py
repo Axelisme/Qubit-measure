@@ -18,7 +18,6 @@ from zcu_tools.gui.form import (
     field_error,
 )
 from zcu_tools.gui.form_adapter import SweepInput
-from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t2_form import (
@@ -93,7 +92,7 @@ class CoherencePlanForm(FormModel):
     """Start-time setpoints and two shared module reference/inline selections.
 
     flux_dev is the resolved host device name; new input defaults to a literal
-    resolved from $flux_dev in the fixed alias capture. Required flux_unit declares A, V or native.
+    read from $qubit.flux_source in the fixed parameter capture. Required flux_unit declares A, V or native.
     fluxes contain absolute values in that coordinate; no conversion occurs.
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
     shared pulse drive; readout selects a pulse-backed readout because native
@@ -143,10 +142,9 @@ class CoherencePlanForm(FormModel):
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Prefill the captured device name and x180 pi estimate.
 
-        Resolve $flux_dev only for new defaults and keep the name literal.
-        Missing captures or unbound aliases keep the $flux_dev expression
-        default, which default_input cannot evaluate, so flux_dev stays
-        unfilled and required, without a device fallback. Device membership is checked only when used.
+        Read $qubit.flux_source for new defaults and keep the name literal.
+        Missing captures, unbound qubits or absent sources leave flux_dev
+        unfilled and required. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in
         the fixed alias capture and declare its concrete path as an expression
         default if readable and non-null; default_input stores its value. No
@@ -156,16 +154,7 @@ class CoherencePlanForm(FormModel):
         not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
-        data = calibration_defaults(super().defaults(env), env)
-        if env.parameters is None:
-            return data
-        try:
-            data["flux_dev"] = env.parameters.resolve_path("$flux_dev")
-        except RoleResolutionError as error:
-            if error.reason not in {"Alias is not bound", "Unknown alias"}:
-                raise
-            # Keep the $flux_dev expression default; flux_dev then stays unfilled.
-        return data
+        return calibration_defaults(super().defaults(env), env)
 
     @classmethod
     def choices(cls, env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]]:

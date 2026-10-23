@@ -1,25 +1,11 @@
-"""Shared analyze-result shapes + helpers reused across adapters.
-
-``FigureOnlyAnalyzeResult`` is the look-at-the-curve analyze result: a single
-``figure`` field and nothing else (no fitted scalar, hence no writeback). The
-reset length sweeps share this shape, so they subclass it rather than
-redeclaring ``figure: Figure`` each.
-"""
+"""Qualify and serialize core fit-quality diagnostics for adapter summaries."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, TypeVar
+from dataclasses import replace
 
-from matplotlib.figure import Figure
 from zcu_tools.analysis.fitting import FitQuality, QualityIssue
-from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
-
-_FigureOnlyT = TypeVar("_FigureOnlyT", bound="FigureOnlyAnalyzeResult")
 
 
 def fit_quality_models(
@@ -65,29 +51,3 @@ def fit_quality_summary(
         if models is None
         else {name: quality.to_summary_dict() for name, quality in models.items()}
     )
-
-
-@dataclass
-class FigureOnlyAnalyzeResult(AnalyzeResultBase):
-    """A look-at-the-curve analyze result: carries only the rendered figure.
-
-    The analysis renders a trace for the Analyze tab but extracts no scalar, so
-    there is no writeback. Adapters declare a named subclass (so the result type
-    stays distinct) but inherit the single ``figure`` field.
-    """
-
-    figure: Figure
-
-
-def run_figure_only_analyze(
-    exp_cls: type[Any],
-    result_cls: type[_FigureOnlyT],
-    req: AnalyzeRequest[Any, Any],
-) -> _FigureOnlyT:
-    """Render ``exp_cls().analyze(run_result)`` into a figure-only result.
-
-    Shared by reset visual checks whose ``analyze`` is exactly "run the
-    experiment's figure-producing analyze, wrap the figure" — the only per-adapter
-    variation is which ``exp_cls`` and which figure-only ``result_cls`` (the return
-    type is exactly that subclass)."""
-    return result_cls(figure=exp_cls().analyze(req.run_result))
