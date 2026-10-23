@@ -106,9 +106,10 @@ async def mux_singleshot_ge(
     """Measure mux probe-off/on IQ clouds, fit GE separation, and review calibration.
 
     Select library then inline sources; null keeps captured Form values.
-    Overrides run last. Only participant drive/sweep settings are required;
+    Overrides run last. Only participant drives are required;
     readout identities remain required for every tone.
-    Shared sweep n is set through overrides; indices are original tone positions.
+    Set the IQ-cloud sample count with a shots override; there is no sweep n.
+    Indices are original tone positions.
     Fit Primary GE separation and Post radius, then ask before writeback.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.

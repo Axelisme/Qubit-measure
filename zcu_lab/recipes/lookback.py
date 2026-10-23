@@ -89,6 +89,7 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
     tab = session.open_recipe_tab("lookback", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     frequency = choose_frequency(
         tab,
@@ -113,6 +114,7 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
             tab.select(("modules", "readout"), inline=True)
             edits.append(FieldEdit(path=field, value=value))
     tab.apply_inputs(inputs, {("rounds",): inputs.rounds}, edits=edits)
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -134,12 +136,14 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return LookbackReport(
             trigger_offset_us=report_number(analysis.result.predict_offset),
             writeback_applied=writeback_applied,

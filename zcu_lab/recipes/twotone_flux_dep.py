@@ -116,6 +116,7 @@ async def twotone_flux_dep(
     tab = session.open_recipe_tab("twotone/flux_dep", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     unit = tab.call(
         "device.snapshot", DeviceParams(name=inputs.flux_device), result=DeviceReply
@@ -153,6 +154,7 @@ async def twotone_flux_dep(
         ]
     )
     tab.apply_inputs(inputs, {}, edits=edits)
+
     await tab.run()
     try:
         analysis = await tab.analyze("primary", result=FluxPickResult, interactive=True)
@@ -164,12 +166,14 @@ async def twotone_flux_dep(
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return TwotoneFluxDepReport(
             flux_half=report_number(analysis.result.flx_half),
             flux_integer=report_number(analysis.result.flx_int),

@@ -440,68 +440,6 @@ def test_apply_inputs_leaves_overlapping_and_unknown_paths_to_form_owner(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("rejected", [False, True])
-def test_apply_inputs_admits_values_named_edits_and_overrides_together(
-    tmp_path: Path, rejected: bool
-) -> None:
-    class Inputs(api.RecipeInputs):
-        pass
-
-    gui = SyntheticGui()
-
-    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
-        if method == "tab.edit_recipe_fields" and rejected:
-            return {
-                "changed": False,
-                "errors": [{"path": ["pulse", "length"], "message": "Required"}],
-            }
-        return gui.respond(method, params)
-
-    @api.recipe("synthetic", "Admit derived edits and final overrides as one candidate")
-    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
-        tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
-        tab.apply_inputs(
-            inputs,
-            {("count",): 3, ("retained",): None},
-            edits=(
-                api.FieldEdit(path=("count",), value=7, source="$calibration.count"),
-                api.FieldEdit(path=("retained",), value=None, source="linewidth"),
-            ),
-        )
-        return Report(count=1)
-
-    client = make_client(tmp_path, respond, recipes=(synthetic,))
-    try:
-        execution = client.context.session.recipes.start(
-            client.context,
-            "synthetic",
-            {"overrides": [{"path": ["count"], "value": 11}]},
-        )
-        execution.join()
-        snapshot = execution.snapshot()
-        assert snapshot.status == ("needs_parameters" if rejected else "completed"), (
-            snapshot
-        )
-        assert [
-            p for m, p in client.transport.sent if m == "tab.edit_recipe_fields"
-        ] == [
-            {
-                "tab_id": "tab-1",
-                "edits": [
-                    {"path": ["count"], "value": 11},
-                ],
-                "require_valid": True,
-            }
-        ]
-        if rejected:
-            assert [(e.path, e.message) for e in snapshot.parameter_errors] == [
-                (("pulse", "length"), "Required")
-            ]
-        assert gui.runs == 0
-    finally:
-        client.context.session.close()
-
-
 @pytest.mark.parametrize(
     ("path", "value", "source", "message"),
     [
@@ -549,21 +487,32 @@ def test_apply_inputs_validates_superseded_and_null_edits(
         client.context.session.close()
 
 
-def test_apply_inputs_retains_named_edit_source_validation(tmp_path: Path) -> None:
-    @api.recipe("synthetic", "Keep the supplied edit source for native admission")
+@pytest.mark.parametrize("override", [False, True])
+def test_apply_inputs_retains_winning_edit_source_validation(
+    tmp_path: Path, override: bool
+) -> None:
+    @api.recipe("synthetic", "Keep the winning named or override source for admission")
     async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
         tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
         tab.apply_inputs(
             inputs,
-            {},
-            edits=(api.FieldEdit(path=("count",), value=7, source=" "),),
+            {("count",): 3},
+            edits=(
+                api.FieldEdit(
+                    path=("count",), value=7, source="explicit" if override else " "
+                ),
+            ),
         )
         return Report(count=1)
 
     client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         execution = client.context.session.recipes.start(
-            client.context, "synthetic", {}
+            client.context,
+            "synthetic",
+            {"overrides": [{"path": ["count"], "value": 11, "source": " "}]}
+            if override
+            else {},
         )
         execution.join()
         snapshot = execution.snapshot()

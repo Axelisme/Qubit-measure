@@ -111,6 +111,7 @@ async def onetone_spectrum(
     tab = session.open_recipe_tab("onetone/freq", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     sweep = frequency_sweep_edits(
         tab,
@@ -132,6 +133,7 @@ async def onetone_spectrum(
     tab.apply_inputs(
         inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -155,12 +157,14 @@ async def onetone_spectrum(
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return OnetoneSpectrumReport(
             frequency_mhz=report_number(analysis.result.freq),
             linewidth_mhz=report_number(analysis.result.fwhm),

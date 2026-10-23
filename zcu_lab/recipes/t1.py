@@ -103,6 +103,7 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
@@ -134,6 +135,7 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
         },
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -157,12 +159,14 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return T1Report(
             t1_us=report_number(analysis.result.t1),
             t1_err_us=report_number(analysis.result.t1_err),

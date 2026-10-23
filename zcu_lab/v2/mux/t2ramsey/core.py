@@ -10,8 +10,9 @@ catalog registration or writeback proposal.
 
 `participants` is a nonempty, unique list of original indices in the complete `tones` list.
 `[2, 0]` selects Q3 then Q1, retaining that execution/data order.
-Every element requires valid drives on independent generators, even when not
-participating. Names, count and order match the fixed capture.
+Only participants require valid drives on independent generators. Inactive
+drives may be None. Every tone retains its name and readout identity; count
+and order match the fixed capture.
 
 Import `MuxT2RamseyCfg`, `MuxT2RamseyExp` and `MuxCoherenceToneCfg` from
 `zcu_lab.v2.mux.t2ramsey`. The cfg contains:
@@ -163,9 +164,9 @@ class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
     """Named x90 drives and a shared delay sweep for mux Ramsey fringes.
 
     modules holds the optional reset and full mux readout. tones follows the
-    original readout order; every tone has a unique nonempty name, a required
-    x90 drive on an independent generator, and a MHz detune for its final phase
-    ramp. Selected drives must be valid and cannot share
+    original readout order; every tone has a unique nonempty name, a nullable
+    x90 drive, and a MHz detune for its final phase ramp. Only participants
+    require drives on independent generators. Selected drives cannot share
     the readout generator. participants is a nonempty list of unique original indices
     in result-row order (Q3/Q1 selects original positions 2/0).
     delay is the common finite, nonnegative requested-us sweep. Inherited reps

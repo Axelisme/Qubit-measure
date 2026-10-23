@@ -107,6 +107,7 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
@@ -139,6 +140,7 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
         },
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -162,12 +164,14 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return T2RamseyReport(
             t2ramsey_us=report_number(analysis.result.t2r),
             t2ramsey_err_us=report_number(analysis.result.t2r_err),

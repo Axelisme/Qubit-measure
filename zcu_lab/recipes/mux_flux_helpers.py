@@ -119,7 +119,9 @@ def flux_range_edits(
 
     path addresses tones or frequency.tones in the flat cfg. Null keeps all
     ranges. A supplied list must cover the complete original list, including
-    nonparticipants. Length mismatch raises needs_parameters before Run.
+    nonparticipants. Each supplied range replaces the complete nullable sweep,
+    including None on a nonparticipant. Length mismatch raises needs_parameters
+    before Run.
     """
     if sweeps is None:
         return []
@@ -134,9 +136,8 @@ def flux_range_edits(
             )
         )
     return [
-        FieldEdit(path=(*path, index, "sweep", endpoint), value=value)
+        FieldEdit(path=(*path, index, "sweep"), value=sweep)
         for index, sweep in enumerate(sweeps)
-        for endpoint, value in (("start", sweep.start), ("stop", sweep.stop))
     ]
 
 

@@ -55,6 +55,7 @@ async def mist_drive_frequency(
         "mist/power_dep/drive_freq", inputs, target_alias="qubit"
     )
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     tab.apply_inputs(
         inputs,
@@ -68,6 +69,7 @@ async def mist_drive_frequency(
         },
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze("primary", result=DriveFreqAnalyzeResult)

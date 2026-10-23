@@ -182,12 +182,14 @@ async def mux_onetone(
         )
         if fit.result is None:
             return MuxOnetoneReport(tones=[], analysis_failure=fit.reason)
+
         answer = await tab.ask_writeback()
         applied = False
         if answer.accepted:
             receipt = tab.accept_writeback(answer.items)
             receipt.raise_for_error()
             applied = bool(receipt.items)
+
         tones = [
             tone_report(tone, names, fit.result.resonators_diagnostic)
             for tone in fit.result.tones

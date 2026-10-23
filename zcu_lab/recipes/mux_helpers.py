@@ -34,8 +34,9 @@ def mux_sweep_edits(
     Null retains the corresponding Form inputs. sweeps must cover every tone
     in original order, including nonparticipants; a length mismatch raises
     ValueError before edits are installed. n is the validated shared count.
-    This reads the Form without changing it; the caller applies these edits
-    before overrides in the same validated batch.
+    Each supplied range replaces the complete nullable sweep, including None
+    on a nonparticipant. This reads the Form without changing it. The caller
+    applies these edits before overrides in the same validated batch.
     """
     edits: list[FieldEdit] = []
     if sweeps is not None:
@@ -47,14 +48,7 @@ def mux_sweep_edits(
                 f"sweeps length={len(sweeps)}; expected {len(tones)} tones, each with start, stop; use top-level n"
             )
         for index, sweep in enumerate(sweeps):
-            edits.extend(
-                (
-                    FieldEdit(
-                        path=("tones", index, "sweep", "start"), value=sweep.start
-                    ),
-                    FieldEdit(path=("tones", index, "sweep", "stop"), value=sweep.stop),
-                )
-            )
+            edits.append(FieldEdit(path=("tones", index, "sweep"), value=sweep))
     edits.append(FieldEdit(path=("expts",), value=n))
     return edits
 

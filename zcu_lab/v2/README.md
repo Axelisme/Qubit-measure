@@ -36,10 +36,9 @@ Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T
 它與 `onetone/freq` linear 共用純 core cfg、頻率格點與繪圖 buffer。
 兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
 Raw 是一維頻率與 complex IQ。
-分析名單隨 cfg 保存，Run 可空，Analyze 必須非空且不重複。Open／Reset 有 `$mux` 時，
-全部成員都有目前 freq 才按 freq 升冪排序，否則保留 group 順序；無 `$mux` 時留空。
-Analyze／Load 從該次 cfg 取可編輯的名單初值，不讀目前 Form。
-分析去除直線 magnitude 背景，選取最顯著且符合最小 MHz 間距的 N 個凹陷，依頻率升序配名稱。
+分析名單只在 Analyze 參數，不進 cfg 或量測表單。名單預設空，先探索符合最小 MHz 間距的無名凹陷，
+依頻率升序回報 freq 與 depth，不提出寫回。先看圖，再於 Analyze 填入不重複的 resonator 名稱。
+分析去除直線 magnitude 背景；非空名單選取最顯著的 N 個凹陷，再依頻率升序配名稱。
 每個 capture 中存在的名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
 不足 N 個凹陷時整次分析失敗。操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 

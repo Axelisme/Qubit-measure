@@ -34,13 +34,22 @@ class CPMGAnalyzeParams:
 
 
 class CPMGSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Row-aligned pi-pulse counts and T2 estimates; null means unavailable.
 
-    ns: list[int] = Field(description="Owner ns values.")
+    ns[i], t2s[i] and t2errs[i] describe the same CPMG fit row.
+    """
 
-    t2s: list[float | None] = Field(description="Owner t2s values.")
+    ns: list[int] = Field(
+        description="Number of pi pulses per CPMG sequence, in fit-row order."
+    )
 
-    t2errs: list[float | None] = Field(description="Owner t2errs values.")
+    t2s: list[float | None] = Field(
+        description="Fitted T2 in us, aligned with ns; null when unavailable."
+    )
+
+    t2errs: list[float | None] = Field(
+        description="T2 fit uncertainty in us, aligned with ns and t2s; null when unavailable."
+    )
 
 
 @dataclass

@@ -606,8 +606,9 @@ class RecipeTab:
         values retain Form input in all three groups. For an exact repeated path,
         the last non-None edit wins, including its source. Distinct ancestor and
         descendant paths still reach owner admission and are rejected as overlaps.
-        No source selection occurs here. require_valid=True checks the complete cfg atomically and raises
-        RecipeNeedsParameters on rejection. False follows apply's draft
+        All supplied edits retain path/source validation, even when superseded
+        or None. No source selection occurs here. require_valid=True checks the
+        complete cfg atomically and raises RecipeNeedsParameters on rejection. False follows apply's draft
         commit/raise semantics. Prior custom edits/selections are not rolled back.
         """
         batch = [

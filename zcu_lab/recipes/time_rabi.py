@@ -119,6 +119,7 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select(("modules", "qub_pulse"), ref=inputs.drive_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
@@ -156,6 +157,7 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     tab.apply_inputs(
         inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -181,12 +183,14 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return TimeRabiReport(
             pi_length_us=report_number(analysis.result.pi_len),
             pi_length_err_us=report_number(analysis.result.pi_len_err),

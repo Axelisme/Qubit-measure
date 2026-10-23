@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -54,7 +54,7 @@ Measure 的預設 zcu_lab 腳本自行保存 user cache，依序嘗試連線 SoC
 ```
 session/
 ├── types.py            — SocProtocol/SocCfgProtocol/SocHandle/SocCfgHandle/ContextReadiness/SessionEnv（P-a 值型別）
-├── aliases.py          — session-only 有序表；原子替換、lazy 名稱 links 與單次 override
+├── aliases.py          — session-only 有序表；原子替換、lazy 名稱 links 與單次 override。scalar_alias_bindings 集中 template placeholder 的 scalar admission，Controller 與 NewEntryDialog 各自呈現 missing 訊息
 ├── events.py           — SessionEvent enum + SessionPayload base + 11 payload（Md/Ml/ContextSwitched/Soc/Device{Changed,SetupStarted,SetupFinished} + GateChanged/ConnectionFinished/DeviceOperationFinished）
 ├── device_models.py    — Device requests 與 read projections 的正式 owner，供 service、control facets、dialogs 與 remote 共用；DeviceSnapshot.info 是 cached reference，不是深層不可變的硬體 snapshot
 ├── state.py            — SessionState（session_env+devices/DeviceState+preferences/SessionPreferences+shared VersionTable+device mutators）；DeviceStatus

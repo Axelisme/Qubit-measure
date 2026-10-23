@@ -16,10 +16,11 @@ from .mux_sweep_cfg import (
 
 
 class MuxCoherenceToneCfg(MuxDriveToneCfg):
-    """One named original tone's required x90 drive and MHz detune.
+    """One named original tone's nullable x90 drive and MHz detune.
 
     name is its nonempty capture-generated qubit identity. drive is the fixed
-    pi/2 source pulse. detune ramps the final pi/2 phase, not its carrier.
+    pi/2 source pulse, required only for participants and otherwise nullable.
+    detune ramps the final pi/2 phase, not its carrier.
     Evolution uses the cfg's shared delay; no per-tone sweep is required.
     Admission validates participant pulses, detunes and independent channels,
     and rejects duplicate names in the complete list.
@@ -42,6 +43,9 @@ def validate_coherence_scan(
     nonnegative delay bounds in us, finite detunes in MHz, fixed drive pulses
     and independent channels. Raise ValueError without changing inputs.
     """
+    # Validate original indices and fixed drives before indexing any tone.
+    validate_mux_tones(cfg, modules, tones, participants)
+
     # Check the shared evolution window and each final-pulse phase ramp.
     if not all(math.isfinite(v) for v in (delay.start, delay.stop, delay.step)):
         raise ValueError("delay start/stop/step must be finite")
@@ -51,9 +55,6 @@ def validate_coherence_scan(
         tone = tones[index]
         if not math.isfinite(tone.detune):
             raise ValueError(f"tones[{index}].detune must be finite MHz")
-
-    # Validate fixed drives independently of pulse-scan ranges and point counts.
-    validate_mux_tones(cfg, modules, tones, participants)
 
 
 @dataclass(frozen=True)

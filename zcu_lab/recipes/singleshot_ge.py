@@ -113,6 +113,7 @@ async def singleshot_ge(
     select_or_disable(tab, ("modules", "init_pulse"), inputs.init_pulse_ref)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
@@ -135,6 +136,7 @@ async def singleshot_ge(
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
     tab.apply_inputs(inputs, {("shots",): inputs.shots}, edits=edits)
+
     await tab.run()
     try:
         primary = await tab.analyze(
@@ -173,12 +175,14 @@ async def singleshot_ge(
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return SingleshotGEReport(
             fidelity=report_number(primary.result.fidelity),
             theta=report_number(primary.result.theta),

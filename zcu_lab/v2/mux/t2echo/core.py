@@ -10,8 +10,9 @@ a Form, recipe, catalog entry or writeback proposal.
 
 `participants` is a nonempty, unique list of original indices in the complete `tones` list.
 `[2, 0]` selects Q3 then Q1, retaining that execution/data order.
-Every element requires valid drives on independent generators, even when not
-participating. Names, count and order match the fixed capture.
+Only participants require valid drives on independent generators. Inactive
+drives may be None. Every tone retains its name and readout identity; count
+and order match the fixed capture.
 
 Import `MuxT2EchoCfg`, `MuxT2EchoExp` and `MuxEchoToneCfg` from
 `zcu_lab.v2.mux.t2echo`. Supply common `MuxDriveModuleCfg` with optional reset

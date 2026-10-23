@@ -184,6 +184,7 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
@@ -235,6 +236,7 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
         },
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(

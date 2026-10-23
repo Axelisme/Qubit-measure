@@ -119,6 +119,7 @@ async def onetone_spectrum_over_flux(
     tab = session.open_recipe_tab("onetone/flux_dep", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     sweep = frequency_sweep_edits(
@@ -152,6 +153,7 @@ async def onetone_spectrum_over_flux(
     tab.apply_inputs(
         inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze("primary", result=FluxPickResult, interactive=True)
@@ -163,12 +165,14 @@ async def onetone_spectrum_over_flux(
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return OnetoneSpectrumOverFluxReport(
             flux_half=report_number(analysis.result.flx_half),
             flux_integer=report_number(analysis.result.flx_int),

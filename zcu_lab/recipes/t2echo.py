@@ -105,6 +105,7 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
@@ -143,6 +144,7 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
         },
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -164,12 +166,14 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return T2EchoReport(
             t2echo_us=report_number(analysis.result.t2e),
             t2echo_err_us=report_number(analysis.result.t2e_err),

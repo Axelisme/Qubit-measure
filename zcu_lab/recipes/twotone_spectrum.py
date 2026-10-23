@@ -116,6 +116,7 @@ async def twotone_spectrum(
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select(("modules", "qub_pulse"), ref=inputs.drive_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     sweep = frequency_sweep_edits(
@@ -157,6 +158,7 @@ async def twotone_spectrum(
     tab.apply_inputs(
         inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
@@ -180,12 +182,14 @@ async def twotone_spectrum(
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
+
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return TwotoneSpectrumReport(
             frequency_mhz=report_number(analysis.result.freq),
             frequency_err_mhz=report_number(analysis.result.freq_err),

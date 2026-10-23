@@ -75,12 +75,14 @@ async def mist_power_trace(
     tab.select(("modules", "probe_pulse"), ref=inputs.probe_ref)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     tab.apply_inputs(
         inputs,
         {("sweep", "gain"): None, ("reps",): None, ("rounds",): None},
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(

@@ -73,6 +73,7 @@ async def mux_twotone_flux_global(
             *edits,
         ],
     )
+
     updates = mux_flux_analysis_updates(tab, inputs)
 
     await tab.run()
@@ -84,12 +85,14 @@ async def mux_twotone_flux_global(
             )
             if analysis.result is None:
                 return MuxFluxReport(tones=tones, analysis_failure=analysis.reason)
+
             decision = await tab.ask_writeback()
             applied = False
             if decision.accepted:
                 receipt = tab.accept_writeback(decision.items)
                 receipt.raise_for_error()
                 applied = bool(receipt.items)
+
             picked = analysis.result
             tones.append(
                 MuxFluxToneReport(

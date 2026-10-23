@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-23（recipe 共用輸入與報告）
+**Last updated:** 2026-10-24（recipe 最後覆寫與 owner admission）
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -147,6 +147,8 @@ values 的 key 是 FormPath tuple，value 使用該欄位的原生單位。
 None 保留 Form 輸入，overrides 排在實驗值之後。
 分拆路徑的 `tab.apply_inputs(inputs, values, edits=...)` 可接收已具名的 FieldEdit 清單。
 它依序提交非 None values、保留 path/value/source 的 edits、最後是 inputs.overrides。
+同一 exact path 只送最後一個非 None 值，保留該項 source；所有 authored path/source 仍先驗證。
+祖先與子路徑不合併，重疊或不可達路徑仍由 Form owner 整批拒絕。
 三組共用一次完整候選驗證。edits 的 None 也保留 Form，不先提交不完整欄位。
 prepare_tab 不接 edits；有校準來源標記或中途自訂操作時用分拆步驟。
 預設 require_valid=True，回 tab 前會驗完整 cfg，不會 Run、Analyze、Save 或寫回。

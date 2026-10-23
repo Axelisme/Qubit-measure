@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 Recipe 是操作 GUI tab 的 async 函式。Adapter 擁有 cfg、表單、量測與分析。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -12,12 +12,12 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 [__init__.py](__init__.py) 的 `RECIPES` 明列 29 個宣告，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
-非 mux 的 `Inputs` 繼承 `RecipeInputs`，只加實驗欄位，逐欄寫單位、預設與 null 政策。
+每個 recipe 的 `Inputs` 繼承 `RecipeInputs`，只加實驗欄位，逐欄寫單位、預設與 null 政策。
 `RecipeInputs` 提供 target、reuse_tab_id、library、inline、overrides。
-Mux 的現有介面見下方 mux guide，由各自的遷移另行更新。
+Mux 的 participants 使用完整 tones 清單的原始 index，逐 tone 範圍清單保留原始順序，見下方 mux guide。
 框架從這個 model 產生 MCP JSON schema，不另維護手寫 schema。
 Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。
-非 mux 的 `Report` 繼承 `RecipeReport`，只加實驗的回報量。
+每個 recipe 的 `Report` 繼承 `RecipeReport`，只加實驗的回報量。
 基底提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics，作者明填 owner 事實。
 各模組的 `DEFINITION` 指向裝飾後的宣告。組合根把 `RECIPES` 注入框架。
 Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須重啟 MCP server。
@@ -26,7 +26,7 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 非 mux helper 回傳具名計算結果或 FieldEdit，不提交半套 cfg。
 Recipe 明寫 selector 的選取，再把計算結果交最後一批 apply_inputs。
 數字回報使用 lib 的 report_number，不改單位或精度。
-`mux_helpers.py` 擁有 mux 的 library、inline 輸入與 tone report 共用欄位。
+`mux_helpers.py` 擁有 mux 的 start/stop 範圍輸入、完整 tone 範圍的 FieldEdit 組裝與 tone report 共用欄位。
 它們不是獨立 recipe。參數推導不放進 framework。
 
 ## 作者可呼叫的操作
@@ -34,7 +34,8 @@ Recipe 明寫 selector 的選取，再把計算結果交最後一批 apply_input
 `session.open_recipe_tab(adapter, inputs, target_alias="qubit")` 開啟或 Reset 非 mux tab。
 Range find 使用 target_alias="resonator"。`tab.select_sources(inputs)` 先選 library 再複製 inline。
 來源選好後可插入自己的步驟，最後用 `tab.apply_inputs(inputs, values, edits=...)`。
-它依序套非 None values、保留來源標記的具名 edits、inputs.overrides，只驗一次完整候選。
+它依序處理非 None values、保留來源標記的具名 edits、inputs.overrides。
+同一 exact path 取最後一個非 None 值，只驗一次完整候選；祖先與子路徑重疊仍整批拒絕。
 不需要中途步驟時用 `session.prepare_tab(..., values=...)`，它不 Run。
 既有 `session.open_tab(adapter, aliases=..., reuse=...)` 仍可直接使用。
 Alias override 只供這次固定 capture，不更改全域 aliases 或 GUI focus。

@@ -91,6 +91,7 @@ async def onetone_spectrum_over_power(
     tab = session.open_recipe_tab("onetone/power_dep", inputs, target_alias="qubit")
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     sweep = frequency_sweep_edits(
         tab,
@@ -136,6 +137,7 @@ async def onetone_spectrum_over_power(
     tab.apply_inputs(
         inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
     )
+
     await tab.run()
     try:
         tab.preview()

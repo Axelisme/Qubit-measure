@@ -99,6 +99,7 @@ async def mist_flux_dep(
         raise ValueError("points must be an integer >=2")
     tab = session.open_recipe_tab("mist/flux_dep", inputs, target_alias="qubit")
     tab.select_sources(inputs)
+
     edits: list[FieldEdit] = []
     edits.extend(flux_device_edits(tab, inputs.flux_device, unit=inputs.flux_unit))
     edits.extend(
@@ -118,6 +119,7 @@ async def mist_flux_dep(
         },
         edits=edits,
     )
+
     await tab.run()
     try:
         analysis = await tab.analyze(
