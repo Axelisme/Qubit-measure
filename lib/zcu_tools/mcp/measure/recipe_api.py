@@ -13,7 +13,7 @@ from inspect import Parameter, iscoroutinefunction, signature
 from math import isfinite
 from typing import TYPE_CHECKING, Literal, Protocol, get_type_hints
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from zcu_tools.analysis.fitting.quality import FitQuality as FitQuality
 from zcu_tools.analysis.fitting.quality import QualityIssue as QualityIssue
@@ -169,10 +169,14 @@ class InlineSelection(BaseModel):
 class RecipeInputs(BaseModel):
     """Optional source and edit inputs shared by experiment recipes.
 
-    Add experiment fields in a subclass. None keeps the corresponding Form
-    input or global alias. These inputs do nothing until passed to a session
-    or tab method; authors may instead use open_tab, select and apply directly.
+    Add experiment fields in a subclass. Unknown fields and non-finite numeric
+    inputs fail validation; recipe admission records failed before binding the
+    GUI or starting measurement. None keeps the corresponding Form input or
+    global alias. These inputs do nothing until passed to a session or tab
+    method; authors may instead use open_tab, select and apply directly.
     """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     target: str | None = Field(
         default=None,
