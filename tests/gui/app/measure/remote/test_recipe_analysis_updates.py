@@ -30,6 +30,7 @@ def test_updates_reach_owner_and_done_resumes_same_recipe_before_writeback_answe
     fx, tmp_path: Path, request: pytest.FixtureRequest
 ) -> None:
     fx.registry.register("synthetic/recipe-picker", RecipePicker)
+    fx.view.interactive_presentation.return_value = None
     context = fx.ctrl.context_control
     captured = context.read_context()
     assert captured is not None
