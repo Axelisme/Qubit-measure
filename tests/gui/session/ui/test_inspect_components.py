@@ -5,6 +5,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QComboBox, QTabWidget, QTreeWidget
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -67,6 +68,57 @@ def inspector(
             dialog.deleteLater()
             qapp.processEvents()
         restore_registry(before)
+
+
+def test_parameters_filter_restores_user_expansion_after_refresh(
+    inspector, tmp_path: Path
+) -> None:
+    dialog, control = inspector
+    control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    control.add_component("Q2", "fake/drive/a", {"rate": 4400.0})
+    dialog.refresh()
+    dialog.resize(1000, 760)
+    dialog.show()
+    ui = ComponentDriver(dialog)
+    evidence = Path(os.environ.get("INSPECT_FILTER_EVIDENCE", str(tmp_path)))
+
+    def rows():
+        return {
+            row.path: row
+            for row in ui.visible().tree_rows
+            if row.tree_name == "component_tree"
+        }
+
+    ui.screenshot(evidence / "parameters-default.png")
+    assert set(rows()) == {("general",), ("Q1",), ("Q2",)}
+    assert not rows()[("Q1",)].expanded
+    ui.expand_tree(("Q1",), object_name="component_tree")
+    ui.click("Refresh")
+    assert ("Q1", "rate") in rows()
+    assert not rows()[("Q2",)].expanded
+
+    assert ui.observe(object_name="inspect.parameters.filter").visible
+    ui.enter_text(
+        object_name="inspect.parameters.filter", value="q2.RATE", commit=False
+    )
+    ui.screenshot(evidence / "parameters-filtered.png")
+    assert set(rows()) == {("Q2",), ("Q2", "rate")}
+    assert rows()[("Q2",)].expanded
+    ui.click("Refresh")
+    assert set(rows()) == {("Q2",), ("Q2", "rate")}
+    ui.enter_text(object_name="inspect.parameters.filter", value="", commit=False)
+    assert ("Q1", "rate") in rows()
+    assert not rows()[("Q2",)].expanded
+    ui.expand_tree(("Q1",), object_name="component_tree")
+    ui.press_key(Qt.Key.Key_Left, object_name="component_tree")
+    ui.click("Refresh")
+    assert not rows()[("Q1",)].expanded
+    ui.enter_text(
+        object_name="inspect.parameters.filter", value="missing", commit=False
+    )
+    assert not rows()
+    ui.enter_text(object_name="inspect.parameters.filter", value="RATE", commit=False)
+    assert ("Q1", "rate") in rows() and ("Q2", "rate") in rows()
 
 
 def test_shipped_inspect_refresh_keeps_component_frontend_and_modules_tab(

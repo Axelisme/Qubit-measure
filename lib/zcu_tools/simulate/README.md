@@ -109,6 +109,15 @@ default. The engine segments controls, selects kernels and shares deterministic
 preparations across points and acquires. It never carries quantum states into a
 new shot. Numeric tolerances do not certify basis convergence or the physical
 validity of a model.
+Single constant-tone plateaus below 30 MHz use `slow_envelope`, which holds
+carrier phase at each midpoint and applies full-Hamiltonian matrix exponentials
+between secular bath half-steps. The default is 20 segments per carrier period.
+Set `numerics.slow_envelope_segments_per_period` in single-fluxonium or the
+six-fluxonium environment to refine this grid. Population error against dense
+ODE is accepted within 1e-2; the 21-level Q1 calibration measured about 1e-4 or
+less. This is not a bound for arbitrary gains, durations or coherences.
+Carriers at or above 30 MHz keep the existing dispatch.
+
 Acquisition cancellation takes effect between evolution chunks, discards the
 interrupted round and retains completed rounds; startup warmup has no acquire
 cancel query.

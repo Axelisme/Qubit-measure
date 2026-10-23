@@ -4,7 +4,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QAction, QImage
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -677,6 +677,83 @@ def test_choice_operations_reject_wrong_selector_and_ignore_unavailable_widgets(
     driver.choose_option(object_name="choice", value="Two")
     driver.invoke_context_action(object_name="choice", action="Copy choice")
     assert driver.observe(object_name="choice_status").text == "Ready"
+
+
+class _BlockComboOpening(QObject):
+    """Consume activation clicks while leaving the synthetic combo readable."""
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a1 is not None and a1.type() in (
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+        ):
+            return True
+        return super().eventFilter(a0, a1)
+
+
+@pytest.mark.parametrize("blockade", ["opening", "disabled_popup"])
+def test_choose_option_leaves_selection_unchanged_without_interactable_popup(
+    choice_surface, blockade: str, tmp_path: Path
+) -> None:
+    driver = _user_input.ComponentDriver(choice_surface)
+    combo = choice_surface.findChild(QComboBox, "choice")
+    opening_filter = _BlockComboOpening(combo)
+    view = combo.view()
+    assert view is not None
+    if blockade == "opening":
+        combo.installEventFilter(opening_filter)
+    else:
+        view.setEnabled(False)
+    driver.screenshot(tmp_path / "before-blocked-selection.png")
+    assert driver.observe(object_name="choice").enabled
+    assert driver.observe(object_name="choice").visible
+
+    driver.choose_option("Selection:", "Three")
+    driver.screenshot(tmp_path / "after-blocked-selection.png")
+    assert driver.observe(object_name="choice").text == "One"
+    assert driver.observe(object_name="choice_status").text == "Ready"
+
+    combo.removeEventFilter(opening_filter)
+    view.setEnabled(True)
+    driver.choose_option("Selection:", "Three")
+    driver.screenshot(tmp_path / "after-restored-selection.png")
+    assert driver.observe(object_name="choice").text == "Three"
+    assert driver.observe(object_name="choice_status").text == "Three"
+
+
+def test_choose_option_does_not_mutate_viewport_clipped_combo(
+    surface, qapp, tmp_path: Path
+) -> None:
+    scroll = QScrollArea()
+    content = QWidget()
+    content.setFixedSize(500, 1200)
+    combo = QComboBox(content)
+    combo.setObjectName("clipped_choice")
+    combo.addItems(["One", "Two", "Three"])
+    combo.setGeometry(10, 1000, 250, 30)
+    combo.currentTextChanged.connect(surface.statusBar().showMessage)
+    scroll.setWidget(content)
+    surface.setCentralWidget(scroll)
+    surface.statusBar().showMessage("Unchanged")
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    driver.screenshot(tmp_path / "before-clipped-selection.png")
+    assert not driver.observe(object_name="clipped_choice").visible
+
+    driver.choose_option(object_name="clipped_choice", value="Three")
+    driver.screenshot(tmp_path / "after-clipped-selection.png")
+    assert driver.status().text == "Unchanged"
+
+    bar = scroll.verticalScrollBar()
+    assert bar is not None
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+    driver.screenshot(tmp_path / "after-revealing-choice.png")
+    assert driver.observe(object_name="clipped_choice").text == "One"
+    driver.choose_option(object_name="clipped_choice", value="Three")
+    driver.screenshot(tmp_path / "after-visible-selection.png")
+    assert driver.observe(object_name="clipped_choice").text == "Three"
+    assert driver.status().text == "Three"
 
 
 def test_object_name_prefers_visible_tab_without_weakening_ambiguity_or_hidden_gates(
