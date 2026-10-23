@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run mux T1 from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 ## GUI setup
 
@@ -36,13 +36,15 @@ T1 leaves recovery blank for correction.
 
 ## FTF cost example
 
-A two-participant offline Run used 8 requested delays from 0.02 to 0.16 us,
-0.02 us const drive pulses, 100 reps, 1 round and 0.1 us recovery.
-The recorded Run action took 2.006 s, about 0.25 s per joint delay point.
+A two-participant offline Run used 11 equally spaced requested delays from
+0.02383 to 0.25635 us, 0.02 us const drive pulses, 50 reps, 2 rounds and
+0.1 us recovery. Readout used 0.1 us pulse and integration windows, with a
+0.4 us trigger offset. The hardware-sweep Run took 1.152 s on CPUs 4 and 5 after
+warming the simulation caches.
 This window only checks execution. It does not constrain a physical T1.
 
-The timer includes the ComponentDriver button action, terminal wait and
-screenshots. It is not acquisition-only time and excludes Analyze and Save.
+The timer includes the ComponentDriver button action and terminal wait.
+It is not acquisition-only time and excludes screenshots, Analyze and Save.
 Do not compare it with timings from other slots or experiments as a speed test.
 Long-delay T1 scans can cost much more than this short example because the
 simulated evolution window changes. Delay point count and range, drive duration,
@@ -53,9 +55,9 @@ includes the intended longest delay before budgeting the full scan.
 
 ## Measurement and analysis
 
-Use calibrated fixed pi pulses. All qubits share a delay axis in us.
+Use calibrated fixed pi pulses. All qubits share a linear, equally spaced delay
+axis in us, executed by one program's hardware loop.
 Requested times must be finite, nonnegative and strictly increasing.
-A nonuniform time list is also supported.
 
 The sequence is common reset, simultaneous pi pulses, common delay, then mux
 readout. The delay starts after the longest pulse branch, including pre/post delays.
@@ -88,7 +90,9 @@ A missing source configuration leaves the name unavailable.
 Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains acquired data and leaves missing data as NaN.
+Live plots update after each completed round across the full delay axis.
+Cancellation retains completed-round averages across that axis.
+Before the first completed round, signals remain NaN.
 Partial data from a failed operation retains its failure status.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
