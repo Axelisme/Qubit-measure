@@ -67,6 +67,12 @@ def test_inapplicable_subtree_preserves_draft_without_evaluation_or_validation(d
     assert target is not None and not target.disabled
 
 
+def test_default_input_preserves_inapplicable_expression_draft() -> None:
+    data: dict[str, JsonValue] = {"selection": [0], "drive": {"gain": {"expr": "unknown_value"}}, "readout": 6000}
+    initial = ConditionalForm.default_input(core.FormEnv(), defaults=data)
+    assert initial.data == data
+
+
 def test_membership_change_uses_same_input_and_restores_valid_expression() -> None:
     state = state_for({"gain": {"expr": "2 * 3"}})
     state.write({("selection",): [1]}, core.FormEnv())
