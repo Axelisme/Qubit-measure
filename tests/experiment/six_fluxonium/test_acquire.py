@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules.dmem import LoadWord
@@ -15,6 +16,7 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
@@ -236,12 +238,27 @@ def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(
             **{f"Q{i}_bias": 0.0 for i in range(1, 7)},
         }
 
+        mux_program(env, order=tuple(range(6)), cavities=tuple(range(6))).acquire(
+            env.soc, progress=False
+        )
+        request = request_of(env)
+        samples = {window.channel: window.samples for window in request.readouts}
+
         def acquire():
-            result = mux_program(
-                env, order=tuple(range(6)), cavities=tuple(range(6))
-            ).acquire(env.soc, progress=False)
-            assert result is not None
-            return np.asarray(result)
+            # Keep the complete RNG identity fixed, including rounding noise.
+            result = env.soc.binding.execute(
+                RoundRequest(request, env.soc.binding.capture_snapshot(), 0)
+            )
+            if not isinstance(result, IntegratedRound):
+                raise AssertionError(
+                    "integrated request must return integrated statistics"
+                )
+            return np.asarray(
+                [
+                    channel.sums / (request.reps * samples[channel.channel])
+                    for channel in result.statistics.channels
+                ]
+            )
 
         baseline = acquire()
         local.set_value(0.13 * bias.period)
