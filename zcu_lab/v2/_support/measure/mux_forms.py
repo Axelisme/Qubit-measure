@@ -17,6 +17,7 @@ from zcu_lab.components.mux import MuxGroupSchema
 
 from .ctx_helpers import t1_initial_time
 from .mux_bindings import require_mux_group, require_mux_qubits
+from .seed_metadata import seed_metadata
 
 READOUT_ELEMENTS = FixedElements(("modules", "readout", "module", "tones"))
 
@@ -127,8 +128,9 @@ def mux_readout_seed_metadata(
     """Describe only the readout seeds actually authored by mux_readout_initial.
 
     initial is its returned Slot or Template, never a materialized cfg. Ref-only
-    slots declare nothing. Generated gain 0.1 and timing overrides are uncalibrated
-    candidates; untouched captured settings remain unknown. Paths are canonical
+    slots declare nothing. Only fixed gain 0.1 and ADC window 1.0 us are marked
+    uncalibrated. Captured mixer and derived timing describe their source paths
+    without claiming measured calibration. Paths are canonical
     for the modules/readout field. No sources, devices or calibration are read.
     """
     if isinstance(initial, Slot) and not initial.copy:
@@ -139,27 +141,27 @@ def mux_readout_seed_metadata(
     if isinstance(tones, list):
         for index, tone in enumerate(tones):
             if tone.get("gain") == 0.1:
-                result[(*prefix, "tones", index, "gain")] = FieldMeta(
-                    description="未校準的起始值，來源：固定常數。Mux readout amplitude seed 0.1 normalized; operator confirmation required",
-                    calibration="uncalibrated",
+                result[(*prefix, "tones", index, "gain")] = seed_metadata(
+                    "Mux readout amplitude seed 0.1 normalized; operator confirmation required",
+                    fallback=True,
                 )
     formulas = {
-        "mixer_freq": "from $mux.mixer_freq",
+        "mixer_freq": "From captured $mux.mixer_freq in MHz",
         "ro_length": "Fixed 1.0 us ADC window candidate; independent of group kappa",
-        "trig_offset": "$mux.time_of_fly + ringup",
-        "length": "trig_offset + ro_length",
+        "trig_offset": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) in us",
+        "length": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) + fixed ro_length 1.0 us",
     }
     if isinstance(initial, Slot):
         formulas.update(
             {
-                "trig_offset": "captured readout.trig_offset + 5/(2*pi*min set group kappa)",
-                "length": "max(captured readout.length, trig_offset + captured readout.ro_length)",
+                "trig_offset": "From captured $mux.module.readout.trig_offset + 5/(2*pi*min(set $mux.resonators kappa)) in us; no set kappa adds zero wait",
+                "length": "From max(captured $mux.module.readout.length, derived trig_offset + captured $mux.module.readout.ro_length) in us",
             }
         )
     for field, formula in formulas.items():
         if field in initial.set:
-            result[(*prefix, field)] = FieldMeta(
-                description=formula, calibration="uncalibrated"
+            result[(*prefix, field)] = seed_metadata(
+                formula, fallback=field == "ro_length"
             )
     return result
 
