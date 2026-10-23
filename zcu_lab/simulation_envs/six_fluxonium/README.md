@@ -66,12 +66,15 @@ Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
 to `MG123456`, `qubit` to `Q1`, `resonator` to `$qubit.resonator` and `flux_dev`
 to `$qubit.flux_source`.
-The group's `coil_flux` starts as `{}`. After measurement, write one qubit's
-`{half, period, int}` calibration record to a path such as `MG123456.coil_flux.Q1`.
-This creates the record without replacing other qubits' calibrations.
-Each field uses the coil device's native unit and defaults to null until measured.
-Keys must belong to the group's qubits. Omit qubits that have no calibration.
-Qubit `flux_half`, `flux_period` and `flux_int` still describe its own local line.
+The template seeds `coil_flux` for all six qubits from `default.yaml` as
+simulated-truth, in A: `int=coil_offset`, `period=coil_period`, and
+`half=coil_offset+coil_period/2`. Each record describes the coil contribution
+alone, excluding the local line's background flux. Qubit `flux_half`,
+`flux_period` and `flux_int` use the same rule with local `offset` and `period`.
+These values are not measurement results. Resonators seed total linewidth
+1.1 MHz and pulse-route flight time 0.4 us from their physical readout settings.
+After measurement, replace a record at a path such as `MG123456.coil_flux.Q1`
+without replacing other qubits' calibrations. Keys must belong to the group's qubits.
 
 The script installs a mock SoC and seven DC FakeDevices with fixed unit A. It reads files
 beside the script rather than relative to the shell cwd. Startup does not acquire,
