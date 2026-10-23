@@ -1,6 +1,7 @@
 """Joint state-conditioned first moments for a shared resonator line."""
 
 from collections import Counter
+from dataclasses import replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -249,8 +250,13 @@ class ConditionalReadout:
                     * np.pi
                     * (pulse.frequency_ghz - self.model.reference_frequency_ghz)
                 )
+                weighted = replace(
+                    pulse,
+                    amplitude=pulse.amplitude
+                    * np.conj(self.model.receiver.background(pulse.frequency_ghz)),
+                )
                 solution = self._constant_line.sampled_trajectory(
-                    pulse, times - delay, omega
+                    weighted, times - delay, omega
                 )
                 if solution is None:
                     return self._fields(pulses, times, constant=False)[0]
@@ -345,7 +351,19 @@ class ConditionalReadout:
         constant: bool,
         projected: bool = False,
     ) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
-        """Solve one physical trajectory on the union of all requested read grids."""
+        """Solve one receiver-weighted trajectory on the requested read grids."""
+        # The line is linear: weight each carrier before superposition rather
+        # than using the demodulation frequency on the combined output. Conjugate
+        # B here because _calibrate converts the physical field to microwave IQ.
+        # These private moments never feed back into physical cavity dynamics.
+        pulses = tuple(
+            replace(
+                p,
+                amplitude=p.amplitude
+                * np.conj(self.model.receiver.background(p.frequency_ghz)),
+            )
+            for p in pulses
+        )
         # Evaluate the emitted field at retarded time. Restoring the absolute
         # carrier's frame phase below is necessary even when f_ref == f_drive.
         delay = self.model.receiver.time_of_flight_ns
@@ -529,6 +547,7 @@ class ConditionalReadout:
             * grid.times_ns
             - 1j * grid.phase_rad
         )
+        # Each outgoing carrier already includes conj(B(f_abs)) in the field.
         signal = (
             np.conj(outgoing * oscillator[:, None])
             * receiver.gain
