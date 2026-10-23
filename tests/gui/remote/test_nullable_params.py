@@ -31,8 +31,8 @@ def test_nullable_schema_keeps_required_key_and_adds_null_value(
 ) -> None:
     spec = ParamSpec("base", kind, required=True, nullable=True)
     schema = build_input_schema((spec,))
-    assert schema["required"] == ["base"]
-    assert schema["properties"]["base"]["type"] == [schema_type, "null"]
+    assert schema.get("required") == ["base"]
+    assert schema["properties"]["base"].get("type") == [schema_type, "null"]
 
 
 def test_nullable_schema_preserves_enum_and_untyped_json() -> None:
@@ -53,7 +53,7 @@ def test_nullable_schema_preserves_enum_and_untyped_json() -> None:
         "enum": ["fast", "careful", None],
     }
     json_schema = build_input_schema((ParamSpec("base", JsonType.JSON, nullable=True),))
-    assert json_schema["required"] == ["base"]
+    assert json_schema.get("required") == ["base"]
     assert json_schema["properties"]["base"] == {}
 
 
@@ -122,8 +122,8 @@ def test_dispatch_nullable_base_distinguishes_absence_null_and_wrong_type() -> N
     link = ClientLink("nullable-test", token_required=False)
     service.on_client_open(link)
 
-    def call(params: dict[str, object]) -> dict[str, object]:
-        service.route(link, Request("nullable", "test.reload", params))
+    def call(params: Mapping[str, object]) -> dict[str, object]:
+        service.route(link, Request("nullable", "test.reload", dict(params)))
         return json.loads(link.outbound.get_nowait())
 
     try:
