@@ -63,6 +63,7 @@ Agent 在 review-done 前須跑完情境並親自看過每步截圖，留下精�
 ## 執行測試套件
 
 受管理 worktree 的 Python 指令按 [AGENTS.md](../AGENTS.md) 使用 `uv run --directory <worktree> --no-sync --`。
+同一 checkout 內並行的 pytest 呼叫各自使用 `.pytest-tmp/<pid>-<隨機字串>` basetemp，結束時只清理自己的目錄；明確指定 `--basetemp` 時沿用呼叫者的路徑。
 選集與平行化由 pytest CLI 決定。開始前確認所用環境安裝 GUI/client 測試需要的 optional dependency。
 
 pytest 全域 warning filter 只放第三方 noise（例如 `qick` / `scqubits` 在 Python 3.13

@@ -81,7 +81,7 @@ qubits:
         max_step_ns: 0.1
         bath_segment_ns: 2.0
       seed: 123
-      min_round_duration_s: 0.2
+      time_scale: 1.0
   Q2:
     format: zcu.single-fluxonium
     version: 1
@@ -144,7 +144,7 @@ qubits:
         max_step_ns: 0.1
         bath_segment_ns: 2.0
       seed: 124
-      min_round_duration_s: 0.2
+      time_scale: 1.0
   Q3:
     format: zcu.single-fluxonium
     version: 1
@@ -207,7 +207,7 @@ qubits:
         max_step_ns: 0.1
         bath_segment_ns: 2.0
       seed: 125
-      min_round_duration_s: 0.2
+      time_scale: 1.0
   Q4:
     format: zcu.single-fluxonium
     version: 1
@@ -270,7 +270,7 @@ qubits:
         max_step_ns: 0.1
         bath_segment_ns: 2.0
       seed: 126
-      min_round_duration_s: 0.2
+      time_scale: 1.0
   Q5:
     format: zcu.single-fluxonium
     version: 1
@@ -333,7 +333,7 @@ qubits:
         max_step_ns: 0.1
         bath_segment_ns: 2.0
       seed: 127
-      min_round_duration_s: 0.2
+      time_scale: 1.0
   Q6:
     format: zcu.single-fluxonium
     version: 1
@@ -396,4 +396,4 @@ qubits:
         max_step_ns: 0.1
         bath_segment_ns: 2.0
       seed: 128
-      min_round_duration_s: 0.2
+      time_scale: 1.0

@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-21, acquire-lifetime ADC memo
+**Last updated:** 2026-10-24, physical-time pacing
 
 **讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -34,20 +34,22 @@ builder with an explicit YAML path. Neither caller uses an environment wrapper.
 
 ## Round pacing
 
-`numerics.min_round_duration_s` in the FTF YAML sets a finite, nonnegative
-minimum duration for each successful binding round in both acquisition modes.
-Omitting it uses **0.2 seconds**. The binding includes snapshot capture and numeric
-execution, then sleeps only for the remaining time before returning. Slow rounds
-and failures do not add a wait. Startup preparation, program construction and
-round hooks are outside this floor. Waiting is synchronous and not interruptible
-by Stop; the next ordinary acquisition checkpoint observes Stop. No GUI field or
-frontend awareness is needed. This does not replace final plot-buffer flushing.
+`numerics.time_scale` is a finite nonnegative physical-time multiplier in both
+acquisition modes. It defaults to 1.0; 0.1 runs ten times faster and zero skips
+waiting. Each round targets `time_scale * reps * sum(timeline duration + relax_delay)`,
+with timeline us converted to seconds. Readout and pre/post delays are included.
+Snapshot capture and numeric execution consume this budget; only the positive
+remainder sleeps. Slow rounds and failures add no wait. Stop interrupts pacing
+at checkpoints at most 10 ms apart. Integrated acquisition discards that round;
+decimated acquisition keeps the completed trace and stops before the next round.
+Startup preparation, program construction and round hooks are outside this
+budget. No GUI field is added; final plot-buffer flushing is unchanged.
 
-For profiling or benchmarking, call `ftf(path_or_settings, min_round_duration_s=0)`.
+For profiling or benchmarking, call `ftf(path_or_settings, time_scale=0)`.
 This public override disables waiting and clock reads without changing numeric
 settings, RNG streams, density, readout or routes. Alternatively set
-`numerics.min_round_duration_s: 0` in the caller-owned YAML. With the default
-`min_round_duration_s=None`, the builder uses the YAML value. Wait for startup
+`numerics.time_scale: 0` in the caller-owned YAML. With the default
+`time_scale=None`, the builder uses the YAML value. Wait for startup
 preparation with `env.wait_ready()` before starting a benchmark timer too.
 
 ## Routing telemetry
@@ -59,7 +61,7 @@ one JSON line, including all software rounds and partial work after a failure.
 UTC. Relative explicit directories resolve at environment startup. The GUI and
 experiment acquisition calls need no changes.
 
-Use `ftf(settings.with_telemetry(enabled=False), min_round_duration_s=0)` for
+Use `ftf(settings.with_telemetry(enabled=False), time_scale=0)` for
 profiles and benchmarks. The public settings method returns a copy, disabling
 routing timers and all telemetry I/O without changing the original settings.
 No directory is created. `settings.with_telemetry(enabled=True, directory=Path(...))`

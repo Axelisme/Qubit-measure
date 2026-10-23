@@ -71,4 +71,4 @@ numerics:
     max_step_ns: 0.1
     bath_segment_ns: 2.0
   seed: 123
-  min_round_duration_s: 0.2
+  time_scale: 1.0

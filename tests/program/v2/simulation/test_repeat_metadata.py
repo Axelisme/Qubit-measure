@@ -156,37 +156,37 @@ def request_digest(request):
 @pytest.mark.parametrize(
     ("case", "expected"),
     [
-        ("swept", "0aed6216d4df3f0bef2193d314a2c111f9583da1a1f737fc63eb214d5060e876"),
+        ("swept", "ce07cccf6884cd443d72ac94ba6cb734d43c9950b9b9cae00e8657e646bb3860"),
         (
             "nonblocking",
-            "b2d818230ccbcb04640895080495e3b0587c92964c33dc3bf7111755dcb098b8",
+            "a6ab6c7947682738559e29c869d593da18de47a617fbe73cb377406daf7749b5",
         ),
         (
             "flat_top",
-            "eb6d2096581689c4beba05b757e43ca46c99410d098f128f0c4e32c59f5fb4c3",
+            "2e4ade443db4157b0481f9ebb891eef269686799a1ee1c1c448578bcd543a3a0",
         ),
         (
             "computed",
-            "61e2c12493fa3cc761475eac4587e9817212103ba88f71c234289d990d838cfa",
+            "03bb5211ed5da8dce0d3f86d70626e3538f48e62a1bdc401e34e0b2a2fd41d8a",
         ),
         (
             "computed_selection",
-            "3240022eff6fb4b38a35122acc0bacec1a5e5aca8359293e94c71ab002a38622",
+            "d796deeb3c2001c266b1de9e5dcb4f3051557424745ba70594d532d7328d181f",
         ),
         (
             "computed_tables",
-            "4299fe9767ee06e0dee1ac10c5f08819983b791de04f02718b532b910c670258",
+            "c479a8be410544303e9653960329862f1a59fcebca7caabb0155be5c49183445",
         ),
         (
             "computed_qick_time",
-            "6d2b3d2f2cd9daa7d707a44ac13b1fdcf0d09fe9f0575e48c4e6035537a2962a",
+            "dd7d3f7318c487daf917707acb69f0d9bda0e9b49d5c91b01feebc9872646c11",
         ),
         (
             "computed_flat_top",
-            "f0131f43bad6c34ba461d0ec82b795c5a1f6a364b8829dbc060820d7ec5be3e2",
+            "7d08fa57c36b1fd498be2150abf7ebc87bb8568e91fa7fa46923ccfab10bf182",
         ),
-        ("dynamic", "5c8ff7cf8fc0c241104b71511ccc609f209b192d980a95cb0491ee66d1c80f89"),
-        ("branch", "43cbdc689aed6890279f10dd2ff84ab66ccfea41d5abd40dec7ab55ef0a2c0a9"),
+        ("dynamic", "58fbed217601aeaa18033bccd5bec43aeec50f268ed4806604be0dae2cc47291"),
+        ("branch", "283718448f03e2272ffe4ed594bc92af6a5028bcf9e19809a1a0fae6eb5fb9a7"),
     ],
 )
 def test_repeated_request_preserves_all_numeric_content(environment, case, expected):
