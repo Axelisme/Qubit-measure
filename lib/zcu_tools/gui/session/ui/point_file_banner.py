@@ -36,6 +36,7 @@ class PointFileBanner(QWidget):
         self._control = control
         self._document = document
         self._on_reloaded = on_reloaded
+        self._notice_file: PointFileRevision | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._message = QLabel()
@@ -92,10 +93,16 @@ class PointFileBanner(QWidget):
                     "Reload to discard the draft, or Keep to continue editing."
                 )
                 return
-        self.hide()
+        if (
+            file is None
+            or self._notice_file is None
+            or file.path != self._notice_file.path
+        ):
+            self.hide()
 
     def show_conflict(self, message: str) -> None:
         """Show a source/check failure without discarding or rebasing the draft."""
+        self._notice_file = self.capture()
         self._message.setText(message)
         self.show()
 

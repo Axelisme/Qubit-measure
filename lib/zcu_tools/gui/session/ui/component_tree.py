@@ -31,7 +31,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_types import PointFileRevision
+from zcu_tools.gui.session.context_types import PointFileRevision, SavedPoint
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.component_editing import (
     edit_choices,
@@ -87,6 +87,9 @@ class _EditTarget:
     initial: str
     write_depth: int
     revision: PointFileRevision | None = None
+    setup: bool = False
+    entry_id: str | None = None
+    point: SavedPoint | None = None
     draft: str | None = None
 
 
@@ -269,15 +272,24 @@ class ComponentTreeWidget(QWidget):
         return True
 
     def edit_parameter(
-        self, path: str, value: YamlValue, *, setup: bool = False
+        self,
+        path: str,
+        value: YamlValue,
+        *,
+        setup: bool = False,
+        target: SavedPoint | None = None,
     ) -> bool:
-        """Edit a concrete field through its owner; report errors as for Add."""
+        """Edit a concrete field through its owner; report errors as for Add.
+
+        target pins a point edit to its original destination. When omitted,
+        capture the currently selected point. setup edits the entry template.
+        """
         try:
             if setup:
                 self._control.set_setup_parameter(path, value)
             else:
-                capture = self._control.read_context()
-                self._control.set_parameter(capture.target, path, value)
+                point = target or self._control.read_context().target
+                self._control.set_parameter(point, path, value)
         except Exception as exc:
             logger.exception("Parameter edit failed")
             show_error(self._error, exc)
@@ -513,8 +525,14 @@ class ComponentTreeWidget(QWidget):
         key = _row_key(item)
         target = self._edit_targets[key]
         if key not in self._drafts:
+            setup = self._is_setup()
+            entry = self._control.get_entry_info()
             target = replace(
-                target, revision=None if self._is_setup() else self._sync.capture()
+                target,
+                setup=setup,
+                entry_id=None if entry is None else entry.entry_id,
+                point=None if setup else self._control.read_context().target,
+                revision=None if setup else self._sync.capture(),
             )
             self._edit_targets[key] = target
             self._drafts[key] = target.initial
@@ -538,8 +556,27 @@ class ComponentTreeWidget(QWidget):
             self._drafts.pop(key, None)
             return  # Unchanged text writes nothing.
         try:
+            entry = self._control.get_entry_info()
+            current_revision = self._sync.capture()
+            if (
+                target.setup != self._is_setup()
+                or target.entry_id != (None if entry is None else entry.entry_id)
+                or (
+                    not target.setup
+                    and (
+                        current_revision is None
+                        or target.revision is None
+                        or current_revision.path != target.revision.path
+                    )
+                )
+            ):
+                raise FailedPreconditionError(
+                    "Parameter draft belongs to another destination. "
+                    "Return to its source or Reload before editing this destination."
+                )
             self._sync.check(target.revision)
         except FailedPreconditionError as exc:
+            self._sync.show_conflict(str(exc))
             show_error(self._error, exc)
             return
         try:
@@ -551,7 +588,7 @@ class ComponentTreeWidget(QWidget):
             nested: YamlMap = {segment: value}
             value = nested
         path = ".".join((target.component, *target.segments[: target.write_depth]))
-        if self.edit_parameter(path, value, setup=self._is_setup()):
+        if self.edit_parameter(path, value, setup=target.setup, target=target.point):
             self._drafts.pop(key, None)
             self.refresh()
 
