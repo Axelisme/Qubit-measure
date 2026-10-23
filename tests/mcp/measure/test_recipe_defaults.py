@@ -191,7 +191,10 @@ def test_apply_inputs_preserves_owner_validation_failures(
 
     def respond(method: str, params: dict[str, object]) -> dict[str, object]:
         if method == "tab.edit_recipe_fields":
-            return {"errors": [{"path": ["count"], "message": "Required"}]}
+            return {
+                "errors": [{"path": ["count"], "message": "Required"}],
+                "changed": not require_valid,
+            }
         return gui.respond(method, params)
 
     @api.recipe("synthetic", "Keep the owner's admission and draft failure semantics")
