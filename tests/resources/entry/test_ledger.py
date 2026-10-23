@@ -12,6 +12,7 @@ from uuid import uuid4
 import numpy as np
 import pytest
 from filelock import FileLock, Timeout
+from pydantic import TypeAdapter
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     AcceptedWrite,
@@ -19,6 +20,7 @@ from zcu_tools.resources.entry import (
     AnalyzedPayload,
     ImportPayload,
     JsonObject,
+    LedgerEntry,
     LedgerEvent,
     RecordsLedger,
     ResultEntry,
@@ -49,6 +51,53 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
         ),
     )
+
+
+def test_large_ledger_parses_only_new_tail_after_append(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    history = tuple(_accepted(entry.entry_id) for _ in range(1000))
+    path = records / "ledger.jsonl"
+    path.write_text(
+        "".join(event.model_dump_json() + "\n" for event in history), encoding="utf-8"
+    )
+    ledger = RecordsLedger(records, entry_id=entry.entry_id)
+    added = _accepted(entry.entry_id)
+
+    # Observe the external JSON decoder and filesystem, not ledger internals.
+    with patch.object(
+        TypeAdapter,
+        "validate_json",
+        autospec=True,
+        side_effect=TypeAdapter.validate_json,
+    ) as parsed:
+        assert ledger.events() == history
+        assert parsed.call_count == 1000
+        parsed.reset_mock()
+        with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+            ledger.append(added)
+            assert ledger.get(added.id).event == added
+            assert tuple(
+                item.event
+                for item in ledger.get_many((added.id, history[0].id, added.id))
+            ) == (added, history[0], added)
+            found = ledger.find_many(("absent", history[-1].id, added.id))
+            assert found["absent"] is None
+            assert found[history[-1].id] == LedgerEntry(
+                history[-1], None, history[-1].model_dump_json()
+            )
+            assert ledger.events() == (*history, added)
+
+        decoded_lines = [call.args[1] for call in parsed.call_args_list]
+        assert len(decoded_lines) <= 1, "historical events must not be parsed again"
+        assert all(line == added.model_dump_json() for line in decoded_lines)
+        ledger_reads = [
+            call
+            for call in opened.call_args_list
+            if call.args[0] == path and call.args[1] == "rb"
+        ]
+        assert len(ledger_reads) == 5, "each operation checks disk under its lock"
 
 
 def test_find_many_reports_all_missing_ids_with_one_read(

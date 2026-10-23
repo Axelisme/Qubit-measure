@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -110,6 +110,8 @@ fixture 過重、重複計算或不必要的 sleep／輪詢要直接修，不用
 每個測試函數的計算只用單核心。一個測試內部的 worker、thread 或 process 總數最多兩個，用於驗證多 worker 契約。每個測試在 `-n 0` 下少於 30 s。
 測試不跑慢的模擬或擬合。行為改用小型合成模型（少數能階、短 timeline）、解析解、不變性或最小 case 對照 reference 來確定。
 完整精度與效能量測放在 task 的量測腳本，不放進測試套件。新增測試時以 `--durations=0` 確認耗時。
+
+Store 效率以工作量測試保護，不斷言實測秒數。使用 synthetic 規模，從公開讀寫接縫操作，透過 I/O 或驗證協作者觀察讀取次數、parse 範圍與驗證次數，不直接呼叫或替換被測私有函式。例如先讀取 1000 筆 ledger，再 append 一筆並查詢，只應 parse 新增尾段；文件內容不變時連續讀取應重用已驗證快照，外部改檔後必須重新驗證。實際延遲另以同一 harness 在相同資源配置下背靠背比較 old／new，工作量斷言不取代量測。
 
 `tests/conftest.py` 在每個 xdist worker 啟動時，把
 `OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS` 預設設為 `"1"`，
