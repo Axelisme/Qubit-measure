@@ -79,6 +79,7 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
+from .services.results_index import ResultsIndex, scan_results
 from .state import State
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
@@ -1325,6 +1326,16 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
     # Project root and settings
     # ------------------------------------------------------------------
+
+    def query_results(self) -> ResultsIndex:
+        """Read all saved Database runs under the current project root.
+
+        Return a fresh detached snapshot shared by the browser and RPC, without
+        changing the opened entry/point or creating files/locks. Missing Database
+        returns an empty index. Ledger/schema and escaping-path errors propagate;
+        individual unreadable run documents remain visible through run.issues.
+        """
+        return scan_results(Path(self.get_project_root()))
 
     def get_project_root(self) -> str:
         """Return the injected base directory for result and Database roots.
