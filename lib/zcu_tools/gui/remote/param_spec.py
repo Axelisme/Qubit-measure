@@ -30,26 +30,30 @@ from typing import Literal, NotRequired, TypedDict
 
 from .errors import ErrorCode, RemoteError
 
-SchemaJsonType = Literal["string", "integer", "number", "boolean", "object", "array"]
+SchemaJsonType = Literal[
+    "string", "integer", "number", "boolean", "object", "array", "null"
+]
 
 
 class SchemaProperty(TypedDict, total=False):
     """One property schema; omitted type accepts any JSON value.
 
-    type is the JSON primitive/container kind. items declares array element shape.
-    minItems/maxItems are nonnegative array lengths. enum lists allowed strings.
+    type is the JSON primitive/container kind, or a type list including null.
+    items declares array element shape.
+    minItems/maxItems are nonnegative array lengths. enum lists allowed strings
+    and includes None when null is admitted.
     minimum/maximum are inclusive numeric limits for schema consumers.
     description is human-readable parameter guidance. Absent fields impose no
     corresponding constraint; defaults remain ParamSpec-owned, not schema fields.
     """
 
-    type: SchemaJsonType
+    type: SchemaJsonType | list[SchemaJsonType]
     items: SchemaProperty
     minItems: int
     maxItems: int
     minimum: float
     maximum: float
-    enum: list[str]
+    enum: list[str | None]
     description: str
 
 
@@ -266,10 +270,25 @@ def _coerce_param(spec: ParamSpec, value: object, *, present: bool) -> object:
     Missing required or malformed values raise RemoteError; JSON and float
     conversion errors retain their causes. Enum membership belongs to the caller.
     """
-    if not present or value is None:
+    if not present:
         if spec.required:
             raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{spec.name}'")
         return spec.default
+    if value is None:
+        if spec.nullable:
+            return None
+        if spec.required:
+            raise RemoteError(ErrorCode.INVALID_PARAMS, f"missing '{spec.name}'")
+        return spec.default
+    return _coerce_supplied_value(spec, value)
+
+
+def _coerce_supplied_value(spec: ParamSpec, value: object) -> object:
+    """Validate/coerce a present non-null value; preserve conversion causes.
+
+    Presence, nullable and default admission have already run. This step only
+    applies the declared JSON type and leaves enum/range policy to its owner.
+    """
     jt = spec.json_type
     if (
         jt is JsonType.STRING
@@ -370,12 +389,16 @@ def schema_property(spec: ParamSpec) -> SchemaProperty:
             JsonType.OBJECT: "object",
         }
         prop["type"] = scalar_types[spec.json_type]
+    if spec.nullable and "type" in prop:
+        declared_type = prop["type"]
+        if isinstance(declared_type, str):
+            prop["type"] = [declared_type, "null"]
     if spec.minimum is not None:
         prop["minimum"] = spec.minimum
     if spec.maximum is not None:
         prop["maximum"] = spec.maximum
     if spec.enum is not None:
-        prop["enum"] = list(spec.enum)
+        prop["enum"] = [*spec.enum, None] if spec.nullable else list(spec.enum)
     if spec.description:
         prop["description"] = spec.description
     return prop
