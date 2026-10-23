@@ -6,7 +6,7 @@ pulse_gen_ch: 13
 pulse_ro_ch: 6
 # Environment totals for prepare/results/routing; ADC bytes apply per source.
 numerics:
-  prepare_cache_bytes: 268435456  # 256 MiB total
+  prepare_cache_bytes: 805306368  # 768 MiB total, 128 MiB per source
   result_memo_bytes: 67108864     # 64 MiB total
   routing_cache_bytes: 4194304    # 4 MiB total
   adc_cache_bytes: 8388608        # 8 MiB per source

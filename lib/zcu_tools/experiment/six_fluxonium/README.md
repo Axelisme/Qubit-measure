@@ -18,14 +18,16 @@ noiseless ADC inputs after later acquisitions and backend close.
 ## Cache budgets
 
 Top-level `numerics` sets residency caps in bytes for the whole environment.
-`prepare_cache_bytes` defaults to 256 MiB, `result_memo_bytes` to 64 MiB and
-`routing_cache_bytes` to 4 MiB. Each of the six independent Engines receives
-one sixth of each total, rounded down. At most five bytes per total remain unused.
+The demo's `default.yaml` sets `prepare_cache_bytes` to 768 MiB,
+`result_memo_bytes` to 64 MiB and `routing_cache_bytes` to 4 MiB.
+Each of the six independent Engines receives one sixth of each total, rounded
+down, giving each Engine 128 MiB for prepare. At most five bytes per total
+remain unused.
 Prepare and memo keys include the complete physical model identity and numeric
 budget. Routing reuse also requires the same source instance.
 
 `adc_cache_bytes` defaults to 8 MiB per source and is not divided.
-The defaults therefore allow at most 372 MiB of cache residency across six
+The demo settings therefore allow at most 884 MiB of cache residency across six
 sources, including estimated metadata. Zero disables the corresponding cache.
 All fields accept nonnegative integers, with no fixed upper bound.
 Oversized products still compute but do not remain resident. Cache eviction
