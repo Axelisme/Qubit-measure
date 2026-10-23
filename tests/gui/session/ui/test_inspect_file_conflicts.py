@@ -91,10 +91,14 @@ def conflict_ui(
 def test_library_keep_cannot_rebase_stale_draft(conflict_ui) -> None:
     ui, path, evidence = conflict_ui
     ui.select_tab("Modules")
-    ui.press_key(Qt.Key.Key_End, object_name="inspect.library")
+    ui.select_tree_row(
+        ("waveforms", "Q1", "waveforms", "flat"), object_name="inspect.library"
+    )
     ui.enter_text(
         object_name="inspect.entry.name", value="Q1.waveforms.draft", commit=False
     )
+    assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
+    assert ui.observe(object_name="inspect.entry.status").text == "Unsaved"
     ui.screenshot(evidence / "01-draft.png")
     path.write_text(path.read_text().replace("0.1", "0.7"))
     ui.click(object_name="inspect.entry.apply")
@@ -149,10 +153,10 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
     ui.enter_text(
         object_name="inspect.parameters.filter", value="Q1.rate", commit=False
     )
-    ui.press_key(Qt.Key.Key_End, object_name="component_tree")
-    ui.press_key(Qt.Key.Key_F2, object_name="component_tree")
-    ui.press_key(Qt.Key.Key_A, modifiers=Qt.KeyboardModifier.ControlModifier)
-    ui.type_text("9")
+    ui.edit_tree_value(
+        ("Q1", "rate"), object_name="component_tree", value="9", commit=False
+    )
+    assert ui.focused_input().text == "9"
     ui.screenshot(evidence / "01-draft.png")
     path.write_text(path.read_text().replace("4300.0", "4700.0"))
     if submit == "enter":

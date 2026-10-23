@@ -446,10 +446,44 @@ class ComponentDriver:
             key_click(tree, Qt.Key.Key_Right)
         QApplication.processEvents()
 
+    def select_tree_row(self, path: tuple[str, ...], *, object_name: str) -> None:
+        """Click a visible tree row's first column, giving it keyboard focus.
+
+        Exact visible captions identify the path. Ancestors must already be
+        expanded; disabled, hidden and viewport-clipped targets are not driven.
+        Missing or ambiguous visible paths raise LookupError.
+        """
+        tree = self._find(None, object_name)
+        if not isinstance(tree, QTreeWidget):
+            raise TypeError(f"{object_name!r} is not a QTreeWidget")
+        if not self._can_interact(tree):
+            return
+        item = _unique(
+            repr(path),
+            [i for i, captions in self._visible_tree_items(tree) if captions == path],
+            [repr(captions) for _, captions in self._visible_tree_items(tree)],
+        )
+        viewport = tree.viewport()
+        assert viewport is not None
+        target = QPoint(
+            tree.columnViewportPosition(0) + tree.columnWidth(0) // 2,
+            tree.visualItemRect(item).center().y(),
+        )
+        if viewport.visibleRegion().contains(target):
+            mouse_click(viewport, target)
+        QApplication.processEvents()
+
     def edit_tree_value(
-        self, path: tuple[str, ...], *, object_name: str, value: str
+        self,
+        path: tuple[str, ...],
+        *,
+        object_name: str,
+        value: str,
+        commit: bool = True,
     ) -> None:
-        """Edit a visible tree row's Value cell using double-click and Enter.
+        """Edit a visible tree row's Value cell using double-click and optional Enter.
+
+        commit=False leaves the editor open for a later Enter or focus loss.
 
         path contains exact visible root-to-row captions, not model keys.
         object_name selects one QTreeWidget whose second column is Value.
@@ -505,7 +539,8 @@ class ComponentDriver:
         if self._can_interact(editor):
             key_click(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
             type_text(editor, value)
-            key_click(editor, Qt.Key.Key_Return)
+            if commit:
+                key_click(editor, Qt.Key.Key_Return)
         QApplication.processEvents()
 
     def click(self, text: str | None = None, *, object_name: str | None = None) -> None:
@@ -867,6 +902,13 @@ class ComponentDriver:
         if (popup := QApplication.activePopupWidget()) is not None:
             key_click(popup, Qt.Key.Key_Escape)
         chooser.click("&Open")
+
+    def focused_input(self) -> WidgetObservation:
+        """Observe the currently focused visible input without moving focus."""
+        widget = self._window.focusWidget()
+        if widget is None:
+            raise LookupError("No focused input")
+        return self._observe_widget(widget)
 
     def text_input(self, *, object_name: str) -> TextInputObservation:
         """Observe a named line edit; hidden controls expose no text or hints.
