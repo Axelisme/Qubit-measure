@@ -7,6 +7,8 @@
 每個 sweep 點的名目頻率是原始 tone 的 base frequency 加上共同 offset。
 圖與擬合都使用這個名目座標，DDS 實際量化頻率可能有差異。
 
+修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+
 ## 準備輸入
 
 1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`、mux generator `wiring.gen_ch`，以及同序的各 tone ADC `wiring.ro_ch`。若已有 `readout/mux` library key，可把 module 槽 `module.readout` 指向它。完整 tones[i] 對應 resonators[i]，綁定依據是位置。
@@ -139,3 +141,16 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 可用的歷史值以已保存內容為準。
 缺少分析參數來源的 Load 可以純計算並列 module 候選；選取非空候選後 Apply 會報錯。
 套用前檢查目的地、頻率變化與 fit quality。
+
+## MCP recipe
+
+呼叫 `mux_onetone`，`target` 可指定這次 Reset 的 mux alias，`reuse_tab_id` 可重用 idle matching tab。
+`participants` 收 resonator 名稱，依 tab 固定 `$mux.resonators` 順序映射 Active tones 原始 index。
+名稱不讀 display label。未知或重複綁定的名字回 `needs_parameters` 並列合法名單。
+`participants` 省略時保留表單 Active tones。重複綁定要以原始 index 的 `active_tones` override 選取。
+`df:{start,stop}` 是所有 tone 共用的 MHz offset，`n` 是共用點數，不是絕對頻率。
+`reps`、`rounds` 可覆寫 acquisition 次數。以上參數 null 都保留表單值。
+`library`、`inline` 依序選來源與複製，`overrides` 最後執行，integer path 使用完整 readout tone 原始位置。
+Run 前整批驗證，缺值列出可讀的欄位路徑。
+Run 後 Analyze，回覆每 tone 的 index、name、label、freq、kappa、fit_quality 與失敗原因，以及 `resonators_diagnostic`。
+再詢問 writeback，只套用回答選定的候選。略過不寫入。最後保存 raw data 與分析。

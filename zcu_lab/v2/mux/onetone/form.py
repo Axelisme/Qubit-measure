@@ -50,10 +50,11 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
         fixed_elements=(READOUT_ELEMENTS,),
         field_order=(
             "active_tones",
-            "sweep",
             "modules",
-            "relax_delay",
+            "sweep",
             "reps",
             "rounds",
+            "relax_delay",
+            "initial_delay",
         ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

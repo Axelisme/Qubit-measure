@@ -42,7 +42,12 @@ class ChevronCfg(DurationScanCfg):
     """
 
     frequency: Annotated[
-        SweepCfg, FieldMeta(unit="MHz", label="Common drive frequency")
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Frequency",
+            description="填入 common drive frequency 起訖值，單位 MHz。先用 conditional spectroscopy 選定掃描範圍。",
+        ),
     ]
 
     @model_validator(mode="after")
