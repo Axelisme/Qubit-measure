@@ -97,6 +97,20 @@ def _display_text(widget: QWidget) -> str:
     return ""
 
 
+def _caption_fits(widget: QWidget) -> bool:
+    if isinstance(widget, QLabel) and widget.wordWrap():
+        bounds = widget.fontMetrics().boundingRect(
+            widget.contentsRect(), Qt.TextFlag.TextWordWrap, widget.text()
+        )
+        return bounds.height() <= widget.contentsRect().height()
+    if isinstance(widget, (QAbstractButton, QLabel)):
+        return (
+            widget.fontMetrics().horizontalAdvance(widget.text())
+            <= widget.contentsRect().width()
+        )
+    return True
+
+
 def _unique[T](query: str, candidates: list[T], descriptions: list[str]) -> T:
     if len(candidates) != 1:
         raise LookupError(
@@ -223,14 +237,7 @@ class ComponentDriver:
             )
             if on_screen
             else None,
-            caption_fits=(
-                on_screen
-                and (
-                    not isinstance(widget, QAbstractButton)
-                    or widget.fontMetrics().horizontalAdvance(widget.text())
-                    <= widget.contentsRect().width()
-                )
-            ),
+            caption_fits=on_screen and _caption_fits(widget),
             checked=(
                 widget.isChecked()
                 if on_screen

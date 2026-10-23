@@ -371,8 +371,10 @@ def test_clean_pages_show_human_pending_and_invalid_source(conflict_ui) -> None:
     path.write_text("invalid: true\n")
     source.synchronize_files(admit_reload=True)
     message = ui.observe(object_name=f"inspect.{document}.sync.message")
-    assert message.visible and str(path) in message.text
     ui.screenshot(evidence / "03-invalid-error.png")
+    message = ui.observe(object_name=f"inspect.{document}.sync.message")
+    assert message.visible and str(path) in message.text
+    assert message.caption_fits, "The file path and validation reason must both fit"
     ui.click(object_name=f"inspect.{document}.sync.reload")
     assert str(path) in ui.observe(object_name=f"inspect.{document}.sync.message").text
     ui.screenshot(evidence / "04-invalid-reload-rejected.png")

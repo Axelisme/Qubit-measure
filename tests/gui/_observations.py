@@ -20,7 +20,7 @@ class WidgetObservation:
     object_name: str  # Stable objectName if provided by the UI, otherwise empty.
     tooltip: str  # Hover help; empty when hidden or without a tooltip.
     bounds: tuple[int, int, int, int] | None  # Visible screen x/y/width/height.
-    caption_fits: bool  # Visible button text fits its Qt contents rectangle.
+    caption_fits: bool  # Visible button/label text fits its Qt contents rectangle.
     checked: (
         bool | None
     )  # Visible checkable button state; None if hidden or not checkable.
