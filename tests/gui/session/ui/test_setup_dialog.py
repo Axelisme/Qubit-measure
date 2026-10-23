@@ -37,6 +37,8 @@ from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets import error_colour
 
+from tests.gui._user_input import ComponentDriver
+
 
 def _prefs(
     *,
@@ -611,6 +613,42 @@ def test_create_clears_form_on_success_and_keeps_it_on_failure(
     description.setText("duplicate")
     entry_button(dialog, "Create").click()
     assert (label.text(), description.text()) == ("p1", "duplicate")
+
+
+def test_external_entry_creation_replaces_empty_hint_and_survives_reopen(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    controller = Controller(
+        state, Registry(), None, BaseEventBus(), project_root=str(tmp_path)
+    )
+    dialog = SetupDialog(controller.setup_control)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        driver = ComponentDriver(dialog)
+        driver.screenshot(tmp_path / "empty.png")
+        assert "No result entries yet" in driver.observe(object_name="setup_status").text
+
+        # Another caller (e.g. RPC) installs an entry while Setup remains open.
+        controller.setup_control.new_entry(EntryRequest("created-externally"))
+        driver.screenshot(tmp_path / "entry-created.png")
+        assert driver.observe(object_name="result_entry").text == "created-externally"
+        assert driver.observe(object_name="setup_status").text == (
+            "Opened entry: created-externally"
+        )
+
+        driver.click("Close")
+        dialog.show()
+        qapp.processEvents()
+        driver.screenshot(tmp_path / "reopened.png")
+        assert driver.observe(object_name="result_entry").text == "created-externally"
+        assert "No result entries yet" not in driver.observe(object_name="setup_status").text
+    finally:
+        dialog.reject()
+        controller.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_missing_result_root_shows_hint_instead_of_error(
