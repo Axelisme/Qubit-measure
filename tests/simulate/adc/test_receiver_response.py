@@ -10,6 +10,117 @@ from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
 
 
+def test_receiver_background_has_flat_default_db_slope_and_complex_ripple():
+    assert hasattr(adc.Receiver, "background"), "receiver must expose B(f)"
+    assert_allclose(adc.Receiver().background(7.123), 1.0)
+    slope = adc.Receiver(slope_db_per_ghz=-3.0, pivot_ghz=7.0)
+    assert_allclose(slope.background(7.0), 1.0)
+    assert_allclose(20 * np.log10(abs(slope.background(7.3))), -0.9)
+    ripple = adc.Receiver(
+        ripple_depth=0.1, ripple_period_ghz=0.04, ripple_phase_rad=np.pi / 2
+    )
+    assert_allclose(ripple.background(7.0), 1 + 0.1j, atol=2e-14)
+    assert_allclose(ripple.background(7.04), 1 + 0.1j, atol=2e-14)
+    assert_allclose(ripple.background(7.01), 0.9, atol=2e-14)
+    assert_allclose(ripple.background(7.03), 1.1, atol=2e-14)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ripple_depth", -0.1),
+        ("ripple_depth", 1.0),
+        ("ripple_period_ghz", 0.0),
+        ("ripple_period_ghz", -0.1),
+        ("ripple_depth", np.nan),
+        ("ripple_period_ghz", np.inf),
+        ("ripple_phase_rad", np.nan),
+        ("slope_db_per_ghz", np.inf),
+        ("pivot_ghz", np.nan),
+    ],
+)
+def test_receiver_rejects_invalid_background_at_construction(field, value):
+    with pytest.raises(ValueError, match=field):
+        adc.Receiver(**{field: value})
+
+
+@pytest.mark.parametrize("path", ["single", "trace", "integrated", "raw"])
+@pytest.mark.parametrize("envelope", ["flat", "sampled", "opaque"])
+def test_background_weights_each_absolute_carrier_before_offset(path, envelope):
+    model = replace(
+        line_model(),
+        state_labels=("g", "e"),
+        frequencies_ghz=np.array([[6.001, 6.013], [6.021, 6.033]]),
+        rates_per_ns=np.array([[0.0, 0.08], [0.02, 0.0]]),
+    )
+    shape = None
+    if envelope == "sampled":
+        shape = adc.PiecewiseLinearEnvelope(
+            np.array([0.0, 20.0]), np.array([1.0, 0.7j])
+        )
+    elif envelope == "opaque":
+
+        def opaque(local):
+            return 1.0 + 0.01j * local
+
+        shape = opaque
+
+    pulses = (
+        adc.ReadoutPulse(0, 20, 1.0, 6.0, envelope=shape),
+        adc.ReadoutPulse(0, 15, 0.4, 6.01, envelope=shape),
+    )
+    grid = adc.SampleGrid(np.arange(0.0, 31.0, 2.0), 6.003, 0.2)
+    receiver = adc.Receiver(
+        gain=1.7,
+        phase_rad=0.3,
+        offset=np.array([0.4, -0.2]),
+        ripple_depth=0.2,
+        ripple_period_ghz=0.04,
+        ripple_phase_rad=np.pi / 2,
+    )
+
+    def observe(current, incident):
+        if path == "single":
+            return adc.ConditionalReadout(current).response(incident, grid).traces
+        if path == "raw":
+            return (
+                adc.ADC(current)
+                .sample(
+                    adc.PopulationInput(("g", "e"), np.array([0.0, 1.0])),
+                    incident,
+                    grid,
+                    SamplingIdentity(52),
+                    shots=8,
+                )
+                .traces
+            )
+        result = adc.ConditionalReadout(current).responses(
+            adc.ReadoutBatch(
+                current,
+                (incident,),
+                ((grid,),),
+                np.array([0], dtype=np.int64),
+                include_traces=path == "trace",
+            )
+        )
+        if path == "integrated":
+            return result.sums[0, 0]
+        assert result.traces is not None
+        return result.traces[0, 0]
+
+    first = observe(model, pulses[:1])
+    second = observe(model, pulses[1:])
+    # Worked ripple factors: 150 periods at 6 GHz; another quarter at 6.01.
+    expected = (first[..., 0] + 1j * first[..., 1]) * (1 + 0.2j) + (
+        second[..., 0] + 1j * second[..., 1]
+    ) * 0.8
+    expected *= 1.7 * np.exp(0.3j)
+    count = len(grid.times_ns) if path == "integrated" else 1
+    expected += count * (0.4 - 0.2j)
+    actual = observe(replace(model, receiver=receiver), pulses)
+    assert_allclose(actual[..., 0] + 1j * actual[..., 1], expected, atol=3e-8)
+
+
 def line_model() -> adc.ReadoutModel:
     return adc.ReadoutModel(
         "receiver-contract",
