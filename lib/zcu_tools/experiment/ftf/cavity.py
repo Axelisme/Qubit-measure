@@ -2,11 +2,11 @@
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
-from threading import Event
 
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import CavityAverageCache
 from zcu_tools.simulate.evolution import (
@@ -21,6 +21,21 @@ from zcu_tools.simulate.ftf import CavityDrive
 
 from .numeric import resonators
 from .template import FTFModelFacts, FTFTemplatePlan
+
+
+@dataclass(frozen=True)
+class CavityEvolutionOptions:
+    """Controls shared by every span in one cavity composition.
+
+    key: Complete caller preparation digest, including downstream ADC inputs.
+    telemetry: Whether evolution collects per-family CPU and routing reports.
+    cancel: Read-only query checked between chunks, or None to disable Stop.
+        Cancellation raises Cancelled and returns no partial composition.
+    """
+
+    key: bytes
+    telemetry: bool
+    cancel: CancellationQuery | None = None
 
 
 @dataclass
@@ -88,14 +103,13 @@ def evolve_plans(
     facts: FTFModelFacts,
     settings: FTFSettings,
     *,
-    key: bytes,
-    telemetry: bool,
+    options: CavityEvolutionOptions,
 ) -> tuple[EvolutionResult, tuple[bytes, ...]]:
     """Advance cavity-driven templates through evolution-owned final spans.
 
     plans share facts.source and contain absolute common-origin numeric controls.
-    settings supplies the resonator parameters used by facts. key is the complete
-    caller preparation digest; telemetry enables engine work reports. Each span
+    settings supplies the resonator parameters used by facts. options supplies
+    the preparation digest, telemetry switch and read-only cancel query. Each span
     receives the preceding DC density unchanged and all cavity branches start
     from the previous main branch's final field. The main branch is the maximum
     span-start population, ties choosing the lowest DC energy. This is a
@@ -108,6 +122,8 @@ def evolve_plans(
     a retained result. Density validation and propagation failures pass through
     unchanged; no normalization, clipping or solver correction is performed.
     No engine model source, drive phase, envelope origin or flux is rebuilt.
+    options.cancel is forwarded to every evolution span's chunk checkpoints; None
+    disables cancellation. Cancelled propagates without a partial result.
     One ADC-owned flat-average cache (at most 64 MiB) serves all g/e points in
     this composition, serially. Return and exception paths release its contents;
     no owner is retained by the engine or long-lived acquisition source.
@@ -116,10 +132,10 @@ def evolve_plans(
         return engine.evolve(
             facts.source,
             tuple(plan.batch for plan in plans),
-            cancel=Event(),
-            telemetry=telemetry,
-            reuse_key=key,
-        ), (key,)
+            cancel=options.cancel,
+            telemetry=options.telemetry,
+            reuse_key=options.key,
+        ), (options.key,)
     cache = CavityAverageCache()
     try:
         pair = resonators(settings)
@@ -139,9 +155,7 @@ def evolve_plans(
             for plan in plans
             if any(plan.cavity_drives)
         ]
-        return _evolve_cavities(
-            engine, plans, facts, timelines, key=key, telemetry=telemetry
-        )
+        return _evolve_cavities(engine, plans, facts, timelines, options=options)
     finally:
         cache.clear()
 
@@ -152,8 +166,7 @@ def _evolve_cavities(
     facts: FTFModelFacts,
     timelines: list[_CavityTimeline],
     *,
-    key: bytes,
-    telemetry: bool,
+    options: CavityEvolutionOptions,
 ) -> tuple[EvolutionResult, tuple[bytes, ...]]:
     plain = tuple(plan.batch for plan in plans if not any(plan.cavity_drives))
     paths = []
@@ -161,12 +174,12 @@ def _evolve_cavities(
     output_points = []
     output_densities = []
     if plain:
-        plain_key = sha256(b"ftf-no-cavity\0" + key).digest()
+        plain_key = sha256(b"ftf-no-cavity\0" + options.key).digest()
         result = engine.evolve(
             facts.source,
             plain,
-            cancel=Event(),
-            telemetry=telemetry,
+            cancel=options.cancel,
+            telemetry=options.telemetry,
             reuse_key=plain_key,
         )
         paths.append(result.paths)
@@ -179,12 +192,12 @@ def _evolve_cavities(
     )
     for step in range(steps):
         batches = tuple(timeline.advance(step) for timeline in timelines)
-        reuse_key = _span_key(key, step, batches)
+        reuse_key = _span_key(options.key, step, batches)
         result = engine.evolve(
             facts.source,
             batches,
-            cancel=Event(),
-            telemetry=telemetry,
+            cancel=options.cancel,
+            telemetry=options.telemetry,
             reuse_key=reuse_key,
         )
         paths.append(result.paths)

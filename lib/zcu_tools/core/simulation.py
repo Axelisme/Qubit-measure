@@ -4,19 +4,32 @@ Times are us, frequencies MHz, phases degrees, gain normalized DAC amplitude.
 Execution is C-order over loop_dims (including reps); read order is trigger order.
 Arrays in RoundSignals are float64 ADC sample units, last axis [I, Q]. Backend
 sums are not normalized or rounded. No driver, Module or callback crosses here.
+The optional round cancel query is read-only control, not a callback.
 Frozen records do not freeze borrowed arrays. SamplingIdentity validates entropy;
 AcquireRequest validates template coordinate names. Frontend and adapter checks
 validate the remaining field ranges, layouts and contents against the request.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import prod
-from typing import Literal
+from typing import Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
 AcquisitionMode = Literal["integrated", "decimated"]
+
+
+class CancellationQuery(Protocol):
+    """Read-only cancellation query shared by acquisition and numeric workers.
+
+    threading.Event and program cancel flags satisfy this interface directly.
+    The owner may set cancellation concurrently; consumers only query it.
+    """
+
+    def is_set(self) -> bool:
+        """Return whether the owner has requested cancellation."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -392,11 +405,15 @@ class RoundRequest:
         index: Zero-based software round index within this acquire, not an
             execution/shot index. White noise combines it with acquire.root_seed
             and acquire.sequence to select this round's random stream.
+        cancel: Optional read-only query checked between evolution chunks. None
+            disables cancellation. Cancellation discards this round, not earlier
+            completed rounds. It is excluded from equality and replay identity.
     """
 
     acquire: AcquireRequest
     snapshot: EnvironmentSnapshot
     index: int
+    cancel: CancellationQuery | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)

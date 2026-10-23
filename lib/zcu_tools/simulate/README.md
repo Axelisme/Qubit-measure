@@ -109,6 +109,9 @@ default. The engine segments controls, selects kernels and shares deterministic
 preparations across points and acquires. It never carries quantum states into a
 new shot. Numeric tolerances do not certify basis convergence or the physical
 validity of a model.
+Acquisition cancellation takes effect between evolution chunks, discards the
+interrupted round and retains completed rounds; startup warmup has no acquire
+cancel query.
 
 `ControlSequence`, `Envelope` and `NumericModel` remain inputs to independent
 continuous-flux and model tools. They do not define an acquisition backend.

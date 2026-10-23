@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -114,7 +114,8 @@ points or reps.
 ## Numeric contract and extension points
 
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
-or callback crosses this boundary. Time is us, frequency MHz, phase degrees and
+or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
+query, not a callback. Time is us, frequency MHz, phase degrees and
 gain normalized DAC amplitude. The frontend interprets exact supported Module
 classes, not arbitrary tProcessor instructions. Unknown subclasses, raw program setup/body/cleanup or make_program overrides, raw loop
 hooks and undefined or
@@ -238,8 +239,10 @@ and call sequence reproduces results within the recorded library versions.
 `step_rounds=True` fails before request construction or sequence admission for
 both simulation acquisition modes. Reentry on the same program or bound SoC fails
 before overwriting the active call. `finally` releases call-owned buffers and
-admission on normal return or exception. Stop retains the ordinary completed-round
-or no-result behavior; it does not interrupt a synchronous backend immediately.
+admission on normal return or exception. Integrated Stop reaches evolution's
+chunk checkpoints through `RoundRequest.cancel`, discards the interrupted round,
+and retains completed rounds (or no result when none completed); warmup and
+hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed

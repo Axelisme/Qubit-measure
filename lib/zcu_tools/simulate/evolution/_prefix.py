@@ -2,9 +2,10 @@
 
 from collections.abc import Mapping
 from dataclasses import replace
-from threading import Event
 
 import numpy as np
+
+from zcu_tools.core.simulation import CancellationQuery
 
 from ._dispatch import classify
 from ._parallel import Executor
@@ -147,7 +148,7 @@ class PrefixResolver:
         geometry: Geometry,
         kernels: Mapping[str, Kernel],
         context: KernelContext,
-        cancel: Event,
+        cancel: CancellationQuery,
         resident: ResidentAdmission,
     ):
         self.geometry = geometry

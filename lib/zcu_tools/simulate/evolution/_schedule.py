@@ -3,11 +3,12 @@
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from threading import Event
 
 import numpy as np
 from joblib import delayed
 from numpy.typing import NDArray
+
+from zcu_tools.core.simulation import CancellationQuery
 
 from ._dispatch import Dispatch, Selection, classify, prepare
 from ._dispatch import diagnostics as dispatch_diagnostics
@@ -79,7 +80,7 @@ def _build(
     selection: NDArray[np.int64],
     table: SegmentTable,
     context: KernelContext,
-    cancel: Event,
+    cancel: CancellationQuery,
 ) -> PreparedPayload:
     if cancel.is_set():
         raise Cancelled()
@@ -123,7 +124,7 @@ class Schedule:
         geometry: Geometry,
         dispatch: Dispatch,
         context: KernelContext,
-        cancel: Event,
+        cancel: CancellationQuery,
         resident: ResidentAdmission,
         initial_density: NDArray[np.complex128] | None = None,
     ):

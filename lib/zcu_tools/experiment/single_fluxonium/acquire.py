@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    CancellationQuery,
     ChannelSignals,
     EnvironmentSnapshot,
     RoundSignals,
@@ -69,22 +70,27 @@ class SingleFluxoniumAcquire:
         self._active = False
 
     def sample_round(
-        self, snapshot: EnvironmentSnapshot, index: int
+        self,
+        snapshot: EnvironmentSnapshot,
+        index: int,
+        *,
+        cancel: CancellationQuery | None = None,
     ) -> IntegratedRound | RoundSignals:
         """Evolve/read/sample this zero-based round, or propagate numeric errors.
 
         snapshot supplies detached native DC values. Negative indices raise
         ValueError. An invalidated session raises RuntimeError. Private replay
         writes finish before return; I/O failures propagate. No partial result
-        or failed preparation is retained. Pacing/cancellation checkpoints and
-        QICK normalization belong to the program acquisition boundary.
+        or failed preparation is retained. cancel is forwarded to evolution's
+        chunk checkpoints; None disables cancellation. Pacing, completed-round
+        retention and QICK normalization belong to the acquisition boundary.
         """
         if not self._active:
             raise RuntimeError("single-fluxonium acquire session is no longer active")
         if type(index) is not int or index < 0:
             raise ValueError("round index must be a nonnegative integer")
         owner, acquire = self._source, self.request
-        prepared = owner.prepare(acquire, snapshot)
+        prepared = owner.prepare(acquire, snapshot, cancel=cancel)
         if acquire.mode == "integrated":
             statistics = round_statistics(
                 prepared.populations,
