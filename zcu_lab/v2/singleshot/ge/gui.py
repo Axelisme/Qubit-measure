@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -58,16 +59,48 @@ class GEAnalyzeParams:
     ] = None
 
 
+class GESummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    fidelity: float | None = Field(
+        description="Owner fidelity in dimensionless; null retains an unavailable estimate."
+    )
+
+    theta: float | None = Field(
+        description="Owner theta in rad; null retains an unavailable estimate."
+    )
+
+    threshold: float | None = Field(
+        description="Owner threshold in ADC units; null retains an unavailable estimate."
+    )
+
+
+class GEPostSummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    ge_radius: float | None = Field(
+        description="Owner ge_radius in ADC units; null retains an unavailable estimate."
+    )
+
+    confusion: list[list[float]] = Field(description="Owner confusion values.")
+
+
 @dataclass(frozen=True)
 class GEAnalyzeResult(GEAnalysis, AnalyzeResultBase):
     """Fit calibration, with a JSON-safe GUI projection of the core result."""
 
+    def summary(self) -> GESummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return GESummary(
+            fidelity=self.fidelity,
+            theta=self.theta,
+            threshold=self.threshold,
+        )
+
     def to_summary_dict(self) -> dict[str, object]:
         return {
+            **self.summary().model_dump(),
             "initial_state": self.initial_state,
-            "fidelity": self.fidelity,
-            "theta": self.theta,
-            "threshold": self.threshold,
             "ge_s": self.ge_s,
             "init_pops": self.init_pops.tolist(),
             "fit_quality": fit_quality_summary(self.fit_quality),
@@ -86,6 +119,16 @@ class GEPostAnalyzeResult(PostAnalyzeResultBase):
     ge_radius: float
     confusion: list[list[float]]
     condition_number: float
+
+    def summary(self) -> GEPostSummary:
+        """Return the named radius and confusion summary in native ADC units."""
+        return GEPostSummary(ge_radius=self.ge_radius, confusion=self.confusion)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {
+            **self.summary().model_dump(),
+            "condition_number": self.condition_number,
+        }
 
 
 def ge_calibration_review_note(primary: GEAnalysis) -> str | None:

@@ -2,15 +2,25 @@
 
 from math import isfinite
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
+from pydantic import Field
 from zcu_tools.gui.form_adapter.sweep import LinRange
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+)
 
-from .helpers import set_flux_sweep, use_flux_device
+from zcu_lab.v2.mist.flux_dep.gui import MistFluxDepAnalysis
+
+from .helpers import (
+    flux_device_edits,
+    flux_sweep_edits,
+)
 
 
-class MistFluxDepInputs(FormModel):
+class MistFluxDepInputs(RecipeInputs):
     """Inputs for mist flux dep; all units and null policies are declared per
     field."""
 
@@ -28,22 +38,34 @@ class MistFluxDepInputs(FormModel):
     )
     points: int = Field(101, description="Sample count on each map axis, at least two.")
 
+    flux_half: float | None = Field(
+        None,
+        description="Half-flux device value; null keeps the GUI analysis value. Analysis only.",
+    )
+    flux_period: float | None = Field(
+        None,
+        description="Flux period (device units); null keeps the GUI analysis value. Analysis only.",
+    )
+    ac_coeff: float | None = Field(
+        None,
+        description="Photon coefficient; null keeps the GUI analysis value. Analysis only.",
+    )
+    secondary_xaxis: bool | None = Field(
+        None,
+        description="Secondary device-value axis; null keeps the GUI analysis value. Analysis only.",
+    )
+    auto_range: bool | None = Field(
+        None,
+        description="Full acquired range; null keeps the GUI analysis value. Analysis only.",
+    )
 
-class MistFluxDepReport(FormModel):
+
+class MistFluxDepReport(RecipeReport):
     """MIST flux dependence results and failure reason; cancellation returns no report."""
 
     analysis_completed: bool = Field(
         description="Whether the default raw-coordinate baseline-difference map completed."
     )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class MistFluxDepSummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
 
     # This figure-only analysis exposes no scalar fields to the report.
 
@@ -57,11 +79,9 @@ async def mist_flux_dep(
 ) -> MistFluxDepReport:
     """Acquire and save one MIST map using the current global aliases.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
+    points → expts sets the sweep sample count.
+    Analysis controls: flux_half, flux_period, ac_coeff, secondary_xaxis, auto_range. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     for name, values in (
         ("flux_range", inputs.flux_range),
@@ -77,32 +97,47 @@ async def mist_flux_dep(
         raise ValueError("gain_range endpoints must lie in [-1, 1]")
     if isinstance(inputs.points, bool) or inputs.points < 2:
         raise ValueError("points must be an integer >=2")
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab("mist/flux_dep")
-    use_flux_device(tab, inputs.flux_device, unit=inputs.flux_unit)
-    set_flux_sweep(
-        tab,
-        ("sweep", "flux"),
-        start=inputs.flux_range[0],
-        stop=inputs.flux_range[1],
-        expts=inputs.points,
+    tab = session.open_recipe_tab("mist/flux_dep", inputs, target_alias="qubit")
+    tab.select_sources(inputs)
+    edits: list[FieldEdit] = []
+    edits.extend(flux_device_edits(tab, inputs.flux_device, unit=inputs.flux_unit))
+    edits.extend(
+        flux_sweep_edits(
+            ("sweep", "flux"),
+            start=inputs.flux_range[0],
+            stop=inputs.flux_range[1],
+            expts=inputs.points,
+        )
     )
-    tab.set(
-        ("sweep", "gain"),
-        LinRange(
-            start=inputs.gain_range[0], stop=inputs.gain_range[1], n=inputs.points
-        ),
+    tab.apply_inputs(
+        inputs,
+        {
+            ("sweep", "gain"): LinRange(
+                start=inputs.gain_range[0], stop=inputs.gain_range[1], n=inputs.points
+            )
+        },
+        edits=edits,
     )
-
-    # Acquire before analysis; the finally block saves raw and artifacts.
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=MistFluxDepSummary)
+        analysis = await tab.analyze(
+            "primary",
+            result=MistFluxDepAnalysis,
+            updates={
+                key: value
+                for key, value in {
+                    "flux_half": inputs.flux_half,
+                    "flux_period": inputs.flux_period,
+                    "ac_coeff": inputs.ac_coeff,
+                    "secondary_xaxis": inputs.secondary_xaxis,
+                    "auto_range": inputs.auto_range,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             return MistFluxDepReport(
-                analysis_completed=False,
-                analysis_failure=analysis.reason,
+                analysis_completed=False, analysis_failure=analysis.reason
             )
         return MistFluxDepReport(analysis_completed=True)
     finally:

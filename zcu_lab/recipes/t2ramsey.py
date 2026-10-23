@@ -5,35 +5,33 @@ Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
 
+from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseySummary
+
 from .helpers import (
     FrequencyCalibration,
-    apply_frequency,
     choose_frequency,
-    report_number,
     require_pi,
     select_or_disable,
 )
 
 
-class T2RamseyInputs(FormModel):
+class T2RamseyInputs(RecipeInputs):
     """Inputs for t2ramsey; all units and null policies are declared per field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -63,8 +61,17 @@ class T2RamseyInputs(FormModel):
         None, description="Averaging round count; null keeps the GUI value."
     )
 
+    fit_fringe: bool | None = Field(
+        None,
+        description="Fit fringe; null keeps the GUI analysis value. Analysis only.",
+    )
+    fit_phase: bool | None = Field(
+        None,
+        description="Fit phase offset (fringe only); null keeps the GUI analysis value. Analysis only.",
+    )
 
-class T2RamseyReport(FormModel):
+
+class T2RamseyReport(RecipeReport):
     """T2 Ramsey results and failure reason; cancellation returns no report."""
 
     t2ramsey_us: float | None = Field(
@@ -79,32 +86,6 @@ class T2RamseyReport(FormModel):
     fit_fringe: bool = Field(
         description="Whether the fringe model was fitted; false when analysis failed."
     )
-    writeback_applied: bool = Field(
-        description="Whether the selected calibration proposal was explicitly accepted and applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class T2RamseySummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    t2r: float | None = Field(
-        description="Owner t2r in us; null retains an unavailable estimate."
-    )
-
-    t2r_err: float | None = Field(
-        description="Owner t2r_err in us; null retains an unavailable estimate."
-    )
-
-    detune: float | None = Field(
-        description="Owner detune in MHz; null retains an unavailable estimate."
-    )
-
-    fit_fringe: bool = Field(description="Owner fit_fringe.")
 
 
 @recipe("t2ramsey", description="Run one calibrated Ramsey delay sweep.")
@@ -118,21 +99,15 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     the GUI parameters, which fit a free fringe phase by default. Turn off Fit
     phase offset in the tab to use a fixed phase instead.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    points → expts sets the sweep sample count.
+    Analysis controls: fit_fringe, fit_phase. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "twotone/t2ramsey",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("twotone/t2ramsey", inputs, target_alias="qubit")
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select_sources(inputs)
+    edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
@@ -144,7 +119,7 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     missing.extend(frequency.missing)
     if frequency.edit is not None:
         tab.select(("modules", "readout"), inline=True)
-        apply_frequency(tab, frequency.edit)
+        edits.append(frequency.edit)
     if (
         parameter := require_pi(
             tab, ("modules", "pi2_pulse"), inputs.pi2_ref, required="pi2_ref"
@@ -153,17 +128,31 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set(("sweep", "length", "stop"), inputs.max_delay_us)
-    tab.set(("sweep", "length", "n"), inputs.points)
-    tab.set(("reps",), inputs.reps)
-    tab.set(("rounds",), inputs.rounds)
-    tab.set(("extras", "detune_ratio"), inputs.detune_ratio)
-
-    # Acquire before analysis; the finally block saves raw and artifacts.
+    tab.apply_inputs(
+        inputs,
+        {
+            ("sweep", "length", "stop"): inputs.max_delay_us,
+            ("sweep", "length", "n"): inputs.points,
+            ("reps",): inputs.reps,
+            ("rounds",): inputs.rounds,
+            ("extras", "detune_ratio"): inputs.detune_ratio,
+        },
+        edits=edits,
+    )
     await tab.run()
     try:
-        # Analyze the acquisition with the GUI parameters.
-        analysis = await tab.analyze("primary", result=T2RamseySummary)
+        analysis = await tab.analyze(
+            "primary",
+            result=T2RamseySummary,
+            updates={
+                key: value
+                for key, value in {
+                    "fit_fringe": inputs.fit_fringe,
+                    "fit_phase": inputs.fit_phase,
+                }.items()
+                if value is not None
+            },
+        )
         if analysis.result is None:
             return T2RamseyReport(
                 t2ramsey_us=None,
@@ -173,8 +162,6 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
                 writeback_applied=False,
                 analysis_failure=analysis.reason,
             )
-
-        # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:

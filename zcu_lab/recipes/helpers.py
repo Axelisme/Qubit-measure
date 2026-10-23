@@ -42,20 +42,6 @@ def _points(expts: object) -> None:
         raise ValueError("expts must be an integer of at least two")
 
 
-def retain_scalar(tab: RecipeTab, field: FormPath) -> None:
-    """Retain one available logical scalar and its captured source label.
-
-    tab is opened; field uses str names or int original list indexes. Retain
-    authored input without copying its captured reference. Unavailable values or
-    field errors raise GuiRpcError(invalid_cfg); path/source/connection errors
-    propagate. No selector is copied or changed.
-    """
-    state = tab.read(field)
-    if state.value_status != "available" or state.errors:
-        raise GuiRpcError(f"Invalid retained {field}", reason="invalid_cfg")
-    tab.set(field, None)
-
-
 class _ParameterQuery(BaseModel):
     """Requested parameter paths and module slots in the tab capture."""
 
@@ -147,7 +133,6 @@ def choose_frequency(
             and state.source is not None
             and _finite(state.value)
         ):
-            tab.set(field, None)
             return FrequencyChoice(None)
     calibrated = _captured_parameter(tab, path)
     if _finite(calibrated):
@@ -165,20 +150,16 @@ def choose_frequency(
     )
 
 
-def apply_frequency(tab: RecipeTab, edit: FieldEdit) -> None:
-    """Apply a choose_frequency edit and require a valid MHz scalar.
+@dataclass(frozen=True)
+class FrequencySweepChoice:
+    """Prepared sweep edits and missing inputs, without changing the Form.
 
-    tab is opened; edit carries the scalar path, value or calibration
-    expression, and source label. Call tab.select(inline=True) on selector
-    ancestors first. Write the edit, then require an available finite nonboolean
-    value without field errors; otherwise raise GuiRpcError(invalid_cfg).
-    Admission, validation and connection failures propagate; no selector is
-    copied here.
+    edits retains explicit/calibration/linewidth provenance for final admission.
+    missing lists unavailable center/span inputs; no edits accompany missing data.
     """
-    tab.apply([edit])
-    state = tab.read(edit.path)
-    if state.value_status != "available" or state.errors or not _finite(state.value):
-        raise GuiRpcError(f"Invalid {edit.path} frequency", reason="invalid_cfg")
+
+    edits: tuple[FieldEdit, ...] = ()
+    missing: tuple[MissingParameter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -246,14 +227,14 @@ class FrequencySweepRange:
     expts: int | None = None
 
 
-def set_frequency_sweep(
+def frequency_sweep_edits(
     tab: RecipeTab,
     field: FormPath,
     *,
     calibration: FrequencySweepCalibration,
     scan: FrequencySweepRange,
-) -> tuple[MissingParameter, ...]:
-    """Write numeric MHz endpoints using explicit values or current calibration.
+) -> FrequencySweepChoice:
+    """Prepare numeric MHz endpoint edits using explicit values or current calibration.
 
     tab is opened and supplies its fixed parameter calibration capture.
     field uses str names or int original list indexes. calibration supplies
@@ -265,7 +246,7 @@ def set_frequency_sweep(
 
     Return all missing center_mhz/span_mhz inputs as MissingParameter values
     without sweep edits when center is unavailable/nonfinite or the required
-    linewidth is boolean, nonfinite or nonpositive. Return () after success.
+    linewidth is boolean, nonfinite or nonpositive. Return named edits after success; no fields are submitted.
     Invalid explicit inputs, policy, range or sweep path raise ValueError;
     explicit inputs and policy are checked before reads/edits. Source and native
     cfg failures propagate.
@@ -300,7 +281,7 @@ def set_frequency_sweep(
                 )
             )
     if missing:
-        return tuple(missing)
+        return FrequencySweepChoice(missing=tuple(missing))
     start, stop = _frequency_endpoints(center, span)
     edge_source = (
         "explicit"
@@ -312,35 +293,29 @@ def set_frequency_sweep(
         else "gui_linewidth"
     )
     if expts is not None:
-        tab.apply(
-            [
-                FieldEdit(
-                    path=field,
-                    value=LinRange(start=start, stop=stop, n=expts),
-                    source=edge_source,
-                ),
-            ]
+        edits = (
+            FieldEdit(
+                path=field,
+                value=LinRange(start=start, stop=stop, n=expts),
+                source=edge_source,
+            ),
         )
     else:
-        tab.apply(
-            [
-                FieldEdit(path=(*field, "start"), value=start, source=edge_source),
-                FieldEdit(path=(*field, "stop"), value=stop, source=edge_source),
-            ]
+        edits = (
+            FieldEdit(path=(*field, "start"), value=start, source=edge_source),
+            FieldEdit(path=(*field, "stop"), value=stop, source=edge_source),
         )
-        tab.set((*field, "n"), None)
-    return ()
+    return FrequencySweepChoice(edits=edits)
 
 
-def set_flux_sweep(
-    tab: RecipeTab,
+def flux_sweep_edits(
     field: FormPath,
     *,
     start: float | None,
     stop: float | None,
     expts: int | None = None,
-) -> None:
-    """Write explicit distinct native flux endpoints, without unit conversion.
+) -> tuple[FieldEdit, ...]:
+    """Prepare explicit native flux edits without submitting or converting them.
 
     tab is opened; field uses str names or int original list indexes. start/stop
     must be finite nonboolean native coordinates in either direction. expts is
@@ -352,15 +327,20 @@ def set_flux_sweep(
     if not _finite(start) or not _finite(stop) or start == stop:
         raise ValueError("flux endpoints must both be finite and distinct")
     if expts is not None:
-        tab.set(field, LinRange(start=float(start), stop=float(stop), n=expts))
-    else:
-        tab.set((*field, "start"), float(start))
-        tab.set((*field, "stop"), float(stop))
-        tab.set((*field, "n"), None)
+        return (
+            FieldEdit(
+                path=field,
+                value=LinRange(start=float(start), stop=float(stop), n=expts),
+            ),
+        )
+    return (
+        FieldEdit(path=(*field, "start"), value=float(start)),
+        FieldEdit(path=(*field, "stop"), value=float(stop)),
+    )
 
 
-def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
-    """Select a registered flux device after exact cached-snapshot unit validation.
+def flux_device_edits(tab: RecipeTab, name: str, *, unit: str) -> tuple[FieldEdit, ...]:
+    """Validate cached device units and prepare identity edits without submitting.
 
     tab is opened; name/unit must be nonblank strings or raise ValueError. unit
     must exactly match the cached snapshot unit, including native.
@@ -385,8 +365,10 @@ def use_flux_device(tab: RecipeTab, name: str, *, unit: str) -> None:
         raise GuiRpcError(
             "Flux unit does not match the device coordinate", reason="invalid_device"
         )
-    tab.set(("flux_dev",), name)
-    tab.set(("flux_unit",), observed)
+    return (
+        FieldEdit(path=("flux_dev",), value=name),
+        FieldEdit(path=("flux_unit",), value=observed),
+    )
 
 
 class DeviceParams(BaseModel):

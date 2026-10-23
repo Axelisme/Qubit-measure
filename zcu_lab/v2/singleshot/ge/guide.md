@@ -67,3 +67,17 @@ Two separated IQ clouds indicate readout separation.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
 **Last updated:** 2026-10-21
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Obtain a calibrated pi pulse and verify readout timing. Primary fits the two clouds; Post derives classification diagnostics.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `singleshot_ge` after inspecting the same Form errors.
+   shots sets each cloud size, not Expts. initial_state, backend, logscale, align_t1 and length_ratio update Primary analysis. Post has no independent controls.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

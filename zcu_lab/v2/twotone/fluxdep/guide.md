@@ -39,3 +39,17 @@ applying selected qubit flux calibration items. Skip writes nothing.
 The report contains `flux_half`, `flux_integer`, `flux_period` and
 `writeback_applied`. Expected analysis failure returns `analysis_failure`
 without writeback. Save retains raw data and completed analysis artifacts.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Supply both sweep axes and confirm the cached native flux unit. Check qubit probe and readout settings.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `twotone_flux_dep` after inspecting the same Form errors.
+   center_mhz, span_mhz, freq_points, flux_device, flux_unit, flux_range and flux_points are required. Both counts map to their sweep Expts. The interactive picker uses the existing GUI parameters.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

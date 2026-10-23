@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -39,6 +40,26 @@ class AmpRabiAnalyzeParams:
     skip: Annotated[int, ParamMeta(label="Skip points")] = 0
 
 
+class AmplitudeRabiSummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    pi_gain: float | None = Field(
+        description="Owner pi_gain in gain; null retains an unavailable estimate."
+    )
+
+    pi_gain_err: float | None = Field(
+        description="Owner pi_gain_err in gain; null retains an unavailable estimate."
+    )
+
+    pi2_gain: float | None = Field(
+        description="Owner pi2_gain in gain; null retains an unavailable estimate."
+    )
+
+    pi2_gain_err: float | None = Field(
+        description="Owner pi2_gain_err in gain; null retains an unavailable estimate."
+    )
+
+
 @dataclass
 class AmpRabiAnalyzeResult(AnalyzeResultBase):
     # Fitted gains stay in this analysis result and the proposed pulse modules.
@@ -47,6 +68,18 @@ class AmpRabiAnalyzeResult(AnalyzeResultBase):
     pi2_gain: float
     pi2_gain_err: float
     fit_quality: dict[str, dict[str, object]] | None = None
+
+    def summary(self) -> AmplitudeRabiSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return AmplitudeRabiSummary(
+            pi_gain=self.pi_gain,
+            pi_gain_err=self.pi_gain_err,
+            pi2_gain=self.pi2_gain,
+            pi2_gain_err=self.pi2_gain_err,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class AmpRabiAdapter(
