@@ -37,6 +37,106 @@ def test_comment_deletion_and_import_formatting_preserve_statement_identity() ->
     assert compare_ignores(before, after) == ()
 
 
+@pytest.mark.parametrize(
+    ("before_header", "after_header"),
+    [
+        ("class Program(HardwareMixin):", "class Program(SimulationMixin):"),
+        ("def acquire(samples: int):", "def acquire(samples: float):"),
+        ("async def acquire(samples: int):", "async def acquire(samples: float):"),
+    ],
+    ids=["class-bases", "function-signature", "async-signature"],
+)
+def test_header_changes_preserve_the_original_owner_ignore(
+    before_header: str, after_header: str
+) -> None:
+    marker = "  # pyright: ignore[reportIncompatibleMethodOverride]\n"
+    before = before_header + marker + "    pass\n"
+    after = after_header + marker + "    pass\n"
+
+    assert compare_ignores(before, after) == ()
+
+
+@pytest.mark.parametrize(
+    ("before_marker", "after_marker", "reason"),
+    [
+        (
+            "pyright: ignore[reportIncompatibleMethodOverride]",
+            "pyright: ignore[reportIncompatibleMethodOverride, reportArgumentType]",
+            "scope-expanded",
+        ),
+        (
+            "pyright: ignore[reportIncompatibleMethodOverride]",
+            "pyright: ignore[reportArgumentType]",
+            "scope-expanded",
+        ),
+        (
+            "pyright: ignore[reportIncompatibleMethodOverride]",
+            "pyright: ignore",
+            "scope-expanded",
+        ),
+        (
+            "pyright: ignore[reportIncompatibleMethodOverride]",
+            "type: ignore",
+            "not-narrow",
+        ),
+    ],
+    ids=["additional-code", "replacement-code", "blanket-scope", "blanket-kind"],
+)
+def test_changed_headers_cannot_expand_the_original_ignore(
+    before_marker: str, after_marker: str, reason: str
+) -> None:
+    before = f"class Program(HardwareMixin):  # {before_marker}\n    pass\n"
+    after = f"class Program(SimulationMixin):  # {after_marker}\n    pass\n"
+
+    found = compare_ignores(before, after)
+
+    assert [(site.line, site.reason) for site in found] == [(1, reason)]
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (
+            "class First(HardwareMixin):  # {marker}\n    pass\n",
+            "class Second(SimulationMixin):  # {marker}\n    pass\n",
+        ),
+        (
+            "class First:\n    class Program(HardwareMixin):  # {marker}\n        pass\n",
+            "class Second:\n    class Program(SimulationMixin):  # {marker}\n        pass\n",
+        ),
+        (
+            "if enabled:\n    class Program(HardwareMixin):  # {marker}\n        pass\n",
+            "if enabled:\n    pass\nelse:\n"
+            "    class Program(SimulationMixin):  # {marker}\n        pass\n",
+        ),
+    ],
+    ids=["renamed-owner", "different-parent", "different-branch"],
+)
+def test_header_ignores_cannot_move_to_another_owner(before: str, after: str) -> None:
+    marker = "pyright: ignore[reportIncompatibleMethodOverride]"
+
+    found = compare_ignores(before.format(marker=marker), after.format(marker=marker))
+
+    assert len(found) == 1
+    assert found[0].reason == "new-position"
+
+
+def test_same_named_headers_cannot_authorize_an_ambiguous_migration() -> None:
+    before = (
+        "class Program(HardwareMixin):  # type: ignore\n    pass\n"
+        "class Program(SimulationMixin):\n    pass\n"
+    )
+    after = (
+        "class Program(HardwareMixin):\n    pass\n"
+        "class Program(SimulationMixin):  # pyright: ignore[reportArgumentType]\n"
+        "    pass\n"
+    )
+
+    found = compare_ignores(before, after)
+
+    assert [(site.line, site.reason) for site in found] == [(3, "unproven-position")]
+
+
 def test_inserting_an_unrelated_statement_does_not_move_the_logical_site() -> None:
     before = "import missing  # type: ignore\n"
     after = "value = 1\nimport missing  # pyright: ignore[reportMissingImports]\n"

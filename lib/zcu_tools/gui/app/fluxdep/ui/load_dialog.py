@@ -49,8 +49,8 @@ class LoadSpectrumDialog(LoadDataDialog):
     ) -> None:
         """Build the dialog over the spectra a new one may inherit from.
 
-        inherit_sources maps each loaded spectrum name, in list order, to the
-        (flux_half, flux_int) device positions it would seed; choosing it in
+        inherit_sources maps eligible aligned or seeded spectrum names, in list
+        order, to the (flux_half, flux_int) device positions it would seed; choosing it in
         "Inherit from" draws those lines on the preview. start_dir is where
         Browse opens.
         """
@@ -86,18 +86,24 @@ class LoadSpectrumDialog(LoadDataDialog):
     def _draw_preview_overlay(self, ax: Axes) -> None:
         """Draw the chosen inherit source's half/integer lines, as its picker does.
 
-        The lines are device positions, so they stay vertical on x, the device
-        axis after the preview's transpose. The spectrum keeps its extent: a
-        line outside it is not drawn, which hints at the wrong orientation.
+        The lines mark device positions: vertical on the original x axis,
+        horizontal on y after transposing. The spectrum keeps its extent, so
+        positions outside the displayed device range remain clipped.
         """
         source = self._inherit.currentData()
         if source is None:
             return
         flux_half, flux_int = self._inherit_sources[source]
-        extent = ax.get_xlim()
-        ax.axvline(flux_half, color=HALF_FLUX_COLOR, linestyle="--", linewidth=1)
-        ax.axvline(flux_int, color=INTEGER_FLUX_COLOR, linestyle="--", linewidth=1)
-        ax.set_xlim(extent)
+        if self._transpose:
+            extent = ax.get_ylim()
+            ax.axhline(flux_half, color=HALF_FLUX_COLOR, linestyle="--", linewidth=1)
+            ax.axhline(flux_int, color=INTEGER_FLUX_COLOR, linestyle="--", linewidth=1)
+            ax.set_ylim(extent)
+        else:
+            extent = ax.get_xlim()
+            ax.axvline(flux_half, color=HALF_FLUX_COLOR, linestyle="--", linewidth=1)
+            ax.axvline(flux_int, color=INTEGER_FLUX_COLOR, linestyle="--", linewidth=1)
+            ax.set_xlim(extent)
 
     # --- result ----------------------------------------------------------
 

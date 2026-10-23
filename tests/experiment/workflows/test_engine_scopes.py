@@ -1,6 +1,6 @@
 """Workflow scoped cancel delivers partial facts and replaces iteration at commit."""
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from threading import Event, get_ident
 
@@ -201,8 +201,12 @@ def test_script_cancel_accepts_after_host_drain_before_owner_finalization(
             assert release.wait(30), "Test releases progress cleanup"
             super().close()
 
-    def progress(**kwargs: object) -> RecordingBar:
-        return FinalizationBar(**kwargs)
+    def progress(
+        iterable: Iterable[object] | None = None,
+        desc: str | None = None,
+        **kwargs: object,
+    ) -> RecordingBar:
+        return FinalizationBar(iterable=iterable, desc=desc, **kwargs)
 
     rig.engine = Engine(
         EnginePorts(rig.plots, progress, rig.clock, context=7, devices=rig.devices)

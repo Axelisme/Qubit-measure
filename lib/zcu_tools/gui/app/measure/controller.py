@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict
 
 from pydantic import JsonValue
+from pydantic_core import PydanticCustomError
 
 from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
@@ -1275,8 +1276,11 @@ class Controller(SessionControllerMixin):
         name unchanged. Returns None after the write, or the form's FormErrors
         with the library unchanged. Unknown or overlapping paths, an existing
         save_as root, an unknown kind or a missing root raise
-        InvalidInputError before any write. Target, conflict and I/O failures
-        from apply_library_change propagate.
+        InvalidInputError before any write. Form structural/owner refusals and
+        directed form_field source errors also raise InvalidInputError with
+        reason_code form_errors. Unexpected provider failures retain their
+        original types. Target, conflict and I/O failures from
+        apply_library_change propagate.
         """
         entry = self.open_library_entry(item_kind, name)
         if save_as is not None:
@@ -1292,7 +1296,16 @@ class Controller(SessionControllerMixin):
                 )
         try:
             entry.state.write(batch, entry.env)
-        except ValueError as exc:
+        except (
+            FormPathError,
+            FormInputRejected,
+            FormCommandError,
+            StructureError,
+        ) as exc:
+            raise InvalidInputError(str(exc), reason_code="form_errors") from exc
+        except PydanticCustomError as exc:
+            if exc.type != "form_field":
+                raise
             raise InvalidInputError(str(exc), reason_code="form_errors") from exc
         try:
             self.commit_library_entry(entry, name if save_as is None else save_as)

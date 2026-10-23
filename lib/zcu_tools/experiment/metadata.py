@@ -47,7 +47,8 @@ class RunSnapshot:
     entry_id identifies the entry; entry_name is its name at capture. point and
     description are optional work-point labels. roles maps aliases to scalar names
     or ordered name lists. Lists preserve acquisition order, not tone indexes.
-    Writers never refresh these values from a live entry.
+    Writers never refresh these values from a live entry. Python and JSON
+    serialization copy roles into a detached dict, including read-only mappings.
     """
 
     entry_id: UUID
@@ -56,7 +57,7 @@ class RunSnapshot:
     description: str | None
     roles: Annotated[
         Mapping[str, AliasValue],
-        PlainSerializer(dict, return_type=dict[str, AliasValue], when_used="json"),
+        PlainSerializer(dict, return_type=dict[str, AliasValue]),
     ]
 
 

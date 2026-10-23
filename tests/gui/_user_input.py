@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QStyle,
     QStyleOptionButton,
+    QStyleOptionComboBox,
     QTabBar,
     QTableWidget,
     QTableWidgetItem,
@@ -171,12 +172,19 @@ class ComponentDriver:
 
     @staticmethod
     def _can_interact(widget: QWidget) -> bool:
+        if not ComponentDriver._on_screen(widget) or not widget.isEnabled():
+            return False
         modal = QApplication.activeModalWidget()
-        return (
-            ComponentDriver._on_screen(widget)
-            and widget.isEnabled()
-            and (modal is None or widget is modal or modal.isAncestorOf(widget))
-        )
+        if modal is None:
+            return True
+        # Qt excludes child windows (including combo popups) from isAncestorOf.
+        # Only controls whose ownership chain reaches the active modal may act.
+        parent = widget
+        while parent is not None:
+            if parent is modal:
+                return True
+            parent = parent.parentWidget()
+        return False
 
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.
@@ -613,7 +621,8 @@ class ComponentDriver:
         or ambiguous widget/option captions raise LookupError; a non-combo target
         raises TypeError. Disabled, hidden, clipped or modal-blocked targets and
         disabled options are no-ops. value is a caption, never userData or index.
-        No target is shown or scrolled into view. Popups close on failure.
+        No target is shown or scrolled into view. If activation does not open an
+        interactable popup, selection stays unchanged. Popups close on failure.
         """
         widget = self._field_control(text, object_name)
         if not isinstance(widget, QComboBox):
@@ -632,11 +641,30 @@ class ComponentDriver:
             & Qt.ItemFlag.ItemIsEnabled
         ):
             return
-        mouse_click(widget, widget.rect().center())
+        # Editable combos reserve their center for text; only the arrow opens them.
+        option = QStyleOptionComboBox()
+        option.initFrom(widget)
+        option.editable = widget.isEditable()
+        style = widget.style()
+        if style is None:
+            raise RuntimeError("Combo has no style for its arrow geometry")
+        arrow = style.subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxArrow,
+            widget,
+        )
+        mouse_click(widget, arrow.center())
         try:
             view = widget.view()
             if view is None:
                 raise RuntimeError("Combo has no option view")
+            viewport = view.viewport()
+            if viewport is None:
+                raise RuntimeError("Combo option view has no viewport")
+            # The viewport paints the options and covers the view's visible region.
+            if not self._can_interact(viewport):
+                return
             key_click(view, Qt.Key.Key_Home)
             for _ in range(index):
                 key_click(view, Qt.Key.Key_Down)
@@ -782,8 +810,11 @@ class ComponentDriver:
         """Click opener, enter path in its modal Qt file chooser, and click Open.
 
         The opener must synchronously open a non-native QFileDialog with Qt's
-        visible fileNameEdit. The caller supplies an existing file path (spaces
-        allowed). Before looking up the opener or applying unavailable no-ops,
+        visible fileNameEdit. Input paths containing hidden parent directories
+        are not supported. The caller supplies an existing file path (spaces
+        allowed). Relative paths require cwd and the chooser's initial directory
+        to refer to the same directory, configured by the caller before opening.
+        Before looking up the opener or applying unavailable no-ops,
         nonexistent paths raise FileNotFoundError and existing non-files raise
         ValueError. Visible caption matches take precedence over hidden copies;
         if none are on screen, a unique unseen opener is a no-op (multiple or
@@ -864,7 +895,10 @@ class ComponentDriver:
         filename = chooser._find(None, "fileNameEdit", editable=True)
         mouse_click(filename, filename.rect().center())
         key_click(filename, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-        type_text(filename, str(path))
+        # Let QFileDialog's filesystem/completion events run between typed keys.
+        for char in str(path):
+            type_text(filename, char)
+            QApplication.processEvents()
         # Completion popups consume Enter and may replace the typed path.
         if (popup := QApplication.activePopupWidget()) is not None:
             key_click(popup, Qt.Key.Key_Escape)

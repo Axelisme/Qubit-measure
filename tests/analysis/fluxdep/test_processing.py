@@ -9,6 +9,7 @@ from zcu_tools.analysis.fluxdep import (
     contrast_limits,
     diff_mirror,
     downsample_points,
+    mirror_loss_at,
     onetone_background,
     spectrum2d_findpoint,
 )
@@ -78,6 +79,51 @@ def test_downsample_points_is_deterministic() -> None:
     second = downsample_points(xs, ys, threshold=0.1)
     np.testing.assert_array_equal(first, second)
     assert first.dtype == np.bool_
+
+
+@pytest.mark.parametrize(
+    ("xs", "center", "expected"),
+    [
+        ([0.0, 0.2, 0.9, 2.0, 4.0], 1.0, [999.0, 990.0, 0.0, 999.0, np.nan]),
+        ([4.0, 2.0, 0.9, 0.2, 0.0], 1.0, [np.nan, 9990.0, 0.0, 990.0, 9990.0]),
+        ([0.0, 1.0, 2.0, 3.0, 4.0], 1.25, [99.0, 0.0, 99.0, np.nan, np.nan]),
+        ([4.0, 3.0, 2.0, 1.0, 0.0], 1.25, [np.nan, np.nan, 900.0, 900.0, 9990.0]),
+        ([0.0, 1.0, 2.0, 3.0, 4.0], 1.4, [999.0, 90.0, 90.0, np.nan, np.nan]),
+        ([np.nan, 0.2, 0.9, 2.0, 4.0], 1.0, [np.nan, 990.0, 0.0, np.nan, np.nan]),
+        ([0.0, np.nan, 0.9, 2.0, 4.0], 1.0, [999.0, np.nan, 0.0, 999.0, np.nan]),
+        ([np.nan] * 5, 1.0, [np.nan] * 5),
+        ([0.0, 0.2, 0.9, 2.0, 4.0], 10.0, [np.nan] * 5),
+    ],
+    ids=[
+        "nonuniform-ascending",
+        "nonuniform-descending",
+        "uniform-tie-first-index",
+        "descending-tie-first-index",
+        "uniform-physical-boundary",
+        "nan-endpoint",
+        "nan-interior",
+        "no-coordinates",
+        "no-overlap",
+    ],
+)
+def test_mirror_loss_pairs_nearest_physical_coordinates(
+    xs: list[float], center: float, expected: list[float]
+) -> None:
+    axis = np.array(xs, dtype=np.float64)
+    values = np.array([1.0, 10.0, 100.0, 1000.0, 10000.0])
+    data = np.column_stack((values, 2.0 * values))
+    expected_rows = np.array(expected, dtype=np.float64)
+    expected_image = np.column_stack((expected_rows, 2.0 * expected_rows))
+
+    np.testing.assert_array_equal(diff_mirror(axis, data, center), expected_image)
+    image, mean = mirror_loss_at(axis, data, center)
+
+    np.testing.assert_array_equal(image, expected_image)
+    valid = ~np.isnan(expected_rows)
+    if valid.any():
+        assert mean == pytest.approx(float(expected_image[valid].mean()))
+    else:
+        assert np.isnan(mean)
 
 
 def test_diff_mirror_rejects_axis_shape_mismatch() -> None:

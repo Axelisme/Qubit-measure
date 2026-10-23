@@ -146,7 +146,17 @@ class T1WithToneSweepResult:
 
 
 class T1WithToneSweepSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
+    length: Annotated[
+        SweepCfg | list[float],
+        FieldMeta(
+            label="Probe length",
+            unit="us",
+            description=(
+                "Enter the probe length range (us); "
+                "every point must be finite and strictly positive."
+            ),
+        ),
+    ]
     gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
     freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
 
