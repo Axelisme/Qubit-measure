@@ -209,16 +209,15 @@ pythonpath = [".", "tools"]
 testpaths = ["tests"]
 # Import test modules by their full path-derived name. This keeps equal basenames
 # in unrelated test domains isolated in both serial and xdist collection.
-# Pin the temporary-file root to the invoking worktree so no caller has to create
-# a basetemp parent first. `uv run --directory <worktree>` fixes the cwd, so parallel
-# lanes stay isolated. pytest clears this directory at session start.
+# tests/conftest.py allocates a basetemp per invocation inside the worktree.
+# Leave --basetemp unset here so explicit caller paths remain distinguishable.
 # Installing the quality group must not randomize ordinary collection or runs.
 # Diagnostics opt in explicitly with `pytest -p randomly --randomly-seed=<seed>`.
 # Ordinary runs exclude slow and sim tests. Before land review, use -m 'not sim'
 # (including slow) unless lib/zcu_tools/simulate/ changed; then use -m "" for all tests.
 # Ticket checks use -m sim (or an affected subset including sim) only when that
 # simulation package changed.
-addopts = "--import-mode=importlib --basetemp=.pytest-tmp --strict-markers --strict-config -p no:randomly -m 'not slow and not sim'"
+addopts = "--import-mode=importlib --strict-markers --strict-config -p no:randomly -m 'not slow and not sim'"
 filterwarnings = [
   "ignore::DeprecationWarning:matplotlib.*",
   "ignore:invalid escape sequence.*:SyntaxWarning:qick\\..*",

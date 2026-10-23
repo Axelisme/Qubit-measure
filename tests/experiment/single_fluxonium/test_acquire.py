@@ -46,7 +46,7 @@ def physical_settings():
     values["chip"]["qubit"]["q_cap"] = 3000
     values["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
     values["readout"]["adc"]["gain"] = 1000
-    values["numerics"]["min_round_duration_s"] = 0
+    values["numerics"]["time_scale"] = 0
     return parse_single_fluxonium(values)
 
 

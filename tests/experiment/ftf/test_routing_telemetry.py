@@ -22,7 +22,7 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     try:
         observed = ftf(
             settings().with_telemetry(enabled=True, directory=directory),
-            min_round_duration_s=0,
+            time_scale=0,
         )
     except AttributeError as error:
         raise AssertionError(
@@ -31,7 +31,7 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     plain_directory = tmp_path / "disabled"
     plain = ftf(
         settings().with_telemetry(enabled=False, directory=plain_directory),
-        min_round_duration_s=0,
+        time_scale=0,
     )
     try:
         program = ModularProgramV2(

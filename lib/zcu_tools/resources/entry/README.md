@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-23，Figure 檔名與碰撞檢查
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -98,7 +98,7 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 
 `ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、前端啟動實驗的名稱、opaque run_id、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view, roles=...)` 從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。可選的 RoleView 必須綁同一 UUID、point source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
 
-`ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。Figure 檔名先編碼 percent，再編碼 underscore，避免 token 與分隔符混淆。Analysis 使用安全的 member_name 作檔名，producer 傳入 pane 名稱；section／artifact name 不參與 JSON 路徑。同 pane 可以跨 artifact 共用目的地，保存依選集順序覆寫，不做批次內容去重或路徑衝突預檢。Symlink 不能讓目的地離開 entry root。
+`ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。Figure 圖名為 `<section>_<name>_<member_name>`，各 token 原樣保留底線與 percent。每次保存選集使用新的 SaveLayout；同一 instance 中，不同 figure key 算到相同輸出路徑時，會拋出 ValueError 並列出路徑與兩個 key，不自動改名。同 key 可重算。Analysis 使用安全的 member_name 作檔名，producer 傳入 pane 名稱；section／artifact name 不參與 JSON 路徑。同 pane 可以跨 artifact 共用目的地，保存依選集順序覆寫。Data 與 analysis 不套用 figure 的碰撞檢查，不做批次內容去重或路徑衝突預檢。Symlink 不能讓目的地離開 entry root。
 
 Run 目錄為 `Database/<name>/runs/<experiment>_<run_id>/`，使用完整 run_id。Data 回傳其中的 data.h5 與當地日期樹內的 Labber 新檔名 `<experiment>_<id6>_<序號>.hdf5`。實驗名中的 `/` 轉 `_`，其餘沿用安全路徑段驗證。Id6 取 run_id 後六碼，短於六碼時保留全部。序號從 1 起避讓既有檔案。
 

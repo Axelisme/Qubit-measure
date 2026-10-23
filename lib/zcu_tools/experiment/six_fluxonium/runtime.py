@@ -402,9 +402,7 @@ def six_fluxonium(
             source.execute,
             backend_version="six-fluxonium-v1",
             seed=settings.qubits.Q1.numerics.seed,
-            min_round_duration_s=max(
-                q.numerics.min_round_duration_s for q in settings.qubits.ordered()
-            ),
+            time_scale=max(q.numerics.time_scale for q in settings.qubits.ordered()),
         )
         routes = (
             *((0, ch) for ch in range(6)),

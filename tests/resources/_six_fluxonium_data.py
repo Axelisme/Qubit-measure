@@ -68,7 +68,7 @@ def six_document() -> SixDocument:
         value["drive_line"].update(name=f"mw_{index}", gen_ch=index + 1)
         value["readout"]["resonator"].update(frequency_ghz=6.8 + 0.125 * index)
         value["readout"]["adc"].update(ro_ch=index, gain=10000)
-        value["numerics"].update(min_round_duration_s=0)
+        value["numerics"].update(time_scale=0)
         qubits[f"Q{index + 1}"] = QubitDocument(
             format=value["format"],
             version=value["version"],

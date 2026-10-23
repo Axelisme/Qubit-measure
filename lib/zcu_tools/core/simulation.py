@@ -273,6 +273,8 @@ class AcquireRequest:
             Required when templates are supplied; length mismatch raises ValueError.
         reps: Length of the reps axis; repetitions do not create new points.
         templates: Structural point classes partitioning range(prod(point_dims)).
+        relax_delay_us: Nonnegative inter-shot relaxation in us, added after
+            every template point for pacing; not part of template body durations.
         root_seed: Nonnegative integer entropy supplied by the environment
             author or generated once by the binding when seed is omitted.
         sequence: Zero-based, monotonically increasing acquire identity from
@@ -298,6 +300,7 @@ class AcquireRequest:
     point_names: tuple[str, ...] = ()
     reps: int = 1
     templates: tuple[TimelineTemplate, ...] = ()
+    relax_delay_us: float = 0.0
 
     def __post_init__(self) -> None:
         if self.templates and len(self.point_names) != len(self.point_dims):

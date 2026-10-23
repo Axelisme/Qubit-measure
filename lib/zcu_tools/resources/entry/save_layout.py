@@ -57,11 +57,6 @@ def _aware_time(value: datetime, *, field: str) -> None:
         raise ValueError(f"{field} must be timezone-aware")
 
 
-def _encode(value: str) -> str:
-    """Keep opaque name tokens distinct from underscore filename separators."""
-    return value.replace("%", "%25").replace("_", "%5F")
-
-
 def _checked_path(root: Path, destination: Path) -> Path:
     """Resolve relative/absolute destination against root, rejecting symlink escapes."""
     path = root / destination
@@ -116,8 +111,10 @@ class SaveLayout:
     Experiment names prefix run directories, Result figure copies and Labber exports.
     Fixed run/figure/JSON destinations may already exist; callers own replacement.
     Labber names are selected by checking
-    existing files, not atomically reserved. Writers and save orchestration own
-    serialization, locking and failure isolation.
+    existing files, not atomically reserved. Each instance tracks figure paths;
+    different keys sharing a path raise ValueError. Use a new instance for each
+    save selection. Writers and save orchestration own serialization, locking
+    and failure isolation.
     """
 
     def __init__(
@@ -152,6 +149,7 @@ class SaveLayout:
         self._experiment = experiment
         self._point = point
         self._saved_at = saved_at
+        self._figure_keys: dict[Path, ArtifactKey] = {}
 
     def outputs(self, key: ArtifactKey) -> tuple[Output, ...]:
         """Return ordered destinations for one ArtifactKey without writing them.
@@ -164,9 +162,12 @@ class SaveLayout:
         Analysis returns analysis/<member_name>.json in the same run directory;
         section/name do not affect that destination. Producers supply their pane
         as member_name.
-        Figure filename tokens escape percent then underscore, preserving
-        member identity. A symlink escaping either
-        entry root raises ValueError; filesystem lookup errors propagate.
+        Figure filename tokens are joined with underscores without encoding.
+        Different figure keys sharing a path within this layout raise ValueError
+        naming both keys and the path; repeating the same key is allowed.
+        Data and analysis destinations may be shared across keys.
+        A symlink escaping either entry root raises ValueError; filesystem
+        lookup errors propagate.
         """
         run_name = f"{self._experiment}_{self._run_id}"
         run = Path("runs") / run_name
@@ -199,9 +200,7 @@ class SaveLayout:
                 ),
             )
 
-        filename = "_".join(
-            _encode(token) for token in (key.section, key.name, key.member_name)
-        )
+        filename = "_".join((key.section, key.name, key.member_name))
         figure = _checked_path(self._database_path, run / "figures" / f"{filename}.png")
         copy_folder = (
             Path("figures")
@@ -211,6 +210,14 @@ class SaveLayout:
         copy = _checked_path(
             self._result_path, copy_folder / f"{run_name}_{filename}.png"
         )
+        for path in (figure, copy):
+            previous_key = self._figure_keys.get(path)
+            if previous_key is not None and previous_key != key:
+                raise ValueError(
+                    f"Figure output collision at {path}: {previous_key!r} and {key!r}"
+                )
+        for path in (figure, copy):
+            self._figure_keys[path] = key
         return Output("png", figure), Output("png", copy)
 
 

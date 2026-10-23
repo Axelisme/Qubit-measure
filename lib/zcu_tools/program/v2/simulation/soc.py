@@ -37,6 +37,7 @@ class SimulationSoc(QickConfig):
             if not 0 <= gen < len(self["gens"]) or not 0 <= adc < len(self["readouts"]):
                 raise ValueError(f"invalid simulation route {(gen, adc)}")
         self._request: AcquireRequest | None = None
+        self._pacing_cancel: CancellationQuery | None = None
         self._round_index = 0
         self._accumulated = {}
         self._decimated = {}
@@ -45,11 +46,15 @@ class SimulationSoc(QickConfig):
         self._statistics_copier = StatisticsCopier()
         self._raw_request: AcquireRequest | None = None
 
-    def install_request(self, request: AcquireRequest) -> None:
+    def install_request(
+        self, request: AcquireRequest, *, pacing_cancel: CancellationQuery | None = None
+    ) -> None:
         """Admit detached controls only when every used channel is wired.
 
         request is borrowed until release_request. Validate every execution's
         generator and ADC routes before retaining it or invoking the backend.
+        pacing_cancel optionally interrupts round waiting only; None disables it.
+        It is borrowed until release_request and never reaches numeric execution.
         ValueError identifies an unbound generator's source module/channel, or
         an unbound generator/ADC route. This method does not generate signals.
         """
@@ -67,11 +72,13 @@ class SimulationSoc(QickConfig):
                 ):
                     raise ValueError("program uses an unbound generator/ADC route")
         self._request = request
+        self._pacing_cancel = pacing_cancel
         self.binding.last_request = request
         self._round_index = 0
 
     def release_request(self) -> None:
         self._request = None
+        self._pacing_cancel = None
 
     def run_round(
         self, *, cancel: CancellationQuery | None = None
@@ -87,7 +94,10 @@ class SimulationSoc(QickConfig):
         if self._request is None:
             raise RuntimeError("simulation has no active acquisition request")
         result = self.binding.sample_round(
-            self._request, self._round_index, cancel=cancel
+            self._request,
+            self._round_index,
+            cancel=cancel,
+            pacing_cancel=self._pacing_cancel,
         )
         self._statistics = None
         if isinstance(result, IntegratedRound):

@@ -23,7 +23,12 @@ numeric warmup or real hardware access occurs during startup.
 A new entry contains Q1 as `qubit/fluxonium`, R1 as `resonator`, and `flux_bias`
 as `device/current_source`. Q1 uses generators 1 and 2. R1 uses generator 0 and
 ADC 0. Aliases are `qubit: Q1`, `resonator: $qubit.resonator`, and
-`flux_dev: $qubit.flux_source`. Existing entries keep their edited values and aliases.
+`flux_dev: $qubit.flux_source`. The template seeds simulated-truth from
+`default.yaml`: Q1's own DC line has `flux_half: 0`, `flux_period: 0.01` and
+`flux_int: -0.005` in A. R1 has total linewidth 1.1 MHz and pulse-route flight
+time 0.4 us. These values are not measurement results. This environment has
+no mux route, global coil or readout amplifier component.
+Existing entries keep their edited values and aliases.
 Missing files, invalid settings, invalid templates and partial entries raise
 instead of opening another environment. Read the startup error before retrying.
 
