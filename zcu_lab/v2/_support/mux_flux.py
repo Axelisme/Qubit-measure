@@ -227,8 +227,10 @@ def run_flux_scan(
     Run scope. Validate every selected driver's unit before the first write.
     Global scans write the coil once per point; local scans zip selected lines.
     Stop during ramp, settle or inner acquisition discards that incomplete flux
-    point and preserves earlier points. Driver/acquisition errors propagate.
-    Sources retain their last setting; no automatic restoration occurs.
+    point and preserves earlier points. Uncancelled nonfinite inner IQ raises
+    ValueError with the zero-based flux point and first invalid tone/cell.
+    Driver/acquisition errors propagate. Sources retain their last setting;
+    no automatic restoration occurs.
     """
     indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     if isinstance(cfg, GlobalFluxCfg):
@@ -296,14 +298,43 @@ def run_flux_scan(
             break
         acquired = _acquire_spectrum(spectrum, context=context)
         context.scope.stop.raise_if_error()
-        if context.scope.stop.partial_result or not np.isfinite(acquired).all():
+        if context.scope.stop.partial_result:
             break
+        _require_finite_spectrum(
+            acquired,
+            point=point,
+            indices=indices,
+            flux_values=flux_values,
+            frequencies=frequencies,
+        )
         signals[:, point, :] = acquired
         for row, viewer in enumerate(viewers):
             viewer.update(flux_values[row], frequencies[row], np.abs(signals[row]))
     return MuxFluxResult(
         np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
     )
+
+
+def _require_finite_spectrum(
+    acquired: NDArray[np.complex128],
+    *,
+    point: int,
+    indices: list[int],
+    flux_values: NDArray[np.float64],
+    frequencies: NDArray[np.float64],
+) -> None:
+    """Reject invalid completed IQ with its original tone and planned coordinates."""
+    nonfinite = ~np.isfinite(acquired)
+    if nonfinite.any():
+        row, column = np.argwhere(nonfinite)[0]
+        raise ValueError(
+            f"Nonfinite inner IQ at flux point {point} (zero-based): "
+            f"{np.count_nonzero(nonfinite)}/{acquired.size} invalid cells; "
+            f"first at tone {indices[row]}, "
+            f"DC={flux_values[row, point]} (native units), "
+            f"frequency={frequencies[row, column]} MHz: "
+            f"{acquired[row, column]!r}"
+        )
 
 
 def _acquire_spectrum(
