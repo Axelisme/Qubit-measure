@@ -3,31 +3,28 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, SweepCfg
+from zcu_tools.program.v2 import ProgramV2Cfg, SweepCfg
 
 from .mux_sweep_cfg import (
     MuxDriveModuleCfg,
-    MuxToneCfg,
-    validate_mux_scan,
+    MuxDriveToneCfg,
+    validate_mux_tones,
 )
 
 
-class MuxCoherenceToneCfg(ConfigBase):
+class MuxCoherenceToneCfg(MuxDriveToneCfg):
     """One named original tone's required x90 drive and MHz detune.
 
     name is its nonempty capture-generated qubit identity. drive is the fixed
     pi/2 source pulse. detune ramps the final pi/2 phase, not its carrier.
+    Evolution uses the cfg's shared delay; no per-tone sweep is required.
     Full-list admission validates every pulse, detune and independent channel,
     including nonparticipants, and rejects duplicate names.
     """
 
-    name: Annotated[str, FieldMeta(readonly=True)]
-    drive: PulseCfg
     detune: float = 0.0
 
 
@@ -54,13 +51,8 @@ def validate_coherence_scan(
         if not math.isfinite(tone.detune):
             raise ValueError(f"tones[{index}].detune must be finite MHz")
 
-    # Reuse full-tone checks with the same delay grid for every drive.
-    validate_mux_scan(
-        cfg,
-        modules,
-        [MuxToneCfg(name=t.name, drive=t.drive, sweep=delay) for t in tones],
-        participants,
-    )
+    # Validate fixed drives independently of pulse-scan ranges and point counts.
+    validate_mux_tones(cfg, modules, tones, participants)
 
 
 @dataclass(frozen=True)
