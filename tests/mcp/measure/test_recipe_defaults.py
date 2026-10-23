@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.gui.app.measure.remote.form_errors import recipe_form_errors
+from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
+from zcu_tools.gui.form import FormEnv, FormErrors
+from zcu_tools.gui.form_adapter import Form, LogicalEdit
 from zcu_tools.analysis.fitting.quality import FitQuality, QualityIssue
 from zcu_tools.mcp.measure import recipe_api as api
 from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
@@ -179,7 +185,6 @@ def test_prepare_tab_orders_sources_values_and_overrides(
                 {
                     "tab_id": "tab-1",
                     "edits": [
-                        {"path": ["count"], "value": 9},
                         {"path": ["count"], "value": 17},
                     ],
                     "require_valid": True,
@@ -296,6 +301,93 @@ def test_apply_inputs_preserves_owner_validation_failures(
         client.context.session.close()
 
 
+class BatchDetail(ConfigBase):
+    amount: int = 2
+
+
+class BatchCfg(ConfigBase):
+    count: int = Field(default=1, gt=0)
+    calibrated: int = 2
+    retained: int = 5
+    detail: BatchDetail = BatchDetail()
+
+
+class WireEdit(BaseModel):
+    path: tuple[str | int, ...]
+    value: JsonValue
+
+
+@pytest.mark.parametrize("override", [11, -1])
+def test_apply_inputs_last_nonnull_value_reaches_atomic_form_admission(
+    tmp_path: Path, override: int
+) -> None:
+    owner = TabFormResource(
+        lambda _ctx: Form(BatchCfg, {}),
+        capture=lambda _aliases: TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    before = owner.input
+    gui = SyntheticGui()
+    admissions: list[bool] = []
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method != "tab.edit_recipe_fields":
+            return gui.respond(method, params)
+        with recipe_form_errors():
+            edits = TypeAdapter(list[WireEdit]).validate_python(params["edits"])
+            result = owner.edit_recipe_fields(
+                [LogicalEdit(edit.path, edit.value) for edit in edits],
+                require_valid=True,
+            )
+            admissions.append(True)
+            errors = result if isinstance(result, FormErrors) else owner.recipe_errors()
+            return {
+                "changed": False if isinstance(result, FormErrors) else result,
+                "errors": [
+                    {"path": list(path), "message": message}
+                    for path, message in (errors.messages.items() if errors else ())
+                ],
+            }
+
+    @api.recipe("synthetic", "Apply final values through real Form admission")
+    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+        tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
+        tab.apply_inputs(
+            inputs,
+            {("count",): 3, ("calibrated",): 4, ("retained",): None},
+            edits=(
+                api.FieldEdit(path=("count",), value=7, source="$calibration.count"),
+                api.FieldEdit(path=("calibrated",), value=9, source="linewidth"),
+                api.FieldEdit(path=("retained",), value=None, source="linewidth"),
+            ),
+        )
+        return Report(count=1)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = client.context.session.recipes.start(
+            client.context, "synthetic", {"overrides": [
+                {"path": ["count"], "value": override},
+                {"path": ["count"], "value": None},
+                {"path": ["calibrated"], "value": None},
+                {"path": ["retained"], "value": None},
+            ]}
+        )
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == ("completed" if override > 0 else "needs_parameters"), snapshot
+        assert admissions == [True]
+        if override > 0:
+            assert owner.read_recipe_field(("count",)).value == 11
+            assert owner.read_recipe_field(("calibrated",)).value == 9
+            assert owner.read_recipe_field(("retained",)).value == 5
+        else:
+            assert owner.input.same_as(before)
+            assert [error.path for error in snapshot.parameter_errors] == [("count",)]
+    finally:
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("rejected", [False, True])
 def test_apply_inputs_admits_values_named_edits_and_overrides_together(
     tmp_path: Path, rejected: bool
@@ -344,8 +436,6 @@ def test_apply_inputs_admits_values_named_edits_and_overrides_together(
             {
                 "tab_id": "tab-1",
                 "edits": [
-                    {"path": ["count"], "value": 3},
-                    {"path": ["count"], "value": 7},
                     {"path": ["count"], "value": 11},
                 ],
                 "require_valid": True,
