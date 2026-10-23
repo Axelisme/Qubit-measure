@@ -78,7 +78,8 @@ class FrequencyCalibration:
     path is the captured source scalar in MHz, such as $resonator.freq. required
     names the recipe input reported when no source is usable. prefer_library
     retains a finite captured library frequency before trying path; false skips
-    that source. Explicit frequency always wins.
+    that source. An unregistered path is treated as missing calibration.
+    Explicit frequency always wins.
     """
 
     path: str
@@ -105,7 +106,8 @@ def choose_frequency(
     true, retain a finite error-free captured library scalar. Otherwise use a
     finite calibration as an expression edit labeled with its path. No usable
     source returns missing without edits or provenance changes. Invalid explicit
-    values raise ValueError; source/connection errors propagate. Call
+    values raise ValueError; an unregistered calibration is missing, while other
+    source/connection errors propagate. Call
     tab.select(inline=True) on selector ancestors before applying a returned
     edit; this function copies no selectors.
     """
@@ -128,7 +130,7 @@ def choose_frequency(
         ):
             tab.set(field, None)
             return FrequencyChoice(None)
-    calibrated = session.context.read(path)
+    calibrated = session.context.read(path, missing_ok=True)
     if _finite(calibrated):
         return FrequencyChoice(
             FieldEdit(path=field, value=Expr(text=path), source=path)

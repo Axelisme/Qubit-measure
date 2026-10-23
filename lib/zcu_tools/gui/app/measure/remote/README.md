@@ -173,6 +173,7 @@ parameter errors retain their existing predictor reasons in `method_entries`.
 
 - One connection has at most one in-flight RPC.
 - Request and response roots are JSON objects.
+- `value.read` reports unregistered keys as `invalid_params` with `reason="unregistered_source"` and `data.path`; other source failures keep their existing error categories.
 
 ## Fixed element paths
 
