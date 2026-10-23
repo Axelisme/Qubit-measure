@@ -12,6 +12,8 @@ from zcu_lab.v2._support.measure.mux_forms import (
 from zcu_lab.v2._support.mux_flux import FluxFrequencyCfg, GlobalFluxCfg, LocalFluxCfg
 from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
 
+from .seed_metadata import seed_metadata
+
 
 def make_flux_form[
     C: GlobalFluxCfg[MuxOnetoneSweepCfg]
@@ -31,8 +33,9 @@ def make_flux_form[
     policies. Order is participants, DC identities, modules, frequency/DC
     scans, averaging, timing. Missing calibration leaves required bounds blank.
     Local bounds are per-Q Expr seeds; global bounds are a captured union.
-    Refs retain stored settings; generated defaults carry source metadata and
-    remain uncalibrated candidates. Refresh preserves inputs and seed capture.
+    Refs retain stored settings; generated defaults describe their source paths.
+    Only fixed-constant fallbacks are marked uncalibrated. Refresh preserves
+    inputs and seed capture.
     """
     names = captured_mux_names(ctx)
     group = require_mux_group(ctx.parameters)
@@ -62,9 +65,7 @@ def make_flux_form[
         ("settle", "Fixed 0.1 s DC settling candidate; confirm for each driver"),
         ("flux_unit", "Initial A native-unit selection; must match connected drivers"),
     ):
-        metadata[(field,)] = FieldMeta(
-            description=description, calibration="uncalibrated"
-        )
+        metadata[(field,)] = seed_metadata(description, fallback=True)
     metadata[("modules", "readout")] = FieldMeta(
         description="Captured $mux.module.readout slot, or readout/mux:blank from group wiring; confirm calibration"
     )
@@ -95,26 +96,25 @@ def make_flux_form[
                 participant_fields=(("drive",), ("sweep",)),
             )
         )
-        metadata[("frequency", "expts")] = FieldMeta(
-            description="Shared 301-point hardware frequency scan candidate",
-            calibration="uncalibrated",
+        metadata[("frequency", "expts")] = seed_metadata(
+            "Shared 301-point hardware frequency scan candidate", fallback=True
         )
         for index, name in enumerate(names):
             for endpoint in ("start", "stop"):
-                metadata[("frequency", "tones", index, "sweep", endpoint)] = FieldMeta(
-                    description=f"From captured {name}.freq and {name}.kappa in MHz; missing calibration requires input",
-                    calibration="uncalibrated",
+                metadata[("frequency", "tones", index, "sweep", endpoint)] = (
+                    seed_metadata(
+                        f"From captured {name}.freq and {name}.kappa in MHz; missing calibration requires input"
+                    )
                 )
-            metadata[("frequency", "tones", index, "drive")] = FieldMeta(
-                description=f"qub_probe template bound to {name}; gain 0.1 and length 1.0 us candidates",
-                calibration="uncalibrated",
+            metadata[("frequency", "tones", index, "drive")] = seed_metadata(
+                f"qub_probe template bound to {name}; gain 0.1 and length 1.0 us candidates",
+                fallback=True,
             )
     else:
         tree["frequency"] = {"df": Range.between(-1.0, 1.0, expts=101)}
         for endpoint in ("start", "stop", "n"):
-            metadata[("frequency", "df", endpoint)] = FieldMeta(
-                description="Nominal common offset candidate -1..1 MHz, 101 points",
-                calibration="uncalibrated",
+            metadata[("frequency", "df", endpoint)] = seed_metadata(
+                "Nominal common offset candidate -1..1 MHz, 101 points", fallback=True
             )
     if local:
         fixed.append(
@@ -134,18 +134,16 @@ def make_flux_form[
             for name in names
         ]
         tree["flux_expts"] = 101
-        metadata[("flux_expts",)] = FieldMeta(
-            description="Shared 101-point zipped local DC scan candidate",
-            calibration="uncalibrated",
+        metadata[("flux_expts",)] = seed_metadata(
+            "Shared 101-point zipped local DC scan candidate", fallback=True
         )
         for index, name in enumerate(names):
             metadata[("tones", index, "flux_dev")] = FieldMeta(
                 description=f"Device name captured from {name}.flux_source"
             )
             for endpoint in ("start", "stop"):
-                metadata[("tones", index, "sweep", endpoint)] = FieldMeta(
-                    description=f"From {name}.flux_int and {name}.flux_half; own DC line, required when missing",
-                    calibration="uncalibrated",
+                metadata[("tones", index, "sweep", endpoint)] = seed_metadata(
+                    f"From {name}.flux_int and {name}.flux_half; own DC line in flux_unit, required when missing"
                 )
     else:
         fixed.append(FixedElements(("tones",), "name", ("participants",)))
@@ -160,11 +158,13 @@ def make_flux_form[
             [None if value is None else value.half for value in calibrations],
         )
         tree["flux"] = Range.between(start, stop, expts=101)
-        for endpoint in ("start", "stop", "n"):
-            metadata[("flux", endpoint)] = FieldMeta(
-                description="Union of captured participant $mux.coil_flux.<Q>.int/half intervals; shared 101 points, missing calibration requires input",
-                calibration="uncalibrated",
+        for endpoint in ("start", "stop"):
+            metadata[("flux", endpoint)] = seed_metadata(
+                "Union of captured $mux.coil_flux.<qubit>.int/half intervals for $mux.qubits in flux_unit; missing calibration requires input"
             )
+        metadata[("flux", "n")] = seed_metadata(
+            "Shared 101-point global DC scan candidate", fallback=True
+        )
     return Form(
         cfg_type,
         tree,

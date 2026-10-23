@@ -113,7 +113,9 @@ Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數�
 不要在機械一致性修正中改變等待時間或 fallback 政策。
 
 對實際產生的候選初值，用 `Form.with_seed_metadata` 的逐位置
-`FieldMeta(description=..., calibration="uncalibrated")` 記錄來源。
+`FieldMeta(description=...)` 記錄來源路徑。只有固定常數 fallback 加上
+`calibration="uncalibrated"`，description 寫明「未校準的起始值，來源：固定常數」。
+從 group／resonator／qubit 參數推導的初值不加此標記，也不宣稱 measured。
 它供 diagnostics 使用，不覆寫 GUI label／unit。
 未改寫的 captured slot 不標成 measured；未知狀態保留未知。
 用 `get_cfg.diagnostics` 的 seed_source、seed_status、uncalibrated 核對 Open／Reset 的結果。
