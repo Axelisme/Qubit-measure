@@ -16,12 +16,12 @@ active mux readout. Reset, reps, rounds, initial delay and relax delay are share
 Pulse pre/post delays remain part of their native branches; no end-alignment
 padding or second compilation is added.
 
-`MuxT1Cfg.delays` is the only delay axis. Supply a `SweepCfg` or an explicit list
-of finite, nonnegative, strictly increasing requested times in microseconds.
-All qubits use the same requested axis. The program owns time quantization, so
-readout timing can differ from the requested delay by a few native ticks.
-The result and fit retain requested times, not a reconstructed actual-delay axis.
-A list can describe a nonuniform scan; the core does not choose a sampling model.
+`MuxT1Cfg.delays` is the only delay axis. Supply a linear `SweepCfg` of finite,
+nonnegative, strictly increasing requested times in microseconds.
+All qubits use the same requested axis in one hardware sweep. The program owns
+time quantization, so readout timing can differ from the requested delay by a few
+native ticks. The result and fit retain requested times, not a reconstructed
+actual-delay axis.
 
 A short pi pulse adds a fixed `max_len - len_i` wait before the common delay.
 For an exponential decay this changes the amplitude, not T1. Pulse delays can
@@ -40,6 +40,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.program.v2 import SweepCfg
 
 # env is a caller-owned compatible hardware or simulation environment.
 # full_readout is MuxReadoutCfg; pi_0/pi_1/pi_2 are fixed PulseCfg values.
@@ -52,7 +53,7 @@ cfg = MuxT1Cfg(
         MuxT1ToneCfg(name="Q3", drive=pi_2),
     ],
     participants=["Q3", "Q1"],
-    delays=[0.0, 0.2, 0.5, 1.0, 2.0, 4.0, 8.0],
+    delays=SweepCfg(start=0.0, stop=8.0, expts=41, step=0.2),
     reps=128,
     rounds=2,
     initial_delay=1.0,
@@ -98,10 +99,10 @@ do not establish physical convergence or calibration accuracy.
 
 `MuxT1Result.times` is float64 `(P,)` requested us. `tone_indices` is int64 `(K,)`
 of original active indices. `signals` is complex128 `(K,P)`, ADC-length-normalized
-average I+jQ. The program averages reps and rounds. Cancellation keeps completed
-points and the current point's completed-round average. Unwritten points remain
-NaN, including a stop before any data. Acquisition failures retain their cause
-on `StopSignal`; always call `raise_if_error()` before reporting success. A
+average I+jQ. The program averages reps and rounds. Cancellation keeps
+completed-round averages across the whole sweep. Before the first completed
+round, signals remain NaN. Acquisition failures retain their cause on `StopSignal`;
+always call `raise_if_error()` before reporting success. A
 partial buffer does not imply success. Admission and construction errors can
 propagate directly.
 
@@ -151,6 +152,7 @@ from zcu_tools.program.v2 import (
     ProgramV2Cfg,
     PulseCfg,
     SweepCfg,
+    sweep2param,
 )
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
@@ -203,8 +205,9 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
     participants is a nonempty, duplicate-free list of those names; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Every drive is required/validated, including nonparticipants, on independent
-    generators distinct from readout. delays is one common SweepCfg or strictly increasing explicit list of finite
-    nonnegative requested us. Fits retain requested times, not compiled delays.
+    generators distinct from readout. delays is one common linear SweepCfg of
+    strictly increasing, finite, nonnegative requested us. Only equally spaced
+    hardware sweeps are supported. Fits retain requested times, not compiled delays.
     Inherited reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
@@ -212,7 +215,7 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
-    delays: SweepCfg | list[float]
+    delays: SweepCfg
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
@@ -237,7 +240,7 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
                     f"tones[{index}].drive.ch requires an independent generator"
                 )
             channels.add(drive.ch)
-        times = sweep2array(self.delays, "none", allow_array=True)
+        times = sweep2array(self.delays, "none")
         if (
             times.ndim != 1
             or not times.size
@@ -272,7 +275,7 @@ def _averaged_signal(
     for module in prog.modules:
         if isinstance(module, MuxReadout) and module.name == "readout":
             iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[:, 0] + 1j * iq[:, 1]
+            return iq[..., 0] + 1j * iq[..., 1]
     raise ValueError("T1 program is missing its named MuxReadout")
 
 
@@ -305,16 +308,17 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         Join waits for the longest pi branch, including its pulse delays, before
         the shared wait. Return requested times (P,), original tone indices (K,)
         and averaged complex IQ (K,P), with one live figure per tone.
-        Cancelled scans retain acquired averages and leave unwritten IQ as NaN.
+        One hardware loop sweeps the equally spaced delays. Cancellation retains
+        completed-round averages across the sweep, or NaN before any round finishes.
         context supplies offline or hardware handles, plots and a stop signal;
-        check cancel_signal.raise_if_error() before reporting success.
+        check context.scope.stop.raise_if_error() before reporting success.
         """
         # 1. Keep participant order while selecting readout tones from the full cfg.
         cfg = MuxT1Cfg.model_validate(config.model_dump())
         indices = participant_indices(
             [tone.name for tone in cfg.tones], cfg.participants
         )
-        times = sweep2array(cfg.delays, "none", allow_array=True)
+        times = sweep2array(cfg.delays, "none")
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[i] for i in indices]
         )
@@ -334,28 +338,25 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
             for row, viewer in enumerate(viewers):
                 viewer.update(times, np.abs(data[:, row]))
 
-        # 3. Compile each delay once; all pi pulses start together after reset.
+        # 3. Compile one hardware delay sweep; pi pulses start together after reset.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(cfg, signals, scope=context.scope) as sched:
-            for delay, step in sched.scan("delay", times.tolist()):
-                pulses = []
-                for index in indices:
-                    drive = cfg.tones[index].drive
-                    pulses.append(Pulse(f"drive_{index}", drive))
-                builder = (
-                    step.prog_builder(context.soc, context.soccfg)
-                    .add_reset("reset", cfg.modules.reset)
-                    .add(
-                        Join(*pulses),
-                        Delay("t1_delay", float(delay)),
-                        MuxReadout("readout", readout),
-                    )
+            pulses = [
+                Pulse(f"drive_{index}", cfg.tones[index].drive) for index in indices
+            ]
+            builder = (
+                sched.prog_builder(context.soc, context.soccfg)
+                .add_reset("reset", cfg.modules.reset)
+                .add(
+                    Join(*pulses),
+                    Delay("t1_delay", sweep2param("delay", cfg.delays)),
+                    MuxReadout("readout", readout),
                 )
-                prog = builder.build()
-                # Average completed rounds into this delay's participant rows.
-                _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_averaged_signal, prog)
-                )
+                .declare_sweep("delay", cfg.delays)
+            )
+            prog = builder.build()
+            # Each completed round supplies the full delay/participant IQ matrix.
+            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
 
         # 4. Flush live plots and return one IQ row per original selected tone.
         signals.trigger_update(flush=True)
