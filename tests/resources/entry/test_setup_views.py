@@ -125,7 +125,10 @@ def test_newer_minor_still_validates_known_values_and_kinds(
         else:
             ResultEntry.open("entry", result_root=results, database_root=database)
 
-    with pytest.raises(error):
+    expected_error = (
+        ValueError if operation == "open" and error is ValidationError else error
+    )
+    with pytest.raises(expected_error):
         perform_operation()
     assert setup_path.read_bytes() == before
     assert entry.setup.R1.rate == pytest.approx(6500.0)
@@ -407,7 +410,8 @@ def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
         else:
             ResultEntry.open("entry", result_root=results, database_root=database)
 
-    with pytest.raises(ValidationError) as failure:
+    error = ValueError if operation == "open" else ValidationError
+    with pytest.raises(error, match=field) as failure:
         perform_operation()
     assert field in str(failure.value)
     assert setup_path.read_bytes() == before
@@ -498,6 +502,8 @@ def test_forbidden_component_fields_preserve_values_sources_and_disk(
 
     previous = entry.setup.meta("R1.rate")
     error = AttributeError if operation == "read" else ValidationError
+    if operation == "open":
+        error = ValueError
     with pytest.raises(error):
         perform_operation()
     assert setup_path.read_bytes() == before

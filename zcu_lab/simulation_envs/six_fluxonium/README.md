@@ -78,7 +78,9 @@ between cavities raises an error. Choose a grid that avoids those midpoints.
 Use the measured centers to prepare `mux/onetone_fine`, then review its readout
 module and writeback proposals. The mux group has no readout module slot until
 you create or accept one. Missing-slot forms use group wiring for the generator
-and ADCs; this does not supply a complete calibrated readout.
+and ADCs when known; this does not supply a complete calibrated readout.
+Documents may keep `wiring: {}`. When group `ro_ch` is unknown, each tone ADC
+stays blank and required in the form before Run.
 
 Qubit `freq` starts at null. Measure each transition before supplying frequencies
 for `mux/twotone_spectrum` or calibrated excitation for `mux/t1`. Changing alias
