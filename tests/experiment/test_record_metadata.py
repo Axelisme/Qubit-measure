@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import warnings
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 from uuid import UUID
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 import zcu_tools.experiment as experiment
 from zcu_tools.datafile import DataVariable, LabberMetadata, load, save
 
@@ -122,6 +126,38 @@ def test_run_identity_rejects_other_strings(entry: str, run_id: str) -> None:
     validate = historical_metadata if entry == "model" else experiment.validate_run_id
     with pytest.raises(ValueError, match="run_id"):
         validate(run_id)
+
+
+def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
+    snapshot = experiment.RunSnapshot(
+        entry_id=UUID("12345678-1234-5678-1234-567812345678"),
+        entry_name="historical entry",
+        point="sweet",
+        description=None,
+        roles=MappingProxyType({"qubit": "Q1"}),
+    )
+    adapter = TypeAdapter(experiment.RunSnapshot)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        python_doc = adapter.dump_python(snapshot, mode="python")
+        json_doc = adapter.dump_python(snapshot, mode="json")
+        json_bytes = adapter.dump_json(snapshot)
+
+    assert not caught, [str(warning.message) for warning in caught]
+    expected_json = {
+        "entry_id": "12345678-1234-5678-1234-567812345678",
+        "entry_name": "historical entry",
+        "point": "sweet",
+        "description": None,
+        "roles": {"qubit": "Q1"},
+    }
+    assert python_doc == {**expected_json, "entry_id": snapshot.entry_id}
+    assert json_doc == expected_json
+    assert json.loads(json_bytes) == expected_json
+    python_doc["roles"]["qubit"] = "renamed in Python output"
+    json_doc["roles"]["qubit"] = "renamed in JSON output"
+    assert snapshot.roles == {"qubit": "Q1"}
+    assert json.loads(adapter.dump_json(snapshot)) == expected_json
 
 
 def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
