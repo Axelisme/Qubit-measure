@@ -43,6 +43,8 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
     return Form(
         CZAmplitudeCfg,
         tree={
+            "reps": 1000,
+            "rounds": 10,
             "roles": roles,
             "drive": drive,
             "modules": {

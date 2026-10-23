@@ -23,6 +23,8 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
     return Form(
         JointReadoutCfg,
         tree={
+            "reps": 1000,
+            "rounds": 10,
             "roles": roles,
             "modules": {
                 "x180_f1": Slot("$f1.module.x180", copy=True),

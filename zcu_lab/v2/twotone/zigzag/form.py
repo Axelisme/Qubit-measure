@@ -30,6 +30,6 @@ def make_form(ctx: FormContext) -> Form[ZigZagCfg]:
             "n_times": 10,
             "repeat_on": "X180_pulse",
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
         },
     )

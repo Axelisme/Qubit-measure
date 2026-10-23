@@ -29,8 +29,8 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
             },
             "sweep": {"phase": Range.between(-360.0, 360.0, expts=201)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "reps": 100,
-            "rounds": 1000,
+            "reps": 1000,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

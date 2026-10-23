@@ -1,6 +1,6 @@
 """Frequency sweep inputs for every qubit in the selected mux group."""
 
-from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2._support.measure.mux_forms import (
@@ -8,7 +8,6 @@ from zcu_lab.v2._support.measure.mux_forms import (
     captured_mux_names,
     mux_readout_initial,
     mux_readout_seed_metadata,
-    mux_relax_delay,
 )
 
 from .core import MuxFreqCfg
@@ -49,10 +48,10 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
             },
             "tones": tones,
             "participants": list(names),
-            "relax_delay": mux_relax_delay(ctx, names),
+            "relax_delay": 1.0,
             "initial_delay": Hidden(),
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
         },
         fixed_elements=(
             FixedElements(("tones",), "name", ("participants",)),
@@ -66,4 +65,11 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
             "reps",
             "rounds",
         ),
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    ).with_seed_metadata(
+        {
+            **mux_readout_seed_metadata(readout),
+            ("relax_delay",): FieldMeta(
+                description="Fixed 1.0 us initial recovery delay"
+            ),
+        }
+    )

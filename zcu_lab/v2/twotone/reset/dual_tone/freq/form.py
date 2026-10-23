@@ -35,8 +35,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 "freq2": Range.around("$qubit.ext.reset_f2", 50.0, expts=201),
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "reps": 100,
-            "rounds": 1000,
+            "reps": 1000,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

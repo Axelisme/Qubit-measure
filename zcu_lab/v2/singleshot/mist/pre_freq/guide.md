@@ -14,7 +14,7 @@ Optional reset and pi pulse use `$qubit.module.reset` and `$qubit.module.x180`. 
 
 Classification uses `$qubit.ext.readout_cal.g_center`, `e_center` and `radius` as starting values in the editable run configuration. Run classifies shots with those configured values, and saved data retain that configuration. Analyze separately reads the optional `$qubit.ext.readout_cal.confusion_matrix` from the selected result's parameter source to correct populations. Calibrate these values with singleshot/ge at the same readout settings. The centres must be finite and distinct, and radius must be positive and finite.
 
-Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 us time scale, giving 150 us. An invalid stored T1 leaves the required delay empty. Defaults remain editable and separate from calibration writeback. Reps starts at 10000 and rounds at 1.
+Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 us time scale, giving 150 us. An invalid stored T1 leaves the required delay empty. Defaults remain editable and separate from calibration writeback. Reps starts at 1000 and rounds at 10.
 
 ## Operator workflow
 
