@@ -4,7 +4,7 @@ from typing import Annotated, Self
 
 import pytest
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase, FieldMeta, PulseCfg, Range
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, FormNode, PulseCfg, Range
 from zcu_tools.gui import form as core
 from zcu_tools.gui import form_adapter as adapter
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -31,7 +31,9 @@ class Group(ConfigBase):
         for index in self.participants:
             for name in ("drive", "sweep"):
                 if getattr(self.tones[index], name) is None:
-                    raise core.field_error(("tones", index, name), "Active setting required")
+                    raise core.field_error(
+                        ("tones", index, name), "Active setting required"
+                    )
         return self
 
 
@@ -39,28 +41,52 @@ def definition() -> adapter.Form[Group]:
     """Seed no sources: the inactive second tone deliberately has empty settings."""
     try:
         declaration = adapter.FixedElements(
-            ("tones",), "name", ("participants",),
+            ("tones",),
+            "name",
+            ("participants",),
             participant_fields=(("drive",), ("sweep",)),
         )
     except TypeError as exc:
         pytest.fail(f"Adapter must declare participant-owned nullable fields: {exc}")
-    return adapter.Form(Group, {
+    tree: dict[str, FormNode] = {
         "tones": [
             {"name": "A", "readout": 6000, "sweep": Range.between(1, 2, 3)},
-            {"name": "B", "readout": 6100, "sweep": Range.between(None, None, None)},
+            {
+                "name": "B",
+                "readout": 6100,
+                "sweep": Range(start=None, stop=None),
+            },
         ],
         "participants": [0],
-    }, fixed_elements=(declaration,))
+    }
+    return adapter.Form(Group, tree, fixed_elements=(declaration,))
 
 
-def test_inactive_module_and_sweep_lower_to_none_without_losing_original_tones() -> None:
+def test_inactive_module_and_sweep_lower_to_none_without_losing_original_tones() -> (
+    None
+):
     form = definition()
     env = core.FormEnv()
     state = core.FormState(form.default_input(env))
-    state.write({("tones", 0, "drive"): {
-        "kind": "inline", "module": {"type": "pulse", "ch": 0, "nqz": 1,
-        "freq": 100, "gain": 0.2, "waveform": {"kind": "inline", "module": {"style": "const", "length": 0.1}}},
-    }}, env)
+    state.write(
+        {
+            ("tones", 0, "drive"): {
+                "kind": "inline",
+                "module": {
+                    "type": "pulse",
+                    "ch": 0,
+                    "nqz": 1,
+                    "freq": 100,
+                    "gain": 0.2,
+                    "waveform": {
+                        "kind": "inline",
+                        "module": {"style": "const", "length": 0.1},
+                    },
+                },
+            }
+        },
+        env,
+    )
     raw = state.input.to_json()
     result = state.result(env)
     assert not isinstance(result, core.FormErrors), result
@@ -92,8 +118,18 @@ def test_unselected_readout_identity_is_still_required() -> None:
     assert errors is not None and ("tones", 0, "readout") in errors.messages
 
 
-@pytest.mark.parametrize("participants, path", [([0, 0], ("participants", 1)), ([2], ("participants", 0)), ([-1], ("participants", 0)), ([True], ("participants", 0))])
-def test_participant_errors_keep_original_index_path(participants: list[int], path: core.FormPath) -> None:
+@pytest.mark.parametrize(
+    "participants, path",
+    [
+        ([0, 0], ("participants", 1)),
+        ([2], ("participants", 0)),
+        ([-1], ("participants", 0)),
+        ([True], ("participants", 0)),
+    ],
+)
+def test_participant_errors_keep_original_index_path(
+    participants: list[int], path: core.FormPath
+) -> None:
     # Reuse the ordinary generated declaration, but supply a simple valid model
     # so the assertion isolates index admission from missing drive/sweep values.
     class Element(core.FormModel):
@@ -103,8 +139,18 @@ def test_participant_errors_keep_original_index_path(participants: list[int], pa
         tones: list[Element]
         participants: list[int]
 
-    Named.fixed_elements = (adapter.FixedElements(("tones",), "name", ("participants",)),)
-    state = core.FormState(core.FormInput(Named, {"tones": [{"name": "A"}, {"name": "B"}], "participants": participants}))
+    Named.fixed_elements = (
+        adapter.FixedElements(("tones",), "name", ("participants",)),
+    )
+    state = core.FormState(
+        core.FormInput(
+            Named,
+            {
+                "tones": [{"name": "A"}, {"name": "B"}],
+                "participants": [value for value in participants],
+            },
+        )
+    )
     result = state.result(core.FormEnv())
     assert isinstance(result, core.FormErrors)
     assert path in result.messages

@@ -19,12 +19,16 @@ class Conditional(FormModel):
     readout: float = 6000
 
     @classmethod
-    def applicability(cls, data: Mapping[str, JsonValue]) -> tuple[FieldApplicability, ...]:
+    def applicability(
+        cls, data: Mapping[str, JsonValue]
+    ) -> tuple[FieldApplicability, ...]:
         """Only selection membership controls amplitude applicability."""
         return (FieldApplicability(("selection",), 1, (("amplitude",),)),)
 
 
-def test_membership_greys_draft_and_restores_its_value_and_error(qapp: QApplication, tmp_path: Path) -> None:
+def test_membership_greys_draft_and_restores_its_value_and_error(
+    qapp: QApplication, tmp_path: Path
+) -> None:
     editor = FormEditor(FormState(Conditional.default_input(FormEnv())), FormEnv())
     editor.resize(650, 360)
     editor.show()
@@ -38,7 +42,9 @@ def test_membership_greys_draft_and_restores_its_value_and_error(qapp: QApplicat
         driver.screenshot(tmp_path / "02-applicable-invalid.png")
         assert driver.observe(object_name="form.input.amplitude").enabled
         assert driver.observe(object_name="form.input.amplitude").text == "-1"
-        assert "greater than 0" in driver.observe(object_name="form.row.amplitude").tooltip
+        assert (
+            "greater than 0" in driver.observe(object_name="form.row.amplitude").tooltip
+        )
         driver.enter_text(object_name="form.input.amplitude", value="3")
         driver.enter_text(object_name="form.input.selection", value="[0]")
         driver.screenshot(tmp_path / "03-disabled-valid-draft.png")
@@ -48,6 +54,9 @@ def test_membership_greys_draft_and_restores_its_value_and_error(qapp: QApplicat
         driver.screenshot(tmp_path / "04-restored-valid.png")
         assert driver.observe(object_name="form.input.amplitude").enabled
         assert driver.observe(object_name="form.input.amplitude").text == "3"
-        assert "greater than 0" not in driver.observe(object_name="form.row.amplitude").tooltip
+        assert (
+            "greater than 0"
+            not in driver.observe(object_name="form.row.amplitude").tooltip
+        )
     finally:
         editor.close()

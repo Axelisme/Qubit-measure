@@ -37,17 +37,29 @@ class ConditionalForm(core.FormModel):
         return (core.FieldApplicability(("selection",), 1, (("drive",),)),)
 
 
-def state_for(drive: JsonValue, selection: JsonValue = None) -> core.FormState[ConditionalForm]:
+def state_for(
+    drive: JsonValue, selection: JsonValue = None
+) -> core.FormState[ConditionalForm]:
     """Build a draft directly, without evaluating its disabled source."""
-    return core.FormState(core.FormInput(ConditionalForm, {
-        "selection": [0] if selection is None else selection,
-        "drive": drive,
-        "readout": 6000,
-    }))
+    return core.FormState(
+        core.FormInput(
+            ConditionalForm,
+            {
+                "selection": [0] if selection is None else selection,
+                "drive": drive,
+                "readout": 6000,
+            },
+        )
+    )
 
 
-@pytest.mark.parametrize("draft", [{"gain": {"expr": "unknown_value"}}, {"gain": -1}, {"gain": "missing-source"}])
-def test_inapplicable_subtree_preserves_draft_without_evaluation_or_validation(draft: JsonValue) -> None:
+@pytest.mark.parametrize(
+    "draft",
+    [{"gain": {"expr": "unknown_value"}}, {"gain": -1}, {"gain": "missing-source"}],
+)
+def test_inapplicable_subtree_preserves_draft_without_evaluation_or_validation(
+    draft: JsonValue,
+) -> None:
     state = state_for(draft)
     before = state.input.to_json()
     result = state.result(core.FormEnv())
@@ -68,7 +80,11 @@ def test_inapplicable_subtree_preserves_draft_without_evaluation_or_validation(d
 
 
 def test_default_input_preserves_inapplicable_expression_draft() -> None:
-    data: dict[str, JsonValue] = {"selection": [0], "drive": {"gain": {"expr": "unknown_value"}}, "readout": 6000}
+    data: dict[str, JsonValue] = {
+        "selection": [0],
+        "drive": {"gain": {"expr": "unknown_value"}},
+        "readout": 6000,
+    }
     initial = ConditionalForm.default_input(core.FormEnv(), defaults=data)
     assert initial.data == data
 
@@ -88,16 +104,20 @@ def test_membership_change_uses_same_input_and_restores_valid_expression() -> No
 
 @pytest.mark.parametrize("selection", [[0], [0, 1]])
 def test_unconditional_readout_still_validates(selection: list[int]) -> None:
-    state = state_for({"gain": 2}, selection)
+    state = state_for({"gain": 2}, [value for value in selection])
     state.write({("readout",): None}, core.FormEnv())
     errors = state.preview(core.FormEnv()).errors
     assert errors is not None and set(errors.messages) == {("readout",)}
     target = state.describe(("drive",), core.FormEnv()).target
-    assert target is not None and getattr(target, "disabled", None) == (1 not in selection)
+    assert target is not None and getattr(target, "disabled", None) == (
+        1 not in selection
+    )
 
 
 @pytest.mark.parametrize("selection", ["invalid", [{"expr": "unknown_index"}]])
-def test_invalid_dependency_is_not_hidden_by_disabled_projection(selection: JsonValue) -> None:
+def test_invalid_dependency_is_not_hidden_by_disabled_projection(
+    selection: JsonValue,
+) -> None:
     state = state_for({"gain": {"expr": "unknown_gain"}}, selection)
     errors = state.preview(core.FormEnv()).errors
     assert errors is not None
