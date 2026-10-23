@@ -107,6 +107,15 @@ def test_inactive_module_and_sweep_lower_to_none_without_losing_original_tones()
     assert any(path[:2] == ("tones", 1) for path in errors.messages)
 
 
+def test_new_participant_missing_settings_reports_error_in_form_preview() -> None:
+    form = definition()
+    env = core.FormEnv()
+    state = core.FormState(form.default_input(env))
+    state.write({("participants",): [1], ("tones", 1, "sweep"): None}, env)
+    errors = state.preview(env).errors
+    assert errors is not None and ("tones", 1, "drive") in errors.messages
+
+
 def test_unselected_readout_identity_is_still_required() -> None:
     form = definition()
     env = core.FormEnv()
