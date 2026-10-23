@@ -591,6 +591,23 @@ class ResultEntry:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
 
     @classmethod
+    def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:
+        """Read setup header and identity without component registration or locks.
+
+        name is a safe single entry name under result_root. Validate the shared
+        parameter-container header and general UUID/UTC creation time only;
+        do not interpret component kinds or require point/records directories.
+        Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
+        Missing setup and other filesystem errors propagate. No files are written.
+        """
+        entry = cls(_entry_path(result_root, name), Path("."))
+        general = entry._setup_store.snapshot().general
+        return EntryIdentity(
+            entry_id=UUID(general.entry_id),
+            created_at=datetime.fromisoformat(general.created_at),
+        )
+
+    @classmethod
     def list_names(cls, *, result_root: str | Path) -> tuple[str, ...]:
         """List sorted direct entry directories containing setup.yaml, without parsing.
 
