@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -100,8 +100,12 @@ def test_load_retains_history_without_foreign_analysis_fallback(
 
     adapter.restore.side_effect = restore_and_rebind
     service, _emit, _writeback = _service(state)
-    service.load_result(tab_id, native_path)
+    outcome = service.load_result(tab_id, native_path)
 
+    expected_issue = ("No active context is available"
+                      if context_free else "Historical entry differs from the opened entry")
+    assert asdict(outcome).get("analysis_source_issue") == expected_issue
+    assert asdict(tab.run).get("analysis_source_issue") == expected_issue
     assert tab.run.result is loaded
     assert tab.run.parameters is None
     assert tab.run.storage is None

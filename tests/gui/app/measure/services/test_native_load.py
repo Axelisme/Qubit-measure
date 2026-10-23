@@ -1,7 +1,7 @@
 """Native Load retains history and rejects unsafe saves through public services."""
 
 from collections.abc import Iterator, Mapping
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Literal
 from unittest.mock import MagicMock
@@ -260,13 +260,14 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     writeback.teardown_draft(draft)
 
 
-def test_native_load_historical_source_failure_preserves_previous_result(
-    role_load_session: NativeSaveSession,
+@pytest.mark.parametrize("fault", ["missing", "corrupt"])
+def test_native_load_missing_source_is_reported_but_corruption_preserves_previous_result(
+    role_load_session: NativeSaveSession, fault: str,
 ) -> None:
     session = role_load_session
     tab = session.state.get_tab("tab")
     history = session.metadata.snapshot
-    broken = replace(history, point="missing")
+    broken = replace(history, point="missing" if fault == "missing" else history.point)
     session.state.update_tab_result(
         "tab",
         replace(
@@ -284,13 +285,19 @@ def test_native_load_historical_source_failure_preserves_previous_result(
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
-    with pytest.raises(FileNotFoundError):
-        service.load_result(
-            "tab",
-            str(session.native_data_path),
-        )
-
-    assert tab.run is previous
+    if fault == "corrupt":
+        source = session.entry.result_path / "points" / str(history.point) / "point.yaml"
+        source.write_text("format: invalid\\n", encoding="utf-8")
+        with pytest.raises(ValueError):
+            service.load_result("tab", str(session.native_data_path))
+        assert tab.run is previous
+    else:
+        outcome = service.load_result("tab", str(session.native_data_path))
+        assert "Historical point 'missing' is unavailable" in str(
+            asdict(outcome).get("analysis_source_issue"))
+        assert asdict(tab.run).get("analysis_source_issue") == asdict(outcome).get("analysis_source_issue")
+        assert tab.run.parameters is None
+        assert require_metadata(tab.run).snapshot == broken
     assert session.entry.ledger.events() == events
 
 
@@ -389,6 +396,13 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
+    reasons = {
+        "foreign": "Historical entry differs from the opened entry",
+        "empty": "No active context is available",
+        "pointless": "Historical metadata has no point",
+    }
+    assert asdict(loaded).get("analysis_source_issue") == reasons[source]
+    assert asdict(tab.run).get("analysis_source_issue") == reasons[source]
     assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
     assert tab.run.parameters is None
