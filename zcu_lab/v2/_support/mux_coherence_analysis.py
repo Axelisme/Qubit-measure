@@ -99,7 +99,9 @@ def fit_coherence_trace(
 
     trace supplies requested us delays and original tone index; real contains
     the matching projected IQ. fit_fringe selects the damped cosine. phase fixes
-    its phase in degrees; None fits phase freely. Decay ignores phase. Return
+    its phase in degrees; None fits phase freely. Fixed phase is excluded from
+    uncertainty invalid diagnostics, not from reported parameters. Decay ignores
+    phase and has no fixed fringe parameters. Return
     T2/error in us, fringe rate/error in MHz and fit quality, plus the predicted
     real IQ at each trace time. expected_frequency_mhz is a finite known alias-risk
     lower bound in MHz, or None when unknown; decay ignores it. Fringe sampling
@@ -134,6 +136,7 @@ def fit_coherence_trace(
         {name: float(value) for name, value in zip(names, params, strict=True)},
         covariance,
         decay_bounds=decay_time_bounds(trace.times),
+        fixed_parameters=("phase",) if fit_fringe and phase is not None else (),
     )
     return (
         MuxCoherenceFit(

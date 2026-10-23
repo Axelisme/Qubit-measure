@@ -56,8 +56,10 @@ class FitQuality:
             diagonal, negative_variance, zero_parameter, then non_finite ratio.
             Off-diagonal entries do not affect these marginal errors.
         invalid: Reasons for unestimable fields and degenerate fits. Every None
-            has a matching metric issue. Zero/non-finite parameter stderr and
-            missing covariance produce issues; non-finite off-diagonal entries
+            for a free parameter or residual metric has a matching metric issue.
+            Fixed-parameter relative errors retain their numeric values or None
+            but produce no uncertainty issue. Zero/non-finite free-parameter
+            stderr and missing covariance produce issues; non-finite off-diagonal entries
             alone do not invalidate marginal errors. Near-constant predictions
             and bounded decay times can have issues despite finite metrics.
             Relative-error paths retain the entire parameter name, including dots.
@@ -121,6 +123,7 @@ def compute_fit_quality(
     covariance: NDArray[np.float64] | None,
     *,
     decay_bounds: tuple[float, float] | None = None,
+    fixed_parameters: Iterable[str] = (),
 ) -> FitQuality:
     """Compute diagnostics from the actual optimizer inputs, without refitting.
 
@@ -141,14 +144,21 @@ def compute_fit_quality(
             decay_time1 and decay_time2 are checked. At/outside bounds (including
             1e-6 relative endpoint tolerance) adds 窗口內無法解析衰減時間 without
             altering numeric metrics. None disables this model-specific check.
+        fixed_parameters: Names of deliberately fixed parameters from the fitting
+            declaration, never inferred from zero covariance. These names must
+            exist in parameters. Their relative errors are still computed, but
+            neither zero/non-finite stderr nor an unestimable relative error
+            adds an issue. Residual and decay-bound diagnostics remain enabled.
 
     Returns:
         FitQuality with the definitions and None/issue correspondence documented
         on that type. Missing covariance takes priority over parameter-value
         errors, keeps all parameter keys, and does not discard residual metrics.
+        Deliberately fixed names suppress uncertainty issues only; their metric
+        values are unchanged, including None for a zero relative-error denominator.
         Non-finite data/arithmetic, zero denominators, and negative diagonal
         variances produce None plus a direct issue, rather than raising.
-        Zero stderr and predicted span below 1e-8 of positive observed span add
+        Zero free-parameter stderr and predicted span below 1e-8 of positive observed span add
         degeneracy issues without replacing finite metrics.
 
     Raises:
@@ -157,7 +167,8 @@ def compute_fit_quality(
             observation/model vectors are empty, not 1-D, or mismatched in shape;
             a parameter name is not a nonblank string; or covariance has the
             wrong shape; or decay_bounds is not finite and ordered with positive
-            lower bound. Inputs are never converted to a supported dtype.
+            lower bound; or fixed_parameters contains an invalid or undeclared
+            name. Inputs are never converted to a supported dtype.
 
     Inputs are not modified. No optimizer, calibration, accept, or writeback
     policy is changed.
@@ -168,6 +179,10 @@ def compute_fit_quality(
         _validate_float64_dtype("covariance", covariance)
     _validate_observations(y, y_fit)
     _validate_parameter_names(parameters)
+    fixed = frozenset(fixed_parameters)
+    _validate_parameter_names(fixed)
+    if not fixed <= parameters.keys():
+        raise ValueError("fixed_parameters must name declared parameters")
     if covariance is not None and covariance.shape != (
         len(parameters),
         len(parameters),
@@ -192,7 +207,26 @@ def compute_fit_quality(
         issues.append(QualityIssue("prediction", "near_constant_prediction"))
     if covariance is None and not parameters:
         issues.append(QualityIssue("covariance", "covariance_unavailable"))
+    relative_errors, parameter_issues = _parameter_metrics(
+        parameters, covariance, decay_bounds, fixed
+    )
+    issues.extend(parameter_issues)
+    return FitQuality(r2, normalized_rms, relative_errors, tuple(issues))
+
+
+def _parameter_metrics(
+    parameters: Mapping[str, float],
+    covariance: NDArray[np.float64] | None,
+    decay_bounds: tuple[float, float] | None,
+    fixed: frozenset[str],
+) -> tuple[dict[str, float | None], list[QualityIssue]]:
+    """Return named relative errors and issues for validated optimizer parameters.
+
+    Keep fixed-parameter metric values, but emit uncertainty issues only for
+    free parameters. Decay bounds apply to the named decay times independently.
+    """
     relative_errors: dict[str, float | None] = {}
+    issues: list[QualityIssue] = []
     for index, (name, value) in enumerate(parameters.items()):
         if decay_bounds is not None and name in (
             "decay_time",
@@ -206,13 +240,13 @@ def compute_fit_quality(
         variance = None if covariance is None else float(covariance[index, index])
         error, reason = _relative_error(value, variance)
         relative_errors[name] = error
-        if variance == 0:
+        if name not in fixed and variance == 0:
             issues.append(
                 QualityIssue(f"standard_errors.{name}", "zero_standard_error")
             )
-        if reason is not None:
+        if name not in fixed and reason is not None:
             issues.append(QualityIssue(f"relative_parameter_errors.{name}", reason))
-    return FitQuality(r2, normalized_rms, relative_errors, tuple(issues))
+    return relative_errors, issues
 
 
 def _validate_float64_dtype(name: str, array: NDArray[np.float64]) -> None:

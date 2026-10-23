@@ -155,6 +155,31 @@ def test_missing_covariance_without_parameters_still_has_a_reason() -> None:
     ]
 
 
+def test_fixed_parameter_mask_keeps_free_zero_stderr_invalid() -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([0.0, 1.0, 2.0]),
+        {"phase": 0.0, "decay_time": 2.0},
+        np.zeros((2, 2)),
+        fixed_parameters=("phase",),
+    )
+    assert quality.to_summary_dict()["invalid"] == [
+        {"path": "standard_errors.decay_time", "reason": "zero_standard_error"}
+    ]
+    assert quality.relative_parameter_errors == {"phase": None, "decay_time": 0.0}
+
+
+def test_fixed_parameter_mask_rejects_undeclared_names() -> None:
+    with pytest.raises(ValueError, match="fixed_parameters.*declared"):
+        compute_fit_quality(
+            np.array([0.0, 1.0]),
+            np.array([0.0, 1.0]),
+            {"time": 2.0},
+            np.eye(1),
+            fixed_parameters=("phase",),
+        )
+
+
 def test_missing_covariance_does_not_hide_negative_r2() -> None:
     quality = compute_fit_quality(
         np.array([0.0, 1.0, 2.0]),

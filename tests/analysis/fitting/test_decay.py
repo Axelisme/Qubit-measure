@@ -108,6 +108,29 @@ def test_fit_ge_decay_non_shared_t1_remains_independent():
     assert e_t1 == pytest.approx(7.0, rel=1e-3)
 
 
+@pytest.mark.parametrize("phase", [0.0, 180.0])
+def test_fixed_fringe_phase_does_not_invalidate_a_resolved_decay(phase: float) -> None:
+    xs = np.linspace(0.0, 20.0, 300)
+    rng = np.random.default_rng(42)
+    ys = decaycos(xs, 0.2, 1.0, 0.5, phase, 5.0)
+    ys += rng.normal(0.0, 0.001, xs.size)
+    *_, fitted, (params, covariance) = fit_decay_fringe(
+        xs, ys, fixedparams=(None, None, None, phase, None)
+    )
+    assert covariance[3, 3] == 0.0
+    quality = compute_fit_quality(
+        ys,
+        fitted,
+        dict(zip(("y0", "yscale", "freq", "phase", "decay_time"), params, strict=True)),
+        covariance,
+        decay_bounds=decay_time_bounds(xs),
+        fixed_parameters=("phase",),
+    )
+    assert quality.invalid == ()
+    assert quality.relative_parameter_errors["phase"] == (None if phase == 0 else 0.0)
+    assert quality.r2 is not None and quality.r2 > 0.999
+
+
 def test_fit_decay_fringe_recovers_T2_and_detune():
     xs = np.linspace(0, 10, 400)
     true = (0.0, 1.0, 0.5, 0.0, 4.0)
