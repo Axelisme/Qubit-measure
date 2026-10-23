@@ -31,6 +31,12 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
 相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
 
+Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的私有目錄，
+結束時還原。每個 xdist worker 各有自己的目錄。專案根與測試資料優先明確傳入 `tmp_path`。
+裸 `tempfile` 呼叫仍須負責清理。Session guard 檢查私有目錄中殘留的 `context-*`，
+讓 session 失敗並列出首次觀察到它的 nodeid。Guard 不掃描全域 `/tmp`，避免其他 lane
+同時跑測試造成誤報；顯式指定其他 `dir` 的呼叫與獨立 subprocess 不在此 guard 的範圍內。
+
 ## UI 驗證
 
 有 UI 改動的票，驗收須包含元件驅動情境。情境使用

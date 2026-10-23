@@ -16,7 +16,6 @@ from dataclasses import replace
 from functools import partial
 from io import BytesIO
 from pathlib import Path
-from tempfile import mkdtemp
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -63,18 +62,12 @@ from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, regist
 logger = logging.getLogger(__name__)
 
 
-def _context_root() -> Path:
-    # Standalone helpers follow the runtime's lane-owned TMPDIR.
-    return Path(mkdtemp(prefix="context-"))
-
-
-def make_ctx() -> SessionEnv:
+def make_ctx(root: Path) -> SessionEnv:
     """Return an ACTIVE fixed capture backed by a real entry, point and ledger.
 
-    Resource files live under the runtime's TMPDIR until lane cleanup.
+    The caller owns root and its cleanup (normally a pytest tmp_path).
     The SoC handles are synthetic and never connect to hardware.
     """
-    root = _context_root()
     entry = ResultEntry.create(
         "fake_qubit", result_root=root / "result", database_root=root / "Database"
     )
@@ -159,8 +152,8 @@ class Fixture:
     def __init__(
         self,
         opts: ControlOptions | None = None,
-        project_root: str | None = None,
         *,
+        project_root: str,
         active_label: str | None = None,
         templates: Mapping[str, TemplateDef] | None = None,
         empty_project: bool = False,
@@ -176,14 +169,13 @@ class Fixture:
             self.registry.register("fake", SampleAdapter)
         self.view = None if headless else make_view()
         self.bus = EventBus()
-        fixture_root = str(_context_root()) if project_root is None else project_root
         self.ctrl = Controller(
             alias_presets={"default": ALIAS_PRESET},
             state=self.state,
             registry=self.registry,
             view=self.view,
             bus=self.bus,
-            project_root=fixture_root,
+            project_root=project_root,
             device_registry=device_registry,
             driver_factory=driver_factory,
         )

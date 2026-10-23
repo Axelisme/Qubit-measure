@@ -44,7 +44,7 @@ from ._remote_core_support import send as _send
 
 
 @pytest.fixture()
-def fx(qapp, request: pytest.FixtureRequest):
+def fx(tmp_path, qapp, request: pytest.FixtureRequest):
     before = component_registry.kinds()
     added = []
     for kind, model in (
@@ -57,7 +57,7 @@ def fx(qapp, request: pytest.FixtureRequest):
     manager = DeviceManager()
     if getattr(request, "param", False):
         manager.register_device("bias", FakeDevice(fast_mode=True))
-    f = _Fixture(device_registry=manager)
+    f = _Fixture(device_registry=manager, project_root=str(tmp_path / "project"))
     f.start()
     try:
         yield f

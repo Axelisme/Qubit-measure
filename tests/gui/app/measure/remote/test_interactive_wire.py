@@ -109,13 +109,18 @@ def test_socket_done_receipt_skips_png_and_settles_original_operation(
         assert interact(sock, tab_id)["error"]["code"] == "precondition_failed"
 
 
-def test_commands_after_gui_and_context_changes_need_no_seen_baseline(fx) -> None:
+def test_commands_after_gui_and_context_changes_need_no_seen_baseline(
+    tmp_path, fx
+) -> None:
     tab_id, token, plugin = start_interactive(fx)
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
     plugin.execute_command(active.session, "set_conjugate", {"enabled": True})
     fx.state.set_context(
-        replace(fx.state.session_env, parameters=make_ctx().parameters)
+        replace(
+            fx.state.session_env,
+            parameters=make_ctx(tmp_path / "next-context").parameters,
+        )
     )
     with open_client(fx.service.port) as sock:
         # First request is a mutation, without any hidden snapshot reads.

@@ -58,8 +58,8 @@ from ._remote_core_support import (
 
 
 @pytest.fixture()
-def fx(qapp):
-    f = _Fixture()
+def fx(tmp_path, qapp):
+    f = _Fixture(project_root=str(tmp_path / "project"))
     f.start()
     yield f
     f.stop()
@@ -206,10 +206,12 @@ def test_wire_version_reported(fx):
         sock.close()
 
 
-def test_wire_version_is_no_auth(qapp):
+def test_wire_version_is_no_auth(tmp_path, qapp):
     # wire.version is a handshake probe: it must answer before auth even on a
     # token-gated service, so a caller can detect a stale process on connect.
-    f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
+    f = _Fixture(
+        ControlOptions(port=0, token="s3cr3t"), project_root=str(tmp_path / "project")
+    )
     f.start()
     try:
         sock = _open_client(f.service.port)
@@ -228,8 +230,10 @@ def test_wire_version_is_no_auth(qapp):
         f.stop()
 
 
-def test_token_gated_when_set(qapp):
-    f = _Fixture(ControlOptions(port=0, token="s3cr3t"))
+def test_token_gated_when_set(tmp_path, qapp):
+    f = _Fixture(
+        ControlOptions(port=0, token="s3cr3t"), project_root=str(tmp_path / "project")
+    )
     f.start()
     try:
         sock = _open_client(f.service.port)
@@ -264,7 +268,10 @@ def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
     monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
     # This test owns authentication, not the unrelated status orientation reads.
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
-    first = _Fixture(ControlOptions(port=0, token="test-secret"))
+    first = _Fixture(
+        ControlOptions(port=0, token="test-secret"),
+        project_root=str(tmp_path / "project"),
+    )
     port = first.start()
     config = MCPBridgeConfig(
         tool_prefix="",
@@ -305,7 +312,10 @@ def test_measure_connect_authenticates_and_reconnects_to_token_gated_gui(
         assert call("rpc_list", {"domain": "adapter"})["methods"]
 
         first.stop()
-        second = _Fixture(ControlOptions(port=port, token="test-secret"))
+        second = _Fixture(
+            ControlOptions(port=port, token="test-secret"),
+            project_root=str(tmp_path / "reconnected-project"),
+        )
         assert second.start() == port
         # first.stop() closes the old transport; its reader publishes disconnection.
         qt_until(lambda: not bridge.is_connected, label="transport disconnect")
