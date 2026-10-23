@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from hashlib import sha256
 from importlib import import_module
 from importlib.util import find_spec
 from pathlib import Path
@@ -64,6 +65,23 @@ def path(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def test_parameter_revision_describes_written_and_refreshed_content(path: Path) -> None:
+    params = open_values(path, Values)
+    assert hasattr(params, "document_revision"), "Parameter handles need revisions"
+    initial = params.document_revision
+    assert initial.path == path.resolve()
+    assert initial.revision == sha256(path.read_bytes()).hexdigest()
+    with params.edit() as draft:
+        draft.set("gain", 2.0)
+    committed = params.document_revision
+    assert committed != initial
+    assert open_values(path, Values).snapshot().gain == 2.0
+    path.write_bytes(path.read_bytes() + b"# external\n")
+    assert params.document_revision == committed
+    params.refresh()
+    assert params.document_revision.revision == sha256(path.read_bytes()).hexdigest()
 
 
 def test_caller_schema_values_metadata_round_trip_and_live_reads(path: Path) -> None:
