@@ -63,6 +63,7 @@ from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
+from .results_browser import ResultsBrowserWindow
 from .run_load_dialog import RunLoadDialog
 from .workflow_tabs import WorkflowTabs
 
@@ -155,6 +156,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._ctrl = controller
+        self._results_browser: ResultsBrowserWindow | None = None
         self._workflow_mode = False
         self._workflow_busy = False
         self._writable = True
@@ -263,6 +265,8 @@ class MainWindow(QMainWindow):
         if self._control_disposed:
             return
         self._workflow_tabs.dispose()
+        if self._results_browser is not None:
+            self._results_browser.close()
         self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
@@ -289,6 +293,8 @@ class MainWindow(QMainWindow):
             dialog.reject()
         self._cleanup_bus_subscriptions()
         self._dialog_registry.dispose()
+        if self._results_browser is not None:
+            self._results_browser.close()
         for tab in self._tab_widgets.values():
             tab.detach()
         self._tab_widgets.clear()
@@ -833,6 +839,19 @@ class MainWindow(QMainWindow):
         self._dialog_registry.set_running(
             running=self._ctrl.get_running_tab_id() is not None or busy
         )
+
+    def open_results_browser(self) -> None:
+        """Show or raise the independent results window without changing session context."""
+        if self._results_browser is None:
+            try:
+                self._results_browser = ResultsBrowserWindow(self._ctrl, self)
+            except Exception as error:
+                logger.exception("Cannot open results browser")
+                self.show_error_dialog("Results browser failed", str(error))
+                return
+        self._results_browser.show()
+        self._results_browser.raise_()
+        self._results_browser.activateWindow()
 
     def list_adapter_names(self) -> list[str]:
         if self._workflow_mode:

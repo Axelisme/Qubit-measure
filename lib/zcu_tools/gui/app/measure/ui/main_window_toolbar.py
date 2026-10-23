@@ -53,6 +53,7 @@ class MainWindowToolbarHost(Protocol):
     def open_dialog(self, name: DialogName) -> None: ...
     def reload_experiments(self) -> None: ...
     def retry_skipped_experiment_tabs(self) -> None: ...
+    def open_results_browser(self) -> None: ...
 
 
 class MainWindowToolbar:
@@ -76,6 +77,10 @@ class MainWindowToolbar:
         )
         self._retry_tabs_btn.setVisible(False)
         self._layout.addWidget(self._retry_tabs_btn)
+        results = QPushButton("Results ▾")
+        results.clicked.connect(self._show_results_menu)
+        self._results_button = results
+        self._layout.addWidget(results)
         self._layout.addStretch()
         self._add_dialog_button("Setup…", DialogName.SETUP)
         self._add_dialog_button("SoC…", DialogName.SOC)
@@ -118,6 +123,18 @@ class MainWindowToolbar:
         button = QPushButton(label)
         button.clicked.connect(lambda _checked=False, n=name: self._host.open_dialog(n))
         self._layout.addWidget(button)
+
+    def _show_results_menu(self) -> None:
+        menu = QMenu(self._parent)
+        action = menu.addAction("Results browser…")
+        try:
+            selected = menu.exec(
+                self._results_button.mapToGlobal(self._results_button.rect().bottomLeft())
+            )
+        finally:
+            menu.deleteLater()
+        if selected is not None and selected is action:
+            self._host.open_results_browser()
 
     def show_new_tab_menu(self) -> None:
         """Open the adapter menu and create the selected tab."""
