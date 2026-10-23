@@ -422,10 +422,10 @@ def test_ledger_failures_are_not_entry_rejections(
     )
     original = path.read_bytes()
 
-    def reject_get(self: RecordsLedger, event_id: str) -> Never:
+    def reject_find_many(self: RecordsLedger, event_ids: tuple[str, ...]) -> Never:
         raise failure
 
-    monkeypatch.setattr(RecordsLedger, "get", reject_get)
+    monkeypatch.setattr(RecordsLedger, "find_many", reject_find_many)
     with pytest.raises(type(failure)):
         library.refresh()
     assert library.snapshot().waveform_keys() == ()

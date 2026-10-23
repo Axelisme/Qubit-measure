@@ -105,6 +105,25 @@ def validate_source(provenance: Provenance, ledger: Path, entry_id: str) -> None
         ) from exc
 
 
+def missing_sources(
+    provenances: Iterable[Provenance], ledger: Path, entry_id: str
+) -> frozenset[str]:
+    """Return all absent local event IDs after one ledger read.
+
+    ledger is this entry's ledger.jsonl path, entry_id its UUID. Manual sources
+    need no I/O. Duplicate IDs and requested attachments are checked once.
+    Ledger schema, attachment and I/O errors propagate even when other IDs are
+    absent. No results are cached; validate_sources remains the strict API.
+    """
+    sources = tuple(
+        dict.fromkeys(p.source for p in provenances if p.source != "manual")
+    )
+    if not sources:
+        return frozenset()
+    entries = RecordsLedger(ledger.parent, entry_id=entry_id).find_many(sources)
+    return frozenset(source for source, entry in entries.items() if entry is None)
+
+
 def validate_sources(
     provenances: Iterable[Provenance], ledger: Path, entry_id: str
 ) -> None:
