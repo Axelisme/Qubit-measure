@@ -51,9 +51,7 @@ def conflict_ui(
     tmp_path: Path,
     request: pytest.FixtureRequest,
     registered_components: None,
-) -> Generator[
-    tuple[ComponentDriver, Path, Path, ContextService, InspectDialog]
-]:
+) -> Generator[tuple[ComponentDriver, Path, Path, ContextService, InspectDialog]]:
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
@@ -199,14 +197,21 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
 
 @pytest.mark.parametrize("conflict_ui", ["parameters"], indirect=True)
 def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
-    ui, _, evidence, *_ = conflict_ui
+    ui, path, evidence, *_ = conflict_ui
     evidence = evidence / "destination"
     ui.enter_text(
         object_name="inspect.parameters.filter", value="Q1.rate", commit=False
     )
-    ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="oops")
+    original = path.read_bytes()
+    ui.edit_tree_value(
+        ("Q1", "rate"), object_name="component_tree", value="9", commit=False
+    )
+    path.write_text(path.read_text().replace("4300.0", "4700.0"))
+    ui.press_key(Qt.Key.Key_Return)
     assert ui.observe(object_name="component_error").text
     ui.screenshot(evidence / "01-rejected.png")
+    # Restore the source baseline so only target pinning can prevent redirection.
+    path.write_bytes(original)
     ui.choose_option("Current point", value="Setup template")
     ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="8")
     assert ui.observe(object_name="component_error").text
@@ -332,12 +337,20 @@ def test_read_only_locks_active_parameter_draft(conflict_ui) -> None:
     ui.screenshot(evidence / "03-unlocked-applied.png")
 
 
-@pytest.mark.parametrize("conflict_ui", ["parameters", "library", "aliases"], indirect=True)
+@pytest.mark.parametrize(
+    "conflict_ui", ["parameters", "library", "aliases"], indirect=True
+)
 def test_clean_pages_show_human_pending_and_invalid_source(conflict_ui) -> None:
     ui, path, evidence, source, dialog = conflict_ui
-    document = next(file.document for file in source.get_file_revisions() if file.path == path)
+    document = next(
+        file.document for file in source.get_file_revisions() if file.path == path
+    )
     evidence = evidence / "clean-status"
-    ui.select_tab({"parameters": "Parameters", "library": "Modules", "aliases": "Aliases"}[document])
+    ui.select_tab(
+        {"parameters": "Parameters", "library": "Modules", "aliases": "Aliases"}[
+            document
+        ]
+    )
     original = path.read_text()
     changed = {
         "parameters": original.replace("4300.0", "4700.0"),
@@ -369,18 +382,32 @@ def test_clean_pages_show_human_pending_and_invalid_source(conflict_ui) -> None:
     ui.screenshot(evidence / "05-valid-reloaded.png")
 
 
-@pytest.mark.parametrize("conflict_ui", ["parameters", "library", "aliases"], indirect=True)
-def test_source_publications_keep_visible_drafts_until_valid_reload(conflict_ui) -> None:
+@pytest.mark.parametrize(
+    "conflict_ui", ["parameters", "library", "aliases"], indirect=True
+)
+def test_source_publications_keep_visible_drafts_until_valid_reload(
+    conflict_ui,
+) -> None:
     ui, path, evidence, source, _ = conflict_ui
-    document = next(file.document for file in source.get_file_revisions() if file.path == path)
+    document = next(
+        file.document for file in source.get_file_revisions() if file.path == path
+    )
     evidence = evidence / "published-draft"
     if document == "parameters":
-        ui.enter_text(object_name="inspect.parameters.filter", value="Q1.rate", commit=False)
-        ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="9", commit=False)
+        ui.enter_text(
+            object_name="inspect.parameters.filter", value="Q1.rate", commit=False
+        )
+        ui.edit_tree_value(
+            ("Q1", "rate"), object_name="component_tree", value="9", commit=False
+        )
     elif document == "library":
         ui.select_tab("Modules")
-        ui.select_tree_row(("waveforms", "Q1", "waveforms", "flat"), object_name="inspect.library")
-        ui.enter_text(object_name="inspect.entry.name", value="Q1.waveforms.draft", commit=False)
+        ui.select_tree_row(
+            ("waveforms", "Q1", "waveforms", "flat"), object_name="inspect.library"
+        )
+        ui.enter_text(
+            object_name="inspect.entry.name", value="Q1.waveforms.draft", commit=False
+        )
     else:
         ui.select_tab("Aliases")
         ui.click(object_name="inspect.aliases.add")
@@ -401,11 +428,16 @@ def test_source_publications_keep_visible_drafts_until_valid_reload(conflict_ui)
         ui.press_key(Qt.Key.Key_Return)
         assert ui.observe(object_name="component_error").text
     elif document == "library":
-        assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
+        assert (
+            ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
+        )
         ui.click(object_name="inspect.entry.apply")
         assert ui.observe(object_name="inspect.entry.status").text == "Unsaved"
     else:
-        assert any(row.columns[0] == "draft" for row in ui.table_rows(object_name="inspect.aliases.table"))
+        assert any(
+            row.columns[0] == "draft"
+            for row in ui.table_rows(object_name="inspect.aliases.table")
+        )
         ui.click(object_name="inspect.aliases.apply")
         assert ui.observe(object_name="inspect.aliases.error").text
     ui.screenshot(evidence / "02-reloaded-source-rejects-draft.png")
@@ -418,10 +450,18 @@ def test_source_publications_keep_visible_drafts_until_valid_reload(conflict_ui)
     ui.click(object_name=f"inspect.{document}.sync.reload")
     assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
     if document == "parameters":
-        assert any(row.path == ("Q1", "rate") and row.columns[1] == "4700.0" for row in ui.visible().tree_rows)
+        assert any(
+            row.path == ("Q1", "rate") and row.columns[1] == "4700.0"
+            for row in ui.visible().tree_rows
+        )
     elif document == "library":
-        assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.flat"
+        assert (
+            ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.flat"
+        )
         assert ui.observe(object_name="inspect.entry.status").text == "Saved"
     else:
-        assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == ("external", "Q2")
+        assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == (
+            "external",
+            "Q2",
+        )
     ui.screenshot(evidence / "04-valid-reload-discards-draft.png")

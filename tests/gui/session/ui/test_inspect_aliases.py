@@ -391,6 +391,7 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     value.setText("Q2")
     # A directory where aliases.yaml belongs makes the atomic replace fail.
     blocker = entry.result_path / "points" / "working" / "aliases.yaml"
+    original = blocker.read_bytes()
     blocker.unlink()
     blocker.mkdir()
     _button(page, "apply").click()
@@ -399,6 +400,8 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     assert value.text() == "Q2"
 
     blocker.rmdir()
+    # Restore the captured revision; removing the blocker alone is a stale edit.
+    blocker.write_bytes(original)
     _button(page, "apply").click()
     assert control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
     assert _error(page) == ""
