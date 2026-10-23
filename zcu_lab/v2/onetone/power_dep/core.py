@@ -52,8 +52,8 @@ class PowerDepModuleCfg(ConfigBase):
 
 
 class PowerDepSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
 class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):

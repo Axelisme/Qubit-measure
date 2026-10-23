@@ -7,6 +7,9 @@ from zcu_tools.cfg_model import Range
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import ParameterContext
 
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 
 from .core import RangeFindCfg
@@ -84,9 +87,18 @@ def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
     """
     return Form(
         RangeFindCfg,
+        field_order=(
+            "resonators",
+            "modules",
+            "sweep",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             **initial_spectrum_tree(ctx),
             "sweep": {"freq": Range(None, None, expts=301)},
             "resonators": [name for name in initial_resonators(ctx)],
         },
-    )
+    ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))

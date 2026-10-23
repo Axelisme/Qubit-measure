@@ -8,6 +8,8 @@ Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 sca
 
 在幅度與 frequency 選定後，選 `two_qubit/local_z`。同一次 Run 分別量 F1、F2。每個 target 從 `B(00)` 熱初態做 X90、n 次雙線 CZ、projection 與完整 mux readout，另一 qubit 維持原熱態。X/Y projection 分別獨立 acquisition，所有 shots 保留原始熱 population。
 
+修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+
 ## Run 前
 
 1. 綁定 scalar aliases `f1`、`f2`、`coupler`、`mux`。F1/F2 須為不同 fluxonium，coupler 是 transmon，mux 的 qubits 須包含兩者，並與 resonators 逐項對應。

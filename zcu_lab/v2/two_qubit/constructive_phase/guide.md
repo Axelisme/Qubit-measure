@@ -6,6 +6,8 @@
 
 Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Purpose
 
 Scan F2 relative to F1 phase and common drive duration in the nominal B11 branch.

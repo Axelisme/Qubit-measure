@@ -42,6 +42,19 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         ChevronCfg,
+        field_order=(
+            "roles",
+            "modules",
+            "drive",
+            "f1_centers",
+            "f2_centers",
+            "frequency",
+            "duration",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "reps": 1000,
             "rounds": 10,

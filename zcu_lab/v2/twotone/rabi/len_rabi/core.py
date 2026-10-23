@@ -62,7 +62,7 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class LenRabiSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
 
 
 class LenRabiModuleCfg(ConfigBase):

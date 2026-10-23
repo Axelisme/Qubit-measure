@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Parameter sources
 
 Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.05 us from the sources captured at Open/Reset. Missing required calibration leaves the fields Invalid until you supply calibration or direct values. Open and Reset leave both frequency endpoints blank and required, with 1001 points. Enter a reviewed drive-frequency window before Run. Flux spans 10% beyond qubit.flux_int and qubit.flux_half over 101 points; missing calibration leaves its endpoints Invalid. Both sweeps remain editable. Existing edits persist until Reset restores these starting values.

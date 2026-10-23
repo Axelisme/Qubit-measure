@@ -8,6 +8,8 @@ Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 sca
 
 `two_qubit/idle_zz` 比較 spectator 的 I、Xπ 兩個名目分支。Target 可選 F1 或 F2，每個 shot 做 target π/2 → delay → 單一 phase projection → 一次完整 mux readout。所有 shots 直接保留，兩分支是在熱初態上施加不同 pulse 的 ensemble。
 
+修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+
 ## 開啟前確認
 
 先依 [FTF bring-up 指南](../guide.md) 完成 F1/F2 的 Xπ、Xπ/2 與 mux 校準。Aliases `f1`、`f2` 指向不同 fluxonium，`coupler` 指向本對的 transmon，`mux` 指向含有 F1/F2 的 MuxGroup。Group 的有序 `qubits` 必須與 `resonators` 逐項對應。
