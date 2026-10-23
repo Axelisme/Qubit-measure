@@ -64,11 +64,12 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         field_order=(
             "participants",
             "tones",
-            "expts",
             "modules",
-            "relax_delay",
+            "expts",
             "reps",
             "rounds",
+            "relax_delay",
+            "initial_delay",
         ),
     ).with_seed_metadata(
         {

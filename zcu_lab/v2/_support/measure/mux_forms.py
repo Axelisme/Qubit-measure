@@ -117,7 +117,7 @@ def mux_readout_seed_metadata(
         for index, tone in enumerate(tones):
             if tone.get("gain") == 0.1:
                 result[(*prefix, "tones", index, "gain")] = FieldMeta(
-                    description="Mux readout amplitude seed 0.1; operator confirmation required",
+                    description="未校準的起始值，來源：固定常數。Mux readout amplitude seed 0.1 normalized; operator confirmation required",
                     calibration="uncalibrated",
                 )
     formulas = {

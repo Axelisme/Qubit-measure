@@ -51,7 +51,7 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 class FreqFluxSweepCfg(ConfigBase):
     flux: Annotated[SweepCfg, FieldMeta(label="Flux device value", decimals=6)]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
 class FreqFluxModuleCfg(ConfigBase):
