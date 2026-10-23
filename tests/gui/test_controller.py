@@ -6,7 +6,6 @@ import dataclasses
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
-from tempfile import mkdtemp
 from unittest.mock import MagicMock
 
 import pytest
@@ -93,9 +92,7 @@ def _make_view() -> MagicMock:
 class ControllerFixture:
     """Holds all objects to prevent premature GC during tests."""
 
-    def __init__(
-        self, cache_dir=None, project_root=None, *, mock_emit: bool = True
-    ) -> None:
+    def __init__(self, cache_dir=None, *, project_root, mock_emit: bool = True) -> None:
         self.state = State(_make_ctx())
         self.registry = Registry()
         self.registry.register("fake", RecordingAdapter)
@@ -111,7 +108,7 @@ class ControllerFixture:
             registry=self.registry,
             view=self.view,
             bus=self.bus,
-            project_root=project_root or mkdtemp(prefix="context-"),
+            project_root=str(project_root),
             driver_factory=lambda type_name, address: FakeDevice(
                 address=address, fast_mode=True
             ),
@@ -127,7 +124,7 @@ class ControllerFixture:
 @pytest.fixture()
 def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
     # Scope persistence to a temp dir so tests never read/write the real cache.
-    fixture = ControllerFixture(cache_dir=tmp_path)
+    fixture = ControllerFixture(cache_dir=tmp_path, project_root=tmp_path / "project")
     yield fixture
     # Test producers are released before teardown; close drains their queued delivery.
     fixture.ctrl.close(timeout_ms=30_000)

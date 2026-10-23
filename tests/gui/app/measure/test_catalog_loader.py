@@ -112,7 +112,7 @@ def register_all(registry):
         assert candidate.templates == {"probe": template}
         assert current.list_names() == []
         assert candidate.list_names() == ["demo"]
-        application = Fixture(headless=True)
+        application = Fixture(headless=True, project_root=str(tmp_path / "project"))
         try:
             application.registry.replace_from(candidate)
             tab_id = application.ctrl.new_tab("demo")

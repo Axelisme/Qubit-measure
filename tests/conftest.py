@@ -1,7 +1,9 @@
 import os
 import sys
+import tempfile
 
 from tests._cache_environment import temporary_cache_root
+from tests._temp_directory_guard import ContextDirectoryGuard
 
 # Configure the cache before third-party imports or descendant conftests can
 # create persistence/discovery services. Pytest basetemp is cleared mid-session.
@@ -29,6 +31,24 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LIB_PATH = os.path.join(_REPO_ROOT, "lib")
 if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
+
+
+def pytest_configure(config):
+    config.pluginmanager.register(ContextDirectoryGuard(), "context-directory-guard")
+
+
+@pytest.fixture(scope="session", autouse=True, name="_owned_tempfile_root")
+def fixture_owned_tempfile_root(tmp_path_factory, request):
+    """Keep bare tempfile calls inside this process's pytest-owned lifetime."""
+    root = tmp_path_factory.mktemp("tempfile")
+    guard = request.config.pluginmanager.get_plugin("context-directory-guard")
+    guard.start(root)
+    previous = tempfile.tempdir
+    tempfile.tempdir = str(root)
+    try:
+        yield
+    finally:
+        tempfile.tempdir = previous
 
 
 @pytest.fixture(autouse=True, name="_isolated_fake_device_instances")

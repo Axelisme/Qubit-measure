@@ -26,6 +26,7 @@ def device_client(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fx = Fixture(
         device_registry=manager,
         driver_factory=lambda type_name, address: drivers[address],
+        project_root=str(tmp_path / "project"),
     )
     fx.start()
     # Status is outside this device seam; Fixture has no real SoC.

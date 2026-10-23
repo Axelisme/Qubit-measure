@@ -68,8 +68,8 @@ def _result_method(stage: str) -> str:
 
 
 @pytest.fixture()
-def fx(qapp):
-    fixture = Fixture(active_label="ctx001")
+def fx(tmp_path, qapp):
+    fixture = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fixture.start()
     yield fixture
     fixture.stop()
