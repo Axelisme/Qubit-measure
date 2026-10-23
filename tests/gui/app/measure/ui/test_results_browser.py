@@ -9,9 +9,10 @@ import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import Container, ContainerAttrs, save
+from zcu_tools.datafile import Container, ContainerAttrs, load, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.gui.app.measure.controller import Controller
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.results_index import scan_results
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.control_identity import ControlIdentity
@@ -25,7 +26,9 @@ from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.measure._native_save_support import NativeSaveSession
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter, NativeSaveSession, SavingAdapter,
+)
 from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.ui._main_window_fakes import apply_window_defaults, mock_ctrl
 
@@ -315,3 +318,99 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
         assert tab_message.visible and expected in tab_message.text
         assert "History loaded, no analysis source:" in tab_message.text
     ui.screenshot(tmp_path / f"load-{variant}.png")
+
+
+@pytest.fixture
+def identity_browser(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    live_registry: Registry,
+    qapp: QApplication,
+) -> ComponentDriver:
+    session, ctrl, window, _tab_id = live_ui
+    live_registry.register("other", SavingAdapter)
+    session.save()
+    original = load(session.native_data_path)
+    for name, experiment in (
+        ("alias-run", "saving"),
+        ("other-run", "other"),
+        ("unknown-run", "old_tag"),
+    ):
+        run = session.native_data_path.parent.parent / name
+        run.mkdir()
+        metadata = session.metadata.model_copy(update={"experiment": experiment})
+        docs = dict(original.docs)
+        docs["metadata"] = metadata.model_dump(mode="json")
+        save(run / "data.h5", replace(original, docs=docs))
+        figures = run / "figures"
+        figures.mkdir()
+        image = QImage(120, 100, QImage.Format.Format_RGB32)
+        image.fill(Qt.GlobalColor.cyan)
+        assert image.save(str(figures / "saved.png"))
+    ctrl.add_view(window)
+    window.show()
+    qapp.processEvents()
+    ui = ComponentDriver(window)
+    ui.select_menu("Results ▾", ("Results browser…",))
+    return ui
+
+
+def test_adapter_identity_groups_alias_and_tag_and_filters_both(
+    identity_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = identity_browser
+    assert {row.text for row in ui.list_rows()} == {"saving", "other", "old_tag"}
+    ui.select_list_row("saving")
+    assert ui.observe(object_name="results.focus").text == "saving · 2 runs"
+    ui.click("All results")
+    ui.select_combo("saving", object_name="results.experiment")
+    assert ui.observe(object_name="results.focus").text == "All results · 2 runs"
+    ui.select_combo("Point → experiment", object_name="results.group")
+    ui.select_list_row("original / p")
+    assert {row.text for row in ui.list_rows()} == {"saving"}
+    assert ui.observe(object_name="results.focus").text == "original / p · 2 runs"
+    ui.select_combo("All experiments", object_name="results.experiment")
+    assert {row.text for row in ui.list_rows()} == {"saving", "other", "old_tag"}
+    ui.screenshot(tmp_path / "identity-groups.png")
+
+
+def test_unresolved_identity_remains_browsable_and_refuses_new_tab(
+    identity_browser: ComponentDriver,
+    tmp_path: Path,
+) -> None:
+    ui = identity_browser
+    ui.select_list_row("old_tag")
+    ui.click(object_name="results.figure.0")
+    ui.click(object_name="results.figure.0")
+    assert "old_tag" in ui.observe(object_name="results.details").text
+    ui.click("Open in new analysis tab")
+    feedback = ui.observe(object_name="results.feedback").text
+    assert "old_tag" in feedback and "No load-capable adapter" in feedback
+    assert ui.tabs("saving (1)").captions == ("saving (1)",)
+    ui.screenshot(tmp_path / "unknown-identity.png")
+
+
+def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    live_registry: Registry,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    session, ctrl, window, _tab_id = live_ui
+    live_registry.register("alternative", AnalysisSavingAdapter)
+    session.save()
+    ctrl.add_view(window)
+    window.show()
+    qapp.processEvents()
+    ui = ComponentDriver(window)
+    ui.select_menu("Results ▾", ("Results browser…",))
+    ui.select_list_row("test/saving")
+    ui.select_list_row("original / p")
+    ui.select_list_row("original / " + session.native_data_path.parent.name)
+    ui.click("Open in new analysis tab")
+    feedback = ui.observe(object_name="results.feedback").text
+    assert "Multiple load-capable adapters" in feedback
+    assert all(name in feedback for name in ("saving", "alternative", "test/saving"))
+    assert ui.tabs("saving (1)").captions == ("saving (1)",)
+    ui.screenshot(tmp_path / "ambiguous-identity.png")
+
+
