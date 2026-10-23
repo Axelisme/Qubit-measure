@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, StrictInt, TypeAdapter
 from typing_extensions import TypedDict
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeTab
@@ -28,9 +28,9 @@ class MuxFluxInputs(FormModel):
     reuse_tab_id: str | None = Field(
         None, min_length=1, description="Idle matching tab to Reset; null opens a tab."
     )
-    participants: list[str] | None = Field(
+    participants: list[StrictInt] | None = Field(
         None,
-        description="Unique Q names in acquisition order; null keeps the Form selection.",
+        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
     library: list[MuxLibrary] | None = Field(
         None, description="Ordered captured module selections; null retains sources."
@@ -212,9 +212,7 @@ def mux_flux_final_edits(inputs: MuxFluxInputs) -> list[FieldEdit]:
     return [
         FieldEdit(
             path=("participants",),
-            value=None
-            if inputs.participants is None
-            else [name for name in inputs.participants],
+            value=None if inputs.participants is None else list(inputs.participants),
         ),
         FieldEdit(path=("flux_unit",), value=inputs.flux_unit),
         *mux_overrides(inputs.overrides),
@@ -234,29 +232,29 @@ def mux_flux_analysis_updates(
     tones = TypeAdapter(list[FluxToneIdentity]).validate_python(
         tab.read(("tones",)).value
     )
-    participants = TypeAdapter(list[str]).validate_python(
+    participants = TypeAdapter(list[int]).validate_python(
         tab.read(("participants",)).value
     )
-    names = [tone.name for tone in tones]
+    names = [tones[index].name for index in participants]
     for field, values in (
         ("flux_half", inputs.flux_half),
         ("flux_integer", inputs.flux_integer),
     ):
-        unknown = set(values or ()) - set(participants)
+        unknown = set(values or ()) - set(names)
         if unknown:
             raise RecipeNeedsParameters(
                 (
                     MissingParameter(
                         field,
-                        f"Picker keys must name selected participants {participants!r}; unknown keys: {sorted(unknown)!r}",
+                        f"Picker keys must name selected participants {names!r}; unknown keys: {sorted(unknown)!r}",
                     ),
                 )
             )
     return [
         {
-            "tone": names.index(name),
+            "tone": index,
             "flux_half": (inputs.flux_half or {}).get(name),
             "flux_int": (inputs.flux_integer or {}).get(name),
         }
-        for name in participants
+        for index, name in zip(participants, names, strict=True)
     ]

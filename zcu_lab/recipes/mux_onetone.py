@@ -2,14 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
-from zcu_tools.mcp.measure.recipe_contracts import (
-    MissingParameter,
-    RecipeNeedsParameters,
-)
-from zcu_tools.mcp.measure.recipe_form import RecipeFormError
 
 from .helpers import report_number
 from .mux_helpers import MuxInline, MuxLibrary, ToneRangeInputs, mux_overrides
@@ -24,9 +19,9 @@ class MuxOnetoneInputs(FormModel):
     reuse_tab_id: str | None = Field(
         None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[str] | None = Field(
+    participants: list[StrictInt] | None = Field(
         None,
-        description="Resonator names in execution order, mapped through captured $mux.resonators; null keeps Active tones. Ambiguous duplicate bindings require original-index overrides.",
+        description="Original tone indices in execution order; null keeps the captured Form selection.",
     )
     df: ToneRangeInputs | None = Field(
         None,
@@ -130,26 +125,6 @@ class MuxOnetoneReport(FormModel):
     )
 
 
-def participant_indices(
-    names: list[str] | None, participants: list[str] | None
-) -> list[int] | None:
-    """Resolve names only when the fixed binding has one unambiguous position."""
-    if participants is None:
-        return None
-    legal = names or []
-    if (
-        not participants
-        or len(set(participants)) != len(participants)
-        or any(legal.count(name) != 1 for name in participants)
-    ):
-        reason = f"Provide unique, unambiguous resonator names from captured $mux.resonators: {legal!r}; duplicate bindings require active_tones overrides."
-        raise RecipeNeedsParameters(
-            (MissingParameter("participants", reason),),
-            parameter_errors=(RecipeFormError(path=("participants",), message=reason),),
-        )
-    return [legal.index(name) for name in participants]
-
-
 def tone_report(
     tone: MuxOnetoneTone, names: list[str] | None, diagnostic: str | None
 ) -> MuxOnetoneToneReport:
@@ -192,11 +167,11 @@ async def mux_onetone(
         tab.select(selection.path, ref=selection.key)
     for copy in inputs.inline or ():
         tab.select(copy.path, inline=True)
-    indices = participant_indices(names, inputs.participants)
+
     edits = [
         FieldEdit(
             path=("active_tones",),
-            value=None if indices is None else [index for index in indices],
+            value=None if inputs.participants is None else list(inputs.participants),
         )
     ]
     if inputs.df is not None:

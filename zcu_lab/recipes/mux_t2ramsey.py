@@ -1,6 +1,6 @@
 """Measure mux Ramsey fringes, save the decay fits and review calibrations."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
@@ -33,9 +33,9 @@ class MuxT2RamseyInputs(FormModel):
     reuse_tab_id: str | None = Field(
         default=None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[str] | None = Field(
+    participants: list[StrictInt] | None = Field(
         default=None,
-        description="Qubit names in execution order; null keeps the GUI value.",
+        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
     library: list[MuxLibrary] | None = Field(
         default=None, description="Ordered module selections; null keeps the GUI value."
@@ -132,7 +132,7 @@ async def mux_t2ramsey(
     tone positions, not participant rows. Null keeps GUI input. Frequencies use
     MHz, times us and gains normalized units; sweep counts use n.
     The GUI uses a shared delay axis, reps and rounds for participating
-    qubits. All tones must validate. No missing pulse calibration is supplied.
+    qubits. Readout identities and selected drives must validate. No missing pulse calibration is supplied.
     Analyze Primary, then ask before applying calibration items.
     Save raw data and completed artifacts in the Run finalizer.
     Return ordered estimates and the writeback decision after completion.
@@ -155,9 +155,7 @@ async def mux_t2ramsey(
     edits = [
         FieldEdit(
             path=("participants",),
-            value=None
-            if inputs.participants is None
-            else [name for name in inputs.participants],
+            value=None if inputs.participants is None else list(inputs.participants),
         )
     ]
     edits.extend(mux_overrides(inputs.overrides))

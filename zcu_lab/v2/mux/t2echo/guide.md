@@ -25,16 +25,15 @@ timing before running.
 
 The Tones picker selects the element to edit. Participants selects the qubits to
 run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique existing names, for example `["Q3", "Q1"]`. This runs original
+list of unique original indices, for example `[2, 0]`. This runs original
 positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-unknown participants block Run and remain editable for correction.
+out-of-range participants block Run and remain editable for correction.
 
-Every tone needs valid drives, including nonparticipants. Each tone uses its own
-drive generator, distinct from the readout generator. Errors in another picker element
-appear on the Tones row. Select that element and correct it to enable Run.
-Reps, rounds and recovery delay are shared. Recovery initially uses five times
-the largest captured T1, with the default for missing T1 values. A stored invalid
-T1 leaves recovery blank for correction.
+Selected tones need drives on independent generators, distinct from readout.
+Unselected drive/sweep fields are grey and may remain blank. Their raw drafts
+stay in the form without evaluation or validation. Adding a participant restores
+its draft and reports missing or invalid settings immediately. Every readout
+tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
@@ -60,7 +59,7 @@ The nonzero-detune fringe fit had enormous T2 uncertainty and was not calibratio
 
 Each tone needs a fixed x90 drive and x180 pi pulse on the same generator.
 The two pulses may have different waveforms, carriers, gains and phases.
-Validate both pulses for every tone, including nonparticipants.
+Validate both pulses for each selected tone. Inactive drive/pi_pulse fields stay grey.
 Use finite, nonnegative bounds for the shared total-delay range in us.
 Each tone has its own detune in MHz.
 

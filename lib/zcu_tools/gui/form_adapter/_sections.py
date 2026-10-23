@@ -113,7 +113,12 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> object:
         _sweep_branch(base, node, decimals, meta.unit if meta is not None else None)
         for base in (LinRange, CenterSpan, StepRange, StepCenter)
     )
-    return Annotated[union_type(branches), Field(discriminator="kind")]
+    annotation = Annotated[union_type(branches), Field(discriminator="kind")]
+    return (
+        union_type((annotation, type(None)))
+        if type(None) in _members(info.annotation)
+        else annotation
+    )
 
 
 def _section_type(annotation: object) -> type[BaseModel] | None:

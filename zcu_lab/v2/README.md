@@ -120,18 +120,17 @@ requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩
 再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。
 
-七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
-每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
-T1／Ramsey／Echo 使用共用 requested-delay 軸。所有元素都驗證，未參與者也必須有
-有效 drive、獨立 generator。三個 pulse scan 的頂層 `expts` 是共用正整數，
+七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[int]`。
+每個元素有固定 qubit `name` 與 nullable drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
+T1／Ramsey／Echo 使用共用 requested-delay 軸。只針對 participants 驗證 drive、逐 tone sweep 與獨立 generator。未參與欄位保留草稿，結果為 None。全 readout 身分始終驗證。三個 pulse scan 的頂層 `expts` 是共用正整數，
 表單在 Tones 後只顯示一個 Expts，預設為頻譜 301、Amp Rabi 51、Len Rabi 101。
-每 tone 只有 Start／Stop，不接受舊的每 tone 點數。Len Rabi 全部元素只接受
+每 tone 只有 Start／Stop，不接受舊的每 tone 點數。Len Rabi 參與元素只接受
 const／flat_top，不伸縮或裁切 arb asset。
-Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序查完整原始位置，
-例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
+Participants 非空、不重複，索引必須在完整 tones 範圍內。Runtime 直接保留清單順序，
+例如 `[2, 0]` 依序量 Q3、Q1。GE raw、analysis 與 native persistence 同樣保留該順序。
 RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
 
-`prepare_frequency_scan(cfg, soccfg=...)` 按 participants 查出原始 indices，
+`prepare_frequency_scan(cfg, soccfg=...)` 直接使用 participants 原始 indices，
 回傳 `mux.twotone_spectrum.MuxFreqScan`。
 其 `indices` 保留 participants 順序的原始序號，`coordinates` 是各 drive 硬體 grid
 上的 `(K,P)` float64 MHz 陣列。座標沿 `sweep2array(..., "freq", ...)` 的硬體

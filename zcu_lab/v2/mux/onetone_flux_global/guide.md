@@ -19,7 +19,7 @@ edits and captures sources again.
 
 ## Form
 
-- `participants` selects Q names in acquisition order. The tone picker only
+- `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
 - `flux_dev` starts from the captured group `flux_source`.
 - `flux` is one native-unit sweep shared by all participants, initially 101 points.
@@ -72,7 +72,11 @@ counts for an offline smoke.
 ## Typed cfg and form paths
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
-Set `participants: list[str]`, full `tones`, and `modules` at top level.
+Set `participants: list[int]`, full `tones`, and `modules` at top level.
+Unselected drive and per-tone sweep fields are grey, retain their drafts and do
+not validate. Adding a participant immediately validates its restored settings.
+All readout identities and local flux_dev names stay required. Local driver
+uniqueness is checked only for selected tones.
 `modules.reset` is optional; `modules.readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `modules.readout.module`; this selector wrapper is not part of Python cfg.

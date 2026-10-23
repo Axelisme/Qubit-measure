@@ -51,7 +51,7 @@ def test_native_model_list_generates_indexed_modules_sweeps_and_lowers():
     assert cfg.tones[1].drive.gain == 0.3
     assert cfg.tones[1].sweep.start == 10
     assert cfg.tones[1].sweep.stop == 14
-    assert cfg.participants == ["B", "A"]
+    assert cfg.participants == [1, 0]
 
 
 def test_native_model_list_defaults_are_projected_without_losing_values():
@@ -167,7 +167,7 @@ def test_hidden_module_list_keeps_values_and_sources_per_position():
                     "sweep": Range.between(3, 4, 3),
                 },
             ],
-            "participants": ["B", "A"],
+            "participants": [1, 0],
         },
         fixed_elements=(adapter.FixedElements(("tones",), "name", ("participants",)),),
     )
@@ -266,7 +266,7 @@ def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
             adapter.FixedElements(("tones",), "label", ("participants",)),
         )
         tones: list[Element]
-        participants: list[str]
+        participants: list[int]
 
         @classmethod
         def defaults(cls, env: core.FormEnv) -> dict[str, JsonValue]:
@@ -276,7 +276,7 @@ def owner_model(*, duplicate: bool = False) -> type[core.FormModel]:
                     {"label": "A", "gain": 1},
                     {"label": "A" if duplicate else "B", "gain": 2},
                 ],
-                "participants": ["B"],
+                "participants": [1],
             }
 
     return Owner
@@ -302,7 +302,7 @@ def test_owner_refuses_identity_mutations_atomically_with_requested_path(path, v
     notifications = []
     state.subscribe(lambda: notifications.append(state.input))
     with pytest.raises(core.FormInputRejected, match="identity") as caught:
-        state.write({path: value, ("participants",): ["A"]}, core.FormEnv())
+        state.write({path: value, ("participants",): [0]}, core.FormEnv())
     assert caught.value.path == path
     assert state.input.same_as(before)
     assert state.base.same_as(base)
@@ -313,15 +313,15 @@ def test_owner_refuses_identity_mutations_atomically_with_requested_path(path, v
 def test_owner_allows_invalid_values_but_checks_every_element_and_participant():
     state = owner_state()
     env = core.FormEnv()
-    state.write({("tones", 0, "gain"): -1, ("participants",): ["B"]}, env)
+    state.write({("tones", 0, "gain"): -1, ("participants",): [1]}, env)
     errors = state.result(env)
     assert isinstance(errors, core.FormErrors)
     assert ("tones", 0, "gain") in errors.messages
     state.write({("tones", 0, "gain"): 3}, env)
     cases: list[tuple[JsonValue, core.FormPath]] = [
         ([], ("participants",)),
-        (["A", "A"], ("participants", 1)),
-        (["Q4"], ("participants", 0)),
+        ([0, 0], ("participants", 1)),
+        ([4], ("participants", 0)),
     ]
     for value, error_path in cases:
         state.write({("participants",): value}, env)
@@ -329,10 +329,10 @@ def test_owner_allows_invalid_values_but_checks_every_element_and_participant():
         errors = state.result(env)
         assert isinstance(errors, core.FormErrors)
         assert error_path in errors.messages
-    state.write({("participants",): ["B", "A"]}, env)
+    state.write({("participants",): [1, 0]}, env)
     result = state.result(env)
     assert isinstance(result, core.FormModel)
-    assert result.model_dump()["participants"] == ["B", "A"]
+    assert result.model_dump()["participants"] == [1, 0]
     assert [item["label"] for item in result.model_dump()["tones"]] == ["A", "B"]
 
 
@@ -348,7 +348,7 @@ def test_restored_identity_becomes_the_boundary_until_reset():
     state.restore_input(
         core.FormInput(
             state.input.model,
-            {"tones": [{"label": "saved", "gain": 5}], "participants": ["saved"]},
+            {"tones": [{"label": "saved", "gain": 5}], "participants": [0]},
         ),
         env,
     )
@@ -357,7 +357,7 @@ def test_restored_identity_becomes_the_boundary_until_reset():
     with pytest.raises(core.FormInputRejected, match="identity"):
         state.write({("tones", 0, "label"): "A"}, env)
     state.reset(state.input.model.default_input(env))
-    assert state.input.data["participants"] == ["B"]
+    assert state.input.data["participants"] == [1]
 
 
 def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
@@ -367,7 +367,7 @@ def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
         "Config",
         __base__=ConfigBase,
         tones=(list[Element], initial["tones"]),
-        participants=(list[str], initial["participants"]),
+        participants=(list[int], initial["participants"]),
     )
     resource = TabFormResource(
         lambda _ctx: adapter.Form(
@@ -391,8 +391,8 @@ def test_resource_uses_declaring_owner_for_whole_list_and_recipe_edits():
         assert caught.value.path == ("tones", 0, "label")
         assert resource.input.same_as(before)
         assert events == []
-        resource.write({("tones", 0, "gain"): 4, ("participants",): ["Q4"]})
-        assert resource.input.data["participants"] == ["Q4"]
+        resource.write({("tones", 0, "gain"): 4, ("participants",): [4]})
+        assert resource.input.data["participants"] == [4]
         assert isinstance(resource.result(), core.FormErrors)
         with pytest.raises(CfgPreconditionError, match="not valid") as caught:
             resource.accept()
@@ -441,7 +441,7 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
             state.select(("tones",), [], core.FormEnv())
         else:
             state.install_input(
-                core.FormInput(Commands, {"tones": [], "participants": ["B"]})
+                core.FormInput(Commands, {"tones": [], "participants": [1]})
             )
 
     with pytest.raises(core.FormInputRejected, match="identity"):

@@ -1,6 +1,6 @@
 """Measure simultaneous T1 decays and ask before writing calibrations."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
@@ -33,9 +33,9 @@ class MuxT1Inputs(FormModel):
     reuse_tab_id: str | None = Field(
         default=None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[str] | None = Field(
+    participants: list[StrictInt] | None = Field(
         default=None,
-        description="Qubit names in execution order; null keeps the GUI value.",
+        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
     library: list[MuxLibrary] | None = Field(
         default=None, description="Ordered module selections; null keeps the GUI value."
@@ -150,9 +150,7 @@ async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
     edits = [
         FieldEdit(
             path=("participants",),
-            value=None
-            if inputs.participants is None
-            else [name for name in inputs.participants],
+            value=None if inputs.participants is None else list(inputs.participants),
         )
     ]
     edits.extend(mux_overrides(inputs.overrides))

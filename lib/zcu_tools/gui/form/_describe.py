@@ -288,17 +288,34 @@ def describe(
     source lookup. ValueError reports noncanonical, unknown or inactive paths.
     Structural tag identity is annotation-owned, independent of dynamic choices.
     """
+    from dataclasses import replace
+
+    from ._applicability import disabled_paths
+
+    disabled = disabled_paths(model, data, env)
+
+    def project(field: FormFieldDescription) -> FormFieldDescription:
+        return replace(
+            field,
+            disabled=any(field.path[: len(parent)] == parent for parent in disabled),
+        )
+
     validate_path(path)
     tags = _description_tags((model,))
     if not path:
         return FormDescription(
-            path, None, _children(root_level(model, data, env, selections), tags)
+            path,
+            None,
+            tuple(
+                project(field)
+                for field in _children(root_level(model, data, env, selections), tags)
+            ),
         )
     target = resolve(model, data, path, env, selections)
     metadata = describe_field(target, roots=(model,))
     level = target.children(env)
     if level is None:
-        return FormDescription(path, metadata, ())
+        return FormDescription(path, project(metadata), ())
     children = _children(level, tags)
     if target.options is not None and len(children) == 1:
         wrapper = children[0]
@@ -306,4 +323,6 @@ def describe(
             nested = level.field(wrapper.name).children(env)
             if nested is not None:
                 children = _children(nested, tags)
-    return FormDescription(path, metadata, children)
+    return FormDescription(
+        path, project(metadata), tuple(project(field) for field in children)
+    )

@@ -20,8 +20,8 @@ from .core import MuxLenRabiCfg
 def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     """Build the complete fixed name list from this Open/Reset capture.
 
-    All positions share the native element declaration and remain required,
-    including nonparticipants. Missing pulse/calibration leaves stay invalid.
+    Readout identity stays required for every position. Only participant drive
+    and sweep fields validate; inactive drafts stay grey and are retained.
     Binding/source faults propagate; Reset alone recaptures. Shared controls
     apply to every branch. No native conversion or device access occurs.
     """
@@ -48,14 +48,22 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
             },
             "tones": tones,
             "expts": 101,
-            "participants": list(names),
+            "participants": list(range(len(names))),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },
         fixed_elements=(
-            FixedElements(("tones",), "name", ("participants",)),
+            FixedElements(
+                ("tones",),
+                "name",
+                ("participants",),
+                participant_fields=(
+                    ("drive",),
+                    ("sweep",),
+                ),
+            ),
             READOUT_ELEMENTS,
         ),
         field_order=(

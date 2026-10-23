@@ -25,16 +25,15 @@ timing before running.
 
 The Tones picker selects the element to edit. Participants selects the qubits to
 run. Tone names, count and order stay fixed. Set Participants to a nonempty JSON
-list of unique existing names, for example `["Q3", "Q1"]`. This runs original
+list of unique original indices, for example `[2, 0]`. This runs original
 positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
-unknown participants block Run and remain editable for correction.
+out-of-range participants block Run and remain editable for correction.
 
-Every tone needs valid drives, including nonparticipants. Each tone uses its own
-drive generator, distinct from the readout generator. Errors in another picker element
-appear on the Tones row. Select that element and correct it to enable Run.
-Reps, rounds and recovery delay are shared. Open/Reset starts reps at 1000,
-rounds at 10 and recovery delay at a fixed 1.0 µs, independent of captured T1.
-All three values remain editable.
+Selected tones need drives on independent generators, distinct from readout.
+Unselected drive/sweep fields are grey and may remain blank. Their raw drafts
+stay in the form without evaluation or validation. Adding a participant restores
+its draft and reports missing or invalid settings immediately. Every readout
+tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
 
@@ -61,7 +60,7 @@ This 16-point example had large linewidth uncertainty and no calibration Apply.
 
 Each tone supplies a drive-frequency range in MHz.
 Set each tone's Start and Stop in MHz. Expts follows Tones and sets one shared
-positive point count for all tones, including nonparticipants (default 301).
+positive point count for all tones, for selected tones (default 301).
 At each point, the selected drives use their corresponding frequencies together.
 The sequence is common reset, simultaneous drives, then mux readout after the
 longest drive. Pulse pre/post delays stay as configured.

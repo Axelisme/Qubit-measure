@@ -17,8 +17,8 @@ from .core import MuxT2EchoCfg
 def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
     """Build the complete fixed name list from this Open/Reset capture.
 
-    All positions share the native element declaration and remain required,
-    including nonparticipants. Missing pulse/calibration leaves stay invalid.
+    Readout identity stays required for every position. Only participant drive
+    and sweep fields validate; inactive drafts stay grey and are retained.
     Binding/source faults propagate; Reset alone recaptures. Shared controls
     apply to every branch. No native conversion or device access occurs.
     """
@@ -45,7 +45,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
                 "readout": readout,
             },
             "tones": tones,
-            "participants": list(names),
+            "participants": list(range(len(names))),
             "delay": Range.between(0.0, 30.0, expts=101),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
@@ -53,7 +53,15 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
             "rounds": 10,
         },
         fixed_elements=(
-            FixedElements(("tones",), "name", ("participants",)),
+            FixedElements(
+                ("tones",),
+                "name",
+                ("participants",),
+                participant_fields=(
+                    ("drive",),
+                    ("pi_pulse",),
+                ),
+            ),
             READOUT_ELEMENTS,
         ),
         field_order=(
