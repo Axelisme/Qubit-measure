@@ -17,7 +17,7 @@ class DiagnosticTone(ConfigBase):
 
 class DiagnosticCfg(SampleCfg):
     tones: Annotated[list[DiagnosticTone], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[int]
 
 
 class DiagnosticAdapter(SampleAdapter):
@@ -36,7 +36,7 @@ class DiagnosticAdapter(SampleAdapter):
                     }
                     for i in range(6)
                 ],
-                "participants": ["Q1"],
+                "participants": [0],
             },
             fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
         )
@@ -109,7 +109,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
                         {"name": "B", "frequency": 6100.0, "gain": 0.2},
                         {"name": "C", "frequency": Expr("missing.freq"), "gain": 0.3},
                     ],
-                    "participants": ["B"],
+                    "participants": [1],
                 },
                 fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
             ).with_seed_metadata(
@@ -166,7 +166,7 @@ def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rp
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         owner.write(
-            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): ["B"]}
+            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]}
         )
         sibling = owner.input.data["tones"][0]
         read = rpc.call(
@@ -295,7 +295,7 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
             model.model_fields["tones"].rebuild_annotation(),
             named_input(model).data["tones"],
         ),
-        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
+        participants=(model.model_fields["participants"].rebuild_annotation(), [1]),
     )
 
     class FixedAdapter(SampleAdapter):

@@ -100,7 +100,7 @@ def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
             == "Q.pulses.drive"
         )
         assert (
-            driver.observe(object_name="form.input.participants").text == '["B", "A"]'
+            driver.observe(object_name="form.input.participants").text == '[1, 0]'
         )
         driver.choose_option(object_name="form.picker.tones", value="1: B")
         assert (
@@ -160,7 +160,7 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         snapshot("03-second-element")
         assert driver.observe(object_name="form.input.tones.1.gain").visible
         assert driver.observe(object_name="form.input.tones.1.gain").text == "2"
-        assert driver.observe(object_name="form.input.participants").text == '["B"]'
+        assert driver.observe(object_name="form.input.participants").text == '[1]'
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         snapshot("04-returned-draft")
         assert (
@@ -183,10 +183,10 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
             in driver.observe(object_name="form.row.tones.0.gain").tooltip
         )
         driver.enter_text(object_name="form.input.tones.0.gain", value="3")
-        driver.enter_text(object_name="form.input.participants", value='["B", "A"]')
+        driver.enter_text(object_name="form.input.participants", value='[1, 0]')
         snapshot("08-corrected-and-ordered")
         assert (
-            driver.observe(object_name="form.input.participants").text == '["B", "A"]'
+            driver.observe(object_name="form.input.participants").text == '[1, 0]'
         )
         assert (
             "could not convert"
@@ -233,7 +233,7 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
             ],
             [{"label": "A", "gain": 1}, {"label": "B", "gain": 2}],
         ),
-        participants=(list[str], ["B"]),
+        participants=(list[int], [1]),
     )
     model.fixed_elements = (
         owner.FixedElements(("tones",), "label", ("participants",)),
@@ -261,14 +261,14 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
         driver.choose_option(object_name="form.picker.tones", value="1: B")
         assert driver.observe(object_name="form.input.tones.1.gain").visible
         driver.enter_text(object_name="form.input.tones.1.gain", value="4")
-        driver.enter_text(object_name="form.input.participants", value='["Q4"]')
+        driver.enter_text(object_name="form.input.participants", value='[4]')
         driver.screenshot(tmp_path / "04-owner-invalid-participant.png")
         assert driver.observe(object_name="form.input.tones.1.gain").text == "4"
-        assert "Q4" in driver.observe(object_name="form.row.participants").tooltip
-        driver.enter_text(object_name="form.input.participants", value='["B", "A"]')
+        assert "4" in driver.observe(object_name="form.row.participants").tooltip
+        driver.enter_text(object_name="form.input.participants", value='[1, 0]')
         driver.screenshot(tmp_path / "05-owner-recovered.png")
         assert (
-            driver.observe(object_name="form.input.participants").text == '["B", "A"]'
+            driver.observe(object_name="form.input.participants").text == '[1, 0]'
         )
         (tmp_path / "owner-visible.json").write_text(
             json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"

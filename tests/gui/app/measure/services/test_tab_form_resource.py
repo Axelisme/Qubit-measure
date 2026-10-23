@@ -47,7 +47,7 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
     resource.subscribe(lambda: events.append("changed"))
     try:
         resource.write(
-            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): ["B"]}
+            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]}
         )
         resource.select(("tones", 1, "sweep"), {"kind": "center"})
         before, base = resource.input, resource.editor_state.base
@@ -107,7 +107,7 @@ def test_indexed_restore_uses_saved_positions_selections_and_reports_dropped():
         retained.pop("phase")
         retained["old_gain"] = 99
         raw["tones"] = [retained]
-        raw["participants"] = ["B"]
+        raw["participants"] = [1]
         saved = FormInput.from_json(
             saved.model,
             FormInput(
@@ -436,7 +436,7 @@ def test_describe_keeps_fixed_capture_and_revokes_retained_handle() -> None:
     resource.write({("amount",): {"expr": "general.ext.amount"}})
     current = 9.0
     before = resource.input.data
-    notifications: list[str] = []
+    notifications: list[int] = []
     resource.subscribe(lambda: notifications.append("changed"))
     description = resource.describe(("amount",))
     assert description.path == ("amount",)
@@ -678,14 +678,14 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
             model.model_fields["tones"].rebuild_annotation(),
             named_input(model).data["tones"],
         ),
-        participants=(model.model_fields["participants"].rebuild_annotation(), ["B"]),
+        participants=(model.model_fields["participants"].rebuild_annotation(), [1]),
     )
     resource = resource_api.TabFormResource(
         lambda _ctx: Form(core, {}, fixed_elements=model.fixed_elements),
         capture=lambda _aliases: resource_api.TabFormSources(env=FormEnv()),
         mutation_allowed=lambda: True,
     )
-    assert resource.accept().values["participants"] == ["B"]
+    assert resource.accept().values["participants"] == [1]
     target = resource.describe(("tones", 1, "gain")).target
     assert target is not None
     assert target.path == ("tones", 1, "gain")
@@ -696,8 +696,8 @@ def test_fixed_elements_open_edit_observe_and_run_admission() -> None:
     with pytest.raises(CfgPreconditionError) as caught:
         resource.accept()
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
-    resource.write({("tones", 0, "gain"): 5, ("participants",): ["B", "A"]})
-    assert resource.accept().values["participants"] == ["B", "A"]
+    resource.write({("tones", 0, "gain"): 5, ("participants",): [1, 0]})
+    assert resource.accept().values["participants"] == [1, 0]
     assert resource.preview().values[("tones", 0, "gain")] == 5
     before = resource.input
     with pytest.raises(FormInputRejected, match="Readonly"):
