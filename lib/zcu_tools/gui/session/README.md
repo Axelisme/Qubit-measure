@@ -66,7 +66,7 @@ session/
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不提供參數容器讀取
 ├── predictor_control.py — Read-only explicit-parameter queries and entry predictor file selection for dialog and remote callers
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
-├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。Alias 表可在未選 point 時編輯；set 只改 memory，Apply 要求並保存目前 point。
+├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。未選 point 的 alias set 只改 memory；已選 point 的 set／Apply 都 write-through。單檔 reload、revision 檢查與同步狀態也由此介面轉接。
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
 ├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort／SetupControlFacet 擁有 entry open/new、point use/new 與 cached setup preferences，公開 devices facet 供 cached label 建議。SocControlPort／SocControlFacet 獨立提供連線、connection preferences、完成通知與 soccfg 查詢
@@ -76,6 +76,7 @@ session/
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
 ├── devices/            — 明確登錄的儀器 adapters；base 定義 driver/panel 契約與 bias_source/user_connectable 能力。各儀器 module 同檔保存 adapter 與專屬 Qt panel，service 和 dialog 共用同一 catalog，未知 type 不建立 driver 或專屬 panel
 ├── adapters/
+│   ├── point_file_watcher.py — PointFileWatcher：監看目前 point 目錄，QTimer 去抖後交 ContextService 比對 hash。flush 可同步排空去抖，close 解除 timer、目錄監看與 binding 訂閱。宿主注入執行時 reload admission，不由 session 讀取 app authority。
 │   ├── manual_owner_scheduler.py — ManualOwnerScheduler（headless/test owner queue，由建立它的owner thread明確pump）
 │   ├── thread_pool_background.py — ThreadPoolBackgroundExecutor（純threading worker，terminal delivery經OwnerScheduler回owner；quiesce等待worker與delivery ack）
 │   ├── qt_owner_scheduler.py — QtOwnerScheduler（queued-signal owner-loop adapter）
@@ -85,7 +86,9 @@ session/
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經typed `ConnectionFinishedPayload`，無Qt）
 │   ├── predictor.py — Independent simulator queries and entry predictor file listing/loading through resources.predictor_file.
-│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability
+│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability。reload_file 驗證單檔候選，安裝後才發布內容 fact 與 POINT_FILE_CHANGED。非法候選只發布 error，未獲 admission 的 watcher 只發布 pending，兩者都不改資源或既有 capture
+│   ├── point_file_sync.py — PointFileSync：集中已安裝版本與磁碟 hash 的比較、草稿 revision 檢查及觀察狀態。reload 比對 installed base；check_file_revision 比對磁碟。資源格式驗證與安裝仍由 ContextService 決定，切 point 清除舊觀察
+│   ├── context_writeback.py — ContextWritebackTarget：把 ContextService commands 綁到既有有序 writeback 執行介面，不增加交易或重試
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`get_device_unit` 讀有效 YOKO／Fake cached Info 的 `value_unit`，分別為 A／V 與 native；缺 Info 的 UI／snapshot 標 none，不按 type 推測單位；strict binding 缺 Info 拋指名 device 的 `DeviceRegistrationError`，這些查詢不讀硬體、不改 connected／offline 狀態；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟
 │   ├── progress.py     — ProgressService（per-operation pbar 容器 + bound factory，吃 ProgressTransport；**共用**，非 app-held；owner listener 例外逐一 log 並隔離，壞 listener 會 detach，不阻斷其他 listener 或 terminal cleanup）

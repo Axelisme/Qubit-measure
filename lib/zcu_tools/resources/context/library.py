@@ -751,14 +751,15 @@ class ModuleLibrary:
         ):
             yield draft
 
-    def refresh(self) -> bool:
+    def refresh(self, *, strict: bool = False) -> bool:
         """Reload and publish changed valid content; return whether it changed.
 
-        Existing invalid entries are backed up and removed before publication.
-        Container/header, ledger I/O/schema and unexpected failures propagate
-        and retain published state.
+        By default invalid entries are backed up and removed before publication.
+        strict=True instead validates the whole external candidate without repair
+        or backup. Validation and I/O failures retain the installed snapshot and
+        revision. Strict reload never writes the document.
         """
-        return self._store.refresh()
+        return self._store.refresh(strict=strict)
 
     def subscribe(
         self, callback: Callable[[DocumentChange], None]
