@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, overload
 from pydantic import BaseModel, TypeAdapter
 
 from zcu_tools.format_version import YamlMap, YamlValue
-from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
 from zcu_tools.resources.parameter_fields import stage_model
 from zcu_tools.resources.parameter_metadata import read_metadata, write_metadata
 
@@ -171,6 +171,14 @@ def snapshot(
     if isinstance(document, DocumentStore):
         return document.snapshot()
     return document.model_copy(deep=True)
+
+
+def document_revision(view: PointView | SetupView) -> DocumentRevision:
+    """Return the view's installed YAML version without I/O; drafts have no version."""
+    document = _view_read(view).document
+    if not isinstance(document, DocumentStore):
+        raise TypeError("Edit drafts have no installed revision")
+    return document.document_revision
 
 
 def source_path(view: PointView | SetupView) -> Path:

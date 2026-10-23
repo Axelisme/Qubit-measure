@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-23
 ---
 
@@ -7,9 +7,9 @@ date: 2026-10-23
 
 ## 決策狀態與問題
 
-本篇記錄已採用的方向，實作尚未完成。它補充 [[0063]]（保存權威）、[[0067]]（ContextService 擁有 alias 表與 Apply 時機）、[[0068]]（measure 固定工具與 live catalog）與 [[0070]]（單一 holder），不改 tab 的固定 capture（[[0065]]）。
+本篇規範 point 檔案的寫入、重載與 revision 檢查。它補充 [[0063]] 的保存權威、[[0067]] 的 ContextService 與 alias 表、[[0068]] 的固定工具與 live catalog，以及 [[0070]] 的單一 holder。不改 [[0065]] 的 tab 固定 capture。
 
-目前 point 的參數文件、module library 與 `aliases.yaml` 由 GUI owner 在記憶體安裝後才擇時落盤；MCP 為每種資料各提供特化的讀寫工具（`value.read`／`value.list`、`context.set_parameter`、`context.ml_*`、`context.aliases_set`、`tab.parameter_read`）。Agent 讀到的是工具的投影而非完整文件，記憶體可能比磁碟新，agent 若直接改檔會被 GUI 下一次保存覆蓋，且繞過驗證、發布與 holder。使用者 2026-10-23：「我考慮將parameter/modules/alias的特化讀取工具從mcp tool中移除，寫入也可能？因為直接edit/read/write檔案好像對agent最友好？」，對本篇的同步方案「我認為這個方案是可行的」。
+GUI 與 agent 都需要讀寫 point 的參數、module library 與 `aliases.yaml`。如果 owner 只更新記憶體、稍後才保存，agent 會讀到舊檔案，外部編輯也可能被下一次保存覆蓋。直接改檔則需要 owner 驗證、安裝與發布，不能只把磁碟寫入當成生效。使用者 2026-10-23：「我考慮將parameter/modules/alias的特化讀取工具從mcp tool中移除，寫入也可能？因為直接edit/read/write檔案好像對agent最友好？」，對本篇的同步方案「我認為這個方案是可行的」。
 
 ## 決策
 
@@ -35,15 +35,17 @@ GUI 監看 point 目錄，去抖後讀檔算 hash：等於記憶體 revision 視
 
 ### Agent 直接讀寫檔案
 
-讀：agent 直接讀檔，write-through 保證即現值；status 的 revision 供判斷手上內容是否過時。寫：agent 編輯檔案後呼叫 `context.reload(path, expected_revision)`，owner 讀檔、驗證、安裝、發布並回新 revision；拒絕分三種：驗證失敗（含路徑與原因，記憶體與檔案都不變）、revision 不符（重讀再來）、holder 不符。既有 RPC 寫入可選帶 `expected_revision`。
+Agent 直接讀檔取得磁碟內容。`status` 回已安裝版本的 revision，外部候選在通過驗證前可能與它不同。
+
+Agent 編輯檔案後呼叫 `context.reload(path, expected_revision)`，expected_revision 是編輯前的已安裝版本。Owner 讀檔、驗證、安裝、發布並回新 revision。驗證失敗回檔案路徑與原因，保留舊記憶體及磁碟候選。Revision 不符時重讀狀態與內容再決定，非 holder 則拒絕重載。既有 RPC 寫入可選帶 `expected_revision`。
 
 ### MCP 固定工具收斂
 
-measure 固定工具移除參數、modules、aliases 的特化讀寫工具；保留 `entry.info`／`status` 的路徑與 revision、`context.reload`，以及 `rpc_call` 對 live catalog 既有 method 的存取。recipe 內部仍走 owner API，不受影響。
+Measure 固定工具不提供參數、modules、aliases 的特化讀寫。`status` 固定工具回檔案路徑與已安裝 revision。`entry.info` 與 `context.reload` 經 `rpc_call` 存取，不另設固定工具。Live catalog 的既有 method 仍可經 `rpc_call` 使用。Recipe 內部仍走 owner API，不受影響。
 
 ## 代價與不採用的方案
 
-- 不採「記憶體為真相、Save 才落盤」（現況）：agent 讀檔會讀到舊值，改檔會被覆蓋。
+- 不採「記憶體為真相、Save 才落盤」：agent 讀檔會讀到舊值，改檔會被覆蓋。
 - 不採自動三方合併：表是小表，重做比合併便宜且不會錯。
 - 不採 peer 檔案鎖：holder 已是互斥機制，再加鎖是第二套。
 - GUI 重寫檔案時 YAML 排版與註解不保留，接受「檔案由 owner 排版」。

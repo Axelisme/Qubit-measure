@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-23，Figure 檔名與碰撞檢查
+**Last updated:** 2026-10-24，Point alias write-through
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -123,7 +123,9 @@ List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。
 ## 角色與失敗
 
 GUI 透過 ContextService 讀取目前 point 的元件／device 共用 alias 表。
-Dialog Apply 只保存目前 point 的表，普通 set 只改 memory。
+Dialog Apply 要求已選 point，只保存目前 point 的表。
+普通 `set_alias_rows` 在未選 point 時只改 memory；選定 point 後先保存該 point 的表，再安裝 memory 與發布 fact。
+兩者都不修改 setup alias，point 檔案同步見 [ADR-0081](../../../../docs/adr/0081-point-data-disk-sync.md)。
 公開 `read_context` 不要求 GUI consumer roles 或 kind 檢查。Tab 在 Open／Reset
 捕捉目前 point 與 alias 表，Run 使用固定 capture。GUI 不自動初始化 point alias，
 也不使用 Notebook 的 focus／via 推論。Notebook 不讀 aliases.yaml，MCP temporary overrides 不寫它。

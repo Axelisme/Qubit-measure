@@ -82,6 +82,36 @@ class EntryRequest:
 
 
 @dataclass(frozen=True)
+class PointFileSyncStatus:
+    """Most recent external observation of one selected-point file.
+
+    file is the installed owner version. disk_revision is the observed raw-byte
+    SHA-256, or None for a missing file. state is pending when admission denies
+    reload, reloaded after installation, or error after rejection. Only error
+    has a nonempty error string, including the path and rejection reason.
+    """
+
+    file: PointFileRevision
+    disk_revision: str | None
+    state: Literal["pending", "reloaded", "error"]
+    error: str | None
+
+
+@dataclass(frozen=True)
+class PointFileRevision:
+    """One installed selected-point document, without reading disk.
+
+    document is parameters, library or aliases, in that order in file lists.
+    path is the absolute owner file. revision is the installed raw-byte SHA-256
+    hex digest; None is allowed only for a missing aliases file.
+    """
+
+    document: Literal["parameters", "library", "aliases"]
+    path: Path
+    revision: str | None
+
+
+@dataclass(frozen=True)
 class EntryInfo:
     """Opened entry UUID, directory name, and absolute owner-supplied roots.
 

@@ -53,6 +53,7 @@ from .views import (
     SetupView,
     document_fields,
     document_meta,
+    document_revision,
     document_unit,
     document_value,
     resolve_path,

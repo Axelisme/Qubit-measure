@@ -416,13 +416,8 @@ def test_root_family_tag_has_no_row(session: _Session) -> None:
 def test_name_apply_renames_and_a_taken_name_keeps_the_draft(
     session: _Session,
 ) -> None:
-    presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    _select(dialog, PULSE)
-    name = _child(dialog, QLineEdit, "inspect.entry.name")
+    # Install the collision before drafting: this tests name validation, not stale revision.
     before = _library(session).document()
-    _type(name, "_v2")
-    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.75")
     # The waveform family is separate; a module name must not reuse a module key.
     session.control.set_module(
         session.control.read_context().target,
@@ -431,6 +426,12 @@ def test_name_apply_renames_and_a_taken_name_keeps_the_draft(
     )
     taken = _library(session).document()
     assert taken != before
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    _select(dialog, PULSE)
+    name = _child(dialog, QLineEdit, "inspect.entry.name")
+    _type(name, "_v2")
+    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.75")
     _child(dialog, QPushButton, "inspect.entry.apply").click()
     assert presenter.messages("warning"), "a taken name must be reported"
     assert _library(session).document() == taken

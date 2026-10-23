@@ -32,6 +32,7 @@ Library 的設計是「元件 → 分組 → pydantic model」，分組名稱不
 - `ModuleLibrary.edit()` 使用 `DocumentStore.edit()`。Body 內的 `LibraryEdit.snapshot()` 反映前項寫入。結構操作可合成隔離候選，再由 transaction 驗證並一次替換內容。新 draft 嚴格驗證，不清掉 caller 壞值後當成功。Body、schema、source、conflict 或 I/O 失敗不發布候選，但不回滾先完成的磁碟讀取清理。
 - 值與來源同檔提交。普通 replacement 記 manual 並清除 clone origin。明確來源沿 `entry.provenance` 驗證本條目 ledger 事件與附檔，不另設 producer。
 - `snapshot()` 只複製已發布記憶體。`refresh()` 顯式重載；`subscribe()` 在 publication 後通知。Handle 不自動監看、mtime sync 或建立缺失文件。
+- `refresh(strict=True)` 驗證完整外部候選，不套用讀取清理或沿用驗證快取。非法候選保留記憶體與 revision，不備份、不修檔。GUI 的單檔 reload 使用這條路徑。一般 open／edit／refresh 的既有清理政策不變。
 
 舊 flat 文件由 root `migrations/` 的離線工具轉成現行文件後再使用。Library 與參數文件各自管理 snapshot 與寫入。
 

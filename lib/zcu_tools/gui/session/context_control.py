@@ -17,6 +17,8 @@ if TYPE_CHECKING:
         EntryInfo,
         LibraryChange,
         PointCreateRequest,
+        PointFileRevision,
+        PointFileSyncStatus,
         PointUseRequest,
         SavedPoint,
         WorkingPointInfo,
@@ -194,6 +196,34 @@ class ContextControlPort(Protocol):
         """Return the opened entry predictor directory, or None; no I/O or creation."""
         ...
 
+    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+        """Read installed point file versions, or (); no I/O or refresh."""
+        ...
+
+    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+        """Return recent external observations without I/O; cleared on point switch."""
+        ...
+
+    def check_file_revision(self, expected: PointFileRevision) -> None:
+        """Compare draft path/version with disk; mismatch rejects without mutation.
+
+        None expects an absent aliases file only. Invalid paths/base raise
+        InvalidInputError; mismatch raises FailedPreconditionError(revision_mismatch).
+        """
+        ...
+
+    def reload_file(
+        self, path: Path, expected_revision: str | None
+    ) -> PointFileRevision:
+        """Strictly install one absolute current owner file, then publish facts.
+
+        Compare expected_revision with the installed base, None only for absent
+        aliases. Invalid paths/candidates raise InvalidInputError with path/reason;
+        stale base raises FailedPreconditionError(revision_mismatch). Failure
+        retains memory/disk; caller owns holder admission. Captures stay fixed.
+        """
+        ...
+
     def get_entry_info(self) -> EntryInfo | None:
         """Read cached entry identity/paths, or None without an entry."""
         ...
@@ -237,14 +267,13 @@ class ContextControlPort(Protocol):
         ...
 
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Atomically submit the complete ordered session-only alias table.
+        """Submit authored rows, saving first when a point is selected.
 
-        Run on the owner thread; no entry or currently resolvable component is
-        required. Invalid syntax, duplicate names and links to self/later rows
-        raise InvalidInputError(alias_invalid) and preserve rows and versions.
+        Run on the owner thread. Before point selection this only sets memory
+        initial rows; a selected point uses apply_alias_rows write-through.
+        Invalid syntax/order and storage failures preserve rows and versions.
         Changed rows publish AliasesChangedPayload after installation; identical
-        submissions publish nothing. Selecting a point replaces memory-only
-        edits with its saved rows. No files, preferences or ledger records are written.
+        submissions publish nothing. No preferences or ledger records are written.
         """
         ...
 
@@ -364,6 +393,24 @@ class ContextControlFacet(ContextControlPort):
     def get_predictors_path(self) -> Path | None:
         """Return the opened entry predictor directory, or None; no I/O or creation."""
         return self._context.get_predictors_path()
+
+    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+        """Read installed point file versions, or (); no I/O or refresh."""
+        return self._context.get_file_revisions()
+
+    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+        """Read the owner's cached external observations without I/O."""
+        return self._context.get_file_sync_status()
+
+    def check_file_revision(self, expected: PointFileRevision) -> None:
+        """Reject a stale draft by the owner's disk revision check."""
+        self._context.check_file_revision(expected)
+
+    def reload_file(
+        self, path: Path, expected_revision: str | None
+    ) -> PointFileRevision:
+        """Strictly reload using ContextControlPort's installation contract."""
+        return self._context.reload_file(path, expected_revision)
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()

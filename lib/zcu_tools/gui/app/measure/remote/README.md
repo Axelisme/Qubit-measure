@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-23, point-file reload RPC
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -247,6 +247,39 @@ Form input, values and errors, and neither changes global aliases. Source events
 do not refresh existing tabs. Recipe aliases continue through Reset, not Run.
 The Form owner defines these rules; RPC forwards them without a second evaluator
 or implicit refresh. See [ADR-0065](../../../../../../docs/adr/0065-cfg-editing.md).
+
+## Point-file reload and guarded writes
+
+`entry.info.files` lists the selected point's absolute parameters, library and
+aliases paths and their installed SHA-256 revisions. Read this base before
+editing a file. Edit that path, then call `context.reload` with its path and the
+previously installed `expected_revision`, not the edited disk hash. Supply the
+key explicitly. Use null only when the aliases base has no file.
+
+```json
+{"method": "context.reload", "params": {"path": "/project/results/entry/points/base/aliases.yaml", "expected_revision": null}}
+```
+
+The owner validates and installs the candidate, publishes source changes and
+returns `{document, path, revision}`. It never rewrites or repairs the edited
+file. Invalid paths or contents return `invalid_params` with the path and
+reason. A stale installed base returns `precondition_failed` with
+`reason=revision_mismatch`. A non-holder receives the existing `not_holder`
+rejection before domain effects. Failures preserve the installed state.
+Existing tabs keep their fixed captures until an explicit Refresh or Reset.
+
+`context.set_parameter`, `context.aliases_set`, `context.ml_edit`,
+`context.ml_create_from_role`, and the module/waveform delete/rename methods
+accept optional `expected_revision`. If supplied, the session owner compares it
+with that document's current disk hash before writing. Explicit null checks for
+a missing aliases file; parameters and library reject null. Omission keeps the
+original unguarded writer contract. These checks are optimistic, without a
+cross-process lock or a multi-file transaction.
+
+Recipe and startup code still use the context owner facets. Startup must select
+or create a point before `ctx.context.apply_alias_rows(rows)`. That command
+validates and atomically saves the selected point's aliases before installing
+or publishing them. No extra save or subsequent reload is needed.
 
 ## Authority and dispatch
 
