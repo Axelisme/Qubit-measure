@@ -110,6 +110,57 @@ def test_paging_selection_identity_and_clear(
     flow.screenshot(tmp_path / "cleared.png")
 
 
+@pytest.mark.parametrize("pane", ["run", "analysis", "post_analysis"])
+def test_tiled_heatmap_ylabels_fit_after_resize_and_paging(
+    area, pane: Literal["run", "analysis", "post_analysis"], tmp_path: Path
+):
+    collection = FigureCollection()
+    for index in range(1, 6):
+        figure = Figure()
+        heatmap, line = figure.subplots(ncols=2)
+        heatmap.pcolormesh([0, 1, 2], [7000, 7001, 7002], [[1, 2], [3, 4]])
+        heatmap.set_xlabel("DC value (A)")
+        heatmap.set_ylabel("Frequency (MHz)")
+        line.plot([7000, 7001, 7002], [0, index, 0], label=f"Tone {index}")
+        line.set_xlabel("Frequency (MHz)")
+        line.legend()
+        collection.adopt(f"Tone {index}", figure)
+    collection.seal()
+    flow = ComponentDriver(area)
+    # The same native figure remains untouched in ordinary single-canvas mode.
+    area.prepare_run_container()
+    area.show_run_figure(collection["Tone 1"])
+    original_positions = tuple(
+        ax.get_position().bounds for ax in collection["Tone 1"].axes
+    )
+    flow.screenshot(tmp_path / "single.png")
+    assert all(
+        b.canvas_left <= b.ylabel_left <= b.axes_left for b in flow.plot_label_bounds()
+    )
+    assert (
+        tuple(ax.get_position().bounds for ax in collection["Tone 1"].axes)
+        == original_positions
+    )
+
+    present(area, pane, collection)
+    flow.screenshot(tmp_path / "tiled.png")
+    bounds = flow.plot_label_bounds()
+    assert len(bounds) == 4
+    assert all(b.canvas_left <= b.ylabel_left <= b.axes_left for b in bounds), bounds
+    assert all(b.ylabel_right <= b.canvas_right for b in bounds), bounds
+    flow.click("Next page")
+    flow.screenshot(tmp_path / "last-page.png")
+    bounds = flow.plot_label_bounds()
+    assert len(bounds) == 1
+    assert bounds[0].canvas_name == f"figures.tile.{pane}.4"
+    assert bounds[0].canvas_left <= bounds[0].ylabel_left <= bounds[0].axes_left
+    flow.click("Previous page")
+    flow.screenshot(tmp_path / "returned-labels.png")
+    assert all(
+        b.canvas_left <= b.ylabel_left <= b.axes_left for b in flow.plot_label_bounds()
+    )
+
+
 def test_data_named_previews_page_and_reset(area, tmp_path: Path):
     flow = ComponentDriver(area)
     present(area, "run", figures(3))
