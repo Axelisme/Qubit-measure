@@ -4,7 +4,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
+from PyQt6.QtCore import QDir, QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QAction, QImage
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -439,6 +439,42 @@ def test_file_chooser_enters_existing_path_through_real_modal_events(
     driver.choose_file("Choose file", native)
     assert driver.status().text == f"Selected {native}"
     assert driver.dialogs() == ()
+
+
+@pytest.mark.parametrize("show_hidden", [False, True], ids=["hidden-off", "hidden-on"])
+def test_file_chooser_selects_file_below_hidden_parent(
+    surface, tmp_path: Path, qapp, show_hidden: bool
+) -> None:
+    hidden = tmp_path / ".hidden-results"
+    hidden.mkdir()
+    native = hidden / "saved signal.h5"
+    native.write_bytes(b"synthetic native file")
+    button = QPushButton("Choose hidden result")
+    surface.setCentralWidget(button)
+    dialog = QFileDialog(surface, "Open hidden result", str(tmp_path), "Data (*.h5)")
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
+    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+    filters = QDir.Filter.AllEntries | QDir.Filter.NoDotAndDotDot
+    dialog.setFilter(filters | QDir.Filter.Hidden if show_hidden else filters)
+
+    def choose() -> None:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            surface.statusBar().showMessage(f"Selected {dialog.selectedFiles()[0]}")
+
+    button.clicked.connect(choose)
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    errors: list[TimeoutError] = []
+    try:
+        driver.choose_file(
+            "Choose hidden result", native, evidence=tmp_path / "chooser.png"
+        )
+    except TimeoutError as error:
+        errors.append(error)
+    driver.screenshot(tmp_path / "selected.png")
+    assert errors == [], "Existing files below hidden parents must be selectable"
+    assert driver.dialogs() == ()
+    assert driver.status().text == f"Selected {native}"
 
 
 def test_viewport_clipped_widgets_cannot_be_observed_or_operated(surface, qapp) -> None:
