@@ -454,7 +454,7 @@ def test_file_chooser_selects_file_below_hidden_parent(
     dialog = QFileDialog(surface, "Open hidden result", str(tmp_path), "Data (*.h5)")
     dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
     dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-    filters = QDir.Filter.AllEntries | QDir.Filter.NoDotAndDotDot
+    filters = QDir.Filter.AllEntries | QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot
     dialog.setFilter(filters | QDir.Filter.Hidden if show_hidden else filters)
 
     def choose() -> None:
