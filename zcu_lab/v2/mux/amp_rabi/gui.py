@@ -134,7 +134,7 @@ class MuxAmpRabiAdapter(
             row_items: list[WritebackItem] = []
             if snapshot is None:
                 continue
-            pulse = snapshot.tones[outcome.index].drive
+            pulse = snapshot.tones[outcome.index].require_drive()
             parameters = req.ctx.parameters
             if parameters is None:
                 raise ValueError("Rabi pulse proposals require captured parameters")

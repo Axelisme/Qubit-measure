@@ -38,9 +38,9 @@ class MuxLenRabiInputs(FormModel):
     reuse_tab_id: str | None = Field(
         default=None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[str] | None = Field(
+    participants: list[int] | None = Field(
         default=None,
-        description="Qubit names in execution order; null keeps the GUI value.",
+        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
     library: list[MuxLibrary] | None = Field(
         default=None, description="Ordered module selections; null keeps the GUI value."
@@ -187,9 +187,7 @@ async def mux_len_rabi(
     edits = [
         FieldEdit(
             path=("participants",),
-            value=None
-            if inputs.participants is None
-            else [name for name in inputs.participants],
+            value=None if inputs.participants is None else list(inputs.participants),
         )
     ]
     edits.extend(mux_sweep_edits(tab, inputs.sweeps, inputs.n))

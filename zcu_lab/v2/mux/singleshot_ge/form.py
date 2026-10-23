@@ -17,8 +17,8 @@ from .core import MuxGECfg
 def make_form(ctx: FormContext) -> Form[MuxGECfg]:
     """Build the complete fixed name list from this Open/Reset capture.
 
-    All positions share the native element declaration and remain required,
-    including nonparticipants. Missing pulse/calibration leaves stay invalid.
+    Readout identity stays required for every position. Only participant drive
+    and sweep fields validate; inactive drafts stay grey and are retained.
     Binding/source faults propagate; Reset alone recaptures. Shared controls
     apply to every branch. No native conversion or device access occurs.
     """
@@ -41,13 +41,18 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
                 "readout": readout,
             },
             "tones": tones,
-            "participants": list(names),
+            "participants": list(range(len(names))),
             "shots": 100000,
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
         },
         fixed_elements=(
-            FixedElements(("tones",), "name", ("participants",)),
+            FixedElements(
+                ("tones",),
+                "name",
+                ("participants",),
+                participant_fields=(("drive",),),
+            ),
             READOUT_ELEMENTS,
         ),
         field_order=(

@@ -178,6 +178,22 @@ class InputPolicy:
     expression: bool = True
 
 
+@dataclass(frozen=True)
+class FieldApplicability:
+    """Apply nullable paths only when dependency's evaluated list contains value.
+
+    dependency and paths are nonempty root-relative typed field paths. value is
+    a JSON membership candidate, not a predicate. Paths cannot overlap or control
+    a dependency. Invalid declarations raise ValueError; invalid dependency input
+    remains a normal validation error. Inactive results are None, while raw drafts
+    remain untouched. No dependency chaining or condition combinations are supported.
+    """
+
+    dependency: FormWritePath
+    value: JsonValue
+    paths: tuple[FormWritePath, ...]
+
+
 class _DisplayProperties(TypedDict, total=False):
     """Typed keyword overrides; absent keys must not reset inner declarations."""
 
@@ -437,6 +453,20 @@ class FormModel(BaseModel):
 
         del env
         return static_defaults(cls)
+
+    @classmethod
+    def applicability(
+        cls, data: Mapping[str, JsonValue]
+    ) -> tuple[FieldApplicability, ...]:
+        """Declare root-relative membership dependencies for this input snapshot.
+
+        Return declarations only, without evaluating or validating input. Core
+        evaluates dependencies and projects inactive nullable fields to None for
+        source checks and validation. data is detached; changing it cannot edit
+        the draft. The default declares no conditional fields.
+        """
+        del data
+        return ()
 
     @classmethod
     def check_input_change(
@@ -741,8 +771,9 @@ class FormState[F: FormModel]:
         inactive descendants, invalid or out-of-range model-list indexes and
         traversal into whole leaves raise FormPathError with the full requested path. Unsupported declarations and other
         non-path failures keep their original exception types.
-        Does not validate, evaluate expressions, call defaults, read sources
-        outside declaration hooks, mutate input/base or notify subscribers.
+        Evaluates applicability dependencies only. Does not validate the described
+        values, call defaults, read sources outside declaration hooks, mutate
+        input/base or notify subscribers.
         """
         from ._describe import describe
 

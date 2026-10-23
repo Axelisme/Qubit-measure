@@ -2,9 +2,9 @@
 
 import math
 from collections.abc import Sequence
-from typing import Annotated, Self
+from typing import Annotated
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg
@@ -42,23 +42,27 @@ class ToneRangeCfg(ConfigBase):
 
 
 class MuxDriveToneCfg(ConfigBase):
-    """One named original tone's required fixed drive, without a pulse sweep.
+    """One named original tone's nullable fixed drive, without a pulse sweep.
 
     name is its nonempty capture-generated qubit name; full-list admission
-    rejects duplicates. drive is required even when not participating. Its MHz
+    rejects duplicates. drive is required only when participating. Its MHz
     frequency, normalized gain, degree phase and us delays must be fixed finite
     values, with nonnegative delays and unswept waveform duration.
     Native pulse/waveform schemas own shape and clock conversion.
     """
 
     name: Annotated[str, FieldMeta(readonly=True)]
-    drive: PulseCfg
+    drive: PulseCfg | None = None
 
-    @model_validator(mode="after")
-    def validate_tone(self) -> Self:
-        """Reject a nonfinite or swept drive for every element."""
-        # Sweeps describe the scan; source pulses must stay fixed until preparation.
-        drive = self.drive
+    def require_drive(self) -> PulseCfg:
+        """Return the active tone's drive, or raise ValueError naming this tone."""
+        if self.drive is None:
+            raise ValueError(f"{self.name}: active tone requires drive")
+        return self.drive
+
+    def validate_tone(self) -> None:
+        """Reject a missing, nonfinite or swept drive when this tone participates."""
+        drive = self.require_drive()
         for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
             value = getattr(drive, name)
             if isinstance(value, QickParam) or not math.isfinite(value):
@@ -69,30 +73,35 @@ class MuxDriveToneCfg(ConfigBase):
             drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)
         ) and isinstance(drive.waveform.length, QickParam):
             raise ValueError("drive.waveform.length must be fixed")
-        return self
 
 
 class MuxToneCfg(MuxDriveToneCfg):
-    """One fixed drive with a required independent pulse-scan range.
+    """One nullable drive and independent pulse-scan range, required when active.
 
     Inherited name and drive identify the original tone. sweep holds finite
     start/stop in MHz, normalized gain or us for twotone, amp or length scans.
     Coherence uses a shared delay instead and does not use this range schema.
     """
 
-    sweep: ToneRangeCfg
+    sweep: ToneRangeCfg | None = None
+
+    def require_sweep(self) -> ToneRangeCfg:
+        """Return the active tone's bounds, or raise ValueError naming this tone."""
+        if self.sweep is None:
+            raise ValueError(f"{self.name}: active tone requires sweep")
+        return self.sweep
 
 
 def validate_mux_tones(
     cfg: ProgramV2Cfg,
     modules: MuxDriveModuleCfg,
     tones: Sequence[MuxDriveToneCfg],
-    participants: Sequence[str],
+    participants: Sequence[int],
 ) -> None:
-    """Validate complete named fixed drives, participants and independent channels.
+    """Validate full names/readout dimensions and active drives/channels.
 
     cfg provides shared positive reps/rounds and finite nonnegative delays in us.
-    tones must match the full numeric readout length. Every drive channel must
+    tones must match the full numeric readout length. Each active drive channel must
     be distinct and different from readout.gen_ch. Raise ValueError with original
     indices/actual values; never read bindings or change inputs. No sweep is needed.
     """
@@ -105,12 +114,14 @@ def validate_mux_tones(
         raise ValueError(
             f"tones length={len(tones)}; full readout count={len(modules.readout.tones)}"
         )
-    participant_indices([tone.name for tone in tones], participants)
+    validate_participants([tone.name for tone in tones], participants)
 
-    # Every full-list tone must use an independent drive channel.
+    # Only participants consume drives; readout still contains every tone.
     channels: dict[int, int] = {}
-    for i, tone in enumerate(tones):
-        drive = tone.drive
+    for i in participants:
+        tone = tones[i]
+        tone.validate_tone()
+        drive = tone.require_drive()
         if drive.ch == modules.readout.gen_ch or drive.ch in channels:
             raise ValueError(
                 f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={modules.readout.gen_ch}"
@@ -122,7 +133,7 @@ def validate_mux_scan(
     cfg: ProgramV2Cfg,
     modules: MuxDriveModuleCfg,
     tones: Sequence[MuxToneCfg],
-    participants: Sequence[str],
+    participants: Sequence[int],
     expts: int,
 ) -> None:
     """Validate fixed drives plus independent pulse ranges and a shared count.
@@ -134,38 +145,27 @@ def validate_mux_scan(
     validate_mux_tones(cfg, modules, tones, participants)
     if type(expts) is not int or expts <= 0:
         raise ValueError("expts must be a positive integer")
-    for i, tone in enumerate(tones):
-        if not all(math.isfinite(v) for v in (tone.sweep.start, tone.sweep.stop)):
+    for i in participants:
+        sweep = tones[i].require_sweep()
+        if not all(math.isfinite(v) for v in (sweep.start, sweep.stop)):
             raise ValueError(f"tones[{i}].sweep start/stop must be finite")
 
 
-def participant_indices(names: Sequence[str], participants: Sequence[str]) -> list[int]:
-    """Resolve participant names to original positions, retaining caller order.
+def validate_participants(names: Sequence[str], participants: Sequence[int]) -> None:
+    """Check complete names and nonempty unique original indices, preserving order.
 
-    names is the complete capture-ordered tone identity list. Both lists must
-    contain nonempty names without duplicates; participants must be nonempty
-    and contain only names in names. Raise ValueError with the offending name
-    or position. Never sort, mutate inputs or consult a capture/library.
+    names contains the full captured identity list. participants indexes that
+    list directly, not a selected subset. Negative, bool, duplicate and out-of-
+    range values raise ValueError with the participant input position.
     """
-    # Resolve against the complete list so subset order never changes identities.
-    index_of: dict[str, int] = {}
-    for index, name in enumerate(names):
-        if not name or name in index_of:
-            raise ValueError(
-                f"tones[{index}].name={name!r}: empty or duplicate name; prior index={index_of.get(name)}"
-            )
-        index_of[name] = index
-
-    # Retain the requested order while rejecting unknown or repeated participants.
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ValueError("tones names must be nonempty and unique")
     if not participants:
         raise ValueError("participants must be nonempty")
-    seen: set[str] = set()
-    indices: list[int] = []
-    for position, name in enumerate(participants):
-        if name not in index_of or name in seen:
+    seen: set[int] = set()
+    for position, index in enumerate(participants):
+        if type(index) is not int or not 0 <= index < len(names) or index in seen:
             raise ValueError(
-                f"participants[{position}]={name!r}: unknown or duplicate name"
+                f"participants[{position}]={index!r}: expected unique original tone index in [0, {len(names)})"
             )
-        seen.add(name)
-        indices.append(index_of[name])
-    return indices
+        seen.add(index)

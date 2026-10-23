@@ -38,9 +38,9 @@ class MuxAmpRabiInputs(FormModel):
     reuse_tab_id: str | None = Field(
         default=None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[str] | None = Field(
+    participants: list[int] | None = Field(
         default=None,
-        description="Qubit names in execution order; null keeps the GUI value.",
+        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
     library: list[MuxLibrary] | None = Field(
         default=None, description="Ordered module selections; null keeps the GUI value."
@@ -149,8 +149,7 @@ async def mux_amp_rabi(
     every tone in original order; a length mismatch raises before applying edits.
     n sets the shared Expts; per-tone n is rejected (only start/stop are accepted).
     Null keeps ranges/count. overrides runs last and may replace these edits.
-    The GUI scans each drive gain without inferring a range. All tones must
-    validate, including nonparticipants.
+    The GUI scans each drive gain without inferring a range. Readout identities and selected drive/sweep settings must validate.
     Analyze Primary, then ask before applying calibration items.
     Save raw data and completed artifacts in the Run finalizer.
     Return ordered estimates and the writeback decision after completion.
@@ -173,9 +172,7 @@ async def mux_amp_rabi(
     edits = [
         FieldEdit(
             path=("participants",),
-            value=None
-            if inputs.participants is None
-            else [name for name in inputs.participants],
+            value=None if inputs.participants is None else list(inputs.participants),
         )
     ]
     edits.extend(mux_sweep_edits(tab, inputs.sweeps, inputs.n))

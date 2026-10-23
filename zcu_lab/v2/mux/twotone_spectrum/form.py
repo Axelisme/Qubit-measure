@@ -17,7 +17,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
     """Build per-qubit drive sweeps and shared averaging/readout controls.
 
     ctx supplies the mux group and calibration values at Open/Reset. Every qubit
-    needs valid settings, including those omitted from participants. Missing
+    needs valid readout identity; only selected drive/sweep fields validate. Missing
     calibration leaves required inputs blank; invalid group mappings raise.
     The tone picker chooses which qubit to edit, not which qubits to measure.
     """
@@ -51,14 +51,22 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
             },
             "tones": tones,
             "expts": 301,
-            "participants": list(names),
+            "participants": list(range(len(names))),
             "relax_delay": 1.0,
             "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },
         fixed_elements=(
-            FixedElements(("tones",), "name", ("participants",)),
+            FixedElements(
+                ("tones",),
+                "name",
+                ("participants",),
+                participant_fields=(
+                    ("drive",),
+                    ("sweep",),
+                ),
+            ),
             READOUT_ELEMENTS,
         ),
         field_order=(

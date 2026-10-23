@@ -109,9 +109,15 @@ Core、widget 與 host 不辨識 mux group。
 
 Workflow 的 Apply 以宣告的 Form.to_cfg() 轉成完整 native tunables model，再由 Engine 依 workflow 型別驗證、整體替換並增加 revision。List 與固定 list 隨完整 model 提交，不攤平 preview leaves，也不建立 native index path grammar。每次 Apply 的 journal 記 actor、revision_before／after 與完整新 tunables JSON。Append 成功後才發布值與 revision，宿主才接受 input／base。使用者於 2026-10-18 確認完整 model 直接套用、不比對差異，並在日誌寫法中確認「甲乙都可以」。採完整快照，不維護逐葉差異或舊格式相容層。當前 step capture 與 iteration record.json 格式不變，見 [[0062]]。
 
-Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。每個元素都有必填 drive，有掃描的實驗另有 sweep。未參與元素保留設定，適用同一驗證規則，無效時也擋 Run。
+Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `name` 由 capture 產生且不可編輯。Drive 類實驗以 qubit 名稱識別，onetone 以 resonator 名稱識別。Readout 身分欄位全 tone 必填。Drive 與逐 tone sweep 是 nullable，只有 participants 必填並檢查 drive 與 channel。未參與的欄位保留原始草稿，不求值、不驗證，結果投影為 None。清單不裁剪、不重新編號。
 
-`participants: list[str]` 必須非空、無重複且每個名稱都存在。順序就是執行與資料 column 順序。Lab runtime 邊界只轉換一次名稱到原始位置。例如完整元素為 Q1、Q2、Q3，participants 為 Q3、Q1，既有 program 接收的 active_tones 為 2、0。只選 Q2 時仍是 1，不重新編號。Program／raw 接口不改，framework 不解讀 mux group。
+`participants: list[int]` 必須非空、無重複，且每個值都是完整 tones 的合法原始索引。順序就是執行與資料 column 順序。例如完整元素為 Q1、Q2、Q3，participants 為 `[2, 0]` 時先量 Q3，再量 Q1。只選 Q2 時仍是 `[1]`。名稱只供 label、錯誤與回覆顯示，recipe 與 runtime 不再以名稱查位置。Program／raw 接口不改，framework 不解讀 mux group。
+
+使用者於 2026-10-23 裁定：「然後participants用list of index好了，不要用list of str」。對非 participant 可留空的甲案，使用者答「甲」。原始索引讓子集與執行順序共用同一座標，不再需要名稱查表。未量測的 drive／sweep 不應阻擋 Run，但所有 readout tones 都參與讀出，所以其身分與通道仍須完整。
+
+Core 提供中立的 `FieldApplicability(dependency, value, paths)`，唯一條件是 dependency 求值後的清單包含 value。`FormModel.applicability(data)` 只產生宣告。Core 從同一份 input 求值 dependency，將不適用的 nullable paths 投影為 None，跳過其來源與值驗證。缺失或無效的 dependency 仍阻擋 Run。宣告錯誤直接 raise，不提供規則 DSL、條件組合或 callback registry。
+
+`gui.form_adapter.FixedElements(..., participant_fields=...)` 依完整 raw list 的原始索引產生宣告。Widgets 只消費 description 的 `disabled`，不解讀 participants。停用不改 readonly 政策，也不丟棄 input。切回適用時，Core 立即驗證保留的草稿並呈現空值或無效值錯誤。
 
 使用者於 2026-10-18 裁定：「那設定也不用逐個toggle了，直接[Q1,Q2]這樣就好。」同日授權「可以，之後就交給advisor，我就不直接對話」。顧問據此採具名 list，未採使用者仍不確定的 mapping 傾向。理由是 list 的位置直接保存原始 tone index，不需依賴 mapping 順序或另一張對照表。保存還原及下節契約同樣由顧問代裁，待使用者覆核。
 
@@ -123,11 +129,11 @@ Model-field path 使用 typed segments：欄位名為 str，list index 為 int�
 
 一次讀全部元素由 owner 在單一 readonly 呼叫產生。MCP 不逐元素發出 N 次讀取再拼成假快照，不持有平行的名稱排序表。完整讀取保留每個元素的 authored input、可用值與定向錯誤，不因一個元素無效而隱藏其他元素。
 
-Recipe 輸入包含以元素 name 表示的 participants，以及與 MCP 相同的 typed path overrides。例如 `[{"path": ["tones", 0, "drive", "gain"], "value": 0.3}]` 直接定位完整原始 list 的第 0 個元素。Overrides 不以元素 name 為 key，owner 不做 name→位置轉換。Owner 在 Run 前沿相同 Form 操作套用 overrides，不在 MCP／recipe 重做 converter，也不另建排序表。
+Recipe 輸入包含以完整原始索引表示的 participants，以及與 MCP 相同的 typed path overrides。例如 `[{"path": ["tones", 0, "drive", "gain"], "value": 0.3}]` 直接定位完整原始 list 的第 0 個元素。Overrides 不以元素 name 為 key，owner 不做 name→位置轉換。Owner 在 Run 前沿相同 Form 操作套用 overrides，不在 MCP／recipe 重做 converter，也不另建排序表。
 
 每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 以完整原始 list 的位置標示，並附元素 name 供閱讀，不依 participants 順序重新編號。這些內容取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示位置與元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
 
-使用者於 2026-10-18 指出 recipe 名稱定位與核心 index 不一致，裁定：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。因此 overrides 與 MCP 共用 typed paths；participants 仍以名稱表達此次參與順序。
+使用者於 2026-10-18 指出 recipe 名稱定位與核心 index 不一致，裁定：「既然核心是用index，那就用適合核心的方案，不要加一堆難維護的轉換邏輯」。因此 overrides 與 MCP 共用 typed paths；2026-10-23 的索引裁定進一步讓 participants 也直接表示完整原始位置與此次參與順序。
 
 ### 模組分工與可執行依賴規則
 

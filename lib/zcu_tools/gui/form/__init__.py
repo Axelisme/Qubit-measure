@@ -20,6 +20,7 @@ from .description import (
 )
 from .model import (
     Display,
+    FieldApplicability,
     FormChange,
     FormCommandError,
     FormConversionError,
