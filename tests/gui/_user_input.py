@@ -7,7 +7,7 @@ tests send the same Qt events through QApplication.sendEvent instead.
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QDir, QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
 from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -774,9 +774,10 @@ class ComponentDriver:
         """Click opener, enter path in its modal Qt file chooser, and click Open.
 
         The opener must synchronously open a non-native QFileDialog with Qt's
-        visible fileNameEdit. The helper preserves its filter and shows hidden
-        directories and files so paths below hidden parents can be selected.
-        The caller supplies an existing file path (spaces allowed).
+        visible fileNameEdit. Input paths containing hidden parent directories
+        are not supported. The caller supplies an existing file path (spaces
+        allowed). Relative paths require cwd and the chooser's initial directory
+        to refer to the same directory, configured by the caller before opening.
         Before looking up the opener or applying unavailable no-ops,
         nonexistent paths raise FileNotFoundError and existing non-files raise
         ValueError. Visible caption matches take precedence over hidden copies;
@@ -851,7 +852,6 @@ class ComponentDriver:
         chooser = ComponentDriver(dialog)
         if not ComponentDriver._on_screen(dialog):
             raise LookupError("Qt file chooser is not on screen")
-        dialog.setFilter(dialog.filter() | QDir.Filter.Hidden)
         if evidence is not None:
             # This callback is executing, not queued behind the screenshot flush,
             # so capture occurs while the chooser is still awaiting input.

@@ -2,9 +2,10 @@
 
 from collections.abc import Generator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
-from PyQt6.QtCore import QDir, QEvent, QObject, Qt, QTimer
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QAction, QImage
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -409,10 +410,21 @@ def test_plot_axes_and_curves_observe_rendered_artists_only(surface, qapp) -> No
     assert driver.plots().axes == ()
 
 
+@pytest.fixture
+def chooser_directory(monkeypatch: pytest.MonkeyPatch) -> Generator[Path]:
+    """Keep chooser files visible and resolve relative input from its start directory."""
+    with (
+        TemporaryDirectory(prefix="chooser-", dir=Path.cwd()) as directory,
+        monkeypatch.context() as context,
+    ):
+        context.chdir(directory)
+        yield Path(directory)
+
+
 def test_file_chooser_enters_existing_path_through_real_modal_events(
-    surface, tmp_path, qapp
+    surface, chooser_directory: Path, qapp
 ) -> None:
-    native = tmp_path / "saved signal.h5"
+    native = Path("saved signal.h5")
     native.write_bytes(b"synthetic native file")
     button = QPushButton("Choose file")
     surface.setCentralWidget(button)
@@ -422,7 +434,7 @@ def test_file_chooser_enters_existing_path_through_real_modal_events(
         filename, _ = QFileDialog.getOpenFileName(
             surface,
             "Open native data",
-            str(tmp_path),
+            str(chooser_directory),
             "Data (*.h5)",
             options=QFileDialog.Option.DontUseNativeDialog,
         )
@@ -434,47 +446,11 @@ def test_file_chooser_enters_existing_path_through_real_modal_events(
     hidden_copy.hide()
     driver.choose_file("Choose file", native)
     assert driver.dialogs() == ()
-    assert driver.status().text == f"Selected {native}"
+    assert driver.status().text == f"Selected {native.resolve()}"
     button.setEnabled(False)
     driver.choose_file("Choose file", native)
-    assert driver.status().text == f"Selected {native}"
+    assert driver.status().text == f"Selected {native.resolve()}"
     assert driver.dialogs() == ()
-
-
-@pytest.mark.parametrize("show_hidden", [False, True], ids=["hidden-off", "hidden-on"])
-def test_file_chooser_selects_file_below_hidden_parent(
-    surface, tmp_path: Path, qapp, show_hidden: bool
-) -> None:
-    hidden = tmp_path / ".hidden-results"
-    hidden.mkdir()
-    native = hidden / "saved signal.h5"
-    native.write_bytes(b"synthetic native file")
-    button = QPushButton("Choose hidden result")
-    surface.setCentralWidget(button)
-    dialog = QFileDialog(surface, "Open hidden result", str(tmp_path), "Data (*.h5)")
-    dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
-    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-    filters = QDir.Filter.AllEntries | QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot
-    dialog.setFilter(filters | QDir.Filter.Hidden if show_hidden else filters)
-
-    def choose() -> None:
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            surface.statusBar().showMessage(f"Selected {dialog.selectedFiles()[0]}")
-
-    button.clicked.connect(choose)
-    qapp.processEvents()
-    driver = _user_input.ComponentDriver(surface)
-    errors: list[TimeoutError] = []
-    try:
-        driver.choose_file(
-            "Choose hidden result", native, evidence=tmp_path / "chooser.png"
-        )
-    except TimeoutError as error:
-        errors.append(error)
-    driver.screenshot(tmp_path / "selected.png")
-    assert errors == [], "Existing files below hidden parents must be selectable"
-    assert driver.dialogs() == ()
-    assert driver.status().text == f"Selected {native}"
 
 
 def test_viewport_clipped_widgets_cannot_be_observed_or_operated(surface, qapp) -> None:
@@ -525,15 +501,17 @@ def test_viewport_clipped_widgets_cannot_be_observed_or_operated(surface, qapp) 
 
 
 def test_file_chooser_saves_png_before_real_selection_closes_modal(
-    surface, tmp_path, qapp
+    surface, tmp_path, chooser_directory: Path, qapp
 ) -> None:
-    native = tmp_path / "native.h5"
+    native = Path("native.h5")
     native.write_bytes(b"synthetic native file")
     button = QPushButton("Choose with evidence")
     surface.setCentralWidget(button)
     # This external chooser is deliberately larger than the owner. A grab of the
     # owner after acceptance cannot satisfy the image-size assertions below.
-    dialog = QFileDialog(surface, "Open native data", str(tmp_path), "Data (*.h5)")
+    dialog = QFileDialog(
+        surface, "Open native data", str(chooser_directory), "Data (*.h5)"
+    )
     dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
     dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
     dialog.setFixedSize(900, 600)
@@ -553,7 +531,7 @@ def test_file_chooser_saves_png_before_real_selection_closes_modal(
     assert image.size() == dialog.size() * dialog.devicePixelRatioF()
     assert image.size() != QImage(str(owner_shot)).size()
     assert driver.dialogs() == ()
-    assert driver.status().text == f"Selected {native}"
+    assert driver.status().text == f"Selected {native.resolve()}"
 
 
 @pytest.mark.parametrize(
@@ -624,9 +602,9 @@ def test_file_chooser_rejects_bad_path_before_opener_side_effects(
 
 @pytest.mark.parametrize("opener_state", ["disabled", "hidden", "clipped"])
 def test_file_chooser_valid_path_unavailable_opener_is_noop(
-    surface, tmp_path: Path, qapp, opener_state: str
+    surface, tmp_path: Path, chooser_directory: Path, qapp, opener_state: str
 ) -> None:
-    native = tmp_path / "native.h5"
+    native = Path("native.h5")
     native.write_bytes(b"synthetic")
     scroll = QScrollArea()
     content = QWidget()

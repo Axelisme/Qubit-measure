@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import typing
 from collections.abc import Callable, Mapping
 from typing import Annotated
-from typing import Mapping as TypingMapping
 
 import pytest
 from pydantic import BaseModel, Field, JsonValue, create_model
@@ -106,12 +106,14 @@ def test_whole_mapping_expr_is_rejected_at_form_declaration(field: str) -> None:
 
 @pytest.mark.parametrize(
     "annotation",
-    [dict, Mapping, TypingMapping, dict | None, Mapping | str, TypingMapping | None],
+    [dict, Mapping, typing.Mapping, dict | None, Mapping | str, typing.Mapping | None],
 )
 def test_unparameterized_mapping_expr_is_rejected_at_form_declaration(
     annotation: object,
 ) -> None:
-    core = create_model("MappingDeclaration", __base__=ConfigBase, value=(annotation, ...))
+    core = create_model(
+        "MappingDeclaration", __base__=ConfigBase, value=(annotation, ...)
+    )
     with pytest.raises(TypeError, match="value: whole mapping Expr"):
         form_adapter.Form(core, {"value": Expr("$labels")})
 

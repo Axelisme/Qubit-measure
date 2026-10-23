@@ -18,6 +18,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -484,6 +485,16 @@ class RemoteControlServiceBase:
             self._run_off_main(spec, params, bus, request_origin, holder)
         else:
             done = threading.Event()
+            # Future callbacks cover late completion and the wait-expiry boundary once.
+            completion: Future[None] = Future()
+
+            def _complete_timed_out() -> None:
+                # Timeout is not cancellation: a late acceptance still owns its action.
+                continuation = self._reply_continuations.get(method)
+                if "result" in holder and continuation is not None:
+                    self._owner_scheduler.post(
+                        lambda: continuation(ReplyDelivery.FAILED)
+                    )
 
             def _run() -> None:
                 # Check current authority at execution, not at request arrival.
@@ -513,6 +524,7 @@ class RemoteControlServiceBase:
                         holder["controller_error"] = exc
                     finally:
                         done.set()
+                        completion.set_result(None)
 
             self._owner_scheduler.post(_run)
             if not done.wait(timeout=spec.timeout_seconds):
@@ -522,6 +534,7 @@ class RemoteControlServiceBase:
                     code=ErrorCode.TIMEOUT,
                     message=f"handler did not complete within {spec.timeout_seconds}s",
                 )
+                completion.add_done_callback(lambda _future: _complete_timed_out())
                 return
         self._reply_dispatch(link, rid, (method, params), ctx, holder)
 
