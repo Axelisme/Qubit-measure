@@ -25,3 +25,17 @@ Proposes fitted qubit.t1 and its standard error (us) to the captured qubit and w
 ## Recommended
 
 Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained. Missing T1 starts the delay endpoint at 150 us; stored invalid T1 leaves it required and empty. Set 'uniform=False' to cluster more points on the exponential decay while keeping the configured start/stop window.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Obtain a calibrated pi pulse before using the recipe. Confirm the delay window and readout timing.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `t1` after inspecting the same Form errors.
+   points maps to delay Expts; max_delay_us sets the stop. dual_exp and skip change only analysis.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

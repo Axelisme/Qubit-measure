@@ -466,7 +466,7 @@ def evaluate_defaults(
     evaluated = copy_object(data)
     # Leaf path -> the object in evaluated that holds that leaf.
     substituted: dict[FormWritePath, dict[str, JsonValue]] = {}
-    _evaluate_section(model, evaluated, env, (), None, substituted)
+    _evaluate_section(model, evaluated, env, (), substituted)
     if not substituted:
         return evaluated
     checked = result(model, evaluated, env)
@@ -484,26 +484,23 @@ def _evaluate_section(
     data: dict[str, JsonValue],
     env: FormEnv,
     prefix: FormWritePath,
-    tag_key: str | None,
     substituted: dict[FormWritePath, dict[str, JsonValue]],
 ) -> None:
-    """Evaluate one model object's Expr leaves in place; tag_key is its selector."""
+    """Evaluate authored Expr leaves in place."""
     for name, value in tuple(data.items()):
         info = model.model_fields.get(name)
-        if info is None or name == tag_key:
+        if info is None:
             continue
         path = (*prefix, name)
         element = list_model(info)
         if element is not None and isinstance(value, list):
             for index, item in enumerate(value):
                 if isinstance(item, dict):
-                    _evaluate_section(
-                        element, item, env, (*path, index), None, substituted
-                    )
+                    _evaluate_section(element, item, env, (*path, index), substituted)
             continue
         child = selected(info, value)
         if child is not None and isinstance(value, dict):
-            _evaluate_section(child, value, env, path, discriminator(info), substituted)
+            _evaluate_section(child, value, env, path, substituted)
             continue
         text_field = expression_allowed(info, path)
         text = expr_text(value)

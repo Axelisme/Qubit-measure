@@ -47,3 +47,17 @@ Use Homophasal after a fit has written `theta0` when you want equal resonator-ci
 Analysis has four controls: Model type, Fit amplitude background, Fit phase curvature, and Electrical delay seed in us. Their defaults are `hm`, on, off, and blank.
 
 Leave the delay blank to use a finite route-matched calibration as the branch seed. When a matching prior is absent, analysis searches with a 100 us cap. Enter a finite delay to seed the fitted branch instead. Valid delay inputs are finite numbers, including zero and negative values. The fit can adjust the seeded delay.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Supply a resonator frequency or an explicit center, plus a positive linewidth or explicit span. Check readout timing.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `onetone_spectrum` after inspecting the same Form errors.
+   points maps to frequency Expts. Optional center_mhz/span_mhz use resonator frequency/linewidth. Analysis controls are model_type, fit_bg_amp_slope, fit_bg_phase_curvature and edelay.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

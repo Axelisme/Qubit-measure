@@ -7,14 +7,14 @@ Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
 Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
-a nonempty, unique list of existing names. Q3/Q1 selects original indices [2, 0]
+a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
-including nonparticipants, on independent generators distinct from readout.
+only for participants, on independent generators distinct from readout.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
-all tones, including nonparticipants. Point p pairs each active tone's p-th value,
+selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program sweeps drive DAC frequencies in a shared hardware loop.
 Each point executes optional common reset, Join of independent drive pulses,
 then active fixed-frequency mux readout. Branches start together;
@@ -77,7 +77,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
@@ -96,7 +96,6 @@ from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
-    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
@@ -109,7 +108,7 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules supplies optional reset and the full readout tone list. tones gives
     each original readout position a unique name, a drive and a MHz sweep.
-    participants selects a nonempty, unique list of names in measurement order.
+    participants selects a nonempty, unique list of original indices in measurement order.
     All tones need distinct drive generators, separate from readout.
     expts is the positive hardware point count shared by all tones.
     Sweeps advance together by point, not as a Cartesian product. reps/rounds are positive averaging counts;
@@ -124,7 +123,7 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
         title="Expts",
         description="Hardware scan point count shared by all tones.",
     )
-    participants: list[str]
+    participants: list[StrictInt]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
@@ -159,13 +158,15 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqSca
     This function does not acquire data or change cfg.
     """
     cfg = MuxFreqCfg.model_validate(cfg.model_dump())
-    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
+    indices = list(cfg.participants)
     coordinates = []
     for index in indices:
         tone = cfg.tones[index]
-        drive = tone.drive
+        drive = tone.require_drive()
         actual = sweep2array(
-            make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+            make_sweep(
+                tone.require_sweep().start, tone.require_sweep().stop, cfg.expts
+            ),
             "freq",
             {"soccfg": soccfg, "gen_ch": drive.ch, "mixer_freq": drive.mixer_freq},
         )
@@ -246,12 +247,16 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
-                drive = tone.drive.model_copy(deep=True)
+                drive = tone.require_drive().model_copy(deep=True)
                 drive.set_param(
                     "freq",
                     sweep2param(
                         "point",
-                        make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+                        make_sweep(
+                            tone.require_sweep().start,
+                            tone.require_sweep().stop,
+                            cfg.expts,
+                        ),
                     ),
                 )
                 drives.append(Pulse(f"drive_{index}", drive))

@@ -1,23 +1,78 @@
 """Mux group readout slots, qubit identities and shared recovery initial values."""
 
+from collections.abc import Sequence
 from math import isfinite, pi
 
 from zcu_tools.cfg_model import (
     Expr,
     FieldMeta,
+    FormNode,
     MuxReadoutSpec,
     Slot,
     Template,
     TemplateSeed,
 )
 from zcu_tools.gui.form_adapter import FixedElements, FormContext
+from zcu_tools.gui.session.aliases import AliasTable
+from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
 
 from .ctx_helpers import t1_initial_time
 from .mux_bindings import require_mux_group, require_mux_qubits
+from .seed_metadata import seed_metadata
 
 READOUT_ELEMENTS = FixedElements(("modules", "readout", "module", "tones"))
+
+
+def mux_tone_initials(
+    tones: list[dict[str, FormNode]],
+    participants: Sequence[int | str],
+    *,
+    fields: tuple[str, ...],
+) -> list[FormNode]:
+    """Build Open/Reset tone seeds after choosing original participant indices.
+
+    tones is the complete ordered authored list. participants contains original
+    indices; unknown captured names may remain as invalid draft strings and do
+    not select a tone. Keep selected seeds and every identity field; set the
+    listed nullable drive/sweep fields to None elsewhere.
+    Return new dictionaries without editing the caller's trees. Ordinary edits
+    never call this helper, so adding/removing participants preserves draft values.
+    """
+    return [
+        {
+            **tone,
+            **({field: None for field in fields} if index not in participants else {}),
+        }
+        for index, tone in enumerate(tones)
+    ]
+
+
+def captured_mux_participants(
+    ctx: FormContext, names: Sequence[str]
+) -> list[int | str]:
+    """Seed original indices from this Open/Reset capture's $participants.
+
+    names is the complete captured qubit order for drive/flux Forms, or
+    resonator order for onetone. Resolve scalar/list aliases and $ links through
+    the alias owner. Missing or unbound rows (including []) select every index.
+    Other alias/source faults propagate, including unbound nonempty elements.
+    Preserve unknown names as ordinary invalid drafts so the field shows the
+    name and rejects cfg until corrected. Never refresh sources or edit tones.
+    """
+    if ctx.parameters is None:
+        raise ValueError("Mux participants require a parameter capture")
+    try:
+        value = AliasTable(ctx.parameters.aliases).resolve_value(
+            "participants", ctx.parameters.document()
+        )
+    except RoleResolutionError as error:
+        if error.reason not in ("Unknown alias", "Alias is not bound"):
+            raise
+        return list(range(len(names)))
+    selected = [value] if isinstance(value, str) else value
+    return [names.index(name) if name in names else name for name in selected]
 
 
 def captured_mux_names(ctx: FormContext) -> tuple[str, ...]:
@@ -104,8 +159,9 @@ def mux_readout_seed_metadata(
     """Describe only the readout seeds actually authored by mux_readout_initial.
 
     initial is its returned Slot or Template, never a materialized cfg. Ref-only
-    slots declare nothing. Generated gain 0.1 and timing overrides are uncalibrated
-    candidates; untouched captured settings remain unknown. Paths are canonical
+    slots declare nothing. Only fixed gain 0.1 and ADC window 1.0 us are marked
+    uncalibrated. Captured mixer and derived timing describe their source paths
+    without claiming measured calibration. Paths are canonical
     for the modules/readout field. No sources, devices or calibration are read.
     """
     if isinstance(initial, Slot) and not initial.copy:
@@ -116,27 +172,27 @@ def mux_readout_seed_metadata(
     if isinstance(tones, list):
         for index, tone in enumerate(tones):
             if tone.get("gain") == 0.1:
-                result[(*prefix, "tones", index, "gain")] = FieldMeta(
-                    description="未校準的起始值，來源：固定常數。Mux readout amplitude seed 0.1 normalized; operator confirmation required",
-                    calibration="uncalibrated",
+                result[(*prefix, "tones", index, "gain")] = seed_metadata(
+                    "Mux readout amplitude seed 0.1 normalized; operator confirmation required",
+                    fallback=True,
                 )
     formulas = {
-        "mixer_freq": "from $mux.mixer_freq",
+        "mixer_freq": "From captured $mux.mixer_freq in MHz",
         "ro_length": "Fixed 1.0 us ADC window candidate; independent of group kappa",
-        "trig_offset": "$mux.time_of_fly + ringup",
-        "length": "trig_offset + ro_length",
+        "trig_offset": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) in us",
+        "length": "From captured $mux.time_of_fly + 5/(2*pi*min($mux.resonators kappa)) + fixed ro_length 1.0 us",
     }
     if isinstance(initial, Slot):
         formulas.update(
             {
-                "trig_offset": "captured readout.trig_offset + 5/(2*pi*min set group kappa)",
-                "length": "max(captured readout.length, trig_offset + captured readout.ro_length)",
+                "trig_offset": "From captured $mux.module.readout.trig_offset + 5/(2*pi*min(set $mux.resonators kappa)) in us; no set kappa adds zero wait",
+                "length": "From max(captured $mux.module.readout.length, derived trig_offset + captured $mux.module.readout.ro_length) in us",
             }
         )
     for field, formula in formulas.items():
         if field in initial.set:
-            result[(*prefix, field)] = FieldMeta(
-                description=formula, calibration="uncalibrated"
+            result[(*prefix, field)] = seed_metadata(
+                formula, fallback=field == "ro_length"
             )
     return result
 

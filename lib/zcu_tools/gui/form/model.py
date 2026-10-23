@@ -741,8 +741,9 @@ class FormState[F: FormModel]:
         inactive descendants, invalid or out-of-range model-list indexes and
         traversal into whole leaves raise FormPathError with the full requested path. Unsupported declarations and other
         non-path failures keep their original exception types.
-        Does not validate, evaluate expressions, call defaults, read sources
-        outside declaration hooks, mutate input/base or notify subscribers.
+        Does not evaluate or validate the described values, call defaults,
+        read sources outside declaration hooks, mutate
+        input/base or notify subscribers.
         """
         from ._describe import describe
 

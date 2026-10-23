@@ -1,8 +1,8 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-23
+**讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、operator guide 與校準 writeback。
+**Last updated:** 2026-10-23
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -12,6 +12,7 @@
 - [實驗重載](#實驗重載)
 - [Form 與固定來源](#form-與固定來源)
 - [表單設計與預演](#表單設計與預演)
+- [Recipe 撰寫](#recipe-撰寫)
 - [執行與分析契約](#執行與分析契約)
 - [Operator guide 格式](#operator-guide-格式)
 - [Readout 分析與 writeback](#readout-分析與-writeback)
@@ -112,7 +113,9 @@ Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數�
 不要在機械一致性修正中改變等待時間或 fallback 政策。
 
 對實際產生的候選初值，用 `Form.with_seed_metadata` 的逐位置
-`FieldMeta(description=..., calibration="uncalibrated")` 記錄來源。
+`FieldMeta(description=...)` 記錄來源路徑。只有固定常數 fallback 加上
+`calibration="uncalibrated"`，description 寫明「未校準的起始值，來源：固定常數」。
+從 group／resonator／qubit 參數推導的初值不加此標記，也不宣稱 measured。
 它供 diagnostics 使用，不覆寫 GUI label／unit。
 未改寫的 captured slot 不標成 measured；未知狀態保留未知。
 用 `get_cfg.diagnostics` 的 seed_source、seed_status、uncalibrated 核對 Open／Reset 的結果。
@@ -143,6 +146,129 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
 Guide 必須提醒來源修改後需 Reset；Refresh 只更新 source／choice，
 Reset 可能覆蓋尚未儲存的輸入。
+
+## Recipe 撰寫
+
+「我會希望zcu_lab中的內容有最大化的可讀性，上手時間最短，實作內容一看就懂」
+
+在 zcu_lab 內，可讀性優先於 lib 的強型別、防禦分支與抽象規則。衝突時選一眼就懂的寫法，
+型別與驗證由 lib 在邊界承擔，不在 recipe 另寫一套驗證。
+審查標準是「新人多久能看懂這個 recipe／core」，不是 class 數或型別完整性。
+
+「加入自己的客製化修改也很自然」
+
+改脈衝、多欄位或換分析步驟，應像改腳本，不必先理解基底或 helper 契約。
+lib 基底只給可選的預設路徑，不限制 recipe 直接寫自己的步驟，也不要求套進固定流程。
+新增自己的設定時，在輸入宣告欄位，再在步驟發生的位置使用它。
+
+每個 cfg／表單／recipe 欄位要能用一句使用者術語說出它在這個實驗的用途，說不出就是殘留，review 時逐欄位問。
+
+Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六項，審查裁決見
+[程式碼品質](../../docs/code-quality.md#zcu_lab-審查裁決)：
+
+1. 主體直接寫開 tab、改欄位、Run、Analyze、問答、寫回及 Save 的順序。
+   共用的來源選取與 overrides 套用交給 lib，但量測動作不藏進 helper。
+2. 分析結果引用 owner 匯出的型別，不另寫 FitQuality、QualityIssue 或 summary 鏡像 model。
+3. Recipe class 只宣告實驗輸入與報告，不為步驟再建 runner 或 pipeline class。
+4. Helper 只做數字呈現等機械格式化。選脈衝、掃描範圍、重測與寫回判斷留在主體。
+5. Review core 時逐項說明 class 與抽象的用途，讓讀者從 `run` 看見脈衝序列。
+   Class 數只提示閱讀成本，不是新增或刪除 class 的配額。
+6. Docstring 寫使用者要填的量、單位、null 語意、量測動作與分析參數的效果。
+   明列 `n → expts` 或 `points → expts`，不要用框架術語取代實驗說明。
+
+以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
+輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。
+共用 library 清單選 key，inline 清單複製 selector，overrides 在最後覆寫實驗值。
+只有本次需要的非 None 值會改 Form。
+
+來源選好後，骨架直接插入「複製 drive waveform」的自訂步驟。
+最後一批同時套用掃描、脈衝長度與 overrides，才驗完整 cfg。
+這個位置也能插入自己的 Form 讀取或換 pulse，不需要 hook class：
+
+```python
+from typing import Literal
+
+from pydantic import Field
+from zcu_tools.gui.form_adapter.sweep import LinRange
+from zcu_tools.mcp.measure.recipe_api import (
+    RecipeInputs, RecipeReport, RecipeSession, recipe, report_number,
+)
+from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
+
+
+class Inputs(RecipeInputs):
+    """Drive sweep bounds in MHz and a custom constant-pulse duration in us."""
+
+    start_mhz: float = Field(description="Drive sweep start in MHz.")
+    stop_mhz: float = Field(description="Drive sweep stop in MHz.")
+    n: int = Field(ge=2, description="Sweep sample count, mapped to GUI Expts.")
+    pulse_length_us: float = Field(gt=0, description="Custom drive duration in us.")
+    model_type: Literal["lor", "sinc"] = "lor"
+    plot_fit: bool = True
+
+
+class Report(RecipeReport):
+    """Transition estimate and the inherited writeback/analysis facts."""
+
+    frequency_mhz: float | None = None
+
+
+@recipe("custom_spectrum", description="Sweep drive frequency with a custom pulse.")
+async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
+    """Sweep, fit a transition, ask before writeback, then save.
+
+    n → sweep.freq.expts sets the sample count. Frequencies use MHz.
+    pulse_length_us changes the drive duration before acquisition.
+    model_type selects the existing lor/sinc fit; plot_fit controls its overlay.
+    Missing Form values stop before acquisition. Null common values retain input.
+    """
+    tab = session.open_recipe_tab("twotone/freq", inputs, target_alias="qubit")
+    tab.select_sources(inputs)
+
+    # Custom experiment step between source selection and complete admission.
+    tab.select(("modules", "qub_pulse"), inline=True)
+    tab.select(("modules", "qub_pulse", "waveform"), inline=True)
+    tab.apply_inputs(inputs, {
+        ("sweep", "freq"): LinRange(
+            start=inputs.start_mhz, stop=inputs.stop_mhz, n=inputs.n
+        ),
+        ("modules", "qub_pulse", "waveform", "length"): inputs.pulse_length_us,
+    })
+
+    await tab.run()
+    try:
+        analysis = await tab.analyze(
+            "primary", result=TwotoneSpectrumSummary,
+            updates={"model_type": inputs.model_type, "plot_fit": inputs.plot_fit},
+        )
+        if analysis.result is None:
+            return Report(analysis_failure=analysis.reason)
+        decision = await tab.ask_writeback()
+        applied = False
+        if decision.accepted:
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            applied = bool(receipt.items)
+        return Report(
+            frequency_mhz=report_number(analysis.result.freq),
+            writeback_applied=applied,
+        )
+    finally:
+        tab.save()
+```
+
+沒有中途自訂步驟時，可用
+`session.prepare_tab(adapter, inputs, target_alias="qubit", values=...)`。
+它只做 Open／Reset、來源選取與完整批次驗證，不做 Run。
+既有校準計算若已產生帶 source 的 `FieldEdit`，在分拆路徑用
+`tab.apply_inputs(inputs, values, edits=calibration_edits)`。
+Lib 依序提交 values、具名 edits、overrides，保留每筆 source。
+不要先用 `tab.set` 提交半套欄位，否則其他必填值尚未補齊就會得到 invalid_cfg。
+
+`select`、`apply`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
+`run` 成功後才進入 Save 的 `finally`，分析失敗仍保存 raw data 與已完成產物。
+不要把整段改成無法插入步驟的 `run_all`。需要換分析時，就在 `analyze` 呼叫處換 stage、
+owner 型別或分析參數，不必先修改基底。
 
 ## 執行與分析契約
 

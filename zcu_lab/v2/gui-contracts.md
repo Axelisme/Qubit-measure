@@ -1,6 +1,6 @@
 # Measure GUI contracts
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-24
 
 **讀者：** lab-author、framework-dev、agent。查閱 concrete adapter 的來源、分析、writeback 與 capability 契約。
 
@@ -82,7 +82,7 @@ RunRecord 是本套件 concrete adapters 採用的結果形式，framework 不�
 
 MuxGroup 的必填 resonators 保存有序 resonator 名稱。選填 qubits 由 model 檢查等長與重複 qubit。提供時，Mux OneTone 的 Form 在 Open／Reset 以固定 ParameterContext 逐項檢查 component 存在、qubit／resonator kind 和 qubit.resonator 對應，缺失或 null 同樣拒絕。錯誤指名欄位、index 與實際值，不另加 framework 外部反紅機制。無 qubits 時不套這些跨 component 檢查，也不額外拒絕重複 resonator。
 
-Mux OneTone 的 Readout 初值取 `$mux.module.readout`，沒有來源可手填有效 readout。active_tones=None 量全部；指定 list 須非空、唯一且為完整 readout 範圍內的整數，不接受 bool、float 或字串。無效 selection 沿宿主 result／Run 診斷定位 active_tones 並拒絕 Run，不保證欄位變紅。Lab 按輸入順序投影 subset 交 program，RunRecord 保存完整 readout、labels 與 selection，不另存 resonators 或 group identity。Live 圖有 K 條線，legend 由 plotting owner callback 設定；原始 tone_indices 與 signals columns 同序，不重新編號。Capability 為 FIT，所有 active tones 共用 onetone/freq 的四欄設定：`model_type`、`fit_bg_amp_slope`、`fit_bg_phase_curvature`、`edelay`，預設依序為 `hm`、`True`、`False`、留空。FIT 核對保存的 cfg、selection、原始座標與資料 shape，每個 column 使用原始 base frequency 加 nominal dfs 並去首尾點。`fit_i` 用原始序號命名，重複 label 不覆蓋圖。每個 active 的 typed outcome 保留成功 scalars 或失敗原因；inactive 不參與分析。缺 cfg 拒絕 FIT，不借目前表單。
+Mux OneTone 的 Readout 初值取 `$mux.module.readout`，沒有來源可手填有效 readout。participants 須非空、唯一且為完整 readout 範圍內的整數，不接受 bool、float 或字串。Open／Reset 依同次 capture 的 `$mux.resonators` 將 `$participants` 名稱轉成 indices，缺列、未綁或空清單選全部。外群名稱保留為可編輯的 invalid draft，整數錯誤標紅並拒絕 cfg。非空清單的未綁元素拒絕 Open／Reset，不 fallback。其他無效 selection 沿宿主 result／Run 診斷定位 participants 並拒絕 Run。Lab 按輸入順序投影 subset 交 program，RunRecord 保存完整 readout、labels 與 selection，不另存 resonators 或 group identity。Live 圖有 K 條線，legend 由 plotting owner callback 設定；原始 tone_indices 與 signals columns 同序，不重新編號。Capability 為 FIT，所有 active tones 共用 onetone/freq 的四欄設定：`model_type`、`fit_bg_amp_slope`、`fit_bg_phase_curvature`、`edelay`，預設依序為 `hm`、`True`、`False`、留空。FIT 核對保存的 cfg、selection、原始座標與資料 shape，每個 column 使用原始 base frequency 加 nominal dfs 並去首尾點。`fit_i` 用原始序號命名，重複 label 不覆蓋圖。每個 active 的 typed outcome 保留成功 scalars 或失敗原因；inactive 不參與分析。缺 cfg 拒絕 FIT，不借目前表單。
 Module proposal 從完整 run readout 建立，只換成功 active 的 freq；失敗和 inactive 保留原值，全失敗不提 module。Target 固定 `$mux.readout.readout_rf`。
 有 Run／Load capture 時，模組列後新增 `$mux.module.readout` ParameterWriteback，值為同份 capture 解析的 module root。
 Apply 模組列與 slot 列後，slot 指向該 library root，下次開表單沿既有 slot 來源讀取。

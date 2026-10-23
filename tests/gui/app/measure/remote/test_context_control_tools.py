@@ -44,6 +44,19 @@ def rpc_error(
     return error
 
 
+def test_alias_lists_roundtrip_remote_set_and_projection(
+    application: PointApplication,
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "base"})
+    rows = [{"alias": "participants", "value": ["Q3", "Q1"]}]
+    reply = application.rpc("context.aliases_set", {"rows": rows})
+    assert reply["ok"] is True, reply
+    assert application.result("context.snapshot", {"path": "aliases"})["value"] == [
+        {"alias": "participants", "value": ["Q3", "Q1"], "resolved": ["Q3", "Q1"]}
+    ]
+
+
 @pytest.mark.parametrize("selection", ["no_entry", "entry", "point"])
 def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     application: PointApplication, selection: str

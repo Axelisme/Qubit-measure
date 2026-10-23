@@ -18,7 +18,7 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 
 `ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Point 的 `point.yaml` 與 `module_cfg.yaml` 必須存在，否則讀寫都報 FileNotFoundError。Alias I/O 只讀寫選定的 alias 表，兩份參數文件保持原狀。
 
-`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。Mapping 保留空字串、原始 `$` link 與順序。格式、結構、非字串值與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
+`aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。`AliasValue = str | list[str]` 表達單一名稱、`$` link 或有序名稱／link 清單。Mapping 保留空字串、空清單、原始 `$` link 與元素順序。清單以 YAML list 保存，不編碼成字串。格式、結構、非字串元素與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。Run snapshot、storage 與 acquired payload 也保留有序名稱清單；普通元件路徑解析只接受單一名稱，拒絕清單。Alias 工作焦點與 parameters 元件事實分開，見 ADR-0063。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
 
 `new_point` 從 setup 建立時，有 alias 檔才逐 byte 複製；clone 則只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 PointView。來源缺檔就保持缺檔，不讀目的 setup 的 alias。之後改 setup、來源或目的表都不影響其他表。
 

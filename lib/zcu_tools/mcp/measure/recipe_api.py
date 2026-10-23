@@ -10,10 +10,13 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from inspect import Parameter, iscoroutinefunction, signature
+from math import isfinite
 from typing import TYPE_CHECKING, Literal, Protocol, get_type_hints
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
+from zcu_tools.analysis.fitting.quality import FitQuality as FitQuality
+from zcu_tools.analysis.fitting.quality import QualityIssue as QualityIssue
 from zcu_tools.cfg_model.template_nodes import Expr as Expr
 from zcu_tools.core.script_protocol import (
     Answer,
@@ -134,6 +137,99 @@ class FieldEdit(BaseModel):
     path: FormPath
     value: FormValue
     source: str = "explicit"
+
+
+class LibrarySelection(BaseModel):
+    """Select one captured module key through RecipeTab.select.
+
+    path uses logical field names and original list indexes. key=None retains
+    the selection. The GUI checks family, readonly and source compatibility.
+    """
+
+    path: FormPath = Field(
+        description="Nonempty selector path; indexes are original positions."
+    )
+    key: str | None = Field(
+        description="Actual module library key; null retains the selection."
+    )
+
+
+class InlineSelection(BaseModel):
+    """Copy a captured selector inline through RecipeTab.select.
+
+    path uses logical field names and original list indexes. List ancestors
+    before children; the GUI rejects missing, readonly or invalid selections.
+    """
+
+    path: FormPath = Field(
+        description="Nonempty selector path to copy; ancestors come first."
+    )
+
+
+class RecipeInputs(BaseModel):
+    """Optional source and edit inputs shared by experiment recipes.
+
+    Add experiment fields in a subclass. Unknown fields and non-finite numeric
+    inputs fail validation; recipe admission records failed before binding the
+    GUI or starting measurement. None keeps the corresponding Form input or
+    global alias. These inputs do nothing until passed to a session or tab
+    method; authors may instead use open_tab, select and apply directly.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    target: str | None = Field(
+        default=None,
+        description="Alias target for this Reset; null keeps global aliases.",
+    )
+    reuse_tab_id: str | None = Field(
+        default=None, description="Idle matching tab to Reset; null opens a new tab."
+    )
+    library: list[LibrarySelection] | None = Field(
+        default=None,
+        description="Ordered captured module selections, before inline copies; null keeps sources.",
+    )
+    inline: list[InlineSelection] | None = Field(
+        default=None,
+        description="Ordered captured module copies, ancestors first; null keeps sources.",
+    )
+    overrides: list[FieldEdit] | None = Field(
+        default=None,
+        description="Ordered edits after experiment values; null values retain Form input.",
+    )
+
+
+class RecipeReport(BaseModel):
+    """Common report facts, without fit acceptance or writeback policy.
+
+    Add experiment results in a subclass. Authors fill these facts explicitly;
+    constructing a report does not analyze, save or apply writeback.
+    """
+
+    writeback_applied: bool = Field(
+        default=False,
+        description="True only when selected writeback items were successfully applied.",
+    )
+    analysis_failure: str | None = Field(
+        default=None,
+        description="Owner analysis failure reason; null when no failure is reported.",
+    )
+    fit_quality: FitQuality | None = Field(
+        default=None,
+        description="Owner fit diagnostics unchanged; null when no quality result is supplied.",
+    )
+    diagnostics: tuple[QualityIssue, ...] = Field(
+        default=(),
+        description="Owner diagnostic paths and reasons in original order, without acceptance thresholds.",
+    )
+
+
+def report_number(value: float | None) -> float | None:
+    """Retain a finite scalar unchanged; return None for None, NaN or infinity.
+
+    No rounding, unit conversion, fit selection or writeback decision occurs.
+    """
+    return value if value is not None and isfinite(value) else None
 
 
 @dataclass(frozen=True)
@@ -370,6 +466,51 @@ class RecipeSession:
         """
         return self._runtime.open_tab(adapter, aliases=aliases, reuse=reuse)
 
+    def open_recipe_tab(
+        self, adapter: str, inputs: RecipeInputs, *, target_alias: str
+    ) -> RecipeTab:
+        """Open or validate reuse and Reset, without selections or value edits.
+
+        adapter is the registered experiment name. target_alias is its alias
+        name (for example qubit or mux), not an experiment field path. A supplied
+        inputs.target overrides only that alias in this Reset; None keeps global
+        aliases. inputs.reuse_tab_id follows open_tab's idle/matching checks.
+        Owner and transport failures propagate without retry or rollback.
+        """
+        return self.open_tab(
+            adapter,
+            aliases=None if inputs.target is None else {target_alias: inputs.target},
+            reuse=inputs.reuse_tab_id,
+        )
+
+    def prepare_tab(
+        self,
+        adapter: str,
+        inputs: RecipeInputs,
+        *,
+        target_alias: str,
+        values: Mapping[FormPath, FormValue] | None = None,
+        require_valid: bool = True,
+    ) -> RecipeTab:
+        """Open/Reset, select library then inline sources, and apply values last.
+
+        values maps logical Form paths to native experiment values in field
+        units; None retains input. inputs.overrides follow those values in the
+        same batch. By default the owner validates the complete cfg before
+        returning the tab. No Run, analysis, Save or writeback occurs.
+        To read Form values or insert custom edits before complete validation,
+        use open_recipe_tab, select_sources, your steps, then apply_inputs.
+        require_valid=False keeps apply's invalid-draft commit/raise semantics;
+        it is not a promise to accept an invalid draft without an error.
+        Failure propagates without rollback of earlier Reset or selections.
+        """
+        tab = self.open_recipe_tab(adapter, inputs, target_alias=target_alias)
+        tab.select_sources(inputs)
+        tab.apply_inputs(
+            inputs, values if values is not None else {}, require_valid=require_valid
+        )
+        return tab
+
     async def ask[A: Answer](self, question: Question[A]) -> A:
         """Wait for a validated answer; raise ScriptCancelled on script cancel.
 
@@ -435,6 +576,61 @@ class RecipeTab:
         An empty validated batch checks the current cfg without changing it.
         """
         self._runtime.apply_fields(self.tab, edits, require_valid=require_valid)
+
+    def select_sources(self, inputs: RecipeInputs) -> None:
+        """Select inputs.library in order, then copy inputs.inline in order.
+
+        None lists or library keys retain input. Paths use original list
+        indexes; put referenced ancestors before children. Each selection uses
+        select's owner checks. Failures stop without retry or rollback of prior
+        selections. Values and overrides are not applied by this method.
+        """
+        for selection in inputs.library or ():
+            self.select(selection.path, ref=selection.key)
+        for selection in inputs.inline or ():
+            self.select(selection.path, inline=True)
+
+    def apply_inputs(
+        self,
+        inputs: RecipeInputs,
+        values: Mapping[FormPath, FormValue],
+        *,
+        edits: Sequence[FieldEdit] = (),
+        require_valid: bool = True,
+    ) -> None:
+        """Apply experiment values, named edits, then overrides as one candidate.
+
+        values maps logical Form paths to native values in field units. Mapping
+        iteration order is retained. edits preserves each supplied path, value
+        and source, for example a calibration or linewidth-derived edit. None
+        values retain Form input in all three groups. For an exact repeated path,
+        the last non-None edit wins, including its source. Distinct ancestor and
+        descendant paths still reach owner admission and are rejected as overlaps.
+        All supplied edits retain path/source validation, even when superseded
+        or None. No source selection occurs here. require_valid=True checks the
+        complete cfg atomically and raises RecipeNeedsParameters on rejection. False follows apply's draft
+        commit/raise semantics. Prior custom edits/selections are not rolled back.
+        """
+        batch = [
+            FieldEdit(path=path, value=value)
+            for path, value in values.items()
+            if value is not None
+        ]
+        batch.extend(edits)
+        batch.extend(inputs.overrides or ())
+        last = {
+            edit.path: index
+            for index, edit in enumerate(batch)
+            if edit.value is not None
+        }
+        # Preserve authored path/source validation while sending only the last non-None value per exact path.
+        final = [
+            edit
+            if edit.value is None or last[edit.path] == index
+            else FieldEdit(path=edit.path, value=None, source=edit.source)
+            for index, edit in enumerate(batch)
+        ]
+        self.apply(final, require_valid=require_valid)
 
     def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
         """Call one named RPC and decode its reply as result, without retries.
@@ -531,7 +727,7 @@ class RecipeDeclaration:
     """An explicit catalog declaration, without import-time registration or I/O.
 
     name is the tool name; description explains its operations/handoffs. inputs
-    is the authored FormModel inferred from the function's second parameter.
+    is the authored BaseModel inferred from the function's second parameter.
     _body preserves its input/report pairing at the reflection boundary.
     """
 
@@ -563,7 +759,7 @@ class RecipeDecorator(Protocol):
 
 
 def recipe(name: str, description: str) -> RecipeDecorator:
-    """Declare async (session, inputs:FormModel)->Report without running it.
+    """Declare async (session, inputs:BaseModel)->Report without running it.
 
     name/description must be nonblank. Return the declaration in an explicit
     RECIPES tuple. Inputs and Report must be named BaseModel subclasses. No

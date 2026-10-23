@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -38,12 +39,44 @@ class FreqAnalyzeParams:
     plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
 
+class TwotoneSpectrumSummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    freq: float | None = Field(
+        description="Owner freq in MHz; null retains an unavailable estimate."
+    )
+
+    freq_err: float | None = Field(
+        description="Owner freq_err in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm: float | None = Field(
+        description="Owner fwhm in MHz; null retains an unavailable estimate."
+    )
+
+    fwhm_err: float | None = Field(
+        description="Owner fwhm_err in MHz; null retains an unavailable estimate."
+    )
+
+
 @dataclass
 class FreqAnalyzeResult(AnalyzeResultBase):
     freq: float
     freq_err: float
     fwhm: float
     fwhm_err: float
+
+    def summary(self) -> TwotoneSpectrumSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return TwotoneSpectrumSummary(
+            freq=self.freq,
+            freq_err=self.freq_err,
+            fwhm=self.fwhm,
+            fwhm_err=self.fwhm_err,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class FreqAdapter(

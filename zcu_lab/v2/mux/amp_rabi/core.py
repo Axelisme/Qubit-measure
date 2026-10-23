@@ -7,14 +7,14 @@ Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
 Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
-a nonempty, unique list of existing names. Q3/Q1 selects original indices [2, 0]
+a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
-including nonparticipants, on independent generators distinct from readout.
+only for participants, on independent generators distinct from readout.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
-all tones, including nonparticipants. Point p pairs each active tone's p-th value,
+selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program advances all gains in a shared hardware loop.
 Each point executes optional common reset, Join of independent drive pulses,
 then active mux readout. Branches start together; short branches wait for the
@@ -79,7 +79,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
@@ -99,7 +99,6 @@ from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
-    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
@@ -112,9 +111,9 @@ class MuxAmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules holds optional reset and complete mux readout. tones contains one
     MuxToneCfg per original readout position, with unique nonempty names.
-    participants is a nonempty, duplicate-free list of those names; its order
+    participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
-    Every drive is required/validated, including nonparticipants, on independent
+    Selected drives are required/validated on independent
     generators distinct from readout. Independent normalized-gain ranges stay
     in [-1,1]; expts is the positive hardware point count shared by all tones.
     Inherited reps/rounds are positive; initial_delay/relax_delay are finite
@@ -129,14 +128,15 @@ class MuxAmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
         title="Expts",
         description="Hardware scan point count shared by all tones.",
     )
-    participants: list[str]
+    participants: list[StrictInt]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
         """Reject invalid full length, drive channels, counts or gain ranges."""
         validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
-        for index, tone in enumerate(self.tones):
-            if max(abs(tone.sweep.start), abs(tone.sweep.stop)) > 1:
+        for index in self.participants:
+            tone = self.tones[index]
+            if max(abs(tone.require_sweep().start), abs(tone.require_sweep().stop)) > 1:
                 raise ValueError(f"tones[{index}].sweep gains must be in [-1,1]")
         return self
 
@@ -153,14 +153,17 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     Invalid cfg raises ValueError; board conversion errors propagate.
     """
     cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
-    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
+    indices = list(cfg.participants)
     coordinates = []
     points = [[] for _ in range(cfg.expts)]
     for index in indices:
         tone = cfg.tones[index]
-        drive = tone.drive
+        drive = tone.require_drive()
         nominal = sweep2array(
-            make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts), "none"
+            make_sweep(
+                tone.require_sweep().start, tone.require_sweep().stop, cfg.expts
+            ),
+            "none",
         )
         actual = round_zcu_gain(nominal, soccfg, drive.ch)
         coordinates.append(actual)
@@ -240,12 +243,16 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
-                drive = tone.drive.model_copy(deep=True)
+                drive = tone.require_drive().model_copy(deep=True)
                 drive.set_param(
                     "gain",
                     sweep2param(
                         "point",
-                        make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+                        make_sweep(
+                            tone.require_sweep().start,
+                            tone.require_sweep().stop,
+                            cfg.expts,
+                        ),
                     ),
                 )
                 drives.append(Pulse(f"drive_{index}", drive, pulse_id=f"drive_{index}"))

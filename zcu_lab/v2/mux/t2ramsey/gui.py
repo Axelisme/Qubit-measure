@@ -25,7 +25,11 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, coherence_summary
+from zcu_lab.v2._support.measure.mux_results import (
+    MuxCoherenceSummary,
+    captured_qubits,
+    coherence_summary,
+)
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
@@ -46,9 +50,13 @@ class MuxT2RamseyAnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxCoherenceFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present original positions/names, numerical values, quality or failure."""
+    def summary(self) -> MuxCoherenceSummary:
+        """Return native coherence outcomes with fixed original tone identities."""
         return coherence_summary(self.outcomes, self.names)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 def _frequency_review_note(outcome: MuxCoherenceFit, t2_note: str | None) -> str | None:

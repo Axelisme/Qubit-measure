@@ -168,8 +168,9 @@ def read_records[P: BaseModel](
 ) -> tuple[SavedRecord[P], ...]:
     """Read a homogeneous run as caller-supplied model instances, ordered by commit_seq.
 
-    record is a BaseModel class or its TypeAdapter. Qualified type names must
-    match; degraded encoding or field validation raises ValueError naming the
+    record is a BaseModel class or its TypeAdapter; other adapter targets raise
+    TypeError. Qualified type names must match; degraded encoding or field
+    validation raises ValueError naming the
     record.json source. Use read_records_raw for heterogeneous runs. Manifest
     schemas remain informational, and no jsonschema dependency is required.
     """
@@ -207,7 +208,12 @@ def read_records[P: BaseModel](
 def _record_type[P: BaseModel](adapter: TypeAdapter[P]) -> str:
     # Pydantic's public model core schema retains the actual class, unlike JSON title overrides.
     schema = adapter.core_schema
-    while schema["type"] in ("function-after", "function-before", "function-wrap"):
+    while schema["type"] in (
+        "definitions",
+        "function-after",
+        "function-before",
+        "function-wrap",
+    ):
         inner = schema.get("schema")
         if inner is None:
             break

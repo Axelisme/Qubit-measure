@@ -5,6 +5,7 @@ from math import isfinite
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -32,6 +33,25 @@ class CPMGAnalyzeParams:
     t1: Annotated[float | None, ParamMeta(label="T1 reference (us)")] = None
 
 
+class CPMGSummary(BaseModel):
+    """Row-aligned pi-pulse counts and T2 estimates; null means unavailable.
+
+    ns[i], t2s[i] and t2errs[i] describe the same CPMG fit row.
+    """
+
+    ns: list[int] = Field(
+        description="Number of pi pulses per CPMG sequence, in fit-row order."
+    )
+
+    t2s: list[float | None] = Field(
+        description="Fitted T2 in us, aligned with ns; null when unavailable."
+    )
+
+    t2errs: list[float | None] = Field(
+        description="T2 fit uncertainty in us, aligned with ns and t2s; null when unavailable."
+    )
+
+
 @dataclass
 class CPMGAnalyzeResult(AnalyzeResultBase):
     """Pi-pulse counts and fitted T2/error in us; rejected rows are null."""
@@ -39,6 +59,17 @@ class CPMGAnalyzeResult(AnalyzeResultBase):
     ns: list[int]
     t2s: list[float | None]
     t2errs: list[float | None]
+
+    def summary(self) -> CPMGSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return CPMGSummary(
+            ns=self.ns,
+            t2s=self.t2s,
+            t2errs=self.t2errs,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class CPMGAdapter(

@@ -27,3 +27,16 @@ The run produces a 2D map for visual inspection. Read the punch-out power and lo
 ## Recommended use
 
 A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled. Leave it blank (`None`) to keep early stopping disabled. Zero and negative thresholds are rejected by the Form. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Supply resonator frequency/linewidth or explicit center_mhz/span_mhz. Check readout timing and both sweep axes.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `onetone_spectrum_over_power` after inspecting the same Form errors.
+   freq_points and gain_points map to their sweep Expts. Supply gain_range when changing its endpoints. This recipe does not Analyze or write back.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

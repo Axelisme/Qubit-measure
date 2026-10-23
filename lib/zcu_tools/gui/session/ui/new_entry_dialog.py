@@ -20,7 +20,8 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.cfg_model import Template, TemplateDef
-from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.aliases import scalar_alias_bindings
 from zcu_tools.gui.session.library_entry import (
     LIBRARY_WRITE_ERRORS,
     LibraryEntryInvalid,
@@ -170,17 +171,17 @@ class NewEntryDialog(QDialog):
         except FailedPreconditionError as exc:
             self._show_error(str(exc))
             return
-        bindings = {
-            row.alias: row.resolved
-            for row in parameters.resolved_aliases()
-            if row.resolved is not None
-        }
-        missing = self._templates[template_id].placeholder_names() - bindings.keys()
-        if missing:
-            names = "、".join(f"{{{name}}}" for name in sorted(missing))
-            self._show_error(
-                f"template 需要綁定 {names}，請先在 Aliases 設定同名 alias"
+        try:
+            bindings = scalar_alias_bindings(
+                parameters.resolved_aliases(),
+                self._templates[template_id].placeholder_names(),
+                missing_message=lambda missing: (
+                    f"template 需要綁定 {'、'.join(f'{{{name}}}' for name in sorted(missing))}，"
+                    "請先在 Aliases 設定同名 alias"
+                ),
             )
+        except InvalidInputError as exc:
+            self._show_error(str(exc))
             return
         entry = new_library_entry(
             parameters,

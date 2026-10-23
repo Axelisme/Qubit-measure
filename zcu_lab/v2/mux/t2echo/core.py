@@ -8,17 +8,18 @@ a Form, recipe, catalog entry or writeback proposal.
 
 ## Configuration and timing
 
-`participants` is a nonempty, unique list of names in the complete `tones` list.
-Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
-Every element requires valid drives on independent generators, even when not
-participating. Names, count and order match the fixed capture.
+`participants` is a nonempty, unique list of original indices in the complete `tones` list.
+`[2, 0]` selects Q3 then Q1, retaining that execution/data order.
+Only participants require valid drives on independent generators. Inactive
+drives may be None. Every tone retains its name and readout identity; count
+and order match the fixed capture.
 
 Import `MuxT2EchoCfg`, `MuxT2EchoExp` and `MuxEchoToneCfg` from
 `zcu_lab.v2.mux.t2echo`. Supply common `MuxDriveModuleCfg` with optional reset
 and full readout, a full ordered `tones` list, and `delay: SweepCfg` in us.
 
 Each tone contains fixed `name`, required `drive` for x90, required `pi_pulse`
-for x180, and `detune` in MHz. Both pulses are validated for nonparticipants too.
+for x180, and `detune` in MHz. Both pulses are required only for participants.
 A tone's two pulses use the same generator, but may have different waveform,
 carrier, gain and phase. Active tones use independent generators, distinct from
 readout. All pulse parameters must be fixed and finite. Delay bounds must be
@@ -131,7 +132,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import model_validator
+from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
@@ -166,7 +167,7 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, require_tone_value
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 
@@ -176,10 +177,16 @@ class MuxEchoToneCfg(MuxCoherenceToneCfg):
 
     Both pulses use the same generator, independent of the other qubits.
     Their frequency, gain, phase and waveform may differ. Nonparticipating
-    tones still need valid pulses; name identifies the qubit in saved results.
+    tones may leave pulses None; name identifies the qubit in saved results.
     """
 
-    pi_pulse: PulseCfg
+    pi_pulse: PulseCfg | None = None
+
+    def require_pi_pulse(self) -> PulseCfg:
+        """Return the active x180 pulse, or raise ValueError naming the tone."""
+        if self.pi_pulse is None:
+            raise ValueError(f"{self.name}: active tone requires pi_pulse")
+        return self.pi_pulse
 
 
 class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
@@ -187,9 +194,9 @@ class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules holds optional reset and the complete mux readout. tones contains
     one uniquely named MuxEchoToneCfg per readout position. participants is a
-    nonempty list of distinct names in acquisition order: Q3/Q1 gives result
+    nonempty list of distinct original indices: [2, 0] gives result
     rows for original indices 2/0. All drives must use independent generators
-    distinct from readout, including tones that do not participate.
+    distinct from readout for selected tones only.
     delay is a finite nonnegative total wait in us, split into two native half
     waits. Each tone's detune ramps its final x90 phase. reps/rounds are positive;
     initial_delay/relax_delay are finite nonnegative us shared by all tones.
@@ -197,7 +204,7 @@ class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[StrictInt]
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
@@ -206,6 +213,8 @@ class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
         validate_coherence_scan(
             self, self.modules, self.tones, self.delay, self.participants
         )
+        for index in self.participants:
+            require_tone_value(self.tones[index].pi_pulse, ("tones", index, "pi_pulse"))
         validate_coherence_scan(
             self,
             self.modules,
@@ -216,8 +225,9 @@ class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
             self.delay,
             self.participants,
         )
-        for index, tone in enumerate(self.tones):
-            if tone.drive.ch != tone.pi_pulse.ch:
+        for index in self.participants:
+            tone = self.tones[index]
+            if tone.require_drive().ch != tone.require_pi_pulse().ch:
                 raise ValueError(f"tones[{index}].pi_pulse.ch must equal drive.ch")
         return self
 
@@ -252,9 +262,7 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
         """
         # 1. Keep participant order while selecting from the complete tone list.
         cfg = MuxT2EchoCfg.model_validate(config.model_dump())
-        indices = participant_indices(
-            [tone.name for tone in cfg.tones], cfg.participants
-        )
+        indices = list(cfg.participants)
         tones = [cfg.tones[index] for index in indices]
         times = sweep2array(cfg.delay, "none")
         # Both waits use the native half-delay grid, not a rounded total delay.
@@ -264,7 +272,7 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 actual_detune(
                     cfg.delay,
                     detune=tone.detune,
-                    gen_ch=tone.drive.ch,
+                    gen_ch=tone.require_drive().ch,
                     soccfg=context.soccfg,
                     time_scaler=0.5,
                 )
@@ -273,7 +281,7 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
             dtype=np.float64,
         )
         frequencies = np.asarray(
-            [float(tone.drive.freq) for tone in tones], dtype=np.float64
+            [float(tone.require_drive().freq) for tone in tones], dtype=np.float64
         )
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[index] for index in indices]
@@ -304,14 +312,14 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 .add(
                     Join(
                         *[
-                            Pulse(f"pi2_first_{index}", tone.drive)
+                            Pulse(f"pi2_first_{index}", tone.require_drive())
                             for index, tone in zip(indices, tones, strict=True)
                         ]
                     ),
                     Delay("delay_first", 0.5 * length),
                     Join(
                         *[
-                            Pulse(f"pi_{index}", tone.pi_pulse)
+                            Pulse(f"pi_{index}", tone.require_pi_pulse())
                             for index, tone in zip(indices, tones, strict=True)
                         ]
                     ),
@@ -320,8 +328,9 @@ class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
                         *[
                             Pulse(
                                 f"pi2_final_{index}",
-                                tone.drive.with_updates(
-                                    phase=tone.drive.phase + 360 * tone.detune * length
+                                tone.require_drive().with_updates(
+                                    phase=tone.require_drive().phase
+                                    + 360 * tone.detune * length
                                 ),
                             )
                             for index, tone in zip(indices, tones, strict=True)

@@ -15,7 +15,7 @@
 2. 在 Aliases 設定 scalar alias `mux = MG12`。Open／Reset 時，Readout 複製 `$mux.module.readout` 的 scalar 設定，tones 由 group resonators 校準值產生。缺 slot 時使用 blank mux 範本加 group tones，generator 取自 `$mux.wiring.gen_ch`，第 i 個 tone 的 ADC 從固定 capture 的 `group.wiring.ro_ch[i]` 取整數初值，各 tone gain 填 0.1。這些是可編輯的初值，不代表硬體設定已確認。有 slot 時，共同 trigger 在原值上增加最小已設 kappa 對應的五倍 ringup 等待，pulse 至少涵蓋 ADC window。缺 slot 的 mixer／timing 候選來源見下表。
 3. 核對 generator、mixer、每個 tone 的 ADC channel、frequency、gain，以及共用播放長度、ADC window 和 trigger timing。範本的 scalar 初值只供編輯。Run 前由操作員確認硬體安全值。
 4. 可選已有的 readout/mux key，或用 Convert to inline 複製內容再修改。Tones 是單行 JSON，例如 `[{"freq":5980,"gain":0.1,"ro_ch":4,"label":"R1"},{"freq":6020,"gain":0.1,"ro_ch":5,"label":"R2"},{"freq":6040,"gain":0.1,"ro_ch":6}]`。此例只示範格式，硬體值須另行確認。
-5. Active tones 選 None 量全部，或輸入原始序號 JSON list。例如 `[0,2]` 量第一及第三個 tone，`[2,0]` 則依第三、第一的順序執行、畫圖與保存 columns。序號須為唯一、有效範圍內的整數。空 list、重複、越界、bool 或非整數會在 Run 診斷中報錯並阻擋執行。請查看診斷內容判斷問題欄位。
+5. Participants 輸入原始序號 JSON list。Open／Reset 將 Aliases 的 `participants: [R3, R1]` 依同次捕捉的 `$mux.resonators` 位置轉成 `[2, 0]`。清單元素可用 `$` 軟連結。缺列、未綁或空清單預設全部原始序號；非空清單內的未綁元素報錯，不退回全部。外群名稱保留在標紅的 Participants 草稿，改成合法索引後清錯。例如 `[0,2]` 量第一及第三個 tone，`[2,0]` 則依第三、第一的順序執行、畫圖與保存 columns。序號須為唯一、有效範圍內的整數。空 list、重複、越界、bool 或非整數會在 Run 診斷中報錯並阻擋執行。請查看診斷內容判斷問題欄位。
 6. 設定 Frequency offset 的 Start、Stop、Expts，以及 Reps、Rounds、Relax delay。執行前確認所有欄位有效。
 
 ### 無 readout slot 的候選來源
@@ -74,7 +74,7 @@ FTF 的編譯與快取可能主導時間，不能假設成本與 reps 成正比�
 
 Run 使用 tab 在 Open 或 Reset 時捕捉的參數來源。
 其後修改 aliases、group resonators 或 library，現有 draft 仍保留原來源。
-需要新來源時執行 Reset，這會重建初值。Active tones 只決定本次量測範圍，完整 readout 保留全部 tones。
+需要新來源時執行 Reset 或重新 Open，這會重建初值。Participants 只決定本次量測範圍，完整 readout 保留全部 tones。一般編輯 Participants 不重設任何 tone 值。
 
 Live 圖以共同 offset 為橫軸，每個 active tone 各有一張 `measurement_i` magnitude 圖。
 標題使用原始 tone 序號與 label，空 label 顯示例如 `tone 2`。Label 可以重複。
@@ -83,7 +83,7 @@ Live 圖以共同 offset 為橫軸，每個 active tone 各有一張 `measuremen
 
 ## 保存與讀回
 
-保存當次量測的完整設定與原始資料，包含全部 base tones、labels、active_tones 與 sweep。
+保存當次量測的完整設定與原始資料，包含全部 base tones、labels、participants 與 sweep。
 檔案保存量測設定；resonators 與 group 綁定由 Run／Load 的參數來源提供。
 Native 讀回使用檔案設定，現有 draft 及其固定來源保持原樣。
 Labber 匯出保留共同 offset、原始 tone 序號與複數訊號，columns 與 tone_indices 同序。
@@ -145,9 +145,9 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 ## MCP recipe
 
 呼叫 `mux_onetone`，`target` 可指定這次 Reset 的 mux alias，`reuse_tab_id` 可重用 idle matching tab。
-`participants` 收 resonator 名稱，依 tab 固定 `$mux.resonators` 順序映射 Active tones 原始 index。
-名稱不讀 display label。未知或重複綁定的名字回 `needs_parameters` 並列合法名單。
-`participants` 省略時保留表單 Active tones。重複綁定要以原始 index 的 `active_tones` override 選取。
+`participants` 收完整 readout 的原始索引，例如 `[2, 0]`。順序就是量測順序。
+空清單、重複、負數或越界索引會回欄位錯誤，不以 display label 查名稱。
+`participants` 省略或 null 時保留表單從 alias 捕捉的選取。
 `df:{start,stop}` 是所有 tone 共用的 MHz offset，`n` 是共用點數，不是絕對頻率。
 `reps`、`rounds` 可覆寫 acquisition 次數。以上參數 null 都保留表單值。
 `library`、`inline` 依序選來源與複製，`overrides` 最後執行，integer path 使用完整 readout tone 原始位置。
