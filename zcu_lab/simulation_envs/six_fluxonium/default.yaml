@@ -13,7 +13,7 @@ numerics:
   routing_cache_bytes: 4194304    # 4 MiB total
   adc_cache_bytes: 8388608        # 8 MiB per source
 dc_source:
-  name: flux_bias
+  name: coil_bias
   unit: A
   limits: [-0.02, 0.02]
   initial: 0.0
@@ -35,8 +35,16 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.50
-      flux_per_unit: 100.0 # Phi0/A, shared global DC current.
+      source:
+        name: Q1_bias
+        unit: A
+        limits: [-0.02, 0.02]
+        initial: 0.0
+        ramp_step: 0.000001
+      offset: -0.001 # Local zero-flux current, A.
+      period: 0.002 # Local current per Phi0, A.
+      coil_offset: 0.0 # Coil zero-flux current, A.
+      coil_period: 0.01 # Coil current per Phi0, A.
 
     drive_line:
       name: q1_charge
@@ -90,8 +98,16 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.45
-      flux_per_unit: 80.0 # Phi0/A, shared global DC current.
+      source:
+        name: Q2_bias
+        unit: A
+        limits: [-0.02, 0.02]
+        initial: 0.0
+        ramp_step: 0.000001
+      offset: -0.001125 # Local zero-flux current, A.
+      period: 0.0025 # Local current per Phi0, A.
+      coil_offset: 0.0 # Coil zero-flux current, A.
+      coil_period: 0.0125 # Coil current per Phi0, A.
 
     drive_line:
       name: q2_charge
@@ -145,8 +161,16 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.55
-      flux_per_unit: 120.0 # Phi0/A, shared global DC current.
+      source:
+        name: Q3_bias
+        unit: A
+        limits: [-0.02, 0.02]
+        initial: 0.0
+        ramp_step: 0.000001
+      offset: -0.00099 # Local zero-flux current, A.
+      period: 0.0018 # Local current per Phi0, A.
+      coil_offset: 0.0 # Coil zero-flux current, A.
+      coil_period: 0.008333333333333333 # Coil current per Phi0, A.
 
     drive_line:
       name: q3_charge
@@ -200,8 +224,16 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.40
-      flux_per_unit: 90.0 # Phi0/A, shared global DC current.
+      source:
+        name: Q4_bias
+        unit: A
+        limits: [-0.02, 0.02]
+        initial: 0.0
+        ramp_step: 0.000001
+      offset: -0.00088 # Local zero-flux current, A.
+      period: 0.0022 # Local current per Phi0, A.
+      coil_offset: 0.0 # Coil zero-flux current, A.
+      coil_period: 0.011111111111111112 # Coil current per Phi0, A.
 
     drive_line:
       name: q4_charge
@@ -255,8 +287,16 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.60
-      flux_per_unit: 110.0 # Phi0/A, shared global DC current.
+      source:
+        name: Q5_bias
+        unit: A
+        limits: [-0.02, 0.02]
+        initial: 0.0
+        ramp_step: 0.000001
+      offset: -0.00168 # Local zero-flux current, A.
+      period: 0.0028 # Local current per Phi0, A.
+      coil_offset: 0.0 # Coil zero-flux current, A.
+      coil_period: 0.00909090909090909 # Coil current per Phi0, A.
 
     drive_line:
       name: q5_charge
@@ -310,8 +350,16 @@ qubits:
       temperature_k: 0.05
 
     dc_bias:
-      offset_phi0: 0.50
-      flux_per_unit: 70.0 # Phi0/A, shared global DC current.
+      source:
+        name: Q6_bias
+        unit: A
+        limits: [-0.02, 0.02]
+        initial: 0.0
+        ramp_step: 0.000001
+      offset: -0.0015 # Local zero-flux current, A.
+      period: 0.003 # Local current per Phi0, A.
+      coil_offset: 0.0 # Coil zero-flux current, A.
+      coil_period: 0.014285714285714285 # Coil current per Phi0, A.
 
     drive_line:
       name: q6_charge

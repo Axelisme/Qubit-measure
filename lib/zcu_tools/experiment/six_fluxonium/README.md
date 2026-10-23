@@ -1,18 +1,30 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-23, local DC lines and shared coil.
 
 **Readers:** framework-dev, lab-author. Build and acquire six independent cavities through the normal simulation SoC.
 
 `six_fluxonium(configuration)` accepts `SixFluxoniumSettings` or a YAML path and
-returns `SimulationEnvironment`. The builder creates one addressed `flux_bias`
-FakeDevice. Six `SingleFluxoniumSource` instances retain that driver. Each circuit
-uses its own DC offset, current-to-flux conversion, oscillator basis and solver.
-There is no joint Hilbert space or fast-flux input. Construction does not evolve
-states, warm numeric caches or open hardware.
+returns `SimulationEnvironment`. The builder creates seven addressed FakeDevices
+in A, `Q1_bias` through `Q6_bias` and `coil_bias`. Each local line affects only
+its own circuit. The shared coil affects all six, with each circuit's own
+current offsets and periods. There is no local-line crosstalk, joint Hilbert
+space or fast-flux input. Construction does not evolve states, warm numeric
+caches or open hardware.
+
+Every round captures all seven native currents without changing the devices.
+The six owner computes `(I_coil - coil_offset)/coil_period +
+(I_local - offset)/period` for each circuit. It passes that fixed reduced flux
+as the corresponding `SingleFluxoniumSource`'s `offset_phi0`, with zero
+`flux_per_unit` and a single-value local-current snapshot. The single backend's
+schema and physics stay unchanged. Its preparation keys include the resulting
+settings and local snapshot, so changing either contribution refreshes physics.
+The outer `EnvironmentSnapshot` retains all seven raw currents and the full
+six-system settings identity. Bound drivers survive registry removal or rename;
+no acquisition restores startup currents.
 
 The host calls `close_backend()` after acquisitions drain, then closes its devices.
-Backend close leaves the DC driver untouched. Delivered raw sources retain their
+Backend close leaves all seven DC drivers untouched. Delivered raw sources retain their
 noiseless ADC inputs after later acquisitions and backend close.
 
 ## Cache budgets

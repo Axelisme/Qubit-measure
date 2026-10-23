@@ -2,13 +2,15 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-23, group mixer and top-level time_of_fly.
+**Last updated:** 2026-10-23, six local DC lines and shared coil.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
-This environment has six uncoupled fluxonium qubits, one global DC source and
-six readout cavities. Each qubit has its own microwave line and its own DC flux
-offset and period. Changing the shared current changes all six qubits' flux.
+This environment has six uncoupled fluxonium qubits, seven DC current sources
+and six readout cavities. Each qubit has its own microwave line and local
+`Qn_bias` source. Changing a local current changes only that qubit's flux.
+Changing `coil_bias` changes all six. Each qubit has separate local and coil
+current offsets and periods.
 There are no fast-flux lines. One mux generator drives all six readout tones.
 A separate pulse generator and ADC handle single-tone scans. The environment
 has no coupler, qubit-qubit interaction or crosstalk matrix.
@@ -59,12 +61,19 @@ connect(launch="new", script="<checkout>/zcu_lab/simulation_envs/six_fluxonium/s
 ```
 
 The script creates or reopens `six-fluxonium-demo/initial`. On first use it seeds
-Q1 through Q6, R1 through R6, one `flux_bias` current-source component
-and the `MG123456` mux group. Each Qi references Ri and the same `flux_bias`.
-Aliases bind `mux` to `MG123456`, `qubit` to `Q1`, `resonator` to
-`$qubit.resonator` and `flux_dev` directly to `flux_bias`.
+Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
+`Q6_bias`, shared `coil_bias` and the `MG123456` mux group. Each Qi references
+Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
+to `MG123456`, `qubit` to `Q1`, `resonator` to `$qubit.resonator` and `flux_dev`
+to `$qubit.flux_source`.
+The group's `coil_flux` starts as `{}`. After measurement, write one qubit's
+`{half, period, int}` calibration record to a path such as `MG123456.coil_flux.Q1`.
+This creates the record without replacing other qubits' calibrations.
+Each field uses the coil device's native unit and defaults to null until measured.
+Keys must belong to the group's qubits. Omit qubits that have no calibration.
+Qubit `flux_half`, `flux_period` and `flux_int` still describe its own local line.
 
-The script installs a mock SoC and one DC FakeDevice with fixed unit A. It reads files
+The script installs a mock SoC and seven DC FakeDevices with fixed unit A. It reads files
 beside the script rather than relative to the shell cwd. Startup does not acquire,
 run numeric warmup or access hardware. Existing entries keep their edited
 components and aliases. To apply a changed template, use a new project root or
@@ -97,9 +106,11 @@ stays blank and required in the form before Run.
 Qubit `freq` starts at null. Measure each transition before supplying frequencies
 for `mux/twotone_spectrum` or calibrated excitation for `mux/t1`. Changing alias
 `qubit` changes the scalar target, not the mux group's ordered six-qubit mapping.
-Changing `flux_dev` current affects every qubit, even when the scalar `qubit`
-alias selects only one. Each qubit uses its own offset and flux-per-current
-coefficient from the [settings guide](field-guide.md#dc-and-control-units).
+Changing `flux_dev` current affects the selected qubit only. The mux group's
+`coil_bias` affects every qubit. Each circuit's reduced flux equals
+`(I_coil - coil_offset)/coil_period + (I_local - offset)/period`, with all
+currents, offsets and periods in A. The [settings guide](field-guide.md#dc-and-control-units)
+lists both sets of physical coefficients. The lines have no crosstalk.
 Reopen or Reset a form after changing its source values or aliases.
 Do not treat the physical YAML's parameters as a measured calibration.
 

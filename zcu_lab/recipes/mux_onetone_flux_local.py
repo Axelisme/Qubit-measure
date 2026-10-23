@@ -1,0 +1,110 @@
+"""Onetone spectroscopy across zipped local DC lines, with one native picker per Q.
+
+Recipe n → frequency.df Expts; flux_n → flux_expts.
+"""
+
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
+
+from .helpers import report_number
+from .mux_flux_helpers import (
+    MuxFluxPickSummary,
+    MuxFluxReport,
+    MuxFluxToneReport,
+    MuxOnetoneFluxInputs,
+    flux_range_edits,
+    mux_flux_analysis_updates,
+    mux_flux_final_edits,
+    onetone_flux_edits,
+)
+from .mux_helpers import ToneRangeInputs
+
+
+class MuxOnetoneFluxLocalInputs(MuxOnetoneFluxInputs):
+    """Native DC ranges for every original tone, including nonparticipants.
+
+    flux_sweeps must cover the complete list; null keeps Form bounds.
+    flux_n is shared by zipped local lines, not a Cartesian product.
+    """
+
+    flux_sweeps: list[ToneRangeInputs] | None = Field(
+        None,
+        description="Native local DC start/stop for every tone in original order; null retains ranges. No per-tone point count.",
+    )
+
+
+@recipe(
+    "mux_onetone_flux_local",
+    description="Map mux onetone spectra over local DC flux, pick each Q, ask before selected writeback, then Save.",
+)
+async def mux_onetone_flux_local(
+    session: RecipeSession, inputs: MuxOnetoneFluxLocalInputs
+) -> MuxFluxReport:
+    """Acquire onetone maps over local DC values, then report per-Q flux lines.
+
+    target binds the Reset mux alias; reuse_tab_id resets an idle matching tab.
+    Select library, copy inline sources outer-first, apply ranges/counts, then
+    overrides to the flat cfg. Null retains Form inputs. MHz frequency and
+    native DC coordinates are never converted. All full tones must validate,
+    even nonparticipants. Missing settings stop before acquisition with owner
+    paths and reasons. n sets the shared frequency Expts; flux_n sets DC Expts.
+
+    Analyze selected Qs in participant order using original tone indices.
+    Each tracked analysis hands off through PendingAnalysis/tab_interact/done.
+    Optional flux_half/flux_integer maps seed lines without changing the Run.
+    answer only selects writeback proposals, never picker commands.
+    Each Q proposes its flux_half/flux_period/flux_int scalars.
+    Accept only selected items and use the confirmed receipt for the report.
+    Expected analysis failure preserves earlier rows and saves without asking
+    for the failed Q. Other errors and root cancellation propagate. Once Run
+    returns, finally saves raw and completed artifacts; per-output Save status
+    is in runs, not implied by completion. No calibration is inferred here.
+    """
+    tab = session.open_tab(
+        "mux/onetone_flux_local",
+        aliases=None if inputs.target is None else {"mux": inputs.target},
+        reuse=inputs.reuse_tab_id,
+    )
+    for selection in inputs.library or ():
+        tab.select(selection.path, ref=selection.key)
+    for copy in inputs.inline or ():
+        tab.select(copy.path, inline=True)
+    edits = onetone_flux_edits(inputs)
+    edits.extend(flux_range_edits(tab, inputs.flux_sweeps, ("tones",)))
+    edits.append(FieldEdit(path=("flux_expts",), value=inputs.flux_n))
+    edits.extend(mux_flux_final_edits(inputs))
+    tab.apply(edits, require_valid=True)
+    updates = mux_flux_analysis_updates(tab, inputs)
+
+    await tab.run()
+    tones: list[MuxFluxToneReport] = []
+    try:
+        for update in updates:
+            analysis = await tab.analyze(
+                "primary", result=MuxFluxPickSummary, interactive=True, updates=update
+            )
+            if analysis.result is None:
+                return MuxFluxReport(tones=tones, analysis_failure=analysis.reason)
+            decision = await tab.ask_writeback()
+            applied = False
+            if decision.accepted:
+                receipt = tab.accept_writeback(decision.items)
+                receipt.raise_for_error()
+                applied = bool(receipt.items)
+            picked = analysis.result
+            tones.append(
+                MuxFluxToneReport(
+                    index=picked.tone,
+                    name=picked.qubit,
+                    flux_half=report_number(picked.flx_half),
+                    flux_integer=report_number(picked.flx_int),
+                    flux_period=report_number(picked.flx_period),
+                    writeback_applied=applied,
+                )
+            )
+        return MuxFluxReport(tones=tones)
+    finally:
+        tab.save()
+
+
+DEFINITION = mux_onetone_flux_local
