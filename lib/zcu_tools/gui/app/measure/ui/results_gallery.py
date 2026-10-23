@@ -1,0 +1,105 @@
+"""Scrollable saved PNG gallery, independent of the measure figure pager."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from qtpy.QtCore import QPoint, Qt, Signal
+from qtpy.QtGui import QMouseEvent, QPixmap, QResizeEvent
+from qtpy.QtWidgets import (
+    QGridLayout, QLabel, QMenu, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+)
+
+from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+
+
+class ResultImage(QLabel):
+    """Clickable raster preview; left click selects, right click opens member actions."""
+
+    activated = Signal()
+    action_requested = Signal(str)
+
+    def __init__(self, png: bytes, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._image = QPixmap()
+        if not self._image.loadFromData(png):
+            raise ValueError("Cannot decode saved PNG")
+        self.setMinimumSize(180, 160)
+        self.setMaximumHeight(230)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
+
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
+        if event is not None and event.button() == Qt.MouseButton.LeftButton:
+            self.activated.emit()
+        super().mousePressEvent(event)
+
+    def resizeEvent(self, event: QResizeEvent | None) -> None:
+        super().resizeEvent(event)
+        self.setPixmap(self._image.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                         Qt.TransformationMode.SmoothTransformation))
+
+    def _context_menu(self, point: QPoint) -> None:
+        menu = QMenu(self)
+        for caption in ("Copy path", "Add to comparison", "Copy image"):
+            menu.addAction(caption)
+        action = menu.exec(self.mapToGlobal(point))
+        if action is not None:
+            self.action_requested.emit(action.text())
+        menu.deleteLater()
+
+
+class ResultsGallery(QScrollArea):
+    """Show all figures in two columns; selection and commands belong to the browser."""
+
+    def __init__(self, index: ResultsIndex, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._index = index
+        self.setObjectName("results.gallery")
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def present(
+        self,
+        runs: tuple[ResultRun, ...],
+        activate: Callable[[ResultRun, str], None],
+        action: Callable[[ResultRun, str, str], None],
+    ) -> None:
+        """Replace visible cards; unreadable members retain their filename and error."""
+        old = self.takeWidget()
+        if old is not None:
+            old.setParent(None)
+            old.deleteLater()
+        content = QWidget()
+        grid = QGridLayout(content)
+        number = 0
+        for run in runs:
+            for path in run.figure_paths:
+                card = QWidget()
+                layout = QVBoxLayout(card)
+                caption = QLabel(f"{run.entry} / {run.point or 'Global / unknown'}\n{path.name}")
+                caption.setWordWrap(True)
+                try:
+                    image = ResultImage(self._index.read_figure(run.key, path.name))
+                except (OSError, ValueError, KeyError) as error:
+                    layout.addWidget(QLabel(f"{path.name}: {error}"))
+                else:
+                    image.setObjectName(f"results.figure.{number}")
+                    image.setToolTip(
+                        f"{run.entry} / {run.point or 'Global / unknown'}\n"
+                        f"{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n"
+                        f"{run.at or 'Unknown date'}\n{path}"
+                    )
+                    image.activated.connect(lambda r=run, f=path.name: activate(r, f))
+                    image.action_requested.connect(lambda a, r=run, f=path.name: action(r, f, a))
+                    layout.addWidget(image)
+                layout.addWidget(caption)
+                grid.addWidget(card, number // 2, number % 2)
+                number += 1
+        if number == 0:
+            grid.addWidget(QLabel("No figures in this selection"), 0, 0)
+        grid.setRowStretch(grid.rowCount(), 1)
+        self.setWidget(content)

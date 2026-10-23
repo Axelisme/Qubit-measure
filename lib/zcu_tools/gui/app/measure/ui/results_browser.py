@@ -2,13 +2,39 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from datetime import date
 from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QLabel, QMainWindow
+from qtpy.QtGui import QImage
+from qtpy.QtWidgets import (
+    QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QMainWindow, QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget,
+)
+
+from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
+from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+
+from .results_comparison import ResultsComparison
+from .results_details import result_details
+from .results_gallery import ResultsGallery
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
+
+
+@dataclass(frozen=True)
+class _Focus:
+    experiment: str | None = None
+    point: tuple[str, str | None] | None = None
+    run_key: str | None = None
+    figure: str | None = None
+
+
+def _point_label(point: tuple[str, str | None]) -> str:
+    return f"{point[0]} / {point[1] or 'Global / unknown'}"
 
 
 class ResultsBrowserWindow(QMainWindow):
@@ -18,8 +44,269 @@ class ResultsBrowserWindow(QMainWindow):
         super().__init__(parent, Qt.WindowType.Window)
         self.setObjectName("results.browser")
         self.setWindowTitle("Results browser")
-        self.resize(1280, 800)
+        self.resize(1400, 850)
         index = controller.query_results()
-        label = QLabel(f"All results · {len(index.runs)} runs", self)
-        label.setObjectName("results.focus")
-        self.setCentralWidget(label)
+        self.setCentralWidget(ResultsBrowser(
+            index,
+            lambda run: controller.tab_control.open_tab_from_file(
+                run.experiment or "", str(run.data_path)
+            ),
+            self,
+        ))
+
+
+class ResultsBrowser(QWidget):
+    """Browse an immutable index without changing the opened entry or point.
+
+    open_run is the application's new-tab Load command. It returns the existing
+    Load outcome or raises a user-facing error; this view presents either fact.
+    All widgets and callbacks run on the Qt owner thread.
+    """
+
+    def __init__(
+        self, index: ResultsIndex,
+        open_run: Callable[[ResultRun], LoadTabResultOutcome],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._index = index
+        self._open_run = open_run
+        self._focus = _Focus()
+        self._history = [self._focus]
+        self._history_position = 0
+        self._navigation: list[_Focus] = []
+        layout = QVBoxLayout(self)
+        layout.addLayout(self._build_filters())
+        layout.addLayout(self._build_history())
+        splitter = QSplitter()
+        self._list = QListWidget()
+        self._list.setObjectName("results.navigation")
+        self._list.itemClicked.connect(self._navigate)
+        splitter.addWidget(self._list)
+        self._gallery = ResultsGallery(index)
+        splitter.addWidget(self._gallery)
+        splitter.addWidget(self._build_details())
+        splitter.setSizes([220, 740, 390])
+        layout.addWidget(splitter, 1)
+        self._feedback = QLabel("")
+        self._feedback.setObjectName("results.feedback")
+        self._feedback.setWordWrap(True)
+        layout.addWidget(self._feedback)
+        self._render()
+
+    def _build_filters(self) -> QHBoxLayout:
+        layout = QHBoxLayout()
+        self._group = QComboBox()
+        self._group.setObjectName("results.group")
+        self._group.addItems(["Experiment → point", "Point → experiment"])
+        self._group.currentIndexChanged.connect(self._change_group)
+        layout.addWidget(self._group)
+        self._experiment = QComboBox()
+        self._experiment.setObjectName("results.experiment")
+        self._experiment.addItem("All experiments")
+        self._experiment.addItems(sorted({r.experiment for r in self._index.runs if r.experiment}))
+        self._experiment.currentIndexChanged.connect(self._render)
+        layout.addWidget(self._experiment)
+        self._search = QLineEdit()
+        self._search.setObjectName("results.search")
+        self._search.setPlaceholderText("Search entries, roles, cfg and analysis")
+        self._search.textChanged.connect(self._render)
+        layout.addWidget(self._search, 1)
+        self._date_from = self._date_filter("results.date_from", "From YYYY-MM-DD", layout)
+        self._date_to = self._date_filter("results.date_to", "To YYYY-MM-DD", layout)
+        return layout
+
+    def _date_filter(self, name: str, hint: str, layout: QHBoxLayout) -> QLineEdit:
+        edit = QLineEdit()
+        edit.setObjectName(name)
+        edit.setPlaceholderText(hint)
+        edit.setMaximumWidth(155)
+        edit.setToolTip("Inclusive UTC date; runs without a timestamp are excluded when set")
+        edit.editingFinished.connect(self._render)
+        layout.addWidget(edit)
+        return edit
+
+    def _build_history(self) -> QHBoxLayout:
+        layout = QHBoxLayout()
+        self._back = QPushButton("Back")
+        self._back.clicked.connect(lambda: self._move_history(-1))
+        self._forward = QPushButton("Forward")
+        self._forward.clicked.connect(lambda: self._move_history(1))
+        home = QPushButton("All results")
+        home.clicked.connect(lambda: self._visit(_Focus()))
+        for button in (self._back, self._forward, home):
+            layout.addWidget(button)
+        self._focus_label = QLabel()
+        self._focus_label.setObjectName("results.focus")
+        layout.addWidget(self._focus_label, 1)
+        return layout
+
+    def _build_details(self) -> QWidget:
+        pane = QWidget()
+        layout = QVBoxLayout(pane)
+        self._current_figure = QLabel("Current figure: none")
+        self._current_figure.setObjectName("results.current_figure")
+        layout.addWidget(self._current_figure)
+        self._details = QPlainTextEdit()
+        self._details.setObjectName("results.details")
+        self._details.setReadOnly(True)
+        layout.addWidget(self._details, 2)
+        self._open_button = QPushButton("Open in new analysis tab")
+        self._open_button.clicked.connect(self._open_selected)
+        layout.addWidget(self._open_button)
+        self._pin_button = QPushButton("Add to comparison")
+        self._pin_button.clicked.connect(self._pin_selected)
+        layout.addWidget(self._pin_button)
+        self.comparison = ResultsComparison(self._index)
+        layout.addWidget(self.comparison, 1)
+        return pane
+
+    def _change_group(self) -> None:
+        self._focus = _Focus()
+        self._history = [self._focus]
+        self._history_position = 0
+        self._render()
+
+    def _visit(self, focus: _Focus) -> None:
+        if focus != self._focus:
+            self._history = self._history[:self._history_position + 1]
+            self._history.append(focus)
+            self._history_position += 1
+            self._focus = focus
+        self._render()
+
+    def _move_history(self, delta: int) -> None:
+        target = self._history_position + delta
+        if 0 <= target < len(self._history):
+            self._history_position = target
+            self._focus = self._history[target]
+            self._render()
+
+    def _filtered(self) -> tuple[ResultRun, ...]:
+        lower = self._date_from.text().strip()
+        upper = self._date_to.text().strip()
+        try:
+            for value in (lower, upper):
+                if value:
+                    date.fromisoformat(value)
+            if lower and upper and lower > upper:
+                raise ValueError("From date must not follow To date")
+        except ValueError as error:
+            self._feedback.setText(f"Invalid date filter: {error}")
+            return ()
+        search = self._search.text().casefold().strip()
+        experiment = self._experiment.currentText() if self._experiment.currentIndex() else None
+        return tuple(run for run in self._index.runs
+                     if (experiment is None or run.experiment == experiment)
+                     and search in run.search_text
+                     and (not lower or (run.at is not None and run.at[:10] >= lower))
+                     and (not upper or (run.at is not None and run.at[:10] <= upper)))
+
+    def _focused(self, runs: tuple[ResultRun, ...]) -> tuple[ResultRun, ...]:
+        focus = self._focus
+        return tuple(run for run in runs
+                     if (focus.experiment is None or run.experiment == focus.experiment)
+                     and (focus.point is None or (run.entry, run.point) == focus.point)
+                     and (focus.run_key is None or run.key == focus.run_key))
+
+    def _render(self) -> None:
+        runs = self._focused(self._filtered())
+        self._back.setEnabled(self._history_position > 0)
+        self._forward.setEnabled(self._history_position + 1 < len(self._history))
+        title = "All results"
+        if self._focus.experiment is not None:
+            title = self._focus.experiment
+        if self._focus.point is not None:
+            title = _point_label(self._focus.point)
+        if self._focus.run_key is not None:
+            title = self._index.get_run(self._focus.run_key).run_path.name
+        self._focus_label.setText(f"{title} · {len(runs)} runs")
+        self._render_navigation(runs)
+        self._gallery.present(runs, self._activate_figure, self._figure_action)
+        self._render_details(runs)
+
+    def _next_focus(self, run: ResultRun, figure: str | None = None) -> _Focus:
+        focus = self._focus
+        point_first = self._group.currentIndex() == 1
+        if point_first and focus.point is None:
+            return replace(focus, point=(run.entry, run.point))
+        if focus.experiment is None:
+            return replace(focus, experiment=run.experiment or "Unknown experiment")
+        if focus.point is None:
+            return replace(focus, point=(run.entry, run.point))
+        return replace(focus, run_key=run.key, figure=figure)
+
+    def _render_navigation(self, runs: tuple[ResultRun, ...]) -> None:
+        self._list.clear()
+        self._navigation.clear()
+        for run in runs:
+            target = self._next_focus(run)
+            if target in self._navigation:
+                continue
+            self._navigation.append(target)
+            if target.run_key is not None:
+                caption = f"{run.entry} / {run.run_path.name}"
+            elif target.point != self._focus.point:
+                caption = _point_label((run.entry, run.point))
+            else:
+                caption = run.experiment or "Unknown experiment"
+            self._list.addItem(caption)
+
+    def _navigate(self) -> None:
+        row = self._list.currentRow()
+        if 0 <= row < len(self._navigation):
+            self._visit(self._navigation[row])
+
+    def _activate_figure(self, run: ResultRun, figure: str) -> None:
+        self._visit(self._next_focus(run, figure))
+
+    def _render_details(self, runs: tuple[ResultRun, ...]) -> None:
+        run = self._index.get_run(self._focus.run_key) if self._focus.run_key and runs else None
+        self._details.setPlainText(result_details(self._index, run) if run else "Select a run to inspect cfg and analysis")
+        reason = "Select a run"
+        if run is not None:
+            reason = "No data.h5 in this saved run" if run.data_path is None else ""
+        self._open_button.setEnabled(not reason)
+        self._open_button.setToolTip(reason)
+        self._pin_button.setEnabled(run is not None)
+        self._current_figure.setText(f"Current figure: {self._focus.figure or 'none'}")
+
+    def _pin_selected(self) -> None:
+        if self._focus.run_key is not None:
+            self.comparison.pin_run(self._index.get_run(self._focus.run_key), self._focus.figure)
+
+    def _open_selected(self) -> None:
+        if self._focus.run_key is None:
+            return
+        run = self._index.get_run(self._focus.run_key)
+        try:
+            outcome = self._open_run(run)
+        except Exception as error:
+            self._feedback.setText(f"Cannot open analysis tab: {error}")
+        else:
+            self._feedback.setText(f"Loaded history: {outcome.data_path}")
+            if outcome.analysis_error:
+                self._feedback.setText(f"History loaded; analysis preparation failed: {outcome.analysis_error}")
+
+    def _figure_action(self, run: ResultRun, figure: str, action: str) -> None:
+        clipboard = QApplication.clipboard()
+        if action == "Add to comparison":
+            self.comparison.pin_run(run, figure)
+            return
+        if clipboard is None:
+            self._feedback.setText("Clipboard unavailable")
+            return
+        if action == "Copy path":
+            path = next(path for path in run.figure_paths if path.name == figure)
+            clipboard.setText(str(path))
+            self._feedback.setText(f"Copied path: {path}")
+        elif action == "Copy image":
+            try:
+                image = QImage.fromData(self._index.read_figure(run.key, figure))
+                if image.isNull():
+                    raise ValueError("Cannot decode saved PNG")
+            except (OSError, ValueError, KeyError) as error:
+                self._feedback.setText(f"Cannot copy image: {error}")
+                return
+            clipboard.setImage(image)
+            self._feedback.setText(f"Copied image: {figure}")
