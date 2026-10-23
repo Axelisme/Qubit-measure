@@ -27,7 +27,7 @@ from zcu_tools.gui.app.fluxdep.state import (
     SpectrumEntry,
     SpecType,
 )
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.simulate import value2flux
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,8 @@ class LoadService:
         """Load ``filepath`` as a new spectrum and write it into State.
 
         The spectrum name is the file's basename. ``inherit_from`` (an existing
-        spectrum name) seeds this spectrum's flux alignment as an initial guess;
+        spectrum name with committed or seeded alignment) seeds this spectrum's
+        flux alignment as an initial guess;
         omitted, the alignment starts at the identity (flux_half=0, period=1) and
         is refined later by the line-picker. The loaded ``fluxs`` are derived from
         whatever alignment is in effect at load time (re-derived on alignment).
@@ -80,7 +81,9 @@ class LoadService:
 
         Returns the spectrum name (basename of ``filepath``). InvalidInputError
         reports unknown_spectrum for absent inheritance or spectrum_not_2d
-        for a missing frequency axis, before State publication. Native I/O and
+        for a missing frequency axis, before State publication.
+        FailedPreconditionError reports alignment_not_seeded when the source has
+        neither committed nor seeded alignment. Native I/O and
         parsing failures propagate without caller-correctable classification.
         """
         ld = load_labber_data(filepath)
@@ -140,6 +143,11 @@ class LoadService:
         if inherit_from is None:
             return 0.0, 0.0, 1.0
         src = self._state.get_spectrum(inherit_from)
+        if not src.can_seed_alignment:
+            raise FailedPreconditionError(
+                f"Spectrum {inherit_from!r} has no alignment to inherit",
+                reason_code="alignment_not_seeded",
+            )
         return src.flux_half, src.flux_int, src.flux_period
 
     def load_processed_spectrums(self, filepath: str) -> list[str]:

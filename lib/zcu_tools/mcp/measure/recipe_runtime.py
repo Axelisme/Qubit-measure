@@ -56,6 +56,7 @@ from zcu_tools.mcp.measure.recipe_contracts import (
 from zcu_tools.mcp.measure.recipe_details import RecipeAnalysisDetail, RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_form import (
     RecipeFormError,
+    encode_form_value,
     field_observation,
     field_path,
     read_form_field,
@@ -414,16 +415,26 @@ class RecipeRuntime:
         self._tools.send_gui_rpc("tab.reset_cfg", params)
         return RecipeTab(self, tab, adapter)
 
-    def read_source(self, source_path: str) -> YamlValue:
+    def read_source(self, source_path: str, *, missing_ok: bool = False) -> YamlValue:
         """Read one registered session-global value source, without a tab capture.
 
         source_path is the owner's value.read key (for example
-        device.flux.value), not a Form path or expression. Missing sources and
-        transport/type errors propagate. This never refreshes tab.read sources.
+        device.flux.value), not a Form path or expression. With missing_ok=True,
+        return None only for an unregistered source. Other source/transport/type
+        errors propagate. This never refreshes tab.read sources.
         """
         if not source_path.strip():
             raise ValueError("Source path must be nonblank")
-        reply = self._tools.send_gui_rpc("value.read", {"key": source_path})
+        try:
+            reply = self._tools.send_gui_rpc("value.read", {"key": source_path})
+        except GuiRpcError as exc:
+            if (
+                missing_ok
+                and exc.code == "invalid_params"
+                and exc.reason == "unregistered_source"
+            ):
+                return None
+            raise
         return TypeAdapter(YamlValue).validate_python(reply["value"])
 
     @property
@@ -469,7 +480,7 @@ class RecipeRuntime:
         field_path(path)
         if value is None:
             return
-        payload = TypeAdapter(FormValue).dump_python(value, mode="json")
+        payload = encode_form_value(value)
         reply = self._tools.send_gui_rpc(
             "tab.edit_recipe_fields",
             {"tab_id": tab, "edits": [{"path": list(path), "value": payload}]},
@@ -498,9 +509,7 @@ class RecipeRuntime:
                 changes.append(
                     {
                         "path": list(edit.path),
-                        "value": TypeAdapter(FormValue).dump_python(
-                            edit.value, mode="json"
-                        ),
+                        "value": encode_form_value(edit.value),
                     }
                 )
         if not changes and not require_valid:
@@ -637,35 +646,21 @@ class RecipeRuntime:
             return AnalysisResult(TypeAdapter(result).validate_python(analysis.result))
 
     def save(self, tab: str) -> SaveResult:
-        """Save fixed Run raw then all completed artifacts and retain the whole attempt."""
+        """Save all fixed Run outputs once and retain the complete owner report."""
         with self._failure_phase("image_save"):
             op = self._run_ops[tab]
-            reports: list[SaveReport] = []
-            try:
-                for method, extra in (
-                    ("tab.save_data", {}),
-                    ("tab.save_artifacts", {"artifacts": "all"}),
-                ):
-                    reply = self._tools.gui.send_gui_rpc(
-                        method, {"tab_id": tab, **extra}, run_operation_handle=op
-                    )
-                    reports.append(TypeAdapter(SaveReport).validate_python(reply))
-            except Exception:
-                if reports:
-                    self._record_save(tab, reports, failed=True)
-                raise
-            return self._record_save(tab, reports)
-
-    def _record_save(
-        self, tab: str, reports: list[SaveReport], *, failed: bool = False
-    ) -> SaveResult:
-        if any(report.run_id != reports[0].run_id for report in reports):
-            raise GuiRpcError(
-                "Save reports identify different Runs", reason="result_superseded"
+            reply = self._tools.gui.send_gui_rpc(
+                "tab.save_artifacts",
+                {"tab_id": tab, "artifacts": "all"},
+                run_operation_handle=op,
             )
+            return self._record_save(
+                tab, TypeAdapter(SaveReport).validate_python(reply)
+            )
+
+    def _record_save(self, tab: str, report: SaveReport) -> SaveResult:
         outputs = tuple(
             output
-            for report in reports
             for section in report.artifacts.values()
             for artifact in section.values()
             for members in artifact.members.values()
@@ -673,11 +668,11 @@ class RecipeRuntime:
         )
         saved = SaveResult(
             "failed"
-            if failed or any(output.status == "failed" for output in outputs)
+            if any(output.status == "failed" for output in outputs)
             else "completed",
-            reports[0].run_id,
+            report.run_id,
             outputs,
-            tuple(reports),
+            (report,),
         )
         with self._lock:
             index = next(

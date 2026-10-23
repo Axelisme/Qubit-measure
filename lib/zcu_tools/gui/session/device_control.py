@@ -73,7 +73,15 @@ class DeviceControlPort(Protocol):
     def get_device_info(self, name: str) -> BaseDeviceInfo | None: ...
     def get_cached_device_value(self, name: str) -> float | None: ...
     def poll_device_info(self, name: str) -> None: ...
-    def try_poll_device_info(self, name: str) -> bool: ...
+    def try_poll_device_info(self, name: str) -> bool:
+        """Return whether a live read was submitted, not whether it completed.
+
+        Missing, memory-only, unsafe mutation and closed-executor targets skip
+        without raising and return False. Later read/cache delivery may fail
+        even after True. This call must run on the session owner thread.
+        """
+        ...
+
     def is_memory_device(self, name: str) -> bool: ...
     def get_device_unit(self, name: str) -> str: ...
     def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]: ...
@@ -163,8 +171,8 @@ class DeviceControlFacet:
         self._device.poll_device_info(name)
 
     def try_poll_device_info(self, name: str) -> bool:
-        self._device.poll_device_info(name)
-        return True
+        """Return the submission receipt described by DeviceControlPort."""
+        return self._device.poll_device_info(name)
 
     def is_memory_device(self, name: str) -> bool:
         return self._device.is_memory_device(name)

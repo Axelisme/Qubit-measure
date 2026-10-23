@@ -7,7 +7,6 @@ from typing import Annotated
 import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
-from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.simulation import white_noise
@@ -211,17 +210,11 @@ def test_operation_groups_replace_old_set_and_retain_workflow_trend(
         label="first operation question",
     )
     _snapshot(driver, tmp_path, "03-first-operation")
-    driver.select_combo(
-        "operation/measurement", object_name="workflow.figures.selector"
+    assert tuple(axes.ylabel for axes in driver.plots().axes) == (
+        "Workflow trend",
+        "Attempt 1",
+        "Diagnostic",
     )
-    _snapshot(driver, tmp_path, "04-first-measurement")
-    assert driver.plots().axes[0].ylabel == "Attempt 1"
-    driver.select_combo("operation/diagnostic", object_name="workflow.figures.selector")
-    _snapshot(driver, tmp_path, "05-first-diagnostic")
-    assert driver.plots().axes[0].ylabel == "Diagnostic"
-    driver.select_combo("trend", object_name="workflow.figures.selector")
-    _snapshot(driver, tmp_path, "06-workflow-trend")
-    assert driver.plots().axes[0].ylabel == "Workflow trend"
     driver.enter_text(object_name="workflow.answer", value='{"value": 1}')
     driver.click("Answer")
     qt_until(
@@ -232,29 +225,18 @@ def test_operation_groups_replace_old_set_and_retain_workflow_trend(
         label="replacement operation question",
     )
     _snapshot(driver, tmp_path, "07-replacement-operation")
-    driver.select_combo(
-        "operation/measurement", object_name="workflow.figures.selector"
+    assert tuple(axes.ylabel for axes in driver.plots().axes) == (
+        "Workflow trend",
+        "Attempt 2",
     )
-    _snapshot(driver, tmp_path, "08-second-measurement")
-    assert driver.plots().axes[0].ylabel == "Attempt 2"
-    with pytest.raises(LookupError, match="diagnostic"):
-        driver.select_combo(
-            "operation/diagnostic", object_name="workflow.figures.selector"
-        )
-    driver.select_combo("trend", object_name="workflow.figures.selector")
-    _snapshot(driver, tmp_path, "09-retained-workflow")
-    assert driver.plots().axes[0].ylabel == "Workflow trend"
-    driver.click(object_name="workflow.figures.selector")
-    _snapshot(driver, tmp_path, "10-grouped-selector")
-    driver.press_key(Qt.Key.Key_Escape, object_name="workflow.figures.selector")
     driver.enter_text(object_name="workflow.answer", value='{"value": 2}')
     driver.click("Answer")
     qt_until(lambda: _done(driver), label="operation workflow terminal delivery")
     _snapshot(driver, tmp_path, "11-terminal-retained")
-    driver.select_combo(
-        "operation/measurement", object_name="workflow.figures.selector"
+    assert tuple(axes.ylabel for axes in driver.plots().axes) == (
+        "Workflow trend",
+        "Attempt 2",
     )
-    assert driver.plots().axes[0].ylabel == "Attempt 2"
 
 
 def test_plan_float_list_edit_errors_and_native_lowering(plan_window, tmp_path):
@@ -419,23 +401,18 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     assert driver.plots().axes == experiment_axes
 
 
-def test_figure_selector_appears_with_figures_and_hides_after_release(
-    plan_window, tmp_path
-):
+def test_workflow_figures_appear_and_release_on_replacement(plan_window, tmp_path):
     driver = ComponentDriver(plan_window)
     _open(driver, tmp_path)
-    assert not driver.observe(object_name="workflow.figures.selector").visible
+    assert driver.plots().axes == ()
     driver.click("Start")
     qt_until(lambda: _done(driver), label="finite figure-producing run")
     _snapshot(driver, tmp_path, "03-figure-arrived")
-    selector = driver.observe(object_name="workflow.figures.selector")
-    assert selector.visible
-    assert selector.text == "flux trace"
+    assert len(driver.plots().axes) == 1
     driver.enter_text(object_name="form.input.fluxes", value="[]")
     assert driver.observe(object_name="form.input.fluxes").text == "[]"
     _snapshot(driver, tmp_path, "04-empty-plan")
     driver.click("Start")
     qt_until(lambda: _done(driver), label="finite plot-free replacement run")
     _snapshot(driver, tmp_path, "05-figures-released")
-    assert not driver.observe(object_name="workflow.figures.selector").visible
     assert driver.plots().axes == ()

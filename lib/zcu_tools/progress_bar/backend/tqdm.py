@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from tqdm.auto import tqdm
 
 from ..base import BaseProgressBar, ProgressTotal, ProgressValue
 
 
 class TQDMProgressBar(BaseProgressBar):
-    def __init__(self, *args, **kwargs) -> None:
-        self.pbar = tqdm(*args, **kwargs)
+    """tqdm bar with a readable description even when display is disabled.
+
+    Initial descriptions are returned unchanged. ``set_description`` appends
+    tqdm's ``": "`` suffix to nonempty descriptions, regardless of display state.
+    """
+
+    def __init__(
+        self,
+        iterable: Iterable[object] | None = None,
+        desc: str | None = None,
+        *args,
+        **kwargs,
+    ) -> None:
+        self.pbar = tqdm(iterable, desc, *args, **kwargs)
+        # Disabled tqdm skips description initialization before returning.
+        self.pbar.desc = desc or ""
 
     def update(self, value: ProgressValue = 1) -> None:
         self.pbar.update(value)

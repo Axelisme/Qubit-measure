@@ -57,6 +57,14 @@ class SoftDelay(Module):
 
 
 class DelayAuto(Module):
+    """Wait for selected channel timelines and then advance the reference time.
+
+    name identifies the module. t is extra time in microseconds (including QickParam
+    sweeps), or a register name holding tProc cycles. gens and ros select generator
+    and readout timelines. At least one must be True; otherwise construction raises
+    ValueError. tag names a time parameter and cannot be used with a register name.
+    """
+
     def __init__(
         self,
         name: str,
@@ -66,6 +74,9 @@ class DelayAuto(Module):
         gens: bool = True,
         ros: bool = True,
     ) -> None:
+        if not gens and not ros:
+            raise ValueError("DelayAuto requires at least one channel: gens or ros")
+
         self.name = name
         self.t = t
         self.gens = gens
