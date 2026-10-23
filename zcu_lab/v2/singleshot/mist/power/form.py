@@ -31,7 +31,7 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
             "radius": Expr("$qubit.ext.readout_cal.radius"),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

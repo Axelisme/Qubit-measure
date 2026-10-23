@@ -93,7 +93,7 @@ class LookbackAdapter(
     def get_writeback_items(
         self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]
     ) -> Sequence[WritebackItem]:
-        """Propose detected arrival time in us at captured resonator.ext.time_of_fly.
+        """Propose detected arrival time in us at captured resonator.time_of_fly.
 
         req supplies the analysis and its capture; source.cfg may be None.
         WritebackService resolves the destination on req.ctx.parameters and
@@ -102,7 +102,7 @@ class LookbackAdapter(
         """
         return [
             ParameterWriteback(
-                target_name="$resonator.ext.time_of_fly",
+                target_name="$resonator.time_of_fly",
                 description="Readout trigger offset prediction (us)",
                 proposed_value=req.analyze_result.predict_offset,
             )

@@ -40,7 +40,7 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
             },
             "relax_delay": 1.0,
             "reps": 1000,
-            "rounds": 1,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

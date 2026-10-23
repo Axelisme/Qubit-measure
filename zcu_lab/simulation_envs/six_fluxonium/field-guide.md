@@ -242,6 +242,17 @@ covariance in ADC units squared times ns. Receiver phase uses degrees;
 resonator mismatch phase uses radians. Time of flight uses ns.
 Program input durations and trigger offsets use us, and frequencies use MHz.
 
+The entry template sets group `mixer_freq: 7250` MHz for readout centers from
+7000 to 7500 MHz. Blank mux forms read `$mux.mixer_freq`; missing or null stays
+required and blank, without deriving a midpoint or depending on kappa.
+Group `time_of_fly: 0.4` us matches the receivers' `time_of_flight_ns: 400`.
+Resonator pulse routes have separate top-level `time_of_fly` values, initially null.
+For blank `mux/onetone_fine`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`,
+ro_length at 1.0 us, and length at trigger plus ro_length. Missing group TOF or
+any kappa leaves trigger and length required and blank. These editable seeds
+are not device-confirmed calibration. Readout slots retain their mixer and
+existing timing rules.
+
 Only terminal readout is supported. The model does not include cavity memory,
 Stark shifts or backaction from an earlier readout pulse. At terminal readout,
 the model uses DC energy levels and dressed cavity shifts. Weak dispersive

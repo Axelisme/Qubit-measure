@@ -30,7 +30,7 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
             },
             "relax_delay": 1.0,
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

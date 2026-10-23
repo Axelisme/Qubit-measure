@@ -11,7 +11,7 @@ import pytest
 from matplotlib.figure import Figure
 from qtpy.QtCore import QEvent, QPoint, Qt, QUrl
 from qtpy.QtGui import QColor, QDesktopServices, QKeyEvent, QPalette
-from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTextEdit
 from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.artifacts import (
@@ -139,6 +139,91 @@ def snapshot(tmp_path: Path) -> tuple[ArtifactTracker, TabSnapshot]:
     )
 
 
+@pytest.mark.parametrize("long_field", ["filename", "error"])
+def test_long_output_evidence_keeps_panel_width(
+    qapp: QApplication, tmp_path: Path, long_field: str
+) -> None:
+    from qtpy.QtWidgets import QScrollArea
+
+    from tests.gui._user_input import ComponentDriver
+
+    tracker, current = snapshot(tmp_path)
+    current = replace(current, artifacts=current.artifacts[:1])
+    outputs = [
+        (member.key, output)
+        for artifact in current.artifacts[0].artifacts
+        for member in artifact.members
+        for output in member.outputs
+    ]
+    center = ArtifactSaveCenter(_CAPABILITIES)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setWidget(center)
+    scroll.resize(560, 900)
+    driver = ComponentDriver(scroll)
+    minimums = []
+    error_heights = []
+    try:
+        for length in (1, 200):
+            filename = "measurement-" + "x" * length + ".h5"
+            error = "Permission denied: /" + "y" * length + "/data.h5"
+            tracker.apply_report(
+                SaveReport(
+                    "20261008T000000Z-a1b2c3",
+                    tuple(
+                        OutputResult(
+                            key,
+                            Output(
+                                output.format,
+                                tmp_path
+                                / (
+                                    filename
+                                    if long_field == "filename"
+                                    else output.path.name
+                                ),
+                            ),
+                            "failed",
+                            error if long_field == "error" else "Permission denied",
+                        )
+                        for key, output in outputs
+                    ),
+                )
+            )
+            center.update_from_snapshot(
+                replace(current, artifacts=tracker.snapshot()[:1])
+            )
+            scroll.show()
+            qapp.processEvents()
+            minimums.append(center.minimumSizeHint().width())
+            error_heights.append(
+                max(
+                    w.bounds[3]
+                    for w in driver.visible().widgets
+                    if w.text.startswith("✗") and w.bounds is not None
+                )
+            )
+            driver.screenshot(tmp_path / f"{long_field}-{length}.png")
+        assert minimums[1] == minimums[0]
+        assert center.width() <= scroll.contentsRect().width()
+        folders = [w for w in driver.visible().widgets if w.text == "Open folder"]
+        assert len(folders) == len(outputs)
+        assert all(w.fully_visible for w in folders)
+        evidence = driver.visible().widgets
+        if long_field == "filename":
+            names = [w for w in evidence if w.tooltip == filename]
+            assert len(names) == len(outputs)
+            assert all("…" in w.text and w.text.endswith(".h5") for w in names)
+        else:
+            # All 200 path characters must wrap, not clip a single token line.
+            assert error_heights[1] >= 4 * error_heights[0]
+            failures = [w for w in evidence if w.text.startswith("✗")]
+            assert len(failures) == len(outputs)
+            assert all(w.tooltip == "✗ " + error for w in failures)
+    finally:
+        scroll.deleteLater()
+        qapp.processEvents()
+
+
 def test_all_output_paths_are_read_only_and_refresh_retains_selection(
     qapp: QApplication, tmp_path: Path
 ) -> None:
@@ -213,7 +298,8 @@ def test_outputs_follow_actual_report_paths_and_errors(
             str(result.output.path) for result in results
         ]
         assert any(
-            "copy denied" in label.text() for label in center.findChildren(QLabel)
+            "copy denied" in edit.toPlainText()
+            for edit in center.findChildren(QTextEdit)
         )
         assert center.has_unsaved_data()
     finally:
@@ -345,17 +431,19 @@ def test_output_header_precedes_full_width_aligned_path_and_error(
         assert status_origin.y() < origin.y()
         assert folder_origin.y() < origin.y()
         assert origin.x() + edit.width() == folder_origin.x() + folder.width()
-        failures = [label for label in labels if label.text().startswith("✗")]
+        failures = [
+            text
+            for text in container.findChildren(QTextEdit)
+            if text.toPlainText().startswith("✗")
+        ]
         for failure in failures:
             error_origin = failure.mapTo(output_center, QPoint())
             assert error_origin.y() >= origin.y() + edit.height()
             assert error_origin.x() == origin.x()
             assert failure.width() == edit.width()
-            assert failure.wordWrap()
-            assert (
-                failure.textInteractionFlags()
-                & Qt.TextInteractionFlag.TextSelectableByMouse
-            )
+            assert failure.isReadOnly()
+            failure.selectAll()
+            assert failure.textCursor().selectedText() == failure.toPlainText()
 
 
 @pytest.mark.parametrize(
@@ -406,9 +494,9 @@ def test_output_failure_colour_follows_window_palette(
     output_center.setPalette(palette)
     qapp.processEvents()
     failures = [
-        label
-        for label in output_center.findChildren(QLabel)
-        if label.text().startswith("✗")
+        text
+        for text in output_center.findChildren(QTextEdit)
+        if text.toPlainText().startswith("✗")
     ]
     assert failures
     assert all(

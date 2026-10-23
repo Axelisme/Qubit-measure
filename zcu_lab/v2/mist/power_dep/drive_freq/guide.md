@@ -25,7 +25,7 @@ displayed configuration. Open or Reset again to apply alias changes.
   generator channel, gain 0.05, and a 1 us constant waveform.
 - Readout uses `$qubit.module.readout` when available, otherwise the readout
   template. The template needs resonator frequency, generator/ADC channels and
-  `$resonator.ext.time_of_fly`. Missing required sources stay Invalid.
+  `$resonator.time_of_fly`. Missing required sources stay Invalid.
 - Frequency starts at `$resonator.freq` ± 1.5 times
   `$resonator.kappa`, with 51 points. Gain starts at 0–1 with 51 points.
   Both sweep axes override the probe's scalar frequency and gain during Run.

@@ -8,7 +8,7 @@ The 2D sweep varies readout gain and readout frequency to map how the resonator 
 
 ## Parameter sources
 
-The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. `resonator.ext.default_probe_length` minus 0.1 us seeds the ADC window, and `resonator.ext.time_of_fly` plus 0.05 us seeds trigger timing. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
+The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. The ADC window starts at 0.99 us. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` us when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 us and trigger plus the ADC window. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
 
 ## Readout module
 

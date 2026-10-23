@@ -47,7 +47,7 @@ def make_form(ctx: FormContext) -> Form[T2EchoCfg]:
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
             "detune": Hidden(),
         },
         extras=DetuneInput,

@@ -36,8 +36,8 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
                 "gain": Range.between(0.0, 0.2, expts=31),
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "reps": 100,
-            "rounds": 1000,
+            "reps": 1000,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

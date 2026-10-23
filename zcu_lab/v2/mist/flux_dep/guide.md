@@ -22,7 +22,7 @@ Flux starts at the qubit's integer-flux device value and ends at its half-flux
 value, with 101 points. Missing calibration leaves the sweep invalid. Gain starts
 at 0 and ends at 0.5, with 101 points. These are editable starting values.
 Set safe ranges using the limits of your hardware. Relaxation starts at five T1,
-using a 30 us scale only when T1 is missing. Reps/rounds start at 1000/1.
+using a 30 us scale only when T1 is missing. Reps/rounds start at 1000/10.
 
 Check the direct flux device name and set flux_unit to its actual A, V or native
 coordinate. The sweep sends values directly in that coordinate. Review device

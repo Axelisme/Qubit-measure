@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QEvent, Qt, QUrl
-from qtpy.QtGui import QColor, QDesktopServices, QPalette, QResizeEvent
+from qtpy.QtCore import QEvent, QSize, Qt, QUrl
+from qtpy.QtGui import (
+    QColor,
+    QDesktopServices,
+    QPalette,
+    QResizeEvent,
+    QTextDocument,
+    QTextOption,
+)
 from qtpy.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -95,6 +103,83 @@ def _hint_label(text: str, owner: QWidget) -> QLabel:
     return label
 
 
+class _ElidedLabel(QLabel):
+    """Keep artifact titles and filenames within their allocated row width."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def set_full_text(self, text: str) -> None:
+        if text == self.toolTip():
+            return
+        self.setToolTip(text)
+        self.setText(text)
+        if self.isVisible():
+            self._update_text()
+
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self._update_text()
+
+    def changeEvent(self, a0: QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.FontChange:
+            self._update_text()
+
+    def _update_text(self) -> None:
+        self.setText(
+            self.fontMetrics().elidedText(
+                self.toolTip(),
+                Qt.TextElideMode.ElideMiddle,
+                self.contentsRect().width(),
+            )
+        )
+
+
+class _WrappingErrorText(QTextEdit):
+    """Hide Qt's wrap-anywhere and adaptive document-height layout details.
+
+    QLabel clips unbroken path tokens even with wordWrap enabled. This read-only
+    document wraps those tokens without modifying the selectable original text.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setReadOnly(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.setStyleSheet("background: transparent;")
+        self._document = QTextDocument(self)
+        self._document.setDocumentMargin(0)
+        self.setDocument(self._document)
+        self.textChanged.connect(self._update_height)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.height())
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSizeHint()
+
+    def _update_height(self) -> None:
+        self.setFixedHeight(ceil(self._document.size().height()))
+        self.updateGeometry()
+
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self._update_height()
+
+    def set_error(self, text: str) -> None:
+        if self.toPlainText() != text:
+            self.setPlainText(text)
+        self.setToolTip(text)
+        self.setVisible(bool(text))
+
+
 class _ElidedPathEdit(QLineEdit):
     """Read-only path field showing its display text elided in the middle.
 
@@ -173,7 +258,7 @@ class _ArtifactRow:
     """Widgets of one artifact: header title, status, Save, and its outputs."""
 
     container: QWidget
-    title: QLabel
+    title: _ElidedLabel
     status: QLabel
     save: QPushButton
     outputs: QVBoxLayout
@@ -184,10 +269,10 @@ class _OutputRow:
     """Widgets of one member output: file name, path, saved mark and failure."""
 
     container: QWidget
-    name: QLabel
+    name: _ElidedLabel
     path: _ElidedPathEdit
     status: QLabel
-    error: QLabel
+    error: _WrappingErrorText
 
 
 class ArtifactSaveCenter(QWidget):
@@ -252,12 +337,11 @@ class ArtifactSaveCenter(QWidget):
         container = QWidget(self)
         layout = QVBoxLayout(container)
         header = QHBoxLayout()
-        title = QLabel()
+        title = _ElidedLabel()
         font = title.font()
         font.setBold(True)
         title.setFont(font)
-        header.addWidget(title)
-        header.addStretch()
+        header.addWidget(title, stretch=1)
         status = QLabel()
         header.addWidget(status)
         save = QPushButton("Save")
@@ -281,12 +365,11 @@ class ArtifactSaveCenter(QWidget):
         layout.setSpacing(2)
         row = QHBoxLayout()
         row.setSpacing(6)
-        name = QLabel()
+        name = _ElidedLabel()
         make_label_selectable(name)
-        row.addWidget(name)
+        row.addWidget(name, stretch=1)
         status = QLabel()
         row.addWidget(status)
-        row.addStretch()
         edit = _ElidedPathEdit(self)
         open_folder = QPushButton("Open folder")
         open_folder.clicked.connect(
@@ -296,10 +379,7 @@ class ArtifactSaveCenter(QWidget):
         layout.addLayout(row)
         layout.addWidget(edit)
         # A failure message needs the full width to wrap readably.
-        error = QLabel()
-        make_label_selectable(error)
-        error.setTextFormat(Qt.TextFormat.PlainText)
-        error.setWordWrap(True)
+        error = _WrappingErrorText()
         set_foreground(error, error_colour(self))
         error.hide()
         layout.addWidget(error)
@@ -418,7 +498,7 @@ class ArtifactSaveCenter(QWidget):
             self._rows[ref] = self._build_row(ref)
         row = self._rows[ref]
         self._rows_layout.insertWidget(index, row.container)
-        row.title.setText(title)
+        row.title.set_full_text(title)
         row.status.setText(_STATUS_TEXT[artifact.status])
         set_foreground(row.status, _STATUS_COLOR[artifact.status](self))
         output_index = 0
@@ -430,14 +510,13 @@ class ArtifactSaveCenter(QWidget):
                 output_row = self._output_rows[identity]
                 row.outputs.insertWidget(output_index, output_row.container)
                 output_index += 1
-                output_row.name.setText(output.path.name)
+                output_row.name.set_full_text(output.path.name)
                 output_row.path.set_path(
                     _display_path(output.path, bases), str(output.path)
                 )
                 output_row.status.setText(_output_status_text(output))
                 error_text = _output_error_text(output)
-                output_row.error.setText(error_text)
-                output_row.error.setVisible(bool(error_text))
+                output_row.error.set_error(error_text)
 
     def update_interaction(
         self, snapshot: TabSnapshot, *, writable: bool = True

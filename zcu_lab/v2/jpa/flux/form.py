@@ -26,8 +26,8 @@ def make_form(ctx: FormContext) -> Form[FluxCfg]:
             "sweep": {"jpa_flux": Range.around("$jpa.flux", 0.005, expts=101)},
             "skew_penalty": 0.0,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=1),
-            "reps": 10000,
-            "rounds": 1,
+            "reps": 1000,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

@@ -10,7 +10,7 @@ Open and Reset take a snapshot of the current aliases, parameters and module cho
 
 Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
 
-Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.ext.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
+Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
 The gain sweep starts at -0.3 and stops at 1.0 regardless of calibration. When the x180 module has a stored scalar waveform length, its editable pulse copy starts at length = 1.5*pi_len*pi_gain us. pi_len must be a finite positive number; pi_gain must be finite and in (0, 1]. Both values must be numeric, with booleans treated as invalid. Missing, null or invalid values leave the required length empty. A finite invalid gain stays visible for correction; a nonfinite gain leaves both gain and length empty.
 
