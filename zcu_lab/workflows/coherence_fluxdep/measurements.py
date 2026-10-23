@@ -29,7 +29,7 @@ from zcu_lab.workflows.common.saving import save_t1, save_t2echo
 type LifetimeKind = Literal["t1", "t2ramsey", "t2echo"]
 
 
-type LifetimeHistory = list[tuple[float, float]]
+type LifetimeHistory = list[tuple[float, float, float]]
 
 
 @dataclass(frozen=True)
@@ -60,27 +60,29 @@ def history_guess(initial_us: float, history: LifetimeHistory) -> float:
     """Return this lifetime's existing alpha=.5 delay-grid EWMA in microseconds.
 
     initial_us is its positive validated guess, history contains only its
-    accepted (setpoint, microseconds) pairs. No other lifetime enters this grid.
+    accepted (setpoint, lifetime_us, error_us) triples. No other lifetime enters this grid.
     The caller retains history; this pure projection does not change it.
     """
     guess = initial_us
-    for _, lifetime in history:
+    for _, lifetime, _error in history:
         guess = 0.5 * lifetime + 0.5 * guess
     return guess
 
 
 def _plot(plots: Plots, kind: LifetimeKind) -> LinePlot:
-    name = f"{kind}/decay"
-    if name not in plots:
-        plots.subplots(name)
+    if kind not in plots:
+        plots.subplots(kind, nrows=2)
 
     def rebuild(figure: Figure) -> None:
-        figure.clear()
-        figure.subplots()
+        figure.set_layout_engine("constrained")
+        # A new axis gives this point its own live handle; cleared axes still
+        # belong to the previous point\'s registered live template.
+        figure.axes[1].remove()
+        figure.add_subplot(2, 1, 2)
 
-    plots.draw(name, rebuild)
+    plots.draw(kind, rebuild)
     return plots.liveplot_1d(
-        name, "Time (us)", "Signal (raw I)", axes=plots[name].axes[0]
+        kind, "Time (us)", "Signal (raw I)", axes=plots[kind].axes[1]
     )
 
 
@@ -98,15 +100,11 @@ def _finish(
     fit: DecayFit,
     times: NDArray[np.float64],
     reason: str | None,
-    *,
-    directory: Path,
 ) -> LifetimeResult:
     filename = f"{kind}.h5"
-    if reason is not None:
-        return LifetimeResult(kind, "rejected", reason, None, None, filename)
 
     def overlay(figure: Figure) -> None:
-        ax = figure.axes[0]
+        ax = figure.axes[1]
         # Replace raw I with the observations in the fit's projection.
         ax.clear()
         ax.plot(times, fit.observed, ".", label="observed")
@@ -114,12 +112,16 @@ def _finish(
         ax.set(
             xlabel="Time (us)",
             ylabel="Signal (projected)" if kind == "t1" else "Normalized signal",
-            title=f"{kind} = {fit.lifetime_us:.2f} us",
+            title=(
+                f"{kind} = {fit.lifetime_us:.2f} ± {fit.error_us:.2f} us"
+                + ("\nRejected fit" if reason is not None else "")
+            ),
         )
         ax.legend()
 
-    plots.draw(f"{kind}/decay", overlay)
-    plots.save(f"{kind}/decay", directory / f"{kind}-decay.png")
+    plots.draw(kind, overlay)
+    if reason is not None:
+        return LifetimeResult(kind, "rejected", reason, None, None, filename)
     return LifetimeResult(
         kind, "accepted", None, fit.lifetime_us, fit.error_us, filename
     )
@@ -168,9 +170,7 @@ async def measure_t1(
         and residual < tun.max_fit_residual
     )
     reason = None if accepted else "T1 fit rejected"
-    return _finish(
-        plots, "t1", fit, outcome.value.result.times, reason, directory=directory
-    )
+    return _finish(plots, "t1", fit, outcome.value.result.times, reason)
 
 
 async def measure_ramsey(
@@ -223,7 +223,6 @@ async def measure_ramsey(
         fit,
         outcome.value.result.times,
         _t2_rejection(fit, float(np.max(outcome.value.result.times))),
-        directory=directory,
     )
 
 
@@ -271,5 +270,4 @@ async def measure_echo(
         fit,
         outcome.value.result.times,
         _t2_rejection(fit, float(np.max(outcome.value.result.times))),
-        directory=directory,
     )

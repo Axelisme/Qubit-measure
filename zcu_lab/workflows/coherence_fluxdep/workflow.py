@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
@@ -122,16 +123,16 @@ def _summary(
     committed_points: int,
     directory: Path | None = None,
 ) -> None:
-    name = f"{kind}/vs_flux"
-    if name not in plots:
-        plots.subplots(name)
+    if kind not in plots:
+        plots.subplots(kind, nrows=2)
 
     def draw(figure: Figure) -> None:
-        figure.clear()
-        axis = figure.subplots()
+        figure.set_layout_engine("constrained")
+        axis = figure.axes[0]
+        axis.clear()
         if history:
-            fluxes, lifetimes = zip(*history, strict=True)
-            axis.scatter(fluxes, lifetimes)
+            fluxes, lifetimes, errors = zip(*history, strict=True)
+            axis.errorbar(fluxes, lifetimes, yerr=errors, fmt="o", capsize=3)
         elif committed_points == 0:
             axis.text(
                 0.5,
@@ -143,10 +144,11 @@ def _summary(
                 fontfamily="Noto Sans CJK TC",
             )
         axis.set(xlabel="flux setpoint", ylabel=f"{kind} (us)")
+        axis.xaxis.set_major_locator(MaxNLocator(nbins=4))
 
-    plots.draw(name, draw)
+    plots.draw(kind, draw)
     if directory is not None:
-        plots.save(name, directory / f"{kind}-summary.png")
+        plots.save(kind, directory / f"{kind}-decay.png")
 
 
 def draw_summaries(
@@ -156,7 +158,11 @@ def draw_summaries(
     committed_points: int,
     directory: Path | None = None,
 ) -> None:
-    """Draw every enabled history before a point and save the same set after the sweep."""
+    """Update enabled lifetime top panels without clearing current decay/fit.
+
+    Histories contain accepted (flux, lifetime_us, error_us) triples only.
+    Save each combined figure as <kind>-decay.png when directory is supplied.
+    """
     for kind, history, enabled in summaries:
         if enabled:
             _summary(
@@ -192,9 +198,9 @@ def dependency_skips(plan: CoherencePlan) -> tuple[LifetimeResult, ...]:
 def _append(history: LifetimeHistory, flux: float, result: LifetimeResult) -> None:
     """Keep only accepted lifetime values in this lifetime's delay-grid history."""
     if result.status == "accepted":
-        if result.lifetime_us is None:
-            raise ValueError("Accepted lifetime requires microseconds")
-        history.append((flux, result.lifetime_us))
+        if result.lifetime_us is None or result.error_us is None:
+            raise ValueError("Accepted lifetime requires microseconds and error")
+        history.append((flux, result.lifetime_us, result.error_us))
 
 
 async def run_t1_stage(
@@ -314,6 +320,7 @@ async def run_readout_stage(
     iteration: Scope,
     inputs: CalibrationInputs,
     point_record: CoherencePoint,
+    plots: Plots,
     *,
     carry: CalCarry,
     estimate: float,
@@ -325,6 +332,7 @@ async def run_readout_stage(
     ):
         point_record.readout = await calibrate_readout(
             iteration,
+            plots=plots,
             inputs=inputs,
             rabi=point_record.rabi,
             carry=carry,
@@ -394,6 +402,8 @@ async def coherence_fluxdep(
                 snapshot=plan.snapshot,
                 directory=d,
                 point_index=index,
+                flux=flux,
+                flux_unit=plan.flux_unit,
             )
             estimate = t1_by_flux[-1][1] if t1_by_flux else tun.current.t1.guess_us
             # Locate frequency, calibrate pulses, then refresh readout on cadence.
@@ -413,6 +423,7 @@ async def coherence_fluxdep(
                     iteration,
                     replace(captured, tun=tun.current.cal),
                     point_record,
+                    env.plots,
                     carry=carry,
                     estimate=estimate,
                 )
@@ -482,6 +493,12 @@ async def coherence_fluxdep(
             directory = d
         finally:
             iteration.commit(point_record)
+            draw_summaries(
+                env.plots,
+                summaries,
+                committed_points=index + 1,
+                directory=iteration.dir,
+            )
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(len(plan.fluxes))
     draw_summaries(
         env.plots, summaries, committed_points=len(plan.fluxes), directory=directory

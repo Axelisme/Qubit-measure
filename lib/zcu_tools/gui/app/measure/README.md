@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -166,6 +166,12 @@ does not drain services or disconnect hardware.
 Qt workflow panes display these owners and forward commands. A busy workflow's
 local Stop remains available under Remote control. It reclaims locked Local before
 requesting Stop through the same facet; other mutations still require the holder.
+Tunables Discard restores the latest accepted input and clears local invalid text.
+Before Start, it restores the captured form base. It is enabled only for a changed
+draft while editing is allowed. Running, pausing and paused runs allow tunables
+edits and Apply; stopping locks edits, Apply and Discard. Entering paused selects
+Tunables and shows 「Resume 會重做未提交的點；可先 Apply 新的 tunables」.
+Resume or Stop hides the hint. A new Ask still selects its question page.
 Measure remote calls the same facet without a pane, toggle or selected-tab
 dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
@@ -201,6 +207,9 @@ The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
 same-host operation Plots and finishes before returning or being discarded.
 `WorkflowFigures` tiles workflow figures and the current operation together,
 with up to four figures per page and page controls for larger sets.
+Follow latest starts checked and selects each newly presented or live-refreshed
+figure's page and tile. Clicking a canvas unchecks it and pins the selection;
+final flushes do not move focus.
 Pane and MCP read `WorkflowPlots.figures()`: workflow names stay unchanged and
 operation names are `operation/<name>`. Workflow registration
 rejects that prefix. A new attempt releases and replaces the whole operation
