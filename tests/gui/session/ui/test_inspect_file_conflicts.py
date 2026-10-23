@@ -57,6 +57,7 @@ def conflict_ui(
     service.use_point(PointUseRequest("point"))
     control = ContextControlFacet(context=service)
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
+    control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, setup=True)
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param
     if document != "aliases-missing":
@@ -76,6 +77,7 @@ def conflict_ui(
     )
     dialog.resize(1000, 760)
     dialog.show()
+    dialog.activateWindow()
     qapp.processEvents()
     evidence = Path(os.environ.get("INSPECT_SYNC_EVIDENCE", str(tmp_path))) / document
     try:
@@ -162,7 +164,9 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
     if submit == "enter":
         ui.press_key(Qt.Key.Key_Return)
     else:
-        ui.click(object_name="inspect.parameters.filter")
+        ui.enter_text(
+            object_name="inspect.parameters.filter", value="Q1.rate", commit=False
+        )
     assert ui.observe(object_name="component_error").text
     rows = ui.visible().tree_rows
     assert any(row.path == ("Q1", "rate") and row.columns[1] == "9" for row in rows)
@@ -177,3 +181,35 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
         row.path == ("Q1", "rate") and row.columns[1] == "4700.0" for row in rows
     )
     ui.screenshot(evidence / "04-reloaded.png")
+
+
+@pytest.mark.parametrize("conflict_ui", ["parameters"], indirect=True)
+def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
+    ui, _, evidence = conflict_ui
+    evidence = evidence / "destination"
+    ui.enter_text(
+        object_name="inspect.parameters.filter", value="Q1.rate", commit=False
+    )
+    ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="oops")
+    assert ui.observe(object_name="component_error").text
+    ui.screenshot(evidence / "01-rejected.png")
+    ui.choose_option("Current point", value="Setup template")
+    ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="8")
+    assert ui.observe(object_name="component_error").text
+    assert any(
+        row.path == ("Q1", "rate") and row.columns[1] == "8"
+        for row in ui.visible().tree_rows
+    )
+    ui.screenshot(evidence / "02-target-rejected.png")
+    ui.choose_option("Setup template", value="Current point")
+    ui.click(object_name="inspect.parameters.sync.reload")
+    assert any(
+        row.path == ("Q1", "rate") and row.columns[1] == "4300.0"
+        for row in ui.visible().tree_rows
+    )
+    ui.choose_option("Current point", value="Setup template")
+    assert any(
+        row.path == ("Q1", "rate") and row.columns[1] == "1200.0"
+        for row in ui.visible().tree_rows
+    )
+    ui.screenshot(evidence / "03-setup-unchanged.png")
