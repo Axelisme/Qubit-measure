@@ -439,7 +439,9 @@ class ParameterContext:
 
         Bare $alias returns a scalar name or ordered name list without catalog
         validation. Missing/unbound rows (including []) and invalid list elements
-        raise RoleResolutionError; there is no same-name fallback. Field paths use
+        raise RoleResolutionError; there is no same-name fallback. An unbound
+        list element uses reason "Alias list element is not bound", distinct from
+        the empty-row reason "Alias is not bound". Field paths use
         their point/library owner. Missing data returns present=False; syntax,
         namespace, source and materialization errors propagate. Unset/dangling
         module slots raise ModuleSlotError naming the slot path.

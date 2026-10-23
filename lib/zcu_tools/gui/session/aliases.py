@@ -156,8 +156,11 @@ class AliasTable:
         """Read one fixed scalar or ordered list, validating every link and kind.
 
         Missing rows, empty strings/lists and unbound dependencies raise
-        RoleResolutionError. Invalid elements fail the entire read; lists never
-        flatten and cannot serve as scalar link roots. No catalog is required
+        RoleResolutionError. Empty bindings use reason "Alias is not bound";
+        a nonempty list with an unbound element uses "Alias list element is not bound".
+        Invalid elements fail the entire read, naming their zero-based index and
+        authored value. Link errors retain their reason and exception cause.
+        Lists never flatten and cannot serve as scalar link roots. No catalog is required
         without kind. Returned lists are detached from authored rows.
         """
         name = self._resolve_name(alias, point, kind=kind)
@@ -220,15 +223,24 @@ class AliasTable:
             return None
         if isinstance(row.value, list):
             names: list[str] = []
-            for value in row.value:
-                name = self._scalar_name(alias, point, value=value, kind=kind)
+            for index, value in enumerate(row.value):
+                try:
+                    name = self._scalar_name(alias, point, value=value, kind=kind)
+                except RoleResolutionError as error:
+                    raise RoleResolutionError(
+                        alias,
+                        error.focus,
+                        error.required_kind,
+                        error.reason,
+                        message=f"${alias}[{index}] element {value!r}: {error}",
+                    ) from error
                 if name is None:
                     raise RoleResolutionError(
                         alias,
                         None,
                         kind,
-                        "Alias is not bound",
-                        message=f"${alias} list element {value!r} links to an unbound alias",
+                        "Alias list element is not bound",
+                        message=f"${alias}[{index}] element {value!r} links to an unbound alias",
                     )
                 names.append(name)
             return names
