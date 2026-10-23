@@ -95,7 +95,11 @@ def _entry_sources(
 
 
 def _clean_disk_entries(
-    document: YamlMap, version: FormatVersion, *, ledger: Path, entry_id: str
+    document: YamlMap,
+    version: FormatVersion,
+    *,
+    ledger: Path | RecordsLedger,
+    entry_id: str,
 ) -> tuple[str, ...]:
     extra = "allow" if version.minor > MODULE_LIBRARY_VERSION.minor else None
     container = _LibraryContainer.model_validate(document, extra=extra)
@@ -153,13 +157,16 @@ def _clean_disk_entries(
 
 
 def open_library_store(
-    path: Path, *, ledger: Path, entry_id: str
+    path: Path, *, ledger: Path | RecordsLedger, entry_id: str
 ) -> DocumentStore[ModuleLibraryDocument]:
     """Open an existing library with locked backup-before-clean disk reads.
 
-    path is module_cfg.yaml; ledger is its owner's records/ledger.jsonl and
-    entry_id its UUID. Container/header and unassignable provenance errors reject
-    the whole file. Invalid Specs or entry-local provenance remove their root.
+    path is module_cfg.yaml; ledger is its owner's records/ledger.jsonl path or
+    scoped RecordsLedger. entry_id opens path inputs; supplied handles must belong
+    to this entry and already own their scope. The store retains one ledger for
+    dependency checks, cleanup and full validation, reusing only the validated
+    event index, never attachment contents. Container/header and unassignable
+    provenance errors reject the whole file. Invalid Specs or entry-local provenance remove their root.
     Ledger I/O/schema/attachment and unexpected failures propagate. The store
     validates the entire cleaned candidate before backup and atomic replacement.
     Unchanged library bytes reuse validation after checking every nonmanual
@@ -169,7 +176,11 @@ def open_library_store(
     not on unchanged reads. Drafts remain strict; this does not create files or
     materialize references.
     """
-    dependencies = RecordsLedger(ledger.parent, entry_id=entry_id)
+    records = (
+        ledger
+        if isinstance(ledger, RecordsLedger)
+        else RecordsLedger(ledger.parent, entry_id=entry_id)
+    )
 
     def check_dependencies(document: ModuleLibraryDocument) -> bool:
         sources = tuple(
@@ -179,13 +190,13 @@ def open_library_store(
                 if record.source != "manual"
             )
         )
-        return dependencies.dependencies_exist(sources)
+        return records.dependencies_exist(sources)
 
     def validate(document: ModuleLibraryDocument) -> None:
-        document.validate_content(ledger=ledger, entry_id=entry_id)
+        document.validate_content(ledger=records, entry_id=entry_id)
 
     def cleanup(document: YamlMap, version: FormatVersion) -> tuple[str, ...]:
-        return _clean_disk_entries(document, version, ledger=ledger, entry_id=entry_id)
+        return _clean_disk_entries(document, version, ledger=records, entry_id=entry_id)
 
     return DocumentStore(
         path,

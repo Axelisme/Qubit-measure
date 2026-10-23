@@ -12,11 +12,11 @@
 
 Library 版本只跟 header／容器結構走。Module／waveform Spec 欄位演進不自動升版，library 維持 2.0（ADR-0072）。其他 major 仍在 header 拒絕，不遷移、不加相容讀取。Forward minor 保留容器層未知欄位，不放寬 entry 的 extra 規則。
 
-Library 首次讀取或內容變更時先驗容器，再逐條驗證四個分組的 Spec 與所屬來源。清理合併所有合法候選的來源，由 entry owner 一次讀 ledger 回報全部缺失事件，再逐 root 移除。後續完整候選驗證獨立讀取 ledger。壞條目及其 provenance 被移除，主檔只留合法條目與來源。清理候選完整驗證後，DocumentStore 在同一 sidecar lock 內逐 byte 複製完整原檔成同目錄時間戳 .bak，不覆寫舊備份，再 atomic replace 主檔。每次成功清理只寫一行 warning，包含備份路徑及移除 roots，不新增 GUI／MCP 顯示。
+Library 首次讀取或內容變更時先驗容器，再逐條驗證四個分組的 Spec 與所屬來源。清理合併所有合法候選的來源，由 entry owner 一次查詢 ledger 回報全部缺失事件，再逐 root 移除。每個 library handle 保留同一個 scoped ledger，供清理、依賴檢查與非空 edit 的完整候選驗證共用增量事件索引。完整候選驗證仍逐次讀取並驗證來源附檔，不快取附檔內容。壞條目及其 provenance 被移除，主檔只留合法條目與來源。清理候選完整驗證後，DocumentStore 在同一 sidecar lock 內逐 byte 複製完整原檔成同目錄時間戳 .bak，不覆寫舊備份，再 atomic replace 主檔。每次成功清理只寫一行 warning，包含備份路徑及移除 roots，不新增 GUI／MCP 顯示。
 
 DocumentStore 每次讀取先 stat 並 hash 完整 YAML bytes。內容未變時，library owner 只用保留的 ledger 索引確認全部非 manual source 存在，並 stat 各來源的本地 attachment。依賴齊全才沿用隔離的已驗證快照，不重跑 YAML parse、Pydantic、cleanup 或完整來源驗證，也不重讀 attachment JSON。缺失依賴會觸發完整驗證與清理，所以刪除事件仍會移除對應 root，刪除 attachment 仍立即報錯。其他依賴檢查錯誤直接傳遞。內容改變與非空 edit 的完整候選驗證仍讀取 attachment 內容。這些讀取維持原本的 lock 範圍，不改成背景監看。
 
-依賴檢查使用的 ledger 採 append-only 契約。索引會在前 4096 bytes 改變、inode／device 改變、檔案縮短、同大小的 mtime_ns 改變，或前次 offset 前最後一行改變時整份重讀。其餘讀取只 parse 新增尾段。同 inode、同 prefix、同前次尾行下，歷史中段原地改寫並同時增長不在偵測範圍。需要完整驗證時，呼叫 `RecordsLedger.reload()` 從 byte 0 重讀；成功後才替換索引，回傳 append order 的隔離 events，不讀 attachments。
+Library handle 使用的 ledger 採 append-only 契約。索引會在前 4096 bytes 改變、inode／device 改變、檔案縮短、同大小的 mtime_ns 改變，或前次 offset 前最後一行改變時整份重讀。其餘讀取只 parse 新增尾段。同 inode、同 prefix、同前次尾行下，歷史中段原地改寫並同時增長不在偵測範圍。需要完整驗證時，呼叫 `RecordsLedger.reload()` 從 byte 0 重讀；成功後才替換索引，回傳 append order 的隔離 events，不讀 attachments。
 
 這是一般讀取不寫檔的 library 例外（ADR-0063），涵蓋 open、refresh、edit 進入與 commit 重讀。合法檔與 header-only 不重寫，也不重複備份。Header／容器或不可歸屬的 provenance 錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤直接傳遞。備份失敗不替換主檔；replace 失敗保留原主檔及已完成的備份，不發布候選。這不是跨檔交易或掉電恢復。
 

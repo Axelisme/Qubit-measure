@@ -90,6 +90,15 @@ class RecordsLedger:
         self._lock = FileLock(str(self._path) + ".lock")
         self._state: _LedgerState | None = None
 
+    @property
+    def source_path(self) -> Path:
+        """Return the bound absolute ledger.jsonl path without file I/O.
+
+        The path identifies this handle's storage for diagnostics. Reading it
+        does not create the ledger, refresh the index or access attachments.
+        """
+        return self._path
+
     @contextmanager
     def _locked(self) -> Generator[None]:
         try:
