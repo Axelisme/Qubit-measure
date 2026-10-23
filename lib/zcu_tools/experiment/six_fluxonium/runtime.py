@@ -98,7 +98,11 @@ def _single_settings(
                 "adc": adc,
             }
         ),
-        numerics=qubit.numerics,
+        numerics=qubit.numerics.model_copy(
+            update={
+                "slow_envelope_segments_per_period": settings.numerics.slow_envelope_segments_per_period
+            }
+        ),
     )
 
 

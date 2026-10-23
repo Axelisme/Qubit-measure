@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 
 from .base import AbsSegment
@@ -51,6 +52,8 @@ class Plot1DSegment(AbsSegment):
     def init_ax(self, ax: Axes) -> None:
         ax.set_xlabel(self.xlabel)
         ax.set_ylabel(self.ylabel)
+        # Leave room for full MHz values on narrow scan-line panels.
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         if self.title is not None:
             ax.set_title(self.title)
         if self.show_grid:
