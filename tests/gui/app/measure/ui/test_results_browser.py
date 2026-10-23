@@ -8,13 +8,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QImage
-from qtpy.QtWidgets import QApplication
+from qtpy.QtGui import QImage, QPixmap
+from qtpy.QtWidgets import QApplication, QWidget
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, load, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.results_index import scan_results
+from zcu_tools.gui.app.measure.services.results_index import ResultsIndex, scan_results
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.session.context_types import (
@@ -70,7 +70,11 @@ def test_menu_opens_independent_results_window(
 @pytest.fixture
 def saved_cfg() -> JsonObject:
     return {
-        "values": {"readout": {"frequency": 5100.0, "tone": "Q2"}},
+        "values": {
+            "readout": {"frequency": 5100.0, "tone": "Q2"},
+            "deep": {"level": {"branch": {"leaf": "bounded"}}},
+            "long": "x" * 240,
+        },
         "cfg_type": "synthetic.history.ReadoutCfg",
         "schema_version": "7.3",
     }
@@ -165,7 +169,211 @@ def populated_browser(
             )
     ui = ComponentDriver(browser_host)
     ui.select_menu("Results ▾", ("Results browser…",))
-    return ui
+    window = browser_host.findChild(QWidget, "results.browser")
+    return ComponentDriver(window)
+
+
+@pytest.mark.parametrize("run_focus", [False, True])
+def test_grouping_reuses_visible_cards_and_decoded_images(
+    populated_browser: ComponentDriver,
+    browser_host: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    run_focus: bool,
+) -> None:
+    ui = populated_browser
+    ui.enter_text(value="Q2", object_name="results.search")
+    ui.click("UTC dates")
+    if run_focus:
+        ui.click(object_name="results.figure.0")
+        ui.click(object_name="results.figure.1")
+    ui.invoke_context_action(action="Add to comparison", object_name="results.figure.0")
+    focus = ui.observe(object_name="results.focus").text
+    current = ui.observe(object_name="results.current_figure").text
+    images = tuple(
+        widget
+        for widget in browser_host.findChildren(QWidget)
+        if widget.objectName().startswith(("results.figure.", "results.card."))
+    )
+    reads: list[str] = []
+    decodes: list[int] = []
+    original_read = ResultsIndex.read_figure
+    original_decode = QPixmap.loadFromData
+
+    def read(index: ResultsIndex, key: str, selector: str) -> bytes:
+        reads.append(selector)
+        return original_read(index, key, selector)
+
+    def decode(image: QPixmap, png: bytes) -> bool:
+        decodes.append(len(png))
+        return original_decode(image, png)
+
+    with monkeypatch.context() as boundary:
+        boundary.setattr(ResultsIndex, "read_figure", read)
+        boundary.setattr(QPixmap, "loadFromData", decode)
+        ui.select_combo("Experiment → point", object_name="results.group")
+        ui.select_combo("Point → experiment", object_name="results.group")
+        assert reads == []
+        assert decodes == []
+    assert images
+    assert images == tuple(
+        widget
+        for widget in browser_host.findChildren(QWidget)
+        if widget.objectName().startswith(("results.figure.", "results.card."))
+    )
+    assert ui.observe(object_name="results.focus").text == focus
+    assert ui.observe(object_name="results.current_figure").text == current
+    assert ui.observe(object_name="results.search").text == "Q2"
+    assert ui.observe("UTC dates").checked
+    ui.select_tab("Comparison")
+    assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
+    ui.select_tab("Gallery")
+    if run_focus:
+        ui.click("Back")
+        assert (
+            ui.observe(object_name="results.current_figure").text
+            == "Current figure: plot-0.png"
+        )
+        ui.click("Forward")
+        assert ui.observe(object_name="results.current_figure").text == current
+    ui.screenshot(tmp_path / "grouping-reused.png")
+
+
+def test_gallery_comparison_and_analysis_have_independent_tabs(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    assert ui.tabs("Gallery").captions == ("Gallery", "Comparison")
+    ui.click(object_name="results.figure.0")
+    ui.invoke_context_action(action="Add to comparison", object_name="results.figure.1")
+    ui.select_tab("Analysis")
+    assert any(
+        row.columns == ("tones[0].freq", "5100.0")
+        for row in ui.table_rows(object_name="results.analysis")
+    )
+    ui.screenshot(tmp_path / "analysis-tab.png")
+    ui.select_tab("Comparison")
+    assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
+    assert ui.table_rows(object_name="results.comparison_table")
+    ui.screenshot(tmp_path / "comparison-tab.png")
+    ui.select_tab("Gallery")
+    assert ui.observe(object_name="results.figure.0").visible
+
+
+def test_preview_height_tracks_available_card_width(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    ui.resize_window(1280, 800)
+    small = ui.observe(object_name="results.figure.0").bounds
+    ui.screenshot(tmp_path / "gallery-1280.png")
+    ui.resize_window(1920, 1200)
+    large = ui.observe(object_name="results.figure.0").bounds
+    assert small is not None and large is not None
+    assert large[2] > small[2]
+    assert large[3] > small[3]
+    assert abs(large[3] / large[2] - 220 / 400) < 0.02
+    ui.screenshot(tmp_path / "gallery-1920.png")
+    for number in range(2):
+        ui.invoke_context_action(
+            action="Add to comparison", object_name=f"results.figure.{number}"
+        )
+    ui.select_tab("Comparison")
+    ui.click("2 × 2 figures")
+    ui.resize_window(1280, 800)
+    small_compare = ui.observe(object_name="results.compare.image.0").bounds
+    ui.screenshot(tmp_path / "comparison-1280.png")
+    ui.resize_window(1920, 1200)
+    large_compare = ui.observe(object_name="results.compare.image.0").bounds
+    assert small_compare is not None and large_compare is not None
+    assert large_compare[2] > small_compare[2]
+    assert large_compare[3] > small_compare[3]
+    assert abs(large_compare[3] / large_compare[2] - 220 / 400) < 0.02
+    ui.screenshot(tmp_path / "comparison-1920.png")
+
+
+def test_date_range_can_be_enabled_edited_and_disabled(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    assert ui.observe(object_name="results.date_from").kind == "QDateEdit"
+    assert not ui.observe(object_name="results.date_from").enabled
+    ui.click("UTC dates")
+    ui.click(object_name="results.date_from")
+    ui.press_key(Qt.Key.Key_End, object_name="results.date_from")
+    ui.press_key(Qt.Key.Key_Up, object_name="results.date_from")
+    ui.press_key(Qt.Key.Key_Return, object_name="results.date_from")
+    assert ui.observe(object_name="results.date_from").text == "2026-10-22"
+    assert ui.observe(object_name="results.visible_count").text == "1 / 3 runs"
+    ui.screenshot(tmp_path / "date-filter.png")
+    ui.click("UTC dates")
+    assert ui.observe(object_name="results.visible_count").text == "3 / 3 runs"
+
+
+def test_comparison_double_click_joins_focus_history(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    ui.invoke_context_action(action="Add to comparison", object_name="results.figure.0")
+    ui.select_tab("Comparison")
+    ui.select_table_row(
+        "alpha", object_name="results.comparison_table", double_click=True
+    )
+    assert ui.tabs("Gallery").current == "Gallery"
+    assert "aaaaaa · 1 runs" in ui.observe(object_name="results.focus").text
+    ui.click("Back")
+    assert ui.observe(object_name="results.focus").text == "All results · 3 runs"
+    ui.click("Forward")
+    assert "aaaaaa · 1 runs" in ui.observe(object_name="results.focus").text
+    ui.select_tab("Comparison")
+    assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
+    ui.screenshot(tmp_path / "comparison-return-history.png")
+
+
+def test_cfg_summary_bounds_mapping_depth_and_value_length(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    ui.click(object_name="results.figure.0")
+    details = ui.observe(object_name="results.details").text
+    assert 'deep.level.branch = {"leaf": "bounded"}' in details
+    assert f"long = {'x' * 200} …" in details
+    ui.screenshot(tmp_path / "bounded-cfg.png")
+
+
+def test_initial_navigation_exposes_point_groups(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    assert ui.observe(object_name="results.group").text == "Point → experiment"
+    paths = {row.path for row in ui.visible().tree_rows}
+    assert paths >= {
+        ("alpha  (2)", "p1  (1)", "mux/readout  (1)"),
+        ("alpha  (2)", "p2  (1)", "mux/readout  (1)"),
+        ("beta  (1)", "p1  (1)", "mux/readout  (1)"),
+    }
+    ui.screenshot(tmp_path / "initial-point-groups.png")
+
+
+def navigation_paths(ui: ComponentDriver) -> set[tuple[str, ...]]:
+    """Read visible navigation paths without the separate count decoration."""
+    return {
+        tuple(part.split("  (", 1)[0] for part in row.path)
+        for row in ui.visible().tree_rows
+        if row.tree_name == "results.navigation"
+    }
+
+
+def navigation_path(ui: ComponentDriver, path: tuple[str, ...]) -> tuple[str, ...]:
+    """Resolve semantic captions to their currently visible decorated path."""
+    matches = [
+        row.path
+        for row in ui.visible().tree_rows
+        if tuple(part.split("  (", 1)[0] for part in row.path) == path
+    ]
+    if len(matches) != 1:
+        raise LookupError(f"{path!r}: {len(matches)} visible paths")
+    return matches[0]
 
 
 @pytest.mark.parametrize("point_first", [False, True])
@@ -173,27 +381,30 @@ def test_entry_tree_paths_keep_entries_isolated(
     populated_browser: ComponentDriver, tmp_path: Path, point_first: bool
 ) -> None:
     ui = populated_browser
-    if point_first:
-        ui.select_combo("Point → experiment", object_name="results.group")
-    assert {
-        row.path
-        for row in ui.visible().tree_rows
-        if row.tree_name == "results.navigation"
-    } == {("alpha",), ("beta",)}
+    ui.select_combo(
+        "Point → experiment" if point_first else "Experiment → point",
+        object_name="results.group",
+    )
+    assert {path for path in navigation_paths(ui) if len(path) == 1} == {
+        ("alpha",),
+        ("beta",),
+    }
     for entry, experiment, point, run_id, count in (
         ("alpha", "mux/readout", "p1", "20261021T010000Z-aaaaaa", 2),
         ("beta", "mux/readout", "p1", "20261021T010000Z-aaaaaa", 1),
     ):
-        ui.select_tree_row((entry,), object_name="results.navigation")
+        ui.select_tree_row(
+            navigation_path(ui, (entry,)), object_name="results.navigation"
+        )
         assert ui.observe(object_name="results.focus").text == f"{entry} · {count} runs"
         path = (entry,)
         for caption in (point, experiment) if point_first else (experiment, point):
-            ui.expand_tree(path, object_name="results.navigation")
+            ui.expand_tree(navigation_path(ui, path), object_name="results.navigation")
             path = (*path, caption)
-        ui.expand_tree(path, object_name="results.navigation")
-        path = (*path, run_id)
-        assert path in {row.path for row in ui.visible().tree_rows}
-        ui.select_tree_row(path, object_name="results.navigation")
+        ui.expand_tree(navigation_path(ui, path), object_name="results.navigation")
+        path = (*path, "aaaaaa  ·  01:05:00")
+        assert path in navigation_paths(ui)
+        ui.select_tree_row(navigation_path(ui, path), object_name="results.navigation")
         assert ui.observe(object_name="results.focus").text == f"{run_id} · 1 runs"
         assert (
             f"{entry} / {point}" in ui.observe(object_name="results.figure.0").tooltip
@@ -214,16 +425,16 @@ def test_group_gallery_has_one_representative_per_run(
     ui.screenshot(tmp_path / "group-one-card-per-run.png")
     for path, count in (
         (("alpha",), 2),
-        (("alpha", "mux/readout"), 2),
-        (("alpha", "mux/readout", "p1"), 1),
+        (("alpha", "p1"), 1),
+        (("alpha", "p1", "mux/readout"), 1),
     ):
-        ui.select_tree_row(path, object_name="results.navigation")
+        ui.select_tree_row(navigation_path(ui, path), object_name="results.navigation")
         assert {
             w.object_name
             for w in ui.visible().widgets
             if w.object_name.startswith("results.figure.")
         } == {f"results.figure.{i}" for i in range(count)}
-        ui.expand_tree(path, object_name="results.navigation")
+        ui.expand_tree(navigation_path(ui, path), object_name="results.navigation")
 
 
 def test_group_image_click_opens_run_and_current_figure_in_one_step(
@@ -265,12 +476,13 @@ def test_filters_grouping_and_focus_history(
 ) -> None:
     ui = populated_browser
     assert ui.observe(object_name="results.focus").text == "All results · 3 runs"
-    ui.expand_tree(("alpha",), object_name="results.navigation")
-    assert ("alpha", "mux/readout") in {r.path for r in ui.visible().tree_rows}
+    ui.select_combo("Experiment → point", object_name="results.group")
+    ui.expand_tree(navigation_path(ui, ("alpha",)), object_name="results.navigation")
+    assert ("alpha", "mux/readout") in navigation_paths(ui)
     ui.select_combo("Point → experiment", object_name="results.group")
-    ui.expand_tree(("alpha",), object_name="results.navigation")
-    ui.expand_tree(("beta",), object_name="results.navigation")
-    assert {r.path for r in ui.visible().tree_rows} >= {
+    ui.expand_tree(navigation_path(ui, ("alpha",)), object_name="results.navigation")
+    ui.expand_tree(navigation_path(ui, ("beta",)), object_name="results.navigation")
+    assert navigation_paths(ui) >= {
         ("alpha", "p1"),
         ("alpha", "p2"),
         ("beta", "p1"),
@@ -278,10 +490,14 @@ def test_filters_grouping_and_focus_history(
     ui.click("All results")
     ui.enter_text(value="Q2", object_name="results.search")
     ui.select_combo("mux/readout", object_name="results.experiment")
-    ui.enter_text(value="2026-10-22", object_name="results.date_from")
-    ui.enter_text(value="2026-10-22", object_name="results.date_to")
+    ui.click("UTC dates")
+    ui.click(object_name="results.date_from")
+    ui.press_key(Qt.Key.Key_End, object_name="results.date_from")
+    ui.press_key(Qt.Key.Key_Up, object_name="results.date_from")
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
-    ui.select_tree_row(("alpha", "p2"), object_name="results.navigation")
+    ui.select_tree_row(
+        navigation_path(ui, ("alpha", "p2")), object_name="results.navigation"
+    )
     assert ui.observe(object_name="results.focus").text == "alpha / p2 · 1 runs"
     ui.select_combo("Experiment → point", object_name="results.group")
     assert ui.observe(object_name="results.focus").text == "alpha / p2 · 1 runs"
@@ -291,6 +507,11 @@ def test_filters_grouping_and_focus_history(
     assert ui.observe(object_name="results.focus").text == "alpha / p2 · 1 runs"
     ui.enter_text(value="no-such-tone", object_name="results.search")
     assert ui.observe(object_name="results.focus").text == "alpha / p2 · 0 runs"
+    assert not any(
+        w.object_name.startswith("results.figure.") for w in ui.visible().widgets
+    )
+    ui.enter_text(value="Q2", object_name="results.search")
+    assert "alpha / p2" in ui.observe(object_name="results.figure.0").tooltip
     ui.screenshot(tmp_path / "filtered-focus.png")
 
 
@@ -313,25 +534,30 @@ def test_figure_drilldown_details_scroll_and_pins(
     for field in ("cfg_type", "schema_version"):
         assert f"{field} = {saved_cfg[field]}" in details
     assert "readout.frequency = 5100.0" in details
-    assert "tones[0].freq = 5100.0" in details
-    assert "Parameters · analysis.json" in details and "n_iter = 12" in details
+    ui.select_tab("Analysis")
+    rows = {row.columns for row in ui.table_rows(object_name="results.analysis")}
+    assert ("tones[0].freq", "5100.0") in rows
+    assert ("Parameters · analysis.json", "") in rows and ("n_iter", "12") in rows
+    ui.select_tab("Metadata / cfg")
     ui.click(object_name="results.details")
     ui.press_key(Qt.Key.Key_PageDown, object_name="results.details")
     ui.screenshot(tmp_path / "run-values-details.png")
     assert "alpha / p1" in ui.observe(object_name="results.figure.0").tooltip
     ui.invoke_context_action(action="Add to comparison", object_name="results.figure.1")
-    assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
     ui.click("Add to comparison")
+    ui.select_tab("Comparison")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
     assert any("20261021T010000Z-aaaaaa" in row.text for row in ui.list_rows())
+    ui.select_tab("Gallery")
     ui.invoke_context_action(action="Copy path", object_name="results.figure.1")
     assert "Copied path:" in ui.observe(object_name="results.feedback").text
     ui.invoke_context_action(action="Copy image", object_name="results.figure.1")
     assert ui.observe(object_name="results.feedback").text == "Copied image: plot-1.png"
     ui.screenshot(tmp_path / "run-details-pinned.png")
-    ui.press_key(Qt.Key.Key_End, object_name="results.gallery")
-    assert ui.observe(object_name="results.figure.7").visible
+    ui.press_key(Qt.Key.Key_PageDown, object_name="results.gallery")
+    assert ui.observe(object_name="results.figure.7").fully_visible
     ui.screenshot(tmp_path / "gallery-bottom.png")
+    ui.select_tab("Comparison")
     ui.press_key(Qt.Key.Key_Home, object_name="results.pins")
     ui.click("Unpin selected")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 0"
@@ -344,10 +570,14 @@ def test_run_without_images_is_reachable_from_tree(
     ui = ComponentDriver(browser_host)
     ui.select_menu("Results ▾", ("Results browser…",))
     path = ("bare",)
-    for caption in ("Unknown experiment", "Global / unknown", "unknown"):
-        ui.expand_tree(path, object_name="results.navigation")
+    for caption in (
+        "Global / unknown",
+        "Unknown experiment",
+        "nknown  ·  Unknown time",
+    ):
+        ui.expand_tree(navigation_path(ui, path), object_name="results.navigation")
         path = (*path, caption)
-    ui.select_tree_row(path, object_name="results.navigation")
+    ui.select_tree_row(navigation_path(ui, path), object_name="results.navigation")
     assert ui.observe(object_name="results.focus").text == "unknown · 1 runs"
     assert "Unregistered" in ui.observe(object_name="results.details").text
     assert (
@@ -496,29 +726,36 @@ def test_adapter_identity_groups_alias_and_tag_and_filters_both(
     identity_browser: ComponentDriver, tmp_path: Path
 ) -> None:
     ui = identity_browser
-    ui.expand_tree(("original",), object_name="results.navigation")
-    assert {row.path for row in ui.visible().tree_rows} >= {
+    ui.select_combo("Experiment → point", object_name="results.group")
+    ui.expand_tree(navigation_path(ui, ("original",)), object_name="results.navigation")
+    assert navigation_paths(ui) >= {
         ("original", "saving"),
         ("original", "other"),
         ("original", "old_tag"),
     }
-    ui.select_tree_row(("original", "saving"), object_name="results.navigation")
+    ui.select_tree_row(
+        navigation_path(ui, ("original", "saving")), object_name="results.navigation"
+    )
     assert ui.observe(object_name="results.focus").text == "saving · 2 runs"
     ui.click("All results")
     ui.select_combo("saving", object_name="results.experiment")
     assert ui.observe(object_name="results.focus").text == "All results · 2 runs"
     ui.select_combo("Point → experiment", object_name="results.group")
-    ui.expand_tree(("original",), object_name="results.navigation")
-    ui.select_tree_row(("original", "p"), object_name="results.navigation")
-    ui.expand_tree(("original", "p"), object_name="results.navigation")
-    assert {row.path for row in ui.visible().tree_rows} == {
+    ui.expand_tree(navigation_path(ui, ("original",)), object_name="results.navigation")
+    ui.select_tree_row(
+        navigation_path(ui, ("original", "p")), object_name="results.navigation"
+    )
+    ui.expand_tree(
+        navigation_path(ui, ("original", "p")), object_name="results.navigation"
+    )
+    assert navigation_paths(ui) == {
         ("original",),
         ("original", "p"),
         ("original", "p", "saving"),
     }
     assert ui.observe(object_name="results.focus").text == "original / p · 2 runs"
     ui.select_combo("All experiments", object_name="results.experiment")
-    assert {row.path for row in ui.visible().tree_rows} >= {
+    assert navigation_paths(ui) >= {
         ("original", "p", "saving"),
         ("original", "p", "other"),
         ("original", "p", "old_tag"),
@@ -531,8 +768,11 @@ def test_unresolved_identity_remains_browsable_and_refuses_new_tab(
     tmp_path: Path,
 ) -> None:
     ui = identity_browser
-    ui.expand_tree(("original",), object_name="results.navigation")
-    ui.select_tree_row(("original", "old_tag"), object_name="results.navigation")
+    ui.select_combo("Experiment → point", object_name="results.group")
+    ui.expand_tree(navigation_path(ui, ("original",)), object_name="results.navigation")
+    ui.select_tree_row(
+        navigation_path(ui, ("original", "old_tag")), object_name="results.navigation"
+    )
     ui.click(object_name="results.figure.0")
     assert "old_tag" in ui.observe(object_name="results.details").text
     ui.click("Open in new analysis tab")

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDateTimeEdit,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -89,7 +90,7 @@ def mouse_click(widget: QWidget, at: QPoint) -> None:
 
 
 def _display_text(widget: QWidget) -> str:
-    if isinstance(widget, (QAbstractButton, QLabel, QLineEdit)):
+    if isinstance(widget, (QAbstractButton, QLabel, QLineEdit, QDateTimeEdit)):
         return widget.text()
     if isinstance(widget, QComboBox):
         return widget.currentText()
@@ -336,11 +337,14 @@ class ComponentDriver:
                 )
         return tuple(rows)
 
-    def select_table_row(self, text: str, *, object_name: str) -> None:
+    def select_table_row(
+        self, text: str, *, object_name: str, double_click: bool = False
+    ) -> None:
         """Click the unique fully visible table cell with this exact caption.
 
         Disabled, hidden, clipped and modal-blocked tables cannot be clicked.
         The target must already be in the viewport; this does not auto-scroll.
+        double_click sends the normal press/release followed by a double-click event.
         """
         table = self._find(None, object_name)
         if not isinstance(table, QTableWidget):
@@ -360,7 +364,24 @@ class ComponentDriver:
                 ):
                     items.append(item)
         item = _unique(text, items, [item.text() for item in items])
-        mouse_click(viewport, table.visualItemRect(item).center())
+        point = table.visualItemRect(item).center()
+        mouse_click(viewport, point)
+        if double_click:
+            for kind, buttons in (
+                (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+                (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+            ):
+                QApplication.sendEvent(
+                    viewport,
+                    QMouseEvent(
+                        kind,
+                        QPointF(point),
+                        QPointF(viewport.mapToGlobal(point)),
+                        Qt.MouseButton.LeftButton,
+                        buttons,
+                        Qt.KeyboardModifier.NoModifier,
+                    ),
+                )
         QApplication.processEvents()
 
     def edit_table_value(
@@ -608,6 +629,9 @@ class ComponentDriver:
         """
         widget = self._find(text, object_name)
         if self._can_interact(widget):
+            if isinstance(widget, QDateTimeEdit):
+                editor = widget.findChild(QLineEdit)
+                widget = editor
             point = widget.rect().center()
             if isinstance(widget, QCheckBox):
                 option = QStyleOptionButton()

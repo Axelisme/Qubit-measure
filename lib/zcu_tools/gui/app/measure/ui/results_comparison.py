@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QSizePolicy,
+    QScrollArea,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -33,9 +33,11 @@ class ResultsComparison(QWidget):
     pins_changed emits after adding/removing a pin or changing its figure. Re-pinning
     an existing run preserves order and updates its selected figure only when supplied.
     Table/figure mode and the at-most-four checked runs never change pin membership.
+    run_activated emits the opaque run key when a table row is double-clicked.
     """
 
     pins_changed = pyqtSignal()
+    run_activated = pyqtSignal(str)
 
     def __init__(self, index: ResultsIndex, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -69,10 +71,16 @@ class ResultsComparison(QWidget):
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.currentCellChanged.connect(self._select_table_row)
+        self._table.cellDoubleClicked.connect(self._activate_row)
         self._views.addWidget(self._table)
         self._images = QWidget()
         self._grid = QGridLayout(self._images)
-        self._views.addWidget(self._images)
+        scroll = QScrollArea()
+        scroll.setObjectName("results.compare.images")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(self._images)
+        self._views.addWidget(scroll)
         layout.addWidget(self._views, 1)
         self._render()
 
@@ -172,6 +180,9 @@ class ResultsComparison(QWidget):
             self._selected_key = tuple(self._pins)[row]
             self._list.setCurrentRow(row)
 
+    def _activate_row(self, row: int, _column: int) -> None:
+        self.run_activated.emit(tuple(self._pins)[row])
+
     def _toggle_image(self, item: QListWidgetItem) -> None:
         key = tuple(self._pins)[self._list.row(item)]
         if item.checkState() == Qt.CheckState.Checked:
@@ -214,10 +225,7 @@ class ResultsComparison(QWidget):
                     reason = f"{selector}: {error}"
                 else:
                     image.setObjectName(f"results.compare.image.{number}")
-                    image.setMinimumSize(60, 60)
-                    image.setSizePolicy(
-                        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-                    )
+                    image.setMinimumWidth(60)
                     image.setCursor(Qt.CursorShape.ArrowCursor)
                     layout.addWidget(image, 1)
                     reason = selector
@@ -227,7 +235,7 @@ class ResultsComparison(QWidget):
             caption.setObjectName(f"results.compare.caption.{number}")
             caption.setWordWrap(True)
             make_label_selectable(caption)
-            layout.addWidget(caption)
+            layout.insertWidget(0, caption)
             self._grid.addWidget(card, number // 2, number % 2)
         if not self._shown:
             self._grid.addWidget(
@@ -235,7 +243,7 @@ class ResultsComparison(QWidget):
             )
         for position in range(2):
             self._grid.setColumnStretch(position, 1)
-            self._grid.setRowStretch(position, 1)
+        self._grid.setRowStretch(2, 1)
 
     def _remove_selected(self) -> None:
         if self._selected_key in self._pins:

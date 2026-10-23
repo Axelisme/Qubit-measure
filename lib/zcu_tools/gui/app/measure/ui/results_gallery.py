@@ -6,9 +6,10 @@ from collections.abc import Callable
 from enum import Enum
 
 from PyQt6.QtCore import pyqtSignal
-from qtpy.QtCore import QPoint, Qt
+from qtpy.QtCore import QPoint, QSize, Qt
 from qtpy.QtGui import QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
+    QFrame,
     QGridLayout,
     QLabel,
     QMenu,
@@ -51,9 +52,10 @@ class ResultImage(QLabel):
         self._image = QPixmap()
         if not self._image.loadFromData(png):
             raise ValueError("Cannot decode saved PNG")
-        self.setMinimumSize(180, 160)
-        self.setMaximumHeight(230)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(180)
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -63,6 +65,14 @@ class ResultImage(QLabel):
         if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
             self.activated.emit()
         super().mousePressEvent(ev)
+
+    def heightForWidth(self, a0: int) -> int:
+        """Return the saved raster's aspect-preserving height at width pixels."""
+        return round(a0 * self._image.height() / self._image.width())
+
+    def sizeHint(self) -> QSize:
+        """Prefer a small initial preview; layouts grow it with the available width."""
+        return QSize(180, self.heightForWidth(180))
 
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)
@@ -136,13 +146,20 @@ class ResultsGallery(QScrollArea):
         for run in runs:
             paths = run.figure_paths if all_figures else run.figure_paths[:1]
             for path in paths:
-                card = QWidget()
+                card = QFrame()
+                card.setFrameShape(QFrame.Shape.StyledPanel)
                 layout = QVBoxLayout(card)
                 caption = QLabel(
-                    f"{run.entry} / {run.point or 'Global / unknown'}\n{path.name}"
+                    path.name
+                    if all_figures
+                    else f"{run.experiment or 'Unknown experiment'} · {run.run_path.name[-6:]}\n"
+                    f"{run.entry} / {run.point or 'Global / unknown'} · {run.at or 'Unknown time'}"
                 )
                 caption.setWordWrap(True)
                 make_label_selectable(caption)
+                caption.setStyleSheet("font-weight: 600; padding-bottom: 3px;")
+                layout.addWidget(caption)
+                card.setObjectName(f"results.card.{number}")
                 try:
                     image = ResultImage(self._index.read_figure(run.key, path.name))
                 except (OSError, ValueError, KeyError) as error:
@@ -159,7 +176,6 @@ class ResultsGallery(QScrollArea):
                         lambda a, r=run, f=path.name: action(r, f, a)
                     )
                     layout.addWidget(image)
-                layout.addWidget(caption)
                 grid.addWidget(card, number // 2, number % 2)
                 number += 1
         if number == 0:
