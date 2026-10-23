@@ -215,7 +215,7 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
-    delays: SweepCfg
+    delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:

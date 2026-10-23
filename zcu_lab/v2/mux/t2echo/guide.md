@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-22
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## GUI setup
 
 Create a `kind: group/mux` component and bind scalar alias `mux` to it, then

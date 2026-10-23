@@ -49,8 +49,8 @@ class LoadSpectrumDialog(LoadDataDialog):
     ) -> None:
         """Build the dialog over the spectra a new one may inherit from.
 
-        inherit_sources maps each loaded spectrum name, in list order, to the
-        (flux_half, flux_int) device positions it would seed; choosing it in
+        inherit_sources maps eligible aligned or seeded spectrum names, in list
+        order, to the (flux_half, flux_int) device positions it would seed; choosing it in
         "Inherit from" draws those lines on the preview. start_dir is where
         Browse opens.
         """

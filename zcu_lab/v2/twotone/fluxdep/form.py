@@ -1,7 +1,11 @@
 """Flux-dependent spectroscopy starting values and named device selection."""
 
-from zcu_tools.cfg_model import AliasName, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import AliasName, FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 
 from .core import FreqFluxCfg
 
@@ -10,6 +14,16 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqFluxCfg,
+        field_order=(
+            "modules",
+            "flux_dev",
+            "flux_unit",
+            "sweep",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
@@ -40,4 +54,18 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
             "fail_retry": Hidden(),
             "initial_delay": Hidden(),
         },
+    ).with_seed_metadata(
+        {
+            **(
+                {}
+                if ctx.has("$qubit.module.readout")
+                else pulse_readout_seed_metadata(gain=0.1)
+            ),
+            **{
+                ("modules", "qub_pulse", "module", "gain"): FieldMeta(
+                    description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 normalized; operator confirmation required",
+                    calibration="uncalibrated",
+                )
+            },
+        }
     )

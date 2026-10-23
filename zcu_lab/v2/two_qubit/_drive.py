@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import Self
+from typing import Annotated, Self
 
 from pydantic import model_validator
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import Pulse, PulseCfg
 from zcu_tools.program.v2.modules import Join
 
@@ -24,8 +24,20 @@ class DualLineCfg(ConfigBase):
     No coupler AC line, persistent gate module kind or logical frame is implied.
     """
 
-    f1: PulseCfg
-    f2: PulseCfg
+    f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 drive",
+            description="填入 F1 charge-line pulse：frequency MHz、signed gain normalized、NQZ 與 envelope duration us。先做 F1 frequency 與 amplitude／length Rabi 取得 pulse 參考，高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。",
+        ),
+    ]
+    f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 drive",
+            description="填入 F2 charge-line pulse：frequency MHz、signed gain normalized、NQZ 與 envelope duration us。先做 F2 frequency 與 amplitude／length Rabi 取得 pulse 參考，高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_lines(self) -> Self:
