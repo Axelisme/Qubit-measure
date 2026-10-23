@@ -8,6 +8,9 @@ from zcu_tools.gui.form import Display, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 
 from .core import CPMG_Cfg
 
@@ -58,6 +61,16 @@ def make_form(ctx: FormContext) -> Form[CPMGFormCfg]:
     """Build CPMG counts, shared time window and fixed-capture module defaults."""
     return Form(
         CPMGFormCfg,
+        field_order=(
+            "modules",
+            "sweep",
+            "detune_ratio",
+            "earlystop_snr",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
@@ -85,4 +98,10 @@ def make_form(ctx: FormContext) -> Form[CPMGFormCfg]:
         },
         extras=TimeWindowInput,
         lower=lower_time_window,
+    ).with_seed_metadata(
+        (
+            {}
+            if ctx.has("$qubit.module.readout")
+            else pulse_readout_seed_metadata(gain=0.1)
+        )
     )

@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Behavior
 
 Lookback fires the readout pulse and captures the decimated ADC trace versus time. The trace shows when the signal arrives at the digitizer. Acquisition uses real hardware with `reps` fixed at 1. Averaging uses software rounds, initially 10. Run this first when bringing up a new readout chain or after changing cabling.

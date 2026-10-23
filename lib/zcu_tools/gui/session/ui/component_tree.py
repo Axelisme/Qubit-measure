@@ -40,6 +40,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_error_foreground,
     show_error,
 )
+from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import (
     FieldValueKind,
@@ -98,7 +99,10 @@ class ComponentTreeWidget(QWidget):
     gray "(unset)" and nested models expand into child rows. Document data
     the schema does not declare follows the declared rows. A separate general/ext
     branch shows the selected document's extension fields, including nested
-    mappings; it is not a registered component. Double-click or F2
+    mappings; it is not a registered component. Roots start collapsed. The Filter
+    box matches names and dotted paths without case sensitivity and reveals matches
+    with their ancestors. Clearing it restores browsing expansion, including across
+    refreshes for this widget's lifetime. Double-click or F2
     opens an in-place editor on an editable Value cell: Enter or focus loss
     submits, Esc cancels. Choice, boolean and role reference fields edit
     through a drop-down (references list the document's components matching
@@ -125,7 +129,6 @@ class ComponentTreeWidget(QWidget):
         self._control = control
         self._read_only = False
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
-        self._expanded: dict[_RowKey, bool] = {}
         layout = QVBoxLayout(self)
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))
@@ -140,6 +143,12 @@ class ComponentTreeWidget(QWidget):
         toolbar.addWidget(self._add_btn)
         layout.addLayout(toolbar)
         self._tree = self._build_tree()
+        self._filter = TreeFilter(
+            self._tree,
+            object_name="inspect.parameters.filter",
+            default_expanded=False,
+        )
+        layout.addWidget(self._filter)
         layout.addWidget(self._tree, stretch=1)
         self._error = QLabel()
         make_label_selectable(self._error)
@@ -183,21 +192,13 @@ class ComponentTreeWidget(QWidget):
         self._show_hint("")
         self._add_btn.setEnabled(not self._read_only)
         items: dict[_RowKey, QTreeWidgetItem] = {}
-        default_expanded: dict[_RowKey, bool] = {}
-        self._render_general_ext(document, items, default_expanded)
+        self._render_general_ext(document, items)
         for name, component in document.components.items():
             root = QTreeWidgetItem(self._tree, [name, component.kind, "", ""])
             items[(name,)] = root
-            default_expanded[(name,)] = True
-            self._render_declared(
-                document, name, component.kind, items, default_expanded
-            )
+            self._render_declared(document, name, component.kind, items)
             self._render_undeclared(document, name, component.kind, items)
-        for key, item in items.items():
-            if item.childCount():
-                item.setExpanded(
-                    self._expanded.get(key, default_expanded.get(key, False))
-                )
+        self._filter.refresh()
         if selected in items:
             self._tree.setCurrentItem(items[selected])
 
@@ -287,8 +288,6 @@ class ComponentTreeWidget(QWidget):
             _VALUE, _ValueDelegate(self._edit_target, self._submit_edit, tree)
         )
         tree.itemDoubleClicked.connect(self._on_double_click)
-        tree.itemExpanded.connect(self._on_expanded)
-        tree.itemCollapsed.connect(self._on_collapsed)
         shortcut = QShortcut(QKeySequence(Qt.Key.Key_F2), tree)
         shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
         shortcut.activated.connect(self._edit_current)
@@ -306,14 +305,11 @@ class ComponentTreeWidget(QWidget):
         self,
         document: SetupDocument | PointDocument,
         items: dict[_RowKey, QTreeWidgetItem],
-        default_expanded: dict[_RowKey, bool],
     ) -> None:
         """Render general extensions without treating general as a component kind."""
         general = QTreeWidgetItem(self._tree, ["general", "", "", ""])
         items[("general",)] = general
         items[("general", "ext")] = QTreeWidgetItem(general, ["ext", "", "", ""])
-        default_expanded[("general",)] = True
-        default_expanded[("general", "ext")] = True
         for field in document_fields(document):
             key = field.segments
             if key[:2] != ("general", "ext"):
@@ -352,7 +348,6 @@ class ComponentTreeWidget(QWidget):
         name: str,
         kind: str,
         items: dict[_RowKey, QTreeWidgetItem],
-        default_expanded: dict[_RowKey, bool],
     ) -> None:
         """Add one row per declared field below the component's root row."""
         component_value = document_value(document, name)
@@ -367,7 +362,6 @@ class ComponentTreeWidget(QWidget):
             item.setToolTip(_FIELD, field_tooltip(spec, path))
             self._show_metadata(item, document_meta(document, path))
             if spec.value_kind == "group":
-                default_expanded[key] = present
                 if not present:
                     self._mark_unset(item)
                 continue
@@ -480,12 +474,6 @@ class ComponentTreeWidget(QWidget):
         item = self._tree.currentItem()
         if item is not None:
             self._on_double_click(item, _VALUE)
-
-    def _on_expanded(self, item: QTreeWidgetItem) -> None:
-        self._expanded[_row_key(item)] = True
-
-    def _on_collapsed(self, item: QTreeWidgetItem) -> None:
-        self._expanded[_row_key(item)] = False
 
     def _edit_target(self, index: QModelIndex) -> _EditTarget:
         item = self._tree.itemFromIndex(index)

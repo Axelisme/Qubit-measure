@@ -49,7 +49,9 @@ class FluxDepModuleCfg(ConfigBase):
 class FluxDepSweepCfg(ConfigBase):
     freq: Annotated[
         SweepCfg,
-        FieldMeta(label="Freq", unit="MHz", description="Readout frequency sweep."),
+        FieldMeta(
+            label="Frequency", unit="MHz", description="Readout frequency sweep."
+        ),
     ]
     flux: Annotated[
         SweepCfg,

@@ -42,12 +42,16 @@ class _PulseFields[WaveformT](_ModuleFields):
     waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     ch: Annotated[int, FieldMeta(label="Gen ch")]
     nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
-    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=3)]
+    freq: Annotated[
+        float | QickParam, FieldMeta(label="Frequency", unit="MHz", decimals=3)
+    ]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
     ] = 0.0
-    gain: Annotated[float | QickParam, FieldMeta(label="Gain", decimals=4)]
+    gain: Annotated[
+        float | QickParam, FieldMeta(label="Gain", unit="normalized", decimals=4)
+    ]
     pre_delay: Annotated[
         float | QickParam,
         FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
@@ -98,8 +102,12 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     gen_ch: Annotated[int, FieldMeta(label="Gen ch")]
     nqz: Annotated[Literal[1, 2], FieldMeta(label="NQZ", group="Advanced")]
-    freq: Annotated[float | QickParam, FieldMeta(label="Freq", unit="MHz", decimals=3)]
-    gain: Annotated[float | QickParam, FieldMeta(label="Gain", decimals=4)]
+    freq: Annotated[
+        float | QickParam, FieldMeta(label="Frequency", unit="MHz", decimals=3)
+    ]
+    gain: Annotated[
+        float | QickParam, FieldMeta(label="Gain", unit="normalized", decimals=4)
+    ]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
@@ -159,9 +167,11 @@ class MuxReadoutTone(ConfigBase):
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
 
-    freq: float
-    gain: Annotated[float, Field(ge=-1.0, le=1.0)]
-    phase: float = 0.0
+    freq: Annotated[float, FieldMeta(label="Frequency", unit="MHz")]
+    gain: Annotated[
+        float, Field(ge=-1.0, le=1.0), FieldMeta(label="Gain", unit="normalized")
+    ]
+    phase: Annotated[float, FieldMeta(label="Phase", unit="deg")] = 0.0
     ro_ch: Annotated[int, Field(ge=0)]
     label: str = ""
 

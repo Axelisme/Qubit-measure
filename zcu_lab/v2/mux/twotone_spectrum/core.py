@@ -119,7 +119,10 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
     expts: int = Field(
-        strict=True, gt=0, description="Hardware scan point count shared by all tones."
+        strict=True,
+        gt=0,
+        title="Expts",
+        description="Hardware scan point count shared by all tones.",
     )
     participants: list[str]
 

@@ -74,7 +74,7 @@ def test_constant_decision_order_and_sequence_middle(expected):
 
 @pytest.mark.parametrize(
     ("frequency", "expected"),
-    [(0.02, "t6"), (0.05, "floquet_period"), (0.6, "floquet_period")],
+    [(0.02, "slow_envelope"), (0.05, "floquet_period"), (0.6, "floquet_period")],
 )
 def test_sideband_selective_constant_tone_uses_periodic_propagation(
     frequency, expected
@@ -433,7 +433,7 @@ def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
     src = ModelSource(np.diag([0.999, 0.001, 0.0]).astype(complex), build)
     pulse = replace(
         track(1, EnvelopeSpec("constant"), start=1, duration=1),
-        frequency_ghz=np.zeros(1),
+        frequency_ghz=np.full(1, 0.05),
         amplitude=np.full(1, 0.003),
     )
     b = replace(
@@ -732,7 +732,6 @@ def test_empty_evolve_preserves_preflight_error_order(
 def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     from zcu_tools.simulate.evolution.kernels.dop853 import DOP853Kernel
     from zcu_tools.simulate.evolution.kernels.dyson import DysonKernel
-    from zcu_tools.simulate.evolution.kernels.floquet_period import FloquetPeriodKernel
     from zcu_tools.simulate.evolution.kernels.t4 import T4
     from zcu_tools.simulate.evolution.kernels.t6 import T6Kernel
 
@@ -784,9 +783,9 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     src = source()
     probe = replace(
         track(3, EnvelopeSpec("constant"), duration=0.6),
-        # Below the period carrier floor, distinct inputs still reach Dyson.
+        # Isolate unknown-input Dyson admission from period-first routing.
         start_ns=np.array([1.2, 1.3, 1.4]),
-        frequency_ghz=np.full(3, 0.025),
+        frequency_ghz=np.full(3, 0.05),
         amplitude=np.array([1e-5, 2e-5, 0.3]),
         phase_rad=np.array([0.2, -0.5, 1.1]),
     )
@@ -808,7 +807,7 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
             kernels=(
                 T4(),
                 dyson,
-                FloquetPeriodKernel(),
+                RecordingKernel("floquet_period", accepts=False),
                 T6Kernel(),
                 DOP853Kernel(),
             ),
@@ -831,7 +830,13 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     assert dyson.bound_starts
     expected = run(
         Engine(
-            1, 0, kernels=(ReferenceDrive(), ReferenceIdle(), FloquetPeriodKernel())
+            1,
+            0,
+            kernels=(
+                ReferenceDrive(),
+                ReferenceIdle(),
+                RecordingKernel("floquet_period", accepts=False),
+            ),
         ),
         src,
         (b,),

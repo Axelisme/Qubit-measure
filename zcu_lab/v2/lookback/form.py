@@ -2,7 +2,7 @@
 
 from math import isfinite
 
-from zcu_tools.cfg_model import Hidden, Template
+from zcu_tools.cfg_model import FieldMeta, Hidden, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.lookback.core import LookbackCfg
@@ -76,6 +76,12 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
     """
     return Form(
         LookbackCfg,
+        field_order=(
+            "modules",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "modules": {
                 "reset": Hidden(),
@@ -95,4 +101,23 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
             "rounds": 10,
             "initial_delay": Hidden(),
         },
+    ).with_seed_metadata(
+        {
+            ("modules", "readout", "module", "gain"): FieldMeta(
+                description="未校準的起始值，來源：固定常數。lookback Template gain 1.0 normalized; operator confirmation required",
+                calibration="uncalibrated",
+            ),
+            ("modules", "readout", "module", "freq"): FieldMeta(
+                description="$resonator.freq + kappa (MHz); missing/null kappa uses a 1 MHz offset，未校準的起始值，來源：固定常數。operator confirmation required",
+                calibration="uncalibrated",
+            ),
+            ("modules", "readout", "module", "trig_offset"): FieldMeta(
+                description="$resonator.time_of_fly - 0.1 us; missing/null TOF uses a 0 us offset，未校準的起始值，來源：固定常數。operator confirmation required",
+                calibration="uncalibrated",
+            ),
+            ("modules", "readout", "module", "ro_length"): FieldMeta(
+                description="未校準的起始值，來源：固定常數。lookback Template ADC window 1.5 us; operator confirmation required",
+                calibration="uncalibrated",
+            ),
+        }
     )

@@ -292,6 +292,9 @@ class ModelSource:
     build: pure callable supplied by the model package; returns a SecularModel
         for each requested level. It owns physics/device-limit validation.
     expansion: optional exact fixed-coordinate flux Hamiltonian expansion.
+    slow_envelope_segments_per_period: strict positive integer subdivisions per
+        carrier period for midpoint plateau propagation, default 20. Immutable
+        numerical policy; invalid values raise ValueError at construction.
     Construction rejects invalid density with ValueError. No density is passed
     to build; preparing a kernel must not inspect initial_density.
     """
@@ -301,7 +304,17 @@ class ModelSource:
         initial_density: NDArray[np.complex128],
         build: Callable[[FluxLevel], SecularModel],
         expansion: FluxExpansion | None = None,
+        *,
+        slow_envelope_segments_per_period: int = 20,
     ) -> None:
+        if (
+            type(slow_envelope_segments_per_period) is not int
+            or slow_envelope_segments_per_period < 1
+        ):
+            raise ValueError(
+                "slow_envelope segments per period must be a positive integer"
+            )
+        self._slow_envelope_segments_per_period = slow_envelope_segments_per_period
         self._initial_density = density(initial_density)
         self._build = build
         self._expansion = expansion
@@ -316,6 +329,11 @@ class ModelSource:
     def initial_density(self) -> NDArray[np.complex128]:
         """Read-only DC Gibbs density, complex128 (M,M) in its eigenbasis."""
         return self._initial_density
+
+    @property
+    def slow_envelope_segments_per_period(self) -> int:
+        """Read-only positive midpoint subdivisions per carrier period, default 20."""
+        return self._slow_envelope_segments_per_period
 
     def model(self, level: FluxLevel) -> SecularModel:
         """Build once per level, serializing cache access and builds across threads.

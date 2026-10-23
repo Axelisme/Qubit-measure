@@ -26,6 +26,7 @@ RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 For
 - [`writeback/`](writeback/service.py)：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
 - [`ui/`](ui/main_window.py)：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
+  Footer 訊息在可用寬度內換行，不以長錯誤文字撐大視窗；tooltip 與 view snapshot 保留完整文字。
 - [`remote/`](remote/README.md)：與 `ui/` 平級的 GUI-process driving adapter，將 RPC 意圖交給
   application commands/queries。`remote.method_specs` public import path 不載入
   Qt-bound service code；MCP bridge 不在本 package。
@@ -134,6 +135,16 @@ Templates use caller-authored `Template.bindings`.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
+
+## Figure presentation
+
+Run、Analysis、Post-analysis 與 Data 的具名圖預覽，四張以內在同一頁平鋪，
+超過四張時每頁最多四張。上一頁／下一頁按鈕與 `i / N` 顯示目前頁次。
+換頁會將該頁第一張設為「目前圖」，點選 canvas tile 會改選該張。
+RPC screenshot 與 `get_current_figure_for_pane` 讀取這張原生 Figure。
+同一 FigureCollection 重送時保留頁次與目前圖，清空時隱藏分頁列。
+Data 預覽只保存圖名與 raster cache，分頁不移動原始 canvas。
+Workflow 圖形區沿用原有選單，不使用這組分頁列。
 
 ## Workflow hosting
 
