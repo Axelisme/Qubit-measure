@@ -12,6 +12,14 @@ class DestinationExistsError(FileExistsError):
     """
 
 
+class MissingPointError(FileNotFoundError):
+    """ResultEntry.use_point could not find point.yaml or module_cfg.yaml.
+
+    This class does not classify missing references, library assets, schema
+    failures or other I/O errors. FileNotFoundError callers remain compatible.
+    """
+
+
 class UnknownFieldError(AttributeError):
     def __init__(self, path: str, field: str, suggestions: tuple[str, ...]) -> None:
         self.path = path

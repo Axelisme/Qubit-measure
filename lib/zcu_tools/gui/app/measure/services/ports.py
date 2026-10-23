@@ -63,6 +63,8 @@ class RunPaneSnapshot:
     run_id: str | None = None
     acquisition_run_id: str | None = None
     partial_result: bool = False
+    # Fixed Load source diagnostic, or None for a readable source/non-Load.
+    analysis_source_issue: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

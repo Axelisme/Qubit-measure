@@ -158,6 +158,7 @@ class TabService:
                 result=tab.run.result,
                 partial_result=tab.run.partial_result,
                 source_path=tab.run.source_path,
+                analysis_source_issue=tab.run.analysis_source_issue,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
                 acquisition_run_id=(metadata.run_id if metadata is not None else None),

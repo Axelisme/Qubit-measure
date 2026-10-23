@@ -25,7 +25,7 @@ from zcu_tools.resources.sample_table import JsonlSampleTable
 from . import _point_origin
 from ._path_segments import validate_path_segment
 from .aliases import EntryAliases, load_entry_aliases, save_entry_aliases
-from .errors import DestinationExistsError
+from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
@@ -526,7 +526,8 @@ class ResultEntry:
 
         label follows new_point's single-segment path rules. Both point.yaml and
         module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
-        raise ValueError and missing files raise FileNotFoundError. Original
+        raise ValueError. Missing required documents raise MissingPointError,
+        a FileNotFoundError subclass; other I/O and reference errors propagate. Original
         models apply their required fields, defaults and validators. Schema
         ValidationError becomes ValueError with the full document path and original
         diagnostic. The original error remains its cause. References are resolved
@@ -536,8 +537,11 @@ class ResultEntry:
         directory = _entry_path(self._result_path / "points", label)
         source = directory / "point.yaml"
         module = directory / "module_cfg.yaml"
-        if not module.is_file():
-            raise FileNotFoundError(module)
+        for required in (module, source):
+            try:
+                required.stat()
+            except FileNotFoundError as error:
+                raise MissingPointError(required) from error
         return PointView(
             self._point_store(source),
             source,

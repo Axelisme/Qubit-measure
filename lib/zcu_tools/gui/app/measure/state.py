@@ -92,6 +92,8 @@ class RunPaneState:
     parameters: ParameterContext | None = None
     storage: PointStorageBinding | None = None
     partial_result: bool = False
+    # None for readable loaded history or non-Load; otherwise the fixed Load reason.
+    analysis_source_issue: str | None = None
 
 
 @dataclass
@@ -471,6 +473,7 @@ class State(SessionState):
         *,
         parameters: ParameterContext | None = None,
         storage: PointStorageBinding | None = None,
+        analysis_source_issue: str | None = None,
     ) -> RetiredPaneResources:
         """Replace loaded data, native history and fixed analysis/Save sources.
 
@@ -479,6 +482,8 @@ class State(SessionState):
         its fixed historical-point analysis source, or None when not readable.
         storage is the Load request's Save capability, or None without one.
         Do not derive storage from parameters: their targets may differ.
+        analysis_source_issue is the Load owner's fixed reason when history has no
+        readable source. None means no Load source limitation was reported.
         Clear dependent panes, Run token and Save confirmation; return retired
         resources. Unknown tabs raise KeyError; off-owner calls fail before mutation.
         """
@@ -496,6 +501,7 @@ class State(SessionState):
                 source_path=source_path,
                 parameters=parameters,
                 storage=storage,
+                analysis_source_issue=analysis_source_issue,
             ),
         )
 
