@@ -186,7 +186,7 @@ class AliasPanel(QWidget):
         """
         if not self.is_unsaved():
             self.revert()
-        self._sync.refresh()
+        self._sync.refresh(has_draft=self.is_unsaved())
 
     def _current_target(self) -> SavedPoint | None:
         info = self._control.get_entry_info()

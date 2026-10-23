@@ -337,7 +337,7 @@ class InspectDialog(QDialog):
         """
         self._aliases.refresh()
         self._component_tree.refresh()
-        self._library_sync.refresh()
+        self._library_sync.refresh(has_draft=self._is_unsaved())
         try:
             parameters = self._ctrl.read_context()
         except FailedPreconditionError:
@@ -677,7 +677,7 @@ class InspectDialog(QDialog):
     def _on_file_changed(self, payload: PointFileChangedPayload) -> None:
         del payload
         # Source observations alone must not rebuild an active parameter editor.
-        self._library_sync.refresh()
+        self._library_sync.refresh(has_draft=self._is_unsaved())
         self._aliases.refresh()
         self._component_tree.refresh_file_status()
 

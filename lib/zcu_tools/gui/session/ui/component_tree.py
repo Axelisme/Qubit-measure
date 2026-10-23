@@ -232,7 +232,10 @@ class ComponentTreeWidget(QWidget):
 
     def refresh_file_status(self) -> None:
         """Update source notices without closing an active or rejected draft."""
-        self._sync.refresh()
+        if self._is_setup() and not self._drafts:
+            self._sync.hide()
+            return
+        self._sync.refresh(has_draft=bool(self._drafts))
 
     def _reload_file(self) -> None:
         self._drafts.clear()
