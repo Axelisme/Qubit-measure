@@ -23,6 +23,7 @@ class Conditional(FormModel):
         cls, data: Mapping[str, JsonValue]
     ) -> tuple[FieldApplicability, ...]:
         """Only selection membership controls amplitude applicability."""
+        del data
         return (FieldApplicability(("selection",), 1, (("amplitude",),)),)
 
 

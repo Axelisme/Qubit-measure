@@ -18,6 +18,7 @@ class Drive(core.FormModel):
     @classmethod
     def check_sources(cls, data: Mapping[str, JsonValue], env: core.FormEnv) -> None:
         """Model a captured source failure without touching external resources."""
+        del env
         if data.get("gain") == "missing-source":
             raise core.field_error(("gain",), "Drive source unavailable")
 
@@ -34,6 +35,7 @@ class ConditionalForm(core.FormModel):
         cls, data: Mapping[str, JsonValue]
     ) -> tuple[core.FieldApplicability, ...]:
         """Declare membership, leaving its evaluation to the core."""
+        del data
         return (core.FieldApplicability(("selection",), 1, (("drive",),)),)
 
 

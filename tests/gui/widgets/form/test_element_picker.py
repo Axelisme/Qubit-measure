@@ -99,9 +99,7 @@ def test_native_indexed_module_and_sweep_navigation_keeps_visible_drafts(
             driver.observe(object_name="form.input.tones.0.drive").text
             == "Q.pulses.drive"
         )
-        assert (
-            driver.observe(object_name="form.input.participants").text == '[1, 0]'
-        )
+        assert driver.observe(object_name="form.input.participants").text == "[1, 0]"
         driver.choose_option(object_name="form.picker.tones", value="1: B")
         assert (
             driver.observe(object_name="form.input.tones.1.drive.module.gain").text
@@ -160,7 +158,7 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
         snapshot("03-second-element")
         assert driver.observe(object_name="form.input.tones.1.gain").visible
         assert driver.observe(object_name="form.input.tones.1.gain").text == "2"
-        assert driver.observe(object_name="form.input.participants").text == '[1]'
+        assert driver.observe(object_name="form.input.participants").text == "[1]"
         driver.choose_option(object_name="form.picker.tones", value="0: A")
         snapshot("04-returned-draft")
         assert (
@@ -183,11 +181,9 @@ def test_picker_keeps_uncommitted_text_errors_and_participants(
             in driver.observe(object_name="form.row.tones.0.gain").tooltip
         )
         driver.enter_text(object_name="form.input.tones.0.gain", value="3")
-        driver.enter_text(object_name="form.input.participants", value='[1, 0]')
+        driver.enter_text(object_name="form.input.participants", value="[1, 0]")
         snapshot("08-corrected-and-ordered")
-        assert (
-            driver.observe(object_name="form.input.participants").text == '[1, 0]'
-        )
+        assert driver.observe(object_name="form.input.participants").text == "[1, 0]"
         assert (
             "could not convert"
             not in driver.observe(object_name="form.row.tones.0.gain").tooltip
@@ -261,15 +257,13 @@ def test_readonly_refusal_is_visible_and_navigation_still_works(
         driver.choose_option(object_name="form.picker.tones", value="1: B")
         assert driver.observe(object_name="form.input.tones.1.gain").visible
         driver.enter_text(object_name="form.input.tones.1.gain", value="4")
-        driver.enter_text(object_name="form.input.participants", value='[4]')
+        driver.enter_text(object_name="form.input.participants", value="[4]")
         driver.screenshot(tmp_path / "04-owner-invalid-participant.png")
         assert driver.observe(object_name="form.input.tones.1.gain").text == "4"
         assert "4" in driver.observe(object_name="form.row.participants").tooltip
-        driver.enter_text(object_name="form.input.participants", value='[1, 0]')
+        driver.enter_text(object_name="form.input.participants", value="[1, 0]")
         driver.screenshot(tmp_path / "05-owner-recovered.png")
-        assert (
-            driver.observe(object_name="form.input.participants").text == '[1, 0]'
-        )
+        assert driver.observe(object_name="form.input.participants").text == "[1, 0]"
         (tmp_path / "owner-visible.json").write_text(
             json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
         )

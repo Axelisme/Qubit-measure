@@ -99,10 +99,7 @@ def test_inactive_module_and_sweep_lower_to_none_without_losing_original_tones()
         assert target is not None and target.disabled
     state.write({("participants",): [0, 1]}, env)
     result = state.result(env)
-    if isinstance(result, core.FormErrors):
-        errors = result
-    else:
-        errors = form.to_cfg(result, env)
+    errors = result if isinstance(result, core.FormErrors) else form.to_cfg(result, env)
     assert isinstance(errors, core.FormErrors)
     assert any(path[:2] == ("tones", 1) for path in errors.messages)
 

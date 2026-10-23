@@ -165,9 +165,7 @@ def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rp
     tab = fixture.ctrl.new_tab("indexed-rpc")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
-        owner.write(
-            {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]}
-        )
+        owner.write({("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]})
         sibling = owner.input.data["tones"][0]
         read = rpc.call(
             "tab.read_module", {"tab_id": tab, "field": ["tones", 1, "drive"]}
