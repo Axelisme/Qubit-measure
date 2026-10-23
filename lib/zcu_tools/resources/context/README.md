@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
 
@@ -12,7 +12,7 @@
 
 Library 版本只跟 header／容器結構走。Module／waveform Spec 欄位演進不自動升版，library 維持 2.0（ADR-0072）。其他 major 仍在 header 拒絕，不遷移、不加相容讀取。Forward minor 保留容器層未知欄位，不放寬 entry 的 extra 規則。
 
-Library 讀取先驗容器，再逐條驗證四個分組的 Spec 與所屬來源。壞條目及其 provenance 被移除，主檔只留合法條目與來源。清理候選完整驗證後，DocumentStore 在同一 sidecar lock 內逐 byte 複製完整原檔成同目錄時間戳 .bak，不覆寫舊備份，再 atomic replace 主檔。每次成功清理只寫一行 warning，包含備份路徑及移除 roots，不新增 GUI／MCP 顯示。
+Library 讀取先驗容器，再逐條驗證四個分組的 Spec 與所屬來源。每次清理合併所有合法候選的來源，由 entry owner 一次讀 ledger 回報全部缺失事件，再逐 root 移除。後續完整候選驗證獨立讀取 ledger，不快取來源結果。壞條目及其 provenance 被移除，主檔只留合法條目與來源。清理候選完整驗證後，DocumentStore 在同一 sidecar lock 內逐 byte 複製完整原檔成同目錄時間戳 .bak，不覆寫舊備份，再 atomic replace 主檔。每次成功清理只寫一行 warning，包含備份路徑及移除 roots，不新增 GUI／MCP 顯示。
 
 這是一般讀取不寫檔的 library 例外（ADR-0063），涵蓋 open、refresh、edit 進入與 commit 重讀。合法檔與 header-only 不重寫，也不重複備份。Header／容器或不可歸屬的 provenance 錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤直接傳遞。備份失敗不替換主檔；replace 失敗保留原主檔及已完成的備份，不發布候選。這不是跨檔交易或掉電恢復。
 

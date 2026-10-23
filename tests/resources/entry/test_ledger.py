@@ -6,6 +6,7 @@ import json
 from io import BufferedWriter, TextIOWrapper
 from pathlib import Path
 from typing import IO, Literal
+from unittest.mock import patch
 from uuid import uuid4
 
 import numpy as np
@@ -48,6 +49,76 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
         ),
     )
+
+
+def test_find_many_reports_all_missing_ids_with_one_read(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+    entry.ledger.append(event, record={"evidence": 1})
+
+    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+        found = entry.ledger.find_many(("absent-a", event.id, "absent-b", event.id))
+
+    assert tuple(found) == ("absent-a", event.id, "absent-b")
+    assert found["absent-a"] is None
+    assert found["absent-b"] is None
+    present = found[event.id]
+    assert present is not None
+    assert present.event == event.model_copy(
+        update={"record": f"records/{event.id}.json"}
+    )
+    assert present.record == {"evidence": 1}
+    assert (
+        len(
+            [
+                call
+                for call in opened.call_args_list
+                if call.args[0] == records / "ledger.jsonl"
+            ]
+        )
+        == 1
+    )
+    assert (
+        len(
+            [
+                call
+                for call in opened.call_args_list
+                if call.args[0] == records / f"{event.id}.json"
+            ]
+        )
+        == 1
+    )
+    with pytest.raises(KeyError, match="absent-a"):
+        entry.ledger.get_many(("absent-a", event.id, "absent-b"))
+
+
+def test_find_many_empty_does_not_access_ledger(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, _ = entry_records
+    with patch.object(Path, "open", side_effect=AssertionError("unexpected I/O")):
+        assert entry.ledger.find_many(()) == {}
+
+
+@pytest.mark.parametrize("defect", ["missing", "malformed"])
+def test_find_many_propagates_attachment_errors_after_missing_ids(
+    entry_records: tuple[ResultEntry, Path], defect: str
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+    entry.ledger.append(event, record={"evidence": 1})
+    attachment = records / f"{event.id}.json"
+    if defect == "missing":
+        attachment.unlink()
+        failure = FileNotFoundError
+    else:
+        attachment.write_text("{broken")
+        failure = ValueError
+
+    with pytest.raises(failure, match=event.id):
+        entry.ledger.find_many(("absent", event.id))
 
 
 def test_accepted_complex_uses_tag_in_payload_and_persisted_ledger(

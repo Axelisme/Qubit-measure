@@ -78,6 +78,8 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 `ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
+`RecordsLedger.find_many(event_ids)` 一次讀取 ledger，依首次出現順序回傳 ID 到 `LedgerEntry | None` 的 mapping。缺失事件回 None，已存在事件的附檔與 ledger 錯誤仍傳遞。`provenance.missing_sources` 忽略 manual 並回報全部缺失 ID，供 library 逐 root 清理。既有 `get`、`get_many` 與 `validate_sources` 仍在首個缺失 ID 拋錯。
+
 Acquired 只保存 run 身分、tab、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 
 每次讀取與追加都持同一 resolved path 的 sidecar lock，不使用 cache。新事件只寫 1.0；讀取 1.0 與較新 1.x 時，envelope 與 kind-specific payload 都忽略不支援欄位，包括舊 cfg_summary。`get` 的 raw event_json 保留原行，讀取不改寫行或附檔。已知欄位錯誤、未知 major／kind 與損壞行仍拒絕，append 仍驗證 caller 的已知欄位。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。

@@ -156,16 +156,39 @@ class RecordsLedger:
             found: dict[str, LedgerEntry] = {}
             for event_id in dict.fromkeys(event_ids):
                 item = entries[event_id]
-                record = None
-                if item.event.record is not None:
-                    path = self._records / f"{event_id}.json"
-                    try:
-                        content = path.read_text(encoding="utf-8")
-                        record = _JSON_OBJECT.validate_json(content)
-                    except ValueError as exc:
-                        raise ValueError(f"{path}: invalid record: {exc}") from exc
-                found[event_id] = LedgerEntry(item.event, record, item.event_json)
+                found[event_id] = self._with_record(item)
             return tuple(found[event_id] for event_id in event_ids)
+
+    def find_many(self, event_ids: tuple[str, ...]) -> dict[str, LedgerEntry | None]:
+        """Look up all IDs with one locked parse, mapping absent IDs to None.
+
+        Keys follow first occurrence in event_ids. Each unique requested event
+        and its local attachment is checked once; unrequested attachments are
+        not read. Empty input returns {} without I/O. Ledger schema, attachment
+        and I/O errors propagate, including after an absent ID. Results are
+        independent disk reads, not a persistent cache. Use get_many for strict
+        lookup that raises at the first absent ID.
+        """
+        if not event_ids:
+            return {}
+        with self._locked():
+            entries = {item.event.id: item for item in self._read()}
+            found: dict[str, LedgerEntry | None] = {}
+            for event_id in dict.fromkeys(event_ids):
+                item = entries.get(event_id)
+                found[event_id] = self._with_record(item) if item is not None else None
+            return found
+
+    def _with_record(self, item: LedgerEntry) -> LedgerEntry:
+        record = None
+        if item.event.record is not None:
+            path = self._records / f"{item.event.id}.json"
+            try:
+                content = path.read_text(encoding="utf-8")
+                record = _JSON_OBJECT.validate_json(content)
+            except ValueError as exc:
+                raise ValueError(f"{path}: invalid record: {exc}") from exc
+        return LedgerEntry(item.event, record, item.event_json)
 
     def _read(self) -> tuple[LedgerEntry, ...]:
         try:

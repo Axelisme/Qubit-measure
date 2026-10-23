@@ -9,12 +9,14 @@ from multiprocessing.connection import Connection
 from multiprocessing.synchronize import Event
 from pathlib import Path
 from typing import IO, Literal, Never
+from unittest.mock import patch
 
 import pytest
 from filelock import FileLock
 from ruamel.yaml import YAML
 from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.resources.context.library import ModuleLibrary
+from zcu_tools.resources.entry import AcceptedPayload, AcceptedWrite, LedgerEvent
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.provenance import Provenance
 
@@ -225,6 +227,85 @@ def test_entry_local_sources_remove_exact_root_only(
     assert backups(path)[0].read_bytes() == original
 
 
+@pytest.mark.parametrize("operation", ["open", "refresh"])
+@pytest.mark.parametrize("missing", [False, True], ids=["valid", "missing-roots"])
+def test_disk_read_batches_sources_and_preserves_valid_roots(
+    tmp_path: Path, operation: str, missing: bool
+) -> None:
+    path = tmp_path / "module_cfg.yaml"
+    path.write_text(HEADER)
+    library = open_library(path) if operation == "refresh" else None
+    records = tmp_path / "records"
+    records.mkdir(exist_ok=True)
+    event_id = "8bc26726-5e8b-4531-b14c-826ad570539c"
+    ledger = RecordsLedger(records, entry_id=ENTRY_ID)
+    ledger.append(
+        LedgerEvent(
+            id=event_id,
+            kind="accepted",
+            at="2026-10-23T00:00:00Z",
+            entry_id=ENTRY_ID,
+            origin="notebook",
+            payload=AcceptedPayload(writes=(AcceptedWrite(path="Q1.rate", value=1),)),
+        ),
+        record={"evidence": 1},
+    )
+    good_source = {**MANUAL, "source": event_id}
+    sources = {
+        "Q1.waveforms.pi.length": good_source,
+        "Q1.waveforms.pi.style": good_source,
+        "Q1.waveforms.pi_half.length": good_source,
+    }
+    waveforms = {"pi": GOOD, "pi_half": GOOD}
+    if missing:
+        waveforms.update({"bad_first": GOOD, "bad_second": GOOD})
+        sources.update(
+            {
+                "Q1.waveforms.bad_first.length": {**MANUAL, "source": "missing-a"},
+                "Q1.waveforms.bad_second.length": {**MANUAL, "source": "missing-b"},
+            }
+        )
+    path.write_text(
+        json.dumps(
+            {
+                "format": "zcu.module-library",
+                "format_version": "2.0",
+                "components": {"Q1": {"waveforms": waveforms}},
+                "provenance": sources,
+            }
+        )
+    )
+    original = path.read_bytes()
+
+    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+        if library is None:
+            library = open_library(path)
+        else:
+            assert library.refresh()
+
+    snapshot = library.snapshot()
+    assert snapshot.waveform_keys() == ("Q1.waveforms.pi", "Q1.waveforms.pi_half")
+    assert set(snapshot.document().provenance) == {
+        "Q1.waveforms.pi.length",
+        "Q1.waveforms.pi.style",
+        "Q1.waveforms.pi_half.length",
+    }
+    assert snapshot.waveform_spec("Q1.waveforms.pi_half").length == 0.1
+    if missing:
+        assert len(backups(path)) == 1
+        assert backups(path)[0].read_bytes() == original
+    else:
+        assert backups(path) == []
+        assert path.read_bytes() == original
+    ledger_reads = [
+        call
+        for call in opened.call_args_list
+        if call.args[0] == records / "ledger.jsonl"
+    ]
+    # Cleanup and the independent full candidate validation each read once.
+    assert len(ledger_reads) == 2
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -341,10 +422,10 @@ def test_ledger_failures_are_not_entry_rejections(
     )
     original = path.read_bytes()
 
-    def reject_get(self: RecordsLedger, event_id: str) -> Never:
+    def reject_find_many(self: RecordsLedger, event_ids: tuple[str, ...]) -> Never:
         raise failure
 
-    monkeypatch.setattr(RecordsLedger, "get", reject_get)
+    monkeypatch.setattr(RecordsLedger, "find_many", reject_find_many)
     with pytest.raises(type(failure)):
         library.refresh()
     assert library.snapshot().waveform_keys() == ()
