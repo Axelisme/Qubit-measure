@@ -133,11 +133,11 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "png",
-                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/a%5Fb_c_x.png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/a_b_c_x.png",
                 ),
                 (
                     "png",
-                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_a%5Fb_c_x.png",
+                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_a_b_c_x.png",
                 ),
             ),
         ),
@@ -147,11 +147,25 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
             (
                 (
                     "png",
-                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/a_b%5Fc_x.png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/a_b_c_x.png",
                 ),
                 (
                     "png",
-                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_a_b%5Fc_x.png",
+                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_a_b_c_x.png",
+                ),
+            ),
+        ),
+        (
+            ArtifactKey("post_analysis", "results_%", "figure", "fit_0"),
+            None,
+            (
+                (
+                    "png",
+                    "Database/entry/runs/Synthetic_Experiment_opaque_run%id/figures/post_analysis_results_%_fit_0.png",
+                ),
+                (
+                    "png",
+                    "results/entry/figures/Synthetic_Experiment_opaque_run%id_post_analysis_results_%_fit_0.png",
                 ),
             ),
         ),
@@ -206,7 +220,7 @@ def test_members_of_one_artifact_have_distinct_destinations(
     second = layout(tmp_path).outputs(replace(key, member_name="second"))
     extension = "png" if member == "figure" else "json"
     folder = "figures" if member == "figure" else "analysis"
-    prefix = "post%5Fanalysis_fit_" if member == "figure" else ""
+    prefix = "post_analysis_fit_" if member == "figure" else ""
     assert (
         first[0].path
         == tmp_path
@@ -218,6 +232,40 @@ def test_members_of_one_artifact_have_distinct_destinations(
         / f"Database/entry/runs/Synthetic_Experiment_opaque_run%id/{folder}/{prefix}second.{extension}"
     )
     assert set(first).isdisjoint(second)
+
+
+@pytest.mark.parametrize(
+    ("first_key", "other_key"),
+    [
+        (
+            ArtifactKey("a_b", "c", "figure", "x"),
+            ArtifactKey("a", "b_c", "figure", "x"),
+        ),
+        (
+            ArtifactKey("a", "b", "figure", "c_x"),
+            ArtifactKey("a", "b_c", "figure", "x"),
+        ),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_figure_path_collision_reports_both_keys_without_publishing(
+    tmp_path: Path, first_key: ArtifactKey, other_key: ArtifactKey, reverse: bool
+) -> None:
+    if reverse:
+        first_key, other_key = other_key, first_key
+    saving = layout(tmp_path)
+    first = saving.outputs(first_key)
+    assert saving.outputs(first_key) == first
+
+    with pytest.raises(ValueError, match="collision") as error:
+        saving.outputs(other_key)
+
+    assert repr(first_key) in str(error.value)
+    assert repr(other_key) in str(error.value)
+    assert str(first[0].path) in str(error.value)
+    assert saving.outputs(first_key) == first
+    assert layout(tmp_path).outputs(other_key) == first
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
