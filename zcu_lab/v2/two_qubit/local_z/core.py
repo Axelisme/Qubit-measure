@@ -10,7 +10,7 @@ from typing import Annotated, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -33,9 +33,27 @@ class LocalZModules(ConfigBase):
     readout retains every tone in its captured order.
     """
 
-    x90_f1: PulseCfg
-    x90_f2: PulseCfg
-    readout: MuxReadoutCfg
+    x90_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x90_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+        ),
+    ]
 
 
 class LocalZCfg(ProgramV2Cfg, ExpCfgModel):
@@ -50,12 +68,30 @@ class LocalZCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: LocalZModules
     roles: JointRoles
-    drive: DualLineCfg
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+        ),
+    ]
     gate_counts: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
         default_factory=lambda: [0, 1, 2, 3, 4], min_length=3
     )
-    f1_centers: GECenters | None = None
-    f2_centers: GECenters | None = None
+    f1_centers: Annotated[
+        GECenters | None,
+        FieldMeta(
+            label="F1 GE centers",
+            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ] = None
+    f2_centers: Annotated[
+        GECenters | None,
+        FieldMeta(
+            label="F2 GE centers",
+            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ] = None
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

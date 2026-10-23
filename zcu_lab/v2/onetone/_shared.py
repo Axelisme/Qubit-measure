@@ -31,13 +31,26 @@ class FreqModuleCfg(ConfigBase):
     """Optional reset followed by the pulse readout's generator and ADC settings."""
 
     reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    readout: Annotated[
+        PulseReadoutCfg,
+        FieldMeta(
+            label="Readout",
+            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
+        ),
+    ]
 
 
 class FreqSweepCfg(ConfigBase):
     """Absolute MHz sweep; the hardware owns both generator and ADC frequencies."""
 
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
+        ),
+    ]
 
 
 class LinearFreqCfg(ProgramV2Cfg, ExpCfgModel):

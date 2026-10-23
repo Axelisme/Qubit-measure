@@ -61,10 +61,11 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
         field_order=(
             "participants",
             "tones",
-            "expts",
             "modules",
-            "relax_delay",
+            "expts",
             "reps",
             "rounds",
+            "relax_delay",
+            "initial_delay",
         ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

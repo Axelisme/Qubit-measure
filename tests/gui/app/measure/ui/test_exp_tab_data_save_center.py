@@ -1,11 +1,12 @@
 """Data-center projection through public State, Controller and Qt seams."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from qtpy.QtCore import QEvent, Qt
 from qtpy.QtGui import QKeyEvent
-from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit, QTextEdit
+from qtpy.QtWidgets import QApplication, QLineEdit, QTextEdit
 from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter, SaveStatus
 from zcu_tools.gui.app.measure.controller import Controller
@@ -15,6 +16,7 @@ from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.resources.entry import Output
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
@@ -27,6 +29,7 @@ _RUN = ArtifactRef("run", "measurement_data")
 
 def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    tmp_path: Path,
 ) -> None:
     from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -42,19 +45,19 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     snap = ctrl.get_tab_snapshot(tab_id)
     window.refresh_tab_figure(tab_id, snap)
     window.refresh_tab_interaction(tab_id, snap)
-    selector = next(
-        widget
-        for widget in window.findChildren(QComboBox)
-        if widget.accessibleName() == "Analysis figure"
-    )
-    assert selector.currentText() == "fit"
+    window.resize(1280, 800)
+    window.show()
+    QApplication.processEvents()
+    flow = ComponentDriver(window)
+    flow.select_tab("Analysis")
+    flow.screenshot(tmp_path / "fit.png")
     fit_png = window.take_figure_screenshot_for_subtab(tab_id, "analysis")
-    selector.setCurrentText("diagnostic")
+    flow.click(object_name="figures.tile.analysis.1")
     diagnostic_png = window.take_figure_screenshot_for_subtab(tab_id, "analysis")
     assert fit_png.startswith(b"\x89PNG") and diagnostic_png.startswith(b"\x89PNG")
     assert fit_png != diagnostic_png
+    flow.screenshot(tmp_path / "diagnostic.png")
     window.refresh_tab_figure(tab_id, snap)
-    assert selector.currentText() == "diagnostic"
     assert (
         window.take_figure_screenshot_for_subtab(tab_id, "analysis") == diagnostic_png
     )
@@ -77,12 +80,13 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
         tab_id, PaneSummary(), replacement, analyze_params_instance=PaneParams()
     )
     window.refresh_tab_figure(tab_id, ctrl.get_tab_snapshot(tab_id))
-    assert selector.currentText() == "new-fit"
+    assert window.take_figure_screenshot_for_subtab(tab_id, "analysis").startswith(
+        b"\x89PNG"
+    )
     session.state.update_tab_analyze(tab_id, None, None)
     cleared = ctrl.get_tab_snapshot(tab_id)
     window.refresh_tab_figure(tab_id, cleared)
     window.refresh_tab_interaction(tab_id, cleared)
-    assert selector.currentText() == ""
     assert [section.section for section in cleared.artifacts] == ["run"]
     with pytest.raises(FailedPreconditionError, match="no selected figure"):
         window.take_figure_screenshot_for_subtab(tab_id, "analysis")

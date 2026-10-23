@@ -24,6 +24,7 @@ from zcu_tools.gui.app.fluxdep.ui.interactive.selector import SelectorWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.fluxdep._search_result import (
     perfect_fit_result,
     synthetic_search_input,
@@ -297,6 +298,40 @@ def test_non_holder_views_the_agent_filter_but_cannot_edit_or_discard(window):
     show_page(view, "spectra")
     assert _selectors(panel) == []
     assert ctrl.interactive.current_cross_selection() is context
+
+
+@pytest.mark.parametrize("close_action", ["cancel", "finish"])
+def test_non_holder_filter_restores_publication_after_external_close(
+    window, tmp_path, close_action
+):
+    view, ctrl = window
+    ctrl.set_selection(np.array([True, False, True, False]))
+    ctrl.control_identity.connect("a", "flux-agent", "owner")
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        ctrl.interactive.begin_cross_selection()
+    driver = ComponentDriver(view)
+    driver.select_tab("Fit")
+    driver.screenshot(tmp_path / "filter-agent-draft.png")
+    assert not driver.observe(object_name="fluxdep.filter.edit").enabled
+    assert not driver.observe(object_name="fluxdep.filter.discard").enabled
+    assert not driver.observe(object_name="fluxdep.filter.published").visible
+
+    # The external holder closes its context while Local stays on Filter.
+    with ctrl.bus.origin(EventOrigin(kind="agent")):
+        if close_action == "cancel":
+            ctrl.interactive.cancel_selection()
+        else:
+            ctrl.interactive.finish_cross_selection()
+
+    driver.screenshot(tmp_path / "filter-external-close.png")
+    assert driver.tabs("Fit").current == "Fit"
+    assert driver.observe(object_name="fluxdep.fit.stage.filter").checked
+    assert driver.observe(object_name="fluxdep.filter.published").visible
+    assert not driver.observe(object_name="fluxdep.filter.edit").enabled
+    assert not driver.observe(object_name="fluxdep.filter.discard").enabled
+    assert [(axis.xlabel, axis.ylabel) for axis in driver.plots().axes] == [
+        ("Flux", "Frequency (GHz)")
+    ]
 
 
 def test_agent_filter_on_the_shown_fit_page_switches_only_its_stage(window):
