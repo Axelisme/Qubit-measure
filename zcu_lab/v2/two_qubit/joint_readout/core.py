@@ -32,8 +32,22 @@ class GECenters(ConfigBase):
     higher-level contributions; it cannot identify leakage.
     """
 
-    g: Annotated[complex, FieldMeta(label="Ground center")]
-    e: Annotated[complex, FieldMeta(label="Excited center")]
+    g: Annotated[
+        complex,
+        FieldMeta(
+            label="Ground center",
+            unit="normalized IQ",
+            description="填入 singleshot/ge 取得的 ground-state complex IQ center。",
+        ),
+    ]
+    e: Annotated[
+        complex,
+        FieldMeta(
+            label="Excited center",
+            unit="normalized IQ",
+            description="填入 singleshot/ge 取得的 excited-state complex IQ center。",
+        ),
+    ]
 
     @field_serializer("g", "e")
     def serialize_center(self, value: complex) -> str:
@@ -51,9 +65,27 @@ class GECenters(ConfigBase):
 class JointReadoutModules(ConfigBase):
     """Calibrated Xπ pulses on independent generators and the complete mux."""
 
-    x180_f1: Annotated[PulseCfg, FieldMeta(label="F1 Xπ")]
-    x180_f2: Annotated[PulseCfg, FieldMeta(label="F2 Xπ")]
-    readout: MuxReadoutCfg
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+        ),
+    ]
 
 
 class JointReadoutCfg(ProgramV2Cfg, ExpCfgModel):
@@ -69,8 +101,20 @@ class JointReadoutCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: JointReadoutModules
     roles: JointRoles
-    f1_centers: GECenters
-    f2_centers: GECenters
+    f1_centers: Annotated[
+        GECenters,
+        FieldMeta(
+            label="F1 GE centers",
+            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ]
+    f2_centers: Annotated[
+        GECenters,
+        FieldMeta(
+            label="F2 GE centers",
+            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

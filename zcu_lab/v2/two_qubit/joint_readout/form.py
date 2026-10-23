@@ -3,6 +3,8 @@
 from zcu_tools.cfg_model import Expr, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.mux_forms import mux_readout_seed_metadata
+
 from .._measure import captured_roles
 from .core import JointReadoutCfg
 
@@ -20,8 +22,23 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
     Core validation requires its tone count to match the captured full group.
     """
     roles = captured_roles(ctx)
+    readout = (
+        Slot("$mux.module.readout")
+        if ctx.has("$mux.module.readout")
+        else Template("readout/mux:blank")
+    )
     return Form(
         JointReadoutCfg,
+        field_order=(
+            "roles",
+            "modules",
+            "f1_centers",
+            "f2_centers",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -29,9 +46,7 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
             "modules": {
                 "x180_f1": Slot("$f1.module.x180", copy=True),
                 "x180_f2": Slot("$f2.module.x180", copy=True),
-                "readout": Slot("$mux.module.readout")
-                if ctx.has("$mux.module.readout")
-                else Template("readout/mux:blank"),
+                "readout": readout,
             },
             "f1_centers": {
                 "g": Expr("$f1.ext.readout_cal.g_center"),
@@ -42,4 +57,4 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
                 "e": Expr("$f2.ext.readout_cal.e_center"),
             },
         },
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

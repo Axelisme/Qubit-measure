@@ -71,7 +71,7 @@ class T2EchoModuleCfg(ConfigBase):
 
 
 class T2EchoSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg, FieldMeta(label="Total delay", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
 
 class T2EchoCfg(ProgramV2Cfg, ExpCfgModel):

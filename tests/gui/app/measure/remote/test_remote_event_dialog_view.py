@@ -12,7 +12,10 @@ Each test spins up a real TCP socket on an ephemeral loopback port via
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import socket
+from collections.abc import Buffer, Generator
+from threading import Event, Thread, current_thread
+from time import monotonic
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -485,21 +488,59 @@ def test_md_changed_emits_requery_hint(fx):
 # ---------------------------------------------------------------------------
 
 
-def test_writer_queue_overflow_eventually_closes_wedged_client(fx, caplog):
-    """A wedged reader gets dropped after exceeding the drop budget."""
+def test_writer_queue_overflow_eventually_closes_wedged_client(
+    fx, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blocked socket writer fills its queue and drops the connection."""
     sock = open_client(fx.service.port)
+    writer_arrived = Event()
+    release_writer = Event()
+    writers: list[Thread] = []
+    writer_errors: list[str] = []
+    original_send = socket.socket.send
+    server_address = sock.getpeername()
+    client_address = sock.getsockname()
+
+    def blocked_send(sender: socket.socket, data: Buffer, flags: int = 0) -> int:
+        # Only this test's accepted peer is blocked; wake sockets and clients pass.
+        if (
+            sender.getsockname() == server_address
+            and sender.getpeername() == client_address
+        ):
+            writers.append(current_thread())
+            writer_arrived.set()
+            # The test releases this writer in finally, including on assertion failure.
+            if not release_writer.wait(timeout=30):
+                writer_errors.append("writer release watchdog expired")
+                raise TimeoutError(writer_errors[-1])
+        return original_send(sender, data, flags)
+
     try:
         call(sock, "events.subscribe", {"events": ["tab_added"]})
-        # Stop reading; emit far more events than the queue can hold.
+        monkeypatch.setattr(socket.socket, "send", blocked_send)
         with caplog.at_level("WARNING"):
-            for i in range(1024):
-                fx.bus.emit(
-                    TabAddedPayload(tab_id=f"t{i}", adapter_name="fake"),
-                )
-        # Confirm at least one WARN about the outbound queue being full.
+            fx.bus.emit(TabAddedPayload(tab_id="blocked", adapter_name="fake"))
+            # Synchronous emission queued a push; its writer must reach socket.send.
+            assert writer_arrived.wait(timeout=30), "push did not reach the socket"
+            # With the sole consumer blocked, finite queue capacity and drop budget
+            # must close the peer. This deadline only guards a broken termination.
+            deadline = monotonic() + 30
+            while not any("exceeded drop budget" in r.message for r in caplog.records):
+                assert monotonic() < deadline, "overflow did not close the peer"
+                fx.bus.emit(TabAddedPayload(tab_id="queued", adapter_name="fake"))
+
         assert any("outbound queue full" in rec.message for rec in caplog.records)
+        # Drop-budget exhaustion shuts down the real socket without writer release.
+        sock.settimeout(30)
+        assert sock.recv(1) == b""
     finally:
+        release_writer.set()
         sock.close()
+        for writer in writers:
+            # Release above lets the original send return/raise and the writer exit.
+            writer.join(timeout=30)
+            assert not writer.is_alive(), "socket writer did not exit"
+        assert not writer_errors, writer_errors
 
 
 def test_stop_unsubscribes_event_bus(qapp):
