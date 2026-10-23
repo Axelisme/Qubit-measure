@@ -192,10 +192,10 @@ def test_decimated_channels_keep_declared_order_and_companion_sums():
             )
 
 
-def test_drive_affects_only_its_own_cavity_with_global_dc_live_refresh():
+def test_drive_affects_only_its_own_cavity():
     document = six_document()
     for q in document["qubits"].values():
-        q["dc_bias"]["offset_phi0"] = 0.5
+        q["dc_bias"]["offset"] = -0.35 * q["dc_bias"]["period"]
         q["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
     with environment(document) as env:
         baseline = mux_program(
@@ -215,10 +215,61 @@ def test_drive_affects_only_its_own_cavity_with_global_dc_live_refresh():
         )
         assert changes[2] > 0.1
         assert np.max(changes[[0, 1, 3, 4, 5]]) < 0.1
-        source = env.create_device("FakeDevice", "flux_bias")
-        assert env.soc.binding.capture_snapshot().values == (("flux_bias", 0.0),)
-        source.set_value(0.2)
-        assert env.soc.binding.capture_snapshot().values == (("flux_bias", 0.2),)
+
+
+@pytest.mark.parametrize("target", range(6))
+def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(target):
+    document = six_document()
+    for qubit in document["qubits"].values():
+        qubit["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
+    try:
+        settings = parse_six_fluxonium(document)
+    except ValueError as error:
+        pytest.fail(f"six-cavity material must accept local and coil DC lines: {error}")
+    bias = settings.qubits.ordered()[target].dc_bias
+    with environment(document) as env:
+        local = env.create_device("FakeDevice", f"Q{target + 1}_bias")
+        coil = env.create_device("FakeDevice", "coil_bias")
+        initial = env.soc.binding.capture_snapshot()
+        assert dict(initial.values) == {
+            "coil_bias": 0.0,
+            **{f"Q{i}_bias": 0.0 for i in range(1, 7)},
+        }
+
+        def acquire():
+            result = mux_program(
+                env, order=tuple(range(6)), cavities=tuple(range(6))
+            ).acquire(env.soc, progress=False)
+            assert result is not None
+            return np.asarray(result)
+
+        baseline = acquire()
+        local.set_value(0.13 * bias.period)
+        local_only = acquire()
+        assert np.linalg.norm(local_only[target] - baseline[target]) > 1e-5
+        others = [i for i in range(6) if i != target]
+        np.testing.assert_allclose(local_only[others], baseline[others], atol=1e-10)
+
+        local.set_value(0)
+        coil.set_value(0.2)
+        coil_only = acquire()
+        for i in range(6):
+            assert np.linalg.norm(coil_only[i] - baseline[i]) > 1e-5
+
+        # The opposite local reduced flux cancels coil on this circuit only.
+        compensation = -0.2 * bias.period / bias.coil_period
+        local.set_value(compensation)
+        combined = acquire()
+        np.testing.assert_allclose(combined[target], baseline[target], atol=1e-10)
+        np.testing.assert_allclose(combined[others], coil_only[others], atol=1e-10)
+        assert dict(env.soc.binding.capture_snapshot().values) == {
+            "coil_bias": 0.2,
+            **{
+                f"Q{i}_bias": compensation if i == target + 1 else 0.0
+                for i in range(1, 7)
+            },
+        }
+        assert all(value == 0.0 for _, value in initial.values)
 
 
 @pytest.mark.parametrize("output", ["integrated", "deferred_raw", "decimated"])
