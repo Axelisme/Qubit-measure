@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from typing import ClassVar
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
+    AnalyzeResultBase,
     ExpAdapterProtocol,
     ModuleWriteback,
     NoAnalysisResult,
@@ -123,3 +128,24 @@ def test_analyze_params_cls_fallback_when_no_annotation():
     # The overridden get_analyze_params has no type annotation → fallback
     cls = _UnannotatedAdapter.analyze_params_cls()
     assert cls is NoAnalyzeParams
+
+
+def test_analysis_summary_retains_degenerate_fit_reasons() -> None:
+    @dataclass
+    class SyntheticAnalysis(AnalyzeResultBase):
+        fit_quality: dict[str, object]
+
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.ones(3),
+        {"decay_time": 0.1},
+        np.zeros((1, 1)),
+        decay_bounds=(0.1, 20.0),
+    )
+    result = SyntheticAnalysis(fit_quality={"fit": quality.to_summary_dict()})
+    summary = json.loads(json.dumps(result.to_summary_dict(), allow_nan=False))
+    assert summary["fit_quality"]["fit"]["invalid"] == [
+        {"path": "prediction", "reason": "near_constant_prediction"},
+        {"path": "decay_time", "reason": "窗口內無法解析衰減時間"},
+        {"path": "standard_errors.decay_time", "reason": "zero_standard_error"},
+    ]

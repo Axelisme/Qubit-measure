@@ -40,6 +40,7 @@ from ._observations import DialogObservation as DialogObservation
 from ._observations import LegendObservation as LegendObservation
 from ._observations import ListRowObservation as ListRowObservation
 from ._observations import PlotAxesObservation as PlotAxesObservation
+from ._observations import PlotLabelBoundsObservation as PlotLabelBoundsObservation
 from ._observations import PlotObservation as PlotObservation
 from ._observations import ScrollObservation as ScrollObservation
 from ._observations import StatusObservation as StatusObservation
@@ -1092,6 +1093,40 @@ class ComponentDriver:
                     )
                 )
         return PlotObservation(tuple(observed))
+
+    def plot_label_bounds(self) -> tuple[PlotLabelBoundsObservation, ...]:
+        """Read renderer bounds for nonempty visible ylabels on shown canvases.
+
+        Call after a screenshot or Qt paint has rendered the current geometry.
+        Coordinates share the canvas renderer's pixel space, not screen pixels.
+        """
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+        observed: list[PlotLabelBoundsObservation] = []
+        for canvas in self._window.findChildren(FigureCanvasQTAgg):
+            if not self._on_screen(canvas):
+                continue
+            renderer = canvas.get_renderer()
+            for axes in canvas.figure.axes:
+                label = axes.yaxis.label
+                if (
+                    axes.get_visible()
+                    and axes.yaxis.get_visible()
+                    and label.get_visible()
+                    and label.get_text()
+                ):
+                    bounds = label.get_window_extent(renderer)
+                    observed.append(
+                        PlotLabelBoundsObservation(
+                            canvas.objectName(),
+                            float(canvas.figure.bbox.x0),
+                            float(axes.bbox.x0),
+                            float(bounds.x0),
+                            float(bounds.x1),
+                            float(canvas.figure.bbox.x1),
+                        )
+                    )
+        return tuple(observed)
 
     def screenshot(self, path: Path) -> Path:
         """Grab the window to caller-chosen PNG path, creating parent directories.

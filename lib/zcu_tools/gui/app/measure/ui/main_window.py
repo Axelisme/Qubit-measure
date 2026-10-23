@@ -1323,9 +1323,9 @@ class MainWindow(QMainWindow):
         confirmation. A background drain timeout still requires a local decision.
         An accepted request does not mean cleanup has completed.
 
-        The cancel-and-wait is deferred to the next event-loop turn so the
-        triggering RPC's reply is written back before the remote service tears
-        down (else the agent's app.shutdown would race the socket teardown)."""
+        The remote adapter calls this only after its accepted reply reaches
+        terminal send (success or failure). The deferred owner turn below avoids
+        reentrant window close; it is not a socket delivery fence."""
         if self._closing:
             return
         self._programmatic_shutdown_requested = True

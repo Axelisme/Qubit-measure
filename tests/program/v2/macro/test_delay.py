@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2.macro.delay import DelayRegAuto
 
@@ -24,6 +25,15 @@ def _make_prog_with_auto_t(auto_t_value, time_reg="r0"):
 # ---------------------------------------------------------------------------
 # preprocess
 # ---------------------------------------------------------------------------
+
+
+def test_preprocess_rejects_no_channels_before_register_lookup(mock_prog):
+    def reject_register_lookup(name: str) -> str:
+        pytest.fail("Channel admission must precede register lookup")
+
+    mock_prog.set_reg_resolver(reject_register_lookup)
+    with pytest.raises(ValueError, match="DelayRegAuto.*at least one.*channel"):
+        _make_delay_auto(gens=False, ros=False).preprocess(mock_prog)
 
 
 def test_preprocess_calls_get_reg(mock_prog):

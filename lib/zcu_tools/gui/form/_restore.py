@@ -3,6 +3,7 @@
 Model fields and sequence elements alternate recursively in a JSON input tree.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import get_args, get_origin
 
@@ -11,7 +12,7 @@ from pydantic.fields import FieldInfo
 
 from ._json import copy_json, copy_object
 from ._selection import literal_values
-from ._structure import alternatives, discriminator, model_types, selected, unwrap
+from ._structure import alternatives, discriminator, model_types, selected
 from .defaults import static_defaults
 from .model import FormEnv, FormModel, FormPath, FormWritePath
 
@@ -176,7 +177,10 @@ class _Restorer:
             return current
         if (
             isinstance(saved, dict)
-            and get_origin(unwrap(info.annotation)) is not dict
+            and not any(
+                get_origin(member) in (dict, Mapping)
+                for member in alternatives(info.annotation)
+            )
             and set(saved) not in ({"expr"}, {"__complex__"})
         ):
             self.dropped.append(path)

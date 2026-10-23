@@ -408,6 +408,13 @@ class Section:
         return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
+        if isinstance(node, Expr):
+            for annotation in _members(info.annotation):
+                if get_origin(annotation) in (dict, Mapping):
+                    raise TypeError(
+                        f"{'.'.join((*self.path, name))}: whole mapping Expr is "
+                        f"unsupported for {annotation!r}; use a core default or literal input"
+                    )
         if isinstance(node, LogPoints):
             if get_origin(info.annotation) is not list or _members(
                 get_args(info.annotation)[0]

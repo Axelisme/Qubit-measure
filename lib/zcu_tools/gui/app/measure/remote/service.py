@@ -37,6 +37,7 @@ from zcu_tools.gui.remote.control_service import (
     RemoteControlServiceBase,
 )
 from zcu_tools.gui.remote.framing import encode_line
+from zcu_tools.gui.remote.rpc_endpoint import ReplyDelivery
 
 if TYPE_CHECKING:
     # Type-only: importing Controller at runtime would form a cycle
@@ -116,6 +117,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
                 method_registry=METHOD_REGISTRY,
                 event_serializers=EVENT_SERIALIZERS,
                 wire_event_name=wire_event_name,
+                reply_continuations={"app.shutdown": self._shutdown_after_reply},
             ),
             owner_scheduler=owner_scheduler,
             control_identity=controller.control_identity,
@@ -135,6 +137,12 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     # ------------------------------------------------------------------
     # Base seams
     # ------------------------------------------------------------------
+
+    def _shutdown_after_reply(self, outcome: ReplyDelivery) -> None:
+        logger.info("accepted shutdown reply %s", outcome.value)
+        if self.render_view is None:
+            raise RuntimeError("accepted shutdown requires a render view")
+        self.render_view.request_shutdown()
 
     def _get_bus(self):
         return self.ctrl.get_bus()

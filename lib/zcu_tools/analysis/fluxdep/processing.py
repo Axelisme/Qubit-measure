@@ -198,24 +198,76 @@ def downsample_points(
     return mask
 
 
+@dataclass(frozen=True)
+class MirrorPairing:
+    """Nearest reflected samples for one device axis.
+
+    indices maps each source row to its nearest reflected row in the original
+    axis order. Only entries selected by valid may be used. valid is False for
+    NaN coordinates and reflections outside the non-NaN axis range.
+    """
+
+    indices: NDArray[np.intp]
+    valid: NDArray[np.bool_]
+
+
+def mirror_pairing(xs: NDArray[np.float64], center: float) -> MirrorPairing:
+    """Pair each x with the nearest sample to ``2 * center - x``.
+
+    xs is a 1D axis with at least two values and distinct endpoints, in either
+    direction. NaN coordinates cannot participate. Reflections outside the
+    non-NaN coordinate range are invalid. Equal distances select the smaller
+    original index. Raise ValueError for an invalid axis or non-finite center.
+    """
+    _require_1d_axis(xs, "xs")
+    if not np.isfinite(center):
+        raise ValueError("center must be finite")
+    coordinate_indices = np.flatnonzero(~np.isnan(xs))
+    if coordinate_indices.size == 0:
+        return MirrorPairing(
+            indices=np.zeros(xs.size, dtype=np.intp),
+            valid=np.zeros(xs.size, dtype=np.bool_),
+        )
+
+    # Unique coordinates keep the first original index, including repeated x.
+    coordinates, first = np.unique(xs[coordinate_indices], return_index=True)
+    original_indices = coordinate_indices[first]
+    reflected = 2 * center - xs
+    valid = (reflected >= coordinates[0]) & (reflected <= coordinates[-1])
+    insertion = np.searchsorted(coordinates, reflected)
+    left = np.clip(insertion - 1, 0, coordinates.size - 1)
+    right = np.clip(insertion, 0, coordinates.size - 1)
+    left_distance = np.abs(reflected - coordinates[left])
+    right_distance = np.abs(reflected - coordinates[right])
+    choose_left = (left_distance < right_distance) | (
+        (left_distance == right_distance)
+        & (original_indices[left] < original_indices[right])
+    )
+    indices = original_indices[np.where(choose_left, left, right)]
+    return MirrorPairing(indices=indices, valid=valid)
+
+
 def diff_mirror(
     xs: NDArray[np.float64], data: NDArray[np.float64], center: float
 ) -> NDArray[np.float64]:
-    """Absolute difference between data and its mirror around ``center``."""
+    """Absolute differences from nearest physical reflections about center.
 
-    _require_1d_axis(xs, "xs")
+    xs is a 1D device axis matching data's first dimension. Pairing follows
+    mirror_pairing, including first-index ties on ascending or descending axes.
+    Unpaired rows are NaN. Data NaNs propagate. Raise ValueError for an invalid
+    axis, mismatched first dimension, or non-finite center.
+    """
+    pairing = mirror_pairing(xs, center)
     if data.shape[0] != xs.size:
         raise ValueError("data first dimension must match len(xs)")
 
-    c_idx = (len(xs) - 1) * (center - xs[0]) / (xs[-1] - xs[0])
-    idxs = np.arange(data.shape[0])
-    mirror_idxs = np.round(2 * c_idx - idxs).astype(int)
-    valid = (mirror_idxs >= 0) & (mirror_idxs < data.shape[0])
-    diff_data = np.zeros_like(data, dtype=np.float64)
+    diff_data = np.full_like(data, np.nan, dtype=np.float64)
 
     # NaN can represent unmeasured/masked points. Let it propagate without
     # warning; downstream loss code decides how to ignore invalid rows.
     with np.errstate(invalid="ignore"):
-        diff_data[valid] = np.abs(data[valid] - data[mirror_idxs[valid]])
+        diff_data[pairing.valid] = np.abs(
+            data[pairing.valid] - data[pairing.indices[pairing.valid]]
+        )
 
     return diff_data

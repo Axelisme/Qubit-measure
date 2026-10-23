@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay, fit_dual_decay
+from zcu_tools.analysis.fitting import (
+    compute_fit_quality,
+    decay_time_bounds,
+    fit_decay,
+    fit_dual_decay,
+)
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.mux import MuxFitFailure
@@ -105,6 +110,7 @@ def analyze_t1(
                 fitted,
                 {name: float(value) for name, value in zip(names, params, strict=True)},
                 covariance,
+                decay_bounds=decay_time_bounds(xs),
             )
             fit = T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality})
             outcome = MuxT1Fit(index, fit)
