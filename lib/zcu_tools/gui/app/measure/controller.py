@@ -33,6 +33,7 @@ from zcu_tools.gui.form import (
     StructureError,
 )
 from zcu_tools.gui.plotting import FigureContainer
+from zcu_tools.gui.session.aliases import scalar_alias_bindings
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.device_models import ActiveDeviceOperation
@@ -1195,18 +1196,15 @@ class Controller(SessionControllerMixin):
             raise FailedPreconditionError(
                 f"A {item_kind} named {name!r} already exists."
             )
-        bindings = {
-            row.alias: row.resolved
-            for row in parameters.resolved_aliases()
-            if row.resolved is not None
-        }
-        missing = self.get_template(template_id).placeholder_names() - bindings.keys()
-        if missing:
-            aliases = ", ".join(f"${alias}" for alias in sorted(missing))
-            raise InvalidInputError(
-                f"Template {template_id!r} requires resolved aliases {aliases}. "
+        bindings = scalar_alias_bindings(
+            parameters.resolved_aliases(),
+            self.get_template(template_id).placeholder_names(),
+            missing_message=lambda missing: (
+                f"Template {template_id!r} requires resolved aliases "
+                f"{', '.join(f'${alias}' for alias in sorted(missing))}. "
                 "Bind these names in Aliases before creating the entry."
-            )
+            ),
+        )
         entry = new_library_entry(
             parameters,
             Template(template_id, bindings=bindings),

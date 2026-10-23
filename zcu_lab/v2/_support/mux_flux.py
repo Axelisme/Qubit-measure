@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     GroupedAxesSpec,
@@ -27,7 +27,8 @@ from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
     ToneRangeCfg,
-    participant_indices,
+    require_tone_value,
+    validate_participants,
 )
 from zcu_lab.v2.mux.onetone.core import (
     MuxOnetoneCfg,
@@ -49,7 +50,7 @@ class FluxFrequencyToneCfg(MuxToneCfg):
     and sweep.stop are MHz, with the point count in frequency.expts.
     """
 
-    sweep: Annotated[ToneRangeCfg, FieldMeta(unit="MHz")]
+    sweep: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
 
 
 class FluxFrequencyCfg(ConfigBase):
@@ -78,7 +79,13 @@ class FluxLineCfg(FluxIdentityCfg):
     """
 
     flux_dev: str = Field(min_length=1)
-    sweep: ToneRangeCfg
+    sweep: ToneRangeCfg | None = None
+
+    def require_sweep(self) -> ToneRangeCfg:
+        """Return a selected line's DC bounds, or raise ValueError with its name."""
+        if self.sweep is None:
+            raise ValueError(f"{self.name}: active tone requires DC sweep")
+        return self.sweep
 
 
 class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
@@ -100,7 +107,7 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
     modules: MuxDriveModuleCfg
     frequency: S
     tones: Annotated[list[T], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[StrictInt]
     flux_unit: Literal["A", "V", "native"] = "A"
     settle: Annotated[float, FieldMeta(unit="s")] = Field(
         default=0.1, ge=0, allow_inf_nan=False
@@ -116,11 +123,16 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
             raise ValueError(
                 "tones must name every original readout position exactly once"
             )
-        participant_indices(names, self.participants)
+        validate_participants(names, self.participants)
         if isinstance(self.frequency, FluxFrequencyCfg) and names != [
             t.name for t in self.frequency.tones
         ]:
             raise ValueError("flux tone names must match the full frequency tone order")
+        if isinstance(self.frequency, FluxFrequencyCfg):
+            for index in self.participants:
+                tone = self.frequency.tones[index]
+                require_tone_value(tone.drive, ("frequency", "tones", index, "drive"))
+                require_tone_value(tone.sweep, ("frequency", "tones", index, "sweep"))
         self.inner_cfg()
         return self
 
@@ -147,9 +159,7 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
                 reset=self.modules.reset, readout=self.modules.readout
             ),
             sweep=self.frequency,
-            active_tones=participant_indices(
-                [tone.name for tone in self.tones], self.participants
-            ),
+            participants=list(self.participants),
             reps=self.reps,
             rounds=self.rounds,
             initial_delay=self.initial_delay,
@@ -180,7 +190,7 @@ class LocalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
 ):
     """Independent local line ranges with one shared positive point count.
 
-    Every full tone has a different source, even when it does not participate.
+    Every full tone requires a source name; selected tones need distinct sources.
     Unselected lines are never written. Selected lines advance in a zip scan.
     """
 
@@ -189,11 +199,15 @@ class LocalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
     @model_validator(mode="after")
     def validate_lines(self) -> LocalFluxCfg[S]:
         """Reject shared local drivers and ranges inconsistent with point count."""
-        devices = [tone.flux_dev for tone in self.tones]
+        devices = [self.tones[index].flux_dev for index in self.participants]
         if len(set(devices)) != len(devices):
             raise ValueError("local flux lines must use distinct devices")
-        for tone in self.tones:
-            make_sweep(tone.sweep.start, tone.sweep.stop, self.flux_expts)
+        for index in self.participants:
+            tone = self.tones[index]
+            require_tone_value(tone.sweep, ("tones", index, "sweep"))
+            make_sweep(
+                tone.require_sweep().start, tone.require_sweep().stop, self.flux_expts
+            )
         return self
 
 
@@ -232,7 +246,7 @@ def run_flux_scan(
     Driver/acquisition errors propagate. Sources retain their last setting;
     no automatic restoration occurs.
     """
-    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
+    indices = list(cfg.participants)
     if isinstance(cfg, GlobalFluxCfg):
         values = np.linspace(cfg.flux.start, cfg.flux.stop, cfg.flux.expts)
         flux_values = np.tile(values, (len(indices), 1))
@@ -241,7 +255,9 @@ def run_flux_scan(
         flux_values = np.asarray(
             [
                 np.linspace(
-                    cfg.tones[i].sweep.start, cfg.tones[i].sweep.stop, cfg.flux_expts
+                    cfg.tones[i].require_sweep().start,
+                    cfg.tones[i].require_sweep().stop,
+                    cfg.flux_expts,
                 )
                 for i in indices
             ],
@@ -253,7 +269,7 @@ def run_flux_scan(
 
     spectrum = cfg.inner_cfg().model_copy(deep=True)
     if isinstance(spectrum, MuxOnetoneCfg):
-        spectrum.active_tones = list(indices)
+        spectrum.participants = list(indices)
         dfs = np.linspace(
             spectrum.sweep.df.start, spectrum.sweep.df.stop, spectrum.sweep.df.expts
         )

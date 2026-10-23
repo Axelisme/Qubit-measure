@@ -6,9 +6,11 @@ from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 from zcu_lab.v2._support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
+    captured_mux_participants,
     mux_readout_initial,
     mux_readout_seed_metadata,
     mux_relax_delay,
+    mux_tone_initials,
 )
 
 from .core import MuxT2EchoCfg
@@ -17,13 +19,15 @@ from .core import MuxT2EchoCfg
 def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
     """Build the complete fixed name list from this Open/Reset capture.
 
-    All positions share the native element declaration and remain required,
-    including nonparticipants. Missing pulse/calibration leaves stay invalid.
+    Readout identity stays required for every position. Only participant drive
+    and sweep fields are required. Other tones start with None in those fields;
+    all nullable fields remain editable and ordinary edits retain their values.
     Binding/source faults propagate; Reset alone recaptures. Shared controls
     apply to every branch. No native conversion or device access occurs.
     """
     names = captured_mux_names(ctx)
-    tones: list[FormNode] = [
+    participants = captured_mux_participants(ctx, names)
+    tones: list[dict[str, FormNode]] = [
         {
             "name": name,
             "drive": Slot(f"{name}.module.x90")
@@ -44,8 +48,15 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
                 "reset": Slot("$mux.module.reset"),
                 "readout": readout,
             },
-            "tones": tones,
-            "participants": list(names),
+            "tones": mux_tone_initials(
+                tones,
+                participants,
+                fields=(
+                    "drive",
+                    "pi_pulse",
+                ),
+            ),
+            "participants": [index for index in participants],
             "delay": Range.between(0.0, 30.0, expts=101),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),

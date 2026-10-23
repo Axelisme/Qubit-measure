@@ -3,6 +3,7 @@
 from typing import Literal, TypedDict
 
 from zcu_tools.gui.app.measure.services.results_index import ResultRun
+from zcu_tools.resources.entry.aliases import AliasValue
 
 
 class ResultRunReply(TypedDict):
@@ -10,8 +11,9 @@ class ResultRunReply(TypedDict):
 
     key is an opaque project-local selector. entry names the Database entry.
     run_id, experiment, point and at retain unknown history as null; point can
-    also be global. roles contains captured bindings only. registered means a
-    matching acquired event. run_path, data_path, figure_paths and analysis_paths
+    also be global. roles preserves captured component names or ordered name
+    lists. registered means a matching acquired event.
+    run_path, data_path, figure_paths and analysis_paths
     are exact absolute paths; data_path is null without data.h5. figures lists
     exact filenames accepted by results.figure. search_text is casefolded
     identity/cfg/analysis text including tone names. issues lists read failures.
@@ -23,7 +25,7 @@ class ResultRunReply(TypedDict):
     run_id: str | None
     experiment: str | None
     point: str | None
-    roles: dict[str, str]
+    roles: dict[str, AliasValue]
     at: str | None
     registered: bool
     run_path: str

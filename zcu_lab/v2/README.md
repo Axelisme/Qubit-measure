@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-23，mux onetone timing 候選
+**Last updated:** 2026-10-24，mux alias participant capture
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -36,10 +36,9 @@ Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T
 它與 `onetone/freq` linear 共用純 core cfg、頻率格點與繪圖 buffer。
 兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
 Raw 是一維頻率與 complex IQ。
-分析名單隨 cfg 保存，Run 可空，Analyze 必須非空且不重複。Open／Reset 有 `$mux` 時，
-全部成員都有目前 freq 才按 freq 升冪排序，否則保留 group 順序；無 `$mux` 時留空。
-Analyze／Load 從該次 cfg 取可編輯的名單初值，不讀目前 Form。
-分析去除直線 magnitude 背景，選取最顯著且符合最小 MHz 間距的 N 個凹陷，依頻率升序配名稱。
+分析名單只在 Analyze 參數，不進 cfg 或量測表單。名單預設空，先探索符合最小 MHz 間距的無名凹陷，
+依頻率升序回報 freq 與 depth，不提出寫回。先看圖，再於 Analyze 填入不重複的 resonator 名稱。
+分析去除直線 magnitude 背景；非空名單選取最顯著的 N 個凹陷，再依頻率升序配名稱。
 每個 capture 中存在的名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
 不足 N 個凹陷時整次分析失敗。操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
@@ -50,7 +49,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
 ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其餘 mixer／timing 候選，來源見 [mux onetone guide](mux/onetone/guide.md#無-readout-slot-的候選來源)。
-active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。
+`participants` 是非空、唯一的原始整數 index list，按輸入順序量測。Open／Reset 將 alias `$participants` 的名稱依 `$mux.resonators` 位置轉成 indices；缺列、未綁或空清單預設全部。之後改 aliases 不更新現有輸入，需 Reset 或重新 Open。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
 Adapter 提供 K 條 active live 曲線及 K 張 `fit_i` 圖，i 是原始 tone 序號。FIT 共用 onetone/freq 的模型與 delay 選項，逐 tone 隔離數值失敗。沒有歷史 cfg 時拒絕 FIT。
@@ -120,18 +119,17 @@ requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩
 再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。
 
-七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
-每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
-T1／Ramsey／Echo 使用共用 requested-delay 軸。所有元素都驗證，未參與者也必須有
-有效 drive、獨立 generator。三個 pulse scan 的頂層 `expts` 是共用正整數，
+七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[int]`。
+每個元素有固定 qubit `name` 與 nullable drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
+T1／Ramsey／Echo 使用共用 requested-delay 軸。只針對 participants 驗證 drive、逐 tone sweep 與獨立 generator。未參與欄位保留草稿，結果為 None。全 readout 身分始終驗證。三個 pulse scan 的頂層 `expts` 是共用正整數，
 表單在 Tones 後只顯示一個 Expts，預設為頻譜 301、Amp Rabi 51、Len Rabi 101。
-每 tone 只有 Start／Stop，不接受舊的每 tone 點數。Len Rabi 全部元素只接受
+每 tone 只有 Start／Stop，不接受舊的每 tone 點數。Len Rabi 參與元素只接受
 const／flat_top，不伸縮或裁切 arb asset。
-Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序查完整原始位置，
-例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
+Participants 非空、不重複，索引必須在完整 tones 範圍內。Runtime 直接保留清單順序，
+例如 `[2, 0]` 依序量 Q3、Q1。GE raw、analysis 與 native persistence 同樣保留該順序。
 RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
 
-`prepare_frequency_scan(cfg, soccfg=...)` 按 participants 查出原始 indices，
+`prepare_frequency_scan(cfg, soccfg=...)` 直接使用 participants 原始 indices，
 回傳 `mux.twotone_spectrum.MuxFreqScan`。
 其 `indices` 保留 participants 順序的原始序號，`coordinates` 是各 drive 硬體 grid
 上的 `(K,P)` float64 MHz 陣列。座標沿 `sweep2array(..., "freq", ...)` 的硬體

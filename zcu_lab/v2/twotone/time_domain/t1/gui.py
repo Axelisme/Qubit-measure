@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -42,6 +43,26 @@ class T1AnalyzeParams:
     skip: Annotated[int, ParamMeta(label="Skip leading points")] = 0
 
 
+class T1Summary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    t1: float | None = Field(
+        description="Owner t1 in us; null retains an unavailable estimate."
+    )
+
+    t1_err: float | None = Field(
+        description="Owner t1_err in us; null retains an unavailable estimate."
+    )
+
+    t1b: float | None = Field(
+        description="Owner t1b in us; null retains an unavailable estimate."
+    )
+
+    t1b_err: float | None = Field(
+        description="Owner t1b_err in us; null retains an unavailable estimate."
+    )
+
+
 @dataclass(frozen=True)
 class T1AnalyzeResult:
     """GUI summary over the unchanged, typed core analysis."""
@@ -56,12 +77,18 @@ class T1AnalyzeResult:
     def t1_err(self) -> float:
         return self.analysis.t1_err
 
+    def summary(self) -> T1Summary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return T1Summary(
+            t1=self.analysis.t1,
+            t1_err=self.analysis.t1_err,
+            t1b=self.analysis.t1b,
+            t1b_err=self.analysis.t1b_err,
+        )
+
     def to_summary_dict(self) -> dict[str, object]:
         return {
-            "t1": self.analysis.t1,
-            "t1_err": self.analysis.t1_err,
-            "t1b": self.analysis.t1b,
-            "t1b_err": self.analysis.t1b_err,
+            **self.summary().model_dump(),
             "fit_quality": fit_quality_summary(self.analysis.fit_quality),
         }
 

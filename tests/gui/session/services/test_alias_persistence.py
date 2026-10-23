@@ -65,6 +65,58 @@ def write_table(entry: ResultEntry, body: str, *, version: str = "1.0") -> None:
     )
 
 
+def test_list_apply_reopen_capture_storage_and_failed_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = entry_at(tmp_path)
+    context = service()
+    context.install_entry(entry)
+    context.use_point(PointUseRequest("first"))
+    rows = (AliasRow("driver", "Q1"), AliasRow("participants", ["$driver.sense", "Q1"]))
+    try:
+        context.apply_alias_rows(rows)
+    except (AttributeError, ValueError) as error:
+        pytest.fail(f"Apply must save an ordered alias list: {error}")
+    captured = context.read_context()
+    assert captured.value("$participants") == ["R1", "Q1"]
+    assert captured.lookup_point("$participants").value == ["R1", "Q1"]
+    assert captured.capture_storage().roles["participants"] == ["R1", "Q1"]
+    with pytest.raises(RoleResolutionError, match="list"):
+        captured.resolve_path("$participants.rate")
+    assert captured.resolved_aliases()[1].resolved == ["R1", "Q1"]
+    context.use_point(PointUseRequest("first"))
+    assert context.get_alias_rows() == rows
+    assert entry.load_aliases(point="first").aliases["participants"] == [
+        "$driver.sense",
+        "Q1",
+    ]
+    events: list[AliasesChangedPayload] = []
+    context_bus = BaseEventBus()
+    fresh = service(context_bus)
+    fresh.install_entry(entry)
+    fresh.use_point(PointUseRequest("first"))
+    context_bus.subscribe(AliasesChangedPayload, events.append)
+    old_file = (entry.result_path / "points/first/aliases.yaml").read_bytes()
+
+    def fail_replace(source: Path, destination: Path) -> Path:
+        raise OSError("synthetic list save failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_replace)
+        with pytest.raises(OSError, match="synthetic list save failure"):
+            fresh.apply_alias_rows((AliasRow("participants", ["Q1"]),))
+    assert fresh.get_alias_rows() == rows
+    assert (entry.result_path / "points/first/aliases.yaml").read_bytes() == old_file
+    assert events == []
+    context.set_alias_rows((AliasRow("participants", []),))
+    with pytest.raises(RoleResolutionError, match="not bound"):
+        context.read_context().value("$participants")
+    assert captured.value("$participants") == ["R1", "Q1"]
+    context.use_point(PointUseRequest("first"))
+    assert context.get_alias_rows() == (AliasRow("participants", []),)
+    assert entry.load_aliases(point="first").aliases == {"participants": []}
+
+
 def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_disk(
     tmp_path: Path,
 ) -> None:

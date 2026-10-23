@@ -2,36 +2,34 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
 
+from zcu_lab.v2.singleshot.ge.gui import GEPostSummary, GESummary
+
 from .helpers import (
     FrequencyCalibration,
-    apply_frequency,
     choose_frequency,
-    report_number,
     require_pi,
     select_or_disable,
 )
 
 
-class SingleshotGEInputs(FormModel):
+class SingleshotGEInputs(RecipeInputs):
     """Inputs for singleshot ge; all units and null policies are declared per
     field."""
 
-    target: str | None = Field(
-        None,
-        description="Qubit alias for this Reset; null uses the GUI aliases without changing focus.",
-    )
-    reuse_tab_id: str | None = Field(
-        None,
-        description="Idle matching tab to reset; null opens a new tab. May be combined with target.",
-    )
     readout_ref: str | None = Field(
         None,
         description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
@@ -52,8 +50,26 @@ class SingleshotGEInputs(FormModel):
         None, description="Probe-off/on shot count; null keeps the GUI value."
     )
 
+    initial_state: Literal["ground", "excited"] | None = Field(
+        None,
+        description="Initial State; null keeps the GUI analysis value. Analysis only.",
+    )
+    backend: Literal["pca", "center"] | None = Field(
+        None, description="Backend; null keeps the GUI analysis value. Analysis only."
+    )
+    logscale: bool | None = Field(
+        None, description="Log Scale; null keeps the GUI analysis value. Analysis only."
+    )
+    align_t1: bool | None = Field(
+        None, description="Align T1; null keeps the GUI analysis value. Analysis only."
+    )
+    length_ratio: float | None = Field(
+        None,
+        description="Length Ratio; null keeps the GUI analysis value. Analysis only.",
+    )
 
-class SingleshotGEReport(FormModel):
+
+class SingleshotGEReport(RecipeReport):
     """Single-shot GE results and failure reason; cancellation returns no report."""
 
     fidelity: float | None = Field(
@@ -71,40 +87,6 @@ class SingleshotGEReport(FormModel):
     confusion: list[list[float]] = Field(
         description="Post-analysis confusion matrix in state order."
     )
-    writeback_applied: bool = Field(
-        description="Whether the selected calibration proposal was explicitly accepted and applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class GESummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    fidelity: float | None = Field(
-        description="Owner fidelity in dimensionless; null retains an unavailable estimate."
-    )
-
-    theta: float | None = Field(
-        description="Owner theta in rad; null retains an unavailable estimate."
-    )
-
-    threshold: float | None = Field(
-        description="Owner threshold in ADC units; null retains an unavailable estimate."
-    )
-
-
-class GEPostSummary(BaseModel):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    ge_radius: float | None = Field(
-        description="Owner ge_radius in ADC units; null retains an unavailable estimate."
-    )
-
-    confusion: list[list[float]] = Field(description="Owner confusion values.")
 
 
 @recipe(
@@ -122,22 +104,17 @@ async def singleshot_ge(
     radius and confusion diagnostics. Ask before applying their calibration
     proposals in Primary-to-Post order, then save raw shots and both analyses.
 
-    Inputs declare native units and GUI-retention policies. The session supplies
-    fixed Form sources. Return the typed report after completion.
-    The runtime owns cancellation. Expected analysis failures return a reason in
-    the report; other errors propagate. Save raw data and completed artifacts once
-    in the Run finalizer.
-    Missing calibration raises RecipeNeedsParameters before Run.
+    No n → expts input: shots sets the probe-off/on cloud size.
+    Analysis controls: initial_state, backend, logscale, align_t1, length_ratio. Null keeps each GUI value.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    # Select the captured sources before editing measurement fields.
-    tab = session.open_tab(
-        "singleshot/ge",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("singleshot/ge", inputs, target_alias="qubit")
     select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
     select_or_disable(tab, ("modules", "init_pulse"), inputs.init_pulse_ref)
     tab.select(("modules", "readout"), ref=inputs.readout_ref)
+    tab.select_sources(inputs)
+
+    edits: list[FieldEdit] = []
     missing: list[MissingParameter] = []
     frequency = choose_frequency(
         tab,
@@ -149,7 +126,7 @@ async def singleshot_ge(
     missing.extend(frequency.missing)
     if frequency.edit is not None:
         tab.select(("modules", "readout"), inline=True)
-        apply_frequency(tab, frequency.edit)
+        edits.append(frequency.edit)
     if (
         parameter := require_pi(
             tab, ("modules", "probe_pulse"), inputs.pi_ref, required="pi_ref"
@@ -158,13 +135,25 @@ async def singleshot_ge(
         missing.append(parameter)
     if missing:
         raise RecipeNeedsParameters(tuple(missing))
-    tab.set(("shots",), inputs.shots)
+    tab.apply_inputs(inputs, {("shots",): inputs.shots}, edits=edits)
 
-    # Acquire before analysis; the finally block saves raw and artifacts.
     await tab.run()
     try:
-        # Fit IQ clouds before deriving Post diagnostics.
-        primary = await tab.analyze("primary", result=GESummary)
+        primary = await tab.analyze(
+            "primary",
+            result=GESummary,
+            updates={
+                key: value
+                for key, value in {
+                    "initial_state": inputs.initial_state,
+                    "backend": inputs.backend,
+                    "logscale": inputs.logscale,
+                    "align_t1": inputs.align_t1,
+                    "length_ratio": inputs.length_ratio,
+                }.items()
+                if value is not None
+            },
+        )
         if primary.result is None:
             return SingleshotGEReport(
                 fidelity=None,
@@ -187,13 +176,13 @@ async def singleshot_ge(
                 analysis_failure=analysis.reason,
             )
 
-        # Write only the proposal items selected in the answer.
         decision = await tab.ask_writeback()
         writeback_applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             writeback_applied = bool(receipt.items)
+
         return SingleshotGEReport(
             fidelity=report_number(primary.result.fidelity),
             theta=report_number(primary.result.theta),

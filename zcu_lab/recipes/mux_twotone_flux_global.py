@@ -4,18 +4,22 @@ Recipe n → frequency.expts; flux_n → flux Expts.
 """
 
 from pydantic import Field
-from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 
-from .helpers import report_number
+from zcu_lab.v2._support.measure.mux_flux_adapter import MuxFluxPickSummary
+
 from .mux_flux_helpers import (
-    MuxFluxPickSummary,
     MuxFluxReport,
     MuxFluxToneReport,
     MuxTwotoneFluxInputs,
     flux_range_edits,
     global_flux_edits,
     mux_flux_analysis_updates,
-    mux_flux_final_edits,
 )
 from .mux_helpers import ToneRangeInputs
 
@@ -40,40 +44,36 @@ class MuxTwotoneFluxGlobalInputs(MuxTwotoneFluxInputs):
 async def mux_twotone_flux_global(
     session: RecipeSession, inputs: MuxTwotoneFluxGlobalInputs
 ) -> MuxFluxReport:
-    """Acquire twotone maps over global DC values, then report per-Q flux lines.
+    """Twotone spectroscopy across the shared coil, with one native picker per Q.
 
-    target binds the Reset mux alias; reuse_tab_id resets an idle matching tab.
-    Select library, copy inline sources outer-first, apply ranges/counts, then
-    overrides to the flat cfg. Null retains Form inputs. MHz frequency and
-    native DC coordinates are never converted. All full tones must validate,
-    even nonparticipants. Missing settings stop before acquisition with owner
-    paths and reasons. n sets the shared frequency Expts; flux_n sets DC Expts.
-
-    Analyze selected Qs in participant order using original tone indices.
-    Each tracked analysis hands off through PendingAnalysis/tab_interact/done.
-    Optional flux_half/flux_integer maps seed lines without changing the Run.
-    answer only selects writeback proposals, never picker commands.
-    Each Q proposes one complete group coil_flux.<Q> record.
-    Accept only selected items and use the confirmed receipt for the report.
-    Expected analysis failure preserves earlier rows and saves without asking
-    for the failed Q. Other errors and root cancellation propagate. Once Run
-    returns, finally saves raw and completed artifacts; per-output Save status
-    is in runs, not implied by completion. No calibration is inferred here.
+    Select library then inline sources; null keeps captured Form values.
+    Overrides run last. Only participant drive/sweep settings are required;
+    readout identities remain required for every tone.
+    n sets shared frequency Expts; flux_n sets DC Expts (zipped for local lines).
+    Picker flux_half/flux_integer maps seed native DC lines by captured Q name.
+    Analyze each participant in acquisition order, ask, then accept selected items.
+    Save raw and completed artifacts after Run, including expected fit failures.
+    Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_tab(
-        "mux/twotone_flux_global",
-        aliases=None if inputs.target is None else {"mux": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
-    for selection in inputs.library or ():
-        tab.select(selection.path, ref=selection.key)
-    for copy in inputs.inline or ():
-        tab.select(copy.path, inline=True)
+    tab = session.open_recipe_tab("mux/twotone_flux_global", inputs, target_alias="mux")
+    tab.select_sources(inputs)
     edits = flux_range_edits(tab, inputs.sweeps, ("frequency", "tones"))
     edits.append(FieldEdit(path=("frequency", "expts"), value=inputs.n))
     edits.extend(global_flux_edits(inputs.flux, inputs.flux_n))
-    edits.extend(mux_flux_final_edits(inputs))
-    tab.apply(edits, require_valid=True)
+    tab.apply_inputs(
+        inputs,
+        {
+            ("flux_unit",): inputs.flux_unit,
+        },
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            ),
+            *edits,
+        ],
+    )
+
     updates = mux_flux_analysis_updates(tab, inputs)
 
     await tab.run()
@@ -85,12 +85,14 @@ async def mux_twotone_flux_global(
             )
             if analysis.result is None:
                 return MuxFluxReport(tones=tones, analysis_failure=analysis.reason)
+
             decision = await tab.ask_writeback()
             applied = False
             if decision.accepted:
                 receipt = tab.accept_writeback(decision.items)
                 receipt.raise_for_error()
                 applied = bool(receipt.items)
+
             picked = analysis.result
             tones.append(
                 MuxFluxToneReport(

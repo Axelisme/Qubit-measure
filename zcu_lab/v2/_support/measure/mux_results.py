@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.fitting.sampling import FringeSamplingQuality
 from zcu_tools.core.element import ElementIdentity
-from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.gui.session.parameters import ParameterContext
 
 from zcu_lab.v2._support.mux import MuxFitFailure
 
-from .analyze_results import fit_quality_summary
+from .analyze_results import fit_quality_models
 from .mux_bindings import require_mux_qubits
 
 if TYPE_CHECKING:
@@ -39,71 +41,77 @@ def captured_qubits(
     return qubits
 
 
-def indexed_summary(
-    names: Sequence[str] | None, index: int, values: Mapping[str, object]
-) -> dict[str, object]:
-    """Attach original position/name and author identity to one source outcome.
+class MuxSummaryTone(BaseModel):
+    """Original complete-list position/name; element is absent without source names."""
 
-    names comes from the source cfg only. Without cfg the name is None, never
-    guessed from current state. Invalid original positions raise IndexError.
-    values contains the leaf's numeric scalars, JSON-safe fit_quality or failure
-    reason. Direct NumPy scalars become Python scalars for nested analysis JSON;
-    values and proposal eligibility are unchanged. Containers are not repaired.
-    """
-    identity = (
-        {}
-        if names is None
-        else {"element": ElementIdentity(index=index, name=names[index])}
+    position: int
+    name: str | None
+    element: ElementIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
-    return {
-        **identity,
-        "position": index,
-        "name": None if names is None else names[index],
-        **{key: normalize_numpy_scalar(value) for key, value in values.items()},
-    }
+
+
+class MuxSummaryFailure(MuxSummaryTone):
+    """Native fitter failure reason at the original tone position."""
+
+    failure: str
+
+
+class MuxCoherenceFitSummary(MuxSummaryTone):
+    """T2/error in us, detuning/error in MHz, fringe mode and owner diagnostics."""
+
+    t2: float
+    t2_err: float
+    detune: float
+    detune_err: float
+    fit_fringe: bool
+    sampling_quality: FringeSamplingQuality | None
+    fit_quality: dict[str, FitQuality] | None
+
+
+class MuxCoherenceSummary(BaseModel):
+    """Coherence outcomes in acquisition order, retaining failed original indices."""
+
+    tones: list[MuxCoherenceFitSummary | MuxSummaryFailure]
 
 
 def coherence_summary(
     outcomes: Sequence[MuxCoherenceFit | MuxFitFailure],
     names: Sequence[str] | None,
-) -> dict[str, object]:
-    """Return {"tones": rows} for Ramsey/Echo without changing analysis row order.
+) -> MuxCoherenceSummary:
+    """Project native coherence outcomes and qualified quality paths without refitting.
 
-    outcomes retains analysis row order and original tone indices. names is the
-    complete source cfg name list, or None without cfg; unavailable names remain
-    None and omit ElementIdentity. Invalid original positions raise IndexError
-    when names is supplied. Successful rows copy t2/error in us, detune/error in
-    MHz, the fringe flag, core fit quality and fringe sampling quality (None for
-    decay). Failed rows store the fitter reason
-    under failure. Direct NumPy scalars become Python scalars. Quality paths use output
-    row offsets under summary.tones[row].fit_quality, not original tone indices.
-    No fitting, quality calculation, source lookup or input mutation occurs.
+    Names come from the full source cfg, never live state. Each original index
+    retains its acquisition row; invalid positions raise IndexError with names.
     """
-    summaries: list[dict[str, object]] = []
+    summaries: list[MuxCoherenceFitSummary | MuxSummaryFailure] = []
     for outcome in outcomes:
+        name = None if names is None else names[outcome.index]
+        element = (
+            None if name is None else ElementIdentity(index=outcome.index, name=name)
+        )
         if isinstance(outcome, MuxFitFailure):
-            values: dict[str, object] = {"failure": outcome.reason}
+            row = MuxSummaryFailure(
+                position=outcome.index,
+                name=name,
+                element=element,
+                failure=outcome.reason,
+            )
         else:
-            values = {
-                "t2": outcome.t2,
-                "t2_err": outcome.t2_err,
-                "detune": outcome.detune,
-                "detune_err": outcome.detune_err,
-                "fit_fringe": outcome.fit_fringe,
-                "sampling_quality": (
-                    None
-                    if outcome.sampling_quality is None
-                    else {
-                        "max_gap_us": outcome.sampling_quality.max_gap_us,
-                        "samples_per_cycle": outcome.sampling_quality.samples_per_cycle,
-                        "status": outcome.sampling_quality.status,
-                        "reason": outcome.sampling_quality.reason,
-                    }
-                ),
-                "fit_quality": fit_quality_summary(
+            row = MuxCoherenceFitSummary(
+                position=outcome.index,
+                name=name,
+                element=element,
+                t2=outcome.t2,
+                t2_err=outcome.t2_err,
+                detune=outcome.detune,
+                detune_err=outcome.detune_err,
+                fit_fringe=outcome.fit_fringe,
+                sampling_quality=outcome.sampling_quality,
+                fit_quality=fit_quality_models(
                     {"fit": outcome.quality},
                     summary_path=f"summary.tones[{len(summaries)}].fit_quality",
                 ),
-            }
-        summaries.append(indexed_summary(names, outcome.index, values))
-    return {"tones": summaries}
+            )
+        summaries.append(row)
+    return MuxCoherenceSummary(tones=summaries)

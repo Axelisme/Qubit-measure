@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-23，mux seed diagnostics
+**Last updated:** 2026-10-24，mux alias participant capture
 
 # Measure domain support
 
@@ -9,7 +9,11 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
-`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+`analyze_results.fit_quality_models(qualities, *, summary_path="summary.fit_quality")` 回傳 `dict[str, FitQuality] | None`。
+它複製 core diagnostics，只將 invalid 的路徑加上 summary 位置，不更改原物件或 metrics。
+Mux caller 傳入 `summary.tones[row].fit_quality`，單 qubit 沿用預設路徑。
+`fit_quality_summary` 序列化同一組 owner 型別，保留既有 JSON 欄位與 invalid 清單。
+數值與原因由 fitting core 擁有，這些 helper 不算品質，也不改 writeback 或 accept policy。
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
@@ -25,13 +29,14 @@ trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_leng
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
 上述缺值情境仍填入 ro_length=1.0 us。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。只有 mixer 初值、推導 timing 與 gain 0.1 標為 uncalibrated，ref-only slot 不標記，未改寫的 captured 欄位保持未知。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
-所有元素共用宣告，不把逐位置 lock 套成共同限制。
+`captured_mux_participants(ctx, names)` 在 Open／Reset 從同一固定 capture 的 alias owner 解析 `$participants`，包含清單內的 `$` 軟連結。Drive 與 flux Forms 以完整 `$mux.qubits` 排序，onetone 以完整 `$mux.resonators` 排序，把名稱轉成原始索引。缺列、未綁或空清單選全部原始索引。非空清單的未綁元素照常報錯，不 fallback。外群名稱保留為 participants 的普通 invalid draft，讓操作員看到原名稱並改成合法索引；一般整數驗證阻擋 cfg。Alias 改動不影響現有輸入，需 Reset 或重新 Open。MuxGroup 不保存 participants，recipe 只收索引，null 保留捕捉的選取。
+所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Reset 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
 
@@ -39,6 +44,11 @@ Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit call
 來源名稱可用時，作者附 `ElementIdentity` 給 native summary rows 與候選；原始位置不由
 row offset 推測。直接 NumPy scalar 在 summary 邊界轉為 Python scalar，不改數值、fit
 或 proposal eligibility。
+各 mux analysis carrier 的 `summary()` 從 native outcomes 建立具名 BaseModel，`to_summary_dict()` 序列化同一模型。
+Recipe 的 `analyze(result=...)` 直接引用這些 owner 模型，不宣告結果鏡像。
+`mux_results.py` 擁有原始位置／名稱、失敗與共用 coherence summary。
+各實驗的 `gui.py` 擁有頻率、Rabi、T1、GE 與 onetone summary。
+品質欄位直接使用 fitting owner 的 `FitQuality`，coherence sampling 使用 owner 的 `FringeSamplingQuality`。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
 本 package 不 import concrete adapter 或 `zcu_lab.definitions`，也不宣告 experiment order。只屬於
@@ -115,6 +125,8 @@ Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gu
 `flux_half`／`flux_int` 是可選的有限 native DC 初線值，每個 None 各自沿用該 tone 的 Run capture，缺校準才用 shared picker 初值。
 Recipe 經同一個 Analyze operation 的 typed updates 傳入，不更改 capture 或其他 tone。
 Picker done 保留原始 tone／Q 身分並產生該 Q 的 writeback proposal，不直接接受寫回。
+`mux_flux_adapter.MuxFluxPickSummary` 擁有該原始 tone／Q 與 native DC half／integer／period 結果。
+`MuxFluxPickResult.summary()` 建立此模型，四個 flux recipes 直接引用它。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
 range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的

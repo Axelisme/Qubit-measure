@@ -84,7 +84,9 @@ def _completion_candidates(env: FormEnv) -> tuple[str, ...]:
         name = f"${row.alias}"
         candidates.append(name)
         component = (
-            point.components.get(row.resolved) if row.resolved is not None else None
+            point.components.get(row.resolved)
+            if isinstance(row.resolved, str)
+            else None
         )
         if component is not None:
             candidates.extend(
@@ -423,7 +425,9 @@ class FormEditor[F: FormModel](QWidget):
         """
         self._require_state()
         messages: dict[FormPath, str] = {
-            path: local.error for path, local in self._local.items()
+            path: local.error
+            for path, local in self._local.items()
+            if path in self._rows
         }
         return FormErrors(messages) if messages else None
 
@@ -435,7 +439,9 @@ class FormEditor[F: FormModel](QWidget):
         """
         self._require_state()
         messages = dict(self._state_errors.messages) if self._state_errors else {}
-        messages.update({path: local.error for path, local in self._local.items()})
+        local_errors = self.local_parse_errors()
+        if local_errors is not None:
+            messages.update(local_errors.messages)
         return FormErrors(messages) if messages else None
 
     def detach(self) -> None:

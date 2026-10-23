@@ -225,7 +225,7 @@ class ResultEntry:
     ) -> DocumentRevision:
         """Atomically replace setup or point aliases with the named raw table.
 
-        aliases is an EntryAliases containing ordered string bindings, not
+        aliases is an EntryAliases containing ordered scalar/list bindings, not
         resolved names. point=None selects setup; a safe single-segment point
         label selects only that point's aliases.yaml. Invalid labels raise
         ValueError; missing point.yaml or module_cfg.yaml raises FileNotFoundError.

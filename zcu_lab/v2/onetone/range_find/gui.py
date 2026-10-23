@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -41,12 +42,12 @@ RangeFindRun: TypeAlias = RunRecord[RangeFindCfg, RangeFindResult]
 class RangeFindParams:
     """Enter frequency-ordered resonator names as a JSON list for coarse analysis.
 
-    resonators is JSON text such as '["R2", "R1"]', not a comma-separated list.
+    resonators is JSON text such as '["R2", "R1"]', or '[]' for unnamed discovery.
     min_separation is positive finite MHz, default 1 MHz as in core Options.
     to_options rejects invalid JSON and delegates the domain checks to core.
     """
 
-    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")]
+    resonators: Annotated[str, ParamMeta(label="Resonators (JSON)")] = "[]"
     min_separation: Annotated[float, ParamMeta(label="Min separation (MHz)")] = (
         DEFAULT_MIN_SEPARATION_MHZ
     )
@@ -55,7 +56,7 @@ class RangeFindParams:
         """Parse JSON names and return validated core Options, or raise ValueError.
 
         Blank/malformed JSON, non-list values and non-string elements fail with
-        input guidance. Core rejects empty/duplicate names and invalid spacing.
+        input guidance. Core rejects blank/duplicate names and invalid spacing.
         No invalid value is replaced with a default or an empty list.
         """
         try:
@@ -76,11 +77,38 @@ class RangeFindParams:
         return options
 
 
+class ResonatorDipSummary(BaseModel):
+    """One frequency-ordered dip; null scalars retain unavailable estimates."""
+
+    name: str | None = Field(
+        description="Analysis name, or null for unnamed discovery; not a hardware channel."
+    )
+    freq: float | None = Field(description="Absolute dip frequency in MHz.")
+    depth: float | None = Field(
+        description="Background-relative magnitude depth in a.u."
+    )
+
+
+class RangeFindSummary(BaseModel):
+    """Dip estimates and captured identity/writeback limitations."""
+
+    resonators: list[ResonatorDipSummary] = Field(
+        description="Dips in ascending frequency order."
+    )
+    writeback_diagnostic: str | None = Field(
+        description="Reason some proposals were omitted; null when none were omitted."
+    )
+    identity_diagnostic: str | None = Field(
+        description="Pairing uncertainty; null is not proof of identity."
+    )
+
+
 @dataclass
 class RangeFindAnalysis(AnalyzeResultBase):
     """Frequency-ordered dips and captured writeback eligibility.
 
-    dips contains name, absolute MHz and background-relative magnitude depth.
+    dips contains optional name, absolute MHz and magnitude prominence depth.
+    Unnamed discovery has no writable names or identity diagnostic.
     writable contains only names present in the analysis capture. diagnostic
     explains omitted frequency proposals; None means every dip is writable.
     identity_diagnostic warns that dip/component pairing needs confirmation when
@@ -93,16 +121,19 @@ class RangeFindAnalysis(AnalyzeResultBase):
     diagnostic: str | None
     identity_diagnostic: str | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Show dip values, omitted-proposal reasons and pairing uncertainty."""
-        return {
-            "resonators": [
-                {"name": dip.name, "freq": dip.freq, "depth": dip.depth}
+    def summary(self) -> RangeFindSummary:
+        """Return the typed dip summary consumed by recipes, in native units."""
+        return RangeFindSummary(
+            resonators=[
+                ResonatorDipSummary(name=dip.name, freq=dip.freq, depth=dip.depth)
                 for dip in self.dips
             ],
-            "writeback_diagnostic": self.diagnostic,
-            "identity_diagnostic": self.identity_diagnostic,
-        }
+            writeback_diagnostic=self.diagnostic,
+            identity_diagnostic=self.identity_diagnostic,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return self.summary().model_dump()
 
 
 class RangeFindAdapter(
@@ -124,13 +155,13 @@ class RangeFindAdapter(
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
-        """Build blank required sweep endpoints and editable captured analysis names."""
+        """Build blank required sweep endpoints without acquisition dip names."""
         return make_form(ctx)
 
     def run(
         self, req: RunRequest, cfg: RangeFindCfg, *, context: RunContext
     ) -> RangeFindRun:
-        """Acquire one spectrum and pair it with the unchanged acquisition cfg and name list.
+        """Acquire one spectrum and pair it with the unchanged acquisition cfg.
 
         context supplies SoC, cached config, cancellation and live plots. req is
         unused. Stop preserves NaNs for unacquired points; the
@@ -142,15 +173,13 @@ class RangeFindAdapter(
     def get_analyze_params(
         self, result: RangeFindRun, ctx: SessionEnv
     ) -> RangeFindParams:
-        """Seed editable JSON names from the Run/Load record, never the current Form.
+        """Start Run/Load analysis with unnamed discovery and default MHz spacing.
 
-        result.cfg owns the saved analysis list. A missing/incompatible cfg starts
-        empty so the operator can enter names for data-only analysis. ctx supplies
-        the fixed environment but does not override the saved list.
+        result and ctx do not seed names. The operator may name dips after
+        inspecting the discovery plot, without changing the acquisition cfg.
         """
-        del ctx
-        names = result.cfg.resonators if result.cfg is not None else []
-        return RangeFindParams(resonators=json.dumps(names))
+        del result, ctx
+        return RangeFindParams()
 
     def analyze(
         self,
@@ -158,10 +187,11 @@ class RangeFindAdapter(
         *,
         plots: Plots,
     ) -> RangeFindAnalysis:
-        """Find all requested dips or fail the entire analysis without proposals.
+        """Discover unnamed dips, or find all requested named dips without partial success.
 
         req supplies raw IQ, options and the fixed Run/Load parameter capture.
-        plots receives the annotated fit. Missing capture/names still allow pure
+        Empty names return ordered dips without proposals or identity claims.
+        plots receives the annotated fit. Missing capture/components still allow pure
         calculation but omit their proposals and explain why in the summary.
         Only finite, strictly ascending captured frequencies establish name order.
         Otherwise summary and proposals flag unconfirmed pairing without blocking
@@ -169,6 +199,9 @@ class RangeFindAdapter(
         curves/options and insufficient dips raise ValueError.
         """
         options = req.analyze_params.to_options()
+        dips = RangeFindExp().analyze(req.run_result, options, plots=plots)
+        if not options.resonators:
+            return RangeFindAnalysis(dips, (), None, None)
         components = (
             req.parameters.document().components if req.parameters is not None else {}
         )
@@ -190,7 +223,6 @@ class RangeFindAdapter(
             )
             else None
         )
-        dips = RangeFindExp().analyze(req.run_result, options, plots=plots)
         if req.parameters is None:
             return RangeFindAnalysis(
                 dips,
@@ -201,6 +233,8 @@ class RangeFindAdapter(
         writable: list[str] = []
         missing: list[str] = []
         for dip in dips:
+            if dip.name is None:
+                continue
             if dip.name in components:
                 writable.append(dip.name)
             else:
@@ -238,5 +272,5 @@ class RangeFindAdapter(
                 proposed_value=dip.freq,
             )
             for dip in req.analyze_result.dips
-            if dip.name in req.analyze_result.writable
+            if dip.name is not None and dip.name in req.analyze_result.writable
         ]

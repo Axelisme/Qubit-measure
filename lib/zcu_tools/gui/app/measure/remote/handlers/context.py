@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import numpy as np
+from pydantic import TypeAdapter, ValidationError
 
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -15,6 +16,7 @@ from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueInfo
 from zcu_tools.resources.entry import document_value
+from zcu_tools.resources.entry.aliases import AliasValue
 
 from ._wire_values import context_wire_value
 from .context_reload import check_writer_revision
@@ -28,7 +30,8 @@ def h_context_aliases_set(
 ) -> Mapping[str, object]:
     """Apply complete ordered authored rows through the context owner.
 
-    Each row has exactly string alias/value fields. The owner validates the
+    Each row has exactly alias (string) and value (AliasValue) fields.
+    Ordered lists use JSON arrays, never an encoded string. The owner validates the
     whole table, saves the selected point's aliases.yaml atomically, then
     installs/publishes it. No selected point raises no_context before I/O.
     Input/storage failures preserve the previous table. Return installed
@@ -46,12 +49,18 @@ def h_context_aliases_set(
                 f"rows[{index}] must contain exactly alias and value",
             )
         alias, value = item["alias"], item["value"]
-        if not isinstance(alias, str) or not isinstance(value, str):
+        if not isinstance(alias, str):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS, f"rows[{index}].alias must be a string"
+            )
+        try:
+            binding = TypeAdapter(AliasValue).validate_python(value, strict=True)
+        except ValidationError as error:
             raise RemoteError(
                 ErrorCode.INVALID_PARAMS,
-                f"rows[{index}].alias and value must be strings",
-            )
-        rows.append(AliasRow(alias, value))
+                f"rows[{index}].value must be a string or list of strings",
+            ) from error
+        rows.append(AliasRow(alias, binding))
     check_writer_revision(adapter, "aliases", params)
     adapter.context_control.apply_alias_rows(tuple(rows))
     return {

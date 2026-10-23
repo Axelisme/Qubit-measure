@@ -12,7 +12,9 @@
 
 `Display(readonly=True)` 由 Form core 強制執行。寫入與目前值相同則通過，不同則以帶路徑及目前值的 readonly rejection 拒絕。Qt、MCP 與 RPC 共用這項規則，完整父層替換與批次寫入也不能繞過唯讀子欄位。唯讀只作用於被宣告欄位的子樹，不固定祖先選擇。
 
-Description 的 options 只列 detached value、label 與 command name／label。`selected` 是依 JSON 型別與 value 葉匹配的第一項 index，missing／no-match 為 None，不猜第一項。`options=None` 表示沒有 selector，空 tuple 則保留顯式空清單。Describe 與 `run_command` 共用 active ancestry、最深 local 覆蓋與選項解析，不查 inactive branches 的 hooks。普通缺值 model 可按型別列欄位；停用 nullable model 與 no-match option 只回 target。Unknown、whole-leaf descendant 與 inactive descendant 的 path 立即 raise `FormPathError(ValueError)`，其 `path` 欄位保留完整請求路徑。作者宣告、nonfinite 與其他非 path 失敗維持原例外類別。Describe 不求值、不套 defaults、不寫 input/base，也不抓取來源；宣告 hooks 只讀呼叫端固定 env。有限的 leaf constraints 是顯示提示，驗證仍由 result／preview 負責。
+Description 的 options 只列 detached value、label 與 command name／label。`selected` 是依 JSON 型別與 value 葉匹配的第一項 index，missing／no-match 為 None，不猜第一項。`options=None` 表示沒有 selector，空 tuple 則保留顯式空清單。Describe 與 `run_command` 共用 active ancestry、最深 local 覆蓋與選項解析，不查 inactive branches 的 hooks。普通缺值 model 可按型別列欄位；停用 nullable model 與 no-match option 只回 target。Unknown、whole-leaf descendant 與 inactive descendant 的 path 立即 raise `FormPathError(ValueError)`，其 `path` 欄位保留完整請求路徑。作者宣告、nonfinite 與其他非 path 失敗維持原例外類別。Describe 不求值被描述欄位、不套 defaults、不寫 input/base，也不抓取來源；宣告 hooks 只讀呼叫端固定 env。有限的 leaf constraints 是顯示提示，驗證仍由 result／preview 負責。
+
+一般 nullable 欄位以 None 表示未填，非 None 值照常求值與驗證。表單不依其他欄位投影或隱藏草稿錯誤。
 
 `static_defaults(model)` 接受普通 Pydantic BaseModel 或持久 Spec，產生 detached input JSON。沒有初值宣告的必填欄位與 None 預設保持缺席，讓 before validator 能從其他欄位推導值。Default factory 每次呼叫重新執行。FormModel 初值與宣告者的 converter 可使用這個入口。
 

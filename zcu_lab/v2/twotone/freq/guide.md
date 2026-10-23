@@ -28,3 +28,17 @@ supplied center and span.
 ## Recommended
 
 Standard flow at a fresh `$qubit.flux_int`: first run a wide survey over the user-approved passband to find a real qubit feature, and use the measured response as the evidence. Predictor output and simulator truth are not evidence of a measured qubit line. Then run a narrower scan around the observed feature and fit it. Analysis defaults to the Lorentzian fit ('lor') with plot-fit on; switch to 'sinc' for power-broadened or saturated lines. If the scan looks like noise, widen/re-centre and check readout/gain before concluding there is no qubit.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Supply an approved qubit-frequency window. Check drive gain/length and the readout frequency/timing.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `twotone_spectrum` after inspecting the same Form errors.
+   center_mhz, span_mhz and points are required. points maps to frequency Expts. model_type selects lor/sinc; plot_fit controls the existing fit overlay.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

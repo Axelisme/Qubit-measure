@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24（recipe 最後覆寫與 owner admission）
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -97,7 +97,7 @@ Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.conn
 
 `recipe_api.py` 是作者的公開入口。`@recipe(name, description)` 宣告
 `async def (session: RecipeSession, inputs: Inputs) -> Report`，
-Inputs 繼承 `FormModel`，Report 是作者選擇的 `BaseModel`。
+Inputs 與 Report 是作者選擇的 `BaseModel`，可分別繼承 `RecipeInputs` 與 `RecipeReport`。
 框架推導 inputs schema，不另維護手寫 schema、SummaryParameter 或 SummaryEstimate 宣告。
 Recipe inputs 只驗 JSON schema 與 pydantic，不渲染 GUI Form。
 Adapter tab 的 Form 仍由 GUI owner 產生與驗證。
@@ -168,6 +168,63 @@ Transport 失敗會傳遞錯誤，不宣稱任何未收到的 raw 收據。
 每個 output 的 status／error 才是保存結果，不能只看 run_id。
 通常在 return 前以 finally Save 一次；想先保住 raw 也可在 Run 後另存。
 Run 未成功取得來源前不要進 Save finalizer，避免 Save 蓋掉原錯誤。
+
+### 共用輸入與自訂步驟
+
+`RecipeInputs` 提供 target、reuse_tab_id、library、inline、overrides，實驗輸入模型只加自己的欄位。
+`LibrarySelection(path, key)` 指定捕捉的 module key，key=null 保留目前選擇。
+`InlineSelection(path)` 指定要複製成 inline 的 selector。兩種模型都用 keyword arguments 建立。
+Path 使用原始 list index，inline 清單先列祖先再列子項。
+
+`session.prepare_tab(adapter, inputs, target_alias=..., values=...)` 依序開 tab／Reset、
+選 library、複製 inline，最後將非 None 的 values 與 overrides 交同一批 apply。
+values 的 key 是 FormPath tuple，value 使用該欄位的原生單位。
+None 保留 Form 輸入，overrides 排在實驗值之後。
+分拆路徑的 `tab.apply_inputs(inputs, values, edits=...)` 可接收已具名的 FieldEdit 清單。
+它依序提交非 None values、保留 path/value/source 的 edits、最後是 inputs.overrides。
+同一 exact path 只送最後一個非 None 值，保留該項 source；所有 authored path/source 仍先驗證。
+祖先與子路徑不合併，重疊或不可達路徑仍由 Form owner 整批拒絕。
+三組共用一次完整候選驗證。edits 的 None 也保留 Form，不先提交不完整欄位。
+prepare_tab 不接 edits；有校準來源標記或中途自訂操作時用分拆步驟。
+預設 require_valid=True，回 tab 前會驗完整 cfg，不會 Run、Analyze、Save 或寫回。
+捷徑的 values 必須補齊本次量測所需的欄位。
+require_valid=False 沿用 apply 的 invalid draft 提交後拋錯語意，不保證無效輸入能繼續執行。
+
+需要讀 Form 或插入自己的脈衝編輯時，拆開步驟，等自訂操作完成才驗完整 cfg。
+以下合成 recipe 的 gain 編輯不屬於預設流程，也不需要 hook class：
+
+```python
+from zcu_tools.mcp.measure.recipe_api import (
+    RecipeInputs, RecipeReport, RecipeSession, recipe,
+)
+
+
+class PulseInputs(RecipeInputs):
+    gain: float = 0.25
+
+
+@recipe("synthetic_pulse", "Set a pulse gain and acquire the current form")
+async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> RecipeReport:
+    tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
+    tab.select_sources(inputs)
+    tab.select(("modules", "pulse"), inline=True)
+    tab.set(("modules", "pulse", "gain"), inputs.gain)
+    tab.apply_inputs(inputs, {})
+    await tab.run()
+    try:
+        return RecipeReport()
+    finally:
+        tab.save()
+```
+
+作者也可直接用 open_tab、select、apply 替換上述操作，不必繼承流程。
+Reset、來源選擇與先前自訂編輯不隨最後一批驗證失敗而回滾。
+
+`RecipeReport` 提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics。
+作者填入 owner 的事實，基底不決定 fit 是否可接受，也不自動寫回。
+`recipe_api.FitQuality` 與 `QualityIssue` 直接匯出 analysis owner 的同一型別。
+`await tab.analyze("primary", result=OwnerSummary)` 回傳的 result 使用 owner 型別，recipe 不另宣告鏡像。
+`report_number(value)` 保留有限數的原始精度，None、NaN 與 infinity 轉為 None，不換單位或四捨五入。
 
 ### 取消與缺參
 

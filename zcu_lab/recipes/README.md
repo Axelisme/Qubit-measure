@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 Recipe 是操作 GUI tab 的 async 函式。Adapter 擁有 cfg、表單、量測與分析。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -12,20 +12,32 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 [__init__.py](__init__.py) 的 `RECIPES` 明列 29 個宣告，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
-`Inputs` 繼承 `FormModel`，逐欄寫單位、預設與 null 政策。
+每個 recipe 的 `Inputs` 繼承 `RecipeInputs`，只加實驗欄位，逐欄寫單位、預設與 null 政策。
+`RecipeInputs` 提供 target、reuse_tab_id、library、inline、overrides。
+Mux 的 participants 使用完整 tones 清單的原始 index，逐 tone 範圍清單保留原始順序，見下方 mux guide。
 框架從這個 model 產生 MCP JSON schema，不另維護手寫 schema。
 Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。
-`Report` 是作者選擇的具名結果 model，包含此流程要回報的量與 writeback 決定。
+每個 recipe 的 `Report` 繼承 `RecipeReport`，只加實驗的回報量。
+基底提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics，作者明填 owner 事實。
 各模組的 `DEFINITION` 指向裝飾後的宣告。組合根把 `RECIPES` 注入框架。
 Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須重啟 MCP server。
 
-`helpers.py` 擁有 frequency、flux、校準來源與數值回報的 lab 政策。
-`mux_helpers.py` 擁有 mux 的 library、inline 輸入與 tone report 共用欄位。
+`helpers.py` 保留既有 frequency／flux 選源、範圍與裝置單位政策。
+非 mux helper 回傳具名計算結果或 FieldEdit，不提交半套 cfg。
+Recipe 明寫 selector 的選取，再把計算結果交最後一批 apply_inputs。
+數字回報使用 lib 的 report_number，不改單位或精度。
+`mux_helpers.py` 擁有 mux 的 start/stop 範圍輸入、完整 tone 範圍的 FieldEdit 組裝與 tone report 共用欄位。
 它們不是獨立 recipe。參數推導不放進 framework。
 
 ## 作者可呼叫的操作
 
-`session.open_tab(adapter, aliases=..., reuse=...)` 開啟或 Reset 一個 tab。
+`session.open_recipe_tab(adapter, inputs, target_alias="qubit")` 開啟或 Reset 非 mux tab。
+Range find 使用 target_alias="resonator"。`tab.select_sources(inputs)` 先選 library 再複製 inline。
+來源選好後可插入自己的步驟，最後用 `tab.apply_inputs(inputs, values, edits=...)`。
+它依序處理非 None values、保留來源標記的具名 edits、inputs.overrides。
+同一 exact path 取最後一個非 None 值，只驗一次完整候選；祖先與子路徑重疊仍整批拒絕。
+不需要中途步驟時用 `session.prepare_tab(..., values=...)`，它不 Run。
+既有 `session.open_tab(adapter, aliases=..., reuse=...)` 仍可直接使用。
 Alias override 只供這次固定 capture，不更改全域 aliases 或 GUI focus。
 `session.context.read(source_path)` 讀 session 的值，不需要先開 tab。
 `tab.read(path)` 則讀該 tab 已捕捉的 Form 來源。
@@ -77,14 +89,15 @@ finally:
     tab.save()
 ```
 
-`FitSummary` 是作者宣告的 `BaseModel`，欄位對應 adapter 的 owner summary。
-框架用 `TypeAdapter` 驗證 summary，不把 GUI 內部 analysis dataclass 填回來。
-欄位缺失或型別不合會失敗，不補值。沒有 scalar 的 figure-only 分析可用空的具名 view。
+`FitSummary` 應直接 import 分析 owner 的具名 summary，不在 recipe 重宣告鏡像。
+例如 twotone/freq 匯出 `TwotoneSpectrumSummary`，figure-only MIST 直接用 owner 的空結果型別。
+框架用 `TypeAdapter` 解碼 summary，欄位缺失或型別不合會失敗，不補值。
+可照著操作的完整骨架見 [Recipe 撰寫](../v2/measure-authoring.md#recipe-撰寫)。
 `report_number` 只把不可估計或非有限的 fit scalar 轉成 null，不改擬合或 writeback 政策。
 
 預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
 範例的 Report 宣告 nullable value、writeback_applied 與 nullable analysis_failure。
-有分析的 24 支 recipe 都在每次 Analyze 後檢查 result。
+有分析的 recipe 都在每次 Analyze 後檢查 result。
 失敗時回報原因，不詢問或接受 writeback，也不跑相依的 Post。
 成功時 analysis_failure 為 null。Primary 成功而 Post 失敗時，報告保留 Primary 的估計。
 Mux 頂層分析失敗回空 tones；單 tone 失敗仍由 owner 保留該 tone 的原因，其他 tone 繼續。
@@ -129,8 +142,8 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 
 | MCP tool | Adapter | 掃描與回報 |
 | --- | --- | --- |
-| `mux_onetone` | `mux/onetone` | `participants` 收 resonator 名稱，依固定 `$mux.resonators` 映射原始 index。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
-| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 名單。回覆每 dip 的 name、freq、depth 與 `identity_diagnostic`。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
+| `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
+| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 只作 Analyze 命名，不進 acquisition cfg。省略、null 或空清單先回無名凹陷，不提案寫回。回覆每 dip 的可選 name、freq、depth 與 `identity_diagnostic`。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 三者依序 Run、Analyze、ask_writeback，只接受回答選定的候選，最後 Save。

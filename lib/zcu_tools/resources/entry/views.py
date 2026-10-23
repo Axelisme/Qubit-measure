@@ -21,6 +21,7 @@ from zcu_tools.resources.parameter_fields import stage_model
 from zcu_tools.resources.parameter_metadata import read_metadata, write_metadata
 
 from ._point_origin import PointOrigin
+from .aliases import AliasValue
 from .errors import RoleResolutionError
 from .field_views import (
     ComponentView as ComponentView,
@@ -296,7 +297,7 @@ def resolve_path(
     document: PointDocument,
     path: str,
     *,
-    roles: Mapping[str, str],
+    roles: Mapping[str, AliasValue],
     reserved_names: Collection[str] = (),
 ) -> str:
     """Resolve a dotted path's first segment using captured role-to-component names.
@@ -306,7 +307,7 @@ def resolve_path(
     stay unchanged. Empty paths or segments raise ValueError. A prefix shared
     by roles, components, logical general fields or reserved_names raises
     RoleResolutionError identifying the namespaces. Unknown prefixes and roles
-    bound to missing components also raise RoleResolutionError. General fields
+    bound to lists or missing components also raise RoleResolutionError. General fields
     require the general prefix; bare metadata keys are not supported.
     No I/O, model validation, serialization or mutation occurs.
     """
@@ -334,6 +335,14 @@ def resolve_path(
         )
     if prefix in roles:
         target = roles[prefix]
+        if isinstance(target, list):
+            raise RoleResolutionError(
+                prefix,
+                None,
+                None,
+                "Alias is a list",
+                message=f"${prefix} is a list; a path requires one component name",
+            )
         if target not in document.components:
             raise RoleResolutionError(
                 prefix, None, None, f"Role targets missing component {target!r}"

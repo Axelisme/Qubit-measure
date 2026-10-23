@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。Core cfg 與持久 Spec 的表單推導與轉換契約。
 
@@ -87,7 +87,7 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 `FixedElements.identify(data, path)` 依同份 input 的完整原始 index 回傳 `ElementIdentity`，不讀 participants。Logical field observation 同時攜帶該 identity，供 Run capture 保留當次名稱；巢狀固定 list 使用最深的宣告。
 
-普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且名稱存在，錯誤保留欄位與 index，輸入順序不變。未參與元素照常驗證。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
+普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且原始索引合法。Bool 與字串不能作 index。錯誤保留欄位與輸入位置，順序不變。Nullable 元素欄位保留明填 None，包含普通 model、module 與 sweep。非 None 值照常驗證。實驗自行在 Open／Reset 選定 participants，再初始化各 tone；native cfg validator 決定哪些值必填。一般 participants 編輯不改 tone 值，readout 身分始終必填。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
 
 宣告者另外提供 `Display(element_label=name_field)` 作 picker label，名稱欄位的 `Display(readonly=True)` 則由 Form core 強制唯讀。同值寫入通過，不同值拒絕；父層或批次寫入不能繞過唯讀名稱。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
@@ -98,8 +98,10 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 `Form` 遞迴生成 `list[ConfigBase]` 的元素 model。起始樹的 list 按位置提供初值，scalar list 也可直接提供初值。省略 list tree 時，生成器把 native defaults 中的 module 與 sweep 投影成可編輯輸入。`to_cfg` 遞迴還原 native model list，不改 participants 順序。
 
 所有位置共用元素宣告，各位置可提供不同的唯讀初值。位置 tree 直接放 `Hidden` 仍在建立 Form 時拒絕。
-位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。所有位置必須宣告相同的 Hidden Spec 路徑，
+位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。同一 module 欄位的所有非 None 位置必須宣告相同的 Hidden Spec 路徑，
 `bind_templates` 才把隱藏政策套到共享元素 model；路徑不同時，錯誤列出 list 路徑與不一致的 indices。
+明示為 None 的 nullable module 不宣告 Hidden 政策，不參與該 module 的比較，也不免除同位置其他 module 的比較。
+全為 None 時沒有額外隱藏路徑。省略初值或非 nullable module 的 None 仍照原規則比較。
 共享 model 只取得隱藏路徑，不取得第一個位置的值、來源、bindings 或其他 defaults。
 各位置仍從自己的 Template／Slot 建 input，Hidden literal 也各自保留。Native 欄位用 `FieldMeta(readonly=True)` 宣告 Form core 的唯讀限制，用 `FieldMeta(element_label="name")` 提供 picker label，不需 import GUI metadata。
 
@@ -116,12 +118,12 @@ class Tone(ConfigBase):
 
 class Group(ConfigBase):
     tones: Annotated[list[Tone], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[int]
 
 form = Form(Group, {
     "tones": [{"name": "Q1", "drive": Slot("Q1.pulses.drive"),
                "sweep": Range.between(4000, 4100, expts=3)}],
-    "participants": ["Q1"],
+    "participants": [0],
 }, fixed_elements=(FixedElements(("tones",), "name", ("participants",)),))
 # form.default_input(env) uses the caller's fixed capture containing the slot.
 ```

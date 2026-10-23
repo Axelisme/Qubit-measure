@@ -33,3 +33,17 @@ Historical Run/Load sources keep their original pulses.
 ## Recommended
 
 Fit phase offset is enabled by default to fit a free fringe phase. Disable it to fix the phase at 0/180 degrees using the near-zero-delay signal. This option applies to fringe fits only. Set the 'Detune ratio (fringes/step)' input to a small deliberate offset (default 0.05). This is the number of fringe periods per delay-sweep step; the absolute detune (MHz) applied to the second pi/2 pulse phase is detune_ratio / sweep step, so the Ramsey signal oscillates at that detuning. The analysis 'Fit fringe' option (on by default, matching the nonzero default ratio) fits the fringe frequency to read back the true qubit-frequency offset and write qubit.freq. Set the ratio to 0 and turn 'Fit fringe' off for a pure decay fit when driving on resonance. A delay sweep reaching a few T2* captures enough fringe periods and decay.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Obtain a calibrated pi/2 pulse. Confirm the delay window, detune_ratio and readout timing.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `t2ramsey` after inspecting the same Form errors.
+   points maps to delay Expts; max_delay_us sets the stop. fit_fringe and fit_phase change only analysis.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

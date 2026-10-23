@@ -13,28 +13,31 @@ from zcu_tools.utils import atomic_replace
 
 from ..document_store import DocumentRevision
 
+type AliasValue = str | list[str]
+"""An authored or resolved scalar name or ordered name list; empty means unbound."""
+
 
 class EntryAliases(BaseModel):
     """A setup or point authored insertion-ordered alias table, not resolved names.
 
-    aliases maps string alias names to raw string bindings in authored order.
+    aliases maps names to raw scalar bindings or ordered lists in authored order.
     An empty string is unbound; $ links keep their original text. An empty
     mapping is an explicitly saved empty table, distinct from a missing file.
-    Non-string keys/values raise ValidationError, never coerce null or numbers.
+    Non-string keys or elements raise ValidationError; null/numbers never coerce.
     Syntax, backward links and component resolution belong to the caller's
     alias table owner, not this storage representation.
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
-    aliases: dict[str, str]
+    aliases: dict[str, AliasValue]
 
 
 def load_entry_aliases(source: Path) -> EntryAliases | None:
     """Read source as zcu.aliases major 1, preserving authored mapping order.
 
     Return None only when source does not exist. Accept forward 1.x minors.
-    Bad headers raise FormatError/VersionError; malformed structure or string
-    mappings raise ValidationError/ValueError or a YAML parser error. Other I/O
+    Bad headers raise FormatError/VersionError; malformed structure or non-string
+    elements raise ValidationError/ValueError or a YAML parser error. Other I/O
     failures propagate. No fallback, component lookup or file writes occur.
     """
     aliases, _ = load_entry_aliases_with_revision(source)
@@ -62,8 +65,8 @@ def parse_entry_aliases(raw: object, *, source: Path) -> EntryAliases:
     """Validate an in-memory zcu.aliases 1.x document without resolving links.
 
     raw is an external document; source labels diagnostics. No I/O occurs.
-    Preserve authored row order and strict strings, as load_entry_aliases does.
-    Invalid headers, missing rows or non-string bindings raise ValueError.
+    Preserve authored row/element order and strict strings, as load_entry_aliases does.
+    Invalid headers, missing rows or non-string elements raise ValueError.
     """
     document = TypeAdapter(YamlMap).validate_python(raw, strict=True)
     validate_header(
@@ -80,18 +83,21 @@ def parse_entry_aliases(raw: object, *, source: Path) -> EntryAliases:
 def save_entry_aliases(destination: Path, aliases: EntryAliases) -> DocumentRevision:
     """Replace destination with zcu.aliases 1.0 and this authored table.
 
-    The parent must exist. Strict string data is validated before I/O. Write a
+    The parent must exist. Strict scalar/list data is validated before I/O. Write a
     sibling temporary, close it, then atomically replace the destination. I/O
     failures propagate and retain the old destination; cleanup removes the
     temporary. Return the version of the exact bytes written. No lock,
     multiwriter merge or power-loss guarantee is provided.
     """
     validated = EntryAliases.model_validate(aliases.model_dump())
-    document: YamlMap = {
-        "format": "zcu.aliases",
-        "format_version": "1.0",
-        "aliases": dict(validated.aliases),
-    }
+    document = TypeAdapter(YamlMap).validate_python(
+        {
+            "format": "zcu.aliases",
+            "format_version": "1.0",
+            "aliases": validated.aliases,
+        },
+        strict=True,
+    )
     rendered = StringIO()
     YAML(typ="rt").dump(document, rendered)
     content = rendered.getvalue().encode("utf-8")

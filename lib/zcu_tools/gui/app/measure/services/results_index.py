@@ -20,6 +20,7 @@ from zcu_tools.resources.entry import (
     SaveLayout,
     validate_path_segment,
 )
+from zcu_tools.resources.entry.aliases import AliasValue
 
 _JSON = TypeAdapter(JsonObject)
 
@@ -31,8 +32,9 @@ class ResultRun:
     key is an opaque project-local selector, not a caller-supplied path. entry
     names the Database entry. run_id/experiment/point are historical identities;
     None means unavailable (point also represents global runs). roles contains
-    only captured role-to-component bindings. at is the acquired UTC timestamp,
-    else metadata.started_at, else None; never a filesystem timestamp.
+    only captured bindings, each a component name or ordered name list.
+    at is the acquired UTC timestamp, else metadata.started_at, else None;
+    never a filesystem timestamp.
     registered means a matching acquired event exists in the same-named Result
     entry. run_path is the absolute exact run directory. data_path is an existing
     data.h5 or None. figure_paths/analysis_paths are sorted existing PNG/JSON
@@ -45,7 +47,7 @@ class ResultRun:
     run_id: str | None
     experiment: str | None
     point: str | None
-    roles: Mapping[str, str]
+    roles: Mapping[str, AliasValue]
     at: str | None
     registered: bool
     run_path: Path

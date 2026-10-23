@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import ClassVar, TypeAlias
 
 import numpy as np
+from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -23,8 +25,12 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.mux_results import captured_qubits, indexed_summary
+from zcu_lab.v2._support.measure.analyze_results import fit_quality_models
+from zcu_lab.v2._support.measure.mux_results import (
+    MuxSummaryFailure,
+    MuxSummaryTone,
+    captured_qubits,
+)
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
@@ -37,6 +43,34 @@ from .form import make_form
 MuxAmpRabiRunResult: TypeAlias = RunRecord[MuxAmpRabiCfg, MuxSweepResult]
 
 
+class MuxAmpRabiFitSummary(MuxSummaryTone):
+    """Native fit estimates in experiment units and qualified owner quality."""
+
+    pi_gain: float | None = Field(
+        description="Owner pi_gain in gain; null retains an unavailable estimate."
+    )
+
+    pi_gain_err: float | None = Field(
+        description="Owner pi_gain_err in gain; null retains an unavailable estimate."
+    )
+
+    pi2_gain: float | None = Field(
+        description="Owner pi2_gain in gain; null retains an unavailable estimate."
+    )
+
+    pi2_gain_err: float | None = Field(
+        description="Owner pi2_gain_err in gain; null retains an unavailable estimate."
+    )
+
+    fit_quality: dict[str, FitQuality] | None
+
+
+class MuxAmpRabiSummary(BaseModel):
+    """Owner tone rows in analysis order, retaining successes and failures."""
+
+    tones: list[MuxAmpRabiFitSummary | MuxSummaryFailure]
+
+
 @dataclass(frozen=True)
 class MuxAmpRabiAnalyzeResult(AnalyzeResultBase):
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
@@ -44,25 +78,43 @@ class MuxAmpRabiAnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxAmpRabiFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Present original positions/names, numerical values, quality or failure."""
-        summaries: list[dict[str, object]] = []
+    def summary(self) -> MuxAmpRabiSummary:
+        """Return native tone estimates/failures with fixed identities and owner quality."""
+        summaries: list[MuxAmpRabiFitSummary | MuxSummaryFailure] = []
         for outcome in self.outcomes:
+            name = None if self.names is None else self.names[outcome.index]
+            element = (
+                None
+                if name is None
+                else ElementIdentity(index=outcome.index, name=name)
+            )
             if isinstance(outcome, MuxFitFailure):
-                values: dict[str, object] = {"failure": outcome.reason}
+                row = MuxSummaryFailure(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    failure=outcome.reason,
+                )
             else:
-                values = {
-                    "pi_gain": outcome.pi_gain,
-                    "pi_gain_err": outcome.pi_gain_err,
-                    "pi2_gain": outcome.pi2_gain,
-                    "pi2_gain_err": outcome.pi2_gain_err,
-                    "fit_quality": fit_quality_summary(
+                row = MuxAmpRabiFitSummary(
+                    position=outcome.index,
+                    name=name,
+                    element=element,
+                    pi_gain=outcome.pi_gain,
+                    pi_gain_err=outcome.pi_gain_err,
+                    pi2_gain=outcome.pi2_gain,
+                    pi2_gain_err=outcome.pi2_gain_err,
+                    fit_quality=fit_quality_models(
                         {"fit": outcome.quality},
                         summary_path=f"summary.tones[{len(summaries)}].fit_quality",
                     ),
-                }
-            summaries.append(indexed_summary(self.names, outcome.index, values))
-        return {"tones": summaries}
+                )
+            summaries.append(row)
+        return MuxAmpRabiSummary(tones=summaries)
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the same owner summary for GUI and recipe consumers."""
+        return self.summary().model_dump(mode="json")
 
 
 class MuxAmpRabiAdapter(
@@ -134,7 +186,7 @@ class MuxAmpRabiAdapter(
             row_items: list[WritebackItem] = []
             if snapshot is None:
                 continue
-            pulse = snapshot.tones[outcome.index].drive
+            pulse = snapshot.tones[outcome.index].require_drive()
             parameters = req.ctx.parameters
             if parameters is None:
                 raise ValueError("Rabi pulse proposals require captured parameters")

@@ -20,7 +20,7 @@ def named_form() -> type[FixedElementsForm]:
         "NamedElements",
         __base__=FixedElementsForm,
         tones=(Annotated[list[Element], Display(element_label="label")], ...),
-        participants=(list[str], ...),
+        participants=(list[int], ...),
     )
     model.fixed_elements = (FixedElements(("tones",), "label", ("participants",)),)
     return model
@@ -30,6 +30,6 @@ def named_input(model: type[FormModel]) -> FormInput[FormModel]:
     """Two different captured values, with only the second participating."""
     data: dict[str, JsonValue] = {
         "tones": [{"label": "A", "gain": 1}, {"label": "B", "gain": 2}],
-        "participants": ["B"],
+        "participants": [1],
     }
     return FormInput(model, data)

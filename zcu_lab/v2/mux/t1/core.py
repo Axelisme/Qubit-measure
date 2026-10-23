@@ -5,9 +5,9 @@ Technical reference for lab authors and framework developers.
 ## Sequence and coordinates
 
 The complete `tones` list retains capture-generated `name` values and original
-readout positions. `participants` is a nonempty, unique list of existing names.
-Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
-Every element requires valid drives, including nonparticipants.
+readout positions. `participants` is a nonempty, unique list of original indices.
+`[2, 0]` selects Q3 then Q1, retaining that execution/data order.
+Only participants require valid drives. Inactive drives may be None.
 
 `MuxT1Exp` excites active qubits with fixed pi pulses on independent drive generators.
 It uses the existing `Join` to start all pulses together. Each shorter branch waits
@@ -52,7 +52,7 @@ cfg = MuxT1Cfg(
         MuxT1ToneCfg(name="Q2", drive=pi_1),
         MuxT1ToneCfg(name="Q3", drive=pi_2),
     ],
-    participants=["Q3", "Q1"],
+    participants=[2, 0],
     delays=SweepCfg(start=0.0, stop=8.0, expts=41, step=0.2),
     reps=128,
     rounds=2,
@@ -80,9 +80,9 @@ finally:
 # The environment owner closes its devices after all operations finish.
 ```
 
-The full ordered tone list must match the full readout count. Every tone requires
-a valid drive, including nonparticipants. The nonempty, unique participants name
-list selects original indices in its own order;
+The full ordered tone list must match the full readout count. Only participants
+require valid drives. The nonempty, unique participants list contains original
+indices in its own order;
 ADC channel order and duplicate labels do not change identity. Cfg validation
 rejects missing drives, shared generators, invalid counts and invalid delay axes.
 Native pulse and readout owners reject unsupported hardware settings.
@@ -128,7 +128,6 @@ The adapter below owns component proposals using the captured binding.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -136,9 +135,8 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import model_validator
-from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from pydantic import StrictInt, model_validator
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import US_TO_S, AxesSpec, Axis, PersistableExperiment, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -150,51 +148,28 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     ProgramV2Cfg,
-    PulseCfg,
     SweepCfg,
     sweep2param,
 )
 from zcu_tools.program.v2.modules import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
     Join,
     MuxReadout,
     Pulse,
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
+from zcu_lab.v2._support.mux_sweep_cfg import (
+    MuxDriveModuleCfg,
+    MuxDriveToneCfg,
+    validate_mux_tones,
+)
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 from .analysis import MuxT1Fit, analyze_t1
 
 
-class MuxT1ToneCfg(ConfigBase):
-    """One named original tone's required fixed pi pulse.
-
-    name is the nonempty capture-generated qubit name, unique in the complete
-    list. drive is required and validated even for nonparticipants: fixed finite
-    MHz frequency, normalized gain, degree phase and nonnegative us delays.
-    Native waveform schemas own shape/clock conversion; length cannot be swept.
-    """
-
-    name: Annotated[str, FieldMeta(readonly=True)]
-    drive: PulseCfg
-
-    @model_validator(mode="after")
-    def validate_drive(self) -> Self:
-        """Reject swept or nonfinite pulses, including nonparticipants."""
-        for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
-            value = getattr(self.drive, name)
-            if isinstance(value, QickParam) or not math.isfinite(value):
-                raise ValueError(f"drive.{name} must be fixed and finite")
-        if self.drive.pre_delay < 0 or self.drive.post_delay < 0:
-            raise ValueError("drive delays must be nonnegative")
-        if isinstance(
-            self.drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)
-        ) and isinstance(self.drive.waveform.length, QickParam):
-            raise ValueError("drive.waveform.length must be fixed")
-        return self
+class MuxT1ToneCfg(MuxDriveToneCfg):
+    """One original qubit's nullable fixed pi pulse, required only when active."""
 
 
 class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
@@ -202,9 +177,9 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
 
     modules holds optional reset and complete mux readout. tones contains one
     MuxT1ToneCfg per original readout position, with unique nonempty names.
-    participants is a nonempty, duplicate-free list of those names; its order
+    participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
-    Every drive is required/validated, including nonparticipants, on independent
+    Selected drives are required/validated on independent
     generators distinct from readout. delays is one common linear SweepCfg of
     strictly increasing, finite, nonnegative requested us. Only equally spaced
     hardware sweeps are supported. Fits retain requested times, not compiled delays.
@@ -214,32 +189,13 @@ class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[StrictInt]
     delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
         """Reject invalid counts, channels and requested delay coordinates."""
-        if self.reps <= 0 or self.rounds <= 0:
-            raise ValueError("reps and rounds must be positive")
-        if any(
-            not math.isfinite(v) or v < 0
-            for v in (self.initial_delay, self.relax_delay)
-        ):
-            raise ValueError(
-                "initial_delay and relax_delay must be finite nonnegative us"
-            )
-        if len(self.tones) != len(self.modules.readout.tones):
-            raise ValueError("tones must match the full readout tone count")
-        participant_indices([tone.name for tone in self.tones], self.participants)
-        channels: set[int] = set()
-        for index, tone in enumerate(self.tones):
-            drive = tone.drive
-            if drive.ch == self.modules.readout.gen_ch or drive.ch in channels:
-                raise ValueError(
-                    f"tones[{index}].drive.ch requires an independent generator"
-                )
-            channels.add(drive.ch)
+        validate_mux_tones(self, self.modules, self.tones, self.participants)
         times = sweep2array(self.delays, "none")
         if (
             times.ndim != 1
@@ -315,9 +271,7 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         """
         # 1. Keep participant order while selecting readout tones from the full cfg.
         cfg = MuxT1Cfg.model_validate(config.model_dump())
-        indices = participant_indices(
-            [tone.name for tone in cfg.tones], cfg.participants
-        )
+        indices = list(cfg.participants)
         times = sweep2array(cfg.delays, "none")
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[i] for i in indices]
@@ -342,7 +296,8 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(cfg, signals, scope=context.scope) as sched:
             pulses = [
-                Pulse(f"drive_{index}", cfg.tones[index].drive) for index in indices
+                Pulse(f"drive_{index}", cfg.tones[index].require_drive())
+                for index in indices
             ]
             builder = (
                 sched.prog_builder(context.soc, context.soccfg)

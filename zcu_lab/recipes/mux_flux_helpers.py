@@ -2,46 +2,28 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, StrictInt, TypeAdapter
 from typing_extensions import TypedDict
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeTab
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
+    RecipeTab,
+)
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
 
-from .mux_helpers import MuxInline, MuxLibrary, ToneRangeInputs, mux_overrides
+from .mux_helpers import ToneRangeInputs
 
 
-class MuxFluxInputs(FormModel):
-    """Select captured sources and optional native-unit picker lines by Q name.
+class MuxFluxInputs(RecipeInputs):
+    """Experiment inputs; null retains captured Form values, overrides apply last."""
 
-    Null fields retain Form inputs. Picker maps may omit any participant; those
-    lines use the Run capture. Keys must name final selected participants.
-    Overrides apply last and use original full-list indices, never row order.
-    """
-
-    target: str | None = Field(
-        None, min_length=1, description="Mux Reset alias; null uses global aliases."
-    )
-    reuse_tab_id: str | None = Field(
-        None, min_length=1, description="Idle matching tab to Reset; null opens a tab."
-    )
-    participants: list[str] | None = Field(
+    participants: list[StrictInt] | None = Field(
         None,
-        description="Unique Q names in acquisition order; null keeps the Form selection.",
-    )
-    library: list[MuxLibrary] | None = Field(
-        None, description="Ordered captured module selections; null retains sources."
-    )
-    inline: list[MuxInline] | None = Field(
-        None,
-        description="Ordered captured-module copies, ancestors first; null retains sources.",
-    )
-    overrides: list[FieldEdit] | None = Field(
-        None,
-        description="Ordered scalar edits applied last at full original tone positions.",
+        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )
     flux_unit: Literal["A", "V", "native"] | None = Field(
         None,
@@ -110,24 +92,8 @@ class MuxFluxAnalysisUpdate(TypedDict, closed=True):
     """Initial integer-flux line in native DC units; null uses Run capture."""
 
 
-class MuxFluxPickSummary(BaseModel):
-    """Owner's accepted native DC lines and original Q identity, without defaults."""
-
-    tone: int = Field(description="Original acquired tone index, not participant row.")
-    qubit: str = Field(description="Q name from this Run's full cfg at tone.")
-    flx_half: float | None = Field(
-        description="Picked half-flux native DC value, or null if unavailable."
-    )
-    flx_int: float | None = Field(
-        description="Picked integer-flux native DC value, or null if unavailable."
-    )
-    flx_period: float | None = Field(
-        description="Native DC flux period, or null if unavailable."
-    )
-
-
-class MuxFluxToneReport(FormModel):
-    """One participant's selected lines and confirmed writeback outcome."""
+class MuxFluxToneReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     index: int = Field(description="Owner's original full-list tone index.")
     name: str = Field(description="Owner's captured Q name.")
@@ -136,20 +102,13 @@ class MuxFluxToneReport(FormModel):
         description="Integer-flux value in native DC units."
     )
     flux_period: float | None = Field(description="Period in native DC units.")
-    writeback_applied: bool = Field(
-        description="True only if the owner receipt confirms selected items."
-    )
 
 
-class MuxFluxReport(FormModel):
-    """Ordered completed participants; Save output statuses are separate in runs."""
+class MuxFluxReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     tones: list[MuxFluxToneReport] = Field(
         description="Completed picker outcomes in participant order, retaining original indices."
-    )
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Owner failure reason; null when all participant analyses completed.",
     )
 
 
@@ -160,7 +119,9 @@ def flux_range_edits(
 
     path addresses tones or frequency.tones in the flat cfg. Null keeps all
     ranges. A supplied list must cover the complete original list, including
-    nonparticipants. Length mismatch raises needs_parameters before Run.
+    nonparticipants. Each supplied range replaces the complete nullable sweep,
+    including None on a nonparticipant. Length mismatch raises needs_parameters
+    before Run.
     """
     if sweeps is None:
         return []
@@ -175,9 +136,8 @@ def flux_range_edits(
             )
         )
     return [
-        FieldEdit(path=(*path, index, "sweep", endpoint), value=value)
+        FieldEdit(path=(*path, index, "sweep"), value=sweep)
         for index, sweep in enumerate(sweeps)
-        for endpoint, value in (("start", sweep.start), ("stop", sweep.stop))
     ]
 
 
@@ -207,20 +167,6 @@ def global_flux_edits(flux: ToneRangeInputs | None, n: int | None) -> list[Field
     return edits
 
 
-def mux_flux_final_edits(inputs: MuxFluxInputs) -> list[FieldEdit]:
-    """Append participant/unit retention edits, then caller's ordered overrides."""
-    return [
-        FieldEdit(
-            path=("participants",),
-            value=None
-            if inputs.participants is None
-            else [name for name in inputs.participants],
-        ),
-        FieldEdit(path=("flux_unit",), value=inputs.flux_unit),
-        *mux_overrides(inputs.overrides),
-    ]
-
-
 def mux_flux_analysis_updates(
     tab: RecipeTab, inputs: MuxFluxInputs
 ) -> list[MuxFluxAnalysisUpdate]:
@@ -234,29 +180,29 @@ def mux_flux_analysis_updates(
     tones = TypeAdapter(list[FluxToneIdentity]).validate_python(
         tab.read(("tones",)).value
     )
-    participants = TypeAdapter(list[str]).validate_python(
+    participants = TypeAdapter(list[int]).validate_python(
         tab.read(("participants",)).value
     )
-    names = [tone.name for tone in tones]
+    names = [tones[index].name for index in participants]
     for field, values in (
         ("flux_half", inputs.flux_half),
         ("flux_integer", inputs.flux_integer),
     ):
-        unknown = set(values or ()) - set(participants)
+        unknown = set(values or ()) - set(names)
         if unknown:
             raise RecipeNeedsParameters(
                 (
                     MissingParameter(
                         field,
-                        f"Picker keys must name selected participants {participants!r}; unknown keys: {sorted(unknown)!r}",
+                        f"Picker keys must name selected participants {names!r}; unknown keys: {sorted(unknown)!r}",
                     ),
                 )
             )
     return [
         {
-            "tone": names.index(name),
+            "tone": index,
             "flux_half": (inputs.flux_half or {}).get(name),
             "flux_int": (inputs.flux_integer or {}).get(name),
         }
-        for name in participants
+        for index, name in zip(participants, names, strict=True)
     ]

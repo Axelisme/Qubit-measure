@@ -28,6 +28,12 @@ class OtherPoint(BaseModel):
     other: str
 
 
+class PairedPoint(BaseModel):
+    model_config = ConfigDict(title="NotTheQualifiedType")
+    first: Point
+    second: Point
+
+
 class AfterPoint(BaseModel):
     model_config = ConfigDict(title="NotTheQualifiedType")
     value: int
@@ -79,6 +85,41 @@ def test_typed_reader_runs_model_validators_and_preserves_source_and_identity(
         assert read_records_raw(rig.paths.metadata_root)[0].record.value == {
             "value": -1
         }
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize("use_adapter", [False, True], ids=["model", "adapter"])
+def test_typed_reader_accepts_repeated_nested_models(
+    tmp_path: Path, use_adapter: bool
+) -> None:
+    rig = Rig(tmp_path)
+    point = PairedPoint(first=Point(value=2), second=Point(value=3))
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        env.commit(point)
+
+    try:
+        rig.start(script)
+        assert rig.engine.execute("run").lifecycle == "done"
+        target = TypeAdapter(PairedPoint) if use_adapter else PairedPoint
+        try:
+            records = read_records(rig.paths.metadata_root, target)
+        except TypeError as error:
+            pytest.fail(
+                f"A single BaseModel with nested models must be readable: {error}"
+            )
+        assert [row.record for row in records] == [point]
+        assert records[0].record_type == (
+            f"{PairedPoint.__module__}.{PairedPoint.__qualname__}"
+        )
+        source = records[0].record_path
+        document = json.loads(source.read_text())
+        document["record"]["value"]["second"]["value"] = "invalid integer"
+        source.write_text(json.dumps(document))
+        with pytest.raises(ValueError, match="second.value") as caught:
+            read_records(rig.paths.metadata_root, target)
+        assert str(source) in str(caught.value)
     finally:
         rig.close()
 

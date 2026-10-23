@@ -56,3 +56,17 @@ The `mist_fluxdep` workflow is a separate measurement procedure.
 The `mist_flux_dep` recipe runs one map with explicit native flux/gain ranges
 and the captured probe/readout selections. It saves raw data and Primary analysis
 and leaves calibration parameters unchanged.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Enter native flux and gain endpoints. Confirm the cached flux unit and supply GE calibration where requested.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `mist_flux_dep` after inspecting the same Form errors.
+   flux_device, flux_unit, flux_range and gain_range are required. points maps to Expts on both axes. flux_half, flux_period, ac_coeff, secondary_xaxis and auto_range update only analysis.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

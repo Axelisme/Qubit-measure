@@ -8,10 +8,11 @@ catalog registration or writeback proposal.
 
 ## Configuration and timing
 
-`participants` is a nonempty, unique list of names in the complete `tones` list.
-Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
-Every element requires valid drives on independent generators, even when not
-participating. Names, count and order match the fixed capture.
+`participants` is a nonempty, unique list of original indices in the complete `tones` list.
+`[2, 0]` selects Q3 then Q1, retaining that execution/data order.
+Only participants require valid drives on independent generators. Inactive
+drives may be None. Every tone retains its name and readout identity; count
+and order match the fixed capture.
 
 Import `MuxT2RamseyCfg`, `MuxT2RamseyExp` and `MuxCoherenceToneCfg` from
 `zcu_lab.v2.mux.t2ramsey`. The cfg contains:
@@ -19,7 +20,7 @@ Import `MuxT2RamseyCfg`, `MuxT2RamseyExp` and `MuxCoherenceToneCfg` from
 - `modules: MuxDriveModuleCfg`, with optional common reset and full mux readout.
 - `tones: list[MuxCoherenceToneCfg]`, one element per original readout tone.
   Each element has a fixed `name`, required `drive` and `detune` in MHz.
-  `drive` is the source x90 pulse, not x180. All drives are required, even for nonparticipants.
+  `drive` is the source x90 pulse, not x180. Only selected drives are required; inactive drives may be None.
 - `delay: SweepCfg`, one common requested free-evolution delay in us.
 - Shared `reps`, `rounds`, `initial_delay` and `relax_delay`, with times in us.
 
@@ -120,7 +121,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import model_validator
+from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
@@ -154,7 +155,7 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
@@ -163,10 +164,10 @@ class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
     """Named x90 drives and a shared delay sweep for mux Ramsey fringes.
 
     modules holds the optional reset and full mux readout. tones follows the
-    original readout order; every tone has a unique nonempty name, a required
-    x90 drive on an independent generator, and a MHz detune for its final phase
-    ramp. All drives must be valid, including nonparticipants, and cannot share
-    the readout generator. participants is a nonempty list of unique tone names
+    original readout order; every tone has a unique nonempty name, a nullable
+    x90 drive, and a MHz detune for its final phase ramp. Only participants
+    require drives on independent generators. Selected drives cannot share
+    the readout generator. participants is a nonempty list of unique original indices
     in result-row order (Q3/Q1 selects original positions 2/0).
     delay is the common finite, nonnegative requested-us sweep. Inherited reps
     and rounds are positive; initial_delay and relax_delay are finite,
@@ -175,7 +176,7 @@ class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[StrictInt]
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
@@ -206,11 +207,9 @@ class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         """
         # 1. Keep participant order while selecting drives and mux readout tones.
         cfg = MuxT2RamseyCfg.model_validate(config.model_dump())
-        indices = participant_indices(
-            [tone.name for tone in cfg.tones], cfg.participants
-        )
+        indices = list(cfg.participants)
         tones = [cfg.tones[index] for index in indices]
-        drives = [tone.drive for tone in tones]
+        drives = [tone.require_drive() for tone in tones]
         times = sweep2array(cfg.delay, "none")
         _ = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg, "scaler": 1.0})
         detunes = np.asarray(

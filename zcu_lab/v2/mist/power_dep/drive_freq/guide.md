@@ -61,3 +61,17 @@ A white-noise simulation exercises pulse execution, acquisition, plots and
 saving with a simulated device. Its output is noise only. Establish physical
 MIST, heating or leakage thresholds with a suitable physical model or hardware
 measurement.
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Enter the frequency/gain rectangle and verify probe/readout timing. Supply GE calibration where the Form requests it.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `mist_drive_frequency` after inspecting the same Form errors.
+   freq_range and gain_range are required pairs. points maps to Expts on both axes. Analysis has no operator parameters.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
