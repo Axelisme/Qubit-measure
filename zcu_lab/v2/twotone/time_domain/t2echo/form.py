@@ -7,7 +7,6 @@ from zcu_tools.gui.form import Display, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2._support.measure.detune import resolve_detune
 from zcu_lab.v2._support.measure.pulse_readout_metadata import (
     pulse_readout_seed_metadata,
 )
@@ -24,8 +23,20 @@ class DetuneInput(FormModel):
 
 
 def lower_detune(extras: DetuneInput, cfg: T2EchoCfg) -> T2EchoCfg:
-    """Return native MHz detune; reject nonzero ratio on a zero-step sweep."""
-    cfg.detune = resolve_detune(extras.detune_ratio, cfg.sweep.length.step)
+    """Set detune (MHz) to fringes/step divided by the delay step (us).
+
+    A zero ratio disables detune even on a zero-step sweep. A nonzero ratio
+    on a zero-step sweep raises ValueError.
+    """
+    if extras.detune_ratio == 0.0:
+        cfg.detune = 0.0
+    elif cfg.sweep.length.step == 0.0:
+        raise ValueError(
+            "cannot apply a nonzero detune_ratio on a degenerate "
+            "length sweep (expts < 2, step == 0)"
+        )
+    else:
+        cfg.detune = extras.detune_ratio / cfg.sweep.length.step
     return cfg
 
 
