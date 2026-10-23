@@ -4,10 +4,13 @@ Recipe freq_points → sweep.freq.expts; flux_points → sweep.flux.expts.
 Both scan counts appear as Expts in the GUI.
 """
 
+from typing import Annotated
+
 from pydantic import Field
 from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -18,34 +21,28 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
 )
-
-from .helpers import (
-    FrequencySweepCalibration,
-    FrequencySweepRange,
-    flux_device_edits,
-    flux_sweep_edits,
-    frequency_sweep_edits,
-)
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 
 class OnetoneSpectrumOverFluxInputs(RecipeInputs):
     """Inputs for onetone spectrum over flux; all units and null policies are
     declared per field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
     )
-    center_mhz: float | None = Field(
-        None, description="Sweep center in MHz. Null reads $resonator.freq."
+    center_mhz: float | None | Keep = Field(
+        KEEP,
+        description="Sweep center in MHz. Supply with span_mhz; omission retains the Form range, null clears it.",
     )
-    span_mhz: float | None = Field(
-        None,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Null uses 2 times $resonator.kappa as the full span.",
+    span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
+        KEEP,
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz; omission retains the Form range, null clears it.",
     )
-    gain: float | None = Field(
-        None,
-        description="Fixed pulse amplitude in native gain units; null keeps the GUI value.",
+    gain: float | None | Keep = Field(
+        KEEP,
+        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
     )
     flux_device: str = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."
@@ -53,20 +50,25 @@ class OnetoneSpectrumOverFluxInputs(RecipeInputs):
     flux_unit: str = Field(
         description="Exact cached device unit, including native; no coordinate conversion occurs."
     )
-    freq_points: int | None = Field(
-        None, description="Frequency sample count; null keeps the GUI count."
+    freq_points: Annotated[int, Field(ge=2)] | None | Keep = Field(
+        KEEP,
+        description="Frequency sample count; omission retains the Form value; null clears/disables it.",
     )
     flux_points: int = Field(
-        description="Required native-flux sample count, at least two."
+        ge=2, description="Required native-flux sample count, at least two."
     )
     flux_range: list[float] = Field(
-        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs."
+        min_length=2,
+        max_length=2,
+        description="Two distinct device-native flux endpoints, in either direction; no conversion occurs.",
     )
-    reps: int | None = Field(
-        None, description="Acquisition repetition count; null keeps the GUI value."
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
     )
-    rounds: int | None = Field(
-        None, description="Averaging round count; null keeps the GUI value."
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value; null clears/disables it.",
     )
 
 
@@ -101,58 +103,49 @@ async def onetone_spectrum_over_flux(
     Analysis uses the captured GUI parameters; no fit controls are added.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    if (
-        not inputs.flux_device
-        or not inputs.flux_device.strip()
-        or (not inputs.flux_unit)
-        or (not inputs.flux_unit.strip())
-    ):
-        raise ValueError("flux_device and flux_unit must be non-empty strings")
-    for name, value in (
-        ("reuse_tab_id", inputs.reuse_tab_id),
-        ("readout_ref", inputs.readout_ref),
-    ):
-        if value is not None and (not value.strip()):
-            raise ValueError(f"{name} must be a non-empty string or null")
-    if inputs.span_mhz is not None and inputs.span_mhz <= 0:
-        raise ValueError("span_mhz must be positive")
-    tab = session.open_recipe_tab("onetone/flux_dep", inputs, target_alias="qubit")
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    missing: list[MissingParameter] = []
-    sweep = frequency_sweep_edits(
-        tab,
-        ("sweep", "freq"),
-        calibration=FrequencySweepCalibration(
-            "$resonator.freq", "$resonator.kappa", 2.0
-        ),
-        scan=FrequencySweepRange(
-            center_mhz=inputs.center_mhz,
-            span_mhz=inputs.span_mhz,
-            expts=inputs.freq_points,
-        ),
+    tab = session.open_tab(
+        "onetone/flux_dep",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    missing.extend(sweep.missing)
-    edits.extend(sweep.edits)
-    edits.extend(flux_device_edits(tab, inputs.flux_device, unit=inputs.flux_unit))
-    edits.extend(
-        flux_sweep_edits(
-            ("sweep", "flux"),
-            start=inputs.flux_range[0],
-            stop=inputs.flux_range[1],
-            expts=inputs.flux_points,
+    tab.select("modules.readout", inputs.readout_ref)
+    if not isinstance(inputs.gain, Keep):
+        pulse_selector = tab.read(("modules", "readout")).selector
+        if pulse_selector is not None and pulse_selector.mode == "ref":
+            tab.command("modules.readout", "to_inline")
+    if isinstance(inputs.center_mhz, Keep) != isinstance(inputs.span_mhz, Keep):
+        missing = "span_mhz" if isinstance(inputs.span_mhz, Keep) else "center_mhz"
+        raise RecipeNeedsParameters(
+            (MissingParameter(missing, "Supply center_mhz and span_mhz together"),)
         )
-    )
-    if missing:
-        raise RecipeNeedsParameters(tuple(missing))
-    if inputs.gain is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(FieldEdit(path=("modules", "readout", "gain"), value=inputs.gain))
-    tab.apply_inputs(
-        inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
-    )
+    if inputs.center_mhz is None or inputs.span_mhz is None:
+        tab.set("sweep.freq.start", None)
+        tab.set("sweep.freq.stop", None)
+    elif not isinstance(inputs.center_mhz, Keep) and not isinstance(
+        inputs.span_mhz, Keep
+    ):
+        tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+        tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("sweep.freq.n", inputs.freq_points)
+    unit = session.device_unit(inputs.flux_device)
+    if not unit.strip() or unit == "none" or unit != inputs.flux_unit:
+        raise GuiRpcError(
+            "Flux unit must match a usable cached device coordinate",
+            reason="invalid_device",
+        )
+    tab.set("flux_dev", inputs.flux_device)
+    tab.set("flux_unit", unit)
+    if inputs.flux_range[0] == inputs.flux_range[1]:
+        raise ValueError("flux endpoints must be distinct")
+    tab.set("sweep.flux.start", inputs.flux_range[0])
+    tab.set("sweep.flux.stop", inputs.flux_range[1])
+    tab.set("sweep.flux.n", inputs.flux_points)
+    tab.set("modules.readout.gain", inputs.gain)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:

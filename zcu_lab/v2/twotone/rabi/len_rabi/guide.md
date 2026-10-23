@@ -39,5 +39,5 @@ Phase defaults to fixed 0/180 degrees; enable Fit phase offset when pulse shapin
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `time_rabi` after inspecting the same Form errors.
    points maps to length Expts; max_length_us sets the stop. frequency_mhz and gain override the fixed drive. decay and fit_phase change the existing analysis model.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

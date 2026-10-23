@@ -7,73 +7,67 @@ from typing import Literal
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
-from zcu_tools.mcp.measure.recipe_contracts import (
-    MissingParameter,
-    RecipeNeedsParameters,
-)
 
 from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
-
-from .helpers import (
-    FrequencyCalibration,
-    FrequencySweepCalibration,
-    FrequencySweepRange,
-    choose_frequency,
-    frequency_sweep_edits,
-    select_or_disable,
-)
 
 
 class TwotoneSpectrumInputs(RecipeInputs):
     """Inputs for twotone spectrum; all units and null policies are declared per
     field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
     )
-    drive_ref: str | None = Field(
-        None,
-        description="Drive library key; null keeps the GUI selection. No pi calibration is required for this sweep.",
+    drive_ref: str | None | Keep = Field(
+        KEEP,
+        description="Drive library key; omission retains the Form value; null clears/disables it. No pi calibration is required for this sweep.",
     )
-    use_reset: str | Literal["off"] = Field(
-        "off",
-        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    use_reset: str | None | Keep = Field(
+        KEEP,
+        description="Reset module option; omission retains the Form selection, null disables it.",
     )
     center_mhz: float = Field(description="Sweep center in MHz.")
     span_mhz: float = Field(
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2."
+        gt=0,
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2.",
     )
-    gain: float | None = Field(
-        None,
-        description="Fixed pulse amplitude in native gain units; null keeps the GUI value.",
+    gain: float | None | Keep = Field(
+        KEEP,
+        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
     )
-    pulse_length_us: float | None = Field(
-        None, description="Fixed drive pulse duration in us; null keeps the GUI value."
+    pulse_length_us: float | None | Keep = Field(
+        KEEP,
+        description="Fixed drive pulse duration in us; omission retains the Form value; null clears/disables it.",
     )
     points: int = Field(
-        description="Sweep sample count; null keeps the GUI count when optional."
+        ge=2,
+        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
     )
-    reps: int | None = Field(
-        None, description="Acquisition repetition count; null keeps the GUI value."
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
     )
-    rounds: int | None = Field(
-        None, description="Averaging round count; null keeps the GUI value."
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value; null clears/disables it.",
     )
 
-    model_type: Literal["lor", "sinc"] | None = Field(
-        None,
-        description="Model type; null keeps the GUI analysis value. Analysis only.",
+    model_type: Literal["lor", "sinc"] | None | Keep = Field(
+        KEEP,
+        description="Model type; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    plot_fit: bool | None = Field(
-        None, description="Plot fit; null keeps the GUI analysis value. Analysis only."
+    plot_fit: bool | None | Keep = Field(
+        KEEP,
+        description="Plot fit; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -108,56 +102,37 @@ async def twotone_spectrum(
     linewidth. Ask before applying it, then save raw data and analysis.
 
     points → expts sets the sweep sample count.
-    Analysis controls: model_type, plot_fit. Null keeps each GUI value.
+    Analysis controls: model_type, plot_fit. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    tab = session.open_recipe_tab("twotone/freq", inputs, target_alias="qubit")
-    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select(("modules", "qub_pulse"), ref=inputs.drive_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    missing: list[MissingParameter] = []
-    sweep = frequency_sweep_edits(
-        tab,
-        ("sweep", "freq"),
-        calibration=FrequencySweepCalibration("$qubit.freq", "$qubit.kappa", 3.0),
-        scan=FrequencySweepRange(
-            center_mhz=inputs.center_mhz, span_mhz=inputs.span_mhz, expts=inputs.points
-        ),
+    tab = session.open_tab(
+        "twotone/freq",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    missing.extend(sweep.missing)
-    edits.extend(sweep.edits)
-    frequency = choose_frequency(
-        tab,
-        ("modules", "readout", "freq"),
-        calibration=FrequencyCalibration(
-            path="$resonator.freq", required="readout_ref"
-        ),
-    )
-    missing.extend(frequency.missing)
-    if frequency.edit is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(frequency.edit)
-    if missing:
-        raise RecipeNeedsParameters(tuple(missing))
-    if inputs.gain is not None or inputs.pulse_length_us is not None:
-        tab.select(("modules", "qub_pulse"), inline=True)
-        edits.append(
-            FieldEdit(path=("modules", "qub_pulse", "gain"), value=inputs.gain)
-        )
-    if inputs.pulse_length_us is not None:
-        tab.select(("modules", "qub_pulse", "waveform"), inline=True)
-        edits.append(
-            FieldEdit(
-                path=("modules", "qub_pulse", "waveform", "length"),
-                value=inputs.pulse_length_us,
-            )
-        )
-    tab.apply_inputs(
-        inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
-    )
+    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("modules.reset", inputs.use_reset)
+    tab.select("modules.qub_pulse", inputs.drive_ref)
+    if not isinstance(inputs.gain, Keep) or not isinstance(
+        inputs.pulse_length_us, Keep
+    ):
+        pulse_selector = tab.read(("modules", "qub_pulse")).selector
+        if pulse_selector is not None and pulse_selector.mode == "ref":
+            tab.command("modules.qub_pulse", "to_inline")
+    if not isinstance(inputs.pulse_length_us, Keep):
+        waveform_selector = tab.read(("modules", "qub_pulse", "waveform")).selector
+        if waveform_selector is not None and waveform_selector.mode == "ref":
+            tab.command("modules.qub_pulse.waveform", "to_inline")
+    tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+    tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("sweep.freq.n", inputs.points)
+    tab.set("modules.qub_pulse.gain", inputs.gain)
+    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
@@ -170,7 +145,7 @@ async def twotone_spectrum(
                     "model_type": inputs.model_type,
                     "plot_fit": inputs.plot_fit,
                 }.items()
-                if value is not None
+                if not isinstance(value, Keep)
             },
         )
         if analysis.result is None:

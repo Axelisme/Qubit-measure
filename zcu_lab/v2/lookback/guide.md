@@ -12,7 +12,7 @@ Lookback fires the readout pulse and captures the decimated ADC trace versus tim
 
 Defaults use the tab's fixed resonator selection, captured when the form opens or resets. The `$resonator` alias identifies that resonator.
 
-The recipe requires `frequency_mhz` when no resonator frequency source or explicitly selected readout library supplies a frequency. An unregistered `$resonator.freq` source returns `needs_parameters(frequency_mhz)`, not a source error.
+The recipe retains the Form's initial frequency unless `frequency_mhz` is supplied. `check_ready` reports missing or invalid Form fields before Run. Invalid selected sources are not replaced with calibration fallbacks.
 
 - Pulse and ADC frequency start at `resonator.freq + resonator.kappa` in MHz. Missing or null `kappa` uses 1 MHz. Both stored values must be positive, finite real numbers, with booleans excluded. Missing or null frequency, invalid frequency or linewidth, or an absent resonator capture leaves frequency required and blank.
 - `resonator.wiring.ch` and `resonator.wiring.ro_ch` supply the generator and ADC channels through the readout slot.
@@ -46,5 +46,5 @@ Use a wide readout window to capture the full pulse arrival. Increase `smooth`, 
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `lookback` after inspecting the same Form errors.
    No scan count is exposed; use frequency_mhz when no frequency source exists. Analysis controls are ratio, smooth and plot_fit.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

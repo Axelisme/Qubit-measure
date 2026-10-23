@@ -68,5 +68,5 @@ and leaves calibration parameters unchanged.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `mist_flux_dep` after inspecting the same Form errors.
    flux_device, flux_unit, flux_range and gain_range are required. points maps to Expts on both axes. flux_half, flux_period, ac_coeff, secondary_xaxis and auto_range update only analysis.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.
