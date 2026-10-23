@@ -40,11 +40,11 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 
 | 入口 | 初開採樣設定 | 一次完整 Run 的採樣數 |
 | --- | --- | --- |
-| Resonator spectroscopy，onetone freq | 301 個頻率，reps=100、rounds=100 | 每頻率 10,000 次，共 3,010,000 次。 |
-| Qubit spectroscopy，twotone freq | 301 個頻率，reps=1000、rounds=100 | 每頻率 100,000 次，共 30,100,000 次。 |
+| Resonator spectroscopy，onetone freq | 301 個頻率，reps=1000、rounds=10 | 每頻率 10,000 次，共 3,010,000 次。 |
+| Qubit spectroscopy，twotone freq | 301 個頻率，reps=1000、rounds=10 | 每頻率 10,000 次，共 3,010,000 次。 |
 | GE single-shot | shots=100000，probe off／on 各一分支 | 每分支 100,000 shots，共 200,000 shots。此入口內部使用 reps=shots、rounds=1，不再乘一組平均次數。 |
 
-兩 qubit FTF 表單未另設平均數時，初開 reps=1、rounds=1，每座標、每分支只有一個 raw joint shot。這個數量不代表分類、擬合或校準已有足夠統計。各入口的總量依下列軸計算，DC sweep 關閉時 DC 點數取 1。
+兩 qubit FTF 表單 Open／Reset 的初值為 reps=1000、rounds=10，每座標、每分支有 10,000 個 raw joint shots。這個數量不代表分類、擬合或校準已有足夠統計。各入口的總量依下列軸計算，DC sweep 關閉時 DC 點數取 1。
 
 | FTF 入口 | 總 joint shots |
 | --- | --- |
@@ -56,11 +56,11 @@ Run 前先從目前 cfg 計算規模。`reps` 是每 round 的重複次數，`ro
 | Conditional phase | `frequency 點數 × gate-count 個數 × 2 spectator 分支 × 2 projections × reps × rounds`。 |
 | Local Z | `gate-count 個數 × 2 targets × 2 projections × reps × rounds`。 |
 
-估算硬體採集時間時，先用 `總 shots × 每 shot 序列時間`。序列時間要包含 preparation、drive、readout 與 relax delay。假設每 shot 共 10 µs，上表 onetone、twotone 的純序列時間分別為 30.1 s 與 301 s。這只是換算例，不是執行時間保證。編譯、傳輸、round 交接、DC ramp／settle、繪圖與保存都另計；gate-count 改變序列長度時，要分座標加總。
+估算硬體採集時間時，先用 `總 shots × 每 shot 序列時間`。序列時間要包含 preparation、drive、readout 與 relax delay。假設每 shot 共 10 µs，上表 onetone、twotone 的純序列時間皆為 30.1 s。這只是換算例，不是執行時間保證。編譯、傳輸、round 交接、DC ramp／settle、繪圖與保存都另計；gate-count 改變序列長度時，要分座標加總。
 
-FTF raw IQ 保存完整 tones 與 shots。Complex128 IQ 的陣列大小約為 `總 joint shots × tone 數 × 16 bytes`，尚未計入分析陣列與保存開銷。例如 chevron 25×101 點、兩 tones、reps=1000、rounds=1，raw IQ 約 80.8 MB。模擬器可重用相同物理條件的計算，因此 wall time 不一定隨 reps 線性增加；抽樣與 raw 輸出仍有成本。先以同一 backend、相近序列與點數實測，再外推，不把硬體序列時間當成模擬秒數。
+FTF raw IQ 保存完整 tones 與 shots。Complex128 IQ 的陣列大小約為 `總 joint shots × tone 數 × 16 bytes`，尚未計入分析陣列與保存開銷。例如 chevron 初值 25×101 點、兩 tones、reps=1000、rounds=10，raw IQ 約 808 MB。模擬器可重用相同物理條件的計算，因此 wall time 不一定隨 reps 線性增加；抽樣與 raw 輸出仍有成本。先以同一 backend、相近序列與點數實測，再外推，不把硬體序列時間當成模擬秒數。
 
-要縮短操作診斷時，明確減少點數或採樣數並保存該次 cfg，標記為「診斷、非校準」。本指南不更改正式預設值。低採樣圖只能用來排查接線、流程與掃描窗口，接受校準前仍須取得可判讀的資料與 uncertainty。
+要縮短操作診斷時，明確減少點數或採樣數並保存該次 cfg，標記為「診斷、非校準」。Open／Reset 會恢復 reps=1000、rounds=10。低採樣圖只能用來排查接線、流程與掃描窗口，接受校準前仍須取得可判讀的資料與 uncertainty。
 
 ## 分別準備 F1 與 F2，實驗 0a
 

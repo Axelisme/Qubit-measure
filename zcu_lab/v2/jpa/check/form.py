@@ -29,7 +29,7 @@ def make_form(ctx: FormContext) -> Form[CheckCfg]:
             },
             "relax_delay": 0.5,
             "reps": 1000,
-            "rounds": 5,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

@@ -29,8 +29,8 @@ def make_gain_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
             "initial_delay": Hidden(),
             "n_times": 6,
             "repeat_on": "X180_pulse",
-            "reps": 100,
-            "rounds": 100,
+            "reps": 1000,
+            "rounds": 10,
             "sweep": {
                 "gain": Range.between(
                     "0.8 * $qubit.module.x180.gain",
@@ -64,8 +64,8 @@ def make_freq_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
             "initial_delay": Hidden(),
             "n_times": 6,
             "repeat_on": "X180_pulse",
-            "reps": 100,
-            "rounds": 100,
+            "reps": 1000,
+            "rounds": 10,
             "sweep": {
                 "freq": Range.around("$qubit.freq", "2.0", expts=101),
                 "gain": Hidden(),

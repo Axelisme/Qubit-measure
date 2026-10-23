@@ -27,6 +27,8 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
     return Form(
         RBCfg,
         tree={
+            "reps": 1000,
+            "rounds": 10,
             "roles": captured_roles(ctx),
             "modules": {
                 "x90_f1": Slot("$f1.module.x90", copy=True),

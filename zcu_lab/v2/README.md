@@ -27,6 +27,11 @@
 
 ## Mux readout 與表單初值
 
+有 reps／rounds 欄位的表單在 Open／Reset 時填入 1000／10，初值可編輯。
+Lookback 只有 rounds，初值為 10，core 固定 reps=1。
+以 shots 控制的 singleshot 表單不改 shots，也不增加 reps／rounds 欄位。
+Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T1。
+
 `onetone/range_find` 使用普通 pulse readout 的 generator 與 ADC 硬體掃絕對 MHz。
 它與 `onetone/freq` linear 共用純 core cfg、頻率格點與繪圖 buffer。
 兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。

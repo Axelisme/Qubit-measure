@@ -38,6 +38,8 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
     return Form(
         MuxOnetoneCfg,
         tree={
+            "reps": 1000,
+            "rounds": 10,
             "modules": {
                 "reset": Hidden(),
                 "readout": readout,

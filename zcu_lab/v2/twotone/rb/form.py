@@ -32,6 +32,6 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "seed": 42,
             "n_seeds": 20,
             "reps": 1000,
-            "rounds": 1,
+            "rounds": 10,
         },
     )

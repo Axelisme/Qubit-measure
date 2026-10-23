@@ -51,7 +51,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
         },
         fixed_elements=(
             FixedElements(("tones",), "name", ("participants",)),

@@ -30,9 +30,9 @@ unknown participants block Run and remain editable for correction.
 Every tone needs valid drives, including nonparticipants. Each tone uses its own
 drive generator, distinct from the readout generator. Errors in another picker element
 appear on the Tones row. Select that element and correct it to enable Run.
-Reps, rounds and recovery delay are shared. Recovery initially uses five times
-the largest captured T1, with the default for missing T1 values. A stored invalid
-T1 leaves recovery blank for correction.
+Reps, rounds and recovery delay are shared. Open/Reset starts reps at 1000,
+rounds at 10 and recovery delay at a fixed 1.0 µs, independent of captured T1.
+All three values remain editable.
 
 ## FTF cost example
 

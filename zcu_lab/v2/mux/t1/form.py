@@ -47,7 +47,7 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
             "relax_delay": recovery,
             "initial_delay": Hidden(),
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
         },
         fixed_elements=(
             FixedElements(("tones",), "name", ("participants",)),

@@ -28,7 +28,7 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
             "sweep": {"gain": Range.between(0.0, 1.0, expts=151)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
-            "rounds": 100,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

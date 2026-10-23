@@ -92,7 +92,7 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
                 ),
             },
             "relax_delay": 0.0,
-            "rounds": 500,
+            "rounds": 10,
             "initial_delay": Hidden(),
         },
     )

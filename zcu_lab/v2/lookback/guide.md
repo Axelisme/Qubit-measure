@@ -4,7 +4,7 @@
 
 ## Behavior
 
-Lookback fires the readout pulse and captures the decimated ADC trace versus time. The trace shows when the signal arrives at the digitizer. Acquisition uses real hardware with `reps` fixed at 1. Averaging uses software rounds, initially 500. Run this first when bringing up a new readout chain or after changing cabling.
+Lookback fires the readout pulse and captures the decimated ADC trace versus time. The trace shows when the signal arrives at the digitizer. Acquisition uses real hardware with `reps` fixed at 1. Averaging uses software rounds, initially 10. Run this first when bringing up a new readout chain or after changing cabling.
 
 ## Parameter sources
 
