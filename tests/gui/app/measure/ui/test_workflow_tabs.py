@@ -366,7 +366,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     assert driver.observe(object_name="empty_tabs_hint").visible
 
 
-def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tmp_path):
+def test_workflow_pane_shows_single_active_leaf_once(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
     driver.click(object_name="workflow.toggle")
@@ -377,13 +377,57 @@ def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tm
     active = driver.observe(object_name="workflow.active_path")
     leaves = driver.observe(object_name="workflow.live_paths")
     assert active.visible and active.text == "workflow:synthetic/operation#1"
-    assert leaves.visible and leaves.text == "workflow:synthetic/operation#1"
+    assert not leaves.visible
     driver.click("Stop")
     qt_until(lambda: _status(driver, "cancelled"), label="scope root cancelled")
     _shot(driver, tmp_path, "scope-03-cancelled")
     assert (
         driver.observe(object_name="workflow.active_path").text == "workflow:synthetic"
     )
+    assert not driver.observe(object_name="workflow.live_paths").visible
+
+
+def test_workflow_pane_keeps_active_chain_and_two_live_leaves(
+    workflow_window, tmp_path
+):
+    ctrl, window = workflow_window
+
+    @workflow("forked", "Synthetic simultaneous live leaves")
+    async def forked(
+        env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+    ) -> None:
+        with env.child("left"), env.child("right"):
+            await env.ask(Choose(point=1))
+
+    ctrl.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                script=forked,
+                plan_model=Plan,
+                knobs_model=Tunables,
+                plan_to_cfg=lambda form, env, snapshot: NativePlan(cycles=form.cycles),
+                knobs_to_cfg=lambda form: NativeTunables(gain=form.gain),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    driver = ComponentDriver(window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("forked",))
+    _shot(driver, tmp_path, "fork-opened")
+    driver.click("Start")
+    # Ask retains both authored children until the scenario sends Stop.
+    qt_until(lambda: _status(driver, "paused"), label="forked Ask accepted")
+    _shot(driver, tmp_path, "fork-two-leaves")
+    active = driver.observe(object_name="workflow.active_path")
+    leaves = driver.observe(object_name="workflow.live_paths")
+    assert active.visible and active.text == "workflow:forked"
+    assert leaves.visible and leaves.text == (
+        "workflow:forked/left#1\nworkflow:forked/right#1"
+    )
+    driver.click("Stop")
+    qt_until(lambda: _status(driver, "cancelled"), label="forked workflow cancelled")
+    _shot(driver, tmp_path, "fork-cancelled")
 
 
 def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):
