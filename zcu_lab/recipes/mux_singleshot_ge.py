@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -117,7 +118,13 @@ async def mux_singleshot_ge(
     tab.select_sources(inputs)
     tab.apply_inputs(
         inputs,
-        {("participants",): inputs.participants},
+        {},
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            )
+        ],
     )
 
     # Acquire paired shots before fitting GE separation.

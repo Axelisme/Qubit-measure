@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
     FitQuality,
     RecipeInputs,
     RecipeReport,
@@ -150,13 +151,18 @@ async def mux_onetone(
     tab.apply_inputs(
         inputs,
         {
-            ("active_tones",): inputs.participants,
             ("sweep", "df", "start"): None if inputs.df is None else inputs.df.start,
             ("sweep", "df", "stop"): None if inputs.df is None else inputs.df.stop,
             ("sweep", "df", "n"): inputs.n,
             ("reps",): inputs.reps,
             ("rounds",): inputs.rounds,
         },
+        edits=[
+            FieldEdit(
+                path=("active_tones",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            )
+        ],
     )
     await tab.run()
     try:

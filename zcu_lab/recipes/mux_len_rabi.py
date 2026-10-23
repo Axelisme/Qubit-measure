@@ -5,6 +5,7 @@ Recipe n → expts: one shared scan point count for every tone.
 
 from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -108,8 +109,14 @@ async def mux_len_rabi(
     tab.select_sources(inputs)
     tab.apply_inputs(
         inputs,
-        {("participants",): inputs.participants},
-        edits=mux_sweep_edits(tab, inputs.sweeps, inputs.n),
+        {},
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            ),
+            *mux_sweep_edits(tab, inputs.sweeps, inputs.n),
+        ],
     )
 
     # Acquire before fitting; the finally block saves raw and artifacts.

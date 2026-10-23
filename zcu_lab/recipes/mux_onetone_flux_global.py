@@ -4,7 +4,12 @@ Recipe n → frequency.df Expts; flux_n → flux Expts.
 """
 
 from pydantic import Field
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe, report_number
+from zcu_tools.mcp.measure.recipe_api import (
+    FieldEdit,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 
 from zcu_lab.v2._support.measure.mux_flux_adapter import MuxFluxPickSummary
 
@@ -57,10 +62,15 @@ async def mux_onetone_flux_global(
     tab.apply_inputs(
         inputs,
         {
-            ("participants",): inputs.participants,
             ("flux_unit",): inputs.flux_unit,
         },
-        edits=edits,
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            ),
+            *edits,
+        ],
     )
     updates = mux_flux_analysis_updates(tab, inputs)
 

@@ -63,10 +63,15 @@ async def mux_twotone_flux_local(
     tab.apply_inputs(
         inputs,
         {
-            ("participants",): inputs.participants,
             ("flux_unit",): inputs.flux_unit,
         },
-        edits=edits,
+        edits=[
+            FieldEdit(
+                path=("participants",),
+                value=None if inputs.participants is None else [*inputs.participants],
+            ),
+            *edits,
+        ],
     )
     updates = mux_flux_analysis_updates(tab, inputs)
 
