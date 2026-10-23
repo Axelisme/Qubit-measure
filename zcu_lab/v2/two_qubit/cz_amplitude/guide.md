@@ -10,6 +10,8 @@ Scan a common scale on two calibrated charge-line gains. Use the first complete
 joint return cycle to propose two CZ pulses. FIT creates proposals;
 Apply Selected writes accepted rows to the library.
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Preparation and inputs
 
 Bind `f1` and `f2` to distinct fluxonium components, `coupler` to their transmon,

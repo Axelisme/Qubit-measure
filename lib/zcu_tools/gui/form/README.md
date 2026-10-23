@@ -26,7 +26,7 @@ Expression 只用於 int、float、complex 與 str 文字欄位，只有顯式 `
 
 Qt FormEditor 在建立或 Refresh 時，從 host 提供的 FormEnv 固定 capture 的 `resolved_aliases()` 與 `document().components` 計算補全清單。Reset 重建 editor 時使用新 capture。Expression 文字欄位以灰字提示 `$alias` 或該元件的一層欄位；device alias 只補名字，不展開巢狀路徑。候選按大小寫敏感的字典序排列。游標處有可補全前綴、右側緊接空白或字串結尾、且沒有選取時才顯示提示。`0.8 * $qubit.fre| + 5` 顯示灰字 `q`，`$qubit.fre|+5` 與 `($qubit.fre|)` 不提示。Tab 接受且保留焦點，不提交文字。連按 Tab 輪替原候選並循環。Esc 清除提示與輪替，直到下一次編輯或游標移動。Direct、唯讀、選取文字及第二層路徑不補全。灰字由文字框自繪，右側既有文字向右顯示，不改 input；accessible description 讀出同一提示與按鍵用法。打字、游標移動與 Tab 只查記憶體清單，不讀檔、不查服務。補全不保證 expression 有效，求值與驗證仍由 FormState 負責。
 
-Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。`default_input` 由 core 用同一個 env 當場求值，input 只存算好的 direct 值；來源之後改變，要重新建立 default input 才反映。Expression 算不出來，或值讓 result 在該欄位報錯時，欄位留空：required 欄位只顯示 `Field required`，有 Pydantic 靜態預設的欄位驗證時用那個預設。來源本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。
+Defaults hook 可以用 `{"expr": ...}` 宣告 scalar 初始值的來源，例如 `$flux_dev` 或 point path。`default_input` 由 core 用同一個 env 當場求值，input 只存算好的 direct 值；來源之後改變，要重新建立 default input 才反映。Expression 算不出來，或值讓 result 在該欄位報錯時，欄位留空：required 欄位保留 `Field required` 前綴；有作者 description 時附上欄位與父欄位的 label、unit、description，path 不變。必填 numeric 欄位明填 null 時，原型別錯誤也附上相同說明。有 Pydantic 靜態預設的欄位驗證時用那個預設。來源本身不可用的錯誤照常拋出。使用者或 MCP 寫入的 expression 保留原文。
 
 `Option` 宣告 label、部分 JSON input value、可選 BaseModel fields 與 commands。`options(env)` 是宣告 hook，consumer 讀 description 的 options 有效清單。Core 自動產生 Literal、Enum、choices 與 tagged union 選項。最深 local 宣告優先，包含表示無選項的空清單，非重疊 parent 宣告保留。Bool 與一般 nullable model 照舊用 checkbox 與 Enabled。Fields 只在 describe 該 active path 時列直接 children，不顯示 value 已決定的 tag。比對只看 value 的每個葉，JSON 型別與值相同即符合，第一項匹配優先。無匹配時 consumer 顯示目前值加 `(missing)`，不寫 state。
 

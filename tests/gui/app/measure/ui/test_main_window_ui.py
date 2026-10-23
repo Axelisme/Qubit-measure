@@ -310,6 +310,29 @@ def test_status_bar_message_is_mouse_selectable(main_window_control_factory, qap
     assert window.get_view_snapshot()["status"] == "Writeback applied: param-1"
 
 
+def test_long_status_message_stays_within_window_with_full_tooltip(
+    main_window_control_factory, qapp
+):
+    ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
+    ctrl.get_bus.return_value = EventBus()
+    ctrl.list_tab_ids.return_value = []
+    window = MainWindow(ctrl, templates=lambda: {})
+    message = "Config invalid: " + (
+        "Fill in F1 pulse frequency (MHz), normalized gain and duration (us). " * 8
+    )
+    window.show_status_message(message)
+    window.resize(1700, 900)
+    window.show()
+    qapp.processEvents()
+
+    assert window.width() == 1700
+    labels = _status_bar_labels(window, message)
+    assert len(labels) == 1
+    assert labels[0].width() <= window.width()
+    assert labels[0].toolTip() == message
+    assert window.get_view_snapshot()["status"] == message
+
+
 def test_main_window_toolbar_does_not_show_arb_waveforms(
     main_window_control_factory, qapp
 ):

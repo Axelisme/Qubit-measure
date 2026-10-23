@@ -56,10 +56,11 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
         field_order=(
             "participants",
             "tones",
-            "delays",
             "modules",
-            "relax_delay",
+            "delays",
             "reps",
             "rounds",
+            "relax_delay",
+            "initial_delay",
         ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

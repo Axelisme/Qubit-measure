@@ -1,6 +1,6 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、operator guide 與校準 writeback。
 
@@ -11,6 +11,7 @@
 - [目錄佈局](#目錄佈局)
 - [實驗重載](#實驗重載)
 - [Form 與固定來源](#form-與固定來源)
+- [表單設計與預演](#表單設計與預演)
 - [執行與分析契約](#執行與分析契約)
 - [Operator guide 格式](#operator-guide-格式)
 - [Readout 分析與 writeback](#readout-分析與-writeback)
@@ -85,6 +86,63 @@ sampling_mode 與 homophasal。Linear 輸出 homophasal=None。Homophasal 的必
 
 Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 的 AliasName("flux_dev") 在 Open／Reset
 選 direct 名稱，core 只以 context.devices 查 driver。Flux_unit 獨立保存，recipe 不改單位政策。
+
+## 表單設計與預演
+
+每張 Form 明列 `field_order`，不要依賴 core inheritance 的欄位順序。
+可見欄位依操作流程排列：participants／tones 或 readonly roles → modules → sweep →
+averaging（reps、rounds、shots）→ timing（relax_delay、initial_delay）。
+可編輯 drive 與必要校準輸入放在 modules 後，掃描設定前。
+`field_order` 只能排列 core cfg 的頂層欄位；nested model 維持宣告順序，extras 仍在最後。
+若實驗需要例外，在 guide 說明順序與操作步驟。
+
+同一物理量使用一致的可見 label 與單位，例如 Frequency、MHz，Delay、us，
+Gain、normalized，以及掃描點數 Expts。以宣告模型的 `FieldMeta` 指定 label／unit；
+SweepCfg 的座標與 step 繼承 unit，點數不帶物理單位。
+既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `sweep.length` 都可顯示 Delay。
+共用但物理量不同的 range 必須說明單位由哪張實驗決定。
+Flux 軸使用 `flux_unit`，不能把動態單位寫成固定 MHz 或 us。
+Recipe docstring 明列 `n → expts` 或 `points → expts` 的對應。
+Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數。
+
+初值依來源處理。來源可推導時，用 Expr 或固定 capture，寫明來源路徑與單位。
+有 operator-authored slot 時沿用 slot，並說明它不是本次已驗證的校準。
+必要來源不存在時，保留必填空白，不用任意數字代填。
+已授權的 literal fallback 保留原值，並說明用途、fallback 條件與操作者確認責任。
+不要在機械一致性修正中改變等待時間或 fallback 政策。
+
+對實際產生的候選初值，用 `Form.with_seed_metadata` 的逐位置
+`FieldMeta(description=..., calibration="uncalibrated")` 記錄來源。
+它供 diagnostics 使用，不覆寫 GUI label／unit。
+未改寫的 captured slot 不標成 measured；未知狀態保留未知。
+用 `get_cfg.diagnostics` 的 seed_source、seed_status、uncalibrated 核對 Open／Reset 的結果。
+Hidden 只用於 Run 會覆寫或 lower 會計算的值，不用來藏起 required input。
+
+必填欄位的靜態 FieldMeta 寫可讀 label、unit 與 description。
+說明用「填入 …」指出角色、單位及取得來源的前置實驗。
+有作者說明的必填空白錯誤會附上該欄位與父欄位的 label／description，保留原 path。
+Recipe preflight 沿用這些 message 與 typed paths，不從 generic error 猜物理設定。
+Readout slot found 與 form valid 必須分開判讀；slot 存在不代表 drive、GE centers 或掃描範圍齊全。
+Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
+
+新實驗交付前，以 `QT_QPA_PLATFORM=offscreen` 預演下列情境：
+
+1. Kickstart entry 只有接線與 nominal values，沒有 module slot。
+   記錄哪些欄位有 seed、哪些欄位必填空白，以及 uncalibrated 候選。
+2. 加入必要 frequency，仍不加入 readout slot。
+   比較 Open、Refresh、Reset；Refresh 保留舊輸入，Reset 依新 capture 重新取初值。
+3. 使用包含 readout slot 的 project 副本。
+   分開列出 slot 是否存在，以及表單尚缺哪些 pulse、drive、timing 或 GE calibration。
+4. 核對對應的 agent recipe。
+   確認必填參數、單位、預設與 null 語意；以缺參情境核對 preflight 能否指出下一步。
+   沒有 recipe 的表單在 guide 說明使用 GUI／RPC，不假設 recipe 覆蓋所有實驗。
+
+每個 GUI 情境保存 get_cfg 的 input、values、errors、diagnostics 與實際欄位順序。
+用 ComponentDriver 操作 Open／Refresh／Reset，保存截圖並審閱可見 label、單位與錯誤。
+在 guide 寫出各情境的起手步驟與仍需取得的校準。
+預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
+Guide 必須提醒來源修改後需 Reset；Refresh 只更新 source／choice，
+Reset 可能覆蓋尚未儲存的輸入。
 
 ## 執行與分析契約
 

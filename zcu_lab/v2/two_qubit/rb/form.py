@@ -3,6 +3,8 @@
 from zcu_tools.cfg_model import Expr, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.mux_forms import mux_readout_seed_metadata
+
 from .._measure import captured_roles
 from .core import RBCfg
 
@@ -24,8 +26,23 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
                 if not isinstance(captured.value, str):
                     raise ValueError(f"{path} must contain a component name")
                 names[role] = captured.value
+    readout = Slot("$mux.module.readout")
     return Form(
         RBCfg,
+        field_order=(
+            "roles",
+            "modules",
+            "drive",
+            "phase_pair",
+            "f1_centers",
+            "f2_centers",
+            "depths",
+            "seeds",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "reps": 1000,
             "rounds": 10,
@@ -33,7 +50,7 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "modules": {
                 "x90_f1": Slot("$f1.module.x90", copy=True),
                 "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": Slot("$mux.module.readout"),
+                "readout": readout,
             },
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),
@@ -56,4 +73,4 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
                 for role in ("f1", "f2")
             },
         },
-    )
+    ).with_seed_metadata(mux_readout_seed_metadata(readout))

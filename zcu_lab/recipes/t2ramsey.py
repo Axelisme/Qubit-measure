@@ -1,4 +1,7 @@
-"""Measure Ramsey fringes versus delay to estimate free-evolution coherence."""
+"""Measure Ramsey fringes versus delay to estimate free-evolution coherence.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 

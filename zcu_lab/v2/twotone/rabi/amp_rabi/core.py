@@ -60,7 +60,7 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class AmpRabiSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
 
 
 class AmpRabiModuleCfg(ConfigBase):

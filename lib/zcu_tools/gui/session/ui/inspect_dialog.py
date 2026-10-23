@@ -1,11 +1,14 @@
 """InspectDialog — the context inspector shared by every session host.
 
-Parameters edits components through the component tree. Modules lists the
-library and edits one selected entry with the shared FormEditor; it also
+Parameters edits components through a filterable, initially collapsed tree.
+Modules browses dotted library keys as a filterable hierarchy and edits one
+selected entry with the shared FormEditor; it also
 creates entries from templates and opens the host's ARB waveform dialog.
 Aliases edits the ordered global alias table.
 Every collaborator is a required constructor argument, so measure and
 workflows open the same dialog with the same buttons.
+Driver filter targets are inspect.parameters.filter and inspect.library.filter;
+the hierarchical library tree remains inspect.library.
 """
 
 from __future__ import annotations
@@ -52,6 +55,7 @@ from zcu_tools.gui.session.library_entry import (
 from zcu_tools.gui.session.ui.alias_panel import AliasPanel
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
+from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets.form import FormEditor
 
 if TYPE_CHECKING:
@@ -102,7 +106,10 @@ class InspectDialog(QDialog):
       - Toolbar: "Arb Waveforms…", "Refresh", "Close".
       - Tabs "Parameters" (a ComponentTreeWidget), "Modules" and "Aliases"
         (an AliasPanel; inspect.aliases.* names as AliasPanel documents).
-      - inspect.library: the QTreeWidget of library roots, grouped under
+      - inspect.parameters.filter and inspect.library.filter: live Filter
+        QLineEdits matching names and dotted paths, ignoring case. Matches and
+        ancestors stay shown and expand; clearing restores browsing expansion.
+      - inspect.library: the QTreeWidget of dotted-key segments, grouped under
         "modules" and "waveforms"; the "New" and "Delete" buttons below it.
       - inspect.entry.name: the Name QLineEdit of the selected entry;
         inspect.entry.status: a QLabel "Saved" or "Unsaved";
@@ -243,6 +250,10 @@ class InspectDialog(QDialog):
         self._tree.setRootIsDecorated(True)
         self._tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         self._tree.currentItemChanged.connect(self._on_item_changed)
+        self._library_filter = TreeFilter(
+            self._tree, object_name="inspect.library.filter", default_expanded=True
+        )
+        left_layout.addWidget(self._library_filter)
         left_layout.addWidget(self._tree)
         row = QHBoxLayout()
         self._new_btn = QPushButton("New")
@@ -374,13 +385,25 @@ class InspectDialog(QDialog):
                 group = QTreeWidgetItem(self._tree, [label])
                 group.setFont(0, bold)
                 group.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                group.setExpanded(True)
+                nodes: dict[tuple[str, ...], QTreeWidgetItem] = {(): group}
                 for name in sorted(keys):
-                    item = QTreeWidgetItem(group, [name])
+                    path = tuple(name.split("."))
+                    for depth in range(1, len(path) + 1):
+                        prefix = path[:depth]
+                        if prefix not in nodes:
+                            node = QTreeWidgetItem(nodes[prefix[:-1]], [prefix[-1]])
+                            node.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                            nodes[prefix] = node
+                    item = nodes[path]
+                    item.setFlags(
+                        Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                    )
                     item.setData(0, Qt.ItemDataRole.UserRole, (kind, name))
+                    item.setToolTip(0, name)
                     if selected == (kind, name):
                         self._tree.setCurrentItem(item)
         finally:
+            self._library_filter.refresh()
             self._tree.blockSignals(False)
 
     def _current_key(self) -> _EntryKey | None:
@@ -697,14 +720,11 @@ def _has_entry(library: LibrarySnapshot, key: _EntryKey) -> bool:
 def _find_item(tree: QTreeWidget, key: _EntryKey | None) -> QTreeWidgetItem | None:
     if key is None:
         return None
-    for index in range(tree.topLevelItemCount()):
-        group = tree.topLevelItem(index)
-        if group is None:
-            continue
-        for child_index in range(group.childCount()):
-            child = group.child(child_index)
-            if child is not None and child.data(0, Qt.ItemDataRole.UserRole) == key:
-                return child
+    for item in tree.findItems(
+        "*", Qt.MatchFlag.MatchWildcard | Qt.MatchFlag.MatchRecursive
+    ):
+        if item.data(0, Qt.ItemDataRole.UserRole) == key:
+            return item
     return None
 
 
