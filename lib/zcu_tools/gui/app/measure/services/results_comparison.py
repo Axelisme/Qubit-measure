@@ -26,6 +26,7 @@ _KIND_FIELDS = (
 )
 _IDENTITY = ("entry", "point", "experiment", "time")
 _FACTS = ("r2", "invalid", "failure", "issues")
+_MUX_FIELDS = {"t2r": "t2", "t2r_err": "t2_err", "t2e": "t2", "t2e_err": "t2_err"}
 
 
 def _fields(run: ResultRun) -> tuple[str, ...]:
@@ -34,15 +35,7 @@ def _fields(run: ResultRun) -> tuple[str, ...]:
     for names, fields in _KIND_FIELDS:
         if any(name in tokens or name == experiment for name in names):
             if "mux" in tokens:
-                return tuple(
-                    {
-                        "t2r": "t2",
-                        "t2r_err": "t2_err",
-                        "t2e": "t2",
-                        "t2e_err": "t2_err",
-                    }.get(key, key)
-                    for key in fields
-                )
+                return tuple(_MUX_FIELDS.get(key, key) for key in fields)
             return fields
     return ()
 
@@ -131,35 +124,37 @@ def build_comparison(index: ResultsIndex, run_keys: tuple[str, ...]) -> Comparis
             key
             for _, fields in _KIND_FIELDS
             for field in fields
-            for key in (field, *{"t2r": ("t2",), "t2r_err": ("t2_err",)}.get(field, ()))
+            for key in (field, _MUX_FIELDS.get(field, field))
         )
     )
     columns = (*_IDENTITY, *(key for key in ordered if key in requested), *_FACTS)
-    rows = []
-    for run in runs:
-        values: dict[str, str] = dict(
-            zip(
-                _IDENTITY,
-                (run.entry, run.point or "—", run.experiment or "—", run.at or "—"),
-                strict=True,
-            )
+    rows = tuple(_comparison_row(index, run, columns) for run in runs)
+    return ComparisonTable(columns, rows)
+
+
+def _comparison_row(
+    index: ResultsIndex, run: ResultRun, columns: tuple[str, ...]
+) -> ComparisonRow:
+    values: dict[str, str] = dict(
+        zip(
+            _IDENTITY,
+            (run.entry, run.point or "—", run.experiment or "—", run.at or "—"),
+            strict=True,
         )
-        issues = list(run.issues)
-        for path in run.analysis_paths:
-            try:
-                document = index.read_analysis(run.key, path.name)
-            except (OSError, ValueError) as error:
-                issues.append(str(error))
-                continue
-            summary = document.get("summary")
-            if isinstance(summary, dict):
-                for key in (*_fields(run), "r2", "invalid", "failure"):
-                    cell = _summary_cell(summary, key)
-                    if len(run.analysis_paths) > 1:
-                        cell = f"{path.name}: {cell}"
-                    values[key] = f"{values[key]}\n{cell}" if key in values else cell
-        values["issues"] = "\n".join(issues) or "—"
-        rows.append(
-            ComparisonRow(run.key, tuple(values.get(key, "—") for key in columns))
-        )
-    return ComparisonTable(columns, tuple(rows))
+    )
+    issues = list(run.issues)
+    for path in run.analysis_paths:
+        try:
+            document = index.read_analysis(run.key, path.name)
+        except (OSError, ValueError) as error:
+            issues.append(str(error))
+            continue
+        summary = document.get("summary")
+        if isinstance(summary, dict):
+            for key in (*_fields(run), "r2", "invalid", "failure"):
+                cell = _summary_cell(summary, key)
+                if len(run.analysis_paths) > 1:
+                    cell = f"{path.name}: {cell}"
+                values[key] = f"{values[key]}\n{cell}" if key in values else cell
+    values["issues"] = "\n".join(issues) or "—"
+    return ComparisonRow(run.key, tuple(values.get(key, "—") for key in columns))

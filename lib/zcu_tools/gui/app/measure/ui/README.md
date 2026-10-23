@@ -114,6 +114,10 @@ resolution. Unresolved identities keep their saved figures and refusal reason.
 A left click on a group image opens its run directly and selects that figure.
 Within a run, left clicks select the current figure. Context menus copy
 a member path or image and pin its run in ResultsComparison.
+`ResultsComparison` retains every pin in its fixed-column table. Checked list rows
+select at most four saved PNGs for the 2×2 view, independently of pin membership.
+Re-pinning from a figure card preserves that exact filename across mode changes.
+Runs without PNGs stay in the list and show a reason in the image view.
 Cfg values and analysis summaries use relative paths; analysis parameters have
 their own sections. New-tab Load uses the application owner. A missing analysis
 source remains visible in both the browser outcome and the loaded tab.

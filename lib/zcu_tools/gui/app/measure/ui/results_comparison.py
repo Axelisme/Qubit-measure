@@ -135,6 +135,12 @@ class ResultsComparison(QWidget):
             )
             item.setToolTip(self._pins[run.key] or "No saved PNG for this run")
             self._list.addItem(item)
+        selected_row = (
+            tuple(self._pins).index(self._selected_key)
+            if self._selected_key in self._pins
+            else -1
+        )
+        self._list.setCurrentRow(selected_row)
         self._list.blockSignals(False)
         table = build_comparison(self._index, tuple(self._pins))
         self._table.blockSignals(True)
@@ -147,6 +153,9 @@ class ResultsComparison(QWidget):
                 item.setToolTip(value)
                 self._table.setItem(row, column, item)
         self._table.resizeRowsToContents()
+        self._table.setCurrentCell(selected_row, 0)
+        if selected_row < 0:
+            self._table.clearSelection()
         self._table.blockSignals(False)
         if self._views.currentIndex() == 1:
             self._render_images()
@@ -154,12 +163,14 @@ class ResultsComparison(QWidget):
     def _select_list_row(self, row: int) -> None:
         if row >= 0:
             self._selected_key = tuple(self._pins)[row]
+            self._table.setCurrentCell(row, 0)
 
     def _select_table_row(
         self, row: int, _column: int, _old_row: int, _old_column: int
     ) -> None:
         if row >= 0:
             self._selected_key = tuple(self._pins)[row]
+            self._list.setCurrentRow(row)
 
     def _toggle_image(self, item: QListWidgetItem) -> None:
         key = tuple(self._pins)[self._list.row(item)]

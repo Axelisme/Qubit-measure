@@ -19,6 +19,7 @@ RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 For
   ModuleSpec。
 - [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
   `services.results_index.scan_results(project_root)` 供結果瀏覽器與 RPC 共用唯讀 `ResultsIndex`。它掃描各 Database entry 的 run 目錄，以 native metadata 與同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
+  `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary 投影為固定欄位與逐 run 的比較列。它集中實驗 token 對應、多 tone／resonator 標籤與具名 fit 品質 facts；檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
