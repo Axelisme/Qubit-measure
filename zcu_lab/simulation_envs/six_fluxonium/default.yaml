@@ -6,6 +6,8 @@ pulse_gen_ch: 13
 pulse_ro_ch: 6
 # Environment totals for prepare/results/routing; ADC bytes apply per source.
 numerics:
+  # Midpoint full-Hamiltonian steps per carrier period below 30 MHz, all qubits.
+  slow_envelope_segments_per_period: 20
   prepare_cache_bytes: 805306368  # 768 MiB total, 128 MiB per source
   result_memo_bytes: 67108864     # 64 MiB total
   routing_cache_bytes: 4194304    # 4 MiB total

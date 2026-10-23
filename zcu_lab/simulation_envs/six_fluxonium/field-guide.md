@@ -32,6 +32,18 @@ Old `offset_phi0`/`flux_per_unit` six-system documents have no schema fallback. 
 Each resonator component instead declares
 pulse wiring `ch: 13`, `ro_ch: 6`. `onetone/range_find` uses that pulse route.
 
+## Low-frequency drive evolution
+
+Single-tone plateaus below 30 MHz use full-Hamiltonian midpoint matrix
+exponentials with Strang bath half-steps, not the T6 Fourier channel builder.
+Set top-level `numerics.slow_envelope_segments_per_period` to a positive integer,
+default 20. It applies to all six sources and overrides the nested single-qubit
+value. Increase it to check grid convergence. The accepted dense-reference
+population error is 1e-2; Q1's 21-level, 50 ns, gain-0.2 calibration measured
+about 1e-4 or less, and synthetic regression tests require 1e-3. These numbers
+do not certify other gains, durations, coherences or basis truncations.
+At 30 MHz and above, dispatch keeps the existing RWA/Floquet/Dyson/T6 order.
+
 ## Cache residency budgets
 
 Set the environment's cache allowances in the top-level `numerics` section of

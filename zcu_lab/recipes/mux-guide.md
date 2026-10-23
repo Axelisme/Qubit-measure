@@ -1,6 +1,39 @@
-# Mux qubit recipes
+# Mux recipes
 
-**Readers:** operator, agent. Run the seven mux qubit recipes, save results and review calibration proposals.
+**Readers:** operator, agent. Run seven mux qubit recipes or the mux resonator survey, save results and review calibration proposals.
+
+## mux_onetone
+
+`mux_onetone` opens `mux/onetone` for a common-offset resonator scan.
+It does not require qubit drives. The seven qubit recipes below have different
+participant and sweep contracts.
+
+| Input | Meaning | If omitted or null |
+| --- | --- | --- |
+| `target`, `reuse_tab_id` | Mux alias override and idle matching tab to Reset | Use global aliases and open a tab |
+| `participants` | Unique resonator names in execution order | Keep Active tones |
+| `df` | `{start, stop}` common offset in MHz, added to each base frequency | Keep the Form range |
+| `n` | Shared offset point count, at least two | Keep Expts |
+| `reps`, `rounds` | Positive acquisition counts | Keep Form values |
+| `library`, `inline`, `overrides` | Ordered source selections, copies and final edits | Keep Form values |
+
+Names map to original indices in the tab's fixed `$mux.resonators` capture,
+not display labels or current global aliases. Unknown names return
+`needs_parameters` with the legal list. Repeated bindings are ambiguous by name;
+use an original-index `active_tones` override with participants omitted.
+Library selections precede inline copies. Participants, df/n and counts come
+next, then overrides. The complete batch must validate before Run.
+
+Analyze reports each original index, bound name, display label, frequency,
+kappa, fit_quality, and any per-tone failure. `resonators_diagnostic` explains
+missing identity bindings; it does not discard module proposals. Labels may
+repeat and do not establish identity. Fits retain native analysis order.
+The recipe asks before applying only selected proposals and saves once after
+acquisition. Skipping writes nothing. `writeback_applied` records confirmed
+applied items, not merely an accepted answer.
+
+Read the [adapter guide](../v2/mux/onetone/guide.md) for source defaults,
+fit diagnostics, timing checks and proposal destinations.
 
 These seven recipes measure selected qubits with simultaneous mux readout, save
 raw data and fits, and ask before applying calibration updates.
