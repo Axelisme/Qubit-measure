@@ -16,15 +16,19 @@ from .base import BuiltinComponent
 
 
 class MuxWiringSchema(BaseModel):
-    """Mux generator and ordered per-tone ADC channels, separate from pulse wiring."""
+    """Mux generator and ordered tone ADCs, separate from pulse wiring.
+
+    None means wiring is not yet known; Forms require it before Run.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     gen_ch: int | None = Field(
         default=None, ge=0, strict=True, description="Mux generator channel, if known."
     )
-    ro_ch: list[Annotated[int, Field(ge=0, strict=True)]] = Field(
-        description="ADC channels aligned with the group resonators, one per full tone."
+    ro_ch: list[Annotated[int, Field(ge=0, strict=True)]] | None = Field(
+        default=None,
+        description="ADC channels aligned with group resonators; None means not yet wired.",
     )
 
 
@@ -69,8 +73,10 @@ class MuxGroupSchema(BuiltinComponent):
 
     @model_validator(mode="after")
     def validate_wiring_length(self) -> Self:
-        """Reject ADC lists that do not cover exactly the full resonator list."""
-        if len(self.wiring.ro_ch) != len(self.resonators):
+        """Reject known ADC lists that do not cover the full resonator list."""
+        if self.wiring.ro_ch is not None and len(self.wiring.ro_ch) != len(
+            self.resonators
+        ):
             raise ValueError(
                 "wiring.ro_ch/resonators: lengths differ; "
                 f"ro_ch={self.wiring.ro_ch!r}, resonators={self.resonators!r}"

@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from math import isfinite
 
+from zcu_tools.cfg_model import Range
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import ParameterContext
 
@@ -75,16 +76,17 @@ def resonator_frequencies(
 
 
 def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
-    """Use freq linear's editable defaults plus a persisted analysis name list.
+    """Leave sweep endpoints blank with 301 points and seed editable analysis names.
 
-    ctx is the Open/Reset capture. The operator widens the absolute MHz sweep;
-    names are editable and do not select hardware channels. Timing failures
-    propagate; no hardware I/O or live parameter refresh occurs here.
+    ctx is the Open/Reset capture. The operator must enter absolute MHz endpoints.
+    Other defaults match freq linear. Names do not select hardware channels.
+    Timing failures propagate; no hardware I/O or live refresh occurs here.
     """
     return Form(
         RangeFindCfg,
         tree={
             **initial_spectrum_tree(ctx),
+            "sweep": {"freq": Range(None, None, expts=301)},
             "resonators": [name for name in initial_resonators(ctx)],
         },
     )

@@ -54,7 +54,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 1`、`ro_ch: [1, 2]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
-範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從 group wiring 補通道，tone gain 補 0.1，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
+範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從已知的 group wiring 補通道，tone gain 補 0.1。文件允許 `wiring: {}`；`ro_ch` 未知時，各 tone ADC 留空必填，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
 初始 alias `qubit` 指向 Q1，`resonator` 與 `flux_dev` 分別讀取其 resonator 與 flux_source。把 `qubit` 改為 Q2 後，兩個連結會跟著切換。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
 
 ## 設計初猜與 predictor
