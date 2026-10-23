@@ -106,7 +106,9 @@ def test_typed_reader_accepts_repeated_nested_models(
         try:
             records = read_records(rig.paths.metadata_root, target)
         except TypeError as error:
-            pytest.fail(f"A single BaseModel with nested models must be readable: {error}")
+            pytest.fail(
+                f"A single BaseModel with nested models must be readable: {error}"
+            )
         assert [row.record for row in records] == [point]
         assert records[0].record_type == (
             f"{PairedPoint.__module__}.{PairedPoint.__qualname__}"
