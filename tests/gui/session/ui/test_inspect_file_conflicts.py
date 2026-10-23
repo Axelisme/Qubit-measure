@@ -161,6 +161,77 @@ def test_library_keep_cannot_rebase_stale_draft(conflict_ui) -> None:
     ui.screenshot(evidence / "04-reloaded.png")
 
 
+@pytest.mark.parametrize("conflict_ui", ["aliases"], indirect=True)
+@pytest.mark.parametrize(
+    ("changed_document", "admit_reload"),
+    [("aliases", False), ("aliases", True), ("parameters", False), ("library", False)],
+)
+def test_source_notification_preserves_live_alias_editor(
+    conflict_ui, changed_document: str, admit_reload: bool
+) -> None:
+    ui, alias_path, evidence, source, _ = conflict_ui
+    evidence = evidence / f"live-editor-{changed_document}-{admit_reload}"
+    ui.select_tab("Aliases")
+    ui.select_table_row("qubit", object_name="inspect.aliases.table")
+    ui.press_key(Qt.Key.Key_F2, object_name="inspect.aliases.table")
+    ui.press_key(Qt.Key.Key_A, modifiers=Qt.KeyboardModifier.ControlModifier)
+    ui.type_text("draft")
+    assert ui.focused_input().text == "draft"
+    # The item still has the installed name: no Enter or focus loss yet.
+    assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[0] == "qubit"
+    ui.screenshot(evidence / "01-live-editor.png")
+
+    path = next(
+        file.path
+        for file in source.get_file_revisions()
+        if file.document == changed_document
+    )
+    original = path.read_text()
+    changed = (
+        "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n"
+        if changed_document == "aliases"
+        else original.replace("4300.0", "4700.0").replace("0.1", "0.7")
+    )
+    path.write_text(changed)
+    source.synchronize_files(admit_reload=admit_reload)
+    ui.screenshot(evidence / "02-notified-while-editing.png")
+    assert ui.focused_input().text == "draft"
+
+    if changed_document == "aliases":
+        message = ui.observe(object_name="inspect.aliases.sync.message")
+        assert message.visible
+        assert ("reloaded" if admit_reload else "pending") in message.text
+        ui.click(object_name="inspect.aliases.sync.keep")
+        assert not ui.observe(object_name="inspect.aliases.sync.message").visible
+        assert (
+            ui.table_rows(object_name="inspect.aliases.table")[0].columns[0] == "draft"
+        )
+        ui.click(object_name="inspect.aliases.apply")
+        assert ui.observe(object_name="inspect.aliases.error").text
+        assert ui.observe(object_name="inspect.aliases.sync.message").visible
+        assert (
+            ui.table_rows(object_name="inspect.aliases.table")[0].columns[0] == "draft"
+        )
+        assert alias_path.read_text() == changed
+        ui.screenshot(evidence / "03-keep-cannot-rebase.png")
+        ui.click(object_name="inspect.aliases.sync.reload")
+        assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == (
+            "external",
+            "Q2",
+        )
+        assert not ui.observe(object_name="inspect.aliases.sync.message").visible
+    else:
+        assert not ui.observe(object_name="inspect.aliases.sync.message").visible
+        ui.press_key(Qt.Key.Key_Return)
+        ui.click(object_name="inspect.aliases.apply")
+        assert not ui.observe(object_name="inspect.aliases.error").text
+        assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == (
+            "draft",
+            "Q1",
+        )
+    ui.screenshot(evidence / "04-resolved.png")
+
+
 @pytest.mark.parametrize("conflict_ui", ["aliases", "aliases-missing"], indirect=True)
 def test_alias_draft_revision_includes_missing_file(conflict_ui) -> None:
     ui, path, evidence, *_ = conflict_ui
