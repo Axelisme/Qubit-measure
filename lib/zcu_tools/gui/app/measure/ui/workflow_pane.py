@@ -244,8 +244,10 @@ class WorkflowPane(QWidget):
         self._scope_labels["live_paths"].setText(
             "" if status is None else "\n".join(status.live_paths)
         )
-        for label in self._scope_labels.values():
-            label.setVisible(status is not None)
+        self._scope_labels["active_path"].setVisible(status is not None)
+        self._scope_labels["live_paths"].setVisible(
+            status is not None and status.live_paths != [status.active_path]
+        )
         writable = self._writable
         lease_active = any(
             p.kind == "run" for p in self._ctrl.get_hardware_gate_presence()

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -201,6 +201,9 @@ The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
 same-host operation Plots and finishes before returning or being discarded.
 `WorkflowFigures` tiles workflow figures and the current operation together,
 with up to four figures per page and page controls for larger sets.
+Follow latest starts checked and selects each newly presented or live-refreshed
+figure's page and tile. Clicking a canvas unchecks it and pins the selection;
+final flushes do not move focus.
 Pane and MCP read `WorkflowPlots.figures()`: workflow names stay unchanged and
 operation names are `operation/<name>`. Workflow registration
 rejects that prefix. A new attempt releases and replaces the whole operation
