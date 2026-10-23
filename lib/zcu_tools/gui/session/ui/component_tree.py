@@ -116,8 +116,10 @@ class ComponentTreeWidget(QWidget):
     the role); other text fields complete component names. All writes use the owner; errors stay visible in
     red below the tree as "<field>: <message>", with the full owner text as
     the tooltip, without changing the rejected document. A point edit captures
-    its file revision when the editor opens. A rejected value remains visible
-    and can be edited again; Keep never advances its baseline. Reload discards
+    its destination and file revision when the editor opens. A stale or
+    wrong-destination value remains visible and can be edited again; Keep never
+    advances its baseline. Other validation failures restore the original cell.
+    Reload discards
     retained text only after the owner validates and installs the source.
     A setup/current
     selector controls the editing destination; "Add component…" opens an
@@ -582,6 +584,9 @@ class ComponentTreeWidget(QWidget):
         try:
             value = parse_field_input(target.value_kind, raw)
         except ValueError as exc:
+            self._drafts.pop(key, None)
+            if item is not None and _row_key(item) == key:
+                item.setText(_VALUE, target.initial)
             show_error(self._error, exc, field=".".join(target.segments))
             return
         for segment in reversed(target.segments[target.write_depth :]):
@@ -591,6 +596,10 @@ class ComponentTreeWidget(QWidget):
         if self.edit_parameter(path, value, setup=target.setup, target=target.point):
             self._drafts.pop(key, None)
             self.refresh()
+        else:
+            self._drafts.pop(key, None)
+            if item is not None and _row_key(item) == key:
+                item.setText(_VALUE, target.initial)
 
 
 class _ValueDelegate(QStyledItemDelegate):
