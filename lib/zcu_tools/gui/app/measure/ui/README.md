@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -46,7 +46,7 @@ or disconnect the session.
 
 `ExpTabWidget` owns the left forms and ledgers, commands, subscriptions,
 progress and splitter width. Its concrete owned child `ExperimentFigureArea`
-owns the right-side canvases, named figure selectors and caches, interactive
+owns the right-side canvases, figure paging and caches, interactive
 presentation and Data gallery. It keeps selection, signal blocking and canvas
 cleanup together. Data activation refreshes previews before switching pages,
 then reflows the visible gallery. The tab's overridable public figure reader
@@ -54,9 +54,12 @@ remains the preview source; each failed pane read leaves only that preview empty
 Figure/container methods on the tab delegate to this owner. Results and Save
 policy stay with their existing owners.
 
-Run, Analysis and Post-Analysis show up to four figures together in a two-column
-layout. Larger sets show one figure with a named selector. Data groups raster
-previews by source stage and applies the same rule within each group. The
+Run, Analysis and Post-Analysis show up to four figures per page in a two-column
+layout. Larger sets expose Previous page and Next page buttons with an i / N
+page indicator. Changing pages selects its first figure; clicking a canvas tile
+selects that figure for screenshots and current-figure reads. Re-presenting the
+same collection retains the page and current figure. Data groups raster previews
+by source stage and applies the same paging rule within each group. The
 app-local plot host passes the operation's original named collection through the
 render-host port after canvas attachment. It does not rename figures, copy their
 collection or change FigureContainer membership. Clearing a pane retires its
