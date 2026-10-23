@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.services.operation_control import ActiveOperation
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
     native_save_session,
@@ -88,6 +89,10 @@ def test_remote_close_only_requires_saved_measurement_data(fx, method, section, 
                 reply = call(sock, method, {**params, "discard_unsaved": True})
             assert reply["ok"] is True
             if method == "app.shutdown":
+                qt_until(
+                    lambda: view.request_shutdown.called,
+                    label="accepted shutdown owner continuation",
+                )
                 view.request_shutdown.assert_called_once()
                 assert reply["result"]["pid"] == os.getpid()
             else:

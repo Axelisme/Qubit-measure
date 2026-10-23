@@ -50,17 +50,14 @@ def h_adapter_guide(
 def h_app_shutdown(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    # Graceful close: trigger the window's normal close path (persist session,
-    # tear down remote, cleanup) on the main thread. request_shutdown defers the
-    # actual close to the next event-loop turn so this reply is sent before the
-    # remote service tears down. No kill / OS signal — that path is the agent's
-    # cross-platform-safe way to stop the GUI.
+    # Validate acceptance here. The adapter registers the owner-thread close
+    # continuation with shared dispatch, after this reply reaches terminal send.
     from .lifecycle import require_idle, require_saved
 
     require_idle(adapter)
     if not params["discard_unsaved"]:
         require_saved(adapter, adapter.tab_control.list_tab_ids())
-    render_view(adapter).request_shutdown()
+    render_view(adapter)  # Reject headless shutdown before accepting the command.
     return {"shutting_down": True, "pid": os.getpid()}
 
 

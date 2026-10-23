@@ -62,7 +62,7 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class LenRabiSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
 
 
 class LenRabiModuleCfg(ConfigBase):
@@ -104,8 +104,15 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
         Return quantized lengths in us and mean complex IQ at each length,
         retaining acquired data on cancellation and NaN for unmeasured points.
         Fit the oscillation with analyze() to obtain pi and pi/2 lengths.
-        Native arb assets reject length changes with ValueError.
+        Reject native arb with ValueError before preparing coordinates or plots:
+        its asset-derived length cannot be swept by this experiment.
         """
+        if cfg.modules.qub_pulse.waveform.style == "arb":
+            raise ValueError(
+                "Len Rabi cannot sweep an arb waveform's asset-derived length. "
+                "Select a waveform with an editable length instead."
+            )
+
         # 1. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg

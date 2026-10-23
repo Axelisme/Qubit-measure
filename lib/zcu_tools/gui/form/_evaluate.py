@@ -11,6 +11,7 @@ from pydantic_core import PydanticCustomError
 from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.gui.session.expression import ExpressionError, evaluate_scalar_expr
 
+from ._describe import describe
 from ._json import copy_object, default_json, expr_text
 from ._selection import option_errors
 from ._sources import check_sources, error_path
@@ -28,6 +29,7 @@ from .model import (
     FormErrors,
     FormModel,
     FormPath,
+    FormPathError,
     FormPreview,
     FormValue,
     FormWritePath,
@@ -57,7 +59,8 @@ class _Decoding:
     at one of these paths is an error and is not evaluated. source_error is
     the directed source failure that check_sources raised as (path, message),
     with choices then empty, or None. errors collects decoding errors by
-    path; selections records the selected structure.
+    path; selections records the selected structure. required_paths identifies
+    missing and null-blank validation errors that can carry authored guidance.
     """
 
     env: FormEnv
@@ -65,6 +68,7 @@ class _Decoding:
     source_error: tuple[FormPath, str] | None = None
     errors: dict[FormPath, str] = field(default_factory=dict)
     selections: _Selections = field(default_factory=_Selections)
+    required_paths: set[FormPath] = field(default_factory=set)
 
 
 def _decode(
@@ -284,7 +288,7 @@ def result[F: FormModel](
     """Evaluate one detached input and return its model or canonical errors."""
     decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
-    return _validate(model, ordinary, decoding)
+    return _validate(model, ordinary, decoding, data)
 
 
 def preview(
@@ -297,7 +301,7 @@ def preview(
     decoding = _start(model, data, env, selections)
     ordinary = _decode_model(model, data, (), decoding)
     failed_decoding = tuple(decoding.errors)
-    validated = _validate(model, ordinary, decoding)
+    validated = _validate(model, ordinary, decoding, data)
     if not isinstance(validated, FormErrors):
         complete = {
             key: default_json(getattr(validated, key)) for key in model.model_fields
@@ -374,9 +378,33 @@ def _validate[F: FormModel](
     model: type[F],
     ordinary: dict[str, FormValue],
     decoding: _Decoding,
+    data: dict[str, JsonValue],
 ) -> F | FormErrors:
-    """Validate ordinary values through the declaring model."""
-    return _validate_model(model, ordinary, decoding)
+    """Validate values and attach author guidance to required-field messages."""
+    result = _validate_model(model, ordinary, decoding)
+    if not isinstance(result, FormErrors):
+        return result
+    messages = dict(result.messages)
+    for path, message in messages.items():
+        if path not in decoding.required_paths:
+            continue
+        labels: list[str] = []
+        guidance: list[str] = []
+        for size in range(1, len(path) + 1):
+            try:
+                target = describe(model, data, path[:size], decoding.env).target
+            except FormPathError:
+                # Directed validator paths may name fields outside the active input.
+                break
+            if target is not None:
+                labels.append(
+                    f"{target.title} ({target.unit})" if target.unit else target.title
+                )
+                if target.description:
+                    guidance.append(target.description)
+        if guidance:
+            messages[path] = f"{message}: {' / '.join(labels)}. {' '.join(guidance)}"
+    return FormErrors(messages)
 
 
 def _validate_model[F: FormModel](
@@ -403,6 +431,10 @@ def _validate_model[F: FormModel](
                         *(item for item in directed if isinstance(item, (str, int))),
                     )
             errors[path] = error["msg"]
+            if error["type"] == "missing" or (
+                error.get("input") is None and error["type"].endswith("_type")
+            ):
+                decoding.required_paths.add(path)
         return FormErrors(errors)
     for path, values in decoding.choices.items():
         if not _active_leaf(validated, path):

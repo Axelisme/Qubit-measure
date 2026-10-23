@@ -123,7 +123,6 @@ def test_global_status_discovers_latest_terminal_recipes_and_retains_older_ids(
         ("tab.run_start", "operation"),
         ("tab.analyze", "operation"),
         ("tab.get_analyze_result", "result_read"),
-        ("tab.save_data", "image_save"),
         ("tab.save_artifacts", "image_save"),
         ("tab.get_figure", "figure_read"),
         ("tab.writeback_preview", "writeback_read"),
@@ -138,7 +137,7 @@ def test_recipe_failure_identifies_the_failed_runtime_action(
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
         await tab.run()
-        if failed_method in {"tab.save_data", "tab.save_artifacts"}:
+        if failed_method == "tab.save_artifacts":
             tab.save()
         elif failed_method == "tab.get_figure":
             tab.preview()

@@ -9,7 +9,7 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 
 ## 宣告與註冊
 
-[__init__.py](__init__.py) 的 `RECIPES` 明列 22 個宣告，不掃描目錄。
+[__init__.py](__init__.py) 的 `RECIPES` 明列 25 個宣告，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 `Inputs` 繼承 `FormModel`，逐欄寫單位、預設與 null 政策。
@@ -84,7 +84,7 @@ finally:
 
 預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
 範例的 Report 宣告 nullable value、writeback_applied 與 nullable analysis_failure。
-有分析的 21 支 recipe 都在每次 Analyze 後檢查 result。
+有分析的 24 支 recipe 都在每次 Analyze 後檢查 result。
 失敗時回報原因，不詢問或接受 writeback，也不跑相依的 Post。
 成功時 analysis_failure 為 null。Primary 成功而 Post 失敗時，報告保留 Primary 的估計。
 Mux 頂層分析失敗回空 tones；單 tone 失敗仍由 owner 保留該 tone 的原因，其他 tone 繼續。
@@ -123,7 +123,18 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 
 用 `recipe_guide(adapter="twotone/t1")` 依 adapter 名查 operator guide。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
-七個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
+八個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
+
+新增流程：
+
+| MCP tool | Adapter | 掃描與回報 |
+| --- | --- | --- |
+| `mux_onetone` | `mux/onetone` | `participants` 收 resonator 名稱，依固定 `$mux.resonators` 映射原始 index。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
+| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 名單。回覆每 dip 的 name、freq、depth 與 `identity_diagnostic`。`min_separation` 暫用分析預設，之後接 analyze updates。 |
+| `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
+
+三者依序 Run、Analyze、ask_writeback，只接受回答選定的候選，最後 Save。
+`writeback_applied` 只在寫入收據確認成功項目後為 true。略過不寫入。
 Framework 的執行、問答與取消契約見
 [recipe 與 execution](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)。
 新增 adapter 與流程的入口見 [實驗教學](../tutorial/03-experiment.md)

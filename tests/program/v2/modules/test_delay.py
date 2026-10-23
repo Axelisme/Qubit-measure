@@ -24,6 +24,12 @@ def test_delay_untagged_allows_rerun():
     assert Delay("d", 0.1).allow_rerun() is True
 
 
+@pytest.mark.parametrize("t", [0.0, "cycles"])
+def test_delay_auto_rejects_no_channels(t: float | str) -> None:
+    with pytest.raises(ValueError, match="DelayAuto.*at least one.*channel"):
+        DelayAuto("wait", t=t, gens=False, ros=False)
+
+
 def test_delay_auto_with_tag_rejects_reg_name():
     with pytest.raises(
         ValueError, match="DelayAuto with tag cannot have t as a register name"
@@ -52,24 +58,26 @@ def test_join_allow_rerun_aggregates():
 # ---------------------------------------------------------------------------
 
 
-def test_delay_auto_normal_calls_delay_auto(mock_prog):
-    da = DelayAuto("d", t=0.5)
+@pytest.mark.parametrize(("gens", "ros"), [(True, True), (True, False), (False, True)])
+def test_delay_auto_normal_calls_delay_auto(mock_prog, gens: bool, ros: bool):
+    da = DelayAuto("d", t=0.5, gens=gens, ros=ros)
     da.run(mock_prog, t=0.0)
     assert mock_prog.only("delay_auto").kwargs == {
         "t": 0.5,
-        "gens": True,
-        "ros": True,
+        "gens": gens,
+        "ros": ros,
         "tag": None,
     }
 
 
-def test_delay_auto_reg_name_calls_delay_reg_auto(mock_prog):
-    da = DelayAuto("d", t="time_reg")
+@pytest.mark.parametrize(("gens", "ros"), [(True, True), (True, False), (False, True)])
+def test_delay_auto_reg_name_calls_delay_reg_auto(mock_prog, gens: bool, ros: bool):
+    da = DelayAuto("d", t="time_reg", gens=gens, ros=ros)
     da.run(mock_prog, t=0.0)
     assert mock_prog.only("delay_reg_auto").kwargs == {
         "time_reg": "time_reg",
-        "gens": True,
-        "ros": True,
+        "gens": gens,
+        "ros": ros,
     }
 
 

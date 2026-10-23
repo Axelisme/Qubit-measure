@@ -158,6 +158,11 @@ class SpectrumEntry:
     brush_mask: NDArray[np.bool_] | None = None
 
     @property
+    def can_seed_alignment(self) -> bool:
+        """Whether committed or seeded alignment may be inherited by a new spectrum."""
+        return self.aligned or self.alignment_seeded
+
+    @property
     def point_count(self) -> int:
         """Number of available annotated points, independent of stage completion."""
         return int(self.points["freqs"].size)

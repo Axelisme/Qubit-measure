@@ -349,6 +349,7 @@ class SingleFluxoniumModel:
         *,
         noise: FluxoniumNoise = _DISABLED_NOISE,
         resonator: DispersiveResonator | None = None,
+        slow_envelope_segments_per_period: int = 20,
     ) -> ModelSource:
         """Return a round-local engine source with DC Gibbs initial density.
 
@@ -358,7 +359,9 @@ class SingleFluxoniumModel:
         flux comes from flux_expansion, while baths retain each row's quantized
         level. The source retains models, not an evolving density between shots.
         Invalid source/bath inputs raise on the first requested level, as in
-        secular_model; construction only validates the initial density.
+        secular_model. slow_envelope_segments_per_period is a strict positive
+        integer, default 20, forwarded to ModelSource's midpoint policy.
+        Construction validates the initial density and policy.
         """
         return ModelSource(
             np.diag(
@@ -368,4 +371,5 @@ class SingleFluxoniumModel:
                 self.secular_model, sources=sources, noise=noise, resonator=resonator
             ),
             self.flux_expansion(),
+            slow_envelope_segments_per_period=slow_envelope_segments_per_period,
         )

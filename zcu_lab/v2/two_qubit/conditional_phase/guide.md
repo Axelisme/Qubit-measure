@@ -8,6 +8,8 @@ Readout references `$mux.module.readout` when present, preserving the library's 
 
 `two_qubit/conditional_phase` acquires the target's ensemble phase for two nominal spectator branches. Choose F1 or F2 as target. Each shot applies spectator I or Xπ, target X90, n repeated simultaneous CZ pulse pairs, one projection pulse, then the complete mux readout. X and Y projections are independent acquisitions. Spectator Xπ flips a thermal ensemble, with thermal admixture still present.
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Prepare the inputs
 
 Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon, and `mux` to a MuxGroup containing both qubits. Calibrate both Xπ and X90 pulses and the complete mux readout first. Open or Reset captures these identities, module inputs and the original tone positions. Run uses these fixed sources throughout acquisition. Reset after changing sources, then check every input.

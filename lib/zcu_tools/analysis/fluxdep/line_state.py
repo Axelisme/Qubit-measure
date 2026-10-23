@@ -34,7 +34,11 @@ class FluxPickState:
 
 @dataclass(frozen=True, slots=True)
 class FluxPickInputs:
-    """Owned, read-only spectrum and device/frequency axes for one picker."""
+    """Owned, read-only spectrum and axes for one picker.
+
+    signals has shape (device, frequency); dev_values uses native device units.
+    freqs contains GHz coordinates, independent of the acquisition frequency unit.
+    """
 
     signals: NDArray[np.complex128]
     dev_values: NDArray[np.float64]
