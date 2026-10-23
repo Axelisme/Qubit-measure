@@ -1,11 +1,14 @@
 """Driver observations of disabled drafts and membership-driven recovery."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from pathlib import Path
 
 from pydantic import Field, JsonValue
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.form import FieldApplicability, FormEnv, FormModel, FormState
+from zcu_tools.gui import form
+from zcu_tools.gui.form import FormEnv, FormModel, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import ComponentDriver
@@ -21,10 +24,10 @@ class Conditional(FormModel):
     @classmethod
     def applicability(
         cls, data: Mapping[str, JsonValue]
-    ) -> tuple[FieldApplicability, ...]:
+    ) -> tuple[form.FieldApplicability, ...]:
         """Only selection membership controls amplitude applicability."""
         del data
-        return (FieldApplicability(("selection",), 1, (("amplitude",),)),)
+        return (form.FieldApplicability(("selection",), 1, (("amplitude",),)),)
 
 
 def test_membership_greys_draft_and_restores_its_value_and_error(
