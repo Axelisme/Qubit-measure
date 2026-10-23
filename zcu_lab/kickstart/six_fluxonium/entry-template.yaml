@@ -143,4 +143,3 @@ aliases:
     mux: MG123456
     qubit: Q1
     resonator: $qubit.resonator
-    flux_dev: $qubit.flux_source

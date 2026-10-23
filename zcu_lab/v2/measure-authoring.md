@@ -85,8 +85,9 @@ sampling_mode 與 homophasal。Linear 輸出 homophasal=None。Homophasal 的必
 `twotone/time_domain/t1` 的 uniform 隨 RunRecord 保存。False 保原 start／stop／expts 視窗，
 由 runtime 在硬體量化前配置 delay；格點 collision 提示擴大 span 或減少 points，不靜默減點。
 
-Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 的 AliasName("flux_dev") 在 Open／Reset
-選 direct 名稱，core 只以 context.devices 查 driver。Flux_unit 獨立保存，recipe 不改單位政策。
+Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 在 Open／Reset 從
+$qubit.flux_source、$mux.flux_source 或 JPA 的 flux_source／rf_source 取得可覆寫的 direct 名稱。
+缺來源留空，必填欄位報錯。Core 只以 context.devices 查 driver。Flux_unit 獨立保存，recipe 不改單位政策。
 
 ## 表單設計與預演
 
@@ -539,10 +540,9 @@ tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列�
 | 5 | `jpa/flux_onetone` | flux × readout frequency 2D survey（`analysis=NONE`，無 writeback） |
 | 6 | `jpa/check` | pump off/on 比較診斷（figure-only analysis，無 writeback） |
 
-共同 mechanics 在 `_support/measure/jpa_shared.py`：RF 選擇使用 `jpa_rf_dev` role
-（`set_freq` / `set_power` / `set_output` knob 能力檢查），flux 選擇使用
-`jpa_flux_dev` role（`set_flux` knob）；lowering 與 preflight 只作用於 cached
-device snapshot，任何硬體工作前 fast-fail。六個 adapter 都顯式暴露 `reps`、
+JPA 表單從 `$jpa.rf_source` 與 `$jpa.flux_source` 取得 `jpa_rf_dev` 與
+`jpa_flux_dev` 的 direct 初值，使用者可覆寫。Core 以具名欄位從 context.devices
+取得 driver，RF 操作使用 `set_freq`／`set_power`／`set_output`，flux 操作使用 `set_flux`。六個 adapter 都顯式暴露 `reps`、
 `rounds`、`relax_delay`。`reps / rounds` 維持原值，`freq` / `flux` /
 `power` 是 `10000 / 1`，`auto_optimize` 是 `1000 / 1`，`flux_onetone` 是
 `100 / 10`，`check` 是 `1000 / 5`。`initial_delay` 維持 GUI 隱藏並使用 core

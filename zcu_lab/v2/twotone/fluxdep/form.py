@@ -1,6 +1,6 @@
 """Flux-dependent spectroscopy starting values and named device selection."""
 
-from zcu_tools.cfg_model import AliasName, FieldMeta, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.pulse_readout_metadata import (
@@ -12,6 +12,13 @@ from .core import FreqFluxCfg
 
 def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
     """Build starting values and shape from the captured source availability."""
+    flux_source = (
+        ctx.parameters.lookup_point("$qubit.flux_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if flux_source is not None and not isinstance(flux_source, str):
+        raise ValueError("$qubit.flux_source must name a device")
     return Form(
         FreqFluxCfg,
         field_order=(
@@ -38,7 +45,7 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "flux_dev": AliasName("flux_dev"),
+            "flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
                 "freq": Range.between(None, None, expts=1001),

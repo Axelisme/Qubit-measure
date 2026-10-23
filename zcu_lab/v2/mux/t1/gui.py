@@ -123,7 +123,7 @@ class MuxT1Adapter(
     """Run explicit sources and propose captured destinations without applying them."""
 
     experiment_tag: ClassVar[str | None] = MuxT1Exp.persistence_tag()
-    sample_device_alias: ClassVar[str | None] = "$flux_dev"
+    sample_device_alias: ClassVar[str | None] = "$mux.flux_source"
     exp_cls = MuxT1Exp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

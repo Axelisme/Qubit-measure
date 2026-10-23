@@ -9,7 +9,8 @@
 Q1 uses microwave generator 1 and fast-flux generator 2.
 R1 uses readout generator 0 and ADC 0.
 `flux_bias` is the only DC source. The startup script seeds aliases for
-`qubit`, `resonator` and `flux_dev` when it creates the entry.
+`qubit` and `resonator` when it creates the entry. Flux forms read the device
+name from `$qubit.flux_source` on Open/Reset.
 
 ## Circuit and basis
 

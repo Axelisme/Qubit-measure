@@ -82,6 +82,50 @@ class SampleProposingAdapter(AnalysisSavingAdapter):
         return sample_proposals()
 
 
+@pytest.mark.parametrize("source", ["device_at_run", None])
+def test_sample_coordinates_follow_the_captured_component_source(
+    tmp_path: Path,
+    qapp: QApplication,
+    registered_components: None,
+    source: str | None,
+) -> None:
+    with native_save_session(tmp_path, qapp) as native:
+        native.context.add_component("Q1", "fake/drive/a", {"source": source})
+        native.context.set_alias_rows((AliasRow("target", "Q1"),))
+        captured = native.context.read_context()
+        assert captured.value("$target.source") == source
+        native.context.set_alias_rows((AliasRow("target", "later_target"),))
+        writeback = WritebackService(
+            ContextControlFacet(context=native.context), arb_names=lambda: ()
+        )
+        draft = writeback.create_draft(
+            [SampleWriteback("Q1", "Sample", {"freq_mhz": 1250.0})],
+            parameters=captured,
+            experiment_name="synthetic",
+            run_id="captured-run",
+            sample_device_alias="$target.source",
+            device_snapshot={"device_at_run": {"value": 0.00125, "value_unit": "A"}},
+        )
+        try:
+            if source is None:
+                assert draft.preview() == []
+                assert draft.unavailable_reasons == (
+                    "Q1: Sample writeback requires a Run $target.source name",
+                )
+            else:
+                samples = [
+                    item
+                    for item in draft.preview()
+                    if isinstance(item, SampleWriteback)
+                ]
+                assert [item.proposed_value for item in samples] == [
+                    {"freq_mhz": 1250.0, "dev_value": 0.00125, "dev_unit": "A"}
+                ]
+                assert draft.unavailable_reasons == ()
+        finally:
+            writeback.teardown_draft(draft)
+
+
 class DeclaredSampleAdapter(SampleProposingAdapter):
     sample_device_alias: ClassVar[str | None] = "$coordinate_source"
 
