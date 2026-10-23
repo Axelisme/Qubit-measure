@@ -438,6 +438,13 @@ class VectorInterpreter:
 
     def _join(self, module: Join, t: Time) -> Time:
         self._diagnostic.check_join(module)
+        if module.table_pulses:
+            self._advance(t)
+            self._align()
+            for pulse in module.table_pulses:
+                self._table_length(pulse, 0.0, wait=False)
+            self._align()
+            return 0.0
         queues = [list(branch) for branch in module.join_modules]
         times = [t for _ in queues]
 
@@ -504,7 +511,9 @@ class VectorInterpreter:
         )
         return t + block_length if block_length is not None else t
 
-    def _table_length(self, module: TableLengthPulse, t: Time) -> float:
+    def _table_length(
+        self, module: TableLengthPulse, t: Time, *, wait: bool = True
+    ) -> float:
         index = self._index(module.idx_reg, len(module.lengths))
         candidates = [
             module.playback_parameters(self._prog, i)
@@ -529,11 +538,16 @@ class VectorInterpreter:
                 self._presence.copy(),
             )
         )
-        self._gen_end[module.cfg.ch] = previous
         durations = np.asarray([c[2] for c in candidates], dtype=np.float64) / float(
             self._prog.tproccfg["f_time"]
         )
-        self._align(durations[index])
+        if wait:
+            self._gen_end[module.cfg.ch] = previous
+            self._align(durations[index])
+        else:
+            self._gen_end[module.cfg.ch] = np.where(
+                self._active, self._ref + durations[index], previous
+            )
         return 0.0
 
     def _frequencies(

@@ -295,8 +295,15 @@ class TimelineInterpreter:
             return self.pulse(module.pi2_pulse, end)
         raise ValueError(f"{type(module).__name__} simulation unsupported")
 
-    def table_length(self, module: TableLengthPulse, t: float | QickParam) -> float:
-        """Apply selected generator length and runtime duration, with no max padding."""
+    def table_length(
+        self, module: TableLengthPulse, t: float | QickParam, *, wait: bool = True
+    ) -> float:
+        """Apply selected generator length and runtime duration, with no max padding.
+
+        wait advances the reference by the selected duration. With wait=False,
+        keep the reference and expose that duration as the generator end so an
+        enclosing table-length Join can align all branches once.
+        """
         index = self.register(module.idx_reg)
         if not 0 <= index < len(module.lengths):
             raise ValueError(
@@ -316,8 +323,13 @@ class TimelineInterpreter:
         self.pulse(template, t, duration=duration)
         # PulseFromLengthReg deliberately does not update compile-time timestamps.
         # Its duration table, not template length, owns the reference increment.
-        self.gen_end[module.cfg.ch] = previous_end
-        self.align(self.prog.cycles2us(duration_cycles))
+        if wait:
+            self.gen_end[module.cfg.ch] = previous_end
+            self.align(self.prog.cycles2us(duration_cycles))
+        else:
+            self.gen_end[module.cfg.ch] = self.ref + self.prog.cycles2us(
+                duration_cycles
+            )
         return 0.0
 
     def table_readout(
@@ -355,6 +367,14 @@ class TimelineInterpreter:
         across hardware points. Cross-branch register dependencies are rejected.
         """
         from ..modules.util import merge_max_length
+
+        if module.table_pulses:
+            self.ref += self.tick(self.scalar(t))
+            self.align()
+            for pulse in module.table_pulses:
+                self.table_length(pulse, 0.0, wait=False)
+            self.align()
+            return 0.0
 
         queues = [list(branch) for branch in module.join_modules]
         times = [t for _ in queues]

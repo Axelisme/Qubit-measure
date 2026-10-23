@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
 
@@ -103,6 +103,14 @@ Scalar and pre/post-delay timing keep their existing rules.
   build. Points below the generator's three-cycle minimum also fail fast. Runtime
   duration alignment places readout immediately after the selected pulse instead
   of padding every point to the maximum length.
+- `Join` accepts one `TableLengthPulse` per parallel branch, with independent
+  generators, a shared index register and equal table sizes. It emits all drives
+  at one origin and loads one per-point maximum duration table for a common wait.
+  The selected lengths, including pre/post delays, determine when readout starts;
+  crossing length ranges do not cause sweep-wide padding. Mixed scalar/table
+  branches and table-pulse sequences fail before build. Standalone table pulses
+  retain their own wait. Hardware and semantic simulation use the same rounded
+  duration tables.
 
 ## Design Boundaries
 

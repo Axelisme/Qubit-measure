@@ -5,6 +5,7 @@ import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import DelayAuto, Join
@@ -127,6 +128,57 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         assert events[1].start_us == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
     assert raw_of(prog)[0].shape == (2, 2, 1, 2)
+
+
+@pytest.mark.parametrize("flat_top", [False, True])
+@pytest.mark.parametrize("branches", [1, 2])
+@pytest.mark.parametrize("preceding_pulse", [False, True])
+def test_join_table_lengths_start_together_and_wait_for_each_points_longest_branch(
+    flat_top,
+    branches,
+    preceding_pulse,
+):
+    from zcu_tools.program.v2.modules.waveform import (
+        FlatTopWaveformCfg,
+        GaussWaveformCfg,
+    )
+
+    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
+    first = drive()
+    first.pre_delay = 0.02
+    first.post_delay = 0.03
+    second = drive().model_copy(update={"ch": 2})
+    if flat_top:
+        first.waveform = FlatTopWaveformCfg(
+            length=0.2, raise_waveform=GaussWaveformCfg(length=0.04, sigma=0.01)
+        )
+    pulses = [
+        TableLengthPulse("first", first, lengths=[0.1, 0.3], idx_reg="length"),
+        TableLengthPulse("second", second, lengths=[0.2, 0.1], idx_reg="length"),
+    ]
+    modules: list[Module] = [Join(*pulses[:branches]), receiver().build("readout")]
+    if preceding_pulse:
+        modules.insert(0, drive(length=0.04).build("reset"))
+    try:
+        prog = ModularProgramV2(
+            env.soccfg, ProgramV2Cfg(), modules=modules, sweep=[("length", 2)]
+        )
+    except RuntimeError as exc:
+        pytest.fail(f"parallel table-length pulses must compile: {exc}")
+    prog.acquire(env.soc, progress=False)
+    request = request_of(env)
+    origin = 0.04 if preceding_pulse else 0.0
+    waits = [0.15, 0.35] if branches == 1 else [0.2, 0.35]
+    for point, expected_wait in enumerate(waits):
+        events = request.materialize_point(point).events
+        first_event = next(e for e in events if e.source == "first_template")
+        readout = next(e for e in events if e.gen_ch == 0)
+        assert first_event.start_us == pytest.approx(origin + 0.02, abs=0.003)
+        if branches == 2:
+            second_event = next(e for e in events if e.gen_ch == 2)
+            assert second_event.start_us == pytest.approx(origin, abs=0.003)
+        assert readout.start_us == pytest.approx(origin + expected_wait, abs=0.007)
+    env.devices.close_all_devices()
 
 
 def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout():
