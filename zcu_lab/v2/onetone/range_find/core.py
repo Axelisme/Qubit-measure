@@ -155,7 +155,8 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
         min_separation in actual MHz; frequency-sorted dips receive the given names.
         Edge minima are excluded. depth is prominence in a.u., not linewidth.
 
-        plots receives raw/background and corrected curves, labeled name/freq/depth.
+        plots receives one measured-magnitude curve with red stars at the dips,
+        annotated by name and labeled with name, MHz frequency and depth.
         Return all requested dips or raise ValueError naming the available count;
         no partial success or proposals are produced here.
         """
@@ -216,24 +217,31 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
             for name, index in zip(options.resonators, sorted(selected), strict=True)
         )
 
-        plots.subplots("fit", nrows=2, sharex=True, figsize=(9, 7))
+        plots.subplots("fit", nrows=1, figsize=(9, 4.5))
 
         def draw(figure: Figure) -> None:
-            raw_ax, dip_ax = figure.axes
-            raw_ax.plot(freqs, magnitude, label="Measured magnitude")
-            raw_ax.plot(freqs, background, label="Linear edge background")
-            raw_ax.set_ylabel("Magnitude (a.u.)")
-            raw_ax.legend()
-            dip_ax.plot(freqs, smoothed, label="Background removed")
+            (ax,) = figure.axes
+            ax.plot(freqs, magnitude, label="Measured magnitude")
             for dip in dips:
-                dip_ax.axvline(
+                measured = magnitude[np.searchsorted(freqs, dip.freq)]
+                ax.plot(
                     dip.freq,
-                    linestyle="--",
+                    measured,
+                    marker="*",
+                    color="red",
+                    markersize=14,
+                    linestyle="none",
                     label=f"{dip.name}: {dip.freq:.6g} MHz, depth {dip.depth:.4g}",
                 )
-            dip_ax.set_xlabel("Frequency (MHz)")
-            dip_ax.set_ylabel("Corrected magnitude (a.u.)")
-            dip_ax.legend()
+                ax.annotate(
+                    dip.name,
+                    (dip.freq, measured),
+                    xytext=(8, 8),
+                    textcoords="offset points",
+                )
+            ax.set_xlabel("Frequency (MHz)")
+            ax.set_ylabel("Magnitude (a.u.)")
+            ax.legend()
             figure.tight_layout()
 
         plots.draw("fit", draw)

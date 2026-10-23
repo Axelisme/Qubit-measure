@@ -124,7 +124,7 @@ class RangeFindAdapter(
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
-        """Build freq linear defaults and editable captured analysis names."""
+        """Build blank required sweep endpoints and editable captured analysis names."""
         return make_form(ctx)
 
     def run(
