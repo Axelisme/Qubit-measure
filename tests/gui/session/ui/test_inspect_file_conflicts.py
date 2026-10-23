@@ -164,9 +164,8 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
     if submit == "enter":
         ui.press_key(Qt.Key.Key_Return)
     else:
-        ui.enter_text(
-            object_name="inspect.parameters.filter", value="Q1.rate", commit=False
-        )
+        ui.press_key(Qt.Key.Key_Tab)
+        assert ui.focused_input().text != "9"
     assert ui.observe(object_name="component_error").text
     rows = ui.visible().tree_rows
     assert any(row.path == ("Q1", "rate") and row.columns[1] == "9" for row in rows)
