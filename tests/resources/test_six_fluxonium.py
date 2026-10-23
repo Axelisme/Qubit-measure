@@ -101,7 +101,8 @@ def test_invalid_topology_or_material_is_rejected(defect, diagnostic):
 def test_current_calibrations_require_finite_numeric_values(field, value):
     document = six_document()
     document["qubits"]["Q3"]["dc_bias"][field] = value
-    with pytest.raises(ValueError, match=rf"qubits.Q3.dc_bias.{field}"):
+    reason = "finite number" if isinstance(value, float) else "valid number"
+    with pytest.raises(ValueError, match=rf"qubits.Q3.dc_bias.{field}: [^;]*{reason}"):
         api.parse_six_fluxonium(document)
 
 
@@ -109,5 +110,5 @@ def test_current_calibrations_require_finite_numeric_values(field, value):
 def test_current_calibrations_reject_zero_period(field):
     document = six_document()
     document["qubits"]["Q3"]["dc_bias"][field] = 0.0
-    with pytest.raises(ValueError, match=rf"qubits.Q3.dc_bias.{field}"):
+    with pytest.raises(ValueError, match=rf"qubits.Q3.dc_bias.{field}: [^;]*nonzero"):
         api.parse_six_fluxonium(document)

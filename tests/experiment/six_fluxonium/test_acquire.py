@@ -33,9 +33,10 @@ def environment(document=None):
         env = six_fluxonium(
             parse_six_fluxonium(six_document() if document is None else document)
         )
-    except NotImplementedError:
+    except (NotImplementedError, ValueError) as error:
         pytest.fail(
-            "six independent physical models must assemble a working acquire environment"
+            "six independent physical models must accept local and coil material "
+            f"and assemble a working acquire environment: {error}"
         )
     try:
         yield env
