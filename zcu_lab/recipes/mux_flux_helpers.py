@@ -3,7 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
-from zcu_tools.format_version import YamlValue
+from typing_extensions import TypedDict
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeTab
 from zcu_tools.mcp.measure.recipe_contracts import (
@@ -97,6 +97,17 @@ class FluxToneIdentity(BaseModel):
     """Decode the fixed complete-list Q identity from a Form observation."""
 
     name: str = Field(description="Q name at this original full-list position.")
+
+
+class MuxFluxAnalysisUpdate(TypedDict, closed=True):
+    """Same-operation picker updates; null lines restore this Q's Run capture."""
+
+    tone: int
+    """Original index in the complete fixed tones list, not participant order."""
+    flux_half: float | None
+    """Initial half-flux line in native DC units; null uses Run capture."""
+    flux_int: float | None
+    """Initial integer-flux line in native DC units; null uses Run capture."""
 
 
 class MuxFluxPickSummary(BaseModel):
@@ -212,7 +223,7 @@ def mux_flux_final_edits(inputs: MuxFluxInputs) -> list[FieldEdit]:
 
 def mux_flux_analysis_updates(
     tab: RecipeTab, inputs: MuxFluxInputs
-) -> list[dict[str, YamlValue]]:
+) -> list[MuxFluxAnalysisUpdate]:
     """Read final validated selection and build same-operation updates in Q order.
 
     Original indices come from the complete fixed tones list. Unknown picker
