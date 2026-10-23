@@ -349,16 +349,16 @@ def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session)
         draft.apply()
     event = entry.ledger.events()[-1]
     assert service.get_all_applied(draft) == {
-        "ml-1": True,
-        "param-1": True,
+        "ml-1": False,
+        "param-1": False,
         "param-2": False,
         "param-3": False,
     }
     current = control.read_context()
-    assert current.value("general.ext.tuned") == 3.0
+    assert not current.lookup("general.ext.tuned").present
     assert not current.lookup("general.ext.after").present
-    assert current.library.module_spec(PULSE) == pulse_proposal(gain=0.25)
-    assert document_meta(current.document(), "general.ext.tuned") == {"stderr": 0.3}
+    assert PULSE not in current.library.module_keys()
+    assert document_meta(current.document(), "general.ext.tuned") is None
     assert isinstance(event.payload, writeback.AcceptedPayload)
     assert [write.path for write in event.payload.writes] == [
         PULSE,

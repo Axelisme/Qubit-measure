@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pydantic import ValidationError
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     PointView,
@@ -16,9 +17,11 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.storage import bind_sample_table
 from zcu_tools.resources.entry.writeback import (
+    ModuleWriteback,
     ParameterWriteback,
     PointWritebackTarget,
     SampleWriteback,
+    WaveformWriteback,
     WritebackApplyError,
     WritebackEvidence,
     apply_writeback,
@@ -64,16 +67,23 @@ def test_executor_returns_each_committed_value_and_failure_prefix(
     else:
         result = apply_writeback(items, target=writer, evidence=evidence())
         assert hasattr(result, "committed"), "Executor must return confirmed values"
-    assert [(item.path, item.value) for item in result.committed] == [
-        ("Q1.ext.fit", {"gain": 0.1}),
-        ("Q1.ext.fit.gain", 0.2),
-    ]
+    assert [(item.path, item.value) for item in result.committed] == (
+        []
+        if fails
+        else [
+            ("Q1.ext.fit", {"gain": 0.1}),
+            ("Q1.ext.fit.gain", 0.2),
+        ]
+    )
     events = writer.ledger.events()
     assert len(events) == 1
     assert events[0].id == result.event_id
     assert events[0].kind == "accepted"
     point.refresh()
-    assert document_value(snapshot(point), "Q1.ext.fit.gain") == 0.2
+    if fails:
+        assert document_value(snapshot(point), "Q1.ext") == {}
+    else:
+        assert document_value(snapshot(point), "Q1.ext.fit.gain") == 0.2
 
 
 def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
@@ -104,7 +114,7 @@ def test_parameter_items_commit_caller_metadata_and_keep_omitted_metadata(
     assert point.meta("general.description") == {}
 
 
-def test_item_failure_keeps_prefix_value_and_metadata_and_stops(
+def test_invalid_parameter_rolls_back_whole_group_and_metadata(
     point: PointView,
 ) -> None:
     writer = target(point)
@@ -118,15 +128,96 @@ def test_item_failure_keeps_prefix_value_and_metadata_and_stops(
             target=writer,
             evidence=evidence(),
         )
-    assert caught.value.applied == 1
+    assert caught.value.applied == 0
     assert isinstance(caught.value.__cause__, ValidationError)
     assert writer.ledger.get(caught.value.event_id).event.kind == "accepted"
     point.refresh()
-    assert point.Q1.rate == 5300.0
-    assert point.meta("Q1.rate") == {"stderr": 0.2}
+    assert point.Q1.rate == 5000.0
+    assert point.meta("Q1.rate") == {"stderr": 9.0, "source": "old run"}
     assert point.Q1.duration == 10.0
     assert point.meta("Q1.duration") == {"stderr": 0.5, "comment": "kept"}
     assert point.description is None
+
+
+def test_group_order_preserves_accepted_order_and_per_item_receipts(
+    point: PointView,
+) -> None:
+    writer = target(point)
+    waveform = ConstWaveformCfg(length=0.1)
+    result = apply_writeback(
+        (
+            SampleWriteback("Q1", {"freq": 10.0}),
+            WaveformWriteback("Q1.waveforms.base", waveform),
+            ParameterWriteback("Q1.ext.fit", {"gain": 0.1}),
+            WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.2)),
+            ParameterWriteback("Q1.ext.fit.gain", 0.2),
+            SampleWriteback("Q1", {"freq": 20.0}),
+        ),
+        target=writer,
+        evidence=evidence(),
+    )
+    assert [(item.path, item.value) for item in result.committed[:4]] == [
+        ("Q1.ext.fit", {"gain": 0.1}),
+        ("Q1.ext.fit.gain", 0.2),
+        ("Q1.waveforms.base", {"style": "const", "length": 0.1}),
+        ("Q1.waveforms.base", {"style": "const", "length": 0.2}),
+    ]
+    assert [
+        item.value["freq"]
+        for item in result.committed[4:]
+        if isinstance(item.value, dict)
+    ] == [10.0, 20.0]
+    event = writer.ledger.get(result.event_id).event
+    assert isinstance(event.payload, AcceptedPayload)
+    assert [write.path for write in event.payload.writes] == [
+        "Q1",
+        "Q1.waveforms.base",
+        "Q1.ext.fit",
+        "Q1.waveforms.base",
+        "Q1.ext.fit.gain",
+        "Q1",
+    ]
+    assert len(writer.ledger.events()) == 1
+    assert [item.index for item in result.committed] == [2, 4, 1, 3, 0, 5]
+
+
+def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
+    point: PointView,
+) -> None:
+    writer = target(point)
+    with pytest.raises(WritebackApplyError) as caught:
+        apply_writeback(
+            (
+                WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.1)),
+                SampleWriteback("Q1", {"freq": 10.0}),
+                ParameterWriteback("Q1.rate", 5300.0),
+                ModuleWriteback(
+                    "Q1.waveforms.wrong",
+                    PulseSpec(
+                        ch=0, nqz=1, freq=100.0, gain=0.1, waveform="Q1.waveforms.base"
+                    ),
+                ),
+                ParameterWriteback("Q1.duration", 12.0),
+            ),
+            target=writer,
+            evidence=evidence(),
+        )
+    assert caught.value.applied == 2
+    assert [(item.path, item.value) for item in caught.value.result.committed] == [
+        ("Q1.rate", 5300.0),
+        ("Q1.duration", 12.0),
+    ]
+    point.refresh()
+    assert (point.Q1.rate, point.Q1.duration) == (5300.0, 12.0)
+    storage = capture_point_storage(point)
+    library = ResultEntry.open(
+        "entry",
+        result_root=storage.result_path.parent,
+        database_root=storage.database_path.parent,
+    ).module_library("a")
+    assert library.snapshot().document().components == {}
+    assert bind_sample_table(storage.result_path, "Q1").latest("run-1") is None
+    assert len(writer.ledger.events()) == 1
 
 
 def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
