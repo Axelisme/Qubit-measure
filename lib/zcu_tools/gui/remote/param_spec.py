@@ -157,7 +157,9 @@ class ParamSpec:
     """One wire parameter and its agent-facing declaration.
 
     name is the literal key; json_type selects primitive admission. required
-    rejects absent/null values; otherwise default is delivered for either.
+    requires the key. nullable admits explicit null as None when True; False
+    keeps legacy null handling (required rejects, optional delivers default).
+    Absent optional keys use default unless omit_when_missing is True.
     description documents the input. mcp_hidden omits it only from MCP schemas.
     enum restricts STRING membership. array_item_type declares ARRAY schema
     items (string by default, or number), without changing handler validation.
@@ -185,6 +187,7 @@ class ParamSpec:
     minimum: float | None = None
     maximum: float | None = None
     omit_when_missing: bool = False
+    nullable: bool = False
 
     def __post_init__(self) -> None:
         if self.omit_when_missing and (self.required or self.default is not None):
