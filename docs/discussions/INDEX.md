@@ -49,4 +49,5 @@
 
 ## 存檔與資料格式
 
+- 2026-10-23 [Store 讀取效率與寫入慣例](2026-10-23-store-read-efficiency.md)：保留分組提交，以 ledger 增量讀與內容 hash 快照減少重複驗證；批次為原形、工作量測試與 owner handler 延遲 warning 分別保護交易邊界、工作量與現場診斷。
 - 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 `data.h5`，Notebook 與 GUI 都讀它；Artifact 以項目種類擴充、格式由框架決定，讀回採資料優先、設定可缺；決策見 [ADR-0063](../adr/0063-persistence-ownership.md)／[0069](../adr/0069-experiment-core-and-frontends.md)／[0067](../adr/0067-gui-application.md)。
