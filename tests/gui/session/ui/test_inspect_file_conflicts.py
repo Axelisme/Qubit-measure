@@ -30,6 +30,18 @@ from tests.gui._user_input import ComponentDriver
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
+@pytest.mark.parametrize("conflict_ui", ["parameters", "library", "aliases"], indirect=True)
+def test_clean_reload_does_not_present_a_draft_conflict(conflict_ui) -> None:
+    ui, path, evidence, source, _ = conflict_ui
+    document = next(file.document for file in source.get_file_revisions() if file.path == path)
+    ui.select_tab({"parameters": "Parameters", "library": "Modules", "aliases": "Aliases"}[document])
+    path.write_text(path.read_text() + "\n")
+    source.synchronize_files(admit_reload=True)
+    ui.click("Refresh")
+    ui.screenshot(evidence / "clean-reloaded.png")
+    assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
+
+
 def _assert_notice_fits(ui: ComponentDriver, document: str) -> None:
     message = ui.observe(object_name=f"inspect.{document}.sync.message")
     reload = ui.observe(object_name=f"inspect.{document}.sync.reload")
