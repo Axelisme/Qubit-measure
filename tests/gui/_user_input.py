@@ -7,7 +7,7 @@ tests send the same Qt events through QApplication.sendEvent instead.
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
+from PyQt6.QtCore import QDir, QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
 from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
@@ -759,8 +759,10 @@ class ComponentDriver:
         """Click opener, enter path in its modal Qt file chooser, and click Open.
 
         The opener must synchronously open a non-native QFileDialog with Qt's
-        visible fileNameEdit. The caller supplies an existing file path (spaces
-        allowed). Before looking up the opener or applying unavailable no-ops,
+        visible fileNameEdit. The helper preserves its filter and shows hidden
+        directories and files so paths below hidden parents can be selected.
+        The caller supplies an existing file path (spaces allowed).
+        Before looking up the opener or applying unavailable no-ops,
         nonexistent paths raise FileNotFoundError and existing non-files raise
         ValueError. Visible caption matches take precedence over hidden copies;
         if none are on screen, a unique unseen opener is a no-op (multiple or
@@ -834,6 +836,7 @@ class ComponentDriver:
         chooser = ComponentDriver(dialog)
         if not ComponentDriver._on_screen(dialog):
             raise LookupError("Qt file chooser is not on screen")
+        dialog.setFilter(dialog.filter() | QDir.Filter.Hidden)
         if evidence is not None:
             # This callback is executing, not queued behind the screenshot flush,
             # so capture occurs while the chooser is still awaiting input.
@@ -841,7 +844,10 @@ class ComponentDriver:
         filename = chooser._find(None, "fileNameEdit", editable=True)
         mouse_click(filename, filename.rect().center())
         key_click(filename, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
-        type_text(filename, str(path))
+        # Let QFileDialog's filesystem/completion events run between typed keys.
+        for char in str(path):
+            type_text(filename, char)
+            QApplication.processEvents()
         # Completion popups consume Enter and may replace the typed path.
         if (popup := QApplication.activePopupWidget()) is not None:
             key_click(popup, Qt.Key.Key_Escape)
