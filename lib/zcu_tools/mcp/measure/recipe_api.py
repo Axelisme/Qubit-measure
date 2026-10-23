@@ -617,11 +617,19 @@ class RecipeTab:
         ]
         batch.extend(edits)
         batch.extend(inputs.overrides or ())
-        final: dict[FormPath, FieldEdit] = {}
-        for edit in batch:
-            if edit.value is not None:
-                final[edit.path] = edit
-        self.apply(tuple(final.values()), require_valid=require_valid)
+        last = {
+            edit.path: index
+            for index, edit in enumerate(batch)
+            if edit.value is not None
+        }
+        # Preserve authored path/source validation while sending only the last non-None value per exact path.
+        final = [
+            edit
+            if edit.value is None or last[edit.path] == index
+            else FieldEdit(path=edit.path, value=None, source=edit.source)
+            for index, edit in enumerate(batch)
+        ]
+        self.apply(final, require_valid=require_valid)
 
     def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
         """Call one named RPC and decode its reply as result, without retries.

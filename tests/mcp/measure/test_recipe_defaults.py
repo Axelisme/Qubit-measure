@@ -1,5 +1,6 @@
 """Optional recipe defaults compose with authored steps through the wire seam."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -317,16 +318,16 @@ class WireEdit(BaseModel):
     value: JsonValue
 
 
-@pytest.mark.parametrize("override", [11, -1])
-def test_apply_inputs_last_nonnull_value_reaches_atomic_form_admission(
-    tmp_path: Path, override: int
-) -> None:
+type BatchResponder = Callable[[str, dict[str, object]], dict[str, object]]
+
+
+@pytest.fixture
+def form_admission() -> tuple[TabFormResource, BatchResponder, list[bool]]:
     owner = TabFormResource(
         lambda _ctx: Form(BatchCfg, {}),
         capture=lambda _aliases: TabFormSources(FormEnv()),
         mutation_allowed=lambda: True,
     )
-    before = owner.input
     gui = SyntheticGui()
     admissions: list[bool] = []
 
@@ -348,6 +349,18 @@ def test_apply_inputs_last_nonnull_value_reaches_atomic_form_admission(
                     for path, message in (errors.messages.items() if errors else ())
                 ],
             }
+
+    return owner, respond, admissions
+
+
+@pytest.mark.parametrize("override", [11, -1])
+def test_apply_inputs_last_nonnull_value_reaches_atomic_form_admission(
+    tmp_path: Path,
+    override: int,
+    form_admission: tuple[TabFormResource, BatchResponder, list[bool]],
+) -> None:
+    owner, respond, admissions = form_admission
+    before = owner.input
 
     @api.recipe("synthetic", "Apply final values through real Form admission")
     async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
@@ -390,6 +403,39 @@ def test_apply_inputs_last_nonnull_value_reaches_atomic_form_admission(
         else:
             assert owner.input.same_as(before)
             assert [error.path for error in snapshot.parameter_errors] == [("count",)]
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize("path", [("detail", "amount"), ("missing",)])
+def test_apply_inputs_leaves_overlapping_and_unknown_paths_to_form_owner(
+    tmp_path: Path,
+    path: api.FormPath,
+    form_admission: tuple[TabFormResource, BatchResponder, list[bool]],
+) -> None:
+    owner, respond, admissions = form_admission
+    before = owner.input
+
+    @api.recipe("synthetic", "Do not make rejected owner paths writable by coalescing")
+    async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
+        tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
+        tab.apply_inputs(inputs, {("count",): 3, ("detail",): BatchDetail(amount=7)})
+        return Report(count=1)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = client.context.session.recipes.start(
+            client.context,
+            "synthetic",
+            {"overrides": [{"path": list(path), "value": 8}]},
+        )
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == "failed", snapshot
+        assert snapshot.error is not None
+        assert "logical" in snapshot.error.message.lower()
+        assert owner.input.same_as(before)
+        assert admissions == []
     finally:
         client.context.session.close()
 
@@ -471,26 +517,34 @@ def test_apply_inputs_validates_superseded_and_null_edits(
     source: str,
     message: str,
 ) -> None:
-    @api.recipe("synthetic", "Validate authored edits even when their value is superseded")
+    @api.recipe(
+        "synthetic", "Validate authored edits even when their value is superseded"
+    )
     async def synthetic(session: api.RecipeSession, inputs: api.RecipeInputs) -> Report:
         tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
         tab.apply_inputs(
-            inputs, {}, edits=(
+            inputs,
+            {},
+            edits=(
                 api.FieldEdit(path=path, value=value, source=source),
                 api.FieldEdit(path=path, value=11),
-            )
+            ),
         )
         return Report(count=1)
 
     client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
-        execution = client.context.session.recipes.start(client.context, "synthetic", {})
+        execution = client.context.session.recipes.start(
+            client.context, "synthetic", {}
+        )
         execution.join()
         snapshot = execution.snapshot()
         assert snapshot.status == "failed", snapshot
         assert snapshot.error is not None
         assert message in snapshot.error.message
-        assert not [p for m, p in client.transport.sent if m == "tab.edit_recipe_fields"]
+        assert not [
+            p for m, p in client.transport.sent if m == "tab.edit_recipe_fields"
+        ]
     finally:
         client.context.session.close()
 
