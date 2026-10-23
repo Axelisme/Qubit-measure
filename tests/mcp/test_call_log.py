@@ -65,6 +65,9 @@ def _collect_jsonl_entries(log_dir: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+# tolerated(capability): A real process exit runs atexit cleanup and exposes sink
+# closure; an in-process call cannot verify this shutdown boundary.
+@pytest.mark.requires_subprocess
 @pytest.mark.parametrize("handler_fails", [False, True], ids=["success", "error"])
 def test_process_exit_closes_and_flushes_call_log(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, handler_fails: bool
