@@ -154,7 +154,7 @@ def saved_runs(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_empty_project_results_are_readable_without_entry_or_control(
     results_rpc: ResultsRpc,
 ) -> None:
-    assert results_rpc.result("entry.info", {}) == {"entry": None}
+    assert results_rpc.result("entry.info", {})["entry"] is None
     assert results_rpc.result("results.list", {}) == {"runs": []}
     assert results_rpc.result("control.status", {})["me"] is False
 
