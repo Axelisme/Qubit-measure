@@ -181,8 +181,8 @@ class SaveLayout:
         A symlink escaping either entry root raises ValueError; filesystem
         lookup errors propagate.
         """
-        run_name = f"{self._experiment}_{self._run_id}"
-        run = Path("runs") / run_name
+        run = self.run_path
+        run_name = run.name
         if key.member == "data":
             data_path = _checked_path(self._database_path, run / "data.h5")
             local = self._saved_at

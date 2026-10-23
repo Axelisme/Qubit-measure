@@ -14,9 +14,12 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from zcu_tools.cfg_model import WaveformAssetInfo
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentStore
+from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
@@ -38,6 +41,7 @@ from .schema import (
     PARAMETER_VERSION,
     PointDocument,
     SetupDocument,
+    SetupGeneral,
 )
 from .storage import bind_sample_table
 from .views import (
@@ -600,8 +604,18 @@ class ResultEntry:
         Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
         Missing setup and other filesystem errors propagate. No files are written.
         """
-        entry = cls(_entry_path(result_root, name), Path("."))
-        general = entry._setup_store.snapshot().general
+        source = _entry_path(result_root, name) / "setup.yaml"
+        if not source.resolve().is_relative_to(source.parent.resolve()):
+            raise ValueError(f"{source}: setup escapes its entry")
+        try:
+            with source.open(encoding="utf-8") as stream:
+                document = TypeAdapter(YamlMap).validate_python(
+                    YAML(typ="safe").load(stream)
+                )
+            validate_parameter_header(document, source=source)
+            general = SetupGeneral.model_validate(document.get("general"))
+        except (ValueError, YAMLError) as error:
+            raise ValueError(f"{source}: {error}") from error
         return EntryIdentity(
             entry_id=UUID(general.entry_id),
             created_at=datetime.fromisoformat(general.created_at),
