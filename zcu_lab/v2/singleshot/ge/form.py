@@ -4,6 +4,9 @@ from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg
 
 
@@ -11,6 +14,12 @@ def make_form(ctx: FormContext) -> Form[GE_Cfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         GE_Cfg,
+        field_order=(
+            "modules",
+            "shots",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
@@ -26,4 +35,10 @@ def make_form(ctx: FormContext) -> Form[GE_Cfg]:
             "shots": 100000,
             "initial_delay": Hidden(),
         },
+    ).with_seed_metadata(
+        (
+            {}
+            if ctx.has("$qubit.module.readout")
+            else pulse_readout_seed_metadata(gain=0.1)
+        )
     )

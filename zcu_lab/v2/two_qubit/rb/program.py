@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Self
+from typing import Annotated, Self
 
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import Module, Pulse, PulseCfg
 
 from .._drive import DualLineCfg, dual_line_drive
@@ -25,10 +25,36 @@ class CZPhasePair(ConfigBase):
     the physical charge pulses' constructive relative phase.
     """
 
-    f1: str = Field(min_length=1)
-    f2: str = Field(min_length=1)
-    correction_f1_deg: float
-    correction_f2_deg: float
+    f1: Annotated[
+        str,
+        FieldMeta(
+            label="F1 component",
+            description="填入 local Z 校準所用的 F1 component name。",
+        ),
+    ] = Field(min_length=1)
+    f2: Annotated[
+        str,
+        FieldMeta(
+            label="F2 component",
+            description="填入 local Z 校準所用的 F2 component name。",
+        ),
+    ] = Field(min_length=1)
+    correction_f1_deg: Annotated[
+        float,
+        FieldMeta(
+            label="F1 Z correction",
+            unit="deg",
+            description="填入 local_z 實驗取得的 F1 邏輯 Z correction。",
+        ),
+    ]
+    correction_f2_deg: Annotated[
+        float,
+        FieldMeta(
+            label="F2 Z correction",
+            unit="deg",
+            description="填入 local_z 實驗取得的 F2 邏輯 Z correction。",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_values(self) -> Self:
