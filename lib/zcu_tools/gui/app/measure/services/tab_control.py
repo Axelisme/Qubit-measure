@@ -42,7 +42,13 @@ class TabControlPort(Protocol):
     def open_tab_from_file(
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
-        """Create/load/focus, cleaning up on failure; Load preserves form input."""
+        """Create/load/focus; isolate only adapter.make_form failure at creation.
+
+        A factory failure leaves no Form: the form area and disabled Run retain
+        its reason, and Reset may recover. Template/default/Load failures still
+        propagate. Failed Load closes the new tab and restores previous focus.
+        Load never fills form input from native cfg.
+        """
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
@@ -115,7 +121,8 @@ class TabControlFacet:
     ) -> LoadTabResultOutcome:
         """Compose new-tab loading; this does not roll back external side effects."""
         previous = self.get_active_tab_id()
-        tab_id = self.new_tab(adapter_name)
+        self._access.require_available()
+        tab_id = self._workspace.new_tab(adapter_name, allow_factory_failure=True)
         try:
             outcome = self._load_tab_result(tab_id, data_path)
             self.set_active_tab(tab_id)

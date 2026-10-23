@@ -39,19 +39,30 @@ class WorkspaceService:
         self._tabs = tabs
         self._bus = bus
 
-    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
+    def new_tab(
+        self,
+        adapter_name: str,
+        *,
+        input: TabInput | None = None,
+        allow_factory_failure: bool = False,
+    ) -> str:
         """Create, activate and announce a tab using current global sources.
 
         Owner-only; input is optional opaque authored Form JSON. The tab/form
         owner restores compatible paths, logs discards and rejects malformed JSON
         before publication. Caller retains input, GUI owns the new tab. Source or
-        default-cfg failure publishes no tab fact.
+        default-cfg failure publishes no tab fact. Only open_tab_from_file sets
+        allow_factory_failure to retain a history tab without a Form; template
+        binding and defaults still fail before publication.
         """
-        tab_id = (
-            self._tabs.new_tab(adapter_name)
-            if input is None
-            else self._tabs.new_tab(adapter_name, input=input)
-        )
+        if allow_factory_failure:
+            tab_id = self._tabs.new_tab(adapter_name, allow_factory_failure=True)
+        else:
+            tab_id = (
+                self._tabs.new_tab(adapter_name)
+                if input is None
+                else self._tabs.new_tab(adapter_name, input=input)
+            )
         self._state.set_active_tab(tab_id)
         self._bus.emit(
             TabAddedPayload(tab_id=tab_id, adapter_name=adapter_name),

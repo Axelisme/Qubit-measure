@@ -121,6 +121,9 @@ Runs without PNGs stay in the list and show a reason in the image view.
 Cfg values and analysis summaries use relative paths; analysis parameters have
 their own sections. New-tab Load uses the application owner. A missing analysis
 source remains visible in both the browser outcome and the loaded tab.
+A history tab whose form factory failed shows its original reason in the form
+area and disabled Run tooltip. Reset can replace that notice with a real editor;
+a failed retry leaves the notice and shows the current preparation error.
 
 `ArtifactSaveCenter` shows each output on two lines: the filename, status and
 actions above, and the secondary-colour path below. Failure messages appear

@@ -752,7 +752,13 @@ class ExpTabWidget(QWidget):
         if not confirmed:
             return
         assert self._actions is not None, "reset clicked before bind"
-        self._cfg.reset()
+        try:
+            self._cfg.reset()
+        except Exception as exc:
+            if self._cfg.unavailable_reason is None:
+                raise
+            self._dialog_presenter.critical(self, "Reset config failed", str(exc))
+            return
         self._actions.refresh_interaction(self.tab_id)
 
     # ── cfg form editor over the tab's form resource ───────────────────────
@@ -763,6 +769,8 @@ class ExpTabWidget(QWidget):
         Unparseable text and input the resource rejected count first, then the
         resource's model and lowering errors. Raises RuntimeError once detached.
         """
+        if self._cfg.unavailable_reason is not None:
+            return self._cfg.unavailable_reason
         errors = self._require_editor().errors()
         if errors is None:
             result = self._cfg.result()
@@ -792,6 +800,18 @@ class ExpTabWidget(QWidget):
             self._editor.detach()
             self._form_scroll.takeWidget()
             self._editor.deleteLater()
+            self._editor = None
+        elif (previous := self._form_scroll.takeWidget()) is not None:
+            previous.deleteLater()
+        reason = self._cfg.unavailable_reason
+        if reason is not None:
+            message = QLabel(reason)
+            message.setObjectName("history.form_error")
+            message.setWordWrap(True)
+            message.setTextFormat(Qt.TextFormat.PlainText)
+            self._form_scroll.setWidget(message)
+            self._editor_state = None
+            return
         state = self._cfg.editor_state
         # Writes and option commands go to the resource unchanged, so its busy,
         # lifetime and notification guards and its subscriber publication
@@ -811,7 +831,10 @@ class ExpTabWidget(QWidget):
         self._form_scroll.setWidget(editor)
 
     def _on_cfg_published(self) -> None:
-        if self._cfg.editor_state is not self._editor_state:
+        if (
+            self._cfg.unavailable_reason is not None
+            or self._cfg.editor_state is not self._editor_state
+        ):
             self._mount_editor()
         # Every committed write re-evaluates Run admission, like a snapshot
         # change: a valid edit must not leave a stale Run gate behind.
@@ -922,7 +945,8 @@ class ExpTabWidget(QWidget):
 
         idle = writable and not local_busy
         self._editing_enabled = idle
-        self._require_editor().set_editing_enabled(enabled=idle)
+        if self._editor is not None:
+            self._editor.set_editing_enabled(enabled=idle)
         self.reset_btn.setEnabled(idle)
         self.refresh_btn.setEnabled(idle)
 
@@ -1005,6 +1029,8 @@ class ExpTabWidget(QWidget):
             self.run_btn.setToolTip("Startup script is running")
         elif state.global_run_active:
             self.run_btn.setToolTip("Another tab is running")
+        elif self._cfg.unavailable_reason is not None:
+            self.run_btn.setToolTip(self._cfg.unavailable_reason)
         elif not state.has_active_context:
             self.run_btn.setToolTip("Select or create a working point first")
         elif capabilities.requires_soc and not state.has_soc:
