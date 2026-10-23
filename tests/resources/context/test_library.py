@@ -505,6 +505,43 @@ def test_unchanged_library_bytes_recheck_attachments_without_reparsing_yaml(
     assert library.snapshot().meta("Q1.pulses.pi.gain") is not None
 
 
+@pytest.mark.parametrize("action", ["refresh", "edit"])
+def test_unchanged_library_checks_dependencies_without_reading_attachment_content(
+    files: tuple[Path, Path], action: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = local_source(files)
+    value = document()
+    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData.from_provenance(source)
+    write_document(files, value)
+    library = open_library(files)
+    attachment = files[1].parent / f"{EVENT_ID}.json"
+    read_text = Path.read_text
+    attachment_reads: list[Path] = []
+
+    def observe_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == attachment:
+            attachment_reads.append(path)
+        return read_text(path, encoding="utf-8")
+
+    monkeypatch.setattr(Path, "read_text", observe_read)
+
+    def reload_library() -> None:
+        if action == "refresh":
+            library.refresh()
+        else:
+            with library.edit():
+                pass
+
+    reload_library()
+    reload_library()
+    assert attachment_reads == []
+    # Removing an event invalidates a cached library even when its bytes match.
+    files[1].unlink()
+    reload_library()
+    assert library.snapshot().module_keys() == ("Q1.pulses.pi2",)
+    assert library.snapshot().meta("Q1.pulses.pi.gain") is None
+
+
 def test_rename_preserves_complete_metadata_and_segment_boundaries() -> None:
     value = document()
     value.components["Q1"].pulses["pi"].waveform = "Q1.waveforms.absent"
