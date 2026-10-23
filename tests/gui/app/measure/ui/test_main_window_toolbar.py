@@ -86,6 +86,9 @@ class _RecordingToolbarHost:
     def retry_skipped_experiment_tabs(self) -> None:
         pass
 
+    def open_results_browser(self) -> None:
+        raise AssertionError("Unexpected results browser command")
+
 
 def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:
     parent = QWidget()

@@ -11,18 +11,23 @@ from qtpy.QtGui import QImage
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import Container, ContainerAttrs, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
-from zcu_tools.gui.app.measure.services.results_index import scan_results
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.session.context_types import CommandOrigin, EntryRequest, PointCreateRequest, PointUseRequest
+from zcu_tools.gui.app.measure.services.results_index import scan_results
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.control_identity import ControlIdentity
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+    PointUseRequest,
+)
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.measure.ui._main_window_fakes import apply_window_defaults, mock_ctrl
 from tests.gui.app.measure._native_save_support import NativeSaveSession
 from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure.ui._main_window_fakes import apply_window_defaults, mock_ctrl
 
 
 @pytest.fixture
@@ -149,7 +154,9 @@ def populated_browser(browser_host: MainWindow, tmp_path: Path) -> ComponentDriv
     return ui
 
 
-def test_filters_grouping_and_focus_history(populated_browser: ComponentDriver, tmp_path: Path) -> None:
+def test_filters_grouping_and_focus_history(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
     ui = populated_browser
     assert ui.observe(object_name="results.focus").text == "All results · 3 runs"
     assert {r.text for r in ui.list_rows()} >= {"mux/readout", "sweep"}
@@ -242,9 +249,17 @@ def load_browser(
     variant = request.param
     if variant in {"missing", "pointless"}:
         tab = session.state.get_tab("tab")
-        history = replace(session.metadata.snapshot, point="missing" if variant == "missing" else None)
-        session.state.update_tab_result("tab", replace(require_record(tab.run),
-            metadata=session.metadata.model_copy(update={"snapshot": history})), parameters=tab.run.parameters)
+        history = replace(
+            session.metadata.snapshot, point="missing" if variant == "missing" else None
+        )
+        session.state.update_tab_result(
+            "tab",
+            replace(
+                require_record(tab.run),
+                metadata=session.metadata.model_copy(update={"snapshot": history}),
+            ),
+            parameters=tab.run.parameters,
+        )
     session.save()
     image = QImage(400, 220, QImage.Format.Format_RGB32)
     image.fill(Qt.GlobalColor.yellow)
@@ -256,7 +271,9 @@ def load_browser(
         ctrl.context_control.use_point(PointUseRequest("p"))
     if variant == "foreign":
         ctrl.setup_control.new_entry(EntryRequest("foreign"))
-        ctrl.setup_control.new_point(PointCreateRequest("other", "", CommandOrigin("gui")))
+        ctrl.setup_control.new_point(
+            PointCreateRequest("other", "", CommandOrigin("gui"))
+        )
     ctrl.add_view(window)
     window.show()
     qapp.processEvents()
@@ -266,9 +283,14 @@ def load_browser(
         ctrl.close_tab(tab_id)
 
 
-@pytest.mark.parametrize("load_browser", ["available", "empty", "foreign", "pointless", "missing"], indirect=True)
+@pytest.mark.parametrize(
+    "load_browser",
+    ["available", "empty", "foreign", "pointless", "missing"],
+    indirect=True,
+)
 def test_new_analysis_tab_projects_the_same_load_source_reason(
-    load_browser: tuple[ComponentDriver, str], tmp_path: Path,
+    load_browser: tuple[ComponentDriver, str],
+    tmp_path: Path,
 ) -> None:
     ui, variant = load_browser
     ui.select_menu("Results ▾", ("Results browser…",))
@@ -278,7 +300,7 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
     feedback = ui.observe(object_name="results.feedback").text
     if variant == "available":
         assert feedback.startswith("Loaded history:")
-        assert not ui.observe(object_name="history.analysis_source").visible
+        assert "history.analysis_source" not in {w.object_name for w in ui.visible().widgets}
     else:
         expected = {
             "empty": "No active context is available",
@@ -286,7 +308,9 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
             "pointless": "Historical metadata has no point",
             "missing": "Historical point 'missing' is unavailable",
         }[variant]
-        assert "History loaded, no analysis source:" in feedback and expected in feedback
+        assert (
+            "History loaded, no analysis source:" in feedback and expected in feedback
+        )
         tab_message = ui.observe(object_name="history.analysis_source")
         assert tab_message.visible and expected in tab_message.text
         assert "History loaded, no analysis source:" in tab_message.text

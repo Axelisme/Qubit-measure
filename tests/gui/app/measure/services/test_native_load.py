@@ -400,11 +400,14 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
-    assert loaded.analysis_source_issue == {
-        "foreign": "Historical entry differs from the opened entry",
-        "empty": "No active context is available",
-        "pointless": "Historical metadata has no point",
-    }[source]
+    assert (
+        loaded.analysis_source_issue
+        == {
+            "foreign": "Historical entry differs from the opened entry",
+            "empty": "No active context is available",
+            "pointless": "Historical metadata has no point",
+        }[source]
+    )
     assert tab.run.analysis_source_issue == loaded.analysis_source_issue
     assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
