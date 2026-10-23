@@ -30,6 +30,14 @@ from tests.gui._user_input import ComponentDriver
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
+def _assert_notice_fits(ui: ComponentDriver, document: str) -> None:
+    message = ui.observe(object_name=f"inspect.{document}.sync.message")
+    reload = ui.observe(object_name=f"inspect.{document}.sync.reload")
+    assert message.caption_fits, "The file path and validation reason must both fit"
+    assert message.bounds is not None and reload.bounds is not None
+    assert message.bounds[1] + message.bounds[3] <= reload.bounds[1]
+
+
 class _NoArb:
     def list_data_keys(self) -> list[str]:
         return []
@@ -149,6 +157,7 @@ def test_alias_draft_revision_includes_missing_file(conflict_ui) -> None:
     assert ui.observe(object_name="inspect.aliases.error").text
     assert len(ui.table_rows(object_name="inspect.aliases.table")) == initial_count + 1
     ui.screenshot(evidence / "02-rejected.png")
+    _assert_notice_fits(ui, "aliases")
     ui.click(object_name="inspect.aliases.sync.keep")
     ui.click(object_name="inspect.aliases.apply")
     assert ui.observe(object_name="inspect.aliases.sync.message").visible
@@ -374,7 +383,7 @@ def test_clean_pages_show_human_pending_and_invalid_source(conflict_ui) -> None:
     ui.screenshot(evidence / "03-invalid-error.png")
     message = ui.observe(object_name=f"inspect.{document}.sync.message")
     assert message.visible and str(path) in message.text
-    assert message.caption_fits, "The file path and validation reason must both fit"
+    _assert_notice_fits(ui, document)
     ui.click(object_name=f"inspect.{document}.sync.reload")
     assert str(path) in ui.observe(object_name=f"inspect.{document}.sync.message").text
     ui.screenshot(evidence / "04-invalid-reload-rejected.png")
