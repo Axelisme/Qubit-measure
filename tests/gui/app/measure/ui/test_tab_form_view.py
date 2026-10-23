@@ -356,7 +356,7 @@ def test_refresh_capture_failure_is_presented_and_keeps_visible_input(
 
 
 @pytest.fixture
-def source_window(qapp: QApplication) -> Iterator[MainWindow]:
+def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
     """Open a synthetic tab, then publish a newer source before interaction."""
 
     class SourceAdapter(SampleAdapter):
@@ -371,7 +371,7 @@ def source_window(qapp: QApplication) -> Iterator[MainWindow]:
                 },
             )
 
-    application = Fixture(headless=True)
+    application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("source", SourceAdapter)
     ctrl = application.ctrl
     target = ctrl.context_control.read_context().target

@@ -9,8 +9,8 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from ._helpers import Fixture, call, open_client
 
 
-def test_native_missing_rename_preserves_the_published_library(qapp):
-    fx = Fixture()
+def test_native_missing_rename_preserves_the_published_library(tmp_path, qapp):
+    fx = Fixture(project_root=str(tmp_path / "project"))
     context = fx.ctrl.context_control
     context.set_waveform(
         context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)

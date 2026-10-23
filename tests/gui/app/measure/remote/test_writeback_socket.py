@@ -114,6 +114,7 @@ def assert_rejected_write_preserves_context(fx, sock, tab, value):
     ],
 )
 def test_complete_md_values_survive_preview_and_write_socket(
+    tmp_path,
     qapp,
     monkeypatch,
     before,
@@ -130,7 +131,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
             ),
         ],
     )
-    fx = Fixture(active_label="ctx001")
+    fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     context = fx.ctrl.context_control
     target = context.read_context().target
     if isinstance(before, complex):
@@ -195,9 +196,9 @@ def test_complete_md_values_survive_preview_and_write_socket(
 
 
 @pytest.fixture
-def module_fixture(qapp, point_models, point_registry_guard):
+def module_fixture(tmp_path, qapp, point_models, point_registry_guard):
     """Return a started GUI fixture whose Q1 holds a pulse using a waveform key."""
-    fx = Fixture(active_label="ctx001")
+    fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("synthetic/module_writeback", ModuleProposalAdapter)
     context = fx.ctrl.context_control
     target = context.read_context().target
@@ -355,7 +356,7 @@ def test_apply_writeback_tool_writes_module_proposal_by_id(
 
 
 def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
-    qapp, monkeypatch
+    tmp_path, qapp, monkeypatch
 ):
     monkeypatch.setattr(
         SampleAdapter,
@@ -369,7 +370,7 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
             ),
         ],
     )
-    fx = Fixture(active_label="ctx001")
+    fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     context = fx.ctrl.context_control
     context.set_parameter(context.read_context().target, "general.ext.a", 1.0)
     context.set_parameter(context.read_context().target, "general.ext.b", 2.0)

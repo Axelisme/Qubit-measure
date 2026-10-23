@@ -1,6 +1,7 @@
 """Point-local authored aliases through public storage and session seams."""
 
 from collections.abc import Generator
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -83,10 +84,6 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     with pytest.raises(RoleResolutionError, match="list"):
         captured.resolve_path("$participants.rate")
     assert captured.resolved_aliases()[1].resolved == ["R1", "Q1"]
-    context.set_alias_rows((AliasRow("participants", []),))
-    with pytest.raises(RoleResolutionError, match="not bound"):
-        context.read_context().value("$participants")
-    assert captured.value("$participants") == ["R1", "Q1"]
     context.use_point(PointUseRequest("first"))
     assert context.get_alias_rows() == rows
     assert entry.load_aliases(point="first").aliases["participants"] == [
@@ -111,6 +108,42 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     assert fresh.get_alias_rows() == rows
     assert (entry.result_path / "points/first/aliases.yaml").read_bytes() == old_file
     assert events == []
+    context.set_alias_rows((AliasRow("participants", []),))
+    with pytest.raises(RoleResolutionError, match="not bound"):
+        context.read_context().value("$participants")
+    assert captured.value("$participants") == ["R1", "Q1"]
+    context.use_point(PointUseRequest("first"))
+    assert context.get_alias_rows() == (AliasRow("participants", []),)
+    assert entry.load_aliases(point="first").aliases == {"participants": []}
+
+
+def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_disk(
+    tmp_path: Path,
+) -> None:
+    context = service()
+    assert hasattr(context, "get_file_revisions"), "Context needs point-file revisions"
+    assert context.get_file_revisions() == ()
+    entry = entry_at(tmp_path)
+    context.install_entry(entry)
+    assert context.get_file_revisions() == ()
+    context.use_point(PointUseRequest("first"))
+    files = context.get_file_revisions()
+    assert [item.document for item in files] == ["parameters", "library", "aliases"]
+    assert all(item.path.is_absolute() for item in files)
+    assert files[2].revision is None
+    for item in files[:2]:
+        assert item.revision == sha256(item.path.read_bytes()).hexdigest()
+    context.set_alias_rows(AUTHORED)
+    installed = context.get_file_revisions()
+    assert installed[:2] == files[:2]
+    assert installed[2].revision == sha256(installed[2].path.read_bytes()).hexdigest()
+    assert entry.load_aliases(point="first").aliases["driver"] == "Q1"
+    write_table(entry, "{}")
+    assert context.get_file_revisions() == installed
+    context.use_point(PointUseRequest("first"))
+    assert context.get_file_revisions()[2].revision != installed[2].revision
+    context.clear_context()
+    assert context.get_file_revisions() == ()
 
 
 def test_saved_table_loads_in_order_without_filling_empty_rows(tmp_path: Path) -> None:
@@ -149,7 +182,7 @@ def test_switch_point_reloads_local_table_without_setup_or_preset_fallback(
     assert context.get_alias_rows() == (AliasRow("driver", "R1"),)
     assert context.read_context().value("$driver.rate") == 6500.0
     context.use_point(PointUseRequest("first"))
-    assert context.get_alias_rows() == ()
+    assert context.get_alias_rows() == AUTHORED
 
 
 @pytest.mark.parametrize(
@@ -188,7 +221,7 @@ def test_bad_file_preserves_old_binding_and_aliases(
     assert info.entry_id == first.entry_id
 
 
-def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) -> None:
+def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) -> None:
     first = entry_at(tmp_path, "one")
     second = entry_at(tmp_path, "two")
     context = service()
@@ -202,13 +235,14 @@ def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) ->
         ("spare", ""),
     ]
     context.set_alias_rows((AliasRow("transient", "Q1"),))
+    assert first.load_aliases(point="first").aliases == {"transient": "Q1"}
     reopened = ResultEntry.open(
         "one", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
     fresh = service()
     fresh.install_entry(reopened)
     fresh.use_point(PointUseRequest("first"))
-    assert fresh.get_alias_rows() == AUTHORED
+    assert fresh.get_alias_rows() == (AliasRow("transient", "Q1"),)
     fresh.install_entry(second)
     fresh.use_point(PointUseRequest("first"))
     fresh.apply_alias_rows(())
@@ -216,7 +250,7 @@ def test_apply_round_trip_entry_isolation_and_memory_only_set(tmp_path: Path) ->
     assert first.load_aliases().aliases == {}
     fresh.install_entry(reopened)
     fresh.use_point(PointUseRequest("first"))
-    assert fresh.get_alias_rows() == AUTHORED
+    assert fresh.get_alias_rows() == (AliasRow("transient", "Q1"),)
     fresh.install_entry(second)
     fresh.use_point(PointUseRequest("first"))
     assert fresh.get_alias_rows() == ()

@@ -291,6 +291,7 @@ def test_alias_revert_loads_current_target_then_apply_saves_there(
 ) -> None:
     entry = entry_session.entry
     assert entry is not None
+    source_rows = entry.load_aliases(point="working")
     entry.new_point("other")
     entry.save_aliases(EntryAliases(aliases={"destination": "R2"}), point="other")
     dialog = _open(entry_session)
@@ -304,7 +305,7 @@ def test_alias_revert_loads_current_target_then_apply_saves_there(
     ui.click(object_name="inspect.aliases.apply")
     assert ui.observe(object_name="inspect.aliases.error").text == ""
     assert entry.load_aliases(point="other").aliases == {"destination": "Confirmed"}
-    assert entry.load_aliases(point="working").aliases == {}
+    assert entry.load_aliases(point="working") == source_rows
 
 
 def test_driver_edits_list_applies_and_reopens(entry_session, tmp_path: Path) -> None:
@@ -420,6 +421,8 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     value.setText("Q2")
     # A directory where aliases.yaml belongs makes the atomic replace fail.
     blocker = entry.result_path / "points" / "working" / "aliases.yaml"
+    original = blocker.read_bytes()
+    blocker.unlink()
     blocker.mkdir()
     _button(page, "apply").click()
     assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
@@ -427,6 +430,8 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     assert value.text() == "Q2"
 
     blocker.rmdir()
+    # Restore the captured revision; removing the blocker alone is a stale edit.
+    blocker.write_bytes(original)
     _button(page, "apply").click()
     assert control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
     assert _error(page) == ""

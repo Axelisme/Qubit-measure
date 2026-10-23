@@ -32,6 +32,41 @@ creates its entry, first point and tab without a separate entry CLI or setup RPC
 
 `mcp_servers/measure.py` 把使用者的 `RecipeDeclaration` 清單注入 session 與 `assembly.py`。`@recipe(name, description)` 從 async 函式的 inputs model 產生 MCP JSON schema；工具表拒絕不一致的注入及重名。Framework 不反向 import 使用者 recipes，也不從 GUI catalog 產生 tools。共用工具為 `connect`、`status`、`wait`、`cancel`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close`、`answer` 與 `apply_writeback`，以及 `device_setup`、`recipe_guide`。
 
+## Point 檔案讀寫
+
+目前 point 的參數、library 與 aliases 以磁碟檔案為權威。
+GUI、writeback、recipe 與啟動腳本經 owner 寫入時，成功即落盤。
+Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases 特化讀寫。
+`entry.info` 與 `context.reload` 是 RPC methods，經 `rpc_call` 呼叫，不另設固定工具。
+
+1. 先用 `status()` 或 `rpc_call(method="entry.info")` 取得頂層 `files`。
+   每筆為 `{document, path, revision}`，順序是 parameters、library、aliases。
+   Path 是絕對路徑，revision 是已安裝 bytes 的 SHA-256。
+   Aliases 尚無檔案時 revision 為 null；未選 point 時 files 為 []。
+2. 依 path 直接讀檔。外部候選尚未通過驗證時，磁碟內容可能與已安裝版本不同。
+   Status 不讀檔，也不把未驗證候選當成現值。
+3. 修改前確認自己是 holder，保留該筆已安裝 revision，然後編輯對應檔案。
+   檔案系統不執行 GUI 的 holder 檢查，取得控制權不能省略。
+4. 呼叫 `rpc_call(method="context.reload", params={"path": path, "expected_revision": revision})`。
+   expected_revision 必須明填，只有預期 aliases 缺檔時可填 null。
+   Owner 比對已安裝版本，再讀取、驗證、安裝磁碟候選並發布事件。
+   成功回 `{document, path, revision}`，revision 是新安裝版本。
+
+驗證失敗會回路徑與原因，owner 保留舊記憶體，不改磁碟候選。
+Revision 不符時重讀 files 與檔案，再決定是否修改，不自動覆寫或重試。
+非 holder 的 reload 會拒絕，修正控制權後再由 caller 決定下一步。
+Watcher 在 agent 持有時也可能先安裝合法候選；此時舊 revision 的 reload 會拒絕，
+先核對已安裝版本即可，不重做寫入。
+人持有時 watcher 只報待處理變更，Inspect 有草稿時提供「重載／保留」。
+這些操作不改既有 Tab／Run 的固定 capture；Tab Refresh 保留 input 並捕捉新來源，
+Reset 重新捕捉來源並重算 defaults。
+
+Live catalog 的 `value.read`／`value.list`、`tab.parameter_read`、
+`context.set_parameter`、`context.ml_*` 與 `context.aliases_set` 仍可經 `rpc_call` 使用。
+這些 RPC 沿 owner 驗證與 holder admission，不是額外的固定工具。
+Recipe 內部仍走 owner API，無須改成直接編輯檔案。
+各檔獨立提交，不提供跨檔交易或自動合併。
+
 ## Setup 工具
 
 `recipe_guide(adapter)` 以明填的 adapter 名查詢 GUI `adapter.guide`，回傳 adapter 與 `guide: {markdown, resource_dir}`。Recipe 可以操作多個 adapter，工具不推測 recipe 到 adapter 的 mapping。Markdown 保留全文；resource_dir 是 GUI host 的絕對目錄字串，未宣告 guide 時是 null。Guide 中的圖片使用相對路徑，agent 需要時自行從該目錄讀取。工具不讀圖、不附圖；跨機 agent 可能無法存取這個路徑。全域 status 不讀或投影 installed predictor。
@@ -488,9 +523,9 @@ Reserved 不代表已保存，run_id 存在也不代表任一輸出成功。
 之後用 tab.get_figure 讀 GUI 當下圖，不保證等於先前回覆；status 不附圖或重新 render。
 
 候選編輯用 tab.writeback_* RPC，module edit 與 tab Form 共用 typed path 陣列。
-Library 用 context.ml_edit，child key 保持原 key；值查詢用 value.list／value.read。
-MCP 的 context.aliases_set 套用整張 authored 表，context.set_parameter 寫目前 point 的具體路徑。
-這些操作直接走 owner，不開 Inspect、不切頁，也不改既有 Form／Run 的 capture。
+參數、Library 與 aliases 的日常操作依上方「Point 檔案讀寫」直接讀檔、編輯並 reload。
+需要 owner 命令時，既有 context.ml_edit、context.aliases_set、context.set_parameter
+與 value.list／value.read 仍經 rpc_call 可達，不開 Inspect、不切頁，也不改既有 Form／Run 的 capture。
 Aliases 在 Inspect 第三頁，dialog.screenshot 只拍目前頁，不接受 tab selector。
 GUI 在每次 dispatch 檢查 holder、source 與 readiness，preview 不取代這些檢查。
 

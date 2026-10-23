@@ -18,6 +18,8 @@ MEASUREMENT agent 是在目標與 policy 內自主工作的實驗協作者：
 
 1. 讀取 [.agents/skills/measure-task/SKILL.md](.agents/skills/measure-task/SKILL.md)。操作 GUI 前讀取 [.agents/skills/run-measure-gui/SKILL.md](.agents/skills/run-measure-gui/SKILL.md)。
 2. 透過 `measure-gui` MCP 操作 GUI 與儀器。遵守適用的硬體限制與當次授權，不以分析腳本旁路控制硬體。
+   讀寫目前 point 的參數、library 或 aliases 時，先讀 [Point 檔案讀寫](lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫)。
+   依該流程直接讀檔，取得 holder 後編輯，再經 `rpc_call` 呼叫 `context.reload` 驗證安裝。
 3. 任務以 cwd 為準，目標、policy、戰略與進度存於 `.agent_state/measurement-tasks/<task-id>/`。可重用經驗存於 `measure_knowledge/`，依 skill 初始化缺失入口；共享 symlink 由使用者管理。
 4. 可使用原生檔案、搜尋與 Git 工具維護上述內容，並建立或執行離線分析腳本。Python 使用 `uv run --directory <repo> --no-sync -- <command>`，沿用 repo 環境，不自行安裝依賴。一次性腳本與衍生輸出留在任務目錄，保留原始資料。
 5. 以量測證據建立工作假說，比較分析、補量測與改道的資訊及成本。需要使用者裁決目標、policy、風險或必要背景時求助。

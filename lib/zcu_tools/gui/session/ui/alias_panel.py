@@ -10,6 +10,7 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -26,6 +27,7 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
     SavedPoint,
 )
+from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry.aliases import AliasValue
@@ -72,6 +74,8 @@ class AliasPanel(QWidget):
         self._base: tuple[AliasRow, ...] = ()
         self._target: SavedPoint | None = None
         layout = QVBoxLayout(self)
+        self._sync = PointFileBanner(control, "aliases", self.revert, parent=self)
+        layout.addWidget(self._sync)
         hint = QLabel(
             "Enter a component name, leave a value empty, or use a $ link "
             "to an earlier row (for example $qubit.resonator), or an ordered "
@@ -124,7 +128,12 @@ class AliasPanel(QWidget):
     # ------------------------------------------------------------------
 
     def is_unsaved(self) -> bool:
-        """Return True while the shown rows differ from those last loaded or applied."""
+        """Return True if draft rows, including live text, differ from loaded/applied.
+
+        Transfer active editor text into the local table draft without closing
+        the editor or writing through control. Invalid list text is unsaved.
+        Run on the owner's Qt thread.
+        """
         try:
             return self._draft_rows() != self._base
         except InvalidInputError:
@@ -159,11 +168,13 @@ class AliasPanel(QWidget):
             return False
         try:
             rows = self._draft_rows()
+            self._sync.check(self._revision)
             self._control.apply_alias_rows(rows)
         except (FailedPreconditionError, InvalidInputError, OSError) as error:
             self._error.setText(str(error))
             return False
         self._base = rows
+        self._revision = self._sync.capture()
         self._error.clear()
         self._refresh_resolutions()
         return True
@@ -177,6 +188,7 @@ class AliasPanel(QWidget):
         """
         self._target = self._current_target()
         self._base = self._control.get_alias_rows()
+        self._revision = self._sync.capture()
         self._show_rows(self._base)
         self._refresh_resolutions()
 
@@ -190,6 +202,7 @@ class AliasPanel(QWidget):
         """
         if not self.is_unsaved():
             self.revert()
+        self._sync.refresh(has_draft=self.is_unsaved())
 
     def _current_target(self) -> SavedPoint | None:
         info = self._control.get_entry_info()
@@ -204,6 +217,7 @@ class AliasPanel(QWidget):
         Read-only disables Add, Remove, Revert and Apply and stops cell editing.
         A draft made before locking stays shown.
         """
+        self._sync.set_read_only(read_only=read_only)
         for button in (
             self._add_btn,
             self._remove_btn,
@@ -222,6 +236,11 @@ class AliasPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _draft_rows(self) -> tuple[AliasRow, ...]:
+        # Qt keeps live text outside the items until Enter or focus loss.
+        # Commit to the local draft only; keep the editor and baseline intact.
+        editor = self._table.focusWidget()
+        if isinstance(editor, QLineEdit) and editor.isVisible():
+            self._table.commitData(editor)
         rows: list[AliasRow] = []
         for index in range(self._table.rowCount()):
             alias = self._table.item(index, 0)

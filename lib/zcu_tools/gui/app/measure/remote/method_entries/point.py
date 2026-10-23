@@ -24,9 +24,12 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "point:h_entry_info",
         MethodSpec(
             5.0,
-            "Return {entry}: null before opening, otherwise entry_id/name/"
-            "result_path/database_path from the cached owner identity. "
-            "Returns metadata only.",
+            "Return {entry, files}: entry is null before opening, otherwise "
+            "entry_id/name/result_path/database_path from the cached owner identity. "
+            "files lists installed point {document, path, revision}, ordered "
+            "parameters/library/aliases; empty before point selection. Paths are "
+            "absolute and revisions are raw-byte SHA-256 (null only for missing aliases). "
+            "No disk read or implicit refresh.",
             readonly=True,
         ),
     ),
