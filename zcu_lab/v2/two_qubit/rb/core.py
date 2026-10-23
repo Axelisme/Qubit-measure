@@ -138,7 +138,7 @@ class RBExp(PersistableExperiment[RBResult, RBCfg]):
         result_type=RBResult,
         cfg_type=RBCfg,
         cfg_schema_version="1.0",
-        tag="ftf/rb",
+        tag="two_qubit/rb",
     )
 
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
