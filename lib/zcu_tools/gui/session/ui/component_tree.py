@@ -545,8 +545,6 @@ class ComponentTreeWidget(QWidget):
                 self._drafts.pop(key)
 
     def _submit_edit(self, target: _EditTarget, raw: str) -> None:
-        if self._read_only:
-            return
         key = (target.component, *target.segments)
         self._drafts[key] = raw
         item = self._tree.currentItem()
@@ -555,6 +553,8 @@ class ComponentTreeWidget(QWidget):
         if raw == target.initial:
             self._drafts.pop(key, None)
             return  # Unchanged text writes nothing.
+        if self._read_only:
+            return  # Closing a locked editor retains text, but cannot submit.
         try:
             entry = self._control.get_entry_info()
             current_revision = self._sync.capture()
