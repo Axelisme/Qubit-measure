@@ -5,13 +5,13 @@ from math import isfinite
 from typing import Literal, TypeGuard
 
 from pydantic import BaseModel
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.remote.form_description import RecipeSelectionResult
 from zcu_tools.gui.form_adapter.sweep import LinRange
 from zcu_tools.mcp.measure.recipe_api import (
     Expr,
     FieldEdit,
     FormPath,
-    RecipeSession,
     RecipeTab,
 )
 from zcu_tools.mcp.measure.recipe_contracts import MissingParameter
@@ -56,6 +56,26 @@ def retain_scalar(tab: RecipeTab, field: FormPath) -> None:
     tab.set(field, None)
 
 
+class _ParameterQuery(BaseModel):
+    """Requested parameter paths and module slots in the tab capture."""
+
+    paths: tuple[str, ...]
+    module_refs: tuple[str, ...] = ()
+
+
+class _ParameterValues(BaseModel):
+    """Parameter projection; absent leaves are omitted, explicit null is retained."""
+
+    values: dict[str, YamlValue]
+
+
+def _captured_parameter(tab: RecipeTab, path: str) -> YamlValue:
+    values = tab.call(
+        "tab.parameter_read", _ParameterQuery(paths=(path,)), result=_ParameterValues
+    )
+    return values.values.get(path)
+
+
 @dataclass(frozen=True)
 class FrequencyChoice:
     """A frequency policy decision, before the recipe copies or edits selectors.
@@ -90,14 +110,13 @@ class FrequencyCalibration:
 def choose_frequency(
     tab: RecipeTab,
     field: FormPath,
-    session: RecipeSession,
     frequency_mhz: float | None = None,
     *,
     calibration: FrequencyCalibration,
 ) -> FrequencyChoice:
     """Choose an explicit, captured-library, or calibrated scalar frequency in MHz.
 
-    tab is opened; session supplies captured entry/session calibration scalars.
+    tab is opened and supplies its fixed parameter calibration capture.
     field is a scalar path of str names or int original list indexes, such as
     ("modules", "readout", "freq"). calibration declares the fallback source
     path, missing-input name and library preference.
@@ -130,7 +149,7 @@ def choose_frequency(
         ):
             tab.set(field, None)
             return FrequencyChoice(None)
-    calibrated = session.context.read(path, missing_ok=True)
+    calibrated = _captured_parameter(tab, path)
     if _finite(calibrated):
         return FrequencyChoice(
             FieldEdit(path=field, value=Expr(text=path), source=path)
@@ -232,12 +251,11 @@ def set_frequency_sweep(
     field: FormPath,
     *,
     calibration: FrequencySweepCalibration,
-    session: RecipeSession,
     scan: FrequencySweepRange,
 ) -> tuple[MissingParameter, ...]:
     """Write numeric MHz endpoints using explicit values or current calibration.
 
-    tab is opened; session supplies captured entry/session calibration scalars.
+    tab is opened and supplies its fixed parameter calibration capture.
     field uses str names or int original list indexes. calibration supplies
     frequency/linewidth paths and a full-span multiplier. scan supplies the
     requested center/span/count. Explicit center/span win; omitted values read
@@ -259,7 +277,7 @@ def set_frequency_sweep(
         raise ValueError(f"Not a sweep cfg field: {field}")
     missing: list[MissingParameter] = []
     center = (
-        session.context.read(calibration.frequency_path)
+        _captured_parameter(tab, calibration.frequency_path)
         if center_mhz is None
         else center_mhz
     )
@@ -271,7 +289,7 @@ def set_frequency_sweep(
         )
     span = span_mhz
     if span is None:
-        width = session.context.read(calibration.linewidth_path)
+        width = _captured_parameter(tab, calibration.linewidth_path)
         if _finite(width) and width > 0:
             span = calibration.span_linewidths * width
         if span is None or not _finite(span) or span <= 0:
@@ -301,7 +319,6 @@ def set_frequency_sweep(
                     value=LinRange(start=start, stop=stop, n=expts),
                     source=edge_source,
                 ),
-                FieldEdit(path=(*field, "n"), value=expts, source="explicit"),
             ]
         )
     else:
