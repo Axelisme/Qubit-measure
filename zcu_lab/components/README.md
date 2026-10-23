@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-10-23，依 kind 宣告 wiring
+**Last updated:** 2026-10-23，DC 局部線與 global coil 校準
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -9,7 +9,7 @@
 | Kind | 代表什麼 | 哪些實驗讀它 |
 | --- | --- | --- |
 | `resonator` | Readout resonator 的頻率、linewidth 與 wiring。 | `onetone/*`、`twotone/*`、`jpa/*` 與 mux tone 初值。 |
-| `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux wiring 與 module 槽。 | `mux/*` 與 `ftf/*` 的表單。 |
+| `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux wiring、module 槽與 global coil 校準。 | `mux/*` 與 `ftf/*` 的表單。 |
 | `device/current_source` | Flux bias 來源的 component 記錄，只有共用 ext、module，沒有 wiring。 | 不代替 driver；flux 實驗讀 device alias 指向的已連線裝置。 |
 | `amplifier/jpa` | JPA pump frequency、power 與 flux bias 校準。 | `jpa/*` 的表單與 writeback。 |
 | `qubit/fluxonium` | 共用 qubit 校準加上 EJ、EC、EL。 | `twotone/*` 與其他讀 qubit 校準的表單；mux／FTF 表單也可經 group 讀取。 |
@@ -37,7 +37,12 @@ Mux generator 未知時可省略 `gen_ch` 或填 null，但 group 必須提供 w
 | 字串欄位 | 填入的名稱 |
 | --- | --- |
 | Qubit `resonator` | Readout resonator 元件，例如 `R1`，kind 為 `resonator`。 |
-| Qubit `flux_source` | Flux bias 來源，例如 `f1_bias`；用於 device alias 時須對應 connected-device 名稱，不代表已連線。 |
+| Qubit `flux_source` | 自己的 DC 線 device 名稱，例如 `Q1_bias`，不代表已連線。 |
+| Mux group `flux_source` | Global coil 的 device 名稱，例如 `coil_bias`，不受 qubits 是否提供影響，不代表已連線。 |
 | Resonator `amplifier` | Readout amplifier 元件，例如 `J1`，內建 kind 為 `amplifier/jpa`。 |
+
+Qubit 的 `flux_half`／`flux_period`／`flux_int` 保存自己的 DC 線校準，單位由 `flux_unit` 指定。`wiring.lo_flux_ch` 仍是 fast-flux 通道，不是 DC device。
+
+Mux group 的 `coil_flux_half`／`coil_flux_period`／`coil_flux_int` 保存每顆 qubit 對 global coil 的校準，使用 coil device 的原生單位，依 qubits 順序排列。整欄 null 表示未知，list 內的 null 表示該 qubit 未校準。qubits 為 None 或空時，任一非 null 校準欄位都拒絕，包含空 list，錯誤訊息為「coil 校準需要 qubits 順序對齊」。qubits 有值時，非 null 校準 list 必須與 qubits 等長。
 
 這些字串不在載入時預檢整張引用圖；解析時才查目標。單位見 [component 欄位單位](../README.md#component-欄位單位)，共用欄位與 ext 政策見 [component 教學](../tutorial/01-components.md#1-宣告欄位)，registry 與 field specs 契約見 [元件與定義](../../lib/zcu_tools/resources/entry/README.md#元件與定義)。

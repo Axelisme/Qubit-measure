@@ -36,25 +36,25 @@ class QubitBaseSchema(BuiltinComponent):
     t1: Duration = Field(default=None, description="Energy relaxation time T1.")
     t2r: Duration = Field(default=None, description="Ramsey dephasing time T2*.")
     t2e: Duration = Field(default=None, description="Echo dephasing time T2E.")
-    # These three values belong to global flux, interpreted by general.ext.flux_unit.
+    # These calibrations belong to this qubit's own DC line, in flux_unit.
     flux_half: Flux = Field(
         default=None,
-        description="Global flux at the half flux quantum, in general.ext.flux_unit.",
+        description="Own DC line bias at half a flux quantum, in flux_unit.",
     )
     flux_period: Flux = Field(
         default=None,
-        description="Global flux span of one flux quantum, in general.ext.flux_unit.",
+        description="Own DC line bias span of one flux quantum, in flux_unit.",
     )
     flux_int: Flux = Field(
         default=None,
-        description="Global flux at an integer flux quantum, in general.ext.flux_unit.",
+        description="Own DC line bias at an integer flux quantum, in flux_unit.",
     )
     flux_unit: Literal["A", "V"] | None = Field(
-        default=None, description="Unit of the local flux bias: A or V."
+        default=None, description="Unit of this qubit's own DC line bias: A or V."
     )
     resonator: str | None = Field(
         default=None, description="Name of the readout resonator component."
     )
     flux_source: str | None = Field(
-        default=None, description="Name of the component that supplies flux bias."
+        default=None, description="Device name supplying this qubit's own DC line bias."
     )

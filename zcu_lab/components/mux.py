@@ -12,7 +12,7 @@ from pydantic import (
 )
 from zcu_tools.resources.entry.schema import validate_component_name
 
-from .base import BuiltinComponent
+from .base import BuiltinComponent, Flux
 
 
 class MuxWiringSchema(BaseModel):
@@ -42,6 +42,11 @@ class MuxGroupSchema(BuiltinComponent):
     never changes this group's inherited module slots or ext ownership.
     time_of_fly stores this mux route's measured flight time in us, or None
     until known. Resonator pulse-route flight times are separate.
+    flux_source names the global coil device, or None until assigned.
+    coil_flux_half/period/int hold coil bias calibrations in qubits order,
+    using the coil device's native unit. None means the whole calibration is
+    unknown; a None element means that qubit has not been calibrated.
+    Non-null calibration lists require qubits and must match its length.
     """
 
     wiring: MuxWiringSchema = Field(
@@ -72,6 +77,31 @@ class MuxGroupSchema(BuiltinComponent):
         description="Optional distinct qubit names, aligned with the full resonators list.",
     )
 
+    flux_source: str | None = Field(
+        default=None, description="Device name supplying the global coil bias."
+    )
+    coil_flux_half: list[Flux] | None = Field(
+        default=None,
+        description=(
+            "Coil biases at half a flux quantum, in coil device units and qubits order; "
+            "None for an unknown list or element."
+        ),
+    )
+    coil_flux_period: list[Flux] | None = Field(
+        default=None,
+        description=(
+            "Coil bias spans of one flux quantum, in coil device units and qubits order; "
+            "None for an unknown list or element."
+        ),
+    )
+    coil_flux_int: list[Flux] | None = Field(
+        default=None,
+        description=(
+            "Coil biases at integer flux quanta, in coil device units and qubits order; "
+            "None for an unknown list or element."
+        ),
+    )
+
     @field_validator("resonators", "qubits")
     @classmethod
     def validate_names(
@@ -98,6 +128,25 @@ class MuxGroupSchema(BuiltinComponent):
                 "wiring.ro_ch/resonators: lengths differ; "
                 f"ro_ch={self.wiring.ro_ch!r}, resonators={self.resonators!r}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_coil_calibration_lengths(self) -> Self:
+        """Reject coil calibrations without a matching, nonempty qubit order."""
+        for field, values in (
+            ("coil_flux_half", self.coil_flux_half),
+            ("coil_flux_period", self.coil_flux_period),
+            ("coil_flux_int", self.coil_flux_int),
+        ):
+            if values is None:
+                continue
+            if not self.qubits:
+                raise ValueError(f"{field}: coil 校準需要 qubits 順序對齊")
+            if len(values) != len(self.qubits):
+                raise ValueError(
+                    f"{field}/qubits: lengths differ; "
+                    f"{field}={values!r}, qubits={self.qubits!r}"
+                )
         return self
 
     @model_validator(mode="after")
