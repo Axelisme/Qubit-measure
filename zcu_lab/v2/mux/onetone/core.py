@@ -124,9 +124,7 @@ class MuxOnetoneCfg(ProgramV2Cfg, ExpCfgModel):
 
     @field_validator("participants")
     @classmethod
-    def validate_participants(
-        cls, value: list[int], info: ValidationInfo
-    ) -> list[int]:
+    def validate_participants(cls, value: list[int], info: ValidationInfo) -> list[int]:
         """Reject empty, duplicate or out-of-range selections; preserve order.
 
         Pydantic validates strict integer elements before this check. Range is

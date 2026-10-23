@@ -33,8 +33,10 @@ def mux_tone_initials(
 ) -> list[FormNode]:
     """Build Open/Reset tone seeds after choosing original participant indices.
 
-    tones is the complete ordered authored list. Keep selected seeds and every
-    identity field; set the listed nullable drive/sweep fields to None elsewhere.
+    tones is the complete ordered authored list. participants contains original
+    indices; unknown captured names may remain as invalid draft strings and do
+    not select a tone. Keep selected seeds and every identity field; set the
+    listed nullable drive/sweep fields to None elsewhere.
     Return new dictionaries without editing the caller's trees. Ordinary edits
     never call this helper, so adding/removing participants preserves draft values.
     """

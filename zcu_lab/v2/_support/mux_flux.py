@@ -159,7 +159,7 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
                 reset=self.modules.reset, readout=self.modules.readout
             ),
             sweep=self.frequency,
-            active_tones=list(self.participants),
+            participants=list(self.participants),
             reps=self.reps,
             rounds=self.rounds,
             initial_delay=self.initial_delay,
@@ -269,7 +269,7 @@ def run_flux_scan(
 
     spectrum = cfg.inner_cfg().model_copy(deep=True)
     if isinstance(spectrum, MuxOnetoneCfg):
-        spectrum.active_tones = list(indices)
+        spectrum.participants = list(indices)
         dfs = np.linspace(
             spectrum.sweep.df.start, spectrum.sweep.df.stop, spectrum.sweep.df.expts
         )

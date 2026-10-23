@@ -623,18 +623,22 @@ class Section:
                 }
         return result
 
-    def _module_hidden_paths(self) -> dict[tuple[str, ...], frozenset[str]]:
-        """Collect only module visibility declarations, without values or sources."""
-        paths: dict[tuple[str, ...], frozenset[str]] = {
-            (name,): frozenset(
-                path
-                for path, seed in field.node.set.items()
-                if isinstance(seed, Hidden)
-            )
-            if field.node is not None
-            else frozenset()
-            for name, field in self.modules.items()
-        }
+    def _module_hidden_paths(self) -> dict[tuple[str, ...], frozenset[str] | None]:
+        """Collect visibility; explicit nullable None declares no module policy."""
+        paths: dict[tuple[str, ...], frozenset[str] | None] = {}
+        for name, field in self.modules.items():
+            if field.nullable and self.tree.get(name, PydanticUndefined) is None:
+                paths[(name,)] = None
+            else:
+                paths[(name,)] = (
+                    frozenset(
+                        path
+                        for path, seed in field.node.set.items()
+                        if isinstance(seed, Hidden)
+                    )
+                    if field.node is not None
+                    else frozenset()
+                )
         for name, child in self.children.items():
             paths.update(
                 {
@@ -648,14 +652,22 @@ class Section:
         """Install a homogeneous list policy; position defaults remain independent."""
         if not positions:
             return
-        common = positions[0]._module_hidden_paths()
-        for index, position in enumerate(positions[1:], start=1):
-            if position._module_hidden_paths() != common:
-                raise ValueError(
-                    f"{self.path!r}: Hidden paths must match at every list position; "
-                    f"positions 0 and {index} differ"
-                )
-        for path, hidden in common.items():
+        policies = [position._module_hidden_paths() for position in positions]
+        for path in policies[0]:
+            declarations = [
+                (index, hidden)
+                for index, policy in enumerate(policies)
+                if (hidden := policy[path]) is not None
+            ]
+            hidden = frozenset[str]()
+            if declarations:
+                first_index, hidden = declarations[0]
+                for index, other in declarations[1:]:
+                    if other != hidden:
+                        raise ValueError(
+                            f"{self.path!r}: Hidden paths must match at every list position; "
+                            f"positions {first_index} and {index} differ"
+                        )
             section = self
             for name in path[:-1]:
                 section = section.children[name]

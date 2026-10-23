@@ -1,6 +1,6 @@
 # gui/form_adapter — 從 core cfg 生成 Form
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。Core cfg 與持久 Spec 的表單推導與轉換契約。
 
@@ -98,8 +98,10 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 `Form` 遞迴生成 `list[ConfigBase]` 的元素 model。起始樹的 list 按位置提供初值，scalar list 也可直接提供初值。省略 list tree 時，生成器把 native defaults 中的 module 與 sweep 投影成可編輯輸入。`to_cfg` 遞迴還原 native model list，不改 participants 順序。
 
 所有位置共用元素宣告，各位置可提供不同的唯讀初值。位置 tree 直接放 `Hidden` 仍在建立 Form 時拒絕。
-位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。所有位置必須宣告相同的 Hidden Spec 路徑，
+位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。同一 module 欄位的所有非 None 位置必須宣告相同的 Hidden Spec 路徑，
 `bind_templates` 才把隱藏政策套到共享元素 model；路徑不同時，錯誤列出 list 路徑與不一致的 indices。
+明示為 None 的 nullable module 不宣告 Hidden 政策，不參與該 module 的比較，也不免除同位置其他 module 的比較。
+全為 None 時沒有額外隱藏路徑。省略初值或非 nullable module 的 None 仍照原規則比較。
 共享 model 只取得隱藏路徑，不取得第一個位置的值、來源、bindings 或其他 defaults。
 各位置仍從自己的 Template／Slot 建 input，Hidden literal 也各自保留。Native 欄位用 `FieldMeta(readonly=True)` 宣告 Form core 的唯讀限制，用 `FieldMeta(element_label="name")` 提供 picker label，不需 import GUI metadata。
 
