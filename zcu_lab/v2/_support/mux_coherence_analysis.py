@@ -9,6 +9,7 @@ from zcu_tools.analysis.fitting import (
     FringeSamplingQuality,
     assess_fringe_sampling,
     compute_fit_quality,
+    decay_time_bounds,
     fit_decay,
     fit_decay_fringe,
 )
@@ -132,6 +133,7 @@ def fit_coherence_trace(
         fitted,
         {name: float(value) for name, value in zip(names, params, strict=True)},
         covariance,
+        decay_bounds=decay_time_bounds(trace.times),
     )
     return (
         MuxCoherenceFit(

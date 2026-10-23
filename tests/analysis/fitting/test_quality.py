@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.fitting import compute_fit_quality
+from zcu_tools.analysis.fitting import compute_fit_quality, decay_time_bounds
 
 
 @pytest.mark.parametrize(
@@ -62,10 +62,97 @@ def test_unestimable_parameter_keeps_finite_residual_metrics(
     assert quality.r2 == 1.0
     assert quality.normalized_residual_rms == 0.0
     assert quality.relative_parameter_errors == {"bad": None, "good": 0.1}
-    assert quality.to_summary_dict()["invalid"] == [
-        {"path": "relative_parameter_errors.bad", "reason": reason}
-    ]
+    expected = [{"path": "relative_parameter_errors.bad", "reason": reason}]
+    if variance == 0:
+        expected.insert(
+            0, {"path": "standard_errors.bad", "reason": "zero_standard_error"}
+        )
+    assert quality.to_summary_dict()["invalid"] == expected
     json.dumps(quality.to_summary_dict(), allow_nan=False)
+
+
+def test_zero_standard_error_is_invalid_without_changing_numeric_metrics() -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([0.0, 1.0, 2.0]),
+        {"decay_time": 2.0},
+        np.zeros((1, 1)),
+    )
+    assert quality.to_summary_dict()["invalid"] == [
+        {"path": "standard_errors.decay_time", "reason": "zero_standard_error"}
+    ]
+    assert quality.r2 == 1.0
+    assert quality.normalized_residual_rms == 0.0
+    assert quality.relative_parameter_errors == {"decay_time": 0.0}
+
+
+@pytest.mark.parametrize("variation", [0.0, 1e-12])
+def test_near_constant_predictions_are_invalid_even_with_finite_errors(
+    variation: float,
+) -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([1.0 - variation, 1.0, 1.0 + variation]),
+        {"offset": 1.0},
+        np.eye(1),
+    )
+    assert quality.to_summary_dict()["invalid"] == [
+        {"path": "prediction", "reason": "near_constant_prediction"}
+    ]
+    assert quality.r2 == pytest.approx(0.0, abs=1e-10)
+    assert quality.normalized_residual_rms == pytest.approx(0.408248290463863)
+    assert quality.relative_parameter_errors == {"offset": 1.0}
+
+
+@pytest.mark.parametrize("time", [0.01, 0.1, 0.100000001, 19.99999999, 20.0, 100.0])
+@pytest.mark.parametrize("name", ["decay_time", "decay_time1", "decay_time2"])
+def test_boundary_and_outside_decay_times_are_invalid(time: float, name: str) -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([0.0, 1.0, 2.0]),
+        {name: time},
+        np.eye(1),
+        decay_bounds=(0.1, 20.0),
+    )
+    assert quality.to_summary_dict()["invalid"] == [
+        {"path": name, "reason": "窗口內無法解析衰減時間"}
+    ]
+    assert quality.r2 == 1.0
+    assert quality.relative_parameter_errors[name] == pytest.approx(1.0 / time)
+
+
+@pytest.mark.parametrize(
+    ("delays", "expected"),
+    [
+        ([0.0, 0.2, 1.0], (0.2, 10.0)),
+        ([0.1, 1.0, 2.0], (0.1, 19.0)),
+        ([5.0, 0.5, 1.0, 1.0], (0.5, 45.0)),
+    ],
+)
+def test_decay_bounds_use_acquired_delay_resolution(
+    delays: list[float], expected: tuple[float, float]
+) -> None:
+    assert decay_time_bounds(np.array(delays)) == pytest.approx(expected)
+
+
+def test_interior_decay_and_other_parameter_names_are_not_invalid() -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]),
+        np.array([0.0, 1.0, 2.0]),
+        {"decay_time": 2.0, "frequency": 100.0},
+        np.eye(2),
+        decay_bounds=(0.1, 20.0),
+    )
+    assert quality.invalid == ()
+
+
+def test_missing_covariance_without_parameters_still_has_a_reason() -> None:
+    quality = compute_fit_quality(
+        np.array([0.0, 1.0, 2.0]), np.array([0.0, 1.0, 2.0]), {}, None
+    )
+    assert quality.to_summary_dict()["invalid"] == [
+        {"path": "covariance", "reason": "covariance_unavailable"}
+    ]
 
 
 def test_missing_covariance_does_not_hide_negative_r2() -> None:

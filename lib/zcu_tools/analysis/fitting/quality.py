@@ -11,21 +11,26 @@ from numpy.typing import NDArray
 
 @dataclass(frozen=True)
 class QualityIssue:
-    """The direct reason one field of a computed FitQuality is unestimable.
+    """One unestimable metric or degenerate-fit diagnostic from the quality owner.
 
     Attributes:
-        path: Relative to FitQuality or its summary: "r2",
-            "normalized_residual_rms", or "relative_parameter_errors.<name>".
+        path: Relative diagnostic location: "r2", "normalized_residual_rms",
+            "relative_parameter_errors.<name>", "standard_errors.<name>",
+            "prediction", "covariance" (no named parameters), or a bounded decay
+            parameter name.
             After the last fixed prefix, <name> is the complete mapping key;
             dots in a parameter name do not denote further nested fields.
-        reason: One of six codes: "zero_variance" (constant observations for r2),
+        reason: "zero_variance" (constant observations for r2),
             "zero_range" (constant observations for normalized residual RMS),
             "zero_parameter" (zero relative-error denominator),
             "covariance_unavailable" (no parameter covariance),
             "negative_variance" (negative covariance diagonal), or "non_finite"
             (non-finite inputs, intermediate arithmetic, or result).
+            Degeneracy adds "zero_standard_error" (zero covariance diagonal),
+            "near_constant_prediction" (predicted span below 1e-8 of observed
+            span), or "窗口內無法解析衰減時間" (decay time at/outside scan bounds).
 
-    An issue explains a None, not an invalid fit or calibration.
+    These diagnostics do not implement calibration acceptance or writeback.
     """
 
     path: str
@@ -50,10 +55,12 @@ class FitQuality:
             first applicable reason is non_finite parameter, non_finite
             diagonal, negative_variance, zero_parameter, then non_finite ratio.
             Off-diagonal entries do not affect these marginal errors.
-        invalid: Direct explanations of unestimable fields, not fit validity.
-            In computed results, every None has exactly one matching
-            QualityIssue, and no finite field has an issue. Relative-error
-            paths use the entire parameter name, even when it contains dots.
+        invalid: Reasons for unestimable fields and degenerate fits. Every None
+            has a matching metric issue. Zero/non-finite parameter stderr and
+            missing covariance produce issues; non-finite off-diagonal entries
+            alone do not invalidate marginal errors. Near-constant predictions
+            and bounded decay times can have issues despite finite metrics.
+            Relative-error paths retain the entire parameter name, including dots.
 
     compute_fit_quality returns finite numbers or None. This dataclass stores
     those results without validating manually constructed instances.
@@ -83,11 +90,37 @@ class FitQuality:
         }
 
 
+def decay_time_bounds(delays: NDArray[np.float64]) -> tuple[float, float]:
+    """Return resolvable decay-time bounds in the units of acquired delays.
+
+    delays must be 1-D finite nonnegative float64 coordinates with at least two
+    distinct values; otherwise raise ValueError. Order and duplicates do not
+    matter. The lower bound is the smaller of the first positive delay and the
+    smallest positive sample spacing. The upper bound is ten scan spans.
+    """
+    _validate_float64_dtype("delays", delays)
+    if delays.ndim != 1 or not np.isfinite(delays).all() or np.any(delays < 0):
+        raise ValueError(
+            "delays must be finite nonnegative one-dimensional coordinates"
+        )
+    unique = np.unique(delays)
+    if len(unique) < 2:
+        raise ValueError("decay bounds require at least two distinct delays")
+    lower = min(float(unique[unique > 0][0]), float(np.min(np.diff(unique))))
+    # Ten windows allow slow envelopes without claiming arbitrarily long lifetimes.
+    upper = 10 * float(unique[-1] - unique[0])
+    if not np.isfinite(upper):
+        raise ValueError("decay window must have finite bounds")
+    return lower, upper
+
+
 def compute_fit_quality(
     y: NDArray[np.float64],
     y_fit: NDArray[np.float64],
     parameters: Mapping[str, float],
     covariance: NDArray[np.float64] | None,
+    *,
+    decay_bounds: tuple[float, float] | None = None,
 ) -> FitQuality:
     """Compute diagnostics from the actual optimizer inputs, without refitting.
 
@@ -103,6 +136,11 @@ def compute_fit_quality(
             in that order, or None when unavailable. Only the diagonal is used
             for marginal errors; no symmetry or positive-semidefinite gate is
             applied to off-diagonal entries.
+        decay_bounds: Optional (lower, upper) from decay_time_bounds, with finite
+            0 < lower < upper, in the decay parameter units. Only decay_time,
+            decay_time1 and decay_time2 are checked. At/outside bounds (including
+            1e-6 relative endpoint tolerance) adds 窗口內無法解析衰減時間 without
+            altering numeric metrics. None disables this model-specific check.
 
     Returns:
         FitQuality with the definitions and None/issue correspondence documented
@@ -110,13 +148,16 @@ def compute_fit_quality(
         errors, keeps all parameter keys, and does not discard residual metrics.
         Non-finite data/arithmetic, zero denominators, and negative diagonal
         variances produce None plus a direct issue, rather than raising.
+        Zero stderr and predicted span below 1e-8 of positive observed span add
+        degeneracy issues without replacing finite metrics.
 
     Raises:
         ValueError: y, y_fit, or non-None covariance has a dtype other than
             float64 (the message names the parameter and received dtype);
             observation/model vectors are empty, not 1-D, or mismatched in shape;
             a parameter name is not a nonblank string; or covariance has the
-            wrong shape. Inputs are never converted to a supported dtype.
+            wrong shape; or decay_bounds is not finite and ordered with positive
+            lower bound. Inputs are never converted to a supported dtype.
 
     Inputs are not modified. No optimizer, calibration, accept, or writeback
     policy is changed.
@@ -133,12 +174,42 @@ def compute_fit_quality(
     ):
         raise ValueError("covariance shape must match the named parameter order")
 
+    if decay_bounds is not None:
+        lower, upper = decay_bounds
+        if not np.isfinite(decay_bounds).all() or not 0 < lower < upper:
+            raise ValueError("decay_bounds must be finite with 0 < lower < upper")
+
     r2, normalized_rms, issues = _residual_metrics(y, y_fit)
+    with np.errstate(over="ignore", invalid="ignore"):
+        observed_span = float(np.ptp(y))
+        predicted_span = float(np.ptp(y_fit))
+    # Below one part in 1e8 of the observed range, the model resolves no variation.
+    if (
+        np.isfinite([observed_span, predicted_span]).all()
+        and observed_span > 0
+        and predicted_span / observed_span < 1e-8
+    ):
+        issues.append(QualityIssue("prediction", "near_constant_prediction"))
+    if covariance is None and not parameters:
+        issues.append(QualityIssue("covariance", "covariance_unavailable"))
     relative_errors: dict[str, float | None] = {}
     for index, (name, value) in enumerate(parameters.items()):
+        if decay_bounds is not None and name in (
+            "decay_time",
+            "decay_time1",
+            "decay_time2",
+        ):
+            lower, upper = decay_bounds
+            # Include optimizer roundoff at active bounds, relative to each endpoint.
+            if value <= lower * (1 + 1e-6) or value >= upper * (1 - 1e-6):
+                issues.append(QualityIssue(name, "窗口內無法解析衰減時間"))
         variance = None if covariance is None else float(covariance[index, index])
         error, reason = _relative_error(value, variance)
         relative_errors[name] = error
+        if variance == 0:
+            issues.append(
+                QualityIssue(f"standard_errors.{name}", "zero_standard_error")
+            )
         if reason is not None:
             issues.append(QualityIssue(f"relative_parameter_errors.{name}", reason))
     return FitQuality(r2, normalized_rms, relative_errors, tuple(issues))

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from zcu_tools.analysis.fitting import compute_fit_quality, decay_time_bounds
 from zcu_tools.analysis.fitting.base import decaycos, dual_expfunc, expfunc
 from zcu_tools.analysis.fitting.decay import (
     fit_decay,
@@ -37,6 +38,33 @@ def test_fit_decay_reuses_parameters_for_followup_fit(initial_fixed):
     assert covariance.shape == (3, 3)
     np.testing.assert_array_equal(covariance[0, :], 0.0)
     np.testing.assert_array_equal(covariance[:, 0], 0.0)
+
+
+def test_unresolved_fast_decay_stays_at_sampling_lower_bound() -> None:
+    xs = np.linspace(0.5, 5.0, 40)
+    ys = expfunc(xs, 0.2, 1.0, 0.02)
+    t1, _, fitted, (params, covariance) = fit_decay(xs, ys, fit_params=(0.2, 1.0, 0.02))
+    assert t1 == pytest.approx(xs[1] - xs[0], rel=1e-5)
+    quality = compute_fit_quality(
+        ys,
+        fitted,
+        dict(zip(("y0", "yscale", "decay_time"), params, strict=True)),
+        covariance,
+        decay_bounds=decay_time_bounds(xs),
+    )
+    assert any(issue.reason == "窗口內無法解析衰減時間" for issue in quality.invalid)
+
+
+@pytest.mark.parametrize("fringe", [False, True])
+def test_decay_time_is_bounded_by_the_observation_window(fringe: bool) -> None:
+    xs = np.linspace(0.5, 5.0, 100)
+    if fringe:
+        ys = decaycos(xs, 0.2, 1.0, 0.5, 0.0, 1e6)
+        time, *_ = fit_decay_fringe(xs, ys)
+    else:
+        ys = expfunc(xs, 0.2, 1.0, 1e6)
+        time, *_ = fit_decay(xs, ys)
+    assert time <= 10 * (xs[-1] - xs[0])
 
 
 def test_fit_dual_decay_recovers_two_times():
