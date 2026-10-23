@@ -151,6 +151,18 @@ class SaveLayout:
         self._saved_at = saved_at
         self._figure_keys: dict[Path, ArtifactKey] = {}
 
+    @property
+    def run_path(self) -> Path:
+        """Return the exact absolute Database run directory without file creation.
+
+        The launch experiment prefix and complete run_id follow the same layout
+        as outputs(). A symlink escaping the Database entry raises ValueError.
+        """
+        return _checked_path(
+            self._database_path,
+            Path("runs") / f"{self._experiment}_{self._run_id}",
+        )
+
     def outputs(self, key: ArtifactKey) -> tuple[Output, ...]:
         """Return ordered destinations for one ArtifactKey without writing them.
 

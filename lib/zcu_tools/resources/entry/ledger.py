@@ -160,6 +160,18 @@ class RecordsLedger:
                 item.event.model_copy(deep=True) for item in self._read().values()
             )
 
+    def read_events_snapshot(self) -> tuple[LedgerEvent, ...]:
+        """Read isolated validated events without acquiring or creating a lock.
+
+        Use for read-only browsing, not read-modify-write transactions. Read the
+        complete current ledger; missing ledger returns (). Validation matches
+        events(), including entry identity, duplicates and complete LF tails.
+        A concurrent append may expose an incomplete tail and raise ValueError;
+        callers may refresh later. Attachments are not opened and no files are
+        created. I/O errors propagate. This does not update the incremental index.
+        """
+        return ()
+
     def reload(self) -> tuple[LedgerEvent, ...]:
         """Fully validate history from byte zero and replace this handle's index.
 
