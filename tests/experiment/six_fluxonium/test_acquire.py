@@ -16,7 +16,7 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.program.v2.simulation import IntegratedRound, SimulationBinding
 from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
@@ -245,10 +245,10 @@ def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(
         request = request_of(env)
         samples = {window.channel: window.samples for window in request.readouts}
 
-        def acquire():
+        def acquire(binding: SimulationBinding):
             # Keep the complete RNG identity fixed, including rounding noise.
-            result = env.soc.binding.execute(
-                RoundRequest(request, env.soc.binding.capture_snapshot(), 0)
+            result = binding.execute(
+                RoundRequest(request, binding.capture_snapshot(), 0)
             )
             if not isinstance(result, IntegratedRound):
                 raise AssertionError(
@@ -261,23 +261,23 @@ def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(
                 ]
             )
 
-        baseline = acquire()
+        baseline = acquire(env.soc.binding)
         local.set_value(0.13 * bias.period)
-        local_only = acquire()
+        local_only = acquire(env.soc.binding)
         assert np.linalg.norm(local_only[target] - baseline[target]) > 1e-5
         others = [i for i in range(6) if i != target]
         np.testing.assert_allclose(local_only[others], baseline[others], atol=1e-10)
 
         local.set_value(0)
         coil.set_value(0.2)
-        coil_only = acquire()
+        coil_only = acquire(env.soc.binding)
         for i in range(6):
             assert np.linalg.norm(coil_only[i] - baseline[i]) > 1e-5
 
         # The opposite local reduced flux cancels coil on this circuit only.
         compensation = -0.2 * bias.period / bias.coil_period
         local.set_value(compensation)
-        combined = acquire()
+        combined = acquire(env.soc.binding)
         np.testing.assert_allclose(combined[target], baseline[target], atol=1e-10)
         np.testing.assert_allclose(combined[others], coil_only[others], atol=1e-10)
         assert dict(env.soc.binding.capture_snapshot().values) == {
@@ -288,6 +288,23 @@ def test_local_and_coil_currents_add_without_crosstalk_and_keep_native_snapshot(
             },
         }
         assert all(value == 0.0 for _, value in initial.values)
+
+    reference_document = six_document()
+    # Local offset contributes 0.25+0.01*i and coil offset contributes 0.15.
+    # Adding 0.13 local flux therefore gives 0.53..0.58 on the selected circuit.
+    baseline_fluxes = (0.40, 0.41, 0.42, 0.43, 0.44, 0.45)
+    shifted_fluxes = (0.53, 0.54, 0.55, 0.56, 0.57, 0.58)
+    for i, qubit in enumerate(reference_document["qubits"].values()):
+        qubit["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
+        ref_bias = qubit["dc_bias"]
+        ref_bias["offset"] = 0.0
+        ref_bias["coil_offset"] = 0.0
+        expected_flux = shifted_fluxes[i] if i == target else baseline_fluxes[i]
+        ref_bias["source"]["initial"] = expected_flux * ref_bias["period"]
+    with environment(reference_document) as reference:
+        np.testing.assert_allclose(
+            acquire(reference.soc.binding), local_only, atol=1e-10
+        )
 
 
 @pytest.mark.parametrize("output", ["integrated", "deferred_raw", "decimated"])
