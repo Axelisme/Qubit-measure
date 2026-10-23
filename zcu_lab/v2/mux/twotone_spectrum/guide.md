@@ -58,7 +58,8 @@ This 16-point example had large linewidth uncertainty and no calibration Apply.
 ## Measurement and analysis
 
 Each tone supplies a drive-frequency range in MHz.
-All tones use the same point count, including nonparticipants.
+Set each tone's Start and Stop in MHz. Expts follows Tones and sets one shared
+positive point count for all tones, including nonparticipants (default 301).
 At each point, the selected drives use their corresponding frequencies together.
 The sequence is common reset, simultaneous drives, then mux readout after the
 longest drive. Pulse pre/post delays stay as configured.

@@ -104,9 +104,11 @@ requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩
 partial NaN 不補零。
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[str]`。
-每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有自己的 sweep，
+每個元素有固定 qubit `name` 與必填 drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
 T1／Ramsey／Echo 使用共用 requested-delay 軸。所有元素都驗證，未參與者也必須有
-有效 drive、獨立 generator；pulse sweep 點數全部相同。Len Rabi 全部元素只接受
+有效 drive、獨立 generator。三個 pulse scan 的頂層 `expts` 是共用正整數，
+表單在 Tones 後只顯示一個 Expts，預設為頻譜 301、Amp Rabi 51、Len Rabi 101。
+每 tone 只有 Start／Stop，不接受舊的每 tone 點數。Len Rabi 全部元素只接受
 const／flat_top，不伸縮或裁切 arb asset。
 Participants 非空、不重複，名稱必須存在。Runtime 按名稱順序查完整原始位置，
 例如 Q3／Q1 對應 `[2, 0]`。GE raw、analysis 與 native persistence 同樣保留該順序。
@@ -117,7 +119,8 @@ RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 gro
 其 `indices` 保留 participants 順序的原始序號，`coordinates` 是各 drive 硬體 grid
 上的 `(K,P)` float64 MHz 陣列。座標沿 `sweep2array(..., "freq", ...)` 的硬體
 start/span/step 量化。Frequency preparation 不建立逐點 pulse；
-`run()` 用各 tone 的 `sweep2param("point", tone.sweep)` 建立 symbolic drive。
+Core 以各 tone 的 start／stop 與共用 expts 建立 `SweepCfg`，
+`run()` 再用 `sweep2param("point", sweep)` 建立 symbolic drive。
 `prepare_amplitude_scan(cfg, soccfg=...)` 仍回傳 `_support.mux.MuxPulseScan`，
 包含原始 `indices`、量化 gain `coordinates (K,P)` 及
 固定 numeric `point_pulses (P,K)`。Gain conversion 沿既有 `round_zcu_gain`。

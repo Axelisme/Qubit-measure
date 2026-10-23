@@ -13,9 +13,9 @@ including nonparticipants, on independent generators distinct from readout.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
-Sweep ranges may differ but every tone, including nonparticipants, must have the
-same point count. Point p pairs each active tone's p-th value, not a Cartesian
-product. Each point compiles once and executes optional common reset, Join of
+Sweep ranges may differ; cfg.expts supplies one positive point count shared by
+all tones, including nonparticipants. Point p pairs each active tone's p-th value,
+not a Cartesian product. Each point compiles once and executes optional common reset, Join of
 independent drive pulses, then active mux readout. Branches start together;
 short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
@@ -101,13 +101,14 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import US_TO_S, PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -152,8 +153,8 @@ class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
     participants is a nonempty, duplicate-free list of those names; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Every drive is required/validated, including nonparticipants, on independent
-    generators distinct from readout. Independent positive us length sweeps
-    have equal point counts. Every waveform
+    generators distinct from readout. Independent positive us length ranges
+    use expts, the positive hardware point count shared by all tones. Every waveform
     must be const or flat_top; arb duration belongs to its asset, not this sweep.
     Inherited reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
@@ -161,12 +162,15 @@ class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True, gt=0, description="Hardware scan point count shared by all tones."
+    )
     participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
         """Reject invalid full tones, active generators, counts or length policy."""
-        validate_mux_scan(self, self.modules, self.tones, self.participants)
+        validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
         for index, tone in enumerate(self.tones):
             drive = tone.drive
             if not isinstance(drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)):
@@ -194,12 +198,14 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxPulseSc
     cfg = MuxLenRabiCfg.model_validate(cfg.model_dump())
     indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
-    points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
+    points = [[] for _ in range(cfg.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
         lengths = sweep2array(
-            tone.sweep, "time", {"soccfg": soccfg, "gen_ch": drive.ch}
+            make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+            "time",
+            {"soccfg": soccfg, "gen_ch": drive.ch},
         )
         if np.any(lengths <= 0):
             raise ValueError(

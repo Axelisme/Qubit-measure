@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 
-from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot
+from zcu_tools.cfg_model import FormNode, Hidden, Slot
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2._support.measure.mux_forms import (
@@ -35,7 +35,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
             {
                 "name": name,
                 "drive": drive,
-                "sweep": Range.between(0.03, stop, expts=101),
+                "sweep": {"start": 0.03, "stop": stop},
             }
         )
     readout = mux_readout_initial(ctx)
@@ -47,6 +47,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
                 "readout": readout,
             },
             "tones": tones,
+            "expts": 101,
             "participants": list(names),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
@@ -60,6 +61,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
         field_order=(
             "participants",
             "tones",
+            "expts",
             "modules",
             "relax_delay",
             "reps",

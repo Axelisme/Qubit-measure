@@ -57,7 +57,8 @@ Use const or flat_top drives for every tone, including nonparticipants.
 For flat_top, total length includes both ramps and must exceed their duration.
 Switch an arb source to a supported waveform explicitly before Run.
 
-Each tone supplies positive lengths in us. All tones use the same point count.
+Each tone supplies positive Start and Stop lengths in us. Expts follows Tones
+and sets one shared positive point count for all tones (default 101).
 At each point, the selected drives use their corresponding lengths together.
 The sequence is common reset, simultaneous drives, then mux readout after that
 point's longest drive. Short drives wait for that branch; pulse pre/post delays

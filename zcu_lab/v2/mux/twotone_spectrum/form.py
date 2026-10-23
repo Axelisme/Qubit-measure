@@ -1,6 +1,6 @@
 """Frequency sweep inputs for every qubit in the selected mux group."""
 
-from zcu_tools.cfg_model import FieldMeta, FormNode, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, FieldMeta, FormNode, Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2._support.measure.mux_forms import (
@@ -32,7 +32,10 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
                 # Run supplies this independent frequency scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
-            "sweep": Range.around(f"{name}.freq", f"1.5 * {name}.kappa", expts=301),
+            "sweep": {
+                "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
+                "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
+            },
         }
         for name in names
     ]
@@ -47,6 +50,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
                 "readout": readout,
             },
             "tones": tones,
+            "expts": 301,
             "participants": list(names),
             "relax_delay": 1.0,
             "initial_delay": Hidden(),
@@ -60,6 +64,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         field_order=(
             "participants",
             "tones",
+            "expts",
             "modules",
             "relax_delay",
             "reps",
