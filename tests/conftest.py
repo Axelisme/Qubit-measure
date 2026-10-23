@@ -1,5 +1,7 @@
 import os
 import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tests._cache_environment import temporary_cache_root
 
@@ -29,6 +31,22 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LIB_PATH = os.path.join(_REPO_ROOT, "lib")
 if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Allocate an invocation-owned basetemp unless the caller supplied one.
+
+    Xdist supplies each worker's basetemp beneath the controller's directory.
+    Only the allocating controller (or serial session) owns cleanup.
+    """
+    if config.option.basetemp is not None:
+        return
+    parent = Path(_REPO_ROOT) / ".pytest-tmp"
+    parent.mkdir(exist_ok=True)
+    directory = TemporaryDirectory(prefix=f"{os.getpid()}-", dir=parent)
+    config.option.basetemp = directory.name
+    config.add_cleanup(directory.cleanup)
 
 
 @pytest.fixture(autouse=True, name="_isolated_fake_device_instances")
