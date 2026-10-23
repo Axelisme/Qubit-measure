@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
 from ..document_store import DocumentStore
+from ..entry.ledger import RecordsLedger
 from ..entry.provenance import Provenance, ProvenanceData, missing_sources
 from .library import (
     MODULE_LIBRARY_FORMAT,
@@ -161,8 +162,24 @@ def open_library_store(
     the whole file. Invalid Specs or entry-local provenance remove their root.
     Ledger I/O/schema/attachment and unexpected failures propagate. The store
     validates the entire cleaned candidate before backup and atomic replacement.
-    Drafts remain strict; this does not create files or materialize references.
+    Unchanged library bytes reuse validation after checking every nonmanual
+    source in a retained ledger index and stat-ing its local attachment. Missing
+    dependencies trigger full admission/cleanup; other dependency errors propagate.
+    Attachment contents are revalidated on changed library bytes or nonempty edits,
+    not on unchanged reads. Drafts remain strict; this does not create files or
+    materialize references.
     """
+    dependencies = RecordsLedger(ledger.parent, entry_id=entry_id)
+
+    def check_dependencies(document: ModuleLibraryDocument) -> bool:
+        sources = tuple(
+            dict.fromkeys(
+                record.source
+                for record in document.provenance.values()
+                if record.source != "manual"
+            )
+        )
+        return dependencies.dependencies_exist(sources)
 
     def validate(document: ModuleLibraryDocument) -> None:
         document.validate_content(ledger=ledger, entry_id=entry_id)
@@ -176,5 +193,6 @@ def open_library_store(
         format=MODULE_LIBRARY_FORMAT,
         supported_version=MODULE_LIBRARY_VERSION,
         validate=validate,
+        check_dependencies=check_dependencies,
         read_cleanup=cleanup,
     )

@@ -62,9 +62,14 @@ def test_unchanged_reads_reuse_validation_and_isolate_mutable_snapshots(
     document_path.touch()
     assert not store.refresh()
     store.snapshot().values["left"] = 99.0
-    with pytest.raises(RuntimeError, match="abort"), store.edit() as draft:
-        draft.values["left"] = 88.0
-        raise RuntimeError("abort")
+
+    def abort_edit() -> None:
+        with store.edit() as draft:
+            draft.values["left"] = 88.0
+            raise RuntimeError("abort")
+
+    with pytest.raises(RuntimeError, match="abort"):
+        abort_edit()
     with store.edit() as draft:
         assert draft.values == {"left": 1.0, "right": 2.0}
     assert store.snapshot().values == {"left": 1.0, "right": 2.0}
