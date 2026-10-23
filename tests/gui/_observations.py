@@ -129,6 +129,18 @@ class PlotAxesObservation:
 
 
 @dataclass(frozen=True)
+class PlotLabelBoundsObservation:
+    """Rendered horizontal ylabel bounds in one visible canvas's pixel coordinates."""
+
+    canvas_name: str  # Public objectName of the canvas containing this axes.
+    canvas_left: float  # Left canvas boundary in renderer coordinates.
+    axes_left: float  # Left edge of the data axes, excluding labels and ticks.
+    ylabel_left: float  # Left edge of the rendered vertical label.
+    ylabel_right: float  # Right edge of the rendered vertical label.
+    canvas_right: float  # Right canvas boundary in renderer coordinates.
+
+
+@dataclass(frozen=True)
 class PlotObservation:
     """Visible axes in canvas/axes order, without retaining artists or result data."""
 
