@@ -15,13 +15,19 @@ _KIND_FIELDS = (
     (("t1",), ("t1", "t1_err", "t1b")),
     (("ramsey", "t2ramsey", "t2r"), ("t2r", "t2r_err", "detune")),
     (("echo", "t2echo", "t2e"), ("t2e", "t2e_err")),
-    (("amp_rabi", "rabi_amplitude"), ("pi_gain", "pi_gain_err", "pi2_gain")),
-    (("len_rabi", "rabi_length"), ("pi_len", "pi_len_err", "pi2_len", "rabi_f")),
+    (
+        ("amp_rabi", "rabi_amplitude", "rabi_gain", "rabi/amp"),
+        ("pi_gain", "pi_gain_err", "pi2_gain"),
+    ),
+    (
+        ("len_rabi", "rabi_length", "rabi/len"),
+        ("pi_len", "pi_len_err", "pi2_len", "rabi_f"),
+    ),
     (
         ("twotone_spectrum", "qubit_spectrum", "twotone/freq"),
         ("freq", "freq_err", "fwhm"),
     ),
-    (("onetone", "resonator"), ("freq", "fwhm", "kappa", "depth")),
+    (("onetone", "onetone_fine", "resonator"), ("freq", "fwhm", "kappa", "depth")),
     (("ge", "singleshot_ge"), ("fidelity", "theta", "threshold", "ge_s")),
 )
 _IDENTITY = ("entry", "point", "experiment", "time")
@@ -32,8 +38,9 @@ _MUX_FIELDS = {"t2r": "t2", "t2r_err": "t2_err", "t2e": "t2", "t2e_err": "t2_err
 def _fields(run: ResultRun) -> tuple[str, ...]:
     experiment = (run.experiment or "").casefold()
     tokens = re.split(r"[/ .-]+", experiment)
+    path = f"/{'/'.join(tokens)}/"
     for names, fields in _KIND_FIELDS:
-        if any(name in tokens or name == experiment for name in names):
+        if any(f"/{name}/" in path for name in names):
             if "mux" in tokens:
                 return tuple(_MUX_FIELDS.get(key, key) for key in fields)
             return fields
@@ -113,8 +120,10 @@ def build_comparison(index: ResultsIndex, run_keys: tuple[str, ...]) -> Comparis
     """Project indexed saved summaries without analysis or unit conversion.
 
     Rows follow run_keys; unknown keys raise KeyError. Fixed numeric columns
-    form a kind-ordered union. Unknown experiments expose identity and saved
-    quality/issues only. Missing values display —. Per-file read errors appear
+    form a kind-ordered union. Kinds match explicit complete names or contiguous
+    path tokens, including prefixed paths; underscores stay within a token.
+    Unknown experiments expose identity and saved quality/issues only.
+    Missing values display —. Per-file read errors appear
     in issues without hiding the run; ResultsIndex owns all reads/validation.
     """
     runs = tuple(index.get_run(key) for key in run_keys)

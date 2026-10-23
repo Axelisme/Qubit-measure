@@ -100,6 +100,90 @@ def test_registered_spectrum_name_selects_saved_frequency_fields(
     assert table.rows[0].cells[4:7] == ("5123.75", "0.1", "2")
 
 
+@pytest.mark.parametrize(
+    ("experiment", "fields", "values"),
+    [
+        (
+            "mux/rabi/len",
+            ("pi_len", "pi_len_err", "pi2_len", "rabi_f"),
+            ("0.2", "0.01", "0.1", "2.5"),
+        ),
+        (
+            "mux/onetone_fine",
+            ("freq", "fwhm", "kappa", "depth"),
+            ("6123.5", "0.4", "0.2", "0.8"),
+        ),
+        (
+            "mux/rabi/amp",
+            ("pi_gain", "pi_gain_err", "pi2_gain"),
+            ("0.3", "0.02", "0.15"),
+        ),
+        (
+            "twotone/rabi/amp_rabi",
+            ("pi_gain", "pi_gain_err", "pi2_gain"),
+            ("0.3", "0.02", "0.15"),
+        ),
+        (
+            "twotone/ge/rabi_gain",
+            ("pi_gain", "pi_gain_err", "pi2_gain"),
+            ("0.3", "0.02", "0.15"),
+        ),
+        (
+            "twotone/rabi/len_rabi",
+            ("pi_len", "pi_len_err", "pi2_len", "rabi_f"),
+            ("0.2", "0.01", "0.1", "2.5"),
+        ),
+        (
+            "archive/twotone/freq",
+            ("freq", "freq_err", "fwhm"),
+            ("6123.5", "0.05", "0.4"),
+        ),
+        ("custom/rabi/length_scan", (), ()),
+        ("custom/onetone_fine_scan", (), ()),
+        ("archive/not_twotone/freq", (), ()),
+        ("archive/twotone/freq_scan", (), ()),
+    ],
+)
+def test_historical_path_tokens_select_only_declared_saved_fields(
+    tmp_path: Path,
+    experiment: str,
+    fields: tuple[str, ...],
+    values: tuple[str, ...],
+) -> None:
+    run = saved_run(
+        tmp_path,
+        "historical",
+        experiment,
+        {
+            "pi_len": 0.2,
+            "pi_len_err": 0.01,
+            "pi2_len": 0.1,
+            "rabi_f": 2.5,
+            "pi_gain": 0.3,
+            "pi_gain_err": 0.02,
+            "pi2_gain": 0.15,
+            "freq": 6123.5,
+            "freq_err": 0.05,
+            "fwhm": 0.4,
+            "kappa": 0.2,
+            "depth": 0.8,
+        },
+    )
+    table = build_comparison(ResultsIndex(tmp_path, (run,)), (run.key,))
+    assert table.columns == (
+        "entry",
+        "point",
+        "experiment",
+        "time",
+        *fields,
+        "r2",
+        "invalid",
+        "failure",
+        "issues",
+    )
+    assert table.rows[0].cells[4:-4] == values
+
+
 def test_direct_quality_diagnostics_keep_tone_label(tmp_path: Path) -> None:
     run = saved_run(
         tmp_path,
