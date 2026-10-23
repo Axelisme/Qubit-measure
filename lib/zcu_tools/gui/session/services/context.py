@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +27,7 @@ from zcu_tools.gui.session.events import (
     MdChangedPayload,
     MlChangedPayload,
 )
+from zcu_tools.gui.session.services.context_writeback import ContextWritebackTarget
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
@@ -87,41 +87,6 @@ if TYPE_CHECKING:
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
     from zcu_tools.resources.entry.provenance import Provenance
-
-
-class _ContextWritebackTarget:
-    """Bind the context's target setters to the shared ordered execution loop."""
-
-    def __init__(
-        self, context: ContextService, target: SavedPoint, entry: ResultEntry
-    ) -> None:
-        self._context = context
-        self._target = target
-        self._entry = entry
-        self.entry_id = entry.entry_id
-        self.ledger = entry.ledger
-        self.point = target.point
-
-    def set_parameters(
-        self, updates: tuple[ParameterUpdate, ...]
-    ) -> tuple[YamlValue, ...]:
-        return self._context.set_parameters(self._target, updates)
-
-    def set_modules(self, updates: tuple[LibraryUpdate, ...]) -> tuple[YamlMap, ...]:
-        return self._context.set_modules(self._target, updates)
-
-    def append_sample(
-        self,
-        component: str,
-        fields: JsonObject,
-        *,
-        run_id: str,
-        at: datetime,
-        source: str,
-    ) -> JsonObject:
-        return self._entry.samples(component).append(
-            run_id=run_id, point=self.point, at=at, source=source, **fields
-        )
 
 
 class ContextService:
@@ -591,7 +556,7 @@ class ContextService:
         entry.use_point(target.point)
         return apply_writeback(
             items,
-            target=_ContextWritebackTarget(self, target, entry),
+            target=ContextWritebackTarget(self, target, entry),
             evidence=evidence,
         )
 
