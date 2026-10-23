@@ -613,6 +613,40 @@ class ResultEntry:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
 
     @classmethod
+    def read_events_snapshot(
+        cls, name: str, *, result_root: str | Path
+    ) -> tuple[LedgerEvent, ...]:
+        """Read validated historical events for a safe single-segment entry name.
+
+        result_root is the exact Result root, not an entry or Database directory.
+        Missing entry, records directory or ledger returns (). An existing entry
+        must have a valid setup header and UUID/UTC identity; components are not
+        interpreted. Ledger validation and I/O errors propagate. Symlinks must
+        preserve root/entry/records containment and keep the ledger in records,
+        otherwise raise ValueError. No entry, file, directory or lock is created,
+        and attachments are not read.
+        """
+        root = Path(result_root).absolute()
+        result = _entry_path(root, name)
+        for path in (root, result):
+            if not path.resolve().is_relative_to(path):
+                raise ValueError(f"{path}: path escapes its entry location")
+        if not result.exists():
+            return ()
+        identity = cls.read_identity(name, result_root=root)
+        records = result / "records"
+        if not records.resolve().is_relative_to(records):
+            raise ValueError(f"{records}: records path escapes its entry location")
+        if not records.exists():
+            return ()
+        ledger = records / "ledger.jsonl"
+        if not ledger.resolve().is_relative_to(records):
+            raise ValueError(f"{ledger}: ledger path escapes records")
+        return RecordsLedger(
+            records, entry_id=str(identity.entry_id)
+        ).read_events_snapshot()
+
+    @classmethod
     def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:
         """Read setup header and identity without component registration or locks.
 

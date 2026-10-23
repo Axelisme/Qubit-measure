@@ -10,7 +10,7 @@ import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import Container, ContainerAttrs, load, save
+from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, load, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -68,7 +68,18 @@ def test_menu_opens_independent_results_window(
 
 
 @pytest.fixture
-def populated_browser(browser_host: MainWindow, tmp_path: Path) -> ComponentDriver:
+def saved_cfg() -> JsonObject:
+    return {
+        "values": {"readout": {"frequency": 5100.0, "tone": "Q2"}},
+        "cfg_type": "synthetic.history.ReadoutCfg",
+        "schema_version": "7.3",
+    }
+
+
+@pytest.fixture
+def populated_browser(
+    browser_host: MainWindow, tmp_path: Path, saved_cfg: JsonObject
+) -> ComponentDriver:
     for entry_name, point, run_id, experiment, day in (
         ("alpha", "p1", "20261021T010000Z-aaaaaa", "mux/readout", "21"),
         ("alpha", "p2", "20261022T010000Z-bbbbbb", "mux/readout", "22"),
@@ -118,11 +129,7 @@ def populated_browser(browser_host: MainWindow, tmp_path: Path) -> ComponentDriv
                 vars={},
                 docs={
                     "metadata": metadata.model_dump(mode="json"),
-                    "cfg": {
-                        "values": {"readout": {"frequency": 5100.0, "tone": "Q2"}},
-                        "cfg_type": "Synthetic",
-                        "schema_version": "1.0",
-                    },
+                    "cfg": saved_cfg,
                 },
                 groups={},
                 attrs=ContainerAttrs("3.0", "synthetic-browser", None, {}),
@@ -288,11 +295,12 @@ def test_filters_grouping_and_focus_history(
 
 
 def test_figure_drilldown_details_scroll_and_pins(
-    populated_browser: ComponentDriver, tmp_path: Path
+    populated_browser: ComponentDriver, tmp_path: Path, saved_cfg: JsonObject
 ) -> None:
     ui = populated_browser
     assert "results.gallery" in {w.object_name for w in ui.visible().widgets}
     ui.click(object_name="results.figure.0")
+    ui.screenshot(tmp_path / "run-first-details.png")
     assert ui.scroll_area(object_name="results.gallery").vertical_scrollable
     assert "20261021T010000Z-aaaaaa" in ui.observe(object_name="results.focus").text
     ui.click(object_name="results.figure.1")
@@ -300,10 +308,16 @@ def test_figure_drilldown_details_scroll_and_pins(
         ui.observe(object_name="results.current_figure").text
         == "Current figure: plot-1.png"
     )
+    ui.screenshot(tmp_path / "run-current-details.png")
     details = ui.observe(object_name="results.details").text
+    for field in ("cfg_type", "schema_version"):
+        assert f"{field} = {saved_cfg[field]}" in details
     assert "readout.frequency = 5100.0" in details
     assert "tones[0].freq = 5100.0" in details
     assert "Parameters · analysis.json" in details and "n_iter = 12" in details
+    ui.click(object_name="results.details")
+    ui.press_key(Qt.Key.Key_PageDown, object_name="results.details")
+    ui.screenshot(tmp_path / "run-values-details.png")
     assert "alpha / p1" in ui.observe(object_name="results.figure.0").tooltip
     ui.invoke_context_action(action="Add to comparison", object_name="results.figure.1")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"

@@ -118,9 +118,8 @@ a member path or image and pin its run in ResultsComparison.
 select at most four saved PNGs for the 2×2 view, independently of pin membership.
 Re-pinning from a figure card preserves that exact filename across mode changes.
 Runs without PNGs stay in the list and show a reason in the image view.
-Cfg values and analysis summaries use relative paths; analysis parameters have
-their own sections. New-tab Load uses the application owner. A missing analysis
-source remains visible in both the browser outcome and the loaded tab.
+Cfg values 與 analysis summary 使用相對路徑。Cfg 的身分區段另列保存的 cfg_type 與 schema_version，analysis parameters 也有自己的區段。
+新 tab 的 Load 使用既有 application owner。缺少 analysis source 的原因同時顯示在瀏覽器結果與載入後的 tab。
 A history tab whose form factory failed shows its original reason in the form
 area and disabled Run tooltip. Reset can replace that notice with a real editor;
 a failed retry leaves the notice and shows the current preparation error.

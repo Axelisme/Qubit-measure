@@ -33,7 +33,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .results_comparison import ResultsComparison
 from .results_details import result_details
-from .results_gallery import ResultsGallery
+from .results_gallery import ResultImageAction, ResultsGallery
 
 logger = logging.getLogger(__name__)
 
@@ -405,19 +405,21 @@ class ResultsBrowser(QWidget):
                     + f"\nAnalysis preparation failed: {outcome.analysis_error}"
                 )
 
-    def _figure_action(self, run: ResultRun, figure: str, action: str) -> None:
+    def _figure_action(
+        self, run: ResultRun, figure: str, action: ResultImageAction
+    ) -> None:
         clipboard = QApplication.clipboard()
-        if action == "Add to comparison":
+        if action is ResultImageAction.ADD_TO_COMPARISON:
             self.comparison.pin_run(run, figure)
             return
         if clipboard is None:
             self._feedback.setText("Clipboard unavailable")
             return
-        if action == "Copy path":
+        if action is ResultImageAction.COPY_PATH:
             path = next(path for path in run.figure_paths if path.name == figure)
             clipboard.setText(str(path))
             self._feedback.setText(f"Copied path: {path}")
-        elif action == "Copy image":
+        elif action is ResultImageAction.COPY_IMAGE:
             try:
                 image = QImage.fromData(self._index.read_figure(run.key, figure))
                 if image.isNull():

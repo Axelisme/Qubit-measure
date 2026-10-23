@@ -181,6 +181,42 @@ def test_figure_only_acquisition_uses_ledger_identity(project: Path) -> None:
         index.read_cfg(run.key)
 
 
+@pytest.mark.parametrize("native_state", ["missing", "unreadable"])
+def test_acquired_identity_matches_full_run_id_when_adapter_differs(
+    project: Path, native_state: str
+) -> None:
+    original = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    renamed = _layout(project, "alpha", "saving", _RUN1).run_path
+    original.rename(renamed)
+    data = renamed / "data.h5"
+    if native_state == "missing":
+        data.unlink()
+    else:
+        data.write_bytes(b"broken native data")
+    # A partial or merely similar suffix must not inherit the acquisition.
+    lookalike = renamed.with_name(f"saving_prefix{_RUN1}")
+    lookalike.mkdir()
+    index = scan_results(project, entries=("alpha",))
+    run = index.get_run(f"alpha/{renamed.name}")
+    assert (run.registered, run.run_id, run.experiment, run.point) == (
+        True,
+        _RUN1,
+        "mux/readout",
+        "p1",
+    )
+    assert run.roles == {"qubit": "Q1"}
+    assert run.at == _AT
+    assert len(run.figure_paths) == 1
+    assert bool(run.issues) == (native_state == "unreadable")
+    other = index.get_run(f"alpha/{lookalike.name}")
+    assert (other.registered, other.run_id, other.experiment, other.at) == (
+        False,
+        None,
+        None,
+        None,
+    )
+
+
 def test_broken_native_is_retained_with_diagnostic(project: Path) -> None:
     data = _layout(project, "alpha", "mux/readout", _RUN2).run_path / "data.h5"
     data.write_bytes(b"not hdf5")

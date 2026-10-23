@@ -54,17 +54,19 @@ def history_controller(
 ) -> Generator[Controller]:
     """Compose real application owners with only the synthetic adapter catalog."""
     component_registry.register("history/source", HistorySource)
-    registry = registry if registry is not None else Registry()
-    registry.register("history", SourceDependentAdapter)
-    ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
-        registry,
-        None,
-        BaseEventBus(),
-        project_root=str(root),
-    )
     try:
-        yield ctrl
+        registry = registry if registry is not None else Registry()
+        registry.register("history", SourceDependentAdapter)
+        ctrl = Controller(
+            State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+            registry,
+            None,
+            BaseEventBus(),
+            project_root=str(root),
+        )
+        try:
+            yield ctrl
+        finally:
+            ctrl.close()
     finally:
-        ctrl.close()
         component_registry.unregister("history/source")
