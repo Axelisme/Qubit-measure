@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
 from ..document_store import DocumentStore
-from ..entry.provenance import MissingSourceError, ProvenanceData, validate_source
+from ..entry.provenance import Provenance, ProvenanceData, missing_sources
 from .library import (
     MODULE_LIBRARY_FORMAT,
     MODULE_LIBRARY_VERSION,
@@ -66,36 +66,31 @@ def _sources_by_root(
     return sources
 
 
-def _valid_entry(
+def _entry_sources(
     partition: str,
     name: str,
     raw: YamlValue,
     sources: dict[str, YamlValue],
-    *,
-    ledger: Path,
-    entry_id: str,
-) -> bool:
+) -> tuple[Provenance, ...] | None:
     # PulseSpec defaults are for authored values, not missing disk discriminators.
     if partition == "pulses" and (not isinstance(raw, dict) or "type" not in raw):
-        return False
+        return None
     # Current entry extra rules apply even inside a forward-minor container.
     try:
         component = ComponentLibrary.model_validate({partition: {name: raw}})
     except ValidationError:
-        return False
+        return None
     spec = component.model_dump(mode="python")[partition][name]
+    provenances: list[Provenance] = []
     for path, record in sources.items():
         try:
             provenance = ProvenanceData.model_validate(record)
         except ValidationError:
-            return False
+            return None
         if not has_persistent_source_suffix(spec, tuple(path.split(".")[3:])):
-            return False
-        try:
-            validate_source(provenance.to_provenance(), ledger, entry_id)
-        except MissingSourceError:
-            return False
-    return True
+            return None
+        provenances.append(provenance.to_provenance())
+    return tuple(provenances)
 
 
 def _clean_disk_entries(
@@ -105,6 +100,25 @@ def _clean_disk_entries(
     container = _LibraryContainer.model_validate(document, extra=extra)
     roots = _roots(container)
     sources = _sources_by_root(container, roots)
+    entry_sources = {
+        root: _entry_sources(
+            partition,
+            name,
+            getattr(container.components[component], partition)[name],
+            sources[root],
+        )
+        for root, (component, partition, name) in roots.items()
+    }
+    missing = missing_sources(
+        (
+            source
+            for provenances in entry_sources.values()
+            if provenances is not None
+            for source in provenances
+        ),
+        ledger,
+        entry_id,
+    )
     removed: list[str] = []
     components = document.get("components", {})
     if not isinstance(components, dict):
@@ -116,13 +130,9 @@ def _clean_disk_entries(
         entries = partitions[partition]
         if not isinstance(entries, dict):
             raise ValueError("Library partition must be a mapping")
-        if not _valid_entry(
-            partition,
-            name,
-            entries[name],
-            sources[root],
-            ledger=ledger,
-            entry_id=entry_id,
+        provenances = entry_sources[root]
+        if provenances is None or any(
+            source.source in missing for source in provenances
         ):
             removed.append(root)
             # YAML aliases may share either ancestor. Detach this root's path

@@ -29,16 +29,16 @@ Service 從固定 Run／Load 來源補入 sample 座標。Widget 只呈現既有
 
 `WritebackService` 從 draft 的固定 Run／Load capture 解析選定提案與 module Form，
 再交給 context owner。全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
-ledger event，再依提案順序提交 Parameter、Module 或 Sample。
-Parameter 與 Module 各列保留自己的單檔交易，Sample 各列追加樣本。
-第一個失敗會停止後項，保留 accepted event 與成功前綴，並標記已成功的 draft 列。
+ledger event，再依序提交 point 參數組、library 組與逐筆 Sample，組內保留提案順序。
+Parameter 與 library 各用一次單檔交易，組內任一項無效整組不寫，Sample 各列追加樣本。
+第一個失敗會停止後組，保留 accepted event 與已提交組，並標記已成功的 draft 列。
 Ledger append 失敗時不提交任何列。Apply 不提供跨列 rollback 或自動 retry。
 
 資源層對完整 serialization tree 驗證一次 YAML 表示。
 Library 的完整 provenance 驗證一次讀取 ledger，並檢查每個被引用的事件與附件。
 DocumentStore 每次仍讀取磁碟 bytes，相同內容只重用已解析的 YAML 節點。
 每次 Apply 都執行模型、清理政策與外部來源驗證，重新驗證 ledger 與附件。
-各列各自提交到固定目的地，錯誤分類與 applied 狀態由逐列結果決定。
+各組提交到固定目的地，錯誤分類與 applied 狀態由已提交項目決定。
 Apply 同步執行。
 
 ## Captured acceptance
@@ -48,7 +48,7 @@ Apply 同步執行。
 Writeback control 固定 Primary 在 Post 前，並在提交前檢查 permission、idle 與 active draft。
 Unknown／duplicate IDs 在第一筆寫入前拒絕。Draft 編輯或替換本身不拒絕接受，見 ADR-0075。
 提交中的失敗回 confirmed IDs、逐項 actual values 成功前綴及診斷，不 retry／rollback。
-Actual values 由 resources/context 的實際寫入 owner 當筆回傳，GUI 只關聯 ID、pane 與固定目的地。
+Actual values 由 resources/context 的實際寫入 owner 逐項捕捉，整組成功才回傳。GUI 以 committed index 對回供應 items，再關聯 ID、pane 與固定目的地；不用 path 或 applied 數量配對。
 不在整批後 readback，後項覆寫與讀取故障不改先前已確認的 receipt。
 `apply_draft` 與單 pane `write_draft` 保留原有 raise 與 edit/write 契約。
 

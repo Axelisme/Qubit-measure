@@ -632,7 +632,10 @@ class WritebackService:
                 ),
             )
         except concrete.WritebackApplyError as exc:
-            for entry in selected_entries[: exc.applied]:
+            completed_entries = tuple(
+                selected_entries[item.index] for item in exc.result.committed
+            )
+            for entry in completed_entries:
                 entry.applied = True
             # Keep GUI/wire classification and the producer's own cause chain.
             cause = exc.__cause__
@@ -641,9 +644,7 @@ class WritebackService:
                     "WritebackApplyError requires its original cause"
                 ) from exc
             return _DraftApplication(
-                tuple(
-                    entry.item.session_id for entry in selected_entries[: exc.applied]
-                ),
+                tuple(entry.item.session_id for entry in completed_entries),
                 written,
                 cause,
                 applied_values(
@@ -765,23 +766,19 @@ class WritebackService:
             on_applied(applied.values)
         if applied.error is not None:
             raise applied.error from applied.error.__cause__
+        previous_values = {
+            item.session_id: previous
+            for item, previous in zip(items, before, strict=True)
+        }
         return [
             WritebackWritten(
-                id=item.session_id,
-                kind=(
-                    "sample"
-                    if isinstance(item, SampleWriteback)
-                    else "parameter"
-                    if isinstance(item, ParameterWriteback)
-                    else "module"
-                ),
-                target=path,
-                before=previous,
+                id=committed.id,
+                kind=committed.kind,
+                target=committed.target,
+                before=previous_values[committed.id],
                 after=committed.value,
             )
-            for item, path, previous, committed in zip(
-                items, paths, before, applied.values, strict=True
-            )
+            for committed in applied.values
         ]
 
     def teardown_draft(self, draft: WritebackDraft) -> None:
