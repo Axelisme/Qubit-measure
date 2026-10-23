@@ -44,7 +44,11 @@ class ModuleRef(KeyRef):
             raise field_error(("name",), "Missing captured library")
         try:
             env.library.module_spec(name)
-        except (ValueError, KeyError) as exc:
+        except KeyError as exc:
+            raise field_error(
+                ("name",), f"Module {name!r} is not in the captured library"
+            ) from exc
+        except ValueError as exc:
             raise field_error(("name",), str(exc)) from exc
 
 
