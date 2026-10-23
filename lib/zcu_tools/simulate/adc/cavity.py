@@ -298,11 +298,16 @@ def _flat_key(
     receiver = model.receiver
     parts.append(
         pack(
-            "!7d",
+            "!12d",
             model.reference_frequency_ghz,
             receiver.gain,
             receiver.phase_rad,
             receiver.time_of_flight_ns,
+            receiver.ripple_depth,
+            receiver.ripple_period_ghz,
+            receiver.ripple_phase_rad,
+            receiver.slope_db_per_ghz,
+            receiver.pivot_ghz,
             start,
             end,
             origin,

@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-23, Numba import boundary
+**Last updated:** 2026-10-24, receiver transmission background
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -72,6 +72,27 @@ ADC. Evolution retains its raw densities and reports trace drift separately.
 conjugate the demodulated physical field before receiver gain, phase, offset and
 noise. Receiver calibration does not conjugate or rotate the added noise's I/Q
 covariance. Constant and shaped pulses use the same convention.
+
+`Receiver.background(f)` supplies a fixed complex transmission background at
+each incident carrier's absolute frequency `f` in GHz:
+
+```text
+B(f) = 10**(slope_db_per_ghz * (f - pivot_ghz) / 20)
+       * (1 + ripple_depth * exp(i * (2*pi*f/ripple_period_ghz + ripple_phase_rad)))
+```
+
+The ADC multiplies each carrier's microwave I+iQ line response by `B(f)` before
+receiver gain and phase, then adds offset and noise once after superposition.
+It never evaluates the background at the ADC demodulation or rotating-reference
+frequency. The slope factor is unity at `pivot_ghz`; the complete background
+need not be unity there when ripple is nonzero. Zero depth and slope give unity
+at every frequency. Depth is in `[0,1)`, period is positive, and all five
+parameters must be finite. Raw paths, conditional traces and integrated sums
+share this convention, including shaped and simultaneous carriers. Linear
+propagation permits weighting private ADC carrier amplitudes by `conj(B(f))`
+before field superposition and final conjugation. This does not change physical
+`cavity_fields`, photon averages, Stark shifts or backaction. Both readout and
+flat cavity-average cache keys include all five background parameters.
 
 `Receiver.time_of_flight_ns` is one finite nonnegative total line delay, default
 zero. The solver evaluates the physical output at t−τ and restores the rotating

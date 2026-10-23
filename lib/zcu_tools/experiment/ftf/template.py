@@ -261,6 +261,11 @@ def plan_template(
             np.array(adc.offset_adc),
             np.array(adc.noise_psd_adc2_ns) / dt,
             time_of_flight_ns=adc.time_of_flight_ns,
+            ripple_depth=adc.ripple_depth,
+            ripple_period_ghz=adc.ripple_period_mhz / 1000,
+            ripple_phase_rad=float(np.deg2rad(adc.ripple_phase_deg)),
+            slope_db_per_ghz=adc.slope_db_per_ghz,
+            pivot_ghz=adc.pivot_ghz,
         )
         model = replace(
             physical,

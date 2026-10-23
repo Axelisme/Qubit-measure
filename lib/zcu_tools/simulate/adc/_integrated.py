@@ -193,7 +193,15 @@ class IntegratedLine:
         values *= np.exp(
             2j * np.pi * model.reference_frequency_ghz * receiver.time_of_flight_ns
         )
-        calibrated = np.conj(values) * receiver.gain * np.exp(1j * receiver.phase_rad)
+        background = np.array(
+            [receiver.background(pulses[i].frequency_ghz) for i in indices]
+        )
+        calibrated = (
+            np.conj(values)
+            * background[:, None, None]
+            * receiver.gain
+            * np.exp(1j * receiver.phase_rad)
+        )
         iq = np.stack((calibrated.real, calibrated.imag), axis=-1)
         counts = np.array([len(g.times_ns) for g in grids[0]])
         iq += counts[None, :, None, None] * receiver.offset
@@ -332,6 +340,11 @@ class IntegratedLine:
             )
         summed *= pulse.amplitude * np.exp(1j * pulse.phase_rad) * phase
         summed *= np.exp(2j * np.pi * model.reference_frequency_ghz * delay)
-        calibrated = np.conj(summed) * receiver.gain * np.exp(1j * receiver.phase_rad)
+        calibrated = (
+            np.conj(summed)
+            * receiver.background(pulse.frequency_ghz)
+            * receiver.gain
+            * np.exp(1j * receiver.phase_rad)
+        )
         iq = np.stack((calibrated.real, calibrated.imag), axis=-1)
         return iq + len(times) * receiver.offset

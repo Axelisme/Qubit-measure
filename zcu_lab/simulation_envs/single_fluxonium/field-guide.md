@@ -50,6 +50,23 @@ Receiver gain maps sqrt(photons/ns) to ADC sample units.
 Offset is an I/Q pair. Noise PSD is a two-sided 2-by-2 I/Q covariance in
 ADC units squared times ns. Time of flight uses ns. Receiver phase uses degrees;
 resonator mismatch phase uses radians.
+The optional receiver `background` object multiplies each carrier's microwave
+I+iQ line response before receiver gain and phase. It uses the absolute incident
+frequency, not the ADC demodulation frequency. Omission or an empty object gives
+a flat unity background. Null is invalid.
+
+| Field under `background` | Meaning and unit | Constraint and omitted value |
+| --- | --- | --- |
+| `ripple_depth` | Reflected standing-wave amplitude, dimensionless | Finite, 0 ≤ depth < 1; default 0 |
+| `ripple_period_mhz` | Standing-wave period, MHz | Finite and positive; default 1000 |
+| `ripple_phase_deg` | Standing-wave phase, degrees | Finite signed value; default 0 |
+| `slope_db_per_ghz` | Amplitude slope, dB/GHz | Finite signed value; default 0 |
+| `pivot_ghz` | Absolute frequency where the slope factor is unity, GHz | Finite signed value; default 0 |
+
+The complex ripple changes amplitude and phase. The full background need not be
+unity at the pivot. It stays fixed across rounds and does not change noise,
+offset or intracavity physics. See the [ADC formula](../../../lib/zcu_tools/simulate/adc/README.md).
+
 The model has one physical cavity. The ADC owner supports 1 or 2 cavities;
 other cavity counts fail at model construction. Single-cavity ADC callers
 explicitly supply one scattering phase, including a one-element zero array
