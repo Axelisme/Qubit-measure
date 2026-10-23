@@ -3,22 +3,23 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_api import (
+    FitQuality,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
 
-from .helpers import report_number
-from .mux_helpers import MuxInline, MuxLibrary, ToneRangeInputs, mux_overrides
+from zcu_lab.v2.mux.onetone.gui import MuxOnetoneSummary, MuxOnetoneTone
+
+from .mux_helpers import ToneRangeInputs
 
 
-class MuxOnetoneInputs(FormModel):
-    """Ordered source selections, common MHz offsets and acquisition counts."""
+class MuxOnetoneInputs(RecipeInputs):
+    """Experiment inputs; null retains captured Form values, overrides apply last."""
 
-    target: str | None = Field(
-        None, description="Mux Reset alias; null uses global aliases."
-    )
-    reuse_tab_id: str | None = Field(
-        None, description="Idle matching tab to reset; null opens a tab."
-    )
     participants: list[StrictInt] | None = Field(
         None,
         description="Original tone indices in execution order; null keeps the captured Form selection.",
@@ -45,16 +46,21 @@ class MuxOnetoneInputs(FormModel):
         gt=0,
         description="Averaging rounds; null keeps the Form value.",
     )
-    library: list[MuxLibrary] | None = Field(
-        None, description="Ordered captured module selections; null keeps sources."
+
+    model_type: Literal["hm", "t", "auto"] | None = Field(
+        None, description="Resonator fit model. Null retains analysis settings."
     )
-    inline: list[MuxInline] | None = Field(
+    fit_bg_amp_slope: bool | None = Field(
         None,
-        description="Ordered captured module copies, ancestors first; null keeps sources.",
+        description="Fit the amplitude background slope. Null retains analysis settings.",
     )
-    overrides: list[FieldEdit] | None = Field(
+    fit_bg_phase_curvature: bool | None = Field(
         None,
-        description="Ordered scalar edits applied last; integers are full readout tone indices.",
+        description="Fit background phase curvature. Null retains analysis settings.",
+    )
+    edelay: float | None = Field(
+        None,
+        description="Manual cable-delay seed in inverse MHz. Null retains analysis settings.",
     )
 
 
@@ -66,25 +72,13 @@ class CaptureRequest(BaseModel):
 
 
 class ResonatorCapture(BaseModel):
+    """Fixed Reset parameter reply: ordered resonator names or unavailable bindings."""
+
     values: dict[str, list[str] | None]
 
 
-class QualityIssue(BaseModel):
-    path: str
-    reason: str
-
-
-class FitQuality(BaseModel):
-    """Owner diagnostics without an authored acceptance threshold."""
-
-    r2: float | None
-    normalized_residual_rms: float | None
-    relative_parameter_errors: dict[str, float | None]
-    invalid: list[QualityIssue]
-
-
-class MuxOnetoneTone(BaseModel):
-    """Native original tone identity and fit result or failure."""
+class MuxOnetoneToneReport(BaseModel):
+    """Original index/label, MHz estimates, core quality or the native fit reason."""
 
     index: int
     label: str
@@ -94,20 +88,13 @@ class MuxOnetoneTone(BaseModel):
     fit_quality: FitQuality | None = None
     reason: str | None = None
 
-
-class MuxOnetoneSummary(BaseModel):
-    tones: list[MuxOnetoneTone]
-    resonators_diagnostic: str | None
-
-
-class MuxOnetoneToneReport(MuxOnetoneTone):
     name: str | None = Field(
         description="Resonator bound to the original index in the fixed capture, never inferred from label."
     )
 
 
-class MuxOnetoneReport(FormModel):
-    """Native fits, captured identities and the explicit writeback outcome."""
+class MuxOnetoneReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     tones: list[MuxOnetoneToneReport] = Field(
         description="Fits in native analysis order, retaining failed tones."
@@ -115,13 +102,6 @@ class MuxOnetoneReport(FormModel):
     resonators_diagnostic: str | None = Field(
         default=None,
         description="Owner reason that resonator identity or scalar writeback is unavailable.",
-    )
-    writeback_applied: bool = Field(
-        default=False,
-        description="True only when selected items were successfully applied.",
-    )
-    analysis_failure: str | None = Field(
-        default=None, description="Top-level analysis failure, or null on completion."
     )
 
 
@@ -133,7 +113,11 @@ def tone_report(
     if names is not None and diagnostic is None and 0 <= tone.index < len(names):
         name = names[tone.index]
     return MuxOnetoneToneReport(
-        **tone.model_dump(exclude={"freq", "kappa"}),
+        index=tone.index,
+        label=tone.label,
+        status=tone.status,
+        fit_quality=tone.fit_quality,
+        reason=tone.reason,
         freq=report_number(tone.freq),
         kappa=report_number(tone.kappa),
         name=name,
@@ -147,52 +131,49 @@ def tone_report(
 async def mux_onetone(
     session: RecipeSession, inputs: MuxOnetoneInputs
 ) -> MuxOnetoneReport:
-    """Run mux/onetone, Analyze, ask_writeback, accept only selected items, Save.
+    """Common-offset mux resonator spectroscopy with reviewed writeback.
 
-    Select library then inline sources. Map participants to original indices in
-    the fixed Reset capture, apply df/n and counts, then overrides. Unknown or
-    ambiguous names return needs_parameters with legal names before acquisition.
-    Null keeps Form values. Labels do not establish resonator identity. All
-    fields must validate before Run. Expected analysis failures save without
-    writeback; cancellation and other operation errors belong to the runtime.
+    Select library then inline sources; null keeps captured Form values.
+    Overrides run last. Active readout tones share a common frequency-offset scan.
+    Readout identities remain required for every tone.
+    n sets the common df Expts; df uses MHz offsets, reps/rounds set averaging.
+    Labels are display-only. Participant indices retain original readout positions.
+    Analyze the resonator model/background/delay settings, then ask before writeback.
+    Save raw and completed artifacts after Run, including expected fit failures.
+    Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_tab(
-        "mux/onetone",
-        aliases=None if inputs.target is None else {"mux": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("mux/onetone", inputs, target_alias="mux")
     capture = tab.call("tab.parameter_read", CaptureRequest(), result=ResonatorCapture)
     names = capture.values.get("$mux.resonators")
-    for selection in inputs.library or ():
-        tab.select(selection.path, ref=selection.key)
-    for copy in inputs.inline or ():
-        tab.select(copy.path, inline=True)
+    tab.select_sources(inputs)
 
-    edits = [
-        FieldEdit(
-            path=("active_tones",),
-            value=None if inputs.participants is None else list(inputs.participants),
-        )
-    ]
-    if inputs.df is not None:
-        edits.extend(
-            [
-                FieldEdit(path=("sweep", "df", "start"), value=inputs.df.start),
-                FieldEdit(path=("sweep", "df", "stop"), value=inputs.df.stop),
-            ]
-        )
-    edits.extend(
-        [
-            FieldEdit(path=("sweep", "df", "n"), value=inputs.n),
-            FieldEdit(path=("reps",), value=inputs.reps),
-            FieldEdit(path=("rounds",), value=inputs.rounds),
-        ]
+    tab.apply_inputs(
+        inputs,
+        {
+            ("active_tones",): inputs.participants,
+            ("sweep", "df", "start"): None if inputs.df is None else inputs.df.start,
+            ("sweep", "df", "stop"): None if inputs.df is None else inputs.df.stop,
+            ("sweep", "df", "n"): inputs.n,
+            ("reps",): inputs.reps,
+            ("rounds",): inputs.rounds,
+        },
     )
-    edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits, require_valid=True)
     await tab.run()
     try:
-        fit = await tab.analyze("primary", result=MuxOnetoneSummary)
+        fit = await tab.analyze(
+            "primary",
+            updates={
+                key: value
+                for key, value in {
+                    "model_type": inputs.model_type,
+                    "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
+                    "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
+                    "edelay": inputs.edelay,
+                }.items()
+                if value is not None
+            },
+            result=MuxOnetoneSummary,
+        )
         if fit.result is None:
             return MuxOnetoneReport(tones=[], analysis_failure=fit.reason)
         answer = await tab.ask_writeback()

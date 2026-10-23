@@ -15,6 +15,9 @@ participant and sweep contracts.
 | `df` | `{start, stop}` common offset in MHz, added to each base frequency | Keep the Form range |
 | `n` | Shared offset point count, at least two | Keep Expts |
 | `reps`, `rounds` | Positive acquisition counts | Keep Form values |
+| `model_type` | Resonator model: `hm`, `t` or `auto` | Keep analysis settings |
+| `fit_bg_amp_slope`, `fit_bg_phase_curvature` | Fit the background slope or phase curvature | Keep analysis settings |
+| `edelay` | Manual cable-delay seed in inverse MHz | Keep analysis settings |
 | `library`, `inline`, `overrides` | Ordered source selections, copies and final edits | Keep Form values |
 
 Indices address the complete captured readout list, not display labels or
@@ -224,6 +227,20 @@ All seven recipes accept the same optional inputs:
 | `inline` | A list of `{path}` references to copy for local editing | Keep references |
 | `overrides` | A list of `{path, value}` field edits | Keep Form values |
 
+Analysis inputs go to the same Primary analysis operation, not to the measurement Form.
+Omitted or null analysis inputs retain that tab's analysis settings.
+They do not change the captured Run settings or writeback policy.
+
+| Recipe | Analysis inputs |
+| --- | --- |
+| `mux_twotone_spectrum` | `model_type`: `lor` or `sinc`; `plot_fit`: draw the fitted curve |
+| `mux_amp_rabi` | `skip`: points omitted before fitting |
+| `mux_len_rabi` | `decay`: fit the envelope; `fit_phase`: fit the phase offset |
+| `mux_t1` | `dual_exp`: fit two components; `skip`: points omitted before fitting |
+| `mux_t2ramsey` | `fit_fringe`: fit oscillations; `fit_phase`: fit their phase offset |
+| `mux_t2echo` | `fit_method`: `fringe` or `decay`; `fit_phase`: fit the fringe phase offset |
+| `mux_singleshot_ge` | `initial_state`: `ground` or `excited`; `backend`: `pca` or `center`; `logscale`, `align_t1`, `length_ratio` |
+
 The three pulse-scan recipes also accept:
 
 | Input | What to supply | If omitted or null |
@@ -251,7 +268,8 @@ library selections and inline copies remain in the tab.
 Paths are JSON lists. Strings name fields and integers select positions in the
 complete tone list. For complete tones Q1/Q2/Q3, `participants: [2, 0]`
 measures original positions `[2, 0]`. Q3 edits still use position 2, not row 0
-or the string `Q3`.
+or the string `Q3`. Recipe participants accept integers only, not component names.
+Null participants leave the selection captured by Open or Reset unchanged.
 
 This example selects a Q3 pulse, copies it inline and changes its gain:
 
@@ -320,7 +338,8 @@ tones and ADC frequencies stay fixed.
 Choose each `tones[i].drive`. Use typed overrides to set MHz bounds at
 `tones[i].sweep.start` and `stop`, or supply the full `sweeps` list.
 Set shared `n` for all tones. The scans advance together by point number, not through every combination
-of frequencies.
+of frequencies. Set `model_type` to `lor` or `sinc` to select the fit model.
+Set `plot_fit` to false to hide the fitted curve without changing the fit.
 
 Successful report rows contain `freq` and `fwhm` in MHz with their errors.
 Inspect `measurement` and each `fit_i` for the peak and fit quality.

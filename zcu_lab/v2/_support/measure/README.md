@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-23，mux seed diagnostics
+**Last updated:** 2026-10-23，mux summaries 與 seed diagnostics
 
 # Measure domain support
 
@@ -9,7 +9,11 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
 
-`analyze_results.py` 把 core 的 named FitQuality map 投影為 JSON-safe summary，並具體化 quality.invalid 的 summary 路徑。Mux caller 指定 `summary.tones[row].fit_quality`，單 qubit 預設維持 `summary.fit_quality`。數值與直接原因由 fitting core 擁有；共用 mechanics 不算品質，也不改 writeback 或 accept policy。
+`analyze_results.fit_quality_models(qualities, *, summary_path="summary.fit_quality")` 回傳 `dict[str, FitQuality] | None`。
+它複製 core diagnostics，只將 invalid 的路徑加上 summary 位置，不更改原物件或 metrics。
+Mux caller 傳入 `summary.tones[row].fit_quality`，單 qubit 沿用預設路徑。
+`fit_quality_summary` 序列化同一組 owner 型別，保留既有 JSON 欄位與 invalid 清單。
+數值與原因由 fitting core 擁有，這些 helper 不算品質，也不改 writeback 或 accept policy。
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
@@ -39,6 +43,11 @@ Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit call
 來源名稱可用時，作者附 `ElementIdentity` 給 native summary rows 與候選；原始位置不由
 row offset 推測。直接 NumPy scalar 在 summary 邊界轉為 Python scalar，不改數值、fit
 或 proposal eligibility。
+各 mux analysis carrier 的 `summary()` 從 native outcomes 建立具名 BaseModel，`to_summary_dict()` 序列化同一模型。
+Recipe 的 `analyze(result=...)` 直接引用這些 owner 模型，不宣告結果鏡像。
+`mux_results.py` 擁有原始位置／名稱、失敗與共用 coherence summary。
+各實驗的 `gui.py` 擁有頻率、Rabi、T1、GE 與 onetone summary。
+品質欄位直接使用 fitting owner 的 `FitQuality`，coherence sampling 使用 owner 的 `FringeSamplingQuality`。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
 本 package 不 import concrete adapter 或 `zcu_lab.definitions`，也不宣告 experiment order。只屬於
@@ -115,6 +124,8 @@ Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gu
 `flux_half`／`flux_int` 是可選的有限 native DC 初線值，每個 None 各自沿用該 tone 的 Run capture，缺校準才用 shared picker 初值。
 Recipe 經同一個 Analyze operation 的 typed updates 傳入，不更改 capture 或其他 tone。
 Picker done 保留原始 tone／Q 身分並產生該 Q 的 writeback proposal，不直接接受寫回。
+`mux_flux_adapter.MuxFluxPickSummary` 擁有該原始 tone／Q 與 native DC half／integer／period 結果。
+`MuxFluxPickResult.summary()` 建立此模型，四個 flux recipes 直接引用它。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
 range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的

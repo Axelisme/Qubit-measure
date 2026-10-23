@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 import numpy as np
+from pydantic import BaseModel
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
@@ -81,12 +82,36 @@ class MuxFluxPickParams:
     )
 
 
+class MuxFluxPickSummary(BaseModel):
+    """Picked native DC half/integer/period values and captured original tone/Q identity."""
+
+    tone: int
+    qubit: str
+    flx_half: float | None
+    flx_int: float | None
+    flx_period: float | None
+
+
 @dataclass
 class MuxFluxPickResult(FluxPickResult):
     """Accepted native-unit half/int/period and this Run's original Q identity."""
 
     tone: int
     qubit: str
+
+    def summary(self) -> MuxFluxPickSummary:
+        """Return picked native DC lines without changing calibration or identity."""
+        return MuxFluxPickSummary(
+            tone=self.tone,
+            qubit=self.qubit,
+            flx_half=self.flx_half,
+            flx_int=self.flx_int,
+            flx_period=self.flx_period,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        """Serialize the named picker summary for GUI and recipe consumers."""
+        return self.summary().model_dump()
 
 
 class MuxFluxAdapter[

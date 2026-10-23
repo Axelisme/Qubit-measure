@@ -3,51 +3,33 @@
 Recipe n → expts: one shared scan point count for every tone.
 """
 
-from pydantic import BaseModel, Field, StrictInt
-from zcu_tools.gui.form import FormModel
+from typing import Literal
+
+from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    RecipeInputs,
+    RecipeReport,
     RecipeSession,
     recipe,
+    report_number,
 )
 
-from .helpers import report_number
+from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
+from zcu_lab.v2.mux.twotone_spectrum.gui import MuxTwotoneSpectrumSummary
+
 from .mux_helpers import (
-    MuxInline,
-    MuxLibrary,
-    MuxSummaryFailure,
-    MuxSummaryTone,
     MuxToneReport,
     ToneRangeInputs,
-    mux_overrides,
     mux_sweep_edits,
 )
 
 
-class MuxTwotoneSpectrumInputs(FormModel):
-    """Choose the mux group and ordered Form edits without inferring calibrations.
+class MuxTwotoneSpectrumInputs(RecipeInputs):
+    """Experiment inputs; null retains captured Form values, overrides apply last."""
 
-    Optional fields default to null. Null keeps Form inputs, uses global mux
-    aliases and opens a new tab. The edit lists run in library, inline,
-    sweeps/n, overrides order; participants precedes sweeps/n.
-    """
-
-    target: str | None = Field(
-        default=None, description="Mux Reset alias; null uses global aliases."
-    )
-    reuse_tab_id: str | None = Field(
-        default=None, description="Idle matching tab to reset; null opens a tab."
-    )
     participants: list[StrictInt] | None = Field(
         default=None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
-    )
-    library: list[MuxLibrary] | None = Field(
-        default=None, description="Ordered module selections; null keeps the GUI value."
-    )
-    inline: list[MuxInline] | None = Field(
-        default=None,
-        description="Ordered captured-module copies, ancestors first; null keeps the GUI value.",
     )
     sweeps: list[ToneRangeInputs] | None = Field(
         default=None,
@@ -59,9 +41,14 @@ class MuxTwotoneSpectrumInputs(FormModel):
         gt=0,
         description="Positive hardware scan point count shared by all tones; null keeps Expts.",
     )
-    overrides: list[FieldEdit] | None = Field(
-        default=None,
-        description="Ordered scalar edits at full tone positions; null keeps the GUI value.",
+
+    model_type: Literal["lor", "sinc"] | None = Field(
+        None,
+        description="Frequency fit model: Lorentzian or sinc. Null retains analysis settings.",
+    )
+    plot_fit: bool | None = Field(
+        None,
+        description="Draw the fitted frequency curve. Null retains analysis settings.",
     )
 
 
@@ -86,50 +73,12 @@ class MuxTwotoneSpectrumToneReport(MuxToneReport):
     )
 
 
-class MuxTwotoneSpectrumReport(FormModel):
-    """Report per-tone fits in native analysis order and the writeback decision.
-
-    tones retains failed rows with their reasons. writeback_applied is true only
-    after acceptance has returned; skipping the question writes nothing.
-    """
+class MuxTwotoneSpectrumReport(RecipeReport):
+    """Native ordered estimates/failures and the confirmed writeback outcome."""
 
     tones: list[MuxTwotoneSpectrumToneReport] = Field(
         description="Native ordered fit estimates or failures with original tone identities."
     )
-    writeback_applied: bool = Field(
-        default=False, description="Whether accepted calibration items were applied."
-    )
-
-    analysis_failure: str | None = Field(
-        default=None,
-        description="Analysis failure reason; null when analysis completed.",
-    )
-
-
-class MuxTwotoneSpectrumFitSummary(MuxSummaryTone):
-    """Author view of owner summary fields; no missing values are invented."""
-
-    freq: float | None = Field(
-        description="Owner freq in MHz; null retains an unavailable estimate."
-    )
-
-    freq_err: float | None = Field(
-        description="Owner freq_err in MHz; null retains an unavailable estimate."
-    )
-
-    fwhm: float | None = Field(
-        description="Owner fwhm in MHz; null retains an unavailable estimate."
-    )
-
-    fwhm_err: float | None = Field(
-        description="Owner fwhm_err in MHz; null retains an unavailable estimate."
-    )
-
-
-class MuxTwotoneSpectrumSummary(BaseModel):
-    """Owner tone rows in analysis order, retaining successes and failures."""
-
-    tones: list[MuxTwotoneSpectrumFitSummary | MuxSummaryFailure]
 
 
 @recipe(
@@ -139,51 +88,41 @@ class MuxTwotoneSpectrumSummary(BaseModel):
 async def mux_twotone_spectrum(
     session: RecipeSession, inputs: MuxTwotoneSpectrumInputs
 ) -> MuxTwotoneSpectrumReport:
-    """Measure simultaneous qubit spectra and report frequency and linewidth fits.
+    """Measure mux qubit spectra and review frequency and linewidth writeback.
 
-    target binds this Reset's mux alias; reuse_tab_id resets an idle matching
-    tab. library selects modules, inline copies captures outer-first, then
-    participants and overrides edit the Form. Integer paths use full original
-    tone positions, not participant rows. Null keeps GUI input. Frequencies use
-    MHz, times us and gains normalized units. sweeps supplies start/stop for
-    every tone in original order; a length mismatch raises before applying edits.
-    n sets the shared Expts; per-tone n is rejected (only start/stop are accepted).
-    Null keeps ranges/count. overrides runs last and may replace these edits.
-    The GUI scans each drive frequency with equal point counts. No range or
-    calibration is inferred. Readout identities and selected drive/sweep settings must validate.
-    Analyze Primary, then ask before applying calibration items.
-    Save raw data and completed artifacts in the Run finalizer.
-    Return ordered estimates and the writeback decision after completion.
-    Expected top-level analysis failures return a reason without writeback.
-    Invalid inputs and other operation failures propagate;
-    completed edits and saves are not rolled back after a later failure.
+    Select library then inline sources; null keeps captured Form values.
+    Overrides run last. Only participant drive/sweep settings are required;
+    readout identities remain required for every tone.
+    n sets shared Expts; sweeps covers all original tones with start/stop only.
+    Frequency uses MHz, length us and gain normalized units.
+    Analyze with the supplied model_type, plot_fit, then ask before writeback.
+    Save raw and completed artifacts after Run, including expected fit failures.
+    Operation errors propagate without rolling back earlier edits or saves.
     """
-    # Capture this group's defaults without changing global aliases.
-    tab = session.open_tab(
-        "mux/twotone_spectrum",
-        aliases=None if inputs.target is None else {"mux": inputs.target},
-        reuse=inputs.reuse_tab_id,
-    )
+    tab = session.open_recipe_tab("mux/twotone_spectrum", inputs, target_alias="mux")
 
-    # Select sources before copying captures and editing original tone positions.
-    for selection in inputs.library or ():
-        tab.select(selection.path, ref=selection.key)
-    for copy in inputs.inline or ():
-        tab.select(copy.path, inline=True)
-    edits = [
-        FieldEdit(
-            path=("participants",),
-            value=None if inputs.participants is None else list(inputs.participants),
-        )
-    ]
-    edits.extend(mux_sweep_edits(tab, inputs.sweeps, inputs.n))
-    edits.extend(mux_overrides(inputs.overrides))
-    tab.apply(edits, require_valid=True)
+    tab.select_sources(inputs)
+    tab.apply_inputs(
+        inputs,
+        {("participants",): inputs.participants},
+        edits=mux_sweep_edits(tab, inputs.sweeps, inputs.n),
+    )
 
     # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()
     try:
-        fit = await tab.analyze("primary", result=MuxTwotoneSpectrumSummary)
+        fit = await tab.analyze(
+            "primary",
+            updates={
+                key: value
+                for key, value in {
+                    "model_type": inputs.model_type,
+                    "plot_fit": inputs.plot_fit,
+                }.items()
+                if value is not None
+            },
+            result=MuxTwotoneSpectrumSummary,
+        )
         if fit.result is None:
             return MuxTwotoneSpectrumReport(
                 tones=[],
