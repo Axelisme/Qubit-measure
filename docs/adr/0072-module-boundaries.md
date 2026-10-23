@@ -94,7 +94,7 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、`mixer_freq`、`time_of_fly`、mux wiring（文件層可未知，表單／Run 才必填）和一般 module／ext。
 `mixer_freq` 是有限的 mux generator LO 設定值，單位 MHz；None 表示未知。無 readout slot 的 mux Form 從 `$mux.mixer_freq` 取初值，缺值留空必填，不由 tone 頻率或 κ 推算。
 Mux group 與 resonator 各自宣告頂層 `time_of_fly`，保存各自量測路徑的有限非負 flight time，單位 µs；None 表示尚未量測。不從 ext 讀取，也不自動搬移既有 entry。
-Mux fine 的無 slot trigger 初值為 `$mux.time_of_fly + 5/(2π·min κ)`，group TOF 或任一 κ 缺值時，trigger 與 pulse length 留空必填。Resonator 的 pulse 路徑 TOF 不供 mux 使用。
+Mux onetone 的無 slot trigger 初值為 `$mux.time_of_fly + 5/(2π·min κ)`，group TOF 或任一 κ 缺值時，trigger 與 pulse length 留空必填。Resonator 的 pulse 路徑 TOF 不供 mux 使用。
 2026-10-23，使用者要求：「mixer frequency屬性請加入到mux group中，並用於生成預設值。」並要求：「讓mux group有自己的time_of_fly屬性，也用於生成預設值。」後續裁定：「將time_of_fly轉正吧。不在放ext裡了。」time_of_fly 因而轉為 mux group 與 resonator 的頂層欄位。
 2026-10-23，使用者指出：「但kickstart應該是生成欄位讓用戶填，必填的話無法做到」。
 文件允許 `wiring: {}`；沒有 ADC wiring 時，各 tone 的 `ro_ch` 在表單中留空必填。
@@ -115,7 +115,7 @@ Framework resources、session 與 program 不擁有這些關係。既有表單�
 Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `$mux.resonators`。
 一般 mux 與 FTF 表單在 `$mux.module.readout` 存在時引用 library，保留其完整 tones 與 scalar 設定。
 Mux 缺 slot 時用 blank 範本加 group tones；FTF 八張缺 slot 用 blank 範本，rb 保持 Invalid。
-Mux/onetone_fine 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
+`mux/onetone` 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
 使用者於 2026-10-20 裁定：「不只twotone，應該說除了onetone與readout optimize/mist等本身就在處理readout相關，其他實驗的readout預設值請優先使用ref。」
 Framework 不認得 group/mux 或 resonators，
 也不新增 list alias、group registry、RPC 或保存格式。

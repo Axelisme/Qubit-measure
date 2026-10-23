@@ -6,7 +6,7 @@
 
 Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
 
-`ftf/conditional_phase` acquires the target's ensemble phase for two nominal spectator branches. Choose F1 or F2 as target. Each shot applies spectator I or Xπ, target X90, n repeated simultaneous CZ pulse pairs, one projection pulse, then the complete mux readout. X and Y projections are independent acquisitions. Spectator Xπ flips a thermal ensemble, with thermal admixture still present.
+`two_qubit/conditional_phase` acquires the target's ensemble phase for two nominal spectator branches. Choose F1 or F2 as target. Each shot applies spectator I or Xπ, target X90, n repeated simultaneous CZ pulse pairs, one projection pulse, then the complete mux readout. X and Y projections are independent acquisitions. Spectator Xπ flips a thermal ensemble, with thermal admixture still present.
 
 ## Prepare the inputs
 

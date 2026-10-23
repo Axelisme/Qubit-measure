@@ -189,7 +189,7 @@ class IdleZZExp(PersistableExperiment[IdleZZResult, IdleZZCfg]):
         result_type=IdleZZResult,
         cfg_type=IdleZZCfg,
         cfg_schema_version="1.0",
-        tag="ftf/idle_zz",
+        tag="two_qubit/idle_zz",
     )
 
     def run(self, config: IdleZZCfg, *, context: RunContext) -> IdleZZResult:

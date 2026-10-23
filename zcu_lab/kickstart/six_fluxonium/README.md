@@ -54,11 +54,11 @@ Group 的 `mixer_freq: 7250` MHz 是示意 LO 設定，使用前須確認硬體 
 範本不含 module library、readout 校準、qubit pulse 校準或已填好的量測序列。
 缺 readout slot 的 mux 表單在 Open／Reset 時，從 group 取得 gen_ch、ro_ch 與 mixer_freq。
 Timing 不會因此完成校準，pulse length 等必填空白仍須補齊。
-`mux/onetone_fine` 的 trigger 與 pulse length 留白，ADC window 會先填 1.0 us。
+`mux/onetone` 的 trigger 與 pulse length 留白，ADC window 會先填 1.0 us。
 `mux/t1` 的 trigger 會先填 0.0 us，pulse length 與 ADC window 留白。
 這些表單預設值都不是量測得到的校準值，使用前須確認。
 已有 readout slot 時，表單沿用該 slot 的 mixer 與 timing 規則。
 修改元件或 aliases 後，要重開或 Reset 表單才會更新初值。
 
-建議順序為 lookback → range_find → onetone_fine → twotone → rabi → T1／T2。
+建議順序為 lookback → range_find → onetone → twotone → rabi → T1／T2。
 量測前先核對接線與儀器設定，再填入每顆 qubit 的有效參數並連線所需硬體。

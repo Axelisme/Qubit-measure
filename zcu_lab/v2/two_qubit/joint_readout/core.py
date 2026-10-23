@@ -161,7 +161,7 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
         result_type=JointReadoutResult,
         cfg_type=JointReadoutCfg,
         cfg_schema_version="1.0",
-        tag="ftf/joint_readout",
+        tag="two_qubit/joint_readout",
     )
 
     def run(

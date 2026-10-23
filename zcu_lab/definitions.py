@@ -11,15 +11,6 @@ from zcu_lab.v2.fastflux.distortion.phase.gui import PhaseAdapter
 from zcu_lab.v2.fastflux.mist.gui import MistAdapter
 from zcu_lab.v2.fastflux.t1.gui import T1Adapter as FastFluxT1Adapter
 from zcu_lab.v2.fastflux.twotone.gui import TwoToneAdapter
-from zcu_lab.v2.ftf.chevron.gui import ChevronAdapter
-from zcu_lab.v2.ftf.conditional_phase.gui import ConditionalPhaseAdapter
-from zcu_lab.v2.ftf.conditional_spectroscopy.gui import SpectroscopyAdapter
-from zcu_lab.v2.ftf.constructive_phase.gui import ConstructivePhaseAdapter
-from zcu_lab.v2.ftf.cz_amplitude.gui import CZAmplitudeAdapter
-from zcu_lab.v2.ftf.idle_zz.gui import IdleZZAdapter
-from zcu_lab.v2.ftf.joint_readout.gui import JointReadoutAdapter
-from zcu_lab.v2.ftf.local_z.gui import LocalZAdapter
-from zcu_lab.v2.ftf.rb.gui import TwoQubitRBAdapter
 from zcu_lab.v2.jpa.auto_optimize.gui import JpaAutoOptimizeAdapter
 from zcu_lab.v2.jpa.check.gui import JpaCheckAdapter
 from zcu_lab.v2.jpa.flux.gui import JpaFluxAdapter
@@ -32,7 +23,7 @@ from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAdapter
 from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAdapter
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiAdapter
 from zcu_lab.v2.mux.len_rabi.gui import MuxLenRabiAdapter
-from zcu_lab.v2.mux.onetone_fine.gui import MuxOnetoneAdapter
+from zcu_lab.v2.mux.onetone.gui import MuxOnetoneAdapter
 from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEAdapter
 from zcu_lab.v2.mux.t1.gui import MuxT1Adapter
 from zcu_lab.v2.mux.t2echo.gui import MuxT2EchoAdapter
@@ -58,6 +49,15 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
     SsT1ToneSweepFreqAdapter,
     SsT1ToneSweepGainAdapter,
 )
+from zcu_lab.v2.two_qubit.chevron.gui import ChevronAdapter
+from zcu_lab.v2.two_qubit.conditional_phase.gui import ConditionalPhaseAdapter
+from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import SpectroscopyAdapter
+from zcu_lab.v2.two_qubit.constructive_phase.gui import ConstructivePhaseAdapter
+from zcu_lab.v2.two_qubit.cz_amplitude.gui import CZAmplitudeAdapter
+from zcu_lab.v2.two_qubit.idle_zz.gui import IdleZZAdapter
+from zcu_lab.v2.two_qubit.joint_readout.gui import JointReadoutAdapter
+from zcu_lab.v2.two_qubit.local_z.gui import LocalZAdapter
+from zcu_lab.v2.two_qubit.rb.gui import TwoQubitRBAdapter
 from zcu_lab.v2.twotone.ac_stark.gui import AcStarkAdapter, AcStarkRamseyAdapter
 from zcu_lab.v2.twotone.allxy.gui import AllXYAdapter
 from zcu_lab.v2.twotone.ckp.gui import CKPAdapter
@@ -141,7 +141,7 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "twotone/reset/bath/length": BathLengthAdapter,
     "twotone/reset/bath/phase": BathPhaseAdapter,
     "twotone/reset/check": RabiCheckAdapter,
-    "mux/onetone_fine": MuxOnetoneAdapter,
+    "mux/onetone": MuxOnetoneAdapter,
     "onetone/range_find": RangeFindAdapter,
     "mux/twotone_spectrum": MuxFreqAdapter,
     "mux/len_rabi": MuxLenRabiAdapter,
@@ -156,15 +156,15 @@ ADAPTERS: dict[str, type[ExpAdapterProtocol]] = {
     "jpa/power": JpaPowerAdapter,
     "jpa/auto_optimize": JpaAutoOptimizeAdapter,
     "jpa/check": JpaCheckAdapter,
-    "ftf/joint_readout": JointReadoutAdapter,
-    "ftf/conditional_spectroscopy": SpectroscopyAdapter,
-    "ftf/chevron": ChevronAdapter,
-    "ftf/cz_amplitude": CZAmplitudeAdapter,
-    "ftf/conditional_phase": ConditionalPhaseAdapter,
-    "ftf/local_z": LocalZAdapter,
-    "ftf/idle_zz": IdleZZAdapter,
-    "ftf/constructive_phase": ConstructivePhaseAdapter,
-    "ftf/rb": TwoQubitRBAdapter,
+    "two_qubit/joint_readout": JointReadoutAdapter,
+    "two_qubit/conditional_spectroscopy": SpectroscopyAdapter,
+    "two_qubit/chevron": ChevronAdapter,
+    "two_qubit/cz_amplitude": CZAmplitudeAdapter,
+    "two_qubit/conditional_phase": ConditionalPhaseAdapter,
+    "two_qubit/local_z": LocalZAdapter,
+    "two_qubit/idle_zz": IdleZZAdapter,
+    "two_qubit/constructive_phase": ConstructivePhaseAdapter,
+    "two_qubit/rb": TwoQubitRBAdapter,
     "fastflux/twotone": TwoToneAdapter,
     "fastflux/t1": FastFluxT1Adapter,
     "fastflux/distortion/freq": FastFluxFreqAdapter,
