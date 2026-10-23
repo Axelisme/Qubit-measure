@@ -4,6 +4,7 @@ from collections.abc import Generator, Iterator
 from pathlib import Path
 
 import pytest
+from zcu_tools.cfg_model import TemplateDef
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -39,10 +40,15 @@ def point_registry_guard(request: pytest.FixtureRequest) -> Generator[None]:
 
 
 @pytest.fixture
+def application_templates() -> dict[str, TemplateDef]:
+    return {}
+
+
+@pytest.fixture
 def application(
-    qapp, tmp_path: Path, point_models, point_registry_guard
+    qapp, tmp_path: Path, point_models, point_registry_guard, application_templates
 ) -> Generator[PointApplication]:
-    registry = Registry()
+    registry = Registry(templates=application_templates)
     registry.register("pointed", PointAdapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     controller = Controller(
