@@ -60,11 +60,11 @@ Labber 匯出包含絕對頻率與 complex IQ，不是 native Load 的替代來�
 
 呼叫 `onetone_range_find`，必填 `freq:{start,stop}` 與 `n`，端點使用絕對 MHz。
 Recipe 不猜頻率初值。`target` 指定這次 Reset 的 resonator alias，`reuse_tab_id` 可重用 idle matching tab。
-`resonators` 只作 Analyze 名單，經 updates 傳入，不寫入 acquisition cfg 或表單。省略、null 或 `[]` 都先做無名探索，不提案寫回。先看圖，再選擇由低頻到高頻的名稱。
-`reps`、`rounds` 省略或 null 保留表單值。Run 前驗證完整欄位。
-`min_separation` 指定選中凹陷之間的最小 MHz 距離，預設 1 MHz，必須是有限正數。
+`resonators` 只作 Analyze 名單，經 updates 傳入，不寫入 acquisition cfg 或表單。省略保留分析名單，`[]` 明確做無名探索，不提案寫回。null 原樣交分析 owner 驗證。先看圖，再選擇由低頻到高頻的名稱。
+`reps`、`rounds` 省略保留表單值，null 清空欄位。Run 前以 check_ready 驗證完整表單。
+`min_separation` 指定選中凹陷之間的最小 MHz 距離。省略保留分析值，初值為 1 MHz。明填數字必須是有限正數，null 原樣交分析 owner。
 例如 `min_separation: 5.0` 排除間距不足 5 MHz 的候選，不改 acquisition 的頻率點。
-Recipe 在同一個 Analyze operation 傳入名單與此值，重用 tab 時也不沿用先前的 GUI 值。
+Recipe 在同一個 Analyze operation 傳入有提供的名單與間距。省略不覆寫 GUI 分析值。
 非正數或非有限值在開 tab 前拒絕。間距過大而找不到指定數量的凹陷時，分析失敗且不詢問寫回。
 Run、Analyze 後回覆每個 dip 的可選 name（無名為 null）、freq、depth，以及 `identity_diagnostic`、`writeback_diagnostic`。
 具名分析成功後 Recipe 詢問 writeback，只接受選定候選，略過不寫入。無名探索不詢問寫回。最後保存 raw data 與分析。
@@ -80,6 +80,6 @@ Run、Analyze 後回覆每個 dip 的可選 name（無名為 null）、freq、de
 3. With a readout slot, Reset and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_range_find` after inspecting the same Form errors.
-   freq with absolute MHz start/stop and n are required. n maps to frequency Expts. resonators optionally labels dips during Analyze; omitted/null/[] discovers unnamed dips without writeback. min_separation sets their minimum MHz spacing during Analyze.
-   Common library/inline inputs select sources; overrides apply last. Null acquisition inputs retain Form values; null resonators starts unnamed analysis.
+   freq with absolute MHz start/stop and n are required. n maps to frequency Expts. resonators optionally labels dips during Analyze; omission retains analysis names, [] discovers unnamed dips, and null is passed to the analysis owner. min_separation sets their minimum MHz spacing during Analyze.
+   The Form chooses module sources. Omission retains values; null is passed to the Form or analysis owner. Overrides apply last, then check_ready validates before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

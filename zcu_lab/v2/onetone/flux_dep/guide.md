@@ -32,7 +32,7 @@ After the run, drag two lines on the 2D map to mark the half-flux and integer-fl
 
 `onetone_spectrum_over_flux` requires explicit, non-null `flux_device`, `flux_unit`, `flux_range`, and `flux_points`. The range contains two distinct device-native endpoints, and `flux_points` must be at least 2. The unit must exactly match the cached device snapshot, including an explicit `native` when that is the device unit. Supply coordinates in that unit and connect the device before running the recipe.
 
-The recipe can omit `center_mhz` and `span_mhz`. Omitted center uses current `$resonator.freq`; omitted span uses 2 times current `$resonator.kappa` for the full frequency span. The recipe reads these values during preparation and sets fixed numeric endpoints at center ± span/2. Omitted `freq_points` retains the GUI count.
+Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center ± span/2. Omitting both retains the Form's captured sweep. Supplying only one returns `needs_parameters` naming the other; the recipe does not infer it from calibration. Explicit null clears the endpoints. Omitting the sample count retains the Form count.
 
 ## Recommended use
 
@@ -57,5 +57,5 @@ Inspect the 2D map with `gui_tab_get_figure` and `subtab_id='run'` to judge the 
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_spectrum_over_flux` after inspecting the same Form errors.
    flux_device, flux_unit, flux_range and flux_points are required. freq_points and flux_points map to Expts. The interactive picker uses the existing GUI parameters.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

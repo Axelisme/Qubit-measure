@@ -354,6 +354,41 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         return _logical.edits(input, edits, env)
 
+    def prepare_logical_selection(
+        self,
+        input: FormInput[FormModel],
+        path: FormWritePath,
+        option: str | None,
+        env: FormEnv,
+    ) -> LogicalEditCandidate:
+        """Prepare an exact active Form option label or captured module key.
+
+        path is logical, with original list indexes. None selects only a listed
+        null option. Inline labels use the declared converter and inheritance,
+        not an implicit to_inline command. Unknown/ambiguous options, readonly,
+        ref ancestry and source failures reject without installation. Ordinary
+        invalid values remain draft candidates. Use within one guarded turn.
+        """
+        self._check_logical_input(input)
+        return _logical.choose(input, path, option, env)
+
+    def prepare_logical_command(
+        self,
+        input: FormInput[FormModel],
+        path: FormWritePath,
+        name: str,
+        env: FormEnv,
+    ) -> LogicalEditCandidate:
+        """Prepare an active declared command at a logical field path.
+
+        name is a command identifier, for example to_inline copies the fixed
+        captured Spec. The owner rejects unavailable commands, ref ancestors,
+        readonly and source failures without changing input. No defaults,
+        recapture or installation occurs. Candidate lifetime is one guarded turn.
+        """
+        self._check_logical_input(input)
+        return _logical.command(input, path, name, env)
+
     def prepare_library_selection(
         self, input: FormInput[FormModel], path: FormWritePath, key: str, env: FormEnv
     ) -> LogicalEditCandidate:

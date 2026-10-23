@@ -5,7 +5,8 @@ Recipe n → frequency.df Expts; flux_n → flux Expts.
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeSession,
     recipe,
     report_number,
@@ -17,9 +18,7 @@ from .mux_flux_helpers import (
     MuxFluxReport,
     MuxFluxToneReport,
     MuxOnetoneFluxInputs,
-    global_flux_edits,
     mux_flux_analysis_updates,
-    onetone_flux_edits,
 )
 from .mux_helpers import ToneRangeInputs
 
@@ -27,13 +26,13 @@ from .mux_helpers import ToneRangeInputs
 class MuxOnetoneFluxGlobalInputs(MuxOnetoneFluxInputs):
     """One native coil range shared by all participants.
 
-    flux uses the captured group source; null keeps Form bounds.
+    flux uses the captured group source; omission keeps Form bounds; null clears them.
     flux_n is the common positive DC point count.
     """
 
-    flux: ToneRangeInputs | None = Field(
-        None,
-        description="Native coil start/stop; null retains the Form range. No unit conversion.",
+    flux: ToneRangeInputs | None | Keep = Field(
+        default=KEEP,
+        description="Native coil start/stop; omission keeps the Form range; null clears its bounds. No unit conversion.",
     )
 
 
@@ -46,7 +45,7 @@ async def mux_onetone_flux_global(
 ) -> MuxFluxReport:
     """Onetone spectroscopy across the shared coil, with one native picker per Q.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared frequency Expts; flux_n sets DC Expts (zipped for local lines).
@@ -55,23 +54,35 @@ async def mux_onetone_flux_global(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/onetone_flux_global", inputs, target_alias="mux")
-    tab.select_sources(inputs)
-    edits = onetone_flux_edits(inputs)
-    edits.extend(global_flux_edits(inputs.flux, inputs.flux_n))
-    tab.apply_inputs(
-        inputs,
-        {
-            ("flux_unit",): inputs.flux_unit,
-        },
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            ),
-            *edits,
-        ],
+    tab = session.open_tab(
+        "mux/onetone_flux_global",
+        target={"mux": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
+    tab.set(
+        "participants",
+        [*inputs.participants]
+        if isinstance(inputs.participants, list)
+        else inputs.participants,
+    )
+    if isinstance(inputs.df, ToneRangeInputs):
+        tab.set("frequency.df.start", inputs.df.start)
+        tab.set("frequency.df.stop", inputs.df.stop)
+    elif inputs.df is None:
+        tab.set("frequency.df.start", None)
+        tab.set("frequency.df.stop", None)
+    tab.set("frequency.df.n", inputs.n)
+    if isinstance(inputs.flux, ToneRangeInputs):
+        tab.set("flux.start", inputs.flux.start)
+        tab.set("flux.stop", inputs.flux.stop)
+    elif inputs.flux is None:
+        tab.set("flux.start", None)
+        tab.set("flux.stop", None)
+    tab.set("flux.n", inputs.flux_n)
+    tab.set("flux_unit", inputs.flux_unit)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     updates = mux_flux_analysis_updates(tab, inputs)
 

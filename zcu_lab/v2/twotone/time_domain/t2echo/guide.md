@@ -40,5 +40,5 @@ Enable Fit phase offset to fit a free fringe phase; it defaults to fixed phase a
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `t2echo` after inspecting the same Form errors.
    points maps to total-delay Expts; max_delay_us sets the stop. fit_method and fit_phase change only analysis.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

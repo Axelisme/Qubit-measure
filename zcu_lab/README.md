@@ -26,7 +26,13 @@ Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.reado
 
 元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 flux_half／flux_period／flux_int 描述自己的 DC 線，依該 qubit 的 `flux_unit` 解讀。Mux group 的 coil 校準使用 coil device 的原生單位，不標固定單位。Global flux 原值仍可存於 `general.ext.flux_value`。`Q1.flux_unit` 與 JPA 的 `J1.flux_unit` 各自維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
-`recipes.RECIPES` 明列 `@recipe(name, description)` 產生的宣告。作者寫 `async def (session, inputs: RecipeInputs) -> Report`，在 RecipeInputs 子類加入實驗欄位，在 RecipeReport 子類加入報告欄位。框架由 inputs model 產生 MCP JSON schema，不渲染 GUI Form。MCP 組合根把清單注入 framework，import 不執行量測或註冊。RecipeSession.open_recipe_tab 處理 target／reuse，RecipeTab.select_sources 選 library／inline，apply_inputs 最後合併實驗值、具名 edits 與 overrides。作者在這些呼叫之間插入自己的步驟，不必使用 prepare_tab 捷徑。Target 省略時沿用 Reset 的全域 aliases。GUI adapters 的 cfg 與 Run 使用該 tab 的固定 capture，後續全域 alias 變動不追改既有 Run。
+`recipes.RECIPES` 明列 `@recipe(name, description)` 產生的宣告。
+作者寫 `async def (session, inputs: RecipeInputs) -> Report`，在 RecipeInputs 子類加入實驗欄位，在 RecipeReport 子類加入報告欄位。
+框架由 inputs model 產生 MCP JSON schema，不渲染 GUI Form。MCP 組合根把清單注入 framework，import 不執行量測或註冊。
+RecipeSession.open_tab 以 target mapping 與 reuse 開啟或 Reset tab。
+作者依序明寫 select／command／set，最後逐筆 set overrides，再 check_ready。
+Target 省略／KEEP／null 沿用 Reset 的全域 aliases。
+GUI adapters 的 cfg 與 Run 使用該 tab 的固定 capture，後續全域 alias 變動不追改既有 Run。
 
 Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
 `onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
@@ -37,8 +43,8 @@ JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
 取得 driver，不認得 alias。Analyze／WB／Save 使用 Run 的固定來源，不重讀目前表。
 具名欄位與範本契約見 [ADR-0073](../docs/adr/0073-measure-form-derivation.md)。
 
-Framework 的 `RecipeTab` 提供通用 Form read／set／select／apply、RPC call，以及 Run／Analyze／問答／同步 Save。Session 的 `context.read` 讀 session 值，不需要 tab；tab.read 讀固定 Form capture。
-`recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。
+Framework 的 `RecipeTab` 提供 Form read／set／select／command／check_ready，以及 Run／Analyze／問答／同步 Save。寫入與 overrides 用 dotted string，read 保留 typed tuple。Session 的 `context.read` 讀 session 值，`tab.read_parameter` 讀 tab 固定捕捉的參數，`session.device_unit` 只讀裝置快取。
+可省略的實驗欄位用 KEEP 保留表單值，明填 null 原樣交 owner 清空／關閉。Analysis updates 也只濾 KEEP。掃描端點與 flux 範圍直接在 recipe 主體計算，不另選校準 fallback。Center／span 成對提供或成對省略，缺一個就回 needs_parameters，不從 Form endpoints 或校準補齊。明填 module scalar 前讀 selector.mode，ref 才 command to_inline，保留既有 waveform family。完整作者契約見 [recipes README](recipes/README.md)。
 
 Recipe 直接引用分析 owner 的具名 summary，不另宣告 FitQuality、QualityIssue 或 summary 鏡像。Recipe 的 Report 由作者選欄位並繼承 RecipeReport，不另宣告 SummaryElements 或 estimates 路徑。框架回 `RecipeOutcome(status, report, runs)`；runs 保留各次 Run 與 Save 收據，full query 另保留 Run 前條件、owner-native analysis summary／invalid 與明確捕捉的寫回提案。元素位置與名稱由 owner 提供，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。
 

@@ -297,6 +297,35 @@ class TabFormResource:
                         return errors
             return self._install_recipe_candidate(candidate)
 
+    def select_recipe_option(self, path: FormWritePath, option: str | None) -> bool:
+        """Select an exact Form option label/key at a nonempty logical path.
+
+        None requires a nullable option. Inline uses the declared converter,
+        while to_inline remains a separate command. Owner guards, source,
+        ancestry and readonly checks precede installation. Return changed,
+        not cfg validity; valid-structure incomplete drafts remain installed.
+        Unknown or ambiguous options reject without publication or recapture.
+        """
+        with self._mutation():
+            candidate = self._form.prepare_logical_selection(
+                self._state.input, path, option, self._sources.env
+            )
+            return self._install_recipe_candidate(candidate)
+
+    def run_recipe_command(self, path: FormWritePath, name: str) -> bool:
+        """Run an available command at a logical path under all mutation guards.
+
+        name is the declared command identifier, such as to_inline. Copy uses
+        fixed captured sources and preserves child keys. Unavailable commands,
+        readonly/ref ancestry and source errors preserve input/publication.
+        Return changed, not validity. No source refresh or retry occurs.
+        """
+        with self._mutation():
+            candidate = self._form.prepare_logical_command(
+                self._state.input, path, name, self._sources.env
+            )
+            return self._install_recipe_candidate(candidate)
+
     def select_recipe_module(
         self,
         path: FormWritePath,
@@ -338,6 +367,20 @@ class TabFormResource:
                 raise ValueError(f"Unknown selector action: {action}")
             self._form.read_logical_field(candidate.input, path, self._sources.env)
             return self._install_recipe_candidate(candidate)
+
+    def recipe_ready_errors(self) -> FormErrors | None:
+        """Read all logical Form and lowered cfg errors from the fixed capture.
+
+        Validate the current draft without mutation, capture, publication or Run.
+        Return None when executable, otherwise every owner path/reason. Reads
+        remain allowed while busy; revoked resources and author failures raise.
+        """
+        result = self.result()
+        return self._form.logical_errors(
+            self._state.input,
+            result if isinstance(result, FormErrors) else None,
+            self._sources.env,
+        )
 
     def recipe_errors(self) -> FormErrors | None:
         """Return complete logical Form preview errors, without cfg lowering.

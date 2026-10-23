@@ -698,6 +698,50 @@ def select(
     return _candidate(input, {position.target.path: value}, env, path)
 
 
+def choose(
+    input: FormInput[FormModel],
+    path: FormWritePath,
+    option: str | None,
+    env: FormEnv,
+) -> LogicalEditCandidate:
+    """Resolve one exact option label in the active owner declaration."""
+    position = _resolve(input, path, env, writing=True)
+    target = position.target
+    if option is None and position.marker is not None:
+        return select(input, path, env, action="disable")
+    matches = [
+        item
+        for item in target.options or ()
+        if (item.value is None if option is None else item.label == option)
+    ]
+    if len(matches) != 1:
+        raise LogicalEditError(
+            "Unknown or ambiguous Form option",
+            reason_code="form_option",
+            path=path,
+            selector_path=path,
+        )
+    if position.marker is not None:
+        selector = _selector(target, position.marker, env)
+        if option in selector.available_keys:
+            return select(input, path, env, action="library", key=option)
+    candidate = FormState(input).prepare_selection(target.path, matches[0].value, env)
+    return LogicalEditCandidate(candidate, not candidate.same_as(input))
+
+
+def command(
+    input: FormInput[FormModel],
+    path: FormWritePath,
+    name: str,
+    env: FormEnv,
+) -> LogicalEditCandidate:
+    """Run an available owner command on detached input, never live state."""
+    position = _resolve(input, path, env, writing=True)
+    state = FormState(input)
+    state.run_command(position.target.path, name, env)
+    return LogicalEditCandidate(state.input, not state.input.same_as(input))
+
+
 def logical_errors(
     input: FormInput[FormModel], errors: FormErrors | None, env: FormEnv
 ) -> FormErrors | None:

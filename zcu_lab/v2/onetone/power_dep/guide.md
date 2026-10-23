@@ -22,7 +22,7 @@ The run produces a 2D map for visual inspection. Read the punch-out power and lo
 
 ## MCP recipe
 
-`onetone_spectrum_over_power` can omit `center_mhz` and `span_mhz`. Omitted center uses current `$resonator.freq`; omitted span uses 3 times current `$resonator.kappa` for the full frequency span. The recipe reads these values during preparation and sets fixed numeric endpoints at center ± span/2. Omitted `freq_points` retains the GUI count.
+Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center ± span/2. Omitting both retains the Form's captured sweep. Supplying only one returns `needs_parameters` naming the other; the recipe does not infer it from calibration. Explicit null clears the endpoints. Omitting the sample count retains the Form count.
 
 ## Recommended use
 
@@ -38,5 +38,5 @@ A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_spectrum_over_power` after inspecting the same Form errors.
    freq_points and gain_points map to their sweep Expts. Supply gain_range when changing its endpoints. This recipe does not Analyze or write back.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

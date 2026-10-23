@@ -1,65 +1,54 @@
 """Readout arrival-time trace and proposed ADC trigger timing."""
 
-from typing import Literal
-
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
-from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
 
 from zcu_lab.v2.lookback.gui import LookbackSummary
-
-from .helpers import (
-    FrequencyCalibration,
-    choose_frequency,
-)
 
 
 class LookbackInputs(RecipeInputs):
     """Inputs for lookback; all units and null policies are declared per field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
     )
-    use_reset: Literal["off"] = Field(
-        "off",
-        description="Only off is supported: the lookback Form hides reset and does not require a reset slot.",
+    frequency_mhz: float | None | Keep = Field(
+        KEEP,
+        description="Readout frequency in MHz; omission retains the Form value, null clears it.",
     )
-    init_pulse_ref: Literal["off"] = Field(
-        "off",
-        description="Only off is supported: the lookback Form hides the initialization pulse.",
+    readout_length_us: float | None | Keep = Field(
+        KEEP,
+        description="ADC acquisition window in us; omission retains the Form value; null clears/disables it.",
     )
-    frequency_mhz: float | None = Field(
-        None,
-        description="Readout frequency in MHz; explicit wins, then an explicitly selected readout library, then $resonator.freq. Required when neither the selected library nor a resonator frequency source supplies a frequency.",
+    trigger_offset_us: float | None | Keep = Field(
+        KEEP,
+        description="ADC trigger offset in us; omission retains the Form value; null clears/disables it.",
     )
-    readout_length_us: float | None = Field(
-        None, description="ADC acquisition window in us; null keeps the GUI value."
-    )
-    trigger_offset_us: float | None = Field(
-        None, description="ADC trigger offset in us; null keeps the GUI value."
-    )
-    rounds: int | None = Field(
-        None, description="Averaging round count; null keeps the GUI value."
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value; null clears/disables it.",
     )
 
-    ratio: float | None = Field(
-        None,
-        description="Threshold ratio; null keeps the GUI analysis value. Analysis only.",
+    ratio: float | None | Keep = Field(
+        KEEP,
+        description="Threshold ratio; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    smooth: float | None = Field(
-        None,
-        description="Smooth sigma; null keeps the GUI analysis value. Analysis only.",
+    smooth: float | None | Keep = Field(
+        KEEP,
+        description="Smooth sigma; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    plot_fit: bool | None = Field(
-        None, description="Plot fit; null keeps the GUI analysis value. Analysis only."
+    plot_fit: bool | None | Keep = Field(
+        KEEP,
+        description="Plot fit; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -83,37 +72,30 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
     Ask before applying the timing proposal, then save raw trace and analysis.
 
     No n → expts input: acquisition uses the readout duration and rounds.
-    Analysis controls: ratio, smooth, plot_fit. Null keeps each GUI value.
+    Analysis controls: ratio, smooth, plot_fit. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    tab = session.open_recipe_tab("lookback", inputs, target_alias="qubit")
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    frequency = choose_frequency(
-        tab,
-        ("modules", "readout", "freq"),
-        inputs.frequency_mhz,
-        calibration=FrequencyCalibration(
-            path="$resonator.freq",
-            required="frequency_mhz",
-            prefer_library=inputs.readout_ref is not None,
-        ),
+    tab = session.open_tab(
+        "lookback",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    if frequency.missing:
-        raise RecipeNeedsParameters(frequency.missing)
-    if frequency.edit is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(frequency.edit)
-    for field, value in (
-        (("modules", "readout", "ro_length"), inputs.readout_length_us),
-        (("modules", "readout", "trig_offset"), inputs.trigger_offset_us),
+    tab.select("modules.readout", inputs.readout_ref)
+    if (
+        not isinstance(inputs.frequency_mhz, Keep)
+        or not isinstance(inputs.readout_length_us, Keep)
+        or not isinstance(inputs.trigger_offset_us, Keep)
     ):
-        if value is not None:
-            tab.select(("modules", "readout"), inline=True)
-            edits.append(FieldEdit(path=field, value=value))
-    tab.apply_inputs(inputs, {("rounds",): inputs.rounds}, edits=edits)
+        pulse_selector = tab.read(("modules", "readout")).selector
+        if pulse_selector is not None and pulse_selector.mode == "ref":
+            tab.command("modules.readout", "to_inline")
+    tab.set("modules.readout.freq", inputs.frequency_mhz)
+    tab.set("modules.readout.ro_length", inputs.readout_length_us)
+    tab.set("modules.readout.trig_offset", inputs.trigger_offset_us)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
@@ -127,7 +109,7 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
                     "smooth": inputs.smooth,
                     "plot_fit": inputs.plot_fit,
                 }.items()
-                if value is not None
+                if not isinstance(value, Keep)
             },
         )
         if analysis.result is None:

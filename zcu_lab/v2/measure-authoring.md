@@ -168,7 +168,7 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 [程式碼品質](../../docs/code-quality.md#zcu_lab-審查裁決)：
 
 1. 主體直接寫開 tab、改欄位、Run、Analyze、問答、寫回及 Save 的順序。
-   共用的來源選取與 overrides 套用交給 lib，但量測動作不藏進 helper。
+   選 module、設值、逐筆套 overrides 與 check_ready 都明寫，不藏進 helper。
 2. 分析結果引用 owner 匯出的型別，不另寫 FitQuality、QualityIssue 或 summary 鏡像 model。
 3. Recipe class 只宣告實驗輸入與報告，不為步驟再建 runner 或 pipeline class。
 4. Helper 只做數字呈現等機械格式化。選脈衝、掃描範圍、重測與寫回判斷留在主體。
@@ -179,20 +179,20 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 
 以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
 輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。
-共用 library 清單選 key，inline 清單複製 selector，overrides 在最後覆寫實驗值。
-只有本次需要的非 None 值會改 Form。
+RecipeInputs 只提供 target、reuse_tab_id 與 overrides，不提供通用 library／inline 輸入。
+可省略的實驗欄位用 `T | None | Keep = KEEP`，省略保留，null 原樣交 owner。
+以下例子的掃描端點與 pulse length 都必填，分析選項可省略。
 
-來源選好後，骨架直接插入「複製 drive waveform」的自訂步驟。
-最後一批同時套用掃描、脈衝長度與 overrides，才驗完整 cfg。
-這個位置也能插入自己的 Form 讀取或換 pulse，不需要 hook class：
+骨架先讀 drive 與 waveform 的 selector.mode，只在 ref 時 command to_inline。
+這樣改長度會保留既有 waveform family，不固定換成 const，單 kind module 也照此處理。
+每欄 set 完才逐筆套 overrides，最後 check_ready。中間可插入自己的步驟：
 
 ```python
 from typing import Literal
 
 from pydantic import Field
-from zcu_tools.gui.form_adapter.sweep import LinRange
 from zcu_tools.mcp.measure.recipe_api import (
-    RecipeInputs, RecipeReport, RecipeSession, recipe, report_number,
+    KEEP, Keep, RecipeInputs, RecipeReport, RecipeSession, recipe, report_number,
 )
 from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
 
@@ -204,8 +204,8 @@ class Inputs(RecipeInputs):
     stop_mhz: float = Field(description="Drive sweep stop in MHz.")
     n: int = Field(ge=2, description="Sweep sample count, mapped to GUI Expts.")
     pulse_length_us: float = Field(gt=0, description="Custom drive duration in us.")
-    model_type: Literal["lor", "sinc"] = "lor"
-    plot_fit: bool = True
+    model_type: Literal["lor", "sinc"] | None | Keep = KEEP
+    plot_fit: bool | None | Keep = KEEP
 
 
 class Report(RecipeReport):
@@ -218,29 +218,41 @@ class Report(RecipeReport):
 async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     """Sweep, fit a transition, ask before writeback, then save.
 
-    n → sweep.freq.expts sets the sample count. Frequencies use MHz.
+    n sets Form sweep.freq.n, lowered to cfg sweep.freq.expts. Frequencies use MHz.
     pulse_length_us changes the drive duration before acquisition.
     model_type selects the existing lor/sinc fit; plot_fit controls its overlay.
-    Missing Form values stop before acquisition. Null common values retain input.
+    Missing Form values stop before acquisition. Omitted analysis controls retain
+    owner values; explicit null is passed unchanged to the analysis owner.
     """
-    tab = session.open_recipe_tab("twotone/freq", inputs, target_alias="qubit")
-    tab.select_sources(inputs)
+    tab = session.open_tab(
+        "twotone/freq", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
+    )
 
-    # Custom experiment step between source selection and complete admission.
-    tab.select(("modules", "qub_pulse"), inline=True)
-    tab.select(("modules", "qub_pulse", "waveform"), inline=True)
-    tab.apply_inputs(inputs, {
-        ("sweep", "freq"): LinRange(
-            start=inputs.start_mhz, stop=inputs.stop_mhz, n=inputs.n
-        ),
-        ("modules", "qub_pulse", "waveform", "length"): inputs.pulse_length_us,
-    })
+    pulse_selector = tab.read(("modules", "qub_pulse")).selector
+    if pulse_selector is not None and pulse_selector.mode == "ref":
+        tab.command("modules.qub_pulse", "to_inline")
+    waveform_selector = tab.read(("modules", "qub_pulse", "waveform")).selector
+    if waveform_selector is not None and waveform_selector.mode == "ref":
+        tab.command("modules.qub_pulse.waveform", "to_inline")
+    tab.set("sweep.freq.start", inputs.start_mhz)
+    tab.set("sweep.freq.stop", inputs.stop_mhz)
+    tab.set("sweep.freq.n", inputs.n)
+    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
         analysis = await tab.analyze(
             "primary", result=TwotoneSpectrumSummary,
-            updates={"model_type": inputs.model_type, "plot_fit": inputs.plot_fit},
+            updates={
+                key: value
+                for key, value in {
+                    "model_type": inputs.model_type, "plot_fit": inputs.plot_fit,
+                }.items()
+                if not isinstance(value, Keep)
+            },
         )
         if analysis.result is None:
             return Report(analysis_failure=analysis.reason)
@@ -258,15 +270,18 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
         tab.save()
 ```
 
-沒有中途自訂步驟時，可用
-`session.prepare_tab(adapter, inputs, target_alias="qubit", values=...)`。
-它只做 Open／Reset、來源選取與完整批次驗證，不做 Run。
-既有校準計算若已產生帶 source 的 `FieldEdit`，在分拆路徑用
-`tab.apply_inputs(inputs, values, edits=calibration_edits)`。
-Lib 依序提交 values、具名 edits、overrides，保留每筆 source。
-不要先用 `tab.set` 提交半套欄位，否則其他必填值尚未補齊就會得到 invalid_cfg。
+`FieldEdit` 只含 dotted path 與 value，不帶 source。Overrides 省略為空 list，不接受 null。
+逐筆 set 不去重、不過濾 null，也不提供整批 rollback。每次操作允許尚未 ready 的合法草稿。
+`check_ready` 唯讀驗完整 Form／cfg，缺值回 needs_parameters 與所有 path／reason。
+結構、來源與 readonly 錯誤仍在 mutation 時立即拒絕。
+讀取用 typed tuple，寫入用 dotted string，數字段是完整清單的原始位置，不按 participants 重編。
+若輸入代表完整 tone 範圍，先檢查與完整 tones 等長，回報缺少或多出的原始位置。
+Center／span 成對提供或成對省略，不從目前 endpoints 或校準補齊。
+明填 null 不做算術，原樣交 owner。全部 module scalar 省略時不轉 inline。
+分析 updates 只濾 KEEP，null 由分析 owner 判定，不在 recipe 偷換成省略。
+參數讀取用 `tab.read_parameter`，裝置快取單位用 `session.device_unit`，不使用 RPC models。
 
-`select`、`apply`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
+`select`、`set`、`command`、`check_ready`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
 `run` 成功後才進入 Save 的 `finally`，分析失敗仍保存 raw data 與已完成產物。
 不要把整段改成無法插入步驟的 `run_all`。需要換分析時，就在 `analyze` 呼叫處換 stage、
 owner 型別或分析參數，不必先修改基底。
