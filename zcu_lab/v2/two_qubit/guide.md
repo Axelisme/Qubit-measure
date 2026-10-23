@@ -64,7 +64,7 @@ FTF raw IQ 保存完整 tones 與 shots。Complex128 IQ 的陣列大小約為 `�
 
 ## 分別準備 F1 與 F2，實驗 0a
 
-既有單 qubit 表單使用 `qubit`、`resonator` 與 DC 掃描所需的 `flux_dev`。先把這些 scalar aliases 綁到 F1、它的 readout resonator 與對應 DC source，完成下列步驟。再改綁 F2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 F1 的結果套到 F2。
+既有單 qubit 表單使用 `qubit` 與 `resonator` aliases。先把 `qubit` 綁到 F1，`resonator` 綁到它的 readout resonator，完成下列步驟。DC 掃描在 Open／Reset 從 `$qubit.flux_source` 取得可覆寫的裝置名稱。再改綁 F2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 F1 的結果套到 F2。
 
 | 次序與既有指南 | 要觀察的圖與判讀 | 可接受的校準與 preview |
 | --- | --- | --- |

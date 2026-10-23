@@ -1,6 +1,6 @@
 """Starting values and form deviations for onetone/flux_dep; Qt-free data only."""
 
-from zcu_tools.cfg_model import AliasName, Hidden, Range, Template
+from zcu_tools.cfg_model import Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.pulse_readout_metadata import (
@@ -13,6 +13,13 @@ from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
 def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     """Build starting values and shape from the captured source availability."""
     timing = initial_readout_timing(ctx)
+    flux_source = (
+        ctx.parameters.lookup_point("$qubit.flux_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if flux_source is not None and not isinstance(flux_source, str):
+        raise ValueError("$qubit.flux_source must name a device")
     return Form(
         FluxDepCfg,
         field_order=(
@@ -39,7 +46,7 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                     },
                 ),
             },
-            "flux_dev": AliasName("flux_dev"),
+            "flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
                 "freq": Range.around(

@@ -58,7 +58,7 @@ Start／Resume 不再讀取所有已連線裝置，也不在 journal 記錄 devi
 
 Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner 更新 cached DeviceInfo，供 dialog 觀察。這筆讀回不改寫 run 前固定 snapshot 或已保存 provenance，不讓 cache 成為 Run 的控制命令，也不改變 acquisition capture 的失敗與保存契約。活動快照與讀回的分工見 [[0076]]。
 
-共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。Coherence 的新 flux_dev default 在固定 capture 解析 $flux_dev 並保存 direct literal device name。缺 capture 或 unbound alias 保留 expression error input，由公開 form 指名 Invalid，不補造 device 或阻斷 panel；其他解析錯誤照常拋出。既有 direct draft 不隨 alias 修改，使用者仍能切 eval，合法 saved input 與 MIST defaults 不改。Source reload 與 input 保存由具體 GUI app 擁有，不授權硬體操作。
+共用 alias preset、裸 alias 求值與 FormState 的顯式字串 expression 已接線。普通字串仍是 literal，結構 selector 仍使用普通 typed tag。Coherence、MIST 與 Overnight 的新 flux_dev default 從固定 capture 的 $qubit.flux_source 讀取 direct literal device name。缺 capture、未綁 qubit 或缺來源時留空，由公開 form 指名 Invalid，不補造 device 或阻斷 panel；其他解析錯誤照常拋出。既有 direct draft 不隨 alias 修改，使用者仍能切 eval，合法 saved input 不改。Source reload 與 input 保存由具體 GUI app 擁有，不授權硬體操作。
 
 各裝置的讀值不是跨欄位、跨裝置或跨 process 的原子 snapshot。同步 I/O 可能阻塞，沒有固定 query 或 settling 時間保證。Snapshot 只記錄讀回值，不要求硬體自動復原；workflow 的後續 setup_device 仍由 driver 設定值與驗證 limits。
 

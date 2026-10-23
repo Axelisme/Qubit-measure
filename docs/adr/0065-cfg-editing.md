@@ -82,7 +82,7 @@ Form Slot 使用公開 ModuleRef/ModuleInline input。Key branch 保存 `{kind: 
 
 RecipeTab.read_field 每次以一次 `tab.describe_cfg` 讀同一 owner turn 的目前欄位，回傳具名 RecipeFormField，包含 authored input、input_present、ordinary value、key/inline mode、actual key、locked、via_ref、目前 child field names 與 directed errors。`via_ref` 表示路徑穿過 library 引用，不表示宣告唯讀。它不投影 CfgSchema kind，觀察 ref descendants 也不授權寫入。Inline model 的路徑包含 module，例如 `modules.readout.module.freq`。Range count 的路徑是 n。set_sweep 的完整 start／stop／expts 設定以一次 container edit 建立 Range + Expts，不寫 Center／Step 的 inactive paths，也不要求舊 draft 可換算。部分設定仍只編輯目前 active leaves。
 
-實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 的 AliasName 在 Open／Reset 解析 direct 名稱。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
+實驗 cfg 依 [[0073]] 使用具名裝置欄位，例如 flux_dev、jpa_flux_dev，不再保存 dev role mapping。Form 在 Open／Reset 從 $qubit.flux_source、$mux.flux_source 或 JPA 的 flux_source／rf_source 讀取可覆寫的 direct 名稱。缺來源時留空，必填欄位報錯。使用 flux 的 cfg 必填 flux_unit，值為 A、V 或 native。Core 與 Notebook 不提供隱含 default，GUI 的初始值為 A。Recipe helper 只比 cached unit，成功後寫 caller 指定的具名裝置欄位與獨立 flux_unit，不換算、不連線或 setup。
 
 Core 以 context.devices[cfg.flux_dev] 等具名欄位取 driver。缺名由實際使用者報錯；RunContext 不提供 setters。操作分工見 [[0067]]，Run 前 snapshot 與保存見 [[0063]]。Measure 不保留舊跨 tab source refresh／Unavailable 恢復路徑；使用時綁範本與缺來源的語義由 [[0073]] 擁有。
 

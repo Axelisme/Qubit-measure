@@ -21,7 +21,7 @@ connect(launch="new", script="/absolute/path/to/zcu_lab/kickstart/six_fluxonium/
 
 首次執行會從相鄰的 `entry-template.yaml` 建立 Q1–Q6、R1–R6、六條局部線 `Q1_bias`–`Q6_bias`、global coil `coil_bias` 與 `MG123456` 的 setup 參數。
 腳本接著建立並選取 `initial` point，再保存 aliases：
-`mux=MG123456`、`qubit=Q1`、`resonator=$qubit.resonator`、`flux_dev=$qubit.flux_source`。
+`mux=MG123456`、`qubit=Q1`、`resonator=$qubit.resonator`。
 七條 DC 線都是 `device/current_source` 元件，不會因此連線儀器。
 
 Entry 已存在時，腳本只重開並選取 `initial`，保留元件與 aliases 的修改。
@@ -42,7 +42,7 @@ Entry 已存在時，腳本只重開並選取 `initial`，保留元件與 aliase
 每顆 Qi 引用同序號 Ri，`flux_source` 指向自己的 `Qi_bias`。
 Mux group 的 `flux_source` 指向 `coil_bias`。
 局部線用來調整對應 qubit 的工作點，global coil 用來調整六顆 qubit 的工作點。
-`flux_dev` 透過 `$qubit.flux_source` 跟隨 scalar 目標的局部線，不指向 global coil。
+Scalar flux 表單在 Open／Reset 從 `$qubit.flux_source` 取得局部線名稱，不需要 flux 裝置 alias，也不指向 global coil。
 `qubit` alias 只選 scalar 表單的目標，不改變 mux group 的六顆順序。
 Mux 表單從 group wiring 取得 generator 與各 tone ADC，不從 resonator 的 pulse wiring 取得。
 

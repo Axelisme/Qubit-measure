@@ -138,7 +138,7 @@ class T2EchoAdapter(
         return make_form(ctx)
 
     experiment_tag: ClassVar[str | None] = T2EchoExp.persistence_tag()
-    sample_device_alias: ClassVar[str | None] = "$flux_dev"
+    sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
     exp_cls = T2EchoExp
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

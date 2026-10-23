@@ -7,8 +7,8 @@
 ## Prepare and open
 
 Open `mist/flux_dep` from the measure catalog. Calibrate the resonator and
-readout first. Bind `qubit`, `resonator` and `flux_dev` before Open or Reset.
-Open/Reset copies the flux device alias into a direct device name. The form
+readout first. Bind `qubit` and `resonator` before Open or Reset.
+Open/Reset reads `$qubit.flux_source` into an editable direct device name. The form
 keeps that name until the next Open or Reset.
 
 Reset and the initial x180 pulse use optional module slots. Missing slots
