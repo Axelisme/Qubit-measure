@@ -8,8 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
+from zcu_tools.cfg_model import Expr
+from zcu_tools.core.complex_codec import encode_complex
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.remote.form_description import (
@@ -94,6 +96,37 @@ class RecipeFormField:
     source: RecipeSourceWire | None
     via_ref: bool
     element: ElementIdentity | None = None
+
+
+def encode_form_value(value: object) -> YamlValue:
+    """Encode a named Form value for the GUI RPC without evaluating it.
+
+    Format authority: lib/zcu_tools/gui/form/README.md (FormInput/expression
+    and complex tags) and tab.describe_cfg RPC field descriptions. Accept
+    scalar values, Expr, BaseModel and nested string-keyed mappings/sequences.
+    Models retain concrete subclass fields. Unsupported values or non-string
+    mapping keys raise TypeError. Schema and source validation stay with GUI.
+    """
+    if isinstance(value, Expr):
+        return {"expr": value.text}
+    if isinstance(value, BaseModel):
+        return encode_form_value(value.model_dump(mode="python", serialize_as_any=True))
+    if isinstance(value, complex):
+        return {
+            key: encode_form_value(item) for key, item in encode_complex(value).items()
+        }
+    if isinstance(value, Mapping):
+        encoded: dict[str, YamlValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("Form input mapping keys must be strings")
+            encoded[key] = encode_form_value(item)
+        return encoded
+    if isinstance(value, (list, tuple)):
+        return [encode_form_value(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError(f"Unsupported Form input value: {type(value).__name__}")
 
 
 def wire_object(value: object) -> dict[str, object]:
