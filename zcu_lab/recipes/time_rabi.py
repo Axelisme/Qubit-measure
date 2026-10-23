@@ -134,12 +134,8 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
             "primary",
             result=TimeRabiSummary,
             updates={
-                key: value
-                for key, value in {
-                    "decay": inputs.decay,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if not isinstance(value, Keep)
+                "decay": inputs.decay,
+                "fit_phase": inputs.fit_phase,
             },
         )
         if analysis.result is None:

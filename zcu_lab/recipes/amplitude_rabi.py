@@ -140,11 +140,7 @@ async def amplitude_rabi(
         analysis = await tab.analyze(
             "primary",
             result=AmplitudeRabiSummary,
-            updates={
-                key: value
-                for key, value in {"skip": inputs.skip}.items()
-                if not isinstance(value, Keep)
-            },
+            updates={"skip": inputs.skip},
         )
         if analysis.result is None:
             return AmplitudeRabiReport(

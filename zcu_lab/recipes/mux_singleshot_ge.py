@@ -133,15 +133,11 @@ async def mux_singleshot_ge(
         primary = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "initial_state": inputs.initial_state,
-                    "backend": inputs.backend,
-                    "logscale": inputs.logscale,
-                    "align_t1": inputs.align_t1,
-                    "length_ratio": inputs.length_ratio,
-                }.items()
-                if not isinstance(value, Keep)
+                "initial_state": inputs.initial_state,
+                "backend": inputs.backend,
+                "logscale": inputs.logscale,
+                "align_t1": inputs.align_t1,
+                "length_ratio": inputs.length_ratio,
             },
             result=MuxGESummary,
         )

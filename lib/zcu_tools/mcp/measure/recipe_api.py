@@ -613,7 +613,7 @@ class RecipeTab:
         *,
         result: type[T],
         interactive: bool = False,
-        updates: Mapping[str, YamlValue] | None = None,
+        updates: Mapping[str, YamlValue | Keep] | None = None,
     ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
@@ -625,14 +625,25 @@ class RecipeTab:
         updates maps the adapter's analysis parameter names to ordinary values
         in their declared units; no conversion or Form expression evaluation
         occurs. None or an empty mapping keeps the owner's current parameters.
-        Explicit null values reach the owner unchanged. Unknown names and
-        incompatible values fail owner validation before analysis starts.
+        KEEP entries are omitted before sending updates to the owner; all KEEP
+        is equivalent to no updates. Explicit null values reach the owner
+        unchanged. Unknown names and incompatible values fail owner validation
+        before analysis starts.
         Updates and analysis share one tracked operation, including Post.
         interactive=True enables native PendingAnalysis/tab_interact/done
         handoff before this await resumes. answer only handles explicit questions.
         """
+        filtered_updates = (
+            None
+            if updates is None
+            else {
+                key: value
+                for key, value in updates.items()
+                if not isinstance(value, Keep)
+            }
+        )
         return await self._runtime.analyze(
-            self.tab, stage, result, interactive=interactive, updates=updates
+            self.tab, stage, result, interactive=interactive, updates=filtered_updates
         )
 
     def preview(self, pane: Literal["run", "analysis", "post"] = "run") -> None:

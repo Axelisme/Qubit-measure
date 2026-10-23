@@ -136,11 +136,7 @@ async def mux_amp_rabi(
     try:
         fit = await tab.analyze(
             "primary",
-            updates={
-                key: value
-                for key, value in {"skip": inputs.skip}.items()
-                if not isinstance(value, Keep)
-            },
+            updates={"skip": inputs.skip},
             result=MuxAmpRabiSummary,
         )
         if fit.result is None:

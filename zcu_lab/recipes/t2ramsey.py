@@ -118,12 +118,8 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
             "primary",
             result=T2RamseySummary,
             updates={
-                key: value
-                for key, value in {
-                    "fit_fringe": inputs.fit_fringe,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if not isinstance(value, Keep)
+                "fit_fringe": inputs.fit_fringe,
+                "fit_phase": inputs.fit_phase,
             },
         )
         if analysis.result is None:

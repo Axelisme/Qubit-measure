@@ -103,13 +103,9 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
             "primary",
             result=LookbackSummary,
             updates={
-                key: value
-                for key, value in {
-                    "ratio": inputs.ratio,
-                    "smooth": inputs.smooth,
-                    "plot_fit": inputs.plot_fit,
-                }.items()
-                if not isinstance(value, Keep)
+                "ratio": inputs.ratio,
+                "smooth": inputs.smooth,
+                "plot_fit": inputs.plot_fit,
             },
         )
         if analysis.result is None:

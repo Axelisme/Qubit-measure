@@ -114,14 +114,10 @@ async def onetone_range_find(
             "primary",
             result=RangeFindSummary,
             updates={
-                key: value
-                for key, value in {
-                    "resonators": inputs.resonators
-                    if inputs.resonators is None or isinstance(inputs.resonators, Keep)
-                    else json.dumps(inputs.resonators),
-                    "min_separation": inputs.min_separation,
-                }.items()
-                if not isinstance(value, Keep)
+                "resonators": inputs.resonators
+                if inputs.resonators is None or isinstance(inputs.resonators, Keep)
+                else json.dumps(inputs.resonators),
+                "min_separation": inputs.min_separation,
             },
         )
         if fit.result is None:

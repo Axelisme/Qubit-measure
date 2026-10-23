@@ -247,11 +247,7 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
         analysis = await tab.analyze(
             "primary", result=TwotoneSpectrumSummary,
             updates={
-                key: value
-                for key, value in {
-                    "model_type": inputs.model_type, "plot_fit": inputs.plot_fit,
-                }.items()
-                if not isinstance(value, Keep)
+                "model_type": inputs.model_type, "plot_fit": inputs.plot_fit,
             },
         )
         if analysis.result is None:
@@ -278,7 +274,8 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
 若輸入代表完整 tone 範圍，先檢查與完整 tones 等長，回報缺少或多出的原始位置。
 Center／span 成對提供或成對省略，不從目前 endpoints 或校準補齊。
 明填 null 不做算術，原樣交 owner。全部 module scalar 省略時不轉 inline。
-分析 updates 只濾 KEEP，null 由分析 owner 判定，不在 recipe 偷換成省略。
+分析 updates 直接傳 dict，由 `tab.analyze` 送 owner 前略過 KEEP 項。
+全 KEEP 等同不帶 updates。Null 原樣交分析 owner 判定，不在 recipe 偷換成省略。
 參數讀取用 `tab.read_parameter`，裝置快取單位用 `session.device_unit`，不使用 RPC models。
 
 `select`、`set`、`command`、`check_ready`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。

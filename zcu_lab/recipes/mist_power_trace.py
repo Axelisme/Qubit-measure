@@ -80,13 +80,9 @@ async def mist_power_trace(
             "primary",
             result=MistTraceAnalyzeResult,
             updates={
-                key: value
-                for key, value in {
-                    "g0": inputs.g0,
-                    "e0": inputs.e0,
-                    "ac_coeff": inputs.ac_coeff,
-                }.items()
-                if not isinstance(value, Keep)
+                "g0": inputs.g0,
+                "e0": inputs.e0,
+                "ac_coeff": inputs.ac_coeff,
             },
         )
         if analysis.result is None:
