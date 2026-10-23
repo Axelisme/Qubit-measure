@@ -459,6 +459,7 @@ class RecipeTab:
         *,
         result: type[T],
         interactive: bool = False,
+        updates: Mapping[str, YamlValue] | None = None,
     ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
@@ -467,11 +468,17 @@ class RecipeTab:
         the author decides whether to save, retry, skip or stop. Root cancellation
         raises ScriptCancelled after owner drain. Invalid stages, stale sources,
         incompatible summary fields, programming and transport errors propagate.
-        interactive=True
-        explicitly enables GUI interaction handoff before completion.
+        updates maps the adapter\'s analysis parameter names to ordinary values
+        in their declared units; no conversion or Form expression evaluation
+        occurs. None or an empty mapping keeps the owner\'s current parameters.
+        Explicit null values reach the owner unchanged. Unknown names and
+        incompatible values fail owner validation before analysis starts.
+        Updates and analysis share one tracked operation, including Post.
+        interactive=True enables native PendingAnalysis/tab_interact/done
+        handoff before this await resumes. answer only handles explicit questions.
         """
         return await self._runtime.analyze(
-            self.tab, stage, result, interactive=interactive
+            self.tab, stage, result, interactive=interactive, updates=updates
         )
 
     def preview(self, pane: Literal["run", "analysis", "post"] = "run") -> None:

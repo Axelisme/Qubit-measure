@@ -366,6 +366,14 @@ Post 結果讀取失敗時，execution 回覆保留同一份 `recovery`；依上
 這個自動保存是 standalone 工具契約，不適用 recipe 的 `await tab.analyze()`；
 recipe 作者另外明確 `tab.save()`。
 
+`RecipeTab.analyze(stage, result=T, updates=...)` 接受 `Mapping[str, YamlValue]`。
+Key 是 adapter 的具名分析參數，value 使用該欄位的原生單位，不求值 Form Expr 或換算單位。
+省略或空 mapping 保留 owner 參數，明填 null 原樣傳給 owner。
+Owner 在同一個 tracked Primary／Post operation 驗證並套用更新，不先開另一個分析 operation。
+`interactive=True` 仍交付 PendingAnalysis，由 `tab_interact` 的 done 完成原 operation，恢復原 recipe await。
+`answer` 只回答 recipe 明確提出的問題，不控制 picker，也不直接寫回。
+未知參數、型別不符與 owner admission 錯誤直接回報，不重試。
+
 `tab_interact` 不帶 payload 時讀 committed state、commands、info、preview_active 與圖，
 不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。
 `done` 加入原 operation 的完成，不另建 analysis runner。

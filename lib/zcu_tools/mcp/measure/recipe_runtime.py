@@ -620,13 +620,22 @@ class RecipeRuntime:
         result: type[T],
         *,
         interactive: bool,
+        updates: Mapping[str, YamlValue] | None = None,
     ) -> AnalysisResult[T]:
-        """Await analysis without saving, then validate its exact public summary as T."""
+        """Await one owner analysis with named native-unit parameter overrides.
+
+        Omitted updates retain owner parameters. The owner validates names and
+        values before starting; admission/validation/transport errors propagate.
+        Interactive completion uses the same tracked operation. Validate its
+        exact public summary as T without saving or answering questions.
+        """
         if stage not in ("primary", "post"):
             raise ValueError("stage must be primary or post")
         try:
             completion = await self.host.call(
-                lambda ctx: self._analyze(tab, stage, ctx, interactive=interactive)
+                lambda ctx: self._analyze(
+                    tab, stage, ctx, interactive=interactive, updates=updates
+                )
             )
         finally:
             self._publish_analysis(None)
@@ -903,7 +912,13 @@ class RecipeRuntime:
         )
 
     def _analyze(
-        self, tab: str, stage: str, ctx: CallContext, *, interactive: bool
+        self,
+        tab: str,
+        stage: str,
+        ctx: CallContext,
+        *,
+        interactive: bool,
+        updates: Mapping[str, YamlValue] | None,
     ) -> AnalysisResult[object]:
         if ctx.scope.cancelled:
             return AnalysisResult(None, status="failed", reason="Analysis cancelled")
@@ -912,7 +927,10 @@ class RecipeRuntime:
         started = _Started.model_validate(
             self._tools.gui.send_gui_rpc(
                 "tab.analyze" if stage == "primary" else "tab.post_analyze",
-                {"tab_id": tab, "updates": {}},
+                {
+                    "tab_id": tab,
+                    "updates": dict(updates) if updates is not None else {},
+                },
                 run_operation_handle=run,
                 operation_handle=primary,
             )
