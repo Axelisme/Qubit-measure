@@ -687,7 +687,7 @@ class DocumentStore[T: BaseModel]:
                     proposed=_lookup(draft, prefix),
                 )
 
-    def _read(self) -> tuple[YamlMap, YamlMap, T, str]:
+    def _read(self, *, strict: bool = False) -> tuple[YamlMap, YamlMap, T, str]:
         """Read raw nodes, normalized YAML values and a public typed snapshot.
 
         No lock is acquired here. Edit/refresh callers own their lock scope;
@@ -696,7 +696,11 @@ class DocumentStore[T: BaseModel]:
         size = self._path.stat().st_size
         original = self._path.read_bytes()
         key = (size, sha256(original).digest())
-        if key == self._validated_key and self._validated_read is not None:
+        if (
+            not strict
+            and key == self._validated_key
+            and self._validated_read is not None
+        ):
             # Transactions and dependency callbacks must never own the cache.
             if self._check_dependencies is None or self._check_dependencies(
                 self._validated_read[2].model_copy(deep=True)
@@ -713,7 +717,7 @@ class DocumentStore[T: BaseModel]:
         # tolerated(cast): Strict validation cannot narrow raw; its return drops round-trip nodes.
         document = cast(YamlMap, raw)
         removed: tuple[str, ...] = ()
-        if self._read_cleanup is not None:
+        if not strict and self._read_cleanup is not None:
             version = validate_header(
                 document,
                 expected_format=self._format,
@@ -786,8 +790,11 @@ class DocumentStore[T: BaseModel]:
             self._validate(public)
         return normalized, public
 
-    def refresh(self) -> bool:
+    def refresh(self, *, strict: bool = False) -> bool:
         """Reload/validate disk and publish its working-unit snapshot.
+
+        strict=True bypasses read cleanup and its cache: validate the complete
+        external candidate without backup, repair or any document writes.
 
         Return True and notify if raw YAML differs, otherwise return False.
         Header/version/schema/validate/I/O and lock failures propagate and leave
@@ -795,7 +802,7 @@ class DocumentStore[T: BaseModel]:
         observer failures are logged separately from successful publication.
         """
         with self.locked():
-            document, _, snapshot, revision = self._read()
+            document, _, snapshot, revision = self._read(strict=strict)
             paths = tuple(path for path, _ in _changes(self._document, document))
             self._snapshot = snapshot
             self._document = document

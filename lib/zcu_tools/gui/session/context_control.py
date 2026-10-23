@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         LibraryChange,
         PointCreateRequest,
         PointFileRevision,
+        PointFileSyncStatus,
         PointUseRequest,
         SavedPoint,
         WorkingPointInfo,
@@ -199,6 +200,30 @@ class ContextControlPort(Protocol):
         """Read installed point file versions, or (); no I/O or refresh."""
         ...
 
+    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+        """Return recent external observations without I/O; cleared on point switch."""
+        ...
+
+    def check_file_revision(self, expected: PointFileRevision) -> None:
+        """Compare draft path/version with disk; mismatch rejects without mutation.
+
+        None expects an absent aliases file only. Invalid paths/base raise
+        InvalidInputError; mismatch raises FailedPreconditionError(revision_mismatch).
+        """
+        ...
+
+    def reload_file(
+        self, path: Path, expected_revision: str | None
+    ) -> PointFileRevision:
+        """Strictly install one absolute current owner file, then publish facts.
+
+        Compare expected_revision with the installed base, None only for absent
+        aliases. Invalid paths/candidates raise InvalidInputError with path/reason;
+        stale base raises FailedPreconditionError(revision_mismatch). Failure
+        retains memory/disk; caller owns holder admission. Captures stay fixed.
+        """
+        ...
+
     def get_entry_info(self) -> EntryInfo | None:
         """Read cached entry identity/paths, or None without an entry."""
         ...
@@ -372,6 +397,20 @@ class ContextControlFacet(ContextControlPort):
     def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
         """Read installed point file versions, or (); no I/O or refresh."""
         return self._context.get_file_revisions()
+
+    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+        """Read the owner's cached external observations without I/O."""
+        return self._context.get_file_sync_status()
+
+    def check_file_revision(self, expected: PointFileRevision) -> None:
+        """Reject a stale draft by the owner's disk revision check."""
+        self._context.check_file_revision(expected)
+
+    def reload_file(
+        self, path: Path, expected_revision: str | None
+    ) -> PointFileRevision:
+        """Strictly reload using ContextControlPort's installation contract."""
+        return self._context.reload_file(path, expected_revision)
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()
