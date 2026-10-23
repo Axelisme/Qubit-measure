@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Annotated
+from typing import Mapping as TypingMapping
 
 import pytest
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, create_model
 from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
@@ -101,6 +102,18 @@ def test_whole_mapping_expr_is_rejected_at_form_declaration(field: str) -> None:
     assert "section" in message and field in message
     assert "Expr" in message and "str" in message
     assert "Mapping" in message or "dict" in message
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [dict, Mapping, TypingMapping, dict | None, Mapping | str, TypingMapping | None],
+)
+def test_unparameterized_mapping_expr_is_rejected_at_form_declaration(
+    annotation: object,
+) -> None:
+    core = create_model("MappingDeclaration", __base__=ConfigBase, value=(annotation, ...))
+    with pytest.raises(TypeError, match="value: whole mapping Expr"):
+        form_adapter.Form(core, {"value": Expr("$labels")})
 
 
 class DefaultedCfg(ConfigBase):
