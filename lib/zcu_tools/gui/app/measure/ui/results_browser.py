@@ -5,21 +5,27 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import date
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QDate, Qt
 from qtpy.QtGui import QImage
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
+    QDateEdit,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -32,7 +38,7 @@ from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsI
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .results_comparison import ResultsComparison
-from .results_details import result_details
+from .results_details import analysis_details, result_details
 from .results_gallery import ResultImageAction, ResultsGallery
 
 logger = logging.getLogger(__name__)
@@ -101,6 +107,17 @@ class ResultsBrowser(QWidget):
             experiment: resolve_experiment(experiment)
             for experiment in {run.experiment for run in index.runs}
         }
+        self.setStyleSheet("""
+            QWidget { background: #f6f8fb; color: #1e293b; font-size: 12px; }
+            QTreeWidget, QTableWidget, QPlainTextEdit, QLineEdit, QComboBox, QDateEdit {
+                background: white; border: 1px solid #cbd5e1; border-radius: 3px; }
+            QPushButton { background: #e7edf6; border: 1px solid #b7c9df;
+                padding: 6px 9px; border-radius: 4px; }
+            QPushButton:hover { background: #d3e5ff; }
+            QPushButton:disabled { color: #94a3b8; }
+            QHeaderView::section { background: #e9eff7; padding: 5px; border: 0; }
+            QTreeWidget::item:selected { background: #dceaff; color: #17365c; }
+        """)
         self._writable = True
         self._open_run = open_run
         self._focus = _Focus()
@@ -109,18 +126,37 @@ class ResultsBrowser(QWidget):
         self._navigation: list[tuple[QTreeWidgetItem, _Focus]] = []
         self._navigation_runs: tuple[ResultRun, ...] | None = None
         layout = QVBoxLayout(self)
-        layout.addLayout(self._build_filters())
-        layout.addLayout(self._build_history())
+        heading = QLabel("Results browser  /  Saved results · read only")
+        heading.setStyleSheet("font-size: 17px; font-weight: 600; padding: 5px;")
+        layout.addWidget(heading)
         splitter = QSplitter()
+        left = QWidget()
+        filters = QVBoxLayout(left)
+        filters.setContentsMargins(0, 0, 5, 0)
+        filters.addLayout(self._build_filters())
         self._tree = QTreeWidget()
         self._tree.setObjectName("results.navigation")
         self._tree.setHeaderHidden(True)
         self._tree.itemClicked.connect(self._navigate)
-        splitter.addWidget(self._tree)
+        self._tree.setMinimumWidth(300)
+        self._tree.setIndentation(15)
+        filters.addWidget(self._tree, 1)
+        splitter.addWidget(left)
+        center = QWidget()
+        central = QVBoxLayout(center)
+        central.setContentsMargins(4, 0, 4, 0)
+        central.addLayout(self._build_history())
+        self._tabs = QTabWidget()
+        self._tabs.setObjectName("results.tabs")
         self._gallery = ResultsGallery(index)
-        splitter.addWidget(self._gallery)
+        self._tabs.addTab(self._gallery, "Gallery")
+        self.comparison = ResultsComparison(self._index)
+        self.comparison.run_activated.connect(self._open_compared)
+        self._tabs.addTab(self.comparison, "Comparison")
+        central.addWidget(self._tabs, 1)
+        splitter.addWidget(center)
         splitter.addWidget(self._build_details())
-        splitter.setSizes([220, 740, 390])
+        splitter.setSizes([340, 700, 350])
         layout.addWidget(splitter, 1)
         self._feedback = QLabel("")
         self._feedback.setObjectName("results.feedback")
@@ -129,13 +165,14 @@ class ResultsBrowser(QWidget):
         layout.addWidget(self._feedback)
         self._render()
 
-    def _build_filters(self) -> QHBoxLayout:
-        layout = QHBoxLayout()
+    def _build_filters(self) -> QVBoxLayout:
+        layout = QVBoxLayout()
+        row = QHBoxLayout()
         self._group = QComboBox()
         self._group.setObjectName("results.group")
-        self._group.addItems(["Experiment → point", "Point → experiment"])
+        self._group.addItems(["Point → experiment", "Experiment → point"])
         self._group.currentIndexChanged.connect(self._change_group)
-        layout.addWidget(self._group)
+        row.addWidget(self._group)
         self._experiment = QComboBox()
         self._experiment.setObjectName("results.experiment")
         self._experiment.addItem("All experiments")
@@ -143,29 +180,53 @@ class ResultsBrowser(QWidget):
             sorted({self._experiment_name(run) for run in self._index.runs})
         )
         self._experiment.currentIndexChanged.connect(self._render)
-        layout.addWidget(self._experiment)
+        row.insertWidget(0, self._experiment, 1)
+        layout.addLayout(row)
         self._search = QLineEdit()
         self._search.setObjectName("results.search")
         self._search.setPlaceholderText("Search entries, roles, cfg and analysis")
         self._search.textChanged.connect(self._render)
         layout.addWidget(self._search, 1)
+        dates = QHBoxLayout()
+        self._dates_enabled = QCheckBox("UTC dates")
+        self._dates_enabled.setObjectName("results.dates_enabled")
+        dates.addWidget(self._dates_enabled)
+        known = sorted(run.at[:10] for run in self._index.runs if run.at)
         self._date_from = self._date_filter(
-            "results.date_from", "From YYYY-MM-DD", layout
+            "results.date_from", known[0] if known else "2000-01-01", dates
         )
-        self._date_to = self._date_filter("results.date_to", "To YYYY-MM-DD", layout)
+        dates.addWidget(QLabel("to"))
+        self._date_to = self._date_filter(
+            "results.date_to",
+            known[-1] if known else QDate.currentDate().toString("yyyy-MM-dd"),
+            dates,
+        )
+        self._dates_enabled.toggled.connect(self._toggle_dates)
+        layout.addLayout(dates)
+        self._visible_count = QLabel()
+        self._visible_count.setObjectName("results.visible_count")
+        make_label_selectable(self._visible_count)
+        layout.addWidget(self._visible_count)
         return layout
 
-    def _date_filter(self, name: str, hint: str, layout: QHBoxLayout) -> QLineEdit:
-        edit = QLineEdit()
+    def _date_filter(self, name: str, initial: str, layout: QHBoxLayout) -> QDateEdit:
+        edit = QDateEdit(QDate.fromString(initial, "yyyy-MM-dd"))
         edit.setObjectName(name)
-        edit.setPlaceholderText(hint)
-        edit.setFixedWidth(140)
+        edit.setDisplayFormat("yyyy-MM-dd")
+        edit.setCalendarPopup(True)
+        edit.setEnabled(False)
         edit.setToolTip(
-            "Inclusive UTC date; runs without a timestamp are excluded when set"
+            "Inclusive UTC date; runs without a timestamp are excluded when enabled"
         )
-        edit.editingFinished.connect(self._render)
+        edit.dateChanged.connect(self._render)
         layout.addWidget(edit)
         return edit
+
+    def _toggle_dates(self) -> None:
+        enabled = self._dates_enabled.isChecked()
+        self._date_from.setEnabled(enabled)
+        self._date_to.setEnabled(enabled)
+        self._render()
 
     def _build_history(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -189,19 +250,30 @@ class ResultsBrowser(QWidget):
         self._current_figure = QLabel("Current figure: none")
         self._current_figure.setObjectName("results.current_figure")
         make_label_selectable(self._current_figure)
-        layout.addWidget(self._current_figure)
-        self._details = QPlainTextEdit()
-        self._details.setObjectName("results.details")
-        self._details.setReadOnly(True)
-        layout.addWidget(self._details, 2)
         self._open_button = QPushButton("Open in new analysis tab")
         self._open_button.clicked.connect(self._open_selected)
         layout.addWidget(self._open_button)
         self._pin_button = QPushButton("Add to comparison")
         self._pin_button.clicked.connect(self._pin_selected)
         layout.addWidget(self._pin_button)
-        self.comparison = ResultsComparison(self._index)
-        layout.addWidget(self.comparison, 1)
+        layout.addWidget(self._current_figure)
+        tabs = QTabWidget()
+        tabs.setObjectName("results.detail_tabs")
+        self._details = QPlainTextEdit()
+        self._details.setObjectName("results.details")
+        self._details.setReadOnly(True)
+        tabs.addTab(self._details, "Metadata / cfg")
+        self._analysis = QTableWidget(0, 2)
+        self._analysis.setObjectName("results.analysis")
+        self._analysis.setHorizontalHeaderLabels(["Key", "Value"])
+        self._analysis.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        header = self._analysis.horizontalHeader()
+        if header is None:
+            raise RuntimeError("Analysis table has no header")
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._analysis.setColumnWidth(1, 110)
+        tabs.addTab(self._analysis, "Analysis")
+        layout.addWidget(tabs, 1)
         return pane
 
     def set_writable(self, *, writable: bool) -> None:
@@ -211,7 +283,7 @@ class ResultsBrowser(QWidget):
 
     def _change_group(self) -> None:
         self._navigation_runs = None
-        self._render()
+        self._render_navigation(self._filtered())
 
     def _visit(self, focus: _Focus) -> None:
         if focus != self._focus:
@@ -233,17 +305,15 @@ class ResultsBrowser(QWidget):
         return resolution.adapter_name or run.experiment or "Unknown experiment"
 
     def _filtered(self) -> tuple[ResultRun, ...]:
-        lower = self._date_from.text().strip()
-        upper = self._date_to.text().strip()
-        try:
-            for value in (lower, upper):
-                if value:
-                    date.fromisoformat(value)
-            if lower and upper and lower > upper:
-                raise ValueError("From date must not follow To date")
-        except ValueError as error:
-            self._feedback.setText(f"Invalid date filter: {error}")
+        enabled = self._dates_enabled.isChecked()
+        lower = self._date_from.date().toString("yyyy-MM-dd") if enabled else ""
+        upper = self._date_to.date().toString("yyyy-MM-dd") if enabled else ""
+        if lower > upper:
+            self._feedback.setText(
+                "Invalid date filter: From date must not follow To date"
+            )
             return ()
+        self._feedback.clear()
         search = self._search.text().casefold().strip()
         experiment = (
             self._experiment.currentText() if self._experiment.currentIndex() else None
@@ -274,6 +344,7 @@ class ResultsBrowser(QWidget):
     def _render(self) -> None:
         filtered = self._filtered()
         runs = self._focused(filtered)
+        self._visible_count.setText(f"{len(filtered)} / {len(self._index.runs)} runs")
         self._back.setEnabled(self._history_position > 0)
         self._forward.setEnabled(self._history_position + 1 < len(self._history))
         title = self._focus.entry or "All results"
@@ -297,7 +368,7 @@ class ResultsBrowser(QWidget):
         entry = _Focus(entry=run.entry)
         experiment = self._experiment_name(run)
         point = (run.entry, run.point)
-        if self._group.currentIndex() == 1:
+        if self._group.currentIndex() == 0:
             first = replace(entry, point=point)
             second = replace(first, experiment=experiment)
             captions = (run.point or "Global / unknown", experiment)
@@ -309,7 +380,10 @@ class ResultsBrowser(QWidget):
             (run.entry, entry),
             (captions[0], first),
             (captions[1], second),
-            (run.run_path.name, replace(second, run_key=run.key)),
+            (
+                f"{run.run_path.name[-6:]}  ·  {run.at[11:19] if run.at else 'Unknown time'}",
+                replace(second, run_key=run.key),
+            ),
         )
 
     def _render_navigation(self, runs: tuple[ResultRun, ...]) -> None:
@@ -318,15 +392,30 @@ class ResultsBrowser(QWidget):
             self._tree.clear()
             self._navigation.clear()
             nodes: dict[_Focus, QTreeWidgetItem] = {}
+            counts: dict[_Focus, int] = {}
             for run in runs:
                 parent = self._tree.invisibleRootItem()
                 for caption, focus in self._run_branch(run):
                     if focus not in nodes:
                         item = QTreeWidgetItem(parent, [caption])
-                        item.setExpanded(focus in expanded)
+                        item.setExpanded(
+                            focus in expanded
+                            or (
+                                focus.run_key is None
+                                and (focus.point is None or focus.experiment is None)
+                            )
+                        )
+                        item.setToolTip(
+                            0,
+                            f"{run.entry} / {run.point or 'Global / unknown'}\n{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n{run.at or 'Unknown time'}\n{run.run_path}",
+                        )
                         nodes[focus] = item
                         self._navigation.append((item, focus))
                     parent = nodes[focus]
+                    counts[focus] = counts.get(focus, 0) + 1
+            for focus, item in nodes.items():
+                if focus.run_key is None:
+                    item.setText(0, f"{item.text(0)}  ({counts[focus]})")
             self._navigation_runs = runs
         for item, focus in self._navigation:
             if focus == replace(self._focus, figure=None):
@@ -363,6 +452,14 @@ class ResultsBrowser(QWidget):
             if run
             else "Select a run to inspect cfg and analysis"
         )
+        rows = analysis_details(self._index, run) if run else ()
+        self._analysis.setRowCount(len(rows))
+        for row, (key, value) in enumerate(rows):
+            for column, text in enumerate((key, value)):
+                item = QTableWidgetItem(text)
+                item.setToolTip(text)
+                self._analysis.setItem(row, column, item)
+        self._analysis.resizeRowsToContents()
         reason = "Select a run"
         if run is not None:
             reason = "No data.h5 in this saved run" if run.data_path is None else ""
@@ -372,6 +469,19 @@ class ResultsBrowser(QWidget):
         self._open_button.setToolTip(reason)
         self._pin_button.setEnabled(run is not None)
         self._current_figure.setText(f"Current figure: {self._focus.figure or 'none'}")
+
+    def _open_compared(self, key: str) -> None:
+        run = self._index.get_run(key)
+        self._visit(
+            _Focus(
+                entry=run.entry,
+                experiment=self._experiment_name(run),
+                point=(run.entry, run.point),
+                run_key=key,
+                figure=self.comparison.selected_figure(key),
+            )
+        )
+        self._tabs.setCurrentIndex(0)
 
     def _pin_selected(self) -> None:
         if self._focus.run_key is not None:

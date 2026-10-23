@@ -2,31 +2,50 @@
 
 from __future__ import annotations
 
+import json
+
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
 
 
-def _lines(value: object, prefix: str = "") -> list[str]:
+def _items(value: object, prefix: str = "") -> list[tuple[str, str]]:
     if isinstance(value, dict):
         return [
-            line
+            item
             for key, child in value.items()
-            for line in _lines(child, f"{prefix}.{key}" if prefix else str(key))
+            for item in _items(child, f"{prefix}.{key}" if prefix else str(key))
         ]
     if isinstance(value, list):
         return [
-            line
+            item
             for i, child in enumerate(value)
-            for line in _lines(child, f"{prefix}[{i}]")
+            for item in _items(child, f"{prefix}[{i}]")
         ]
-    return [f"{prefix} = {value}"]
+    return [(prefix, str(value))]
+
+
+def _cfg_lines(value: object, prefix: str = "", depth: int = 0) -> list[str]:
+    if isinstance(value, dict) and depth < 3:
+        return [
+            line
+            for key, child in value.items()
+            for line in _cfg_lines(
+                child, f"{prefix}.{key}" if prefix else str(key), depth + 1
+            )
+        ]
+    text = (
+        json.dumps(value, ensure_ascii=False)
+        if isinstance(value, (dict, list))
+        else str(value)
+    )
+    return [f"{prefix} = {text[:200]}{' …' if len(text) > 200 else ''}"]
 
 
 def result_details(index: ResultsIndex, run: ResultRun) -> str:
-    """Project one run's documents without cfg values/analysis summary root prefixes.
+    """Return metadata and bounded cfg values without absolute path body rows.
 
-    Saved cfg_type/schema_version and analysis parameters have separate sections.
-    Per-document read failures are
-    displayed beside the affected filename rather than hiding the run.
+    Cfg identity is separate from relative values. Values descend at most three
+    mapping levels and truncate each rendered value to 200 characters.
+    Read failures and indexed issues remain visible for diagnosis.
     """
     sections = [
         f"{run.entry} / {run.point or 'Global / unknown'}",
@@ -35,7 +54,6 @@ def result_details(index: ResultsIndex, run: ResultRun) -> str:
         "Registered" if run.registered else "Unregistered",
         f"Time: {run.at or 'Unknown'}",
         f"Roles: {dict(run.roles)}",
-        str(run.run_path),
     ]
     if run.data_path is not None:
         try:
@@ -47,19 +65,31 @@ def result_details(index: ResultsIndex, run: ResultRun) -> str:
             for field in ("cfg_type", "schema_version"):
                 if field in cfg:
                     sections.append(f"{field} = {cfg[field]}")
-            sections.extend(["\nCfg values", *_lines(cfg.get("values", cfg))])
+            sections.extend(["\nCfg values", *_cfg_lines(cfg.get("values", cfg))])
+    sections.extend(run.issues)
+    return "\n".join(sections)
+
+
+def analysis_details(
+    index: ResultsIndex, run: ResultRun
+) -> tuple[tuple[str, str], ...]:
+    """Return key/value rows with relative summary keys and separate parameters.
+
+    Each document starts with its summary heading. Read failures retain the
+    filename and error as a row; no summary or quality facts are synthesized.
+    """
+    rows: list[tuple[str, str]] = []
     for path in run.analysis_paths:
         try:
             document = index.read_analysis(run.key, path.name)
         except (OSError, ValueError, KeyError) as error:
-            sections.append(f"{path.name}: {error}")
+            rows.append((path.name, str(error)))
             continue
-        sections.extend(
-            [f"\nSummary · {path.name}", *_lines(document.get("summary", document))]
+        rows.extend(
+            [(f"Summary · {path.name}", ""), *_items(document.get("summary", document))]
         )
         if "parameters" in document:
-            sections.extend(
-                [f"\nParameters · {path.name}", *_lines(document["parameters"])]
+            rows.extend(
+                [(f"Parameters · {path.name}", ""), *_items(document["parameters"])]
             )
-    sections.extend(run.issues)
-    return "\n".join(sections)
+    return tuple(rows)
