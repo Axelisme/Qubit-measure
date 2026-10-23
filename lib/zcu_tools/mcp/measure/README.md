@@ -122,9 +122,11 @@ Full details 的 writeback_receipts 保留每次接受的確認項目與錯誤�
 `WritebackDestination.path` 是 owner 原樣的 opaque actual_path，
 label 是 preview 當時 active context 的顯示標籤，不是 captured identity。
 
-`tab.save()` 同步呼叫 `tab.save_data` 與 `tab.save_artifacts(artifacts="all")`，
-保存 raw data 與全部已完成階段的 JSON／圖。
-兩個 RPC 都在 GUI owner 同步完成，沒有 Save operation 或 handle 要 await。
+`tab.save()` 只同步呼叫一次 `tab.save_artifacts(artifacts="all")`，
+保存 raw data、Labber 與全部已完成階段的 JSON／圖，每種輸出各一次。
+RPC 在 GUI owner 同步完成，沒有 Save operation 或 handle 要 await。
+個別輸出失敗沿 owner report 回報，不阻止其他輸出。
+Transport 失敗會傳遞錯誤，不宣稱任何未收到的 raw 收據。
 每次 Save 的完整 owner report 記在 runs，不累積跨次成功宣稱。
 同 run 的 native 成員可覆寫，Labber 每次另產新檔。
 每個 output 的 status／error 才是保存結果，不能只看 run_id。

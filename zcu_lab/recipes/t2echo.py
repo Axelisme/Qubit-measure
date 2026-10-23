@@ -129,7 +129,6 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),
