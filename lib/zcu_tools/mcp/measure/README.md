@@ -72,6 +72,7 @@ Adapter tab 的 Form 仍由 GUI owner 產生與驗證。
 非空 mapping 只覆寫這次固定 capture，不寫全域 aliases 或 memento。
 Recipe 不自動選重用 tab，也不自動關閉 tab；關閉用 `tab_close`。
 `session.context.read(source_path)` 直接讀 session 層的 `value.read`，不需先開 tab。
+明填 `missing_ok=True` 只把 owner 回覆的 `unregistered_source` 轉成 None；其他來源與連線錯誤照常拋出。
 `tab.read(path)` 讀該 tab 固定 Form capture，回 detached `FormField`。
 Structured value 保留 owner 的 `YamlValue` mapping，作者需要 model 時自行 TypeAdapter 解碼。
 Value_status 區分 available、missing、unavailable；available null 是有效觀察，不證明整份 cfg 有效。
