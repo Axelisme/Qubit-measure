@@ -331,6 +331,7 @@ class TransmissionModel:
         norm_xc, norm_yc, norm_r0 = norm_circle_params
 
         fig = figure
+        fig.set_layout_engine("constrained")
         spec = fig.add_gridspec(2, 2)
         ax1 = fig.add_subplot(spec[0, 0])
         ax2 = fig.add_subplot(spec[0, 1])
@@ -364,7 +365,7 @@ class TransmissionModel:
         )
         ax2.axvline(freq, color="k", linestyle="--")
         ax2.grid()
-        ax2.legend(fontsize=12)
+        ax2.legend(fontsize=10)
         ax2.set_xlabel("Frequency (MHz)")
         ax2.set_ylabel("Phase (rad)")
 
@@ -380,16 +381,16 @@ class TransmissionModel:
         ax3.axvline(freq, color="k", linestyle="--", label=base_info)
         ax3.text(
             0.98,
-            0.90,
+            0.98,
             Q_info,
             transform=ax3.transAxes,
             verticalalignment="top",
             horizontalalignment="right",
-            fontsize=12,
+            fontsize=10,
             bbox=dict(facecolor="white", edgecolor="lightgray", alpha=0.5),
         )
         ax3.grid()
-        ax3.legend(loc="lower left", fontsize=12)
+        ax3.legend(loc="lower left", fontsize=10)
         ax3.set_xlabel("Frequency (MHz)")
         ax3.set_ylabel("Magnitude (a.u.)")
 

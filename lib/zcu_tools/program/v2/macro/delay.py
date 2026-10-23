@@ -11,11 +11,16 @@ logger = logging.getLogger(__name__)
 class DelayRegAuto(TimedMacro):
     """Auto-align to timeline, then increment by runtime cycles from a register.
 
-    The register value is interpreted as tProc cycles (not microseconds).
+    time_reg names a register holding tProc cycles (not microseconds). gens and
+    ros select generator and readout timelines. preprocess raises ValueError before
+    resolving the register if neither channel type is selected.
     """
 
     # fields: time_reg (str), gens (bool), ros (bool)
     def preprocess(self, prog) -> None:
+        if not self.gens and not self.ros:
+            raise ValueError("DelayRegAuto requires at least one channel: gens or ros")
+
         # Resolve early to fail fast on missing/invalid register names.
         prog._get_reg(self.time_reg)
         auto_t = prog.get_max_timestamp(gens=self.gens, ros=self.ros)

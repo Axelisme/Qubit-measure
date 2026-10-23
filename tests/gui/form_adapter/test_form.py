@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import typing
+from collections.abc import Callable, Mapping
 from typing import Annotated
 
 import pytest
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, create_model
 from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
@@ -73,6 +74,48 @@ def test_field_order_is_local_partial_and_preserves_nested_order() -> None:
     for invalid in (("missing",), ("amount", "amount")):
         with pytest.raises(ValueError, match="field_order"):
             form_adapter.Form(ScalarCfg, tree, field_order=invalid)
+
+
+type StringMapping = Mapping[str, str]
+
+
+class MappingSection(ConfigBase):
+    """Typed mappings are whole data leaves, not scalar expression targets."""
+
+    labels: Mapping[str, str] = Field(default_factory=dict)
+    dictionary: dict[str, str] = Field(default_factory=dict)
+    optional: Mapping[str, str] | None = None
+    aliased: StringMapping = Field(default_factory=dict)
+
+
+class MappingCfg(ConfigBase):
+    """Nested declarations must identify the consuming mapping field."""
+
+    section: MappingSection = Field(default_factory=MappingSection)
+
+
+@pytest.mark.parametrize("field", ["labels", "dictionary", "optional", "aliased"])
+def test_whole_mapping_expr_is_rejected_at_form_declaration(field: str) -> None:
+    with pytest.raises(TypeError) as failure:
+        form_adapter.Form(MappingCfg, {"section": {field: Expr("$labels")}})
+    message = str(failure.value)
+    assert "section" in message and field in message
+    assert "Expr" in message and "str" in message
+    assert "Mapping" in message or "dict" in message
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [dict, Mapping, typing.Mapping, dict | None, Mapping | str, typing.Mapping | None],
+)
+def test_unparameterized_mapping_expr_is_rejected_at_form_declaration(
+    annotation: object,
+) -> None:
+    core = create_model(
+        "MappingDeclaration", __base__=ConfigBase, value=(annotation, ...)
+    )
+    with pytest.raises(TypeError, match="value: whole mapping Expr"):
+        form_adapter.Form(core, {"value": Expr("$labels")})
 
 
 class DefaultedCfg(ConfigBase):
