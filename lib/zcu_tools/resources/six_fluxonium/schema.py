@@ -140,7 +140,7 @@ class SixFluxoniumSettings(Values):
     Tones/pulse frequencies select the nearest bare cavity at each point;
     equal-distance routing fails at acquisition. No joint Hilbert space is used.
     Q1's seed selects the environment root stream. The maximum of the six
-    min_round_duration_s values sets successful-round pacing. Per-qubit solver
+    time_scale values sets successful-round pacing. Per-qubit solver
     tolerances, truncations and physical calibrations remain independent.
     numerics: environment cache allowances and midpoint subdivisions, default
     SixFluxoniumNumerics.

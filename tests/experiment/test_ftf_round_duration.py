@@ -21,9 +21,15 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
     monkeypatch: pytest.MonkeyPatch, mode: str
 ):
     waits: list[float] = []
-    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
-    monkeypatch.setattr(time, "sleep", waits.append)
-    # This legacy document omits the pacing setting.
+    now = [0.0]
+
+    def sleep(duration: float) -> None:
+        waits.append(duration)
+        now[0] += duration
+
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", sleep)
+    # The synthetic settings omit pacing; the builder supplies physical time.
     settings = parse_ftf(ftf_document())
     env = ftf(settings)
     try:
@@ -42,11 +48,11 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
         acquire = program.acquire if mode == "integrated" else program.acquire_decimated
         expected = acquire(env.soc, progress=False)
         expected_raw = raw_of(program)
-        assert waits == pytest.approx([0.2, 0.2])
-        unpaced = ftf(settings, min_round_duration_s=0)
+        assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
+        unpaced = ftf(settings, time_scale=0)
         try:
             actual = acquire(unpaced.soc, progress=False)
-            assert waits == pytest.approx([0.2, 0.2])
+            assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
             assert np.asarray(actual).tobytes() == np.asarray(expected).tobytes()
             assert (
                 np.asarray(raw_of(program)).tobytes()
@@ -68,7 +74,7 @@ def test_yaml_zero_disables_round_wait(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(time, "sleep", waits.append)
     document = ftf_document()
     settings = parse_ftf(document)
-    document["numerics"] = {**settings.numerics.model_dump(), "min_round_duration_s": 0}
+    document["numerics"] = {**settings.numerics.model_dump(), "time_scale": 0}
     env = ftf(parse_ftf(document))
     try:
         program = ModularProgramV2(
