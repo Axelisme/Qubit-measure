@@ -8,6 +8,8 @@ Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 sca
 
 `two_qubit/conditional_spectroscopy` 量四個熱初態上的名目準備分支。每 shot 做 `B00/01/10/11 → 雙線 weak probe → 可選 Xπ⊗Xπ → 完整 mux readout`。F1 是 branch 的第一個 bit，F2 是第二個 bit。B11 仍含熱 population，所有 shots 都保留，直接分析原始 ensemble。
 
+修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+
 ## 開啟前確認
 
 先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ pulses 與 mux readout。綁定 `f1`、`f2` 到不同 fluxonium，`coupler` 到本對 transmon，`mux` 到包含兩者的 MuxGroup。Group 的 `qubits` 與 `resonators` 必須有序對應。

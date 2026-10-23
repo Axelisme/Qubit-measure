@@ -1,4 +1,7 @@
-"""Measure mux length Rabi, fit pulse lengths, and review calibration updates."""
+"""Measure mux length Rabi, fit pulse lengths, and review calibration updates.
+
+Recipe n → expts: one shared scan point count for every tone.
+"""
 
 from pydantic import BaseModel, Field
 from zcu_tools.gui.form import FormModel

@@ -8,6 +8,9 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2._support.measure.detune import resolve_detune
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 
 from .core import T2RamseyCfg
 
@@ -30,6 +33,14 @@ def make_form(ctx: FormContext) -> Form[T2RamseyCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         T2RamseyCfg,
+        field_order=(
+            "modules",
+            "sweep",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "modules": {
                 "reset": Slot("$qubit.module.reset"),
@@ -49,4 +60,10 @@ def make_form(ctx: FormContext) -> Form[T2RamseyCfg]:
         },
         extras=DetuneInput,
         lower=lower_detune,
+    ).with_seed_metadata(
+        (
+            {}
+            if ctx.has("$qubit.module.readout")
+            else pulse_readout_seed_metadata(gain=0.1)
+        )
     )
