@@ -44,7 +44,6 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QEvent, QObject, QSize, Qt
 from qtpy.QtGui import QPixmap, QResizeEvent, QShowEvent
 from qtpy.QtWidgets import (
-    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -60,7 +59,8 @@ from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.widgets import secondary_colour, set_foreground
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
-from .figure_pane_layout import MAX_TILED_FIGURES, FigurePaneLayout
+from .figure_pager import FigurePager
+from .figure_pane_layout import FigurePaneLayout
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -139,14 +139,10 @@ class _PreviewCard(QWidget):
         self._named_page = QWidget()
         named_layout = QVBoxLayout(self._named_page)
         named_layout.setContentsMargins(0, 0, 0, 0)
-        self._named_selector = QComboBox()
-        self._named_selector.setAccessibleName(f"{display_name} saved figure")
+        self._named_names: tuple[str, ...] = ()
         self._named_stack = FigurePaneLayout()
         self._named_stack.addWidget(QLabel("No figure yet"))
-        self._named_selector.currentIndexChanged.connect(
-            lambda index: self._named_stack.setCurrentIndex(index + 1)
-        )
-        named_layout.addWidget(self._named_selector)
+        named_layout.addWidget(FigurePager(self._named_stack, f"data.{source_key}"))
         named_layout.addWidget(self._named_stack, stretch=1)
         self._stack.addWidget(self._named_page)
         outer.addWidget(self._stack, stretch=1)
@@ -203,28 +199,27 @@ class _PreviewCard(QWidget):
         render: Callable[[_PreviewCard, Figure], None],
     ) -> None:
         """Render a borrowed stage snapshot, retaining only pixmaps and UI names."""
-        selected = self._named_selector.currentText()
+        selected_index = self._named_stack.currentIndex() - 1
+        selected = (
+            self._named_names[selected_index]
+            if 0 <= selected_index < len(self._named_names)
+            else ""
+        )
         while self._named_stack.count() > 1:
             child = self._named_stack.widget(self._named_stack.count() - 1)
             if child is not None:
                 self._named_stack.removeWidget(child)
                 child.deleteLater()
-        self._named_selector.blockSignals(True)
-        try:
-            self._named_selector.clear()
-            for name, figure in figures.items():
-                card = _PreviewCard(f"{self._source_key}_member", name)
-                render(card, figure)
-                card._title.setVisible(len(figures) <= MAX_TILED_FIGURES)
-                self._named_stack.addWidget(card)
-                self._named_selector.addItem(name)
-            if selected in figures:
-                self._named_selector.setCurrentText(selected)
-        finally:
-            self._named_selector.blockSignals(False)
-        self._named_selector.setVisible(len(figures) > MAX_TILED_FIGURES)
-        self._named_stack.setCurrentIndex(self._named_selector.currentIndex() + 1)
-        self._named_stack.set_tiled(tiled=len(figures) <= MAX_TILED_FIGURES)
+        self._named_names = tuple(figures)
+        for name, figure in figures.items():
+            card = _PreviewCard(f"{self._source_key}_member", name)
+            render(card, figure)
+            self._named_stack.addWidget(card)
+        index = (
+            self._named_names.index(selected) if selected in self._named_names else 0
+        )
+        self._named_stack.setCurrentIndex(index + 1)
+        self._named_stack.set_tiled(tiled=True)
         self.setMinimumHeight(360 if len(figures) > 2 else 260)
         self._stack.setCurrentWidget(self._named_page)
 
@@ -673,7 +668,7 @@ class DataFigurePreviewGallery(QWidget):
 
         Call on the Qt owner after update_figures has established fallback/error
         states through the public pane reader. Each member's rendering failure
-        stays local. Selectors and raster widgets are presentation cache only.
+        stays local. Names, page selection and raster widgets are presentation cache only.
         """
         for key, figures in (
             ("run", run),

@@ -6,6 +6,8 @@ The 2D sweep varies readout gain and readout frequency to map how the resonator 
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Parameter sources
 
 The tab uses a fixed copy of the resonator parameters taken when it was opened or reset. `resonator.freq` and `resonator.kappa` seed the frequency sweep. `resonator.wiring.ch` and `resonator.wiring.ro_ch` seed the generator and ADC channels. The ADC window starts at 0.99 us. Trigger timing reads the top-level `$resonator.time_of_fly`, adding `5/(2π·kappa)` us when kappa is set. Missing or null TOF leaves trigger and pulse length required and blank. Pulse length starts at the larger of 1.0 us and trigger plus the ADC window. Missing or null calibration and unbound aliases leave required fields Invalid until valid values are supplied. Other source failures are reported as errors.
@@ -24,4 +26,4 @@ The run produces a 2D map for visual inspection. Read the punch-out power and lo
 
 ## Recommended use
 
-A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled, with `None` or a nonpositive value. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.
+A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled. Leave it blank (`None`) to keep early stopping disabled. Zero and negative thresholds are rejected by the Form. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.

@@ -4,9 +4,13 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Parameter sources
 
 Length runs 0.03 to 4 * qubit.module.x180.waveform.length us over 101 points; Run overwrites drive length. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
+
+Run rejects an arbitrary (arb) drive waveform before preparing the scan or plots because its length comes from the saved asset. Select a waveform with an editable length for Length Rabi. Const and flat-top pulses sweep on the FPGA; other editable-length shapes scan on the host. Run does not resize or resample arb assets.
 
 The length sweep starts at 0.03 us and stops at 4*pi_len, using the stored x180 waveform length as pi_len. A missing or null pi_len, including an arbitrary waveform with no stored numeric length, uses a 1 us stop. An invalid stored pi_len leaves stop empty. Enter a finite positive numeric length. An existing x180 keeps its saved module selection and gain; if x180 is absent, qub_probe starts at gain=1. Starting values use stored calibration only.
 

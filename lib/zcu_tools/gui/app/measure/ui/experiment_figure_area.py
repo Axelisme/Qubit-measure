@@ -1,4 +1,4 @@
-"""Qt-owned experiment canvases, named selectors, interactive views and Data previews."""
+"""Qt-owned experiment canvases, paged tiles, interactive views and Data previews."""
 
 from __future__ import annotations
 
@@ -13,8 +13,10 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.plotting import FigureContainer, attach_existing_figure_to_container
 
 from .data_figure_preview_gallery import DataFigurePreviewGallery
-from .figure_pane_layout import MAX_TILED_FIGURES, FigurePaneLayout
+from .figure_pager import FigurePager
+from .figure_pane_layout import FigurePaneLayout
 from .interactive_frontend import InteractiveFrontend
+from .named_figure_presentation import present_named_figure_tiles, sync_figure_selection
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -28,7 +30,7 @@ class ExperimentFigureArea(QWidget):
     """Own the right-side widgets and their presentation state on the Qt owner thread.
 
     The containing experiment tab retains commands, subscriptions, progress and
-    State projections. This widget owns canvas mounting, selector/cache identity,
+    State projections. This widget owns canvas mounting, selection/cache identity,
     interactive child membership and the raster gallery, not results or saving.
     Clearing presentation retires Qt canvases but keeps caller-retained Figures
     saveable. All public calls are synchronous and require the Qt owner thread.
@@ -77,13 +79,16 @@ class ExperimentFigureArea(QWidget):
             self._analysis_panel_right = QWidget()
             analysis_right = QVBoxLayout(self._analysis_panel_right)
             analysis_right.setContentsMargins(0, 0, 0, 0)
-            self._analysis_selector = QComboBox()
-            self._analysis_selector.setAccessibleName("Analysis figure")
-            self._analysis_selector.hide()
-            self._analysis_selector.currentIndexChanged.connect(
-                self._on_analysis_figure_selected
+            self._analysis_selection_model = QComboBox()
+            self._analysis_selection_model.setAccessibleName("Analysis figure")
+            self._analysis_selection_model.hide()
+            self._analysis_stack.currentChanged.connect(
+                lambda index: sync_figure_selection(
+                    self._analysis_selection_model, index
+                )
             )
-            analysis_right.addWidget(self._analysis_selector)
+            analysis_right.addWidget(self._analysis_selection_model)
+            analysis_right.addWidget(FigurePager(self._analysis_stack, "analysis"))
             analysis_right.addWidget(self._analysis_stack, stretch=1)
 
     def _build_post_figure_pane(self) -> None:
@@ -101,13 +106,14 @@ class ExperimentFigureArea(QWidget):
             self._post_panel_right = QWidget()
             post_right = QVBoxLayout(self._post_panel_right)
             post_right.setContentsMargins(0, 0, 0, 0)
-            self._post_selector = QComboBox()
-            self._post_selector.setAccessibleName("Post-analysis figure")
-            self._post_selector.hide()
-            self._post_selector.currentIndexChanged.connect(
-                self._on_post_figure_selected
+            self._post_selection_model = QComboBox()
+            self._post_selection_model.setAccessibleName("Post-analysis figure")
+            self._post_selection_model.hide()
+            self._post_stack.currentChanged.connect(
+                lambda index: sync_figure_selection(self._post_selection_model, index)
             )
-            post_right.addWidget(self._post_selector)
+            post_right.addWidget(self._post_selection_model)
+            post_right.addWidget(FigurePager(self._post_stack, "post_analysis"))
             post_right.addWidget(self._post_stack, stretch=1)
 
     def _build_plot_area(self) -> None:
@@ -127,11 +133,14 @@ class ExperimentFigureArea(QWidget):
         self._run_panel_right = QWidget()
         run_right = QVBoxLayout(self._run_panel_right)
         run_right.setContentsMargins(0, 0, 0, 0)
-        self._run_selector = QComboBox()
-        self._run_selector.setAccessibleName("Run figure")
-        self._run_selector.hide()
-        self._run_selector.currentIndexChanged.connect(self._on_run_figure_selected)
-        run_right.addWidget(self._run_selector)
+        self._run_selection_model = QComboBox()
+        self._run_selection_model.setAccessibleName("Run figure")
+        self._run_selection_model.hide()
+        self._run_stack.currentChanged.connect(
+            lambda index: sync_figure_selection(self._run_selection_model, index)
+        )
+        run_right.addWidget(self._run_selection_model)
+        run_right.addWidget(FigurePager(self._run_stack, "run"))
         run_right.addWidget(self._run_stack, stretch=1)
 
         self._build_analysis_figure_pane()
@@ -257,14 +266,14 @@ class ExperimentFigureArea(QWidget):
         self._refresh_data_gallery()
 
     def mount_interactive_widget(self, widget: QWidget) -> None:
-        """Take Qt ownership of widget and present it in Analysis, hiding its selector.
+        """Take Qt ownership of widget and present it in Analysis without paging.
 
         Unsupported Analysis raises RuntimeError. Other mounted children remain;
         unmount_interactive_widgets retires children matching the supplied type.
         Mounting changes the right page, not the containing tab's left selection.
         """
         self._require_analysis()
-        self._analysis_selector.hide()
+        self._analysis_selection_model.hide()
         self._analysis_stack.set_tiled(tiled=False)
         self._analysis_stack.addWidget(widget)
         self._analysis_stack.setCurrentWidget(widget)
@@ -293,6 +302,7 @@ class ExperimentFigureArea(QWidget):
     def get_current_figure_for_pane(self, pane: str) -> Figure | None:
         """Borrow the presented Figure for run, analysis or post_analysis, or None.
 
+        Paging selects the first Figure on that page; canvas clicks select a tile.
         Empty/placeholder panes return None. Unknown names raise ValueError;
         unsupported panes or a mounted canvas without a Figure raise RuntimeError.
         This neither renders nor transfers ownership of the Figure.
@@ -324,24 +334,24 @@ class ExperimentFigureArea(QWidget):
         """Clear all figure panes (used for LoadData and Run start invalidation)."""
         self._run_container.clear_dynamic_canvases()
         self._run_figures = None
-        self._run_selector.blockSignals(True)
-        self._run_selector.clear()
-        self._run_selector.blockSignals(False)
-        self._run_selector.hide()
+        self._run_selection_model.blockSignals(True)
+        self._run_selection_model.clear()
+        self._run_selection_model.blockSignals(False)
+        self._run_selection_model.hide()
         if self._has_analysis:
             self._analysis_container.clear_dynamic_canvases()
             self._analysis_figures = None
-            self._analysis_selector.blockSignals(True)
-            self._analysis_selector.clear()
-            self._analysis_selector.blockSignals(False)
-            self._analysis_selector.hide()
+            self._analysis_selection_model.blockSignals(True)
+            self._analysis_selection_model.clear()
+            self._analysis_selection_model.blockSignals(False)
+            self._analysis_selection_model.hide()
         if self._has_post:
             self._post_container.clear_dynamic_canvases()
             self._post_figures = None
-            self._post_selector.blockSignals(True)
-            self._post_selector.clear()
-            self._post_selector.blockSignals(False)
-            self._post_selector.hide()
+            self._post_selection_model.blockSignals(True)
+            self._post_selection_model.clear()
+            self._post_selection_model.blockSignals(False)
+            self._post_selection_model.hide()
         self._refresh_data_gallery()
 
     def show_run_figure(self, fig: Figure) -> None:
@@ -358,7 +368,7 @@ class ExperimentFigureArea(QWidget):
         """Draw borrowed named Figures in Analysis, or clear for None/empty input.
 
         Preserve the selected name for the same collection identity. Replacing the
-        collection rebuilds the selector with signals blocked. Unsupported Analysis,
+        collection rebuilds the name model with signals blocked. Unsupported Analysis,
         a missing selected name or a nondrawable canvas raises RuntimeError; other
         attach/draw failures propagate. Refresh only an active Data gallery.
         """
@@ -390,8 +400,8 @@ class ExperimentFigureArea(QWidget):
         attach: bool = True,
     ) -> None:
         if pane == "run":
-            selector, container, stack = (
-                self._run_selector,
+            selection_model, container, stack = (
+                self._run_selection_model,
                 self._run_container,
                 self._run_stack,
             )
@@ -399,8 +409,8 @@ class ExperimentFigureArea(QWidget):
             self._run_figures = figures
         elif pane == "analysis":
             self._require_analysis()
-            selector, container, stack = (
-                self._analysis_selector,
+            selection_model, container, stack = (
+                self._analysis_selection_model,
                 self._analysis_container,
                 self._analysis_stack,
             )
@@ -408,8 +418,8 @@ class ExperimentFigureArea(QWidget):
             self._analysis_figures = figures
         elif pane == "post_analysis":
             self._require_post()
-            selector, container, stack = (
-                self._post_selector,
+            selection_model, container, stack = (
+                self._post_selection_model,
                 self._post_container,
                 self._post_stack,
             )
@@ -417,7 +427,7 @@ class ExperimentFigureArea(QWidget):
             self._post_figures = figures
         else:
             raise ValueError(f"unknown pane {pane!r}")
-        selected = selector.currentText() if figures is previous else ""
+        selected = selection_model.currentText() if figures is previous else ""
         if attach and figures is not previous:
             container.clear_dynamic_canvases()
         names = (
@@ -429,24 +439,13 @@ class ExperimentFigureArea(QWidget):
                 if attach or container.contains_figure(figure)
             ]
         )
-        selector.blockSignals(True)
-        try:
-            selector.clear()
-            selector.addItems(names)
-            if selected in names:
-                selector.setCurrentText(selected)
-        finally:
-            selector.blockSignals(False)
-        selector.setVisible(len(names) > MAX_TILED_FIGURES)
-        stack.set_tiled(tiled=0 < len(names) <= MAX_TILED_FIGURES)
-        if not names:
-            if attach:
-                container.clear_dynamic_canvases()
-        elif figures is not None:
-            if attach:
-                self._draw_named_figures(figures, container, names)
-            figure = figures[selector.currentText()]
-            attach_existing_figure_to_container(figure, container)
+        if not names and attach:
+            container.clear_dynamic_canvases()
+        elif figures is not None and names and attach:
+            self._draw_named_figures(figures, container, names)
+        present_named_figure_tiles(
+            stack, selection_model, names, selected=selected, pane=pane
+        )
         self._refresh_data_gallery()
 
     @staticmethod
@@ -459,18 +458,6 @@ class ExperimentFigureArea(QWidget):
             if not callable(draw):
                 raise RuntimeError("Attached figure canvas does not support draw()")
             draw()
-
-    def _on_run_figure_selected(self, index: int) -> None:
-        if index >= 0 and self._run_figures is not None:
-            self._show_named_figures("run", self._run_figures, attach=False)
-
-    def _on_analysis_figure_selected(self, index: int) -> None:
-        if index >= 0 and self._analysis_figures is not None:
-            self._show_named_figures("analysis", self._analysis_figures)
-
-    def _on_post_figure_selected(self, index: int) -> None:
-        if index >= 0 and self._post_figures is not None:
-            self._show_named_figures("post_analysis", self._post_figures)
 
     def _refresh_data_gallery(self) -> None:
         """Refresh Data gallery from current pane figures when Data is visible (S2)."""

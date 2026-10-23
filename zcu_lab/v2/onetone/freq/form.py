@@ -19,6 +19,9 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
@@ -109,6 +112,14 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqCfg,
+        field_order=(
+            "modules",
+            "sweep",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             **initial_spectrum_tree(ctx),
             "sampling_mode": Hidden(),
@@ -116,4 +127,4 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
         },
         extras=SamplingInput,
         lower=lower_sampling,
-    )
+    ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))

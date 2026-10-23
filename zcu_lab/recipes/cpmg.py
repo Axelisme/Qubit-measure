@@ -1,4 +1,8 @@
-"""Measure CPMG decay across positive refocusing-pulse counts."""
+"""Measure CPMG decay across positive refocusing-pulse counts.
+
+Recipe points controls the pulse-count grid, not a time-sweep expts field.
+length_points → length_expts: the GUI Time points input is the shared time-window count.
+"""
 
 from math import isfinite
 from typing import Literal
@@ -200,7 +204,6 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),
