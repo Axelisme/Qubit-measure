@@ -13,6 +13,8 @@ from .util import merge_max_length, round_timestamp
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
+    from .pulse import TableLengthPulse
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +92,16 @@ class DelayAuto(Module):
 
 
 class Join(Module):
+    """Start independent branches together and wait for their longest duration.
+
+    args are modules or module sequences. Delay/DelayAuto branches are invalid.
+    Table-length joins require exactly one TableLengthPulse per branch, distinct
+    generators and a shared index register/table size. Other table combinations
+    raise ValueError. table_pulses holds those branches, or an empty tuple for
+    ordinary joins. Their common wait uses each point's quantized maximum, not
+    a sweep-wide maximum. Input modules become owned by this Join.
+    """
+
     def __init__(self, *args: Module | Sequence[Module]) -> None:
         self.name = ""
 
@@ -103,15 +115,68 @@ class Join(Module):
                     raise ValueError("modules cannot contain DelayAuto or Delay")
 
         self.join_modules = join_modules
+        # Pulse imports DelayAuto, so resolve the concrete table type at construction.
+        from .pulse import TableLengthPulse
+
+        tables = [
+            m
+            for branch in join_modules
+            for m in branch
+            if isinstance(m, TableLengthPulse)
+        ]
+        self.table_pulses: tuple[TableLengthPulse, ...] = tuple(tables)
+        if tables:
+            if len(tables) != len(join_modules) or any(
+                len(branch) != 1 for branch in join_modules
+            ):
+                raise ValueError(
+                    "Table-length Join requires one TableLengthPulse per branch"
+                )
+            if len({pulse.cfg.ch for pulse in tables}) != len(tables):
+                raise ValueError("Table-length Join requires independent generators")
+            if len({(pulse.idx_reg, len(pulse.lengths)) for pulse in tables}) != 1:
+                raise ValueError(
+                    "Table-length Join requires a shared index and table size"
+                )
 
     def init(self, prog: ModularProgramV2) -> None:
         for list in self.join_modules:
             for m in list:
                 m.init(prog)
+        if self.table_pulses:
+            from .dmem import LoadValue
+
+            first = self.table_pulses[0]
+            duration_reg = f"{first.name}_join_duration"
+            durations = [
+                max(
+                    pulse.playback_parameters(prog, i)[2] for pulse in self.table_pulses
+                )
+                for i in range(len(first.lengths))
+            ]
+            self._duration_loader = LoadValue(
+                f"{first.name}_join_load_duration",
+                durations,
+                idx_reg=first.idx_reg,
+                val_reg=duration_reg,
+            )
+            self._duration_loader.init(prog)
+            self._wait = DelayAuto(f"{first.name}_join_wait", t=duration_reg)
+            self._wait.init(prog)
 
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
+        if self.table_pulses:
+            # Set one common origin before emitting any runtime-length branch.
+            prog.delay(t=t)
+            prog.delay_auto(t=0.0)
+            with prog.disable_delay():
+                for pulse in self.table_pulses:
+                    pulse.play_parallel(prog)
+            self._duration_loader.run(prog)
+            return self._wait.run(prog)
+
         logger.debug(
             "Join.run: %d parallel branches, t=%s",
             len(self.join_modules),

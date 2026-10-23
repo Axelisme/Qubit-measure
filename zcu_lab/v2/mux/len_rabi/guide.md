@@ -59,11 +59,14 @@ Switch an arb source to a supported waveform explicitly before Run.
 
 Each tone supplies positive Start and Stop lengths in us. Expts follows Tones
 and sets one shared positive point count for all tones (default 101).
+One program sweeps the selected drives' length tables in a shared hardware loop.
 At each point, the selected drives use their corresponding lengths together.
 The sequence is common reset, simultaneous drives, then mux readout after that
 point's longest drive. Short drives wait for that branch; pulse pre/post delays
 stay as configured. Hardware rounding can change total playback by a few ticks.
 Nonpositive or overlapping adjacent rounded lengths block Run.
+Live plots update after each completed round across the full sweep. Stop keeps
+those completed-round averages; if no round completed, signals remain NaN.
 
 Each tone uses its own rounded requested-length axis and needs six finite IQ points.
 Decay defaults to a damped cosine and can be disabled.

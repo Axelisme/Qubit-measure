@@ -348,18 +348,26 @@ class TableLengthPulse(Module):
         self._wait = DelayAuto(f"{self.name}_runtime_duration", t=self._duration_reg)
         self._wait.init(prog)
 
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        cur_t = t
+    def play_parallel(self, prog: ModularProgramV2, t: float | QickParam = 0.0) -> None:
+        """Emit this initialized pulse at t without advancing the time reference.
+
+        prog must have initialized this module. The named loop selects its table
+        entry. The caller must wait for the selected duration from
+        playback_parameters before later playback; Join owns that common wait
+        for parallel table pulses. No compile-time channel timestamp is updated.
+        """
         for module in (
             self._length_loader,
             self._duration_loader,
             self._runtime_pulse,
-            self._wait,
         ):
-            cur_t = module.run(prog, cur_t)
-        return cur_t
+            module.run(prog, t)
+
+    def run(
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
+        self.play_parallel(prog, t)
+        return self._wait.run(prog, t)
 
     def allow_rerun(self) -> bool:
         return True

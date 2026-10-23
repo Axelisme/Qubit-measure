@@ -15,9 +15,9 @@ does not resolve component identities.
 
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 all tones, including nonparticipants. Point p pairs each active tone's p-th value,
-not a Cartesian product. Each point compiles once and executes optional common reset, Join of
-independent drive pulses, then active mux readout. Branches start together;
-short branches wait for the longest branch at that point. Pre/post delays stay
+not a Cartesian product. One program executes a shared hardware point loop with
+optional common reset, Join of table-length drive pulses, then active mux readout.
+Branches start together; short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
 All participants share reps, rounds, initial_delay and relax_delay.
 Program modules perform native conversion and averaging.
@@ -28,8 +28,8 @@ MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
 float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
 ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
 original tone indices and each tone's own coordinates, so duplicate labels retain
-distinct plots. Cancellation preserves completed points and the current point's
-completed-round average. Unacquired points remain NaN.
+distinct plots. Each completed round updates the full sweep. Cancellation keeps
+completed-round averages across all points, or NaN when no round completed.
 
 Length scan contract
 --------------------
@@ -43,7 +43,7 @@ run validation rather than stretched or cropped.
 
 prepare_length_scan(cfg, soccfg=...) copies cfg and resolves original indices
 in participant order. sweep2array(..., "time", gen_ch=...) creates each drive's
-rounded requested-length grid for set_param("length", ...). Each grid retains its
+rounded requested-length grid for TableLengthPulse. Each grid retains its
 hardware spacing and full point count, with no sorting or deduplication.
 Nonpositive rounded lengths or overlapping adjacent points raise. Coordinates
 are requested total lengths rather than compiled traces; flat_top ramp handling
@@ -95,7 +95,7 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 from __future__ import annotations
 
 from collections.abc import Sequence
-from copy import deepcopy
+from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar
 
@@ -118,10 +118,10 @@ from zcu_tools.program.v2.modules import (
     FlatTopWaveformCfg,
     Join,
     MuxReadout,
-    Pulse,
+    TableLengthPulse,
 )
 
-from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
+from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
@@ -141,7 +141,7 @@ def _averaged_signal(
     for module in prog.modules:
         if isinstance(module, MuxReadout) and module.name == "readout":
             iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[:, 0] + 1j * iq[:, 1]
+            return iq[..., 0] + 1j * iq[..., 1]
     raise ValueError("Mux scan program is missing its named MuxReadout")
 
 
@@ -183,13 +183,25 @@ class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
         return self
 
 
-def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxPulseScan:
+@dataclass(frozen=True)
+class MuxLengthScan:
+    """Prepared length axes without acquisition state or per-point pulse copies.
+
+    indices retains original tone indices in participant order. coordinates is
+    float64 (K,P), containing each drive's rounded total lengths in us.
+    """
+
+    indices: Sequence[int]
+    coordinates: NDArray[np.float64]
+
+
+def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthScan:
     """Prepare each selected qubit's pulse-length grid without acquiring data.
 
     cfg supplies complete tones and ordered participants; soccfg supplies the
-    board clocks. Return original indices, float64 lengths (K,P) in us and
-    copied pulses (P,K), pairing the qubits' own sweep points rather than
-    taking their Cartesian product. Each length follows its drive generator's
+    board clocks. Return original indices and float64 lengths (K,P) in us,
+    pairing the qubits' own sweep points rather than taking their Cartesian
+    product. No per-point pulses are constructed. Each length follows its drive generator's
     time grid and includes flat-top ramps. Playback may differ by clock ticks.
 
     Inputs stay unchanged. Invalid cfg, nonpositive rounded lengths, collapsed
@@ -198,7 +210,6 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxPulseSc
     cfg = MuxLenRabiCfg.model_validate(cfg.model_dump())
     indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
-    points = [[] for _ in range(cfg.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
@@ -212,11 +223,7 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxPulseSc
                 f"tones[{index}].sweep quantized lengths must be positive us"
             )
         coordinates.append(lengths)
-        for point, length in enumerate(lengths):
-            pulse = deepcopy(drive)
-            pulse.set_param("length", float(length))
-            points[point].append(pulse)
-    return MuxPulseScan(indices, np.asarray(coordinates, dtype=np.float64), points)
+    return MuxLengthScan(indices, np.asarray(coordinates, dtype=np.float64))
 
 
 class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
@@ -272,32 +279,29 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
             for row, viewer in enumerate(viewers):
                 viewer.update(scan.coordinates[row], np.abs(data[:, row]))
 
-        # Point-major storage lets each scan step write one whole tone vector.
+        # 2. One hardware point loop selects all participants' length tables.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
         with Schedule(cfg, signals, scope=context.scope) as sched:
-            for pulses, step in sched.scan("point", scan.point_pulses):
-                # 2. Reset, start drives together, then read after the longest drive.
-                builder = (
-                    step.prog_builder(context.soc, context.soccfg)
-                    .add_reset("reset", cfg.modules.reset)
-                    .add(
-                        Join(
-                            *[
-                                Pulse(f"drive_{index}", pulse)
-                                for index, pulse in zip(
-                                    scan.indices, pulses, strict=True
-                                )
-                            ]
-                        ),
-                        MuxReadout("readout", readout),
-                    )
+            drives = [
+                TableLengthPulse(
+                    f"drive_{index}",
+                    cfg.tones[index].drive,
+                    lengths=scan.coordinates[row],
+                    idx_reg="point",
                 )
-                prog = builder.build()
+                for row, index in enumerate(scan.indices)
+            ]
+            # Reset -> simultaneous drives -> readout after this point's longest drive.
+            builder = (
+                sched.prog_builder(context.soc, context.soccfg)
+                .add_reset("reset", cfg.modules.reset)
+                .add(Join(*drives), MuxReadout("readout", readout))
+                .declare_sweep("point", cfg.expts)
+            )
+            prog = builder.build()
 
-                # 3. Average IQ in participant order, including completed rounds on stop.
-                _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_averaged_signal, prog)
-                )
+            # 3. Publish the full point/tone matrix after each completed round.
+            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
         signals.trigger_update(flush=True)
         return MuxSweepResult(
             np.asarray(scan.indices, dtype=np.int64),
