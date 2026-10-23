@@ -19,9 +19,11 @@ Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名
 有 captured readout 時，helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
 此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 保留來源值。
 Pulse 至少涵蓋 ADC 窗口，原 ro_length 與較長的 pulse 保留。
-Fine 缺 slot 時，只有完整 group 的 kappa 都有效才填候選。mixer_freq 取完整 tone 頻率最小與最大值的中點，ro_length 取五倍 ringup 時間。
+Fine 缺 slot 時，ro_length 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
+完整 group 的 kappa 都有效才推導其餘候選。mixer_freq 取完整 tone 頻率最小與最大值的中點。
 trig_offset 取全部 resonators.ext.time_of_fly 最大值加 ringup，length 取 trig_offset + ro_length。
-任一 kappa 缺值時四欄留空；任一 frequency 缺值時 mixer_freq 留空；任一 time_of_fly 缺值時 trig_offset／length 留空。
+任一 kappa 缺值時 mixer_freq／trig_offset／length 留空；任一 frequency 缺值時 mixer_freq 留空；任一 time_of_fly 缺值時 trig_offset／length 留空。
+上述缺值情境仍填入 ro_length=1.0 us。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
 候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。只有推導 timing 與 gain 0.1 標為 uncalibrated，ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
