@@ -461,7 +461,7 @@ def test_apply_inputs_admits_values_named_edits_and_overrides_together(
     [
         (("count",), 7, " ", "Edit source must be nonblank"),
         (("count",), None, " ", "Edit source must be nonblank"),
-        (("tones", True), 7, "explicit", "Form paths require string fields or nonnegative integer indexes"),
+        ((), 7, "explicit", "field must be a nonempty typed path"),
     ],
 )
 def test_apply_inputs_validates_superseded_and_null_edits(
@@ -477,7 +477,7 @@ def test_apply_inputs_validates_superseded_and_null_edits(
         tab.apply_inputs(
             inputs, {}, edits=(
                 api.FieldEdit(path=path, value=value, source=source),
-                api.FieldEdit(path=("tones", 1) if len(path) > 1 else ("count",), value=11),
+                api.FieldEdit(path=path, value=11),
             )
         )
         return Report(count=1)
