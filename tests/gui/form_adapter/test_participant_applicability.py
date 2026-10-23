@@ -58,7 +58,7 @@ def test_inactive_module_and_sweep_lower_to_none_without_losing_original_tones()
     env = core.FormEnv()
     state = core.FormState(form.default_input(env))
     state.write({("tones", 0, "drive"): {
-        "kind": "inline", "module": {"style": "pulse", "ch": 0, "nqz": 1,
+        "kind": "inline", "module": {"type": "pulse", "ch": 0, "nqz": 1,
         "freq": 100, "gain": 0.2, "waveform": {"kind": "inline", "module": {"style": "const", "length": 0.1}}},
     }}, env)
     raw = state.input.to_json()
@@ -92,7 +92,7 @@ def test_unselected_readout_identity_is_still_required() -> None:
     assert errors is not None and ("tones", 0, "readout") in errors.messages
 
 
-@pytest.mark.parametrize("participants, path", [([0, 0], ("participants", 1)), ([2], ("participants", 0)), ([-1], ("participants", 0))])
+@pytest.mark.parametrize("participants, path", [([0, 0], ("participants", 1)), ([2], ("participants", 0)), ([-1], ("participants", 0)), ([True], ("participants", 0))])
 def test_participant_errors_keep_original_index_path(participants: list[int], path: core.FormPath) -> None:
     # Reuse the ordinary generated declaration, but supply a simple valid model
     # so the assertion isolates index admission from missing drive/sweep values.
