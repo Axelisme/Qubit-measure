@@ -26,7 +26,7 @@ class LedgerEntry:
 
     event_json retains whitespace and unknown future-minor fields, without LF.
     record is the referenced JSON object or None; historical import paths are
-    never followed. Each lookup reads independent data from disk.
+    never followed. Each lookup returns isolated data and rereads its attachment.
     """
 
     event: LedgerEvent
@@ -34,12 +34,30 @@ class LedgerEntry:
     event_json: str
 
 
+@dataclass(frozen=True)
+class _LedgerState:
+    """Validated prefix and ID index, published only after the whole tail passes."""
+
+    identity: tuple[int, int]
+    modified: tuple[int, int]
+    offset: int
+    head: bytes
+    last_line: bytes
+    entries: dict[str, LedgerEntry]
+
+
 class RecordsLedger:
     """Serialize reads/appends with one resolved ledger.jsonl.lock sidecar.
 
-    No cache, event producer, repair, rollback or cross-file transaction is
-    provided. I/O errors propagate. Malformed envelopes or JSON raise ValueError
-    with the ledger path and line number. Lock acquisition raises native Timeout
+    Each handle indexes validated lines and parses only appended bytes. A shorter
+    file, changed first 4096 bytes, changed previous last line or changed file
+    identity triggers a full reread, as does a modified file of unchanged size.
+    The ledger is append-only: an in-place middle rewrite combined with growth,
+    preserving the file identity, head and previous last line, is not detected.
+    Call reload() to validate the complete history after external rewrites.
+    Attachments are never cached. No event producer, repair, rollback or cross-file
+    transaction is provided. I/O errors propagate. Malformed envelopes or JSON
+    raise ValueError with the ledger path and line number. Lock acquisition raises native Timeout
     with diagnostic notes. A failed append may leave an orphan record or partial
     tail; later operations report that tail rather than skipping it.
     """
@@ -70,6 +88,7 @@ class RecordsLedger:
         self._timeout = lock_timeout
         self._path = self._records / "ledger.jsonl"
         self._lock = FileLock(str(self._path) + ".lock")
+        self._state: _LedgerState | None = None
 
     @contextmanager
     def _locked(self) -> Generator[None]:
@@ -112,7 +131,7 @@ class RecordsLedger:
         line = validated.model_dump_json() + "\n"
         with self._locked():
             entries = self._read()
-            if any(item.event.id == validated.id for item in entries):
+            if validated.id in entries:
                 raise ValueError(f"{self._path}: duplicate event ID {validated.id!r}")
             if attachment is not None:
                 self._publish_record(validated.id, attachment)
@@ -128,7 +147,48 @@ class RecordsLedger:
         successful reads never rewrite ledger bytes.
         """
         with self._locked():
-            return tuple(item.event for item in self._read())
+            return tuple(
+                item.event.model_copy(deep=True) for item in self._read().values()
+            )
+
+    def reload(self) -> tuple[LedgerEvent, ...]:
+        """Fully validate history from byte zero and replace this handle's index.
+
+        Return isolated events in append order without reading attachments, as
+        events() does. Use this after external non-append history edits that may
+        preserve the incremental read boundaries. Errors propagate without
+        publishing a partially validated index or rewriting the ledger.
+        """
+        with self._locked():
+            return tuple(
+                item.event.model_copy(deep=True)
+                for item in self._read(force_reload=True).values()
+            )
+
+    def dependencies_exist(self, event_ids: tuple[str, ...]) -> bool:
+        """Check event IDs and local attachment existence without parsing records.
+
+        Empty input returns True without I/O. Otherwise hold the ledger lock,
+        update the incremental index and check each unique ID and its referenced
+        local attachment with stat. A missing ID or attachment returns False.
+        Ledger schema, lock and other I/O errors propagate. Attachment content is
+        not read or validated; imports never follow historical source_record.
+        Callers that require content validation must use get/get_many/find_many.
+        """
+        if not event_ids:
+            return True
+        with self._locked():
+            entries = self._read()
+            for event_id in dict.fromkeys(event_ids):
+                item = entries.get(event_id)
+                if item is None:
+                    return False
+                if item.event.record is not None:
+                    try:
+                        (self._records / f"{event_id}.json").stat()
+                    except FileNotFoundError:
+                        return False
+            return True
 
     def get(self, event_id: str) -> LedgerEntry:
         """Read an event and its local JSON attachment under the ledger lock.
@@ -144,7 +204,8 @@ class RecordsLedger:
         """Read requested events and attachments with one locked ledger parse.
 
         Return entries in input order, including repeated IDs. Each unique ID
-        and attachment is checked once per call, without a persistent cache.
+        and attachment is checked once per call. Validated ledger lines are indexed;
+        attachments are read from disk on every call.
         The first missing ID raises KeyError; earlier attachment failures
         propagate just as in get(). Unrequested attachments are not read.
         Empty input returns () without accessing the ledger.
@@ -152,7 +213,7 @@ class RecordsLedger:
         if not event_ids:
             return ()
         with self._locked():
-            entries = {item.event.id: item for item in self._read()}
+            entries = self._read()
             found: dict[str, LedgerEntry] = {}
             for event_id in dict.fromkeys(event_ids):
                 item = entries[event_id]
@@ -166,13 +227,13 @@ class RecordsLedger:
         and its local attachment is checked once; unrequested attachments are
         not read. Empty input returns {} without I/O. Ledger schema, attachment
         and I/O errors propagate, including after an absent ID. Results are
-        independent disk reads, not a persistent cache. Use get_many for strict
+        isolated copies with freshly read attachments. Use get_many for strict
         lookup that raises at the first absent ID.
         """
         if not event_ids:
             return {}
         with self._locked():
-            entries = {item.event.id: item for item in self._read()}
+            entries = self._read()
             found: dict[str, LedgerEntry | None] = {}
             for event_id in dict.fromkeys(event_ids):
                 item = entries.get(event_id)
@@ -188,9 +249,9 @@ class RecordsLedger:
                 record = _JSON_OBJECT.validate_json(content)
             except ValueError as exc:
                 raise ValueError(f"{path}: invalid record: {exc}") from exc
-        return LedgerEntry(item.event, record, item.event_json)
+        return LedgerEntry(item.event.model_copy(deep=True), record, item.event_json)
 
-    def _read(self) -> tuple[LedgerEntry, ...]:
+    def _read(self, *, force_reload: bool = False) -> dict[str, LedgerEntry]:
         try:
             stream = self._path.open("rb")
         except FileNotFoundError:
@@ -198,33 +259,67 @@ class RecordsLedger:
             self._records.stat()
             if self._path.is_symlink():
                 raise
-            return ()
-        entries: list[LedgerEntry] = []
-        ids: set[str] = set()
+            self._state = None
+            return {}
         with stream:
-            for number, encoded_line in enumerate(stream, start=1):
-                try:
-                    line = encoded_line.decode("utf-8")
-                    if not line.endswith("\n"):
-                        raise ValueError("incomplete tail: expected LF")
-                    raw = line[:-1]
-                    data = _JSON_OBJECT.validate_json(raw)
-                    if "format" not in data or "format_version" not in data:
-                        raise ValueError("missing format or format_version header")
-                    # Reading projects known fields at every supported minor;
-                    # event_json retains the complete original envelope.
-                    event = LedgerEvent.model_validate(
-                        data, extra="ignore", context={"ledger_read": True}
+            status = os.fstat(stream.fileno())
+            identity = (status.st_dev, status.st_ino)
+            modified = (status.st_mtime_ns, status.st_ctime_ns)
+            previous = None if force_reload else self._state
+            if previous is not None:
+                head = stream.read(len(previous.head))
+                stream.seek(previous.offset - len(previous.last_line))
+                last_line = stream.read(len(previous.last_line))
+                if (
+                    identity != previous.identity
+                    or status.st_size < previous.offset
+                    or head != previous.head
+                    or last_line != previous.last_line
+                    or (
+                        status.st_size == previous.offset
+                        and modified != previous.modified
                     )
-                    if event.entry_id != self._entry_id:
-                        raise ValueError("entry_id belongs to another entry")
-                    if event.id in ids:
-                        raise ValueError(f"duplicate event ID {event.id!r}")
+                ):
+                    previous = None
+            entries = previous.entries if previous is not None else {}
+            stream.seek(previous.offset if previous is not None else 0)
+            added: dict[str, LedgerEntry] = {}
+            last_line = previous.last_line if previous is not None else b""
+            for number, encoded_line in enumerate(stream, start=len(entries) + 1):
+                try:
+                    item = self._parse_entry(encoded_line)
+                    if item.event.id in entries or item.event.id in added:
+                        raise ValueError(f"duplicate event ID {item.event.id!r}")
                 except ValueError as exc:
                     raise ValueError(f"{self._path}:{number}: {exc}") from exc
-                ids.add(event.id)
-                entries.append(LedgerEntry(event, None, raw))
-        return tuple(entries)
+                added[item.event.id] = item
+                last_line = encoded_line
+            offset = stream.tell()
+            # A bounded prefix detects replacement without rereading growing history.
+            stream.seek(0)
+            head = stream.read(min(offset, 4096))
+        # Do not publish any prefix of a malformed tail or a failed I/O operation.
+        entries.update(added)
+        self._state = _LedgerState(identity, modified, offset, head, last_line, entries)
+        return entries
+
+    def _parse_entry(self, encoded_line: bytes) -> LedgerEntry:
+        """Decode one complete line and validate its envelope and entry identity."""
+        line = encoded_line.decode("utf-8")
+        if not line.endswith("\n"):
+            raise ValueError("incomplete tail: expected LF")
+        raw = line[:-1]
+        data = _JSON_OBJECT.validate_json(raw)
+        if "format" not in data or "format_version" not in data:
+            raise ValueError("missing format or format_version header")
+        # Reading projects known fields at every supported minor;
+        # event_json retains the complete original envelope.
+        event = LedgerEvent.model_validate(
+            data, extra="ignore", context={"ledger_read": True}
+        )
+        if event.entry_id != self._entry_id:
+            raise ValueError("entry_id belongs to another entry")
+        return LedgerEntry(event, None, raw)
 
     def _publish_record(self, event_id: str, content: JsonObject) -> None:
         path = self._records / f"{event_id}.json"
