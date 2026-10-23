@@ -196,7 +196,7 @@ class DeviceDialog(QDialog):
         left_layout.addWidget(self._list, stretch=1)
         # Drop acts on the selected list row, so it sits directly under the list.
         self._drop_btn = QPushButton("Drop")
-        self._drop_btn.setStyleSheet("color: red;")
+        self._drop_btn.setStyleSheet("QPushButton:enabled { color: red; }")
         self._drop_btn.clicked.connect(self._on_forget_clicked)
         drop_row = QHBoxLayout()
         drop_row.addWidget(self._drop_btn)

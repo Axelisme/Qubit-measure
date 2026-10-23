@@ -45,7 +45,8 @@ class RunSnapshot:
 
     entry_id identifies the entry; entry_name is its name at capture. point and
     description are optional work-point labels. roles maps role to component name.
-    Writers never refresh these values from a live entry.
+    Writers never refresh these values from a live entry. Python and JSON
+    serialization copy roles into a detached dict, including read-only mappings.
     """
 
     entry_id: UUID
@@ -54,7 +55,7 @@ class RunSnapshot:
     description: str | None
     roles: Annotated[
         Mapping[str, str],
-        PlainSerializer(dict, return_type=dict[str, str], when_used="json"),
+        PlainSerializer(dict, return_type=dict[str, str]),
     ]
 
 

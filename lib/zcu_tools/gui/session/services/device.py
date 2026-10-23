@@ -935,7 +935,7 @@ class DeviceService:
             self._emit_device_changed(name)
         return info
 
-    def poll_device_info(self, name: str) -> None:
+    def poll_device_info(self, name: str) -> bool:
         """Best-effort off-main live-read of a device's real driver values.
 
         The dialog-scoped poller calls this once per tick for the selected
@@ -952,9 +952,12 @@ class DeviceService:
         response / driver gone) is logged and swallowed so the next tick still
         runs — this is the best-effort core, not a Fast-Fail path. Terminal
         executor admission rejection also skips the tick without scheduling I/O.
+        Return True only after executor submission succeeds, or False for a
+        skipped tick. Submission does not guarantee a successful read or cache
+        installation; delivery may still fail or find the target no longer safe.
         """
         if not self._can_poll_device_info(name):
-            return
+            return False
 
         def read_work() -> BaseDeviceInfo:
             # Worker thread: pure driver read, no State touch, no emit.
@@ -983,7 +986,8 @@ class DeviceService:
             )
         except BackgroundAdmissionClosedError:
             # Terminal shutdown makes further polling unnecessary.
-            return
+            return False
+        return True
 
     def _can_poll_device_info(self, name: str) -> bool:
         """Return whether ``poll_device_info`` may live-read this device now.

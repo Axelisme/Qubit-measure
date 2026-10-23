@@ -6,6 +6,7 @@ from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import AfterValidator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     IDENTITY,
@@ -56,12 +57,23 @@ class PowerDepSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
+def _positive_snr_or_none(value: float | None) -> float | None:
+    if value is not None and value <= 0:
+        raise ValueError("SNR threshold must be positive or left blank (None)")
+    return value
+
+
 class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerDepModuleCfg
     sweep: PowerDepSweepCfg
     earlystop_snr: Annotated[
         float | None,
-        FieldMeta(label="Early-stop SNR (nonpositive disables)", decimals=3),
+        AfterValidator(_positive_snr_or_none),
+        FieldMeta(
+            label="Early-stop SNR (blank/None disables)",
+            description="Positive SNR threshold; leave blank (None) to disable early stopping.",
+            decimals=3,
+        ),
     ] = None
 
 

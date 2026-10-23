@@ -413,6 +413,13 @@ class Section:
         return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
+        if isinstance(node, Expr):
+            for annotation in _members(info.annotation):
+                if (get_origin(annotation) or annotation) in (dict, Mapping):
+                    raise TypeError(
+                        f"{'.'.join((*self.path, name))}: whole mapping Expr is "
+                        f"unsupported for {annotation!r}; use a core default or literal input"
+                    )
         if isinstance(node, LogPoints):
             if get_origin(info.annotation) is not list or _members(
                 get_args(info.annotation)[0]
@@ -511,8 +518,12 @@ class Section:
             if name in self.model.model_fields and SweepCfg in _members(info.annotation)
         }
 
-    def _list_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    def _native_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         result: dict[str, JsonValue] = {}
+        for name, field in self.modules.items():
+            native = data.get(name)
+            if isinstance(native, dict):
+                result[name] = field.native_input(native)
         for name, child in self.lists.items():
             native = data.get(name)
             if isinstance(native, list):
@@ -529,7 +540,7 @@ class Section:
         expression seeds remain raw for Core default evaluation.
         """
         data = {**self._sweep_defaults(), **static_defaults(self.model)}
-        data.update(self._list_defaults(data))
+        data.update(self._native_defaults(data))
         for name, node in self.tree.items():
             if isinstance(node, Hidden):
                 continue

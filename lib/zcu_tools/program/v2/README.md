@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
 
 **讀者：** framework-dev。V2 program、module、readout 與 acquisition 契約。
 
@@ -147,7 +147,7 @@ Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 
 
 `LoadValue` 儲存整數 lookup table 於 dmem，支援可選的 bit-packing 壓縮（`auto_compress=True` 且值個數 ≥ 30）。
 
-**空表短路**：`values=[]` 允許，`init()` / `run()` 皆短路為 no-op（不配置 dmem，不發出讀取指令）。用於上層已確定不會執行該 lookup 的路徑（例如 loop 次數為 0）。
+**空表短路**：`values=[]` 僅用於上層已確定不會執行 lookup 的路徑（例如 loop 次數為 0）。`init()` 仍依 `use_existed` 宣告 destination register，讓編譯器能解析未執行路徑內的 consumer；它不配置 dmem，也不填入預設值。`run()` 不發出讀寫指令，並原樣回傳傳入時間。這不支援在執行期讀取空表。
 
 **值域限制：0 ≤ v ≤ 2³¹−1**（有號 32-bit 正數範圍）。此限制只針對**未壓縮**路徑——直接以 `read_dmem` 將 word 讀進 register，若 bit 31 被設定讀回為負數會造成語意錯誤。
 
