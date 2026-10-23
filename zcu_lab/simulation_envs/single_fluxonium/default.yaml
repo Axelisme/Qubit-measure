@@ -58,6 +58,8 @@ readout:
     noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
 
 numerics:
+  # Midpoint full-Hamiltonian steps per carrier period below 30 MHz.
+  slow_envelope_segments_per_period: 20
   truncation:
     native_cutoff: 40 # Harmonic-oscillator dimension.
     # Fixed DC-reference space. Lowest three projected energies differ by
