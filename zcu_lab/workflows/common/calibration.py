@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
-from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
@@ -17,7 +16,11 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 
-from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqModuleCfg, FreqSweepCfg
+from zcu_lab.v2.twotone.freq.core import (
+    FreqCfg,
+    FreqModuleCfg,
+    FreqSweepCfg,
+)
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiCfg,
     LenRabiExp,
@@ -34,6 +37,13 @@ from zcu_lab.workflows.common.acquire import run_qubit_freq
 from zcu_lab.workflows.common.analysis import (
     analyze_len_rabi,
     analyze_qubit_freq,
+)
+from zcu_lab.workflows.common.calibration_plots import (
+    CalibrationTrace,
+    draw_frequency,
+    draw_rabi,
+    draw_readout,
+    retain_trace,
 )
 from zcu_lab.workflows.common.saving import save_frequency, save_rabi, save_readout
 
@@ -146,13 +156,17 @@ class CalCarry:
     seed is the legal host scalar seed; last contains the latest accepted
     scalar parts or None initially. Frequency, Rabi and readout update only
     their own fields. f01_by_flux contains accepted (device setpoint, MHz)
-    frequency history even when a later stage fails. Pause preserves this carry;
+    frequency history even when a later stage fails. frequency_traces/rabi_traces
+    retain one projected sweep row per point for run-local heatmaps, not Figures.
+    Widening replaces the current point's frequency row. Pause preserves this carry;
     only explicit point commits persist reports. There are no stage checkpoints.
     """
 
     seed: Calibrated
     last: Calibrated | None = None
     f01_by_flux: list[tuple[float, float]] = field(default_factory=list)
+    frequency_traces: list[CalibrationTrace] = field(default_factory=list)
+    rabi_traces: list[CalibrationTrace] = field(default_factory=list)
 
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
@@ -170,6 +184,7 @@ class CalibrationInputs:
     Coherence and MIST reuse fixed modules/snapshot/directory across stages,
     replacing tun from tun.current.cal before each stage. A stage does not
     recapture sources or refresh its own policy during acquisition.
+    flux/flux_unit label the current point's history rows in device coordinates.
     """
 
     qub_pulse: PulseCfg
@@ -178,6 +193,8 @@ class CalibrationInputs:
     snapshot: RunSnapshot
     directory: Path
     point_index: int
+    flux: float
+    flux_unit: str
 
 
 @dataclass(frozen=True)
@@ -296,22 +313,6 @@ async def calibrate_frequency(
     for attempt, widen in enumerate(inputs.tun.qf_widen, start=1):
         if scope.cancelled:
             return FrequencyResult("skipped", "Point cancelled", None, tuple(filenames))
-        # Rebuild the spectroscopy plot with expected and previous frequencies.
-        name = "calibration/qubit_freq"
-        if name not in plots:
-            plots.subplots(name)
-
-        def rebuild(figure: Figure) -> None:
-            figure.clear()
-            ax = figure.subplots()
-            ax.axvline(hint, linestyle="--", label="expected")
-            ax.axvline(prior.f01_mhz, linestyle=":", label="previous")
-
-        plots.draw(name, rebuild)
-        plot = plots.liveplot_1d(
-            name, "Frequency (MHz)", "Signal", num_lines=2, axes=plots[name].axes[0]
-        )
-
         # Sweep a widened span around the history estimate using retained readout.
         drive = inputs.qub_pulse.model_copy(deep=True)
         ro = inputs.readout.model_copy(deep=True)
@@ -347,12 +348,27 @@ async def calibrate_frequency(
         if outcome.partial_result:
             status, reason = "rejected", "stopped"
             continue
-        fit = analyze_qubit_freq(outcome.value.result)
+        result = outcome.value.result
+        fit = analyze_qubit_freq(result)
+        trace = CalibrationTrace(
+            inputs.point_index,
+            flux,
+            result.freqs - hint,
+            result.signals.real if isinstance(fit, Failed) else fit.observed,
+        )
+        retain_trace(carry.frequency_traces, trace)
         if isinstance(fit, Failed):
+            draw_frequency(
+                plots,
+                carry.frequency_traces,
+                carry.f01_by_flux,
+                flux_unit=inputs.flux_unit,
+                directory=inputs.directory,
+            )
             status, reason = "failed", fit.reason
             continue
         residual = fit.quality.normalized_residual_rms
-        if (
+        accepted = (
             math.isfinite(fit.frequency_mhz)
             and fit.frequency_mhz > 0
             and math.isfinite(fit.width_mhz)
@@ -362,12 +378,23 @@ async def calibrate_frequency(
             and fit.error_mhz / fit.width_mhz < inputs.tun.max_frequency_rel_err
             and residual is not None
             and residual < inputs.tun.max_fit_residual
-        ):
-            plot.update(
-                outcome.value.result.freqs, np.stack((fit.observed, fit.fitted))
-            )
+        )
+        if accepted:
             carry.last = replace(prior, f01_mhz=fit.frequency_mhz)
             carry.f01_by_flux.append((flux, fit.frequency_mhz))
+        carry.frequency_traces[-1] = replace(
+            trace,
+            observed=fit.observed,
+            fitted=fit.fitted,
+        )
+        draw_frequency(
+            plots,
+            carry.frequency_traces,
+            carry.f01_by_flux,
+            flux_unit=inputs.flux_unit,
+            directory=inputs.directory,
+        )
+        if accepted:
             return FrequencyResult(
                 "accepted", None, fit.frequency_mhz, tuple(filenames)
             )
@@ -393,7 +420,7 @@ async def calibrate_rabi(
     on acceptance. inputs.snapshot is the fixed historical entry/point state
     used to save rabi.h5 after Completed, including rejected fits. point_index
     must be a nonnegative integer (not bool), the zero-based flux index; invalid
-    indexes raise ValueError at entry. The title shows its one-based number. Lengths
+    indexes raise ValueError at entry. The title shows its flux setpoint. Lengths
     stay in microseconds and the projected signal has arbitrary units.
     Partial saves then returns rejected/stopped without fitting or carry updates.
     Schedule and expected fit failures are named failed; unexpected errors
@@ -444,11 +471,25 @@ async def calibrate_rabi(
     )
     if outcome.partial_result:
         return RabiResult("rejected", "stopped", f01, None, None, "rabi.h5")
-    fit = analyze_len_rabi(outcome.value.result)
+    result = outcome.value.result
+    fit = analyze_len_rabi(result)
+    trace = CalibrationTrace(
+        inputs.point_index,
+        inputs.flux,
+        result.lengths,
+        result.signals.real if isinstance(fit, Failed) else fit.observed,
+    )
+    retain_trace(carry.rabi_traces, trace)
     if isinstance(fit, Failed):
+        draw_rabi(
+            plots,
+            carry.rabi_traces,
+            flux_unit=inputs.flux_unit,
+            directory=inputs.directory,
+        )
         return RabiResult("failed", fit.reason, f01, None, None, "rabi.h5")
     residual = fit.quality.normalized_residual_rms
-    if not (
+    accepted = (
         math.isfinite(fit.pi_length_us)
         and fit.pi_length_us > 0
         and math.isfinite(fit.error_us)
@@ -456,7 +497,17 @@ async def calibrate_rabi(
         and fit.error_us / fit.pi_length_us < inputs.tun.max_rabi_rel_err
         and residual is not None
         and residual < inputs.tun.max_fit_residual
-    ):
+    )
+    carry.rabi_traces[-1] = replace(
+        trace,
+        observed=fit.observed,
+        fitted=fit.fitted,
+        accepted=fit.pi_length_us if accepted else None,
+    )
+    draw_rabi(
+        plots, carry.rabi_traces, flux_unit=inputs.flux_unit, directory=inputs.directory
+    )
+    if not accepted:
         return RabiResult("rejected", "Rabi fit rejected", f01, None, None, "rabi.h5")
     # Update only accepted pulse durations and show the fitted oscillation.
     carry.last = CalibratedPi2(
@@ -466,22 +517,6 @@ async def calibrate_rabi(
         prior.readout_gain,
         fit.pi2_length_us,
     )
-    name = "calibration/len_rabi"
-    if name not in plots:
-        plots.subplots(name)
-
-    def draw(figure: Figure) -> None:
-        figure.clear()
-        ax = figure.subplots()
-        ax.plot(outcome.value.result.lengths, fit.observed, label="observed")
-        ax.plot(outcome.value.result.lengths, fit.fitted, label="fit")
-        ax.set(
-            xlabel="Pulse length (µs)",
-            ylabel="Signal (a.u.)",
-            title=f"Length Rabi — flux point {inputs.point_index + 1}",
-        )
-
-    plots.draw(name, draw)
     return RabiResult(
         "accepted", None, f01, fit.pi_length_us, fit.pi2_length_us, "rabi.h5"
     )
@@ -503,6 +538,7 @@ def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
 async def calibrate_readout(
     scope: Scope,
     *,
+    plots: Plots,
     inputs: CalibrationInputs,
     rabi: RabiResult,
     carry: CalCarry,
@@ -568,6 +604,14 @@ async def calibrate_readout(
     )
     if outcome.partial_result:
         return ReadoutResult("rejected", "stopped", None, None, "readout.h5")
+    draw_readout(
+        plots,
+        outcome.value.result.freqs,
+        outcome.value.result.gains,
+        outcome.value.result.signals,
+        inputs_flux=(inputs.flux, inputs.flux_unit),
+        directory=inputs.directory,
+    )
     signals = outcome.value.result.signals
     accepted = np.isfinite(signals) & (signals >= inputs.tun.min_readout_snr)
     if not np.any(accepted):
