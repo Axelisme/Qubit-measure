@@ -70,7 +70,7 @@ from .events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from .registry import Registry
+from .registry import ExperimentResolution, Registry
 from .remote.dialogs import DialogName
 from .services import (
     AppPersistedState,
@@ -1326,6 +1326,14 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
     # Project root and settings
     # ------------------------------------------------------------------
+
+    def resolve_experiment(self, experiment: str | None) -> ExperimentResolution:
+        """Resolve historical identity through the live catalog, without mutation.
+
+        Exact registered names win; otherwise a unique load-capable tag owner is
+        returned. Unknown/missing/ambiguous identities carry a rejection reason.
+        """
+        return self._registry.resolve_experiment(experiment)
 
     def query_results(self) -> ResultsIndex:
         """Read all saved Database runs under the current project root.

@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.app.measure.registry import ExperimentResolution
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -64,10 +65,9 @@ class ResultsBrowserWindow(QMainWindow):
         index = controller.query_results()
         self._browser = ResultsBrowser(
             index,
-            lambda run: controller.tab_control.open_tab_from_file(
-                run.experiment or "", str(run.data_path)
-            ),
+            controller.tab_control.open_tab_from_file,
             self,
+            resolve_experiment=controller.resolve_experiment,
         )
         self.setCentralWidget(self._browser)
 
@@ -79,19 +79,26 @@ class ResultsBrowserWindow(QMainWindow):
 class ResultsBrowser(QWidget):
     """Browse an immutable index without changing the opened entry or point.
 
-    open_run is the application's new-tab Load command. It returns the existing
-    Load outcome or raises a user-facing error; this view presents either fact.
-    All widgets and callbacks run on the Qt owner thread.
+    open_run accepts a resolved adapter name and native data path, returning the
+    existing Load outcome or raising a user-facing error. resolve_experiment is
+    the catalog owner's query; one result per historical identity is shared by
+    navigation, filters and opening. All callbacks run on the Qt owner thread.
     """
 
     def __init__(
         self,
         index: ResultsIndex,
-        open_run: Callable[[ResultRun], LoadTabResultOutcome],
+        open_run: Callable[[str, str], LoadTabResultOutcome],
         parent: QWidget | None = None,
+        *,
+        resolve_experiment: Callable[[str | None], ExperimentResolution],
     ) -> None:
         super().__init__(parent)
         self._index = index
+        self._resolutions = {
+            experiment: resolve_experiment(experiment)
+            for experiment in {run.experiment for run in index.runs}
+        }
         self._writable = True
         self._open_run = open_run
         self._focus = _Focus()
@@ -129,7 +136,7 @@ class ResultsBrowser(QWidget):
         self._experiment.setObjectName("results.experiment")
         self._experiment.addItem("All experiments")
         self._experiment.addItems(
-            sorted({r.experiment for r in self._index.runs if r.experiment})
+            sorted({self._experiment_name(run) for run in self._index.runs})
         )
         self._experiment.currentIndexChanged.connect(self._render)
         layout.addWidget(self._experiment)
@@ -219,6 +226,10 @@ class ResultsBrowser(QWidget):
             self._focus = self._history[target]
             self._render()
 
+    def _experiment_name(self, run: ResultRun) -> str:
+        resolution = self._resolutions[run.experiment]
+        return resolution.adapter_name or run.experiment or "Unknown experiment"
+
     def _filtered(self) -> tuple[ResultRun, ...]:
         lower = self._date_from.text().strip()
         upper = self._date_to.text().strip()
@@ -238,7 +249,7 @@ class ResultsBrowser(QWidget):
         return tuple(
             run
             for run in self._index.runs
-            if (experiment is None or run.experiment == experiment)
+            if (experiment is None or self._experiment_name(run) == experiment)
             and search in run.search_text
             and (not lower or (run.at is not None and run.at[:10] >= lower))
             and (not upper or (run.at is not None and run.at[:10] <= upper))
@@ -251,7 +262,7 @@ class ResultsBrowser(QWidget):
             for run in runs
             if (
                 focus.experiment is None
-                or (run.experiment or "Unknown experiment") == focus.experiment
+                or self._experiment_name(run) == focus.experiment
             )
             and (focus.point is None or (run.entry, run.point) == focus.point)
             and (focus.run_key is None or run.key == focus.run_key)
@@ -279,7 +290,7 @@ class ResultsBrowser(QWidget):
         if point_first and focus.point is None:
             return replace(focus, point=(run.entry, run.point))
         if focus.experiment is None:
-            return replace(focus, experiment=run.experiment or "Unknown experiment")
+            return replace(focus, experiment=self._experiment_name(run))
         if focus.point is None:
             return replace(focus, point=(run.entry, run.point))
         return replace(focus, run_key=run.key, figure=figure)
@@ -297,7 +308,7 @@ class ResultsBrowser(QWidget):
             elif target.point != self._focus.point:
                 caption = _point_label((run.entry, run.point))
             else:
-                caption = run.experiment or "Unknown experiment"
+                caption = self._experiment_name(run)
             self._list.addItem(caption)
 
     def _navigate(self) -> None:
@@ -339,8 +350,12 @@ class ResultsBrowser(QWidget):
         if self._focus.run_key is None:
             return
         run = self._index.get_run(self._focus.run_key)
+        resolution = self._resolutions[run.experiment]
+        if resolution.adapter_name is None:
+            self._feedback.setText(f"Cannot open analysis tab: {resolution.reason}")
+            return
         try:
-            outcome = self._open_run(run)
+            outcome = self._open_run(resolution.adapter_name, str(run.data_path))
         except Exception as error:
             logger.exception("Cannot open saved history in a new tab")
             self._feedback.setText(f"Cannot open analysis tab: {error}")

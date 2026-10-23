@@ -104,6 +104,9 @@ measure window closes this browser. It reads the Controller results query once
 and filters the shared index without changing the opened entry or point.
 Experiment-first and point-first navigation share focus history. Saved PNGs use
 a vertically scrolling gallery, separate from the measure figure pager.
+The catalog owner resolves historical adapter names and loadable tags once per
+identity. Both grouping orders, the experiment filter and new-tab Load share that
+resolution. Unresolved identities keep their saved figures and refusal reason.
 Left clicks drill down and select the current run figure. Context menus copy
 a member path or image and pin its run in ResultsComparison.
 Cfg values and analysis summaries use relative paths; analysis parameters have

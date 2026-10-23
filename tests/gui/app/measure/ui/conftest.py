@@ -54,7 +54,9 @@ def live_registry() -> Registry:
 
 @pytest.fixture
 def live_ui(
-    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
     live_registry: Registry,
 ) -> Generator[tuple[NativeSaveSession, Controller, MainWindow, str]]:
     """Open a real tab and view over the existing offline native Save fixture."""
@@ -87,5 +89,6 @@ def live_ui(
         finally:
             assert session.background.quiesce()
             ctrl.tab_control.close_tab(tab_id)
+            ctrl.close()
             window.deleteLater()
             qapp.processEvents()

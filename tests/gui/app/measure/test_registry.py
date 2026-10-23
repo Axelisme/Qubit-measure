@@ -6,7 +6,10 @@ import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, TemplateDef
 from zcu_tools.gui.app.measure.registry import Registry
 
-from tests.gui.app.measure._native_save_support import AnalysisSavingAdapter, SavingAdapter
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
+    SavingAdapter,
+)
 
 
 @pytest.mark.parametrize("publish", [False, True])
@@ -68,5 +71,6 @@ def test_resolve_experiment_rejects_ambiguous_tag_without_guessing() -> None:
     resolution = registry.resolve_experiment("test/saving")
     assert resolution.adapter_name is None
     assert resolution.reason
-    assert all(name in resolution.reason for name in ("saving", "alternative", "test/saving"))
-
+    assert all(
+        name in resolution.reason for name in ("saving", "alternative", "test/saving")
+    )

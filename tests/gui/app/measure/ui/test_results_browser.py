@@ -3,6 +3,7 @@
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
+from typing import ClassVar
 from uuid import UUID, uuid4
 
 import pytest
@@ -27,7 +28,9 @@ from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, ResultEntry
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._native_save_support import (
-    AnalysisSavingAdapter, NativeSaveSession, SavingAdapter,
+    AnalysisSavingAdapter,
+    NativeSaveSession,
+    SavingAdapter,
 )
 from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.ui._main_window_fakes import apply_window_defaults, mock_ctrl
@@ -41,6 +44,7 @@ def browser_host(
 ) -> Iterator[MainWindow]:
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.query_results.side_effect = lambda: scan_results(tmp_path)
+    ctrl.resolve_experiment.side_effect = Registry().resolve_experiment
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
@@ -303,7 +307,9 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
     feedback = ui.observe(object_name="results.feedback").text
     if variant == "available":
         assert feedback.startswith("Loaded history:")
-        assert "history.analysis_source" not in {w.object_name for w in ui.visible().widgets}
+        assert "history.analysis_source" not in {
+            w.object_name for w in ui.visible().widgets
+        }
     else:
         expected = {
             "empty": "No active context is available",
@@ -419,3 +425,40 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
     ui.screenshot(tmp_path / "ambiguous-identity.png")
 
 
+@pytest.mark.parametrize("load_browser", ["available"], indirect=True)
+@pytest.mark.parametrize("rejection", ["capability", "tag", "format"])
+def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
+    load_browser: tuple[ComponentDriver, str],
+    live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
+    live_registry: Registry,
+    rejection: str,
+    tmp_path: Path,
+) -> None:
+    ui, _variant = load_browser
+    session, _ctrl, _window, _tab_id = live_ui
+    if rejection == "capability":
+        live_registry.register("test/saving", SavingAdapter)
+    elif rejection == "tag":
+        live_registry.register("test/saving", WrongTagAdapter)
+    ui.select_menu("Results ▾", ("Results browser…",))
+    if rejection == "format":
+        # A file can change after indexing; Load, not the browser, admits bytes.
+        session.native_data_path.write_bytes(b"not a native container")
+    for _ in range(3):
+        ui.click(object_name="results.figure.0")
+    ui.click("Open in new analysis tab")
+    feedback = ui.observe(object_name="results.feedback").text
+    expected = {
+        "capability": "does not support loading data",
+        "tag": "Expected experiment tag",
+        "format": "Could not read the data file",
+    }[rejection]
+    assert "Cannot open analysis tab:" in feedback and expected in feedback
+    assert ui.tabs("saving").captions == ("saving",)
+    ui.screenshot(tmp_path / f"load-rejected-{rejection}.png")
+
+
+class WrongTagAdapter(AnalysisSavingAdapter):
+    """Expose a distinct declared tag to exercise the existing Load admission."""
+
+    experiment_tag: ClassVar[str | None] = "different-tag"
