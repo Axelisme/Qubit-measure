@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QStatusBar,
     QTabWidget,
@@ -316,6 +317,10 @@ class MainWindow(QMainWindow):
         # A label, not showMessage(): QStatusBar paints its own message text,
         # which users cannot select or copy.
         self._status_label = QLabel("Ready")
+        self._status_label.setWordWrap(True)
+        self._status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum
+        )
         make_label_selectable(self._status_label)
         status_bar.addWidget(self._status_label, 1)
         return status_bar
@@ -749,6 +754,7 @@ class MainWindow(QMainWindow):
         logger.info("status: %s", message)
         self._cfg_status_message = None
         self._status_label.setText(message)
+        self._status_label.setToolTip(message)
 
     def show_error_dialog(self, title: str, message: str) -> None:
         self._dialog_presenter.critical(self, title, message)

@@ -41,10 +41,35 @@ class CZAmplitudeCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: JointReadoutModules
     roles: JointRoles
-    drive: DualLineCfg
-    scales: Annotated[SweepCfg, FieldMeta(label="Common gain scale")]
-    f1_centers: GECenters
-    f2_centers: GECenters
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses。先做 conditional spectroscopy／chevron，再確認 coupler 的 cz_f1／cz_f2 slots。",
+        ),
+    ]
+    scales: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Gain scale",
+            unit="dimensionless",
+            description="填入 common gain scale 起訖值。先用 chevron 選定 CZ pulse，再由操作者確認幅度範圍。",
+        ),
+    ]
+    f1_centers: Annotated[
+        GECenters,
+        FieldMeta(
+            label="F1 GE centers",
+            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ]
+    f2_centers: Annotated[
+        GECenters,
+        FieldMeta(
+            label="F2 GE centers",
+            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:

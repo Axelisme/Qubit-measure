@@ -1,4 +1,7 @@
-"""Measure Ramsey fringes versus delay to estimate free-evolution coherence."""
+"""Measure Ramsey fringes versus delay to estimate free-evolution coherence.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 
@@ -134,7 +137,6 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),
