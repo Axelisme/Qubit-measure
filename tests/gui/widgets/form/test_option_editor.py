@@ -1,7 +1,9 @@
 """Every selection field shows one dropdown drawn only from x-form-options."""
 
+import sys
 from collections.abc import Callable, Iterator, Mapping
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
@@ -282,6 +284,61 @@ class ModuleCore(ConfigBase):
 
     pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
     reset: Annotated[ResetCfg | None, Display(collapsed=False)] = None
+
+
+def test_dangling_module_blocks_unrelated_text_write_without_qt_slot_exception(
+    build: Build,
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SourceCore(ConfigBase):
+        pulse: PulseCfg | None = None
+        note: str = "original"
+
+    env = module_env()
+    form = form_adapter.Form(SourceCore, {})
+    state = FormState(form.default_input(env))
+    state.restore_input(
+        FormInput(
+            form.model,
+            {"pulse": {"kind": "ref", "name": "Q1.pulses.gone"}, "note": "original"},
+        ),
+        env,
+    )
+    unhandled: list[BaseException] = []
+    # Qt's external exception boundary must stay quiet for expected source refusal.
+    monkeypatch.setattr(
+        sys, "excepthook", lambda _kind, error, _tb: unhandled.append(error)
+    )
+    editor = build(state, env, None, None, None)
+    editor.resize(760, 360)
+    editor.show()
+    qapp.processEvents()
+    driver = ComponentDriver(editor)
+    driver.screenshot(tmp_path / "01-dangling-source.png")
+    assert "Q1.pulses.gone" in driver.observe(object_name="form.input.pulse").text
+    assert driver.observe(object_name="form.input.note").text == "original"
+    note_help = driver.observe(object_name="form.row.note").tooltip
+
+    driver.enter_text(object_name="form.input.note", value="renamed")
+    driver.screenshot(tmp_path / "02-unrelated-write-rejected.png")
+    refused = driver.observe(object_name="form.input.note")
+    assert refused.text == "renamed"
+    reason = driver.observe(object_name="form.row.note").tooltip
+    assert "pulse.name" in reason
+    assert "Q1.pulses.gone" in reason
+    assert "not in the captured library" in reason
+    assert unhandled == []
+
+    driver.choose_option(object_name="form.input.pulse", value="Q1.pulses.pi")
+    driver.screenshot(tmp_path / "03-source-repaired.png")
+    assert driver.observe(object_name="form.input.pulse").text == "Q1.pulses.pi"
+    driver.enter_text(object_name="form.input.note", value="accepted")
+    driver.screenshot(tmp_path / "04-unrelated-write-accepted.png")
+    assert driver.observe(object_name="form.input.note").text == "accepted"
+    assert driver.observe(object_name="form.row.note").tooltip == note_help
+    assert unhandled == []
 
 
 def test_nullable_modules_offer_none_keys_and_inline_kinds_without_enabled(
