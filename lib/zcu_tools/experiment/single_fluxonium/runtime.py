@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from hashlib import sha256
 from math import prod
 from pathlib import Path
-from threading import Event
 from typing import Literal
 
 import numpy as np
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    CancellationQuery,
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
@@ -282,7 +282,11 @@ class SingleFluxoniumSource:
         return sha256(self.settings.model_dump_json().encode()).hexdigest()
 
     def prepare(
-        self, request: AcquireRequest, snapshot: EnvironmentSnapshot
+        self,
+        request: AcquireRequest,
+        snapshot: EnvironmentSnapshot,
+        *,
+        cancel: CancellationQuery | None = None,
     ) -> SingleFluxoniumPreparation:
         """Prepare noiseless ADC inputs; used by the serialized acquire session.
 
@@ -291,6 +295,7 @@ class SingleFluxoniumSource:
         key a single resident. Evolution alone segments the complete timelines.
         ADC normalization is the sole probability repair. Errors clear partial
         preparations and ADC responses; they propagate without a result.
+        cancel is checked between evolution chunks; None disables cancellation.
         """
         self._require_open()
         try:
@@ -328,7 +333,7 @@ class SingleFluxoniumSource:
             evolved = self.engine.evolve(
                 facts.source,
                 tuple(plan.batch for plan in plans),
-                cancel=Event(),
+                cancel=cancel,
                 reuse_key=key,
             )
             dc = facts.source.model((0,))
@@ -389,7 +394,9 @@ class SingleFluxoniumSource:
             self.open_acquire(request.acquire)
         if self._session is None:
             raise RuntimeError("single-fluxonium acquire was not opened")
-        return self._session.sample_round(request.snapshot, request.index)
+        return self._session.sample_round(
+            request.snapshot, request.index, cancel=request.cancel
+        )
 
     def _clear(self) -> None:
         if self._facts is not None:

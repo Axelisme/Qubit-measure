@@ -61,8 +61,9 @@ Integrated rounds use ADC `round_statistics` and `PreparedRawShots`.
 Decimated rounds use ADC `sample_traces`. No environment-owned random sampler,
 synthetic second cavity or alternate IQ generator exists. QICK owns averaging,
 round hooks, Stop checkpoints and successful-round pacing. The default pacing
-floor is 0.2 s; settings may set it to zero. Stop does not interrupt an active
-numeric round or a pacing sleep. The next program checkpoint observes it.
+floor is 0.2 s; settings may set it to zero. Integrated Stop is checked between
+evolution chunks and discards the interrupted round while retaining completed
+rounds. Pacing sleeps and ADC sampling remain synchronous.
 
 ## Reuse and lifetime
 

@@ -5,7 +5,7 @@ from math import prod
 import numpy as np
 from qick import QickConfig
 
-from zcu_tools.core.simulation import AcquireRequest, RoundSignals
+from zcu_tools.core.simulation import AcquireRequest, CancellationQuery, RoundSignals
 
 from .binding import SimulationBinding
 from .result import IntegratedRound
@@ -73,16 +73,22 @@ class SimulationSoc(QickConfig):
     def release_request(self) -> None:
         self._request = None
 
-    def run_round(self) -> IntegratedRound | RoundSignals:
+    def run_round(
+        self, *, cancel: CancellationQuery | None = None
+    ) -> IntegratedRound | RoundSignals:
         """Execute the next installed round and detach/validate its numeric result.
 
         Statistics remain compact until an accumulated getter is used. Signals
         populate the usual buffers immediately. Raise on absent request or invalid
         backend data; a successful call advances the software round index.
+        cancel is queried by evolution between chunks; None disables it. Cancelled
+        propagates without advancing the index or replacing completed buffers.
         """
         if self._request is None:
             raise RuntimeError("simulation has no active acquisition request")
-        result = self.binding.sample_round(self._request, self._round_index)
+        result = self.binding.sample_round(
+            self._request, self._round_index, cancel=cancel
+        )
         self._statistics = None
         if isinstance(result, IntegratedRound):
             result = IntegratedRound(

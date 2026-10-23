@@ -135,6 +135,52 @@ def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
         env.devices.close_all_devices()
 
 
+@pytest.mark.parametrize("cancel_round", [0, 1])
+def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_round):
+    from zcu_tools.simulate.evolution import Cancelled
+
+    env = environment(std_adc=0, seed=13)
+    prog = program(env, rounds=3)
+    stop = Event()
+    completed_chunks = []
+    execute = env.soc.binding.execute
+
+    def source(request):
+        cancel = getattr(request, "cancel", None)
+        for chunk in range(5):
+            if request.index == cancel_round and chunk == 2:
+                stop.set()
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            completed_chunks.append((request.index, chunk))
+        return execute(request)
+
+    env.soc.binding.execute = source
+    try:
+        if cancel_round == 0:
+            with pytest.raises(StoppedPartialAcquireError):
+                prog.acquire(env.soc, progress=False, cancel_flag=stop)
+            assert prog.get_raw() is None
+        else:
+            result = prog.acquire(env.soc, progress=False, cancel_flag=stop)
+            np.testing.assert_array_equal(result[0], 0)
+            rounds = prog.get_rounds()
+            assert rounds is not None and len(rounds) == 1
+            np.testing.assert_array_equal(raw_of(prog)[0], 0)
+        assert completed_chunks == [
+            *((0, chunk) for chunk in range(5) if cancel_round == 1),
+            (cancel_round, 0),
+            (cancel_round, 1),
+        ]
+        # Cancellation releases admission and does not leak into the next acquire.
+        env.soc.binding.execute = execute
+        prog.acquire(env.soc, progress=False)
+        resumed = prog.get_rounds()
+        assert resumed is not None and len(resumed) == 3
+    finally:
+        env.devices.close_all_devices()
+
+
 def test_gaussian_sum_scaling_and_reproducible_independent_acquires():
     # 12000 independent quadratures: mean/std bounds exceed six sampling SEs.
     env = environment(std_adc=20, seed=41)

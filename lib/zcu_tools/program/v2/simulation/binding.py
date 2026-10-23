@@ -14,6 +14,7 @@ import numpy as np
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    CancellationQuery,
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
@@ -218,7 +219,11 @@ class SimulationBinding:
             self._admission.release()
 
     def sample_round(
-        self, request: AcquireRequest, index: int
+        self,
+        request: AcquireRequest,
+        index: int,
+        *,
+        cancel: CancellationQuery | None = None,
     ) -> IntegratedRound | RoundSignals:
         """Capture inputs and synchronously return one joint ADC realization.
 
@@ -226,6 +231,8 @@ class SimulationBinding:
         index is its zero-based software round index, supplied by the SoC. Call
         between a successful begin and end; this method does not check admission,
         request identity or index range and does not increment the index itself.
+        cancel is forwarded unchanged as read-only round control; None disables it.
+        A backend Cancelled exception propagates without a result or pacing.
 
         Calls capture_snapshot once, appends the resulting RoundRequest to rounds,
         then calls execute once. Validates the mode/result type and returns the
@@ -238,7 +245,9 @@ class SimulationBinding:
         not wait; zero disables pacing. Failures never add a delay.
         """
         started = time.monotonic() if self._min_round_duration_s > 0 else 0.0
-        round_request = RoundRequest(request, self.capture_snapshot(), index)
+        round_request = RoundRequest(
+            request, self.capture_snapshot(), index, cancel=cancel
+        )
         self.rounds += (round_request,)
         result = self.execute(round_request)
         if not (

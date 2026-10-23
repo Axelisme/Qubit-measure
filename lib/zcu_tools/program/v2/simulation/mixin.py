@@ -159,8 +159,15 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         params = self.acquire_params
         if not isinstance(params["soc"], SimulationSoc):
             return super()._finish_accumulated_round(cancel_flag)
+        from zcu_tools.simulate.evolution import Cancelled
+
         soc = params["soc"]
-        result = soc.run_round()
+        try:
+            result = soc.run_round(cancel=cancel_flag)
+        except Cancelled:
+            soc.cleanup_round()
+            self._close_rounds_pbar()
+            return False
         if cancel_flag.is_set():
             soc.cleanup_round()
             self._close_rounds_pbar()

@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    CancellationQuery,
     ChannelSignals,
     EnvironmentSnapshot,
     RoundRequest,
@@ -131,7 +132,12 @@ class SixFluxoniumSource:
         return EnvironmentSnapshot("six-fluxonium-v1", self._identity, captured.values)
 
     def _prepare_group(
-        self, request: AcquireRequest, snapshot: EnvironmentSnapshot, group: RoutedGroup
+        self,
+        request: AcquireRequest,
+        snapshot: EnvironmentSnapshot,
+        group: RoutedGroup,
+        *,
+        cancel: CancellationQuery | None = None,
     ) -> tuple[NDArray[np.float64], tuple[ChannelReadout, ...], PreparedRawShots]:
         source = self.sources[group.cavity]
         channels = []
@@ -159,7 +165,7 @@ class SixFluxoniumSource:
                     for template in group.templates
                 ),
             )
-            prepared = source.prepare(subrequest, snapshot)
+            prepared = source.prepare(subrequest, snapshot, cancel=cancel)
             populations = prepared.populations
             channels.append(prepared.channel)
             batches.update(prepared.raw.batches)
@@ -198,7 +204,9 @@ class SixFluxoniumSource:
         rounds = []
         traces: dict[int, NDArray[np.float64]] = {}
         for group in groups:
-            populations, channels, raw = self._prepare_group(request, snapshot, group)
+            populations, channels, raw = self._prepare_group(
+                request, snapshot, group, cancel=round_request.cancel
+            )
             # Cantor-pair the fixed-radix acquire/cavity identity with the
             # partition's first point, independent of request size. ADCs within
             # one group still share a single path draw.

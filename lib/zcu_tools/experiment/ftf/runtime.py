@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    CancellationQuery,
     ChannelSignals,
     EnvironmentSnapshot,
     RoundRequest,
@@ -46,7 +47,7 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
-from .cavity import evolve_plans
+from .cavity import CavityEvolutionOptions, evolve_plans
 from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
@@ -108,7 +109,11 @@ class FTFAcquire:
         self.routing.clear()
 
     def sample_round(
-        self, snapshot: EnvironmentSnapshot, index: int
+        self,
+        snapshot: EnvironmentSnapshot,
+        index: int,
+        *,
+        cancel: CancellationQuery | None = None,
     ) -> IntegratedRound | RoundSignals:
         """Return integrated totals or decimated shots for this snapshot/index.
 
@@ -116,13 +121,15 @@ class FTFAcquire:
         cached snapshot. Replay writes, when enabled, finish before returning.
         Decimated shots are rearranged from point-major C6 order to QICK loop
         order (including the reps axis). Neither mode averages or rounds data.
+        cancel is checked between evolution chunks; None disables cancellation.
+        Cancelled propagates without retaining a partial preparation.
         """
         owner = self._source
         if not self._active:
             raise RuntimeError("FTF acquire session is no longer active")
         if self._prepared is None or snapshot != self._snapshot:
             try:
-                prepared = self._reuse_or_prepare(snapshot, index)
+                prepared = self._reuse_or_prepare(snapshot, index, cancel=cancel)
             except Exception:
                 # Preparation may have filled only part of either deterministic
                 # cache. Do not keep any generation's partial products.
@@ -181,7 +188,13 @@ class FTFAcquire:
             )
         return result
 
-    def _reuse_or_prepare(self, snapshot: EnvironmentSnapshot, index: int) -> _Prepared:
+    def _reuse_or_prepare(
+        self,
+        snapshot: EnvironmentSnapshot,
+        index: int,
+        *,
+        cancel: CancellationQuery | None = None,
+    ) -> _Prepared:
         owner = self._source
         # This check must precede every lookup, including equal-content requests.
         facts = owner.model_facts(snapshot)
@@ -195,7 +208,9 @@ class FTFAcquire:
         ):
             # Evolution replays inventory and reprices immutable policy facts.
             # Only a changed selection or evicted facts requires a fresh solve.
-            prepared = self._prepare(snapshot, index, key=key, previous=prepared)
+            prepared = self._prepare(
+                snapshot, index, key=key, previous=prepared, cancel=cancel
+            )
             owner.preparation_cache.put(key, prepared)
         else:
             if owner.telemetry is not None:
@@ -213,6 +228,7 @@ class FTFAcquire:
         *,
         key: bytes,
         previous: _Prepared | None = None,
+        cancel: CancellationQuery | None = None,
     ) -> _Prepared:
         acquire = self.request
         owner = self._source
@@ -228,8 +244,7 @@ class FTFAcquire:
             plans,
             facts,
             owner.settings,
-            key=key,
-            telemetry=owner.telemetry is not None,
+            options=CavityEvolutionOptions(key, owner.telemetry is not None, cancel),
         )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
@@ -492,7 +507,9 @@ class FTFSource:
         session = self._session
         if session is None:
             raise RuntimeError("FTF acquire was not opened")
-        return session.sample_round(request.snapshot, request.index)
+        return session.sample_round(
+            request.snapshot, request.index, cancel=request.cancel
+        )
 
     def finish_acquire(self, rounds: tuple[RoundRequest, ...], wall_s: float) -> None:
         """Write one best-effort summary at the binding's completion boundary.

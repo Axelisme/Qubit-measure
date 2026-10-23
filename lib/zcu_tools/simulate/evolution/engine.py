@@ -13,6 +13,8 @@ from threading import Event, Lock
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from zcu_tools.core.simulation import CancellationQuery
+
 if TYPE_CHECKING:
     from .kernel import Kernel
 
@@ -618,7 +620,7 @@ class Engine:
         source: ModelSource,
         key: bytes,
         *,
-        cancel: Event | None = None,
+        cancel: CancellationQuery | None = None,
         budget: float = 1e-3,
     ) -> bool:
         """Validate a caller's exact-content result against current source usage.
@@ -646,7 +648,7 @@ class Engine:
         batches: Sequence[TimelineBatch],
         *,
         budget: float = 1e-3,
-        cancel: Event,
+        cancel: CancellationQuery | None = None,
         telemetry: bool = False,
         reuse_key: bytes | None = None,
     ) -> EvolutionResult:
@@ -667,7 +669,7 @@ class Engine:
         a route change; the caller must then evolve the full acquire again.
         budget: finite positive absolute population and low-four error allowance;
         otherwise raises ValueError. A closed engine raises RuntimeError.
-        cancel: event checked between chunks;
+        cancel: read-only is_set query checked between chunks; None disables it;
         when set, raises Cancelled, without returning partial results.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
@@ -689,6 +691,7 @@ class Engine:
         from ._schedule import Schedule
         from .kernel import KernelContext
 
+        cancel = Event() if cancel is None else cancel
         with self._lock, native_limit.acquire():
             self._check_evolve_ready(budget, cancel)
             if not batches or not any(len(batch.points) for batch in batches):
@@ -775,7 +778,7 @@ class Engine:
             self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
 
-    def _check_evolve_ready(self, budget: float, cancel: Event) -> None:
+    def _check_evolve_ready(self, budget: float, cancel: CancellationQuery) -> None:
         """Check evolve preconditions without side effects under caller-held resources.
 
         The caller holds the engine lock and native limit; this acquires neither.
@@ -789,7 +792,7 @@ class Engine:
             raise Cancelled()
 
     def _cached_result(
-        self, key: bytes, cancel: Event, *, telemetry: bool
+        self, key: bytes, cancel: CancellationQuery, *, telemetry: bool
     ) -> EvolutionResult | None:
         """Look up an exact result and preserve cancellation/warning semantics."""
         cached = self._memo.find(key, telemetry=telemetry)
