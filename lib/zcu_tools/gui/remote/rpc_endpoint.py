@@ -45,6 +45,7 @@ import socket
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol, TypeVar
 
 from zcu_tools.gui.remote.errors import ErrorCode, ErrorEnvelope, RemoteError
@@ -103,6 +104,15 @@ class ControlOptions:
         return "0.0.0.0" if self.allow_external else "127.0.0.1"
 
 
+class ReplyDelivery(str, Enum):
+    """Terminal result for a single correlated success reply."""
+
+    DELIVERED = "delivered"
+    """Every byte of the success NDJSON frame was sent to the OS, not peer ack."""
+    FAILED = "failed"
+    """Encoding, enqueue, send or close prevented confirmation of a complete send."""
+
+
 class ClientLink:
     """One accepted client's pure-transport state.
 
@@ -119,6 +129,7 @@ class ClientLink:
         "peer",
         "outbound",
         "pending_bytes",
+        "reply_completions",
         "writer_thread",
         "consecutive_drops",
         "closing",
@@ -132,6 +143,9 @@ class ClientLink:
         self.buffer = bytearray()
         self.outbound: queue.Queue[bytes] = queue.Queue(maxsize=_OUTBOUND_QUEUE_MAX)
         self.pending_bytes = 0  # Protected by the endpoint's clients lock.
+        # Frame identity keeps repeated identical replies independent while the
+        # outbound queue retains its plain encoded-bytes contract.
+        self.reply_completions: dict[int, Callable[[ReplyDelivery], None]] = {}
         self.writer_thread: threading.Thread | None = None
         self.consecutive_drops: int = 0
         self.closing: bool = False
@@ -370,9 +384,28 @@ class NdjsonRpcEndpoint:
     # Outbound: reply (to one link) + broadcast (push fan-out)
     # ------------------------------------------------------------------
 
-    def reply_ok(self, link: ClientLink, *, rid: str, result) -> bool:
-        """Return whether the success reply encoded and entered the outbound queue."""
-        return self._send_response(link, Response(id=rid, ok=True, result=result))
+    def reply_ok(
+        self,
+        link: ClientLink,
+        *,
+        rid: str,
+        result,
+        on_complete: Callable[[ReplyDelivery], None] | None = None,
+    ) -> bool:
+        """Queue a correlated success reply and optionally report terminal send.
+
+        Return True only when the success response encoded and was enqueued.
+        on_complete runs exactly once, on the completing IO/writer/stop caller
+        thread, outside endpoint locks. DELIVERED means the complete success NDJSON
+        frame was sent to the OS socket (not a peer acknowledgement). FAILED means
+        encoding, enqueue, send or connection close prevented that confirmation.
+        Close/stop retires outstanding completions; no new send timeout is added.
+        The callback must not block or stop this endpoint; marshal owner work.
+        Callback exceptions are logged and isolated from other clients.
+        """
+        return self._send_response(
+            link, Response(id=rid, ok=True, result=result), on_complete=on_complete
+        )
 
     def reply_error(
         self,
@@ -387,7 +420,13 @@ class NdjsonRpcEndpoint:
         env = ErrorEnvelope(code=code.value, message=message, reason=reason, data=data)
         self._send_response(link, Response(id=rid, ok=False, error=env))
 
-    def _send_response(self, link: ClientLink, response: Response) -> bool:
+    def _send_response(
+        self,
+        link: ClientLink,
+        response: Response,
+        *,
+        on_complete: Callable[[ReplyDelivery], None] | None = None,
+    ) -> bool:
         encoded_success = False
         try:
             line = encode_line(response.to_wire())
@@ -414,13 +453,40 @@ class NdjsonRpcEndpoint:
                     "failed to encode fallback reply for %.128r", response.id
                 )
                 self._abort_client(link)
+                if on_complete is not None:
+                    self._notify_reply(on_complete, ReplyDelivery.FAILED)
                 return False
+
+        def completed(outcome: ReplyDelivery) -> None:
+            if on_complete is not None:
+                on_complete(outcome if encoded_success else ReplyDelivery.FAILED)
+
         with self._clients_lock:
             queued = self._enqueue(link, line, is_push=False)
+            if queued and on_complete is not None:
+                link.reply_completions[id(line)] = completed
         if not queued:
             # Unlike pushes, a correlated reply must not be silently dropped.
             self._abort_client(link)
+            if on_complete is not None:
+                self._notify_reply(on_complete, ReplyDelivery.FAILED)
         return encoded_success and queued
+
+    def _notify_reply(
+        self, callback: Callable[[ReplyDelivery], None], outcome: ReplyDelivery
+    ) -> None:
+        try:
+            callback(outcome)
+        except Exception:
+            logger.exception("reply completion callback failed")
+
+    def _finish_reply(self, link: ClientLink, line: bytes, *, delivered: bool) -> None:
+        with self._clients_lock:
+            callback = link.reply_completions.pop(id(line), None)
+        if callback is not None:
+            self._notify_reply(
+                callback, ReplyDelivery.DELIVERED if delivered else ReplyDelivery.FAILED
+            )
 
     def _abort_client(self, link: ClientLink) -> None:
         with self._clients_lock:
@@ -449,6 +515,10 @@ class NdjsonRpcEndpoint:
                 link.pending_bytes -= len(line)
             with contextlib.suppress(queue.Full):
                 link.outbound.put_nowait(_SHUTDOWN_SENTINEL)
+            completions = list(link.reply_completions.values())
+            link.reply_completions.clear()
+        for callback in completions:
+            self._notify_reply(callback, ReplyDelivery.FAILED)
 
     def broadcast(self, line: bytes, predicate: Callable[[ClientLink], bool]) -> None:
         """Fan a pre-encoded push line out to every link passing ``predicate``.
@@ -617,6 +687,7 @@ class NdjsonRpcEndpoint:
                         return
                     # Accepted sockets are nonblocking. Keep the byte cursor
                     # across backpressure without replaying a partially sent line.
+                    delivered = False
                     try:
                         pending = memoryview(line)
                         while pending:
@@ -632,7 +703,9 @@ class NdjsonRpcEndpoint:
                                     "socket closed during reply delivery"
                                 )
                             pending = pending[sent:]
+                        delivered = True
                     finally:
+                        self._finish_reply(link, line, delivered=delivered)
                         with self._clients_lock:
                             link.pending_bytes -= len(line)
                     del pending, line
@@ -761,4 +834,5 @@ __all__ = [
     "ControlOptions",
     "EndpointRouter",
     "NdjsonRpcEndpoint",
+    "ReplyDelivery",
 ]

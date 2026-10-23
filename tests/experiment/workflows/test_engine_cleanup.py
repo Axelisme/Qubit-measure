@@ -1,6 +1,6 @@
 """Progress cleanup settles before terminal publication and releases admission."""
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import pytest
@@ -22,8 +22,16 @@ from ._engine_ports import RecordingBar
 class ClosingBar(RecordingBar):
     """Record every cleanup attempt, with optional presentation failure."""
 
-    def __init__(self, failures: bool, attempts: list[str], **kwargs: object) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        failures: bool,
+        attempts: list[str],
+        *,
+        iterable: Iterable[object] | None = None,
+        desc: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(iterable=iterable, desc=desc, **kwargs)
         self.failures = failures
         self.attempts = attempts
 
@@ -48,8 +56,14 @@ def test_progress_cleanup_settles_all_bars_before_terminal_and_releases_worker(
 ) -> None:
     attempts: list[str] = []
 
-    def progress(**kwargs: object) -> ClosingBar:
-        return ClosingBar(cleanup_fails, attempts, **kwargs)
+    def progress(
+        iterable: Iterable[object] | None = None,
+        desc: str | None = None,
+        **kwargs: object,
+    ) -> ClosingBar:
+        return ClosingBar(
+            cleanup_fails, attempts, iterable=iterable, desc=desc, **kwargs
+        )
 
     rig.engine = Engine(EnginePorts(rig.plots, progress, rig.clock, context=7))
     journal = rig.paths.metadata_root / "journal.jsonl"

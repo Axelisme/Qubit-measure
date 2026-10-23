@@ -16,6 +16,8 @@
 
 手寫表單在 `options(env)` hook 將 `ModuleInputField.options(env)` 放到欄位路徑，並在 `converters(env)` 的同一路徑宣告 `ModuleInputField.converter(env)`。兩個 hook 使用 host 的同一份固定 capture。宣告不讀來源，也不儲存共享 mutable capture。既有最深 local choices 規則照舊。Python 型別檢查器不能反射 runtime `annotation`，靜態別名可用 `ModuleRef | ModuleInline` 作 nominal value view，nullable 時另含 None。這個 view 只供保存結果與傳給 `to_spec`，不表示 generated `.module` 已是持久 Spec。Workflows 三個 plan 表單共用這個入口，先取持久形式再交既有 core/native factories；校準 policy 仍屬 workflows。
 
+Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `TypeError` 拒絕，訊息列出欄位路徑與 mapping 型別。Literal mapping 由 core default、`FormState.write` 或 restore 提供，其中名為 `expr` 的 key 是資料。作者樹不支援整份 Mapping literal seed；scalar Expr 保持原有求值規則。
+
 `AliasName` 的 devices 選項包含 core 欄位的靜態字串預設，空字串顯示為 None。Description 與驗證共用同一份 choices。缺 alias 時 input 保持缺席，有 core 預設就用該預設，無預設的 required 欄位仍 Invalid。綁定 alias 照舊帶入裝置名，其他未列出的值仍被拒絕。
 
 生成器集中處理兩條翻譯政策，host 與 `gui.form` 使用轉換結果：
@@ -85,7 +87,7 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 `FixedElements.identify(data, path)` 依同份 input 的完整原始 index 回傳 `ElementIdentity`，不讀 participants。Logical field observation 同時攜帶該 identity，供 Run capture 保留當次名稱；巢狀固定 list 使用最深的宣告。
 
-普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且名稱存在，錯誤保留欄位與 index，輸入順序不變。未參與元素照常驗證。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
+普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且原始索引合法。Bool 與字串不能作 index。錯誤保留欄位與輸入位置，順序不變。`participant_fields` 列出元素相對路徑，欄位必須 nullable。Adapter 依完整 raw list 的原始索引產生 Core applicability 宣告，停用區保留草稿並投影為 None，active 空值立即報錯。未宣告的欄位始終驗證，readout 不隨 participants 停用。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
 
 宣告者另外提供 `Display(element_label=name_field)` 作 picker label，名稱欄位的 `Display(readonly=True)` 則由 Form core 強制唯讀。同值寫入通過，不同值拒絕；父層或批次寫入不能繞過唯讀名稱。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 
@@ -114,12 +116,12 @@ class Tone(ConfigBase):
 
 class Group(ConfigBase):
     tones: Annotated[list[Tone], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[int]
 
 form = Form(Group, {
     "tones": [{"name": "Q1", "drive": Slot("Q1.pulses.drive"),
                "sweep": Range.between(4000, 4100, expts=3)}],
-    "participants": ["Q1"],
+    "participants": [0],
 }, fixed_elements=(FixedElements(("tones",), "name", ("participants",)),))
 # form.default_input(env) uses the caller's fixed capture containing the slot.
 ```

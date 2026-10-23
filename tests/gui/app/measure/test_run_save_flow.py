@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import ClassVar
 
 import pytest
@@ -100,13 +101,15 @@ class PlottedSavingAdapter(SavingAdapter):
 
 
 @pytest.fixture
-def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
+def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
     registry = Registry()
     registry.register("synthetic", PlottedSavingAdapter)
     before = registry_state()
     with (
+        TemporaryDirectory(prefix="measure-chooser-", dir=Path.cwd()) as directory,
+        monkeypatch.context() as context,
         registered_model("synthetic/calibration", CalibrationSchema),
-        launched_measure_app(qapp, tmp_path, registry=registry) as app,
+        launched_measure_app(qapp, Path(directory), registry=registry) as app,
     ):
         installed = registry_state()
         # Fixture bootstrap only: create an isolated entry/point before opening a tab.
@@ -118,6 +121,11 @@ def measure_window(qapp, tmp_path: Path) -> Generator[QWidget]:
             "calibration", "synthetic/calibration", {}
         )
         app.controller.new_tab("synthetic")
+        # Load's File chooser starts at the opened entry's database directory.
+        # Keep both relative-path validation and real chooser input rooted there.
+        chooser_directory = Path(app.controller.get_session_env().database_path)
+        chooser_directory.mkdir(parents=True, exist_ok=True)
+        context.chdir(chooser_directory)
         yield app.window
         assert registry_state() == installed
     assert registry_state() == before
@@ -259,7 +267,9 @@ def _load_saved_signal(
             assert flow.dialogs()[0].title == "Load Data"
             flow.screenshot(shots / "07-load-dialog.png")
             flow.choose_file(
-                "File…", Path(native_path), evidence=shots / "07-file-chooser.png"
+                "File…",
+                Path(native_path).relative_to(Path.cwd(), walk_up=True),
+                evidence=shots / "07-file-chooser.png",
             )
         except Exception as error:
             logging.exception("Load dialog input delivery failed")

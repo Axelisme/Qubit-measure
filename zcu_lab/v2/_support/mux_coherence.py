@@ -21,8 +21,8 @@ class MuxCoherenceToneCfg(MuxDriveToneCfg):
     name is its nonempty capture-generated qubit identity. drive is the fixed
     pi/2 source pulse. detune ramps the final pi/2 phase, not its carrier.
     Evolution uses the cfg's shared delay; no per-tone sweep is required.
-    Full-list admission validates every pulse, detune and independent channel,
-    including nonparticipants, and rejects duplicate names.
+    Admission validates participant pulses, detunes and independent channels,
+    and rejects duplicate names in the complete list.
     """
 
     detune: float = 0.0
@@ -33,12 +33,12 @@ def validate_coherence_scan(
     modules: MuxDriveModuleCfg,
     tones: Sequence[MuxCoherenceToneCfg],
     delay: SweepCfg,
-    participants: Sequence[str],
+    participants: Sequence[int],
 ) -> None:
     """Check the tones and shared delay before a Ramsey or Echo measurement.
 
     cfg and modules supply shared averaging, timing and the full mux readout.
-    participants selects tone names in measurement order. Require finite
+    participants selects original indices in measurement order. Require finite
     nonnegative delay bounds in us, finite detunes in MHz, fixed drive pulses
     and independent channels. Raise ValueError without changing inputs.
     """
@@ -47,7 +47,8 @@ def validate_coherence_scan(
         raise ValueError("delay start/stop/step must be finite")
     if min(delay.start, delay.stop) < 0:
         raise ValueError("delay must be nonnegative us")
-    for index, tone in enumerate(tones):
+    for index in participants:
+        tone = tones[index]
         if not math.isfinite(tone.detune):
             raise ValueError(f"tones[{index}].detune must be finite MHz")
 

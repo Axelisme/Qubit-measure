@@ -38,7 +38,7 @@ def make_flux_form[
     group = require_mux_group(ctx.parameters)
     readout = mux_readout_initial(ctx, wait_for_ringup=not twotone)
     tree: dict[str, FormNode] = {
-        "participants": list(names),
+        "participants": list(range(len(names))),
         "modules": {
             "reset": Slot("$mux.module.reset") if twotone else Hidden(),
             "readout": readout,
@@ -51,7 +51,6 @@ def make_flux_form[
         "settle": 0.1,
     }
     fixed = [
-        FixedElements(("tones",), "name", ("participants",)),
         FixedElements(("modules", "readout", "module", "tones")),
     ]
     metadata = mux_readout_seed_metadata(readout)
@@ -88,7 +87,14 @@ def make_flux_form[
             ],
             "expts": 301,
         }
-        fixed.append(FixedElements(("frequency", "tones"), "name", ("participants",)))
+        fixed.append(
+            FixedElements(
+                ("frequency", "tones"),
+                "name",
+                ("participants",),
+                participant_fields=(("drive",), ("sweep",)),
+            )
+        )
         metadata[("frequency", "expts")] = FieldMeta(
             description="Shared 301-point hardware frequency scan candidate",
             calibration="uncalibrated",
@@ -111,6 +117,11 @@ def make_flux_form[
                 calibration="uncalibrated",
             )
     if local:
+        fixed.append(
+            FixedElements(
+                ("tones",), "name", ("participants",), participant_fields=(("sweep",),)
+            )
+        )
         tree["tones"] = [
             {
                 "name": name,
@@ -137,6 +148,7 @@ def make_flux_form[
                     calibration="uncalibrated",
                 )
     else:
+        fixed.append(FixedElements(("tones",), "name", ("participants",)))
         tree["tones"] = [{"name": name} for name in names]
         tree["flux_dev"] = group.flux_source
         metadata[("flux_dev",)] = FieldMeta(

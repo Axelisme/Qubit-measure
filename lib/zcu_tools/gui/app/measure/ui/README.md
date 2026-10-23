@@ -4,6 +4,11 @@
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
+Programmatic close uses the same drain, persistence and remote teardown as local
+close. The remote adapter waits for terminal reply send before calling
+`request_shutdown()`. Its deferred Qt close turn prevents reentrancy and does
+not confirm socket delivery.
+
 Views project controller snapshots and submit commands through control facets.
 They do not own result data or Save policy. `MainDialogRegistry` retains truly
 non-modal named windows. `MainWindow` synchronizes Setup, SoC, Devices,

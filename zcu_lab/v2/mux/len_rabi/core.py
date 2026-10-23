@@ -7,14 +7,14 @@ Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
 Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
-a nonempty, unique list of existing names. Q3/Q1 selects original indices [2, 0]
+a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
-including nonparticipants, on independent generators distinct from readout.
+only for participants, on independent generators distinct from readout.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
-all tones, including nonparticipants. Point p pairs each active tone's p-th value,
+selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program executes a shared hardware point loop with
 optional common reset, Join of table-length drive pulses, then active mux readout.
 Branches start together; short branches wait for the longest branch at that point. Pre/post delays stay
@@ -35,7 +35,7 @@ Length scan contract
 --------------------
 MuxLenRabiCfg.modules contains optional common reset and full mux readout.
 Sweep bounds are positive requested lengths in us. Every tone must use const
-or flat_top, including nonparticipants. Const length is the entire pulse.
+or flat_top for participants. Const length is the entire pulse.
 Flat_top length includes raise_waveform ramps; the waveform implementation
 subtracts ramps to determine the plateau. Gain, frequency, phase and ramp
 settings stay fixed. Arb assets have fixed length and are rejected by cfg and
@@ -101,7 +101,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import US_TO_S, PersistableExperiment
@@ -126,7 +126,6 @@ from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
     MuxToneCfg,
-    participant_indices,
     validate_mux_scan,
 )
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
@@ -150,9 +149,9 @@ class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules holds optional reset and complete mux readout. tones contains one
     MuxToneCfg per original readout position, with unique nonempty names.
-    participants is a nonempty, duplicate-free list of those names; its order
+    participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
-    Every drive is required/validated, including nonparticipants, on independent
+    Selected drives are required/validated on independent
     generators distinct from readout. Independent positive us length ranges
     use expts, the positive hardware point count shared by all tones. Every waveform
     must be const or flat_top; arb duration belongs to its asset, not this sweep.
@@ -168,20 +167,21 @@ class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
         title="Expts",
         description="Hardware scan point count shared by all tones.",
     )
-    participants: list[str]
+    participants: list[StrictInt]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
         """Reject invalid full tones, active generators, counts or length policy."""
         validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
-        for index, tone in enumerate(self.tones):
-            drive = tone.drive
+        for index in self.participants:
+            tone = self.tones[index]
+            drive = tone.require_drive()
             if not isinstance(drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)):
                 raise ValueError(
                     f"tones[{index}].drive.waveform: length sweep requires const or "
                     "flat_top; arb length is asset-derived with no public length sweep"
                 )
-            if min(tone.sweep.start, tone.sweep.stop) <= 0:
+            if min(tone.require_sweep().start, tone.require_sweep().stop) <= 0:
                 raise ValueError(f"tones[{index}].sweep lengths must be positive us")
         return self
 
@@ -211,13 +211,15 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
     sweeps and waveform conversion errors raise before acquisition.
     """
     cfg = MuxLenRabiCfg.model_validate(cfg.model_dump())
-    indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
+    indices = list(cfg.participants)
     coordinates = []
     for index in indices:
         tone = cfg.tones[index]
-        drive = tone.drive
+        drive = tone.require_drive()
         lengths = sweep2array(
-            make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+            make_sweep(
+                tone.require_sweep().start, tone.require_sweep().stop, cfg.expts
+            ),
             "time",
             {"soccfg": soccfg, "gen_ch": drive.ch},
         )
@@ -288,7 +290,7 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
             drives = [
                 TableLengthPulse(
                     f"drive_{index}",
-                    cfg.tones[index].drive,
+                    cfg.tones[index].require_drive(),
                     lengths=scan.coordinates[row],
                     idx_reg="point",
                 )

@@ -141,7 +141,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 
 | MCP tool | Adapter | 掃描與回報 |
 | --- | --- | --- |
-| `mux_onetone` | `mux/onetone` | `participants` 收 resonator 名稱，依固定 `$mux.resonators` 映射原始 index。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
+| `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
 | `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 名單。回覆每 dip 的 name、freq、depth 與 `identity_diagnostic`。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 

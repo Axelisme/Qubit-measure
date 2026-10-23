@@ -17,6 +17,7 @@ from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
@@ -545,6 +546,29 @@ class TestControlIntegration:
 
 
 class TestDmemIntegration:
+    def test_empty_lookup_consumer_compiles_across_programs(self):
+        """An unreachable pulse selector still needs its named register resolved."""
+        pulses = [_pulse_cfg(gain=0.0), _pulse_cfg(gain=0.5)]
+        for values in ([1], [], []):
+            repeat = Repeat("gate_pos", "gate_count", range_hint=(0, len(values)))
+            repeat.add_content(
+                [
+                    LoadValue("gate_lookup", values, "gate_pos", "gate_idx"),
+                    ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
+                ]
+            )
+            try:
+                prog = _make_prog(
+                    modules=[
+                        LoadValue("count", [len(values)], "point", "gate_count"),
+                        repeat,
+                    ],
+                    sweep=[("point", 1)],
+                )
+            except KeyError as error:
+                pytest.fail(f"Zero-count lookup consumers must compile: {error}")
+            assert len(prog.binprog["pmem"]) > 0
+
     def _scan_values_small(self):
         return list(range(5))
 

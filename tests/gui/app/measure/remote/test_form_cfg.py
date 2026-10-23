@@ -10,7 +10,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.form import FormInput, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -48,6 +48,53 @@ class ExtrasAdapter(SampleAdapter):
             extras=ExtraInputs,
             lower=retain_cfg,
         )
+
+
+def test_dangling_module_rejects_unrelated_rpc_write_without_publication(
+    form_rpc: tuple[Fixture, str, FormRpc],
+) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("module-rpc", ModuleRpcAdapter)
+    tab = fixture.ctrl.new_tab("module-rpc")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        owner.restore_input(
+            FormInput(
+                owner.input.model,
+                {
+                    **owner.input.data,
+                    "pulse": {"kind": "ref", "name": "Q1.pulses.gone"},
+                },
+            )
+        )
+        before = rpc.call("tab.get_cfg", {"tab_id": tab})
+        assert before["ok"], before
+        assert any(
+            error["path"] == ["pulse", "name"] and "Q1.pulses.gone" in error["message"]
+            for error in before["result"]["errors"]
+        )
+        version_key = f"tab:{tab}:cfg"
+        version = fixture.state.version.get(version_key)
+        notices: list[str] = []
+        owner.subscribe(lambda: notices.append("changed"))
+
+        refused = rpc.call(
+            "tab.edit_cfg",
+            {"tab_id": tab, "edits": [{"path": ["gain"], "value": 0.75}]},
+        )
+
+        assert not refused["ok"], refused
+        error = refused["error"]
+        assert error["code"] == "invalid_params"
+        assert error["reason"] == "form_errors"
+        assert "pulse.name" in error["message"]
+        assert "Q1.pulses.gone" in error["message"]
+        assert "not in the captured library" in error["message"]
+        assert rpc.call("tab.get_cfg", {"tab_id": tab}) == before
+        assert fixture.state.version.get(version_key) == version
+        assert notices == []
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 def test_get_cfg_returns_authored_input_and_ordinary_leaf_values(form_rpc) -> None:

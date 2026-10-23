@@ -98,6 +98,10 @@ def check_sources(
     enclosing container keys/indexes only prefix errors, not declarations.
     Nested local options override enclosing options at the same leaf path.
     """
+    if not prefix and issubclass(model, FormModel):
+        from ._applicability import project
+
+        data = project(model, data, env)
     options: dict[FormPath, tuple[JsonValue, ...]] = {}
     try:
         for path, values in local_choices(

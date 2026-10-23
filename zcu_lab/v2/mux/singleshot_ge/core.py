@@ -5,9 +5,9 @@ Technical reference for lab authors and framework developers.
 ## Acquisition
 
 The complete `tones` list retains capture-generated `name` values and original
-readout positions. `participants` is a nonempty, unique list of existing names.
-Q3/Q1 selects original indices `[2, 0]`, retaining that execution/data order.
-Every element requires valid drives, including nonparticipants.
+readout positions. `participants` is a nonempty, unique list of original indices.
+`[2, 0]` selects Q3 then Q1, retaining that execution/data order.
+Only participants require valid drives. Inactive drives may be None.
 
 `MuxGEExp.run(config, *, context)` acquires probe-off and probe-on raw IQ for
 all active qubits in the same two programs. It does not simulate each qubit
@@ -180,7 +180,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import AxesSpec, Axis, PersistableExperiment, RunRecord, ZSpec
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
@@ -196,7 +196,11 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, participant_indices
+from zcu_lab.v2._support.mux_sweep_cfg import (
+    MuxDriveModuleCfg,
+    MuxDriveToneCfg,
+    validate_participants,
+)
 from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
 
 from .analysis import (
@@ -222,26 +226,23 @@ def _validate_fixed_pulse(pulse: PulseCfg) -> None:
         raise ValueError("pulse length must be fixed")
 
 
-class MuxGEToneCfg(ConfigBase):
+class MuxGEToneCfg(MuxDriveToneCfg):
     """One named original tone's required probe drive and optional init pulse.
 
     name is the nonempty capture-generated qubit identity. drive is probe-on;
     init_pulse, when present, runs before it in both preparations on the same
     generator. All pulses are fixed native PulseCfg (MHz, us, degrees, gain),
-    validated even for nonparticipants. Nonparticipant settings do not run.
+    validated only when selected. Nonparticipant settings do not run.
     """
 
-    name: Annotated[str, FieldMeta(readonly=True)]
-    drive: PulseCfg
     init_pulse: PulseCfg | None = None
 
-    @model_validator(mode="after")
     def validate_pulses(self) -> MuxGEToneCfg:
         """Reject swept values or shared-branch generators for every element."""
-        _validate_fixed_pulse(self.drive)
+        _validate_fixed_pulse(self.require_drive())
         if self.init_pulse is not None:
             _validate_fixed_pulse(self.init_pulse)
-            if self.init_pulse.ch != self.drive.ch:
+            if self.init_pulse.ch != self.require_drive().ch:
                 raise ValueError("init_pulse must use the tone's drive generator")
         return self
 
@@ -251,9 +252,9 @@ class MuxGECfg(ExpCfgModel):
 
     modules holds optional reset and complete mux readout. tones contains one
     MuxGEToneCfg per original readout position, with unique nonempty names.
-    participants is a nonempty, duplicate-free list of those names; its order
+    participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
-    Every drive is required/validated, including nonparticipants, on independent
+    Selected drives are required/validated on independent
     generators distinct from readout. shots is positive. Run sets program rounds=1
     and reps=shots; these derived runtime counts are not experiment inputs.
     initial_delay/relax_delay are finite
@@ -277,7 +278,7 @@ class MuxGECfg(ExpCfgModel):
     ] = 1.0
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
-    participants: list[str]
+    participants: list[StrictInt]
     shots: StrictInt
 
     @model_validator(mode="after")
@@ -294,17 +295,19 @@ class MuxGECfg(ExpCfgModel):
             )
         if len(self.tones) != len(self.modules.readout.tones):
             raise ValueError("tones must match the complete readout tone count")
-        participant_indices([tone.name for tone in self.tones], self.participants)
+        validate_participants([tone.name for tone in self.tones], self.participants)
         channels: set[int] = set()
-        for index, tone in enumerate(self.tones):
+        for index in self.participants:
+            tone = self.tones[index]
+            tone.validate_pulses()
             if (
-                tone.drive.ch in channels
-                or tone.drive.ch == self.modules.readout.gen_ch
+                tone.require_drive().ch in channels
+                or tone.require_drive().ch == self.modules.readout.gen_ch
             ):
                 raise ValueError(
                     f"tones[{index}].drive requires an independent generator"
                 )
-            channels.add(tone.drive.ch)
+            channels.add(tone.require_drive().ch)
         return self
 
 
@@ -385,9 +388,7 @@ def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
     validate_ge_result(source.result)
     if source.cfg is not None:
         cfg = MuxGECfg.model_validate(source.cfg.model_dump())
-        indices = participant_indices(
-            [tone.name for tone in cfg.tones], cfg.participants
-        )
+        indices = list(cfg.participants)
         if not np.array_equal(indices, source.result.tone_indices) or cfg.shots != len(
             source.result.shot_indices
         ):
@@ -471,9 +472,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
             relax_delay=cfg.relax_delay,
         )
 
-        indices = participant_indices(
-            [tone.name for tone in cfg.tones], cfg.participants
-        )
+        indices = list(cfg.participants)
         readout = cfg.modules.readout.with_updates(
             tones=[cfg.modules.readout.tones[i] for i in indices]
         )
@@ -497,7 +496,10 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
                 branches = [
                     [
                         Pulse(f"init_{i}", cfg.tones[i].init_pulse),
-                        Pulse(f"probe_{i}", cfg.tones[i].drive if with_probe else None),
+                        Pulse(
+                            f"probe_{i}",
+                            cfg.tones[i].require_drive() if with_probe else None,
+                        ),
                     ]
                     for i in indices
                 ]

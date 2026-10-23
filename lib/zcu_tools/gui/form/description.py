@@ -132,6 +132,9 @@ class FormFieldDescription:
     requests non-editable presentation. It does not imply fixed/fixed_value:
     separate list positions and restored inputs can hold different values.
     Readonly applies to this field's subtree, not its ancestor selectors.
+    disabled means a membership dependency makes this subtree inapplicable: raw
+    input is preserved, but values and sources are not consumed or validated.
+    It is independent of readonly and propagates to descendant descriptions.
     """
 
     path: FormWritePath
@@ -158,6 +161,7 @@ class FormFieldDescription:
     commands: tuple[FormCommandDescription, ...] = ()
     selector: bool = True
     readonly: bool = False
+    disabled: bool = False
     branch: JsonValue = None
     elements: tuple[FormElementDescription, ...] | None = None
 

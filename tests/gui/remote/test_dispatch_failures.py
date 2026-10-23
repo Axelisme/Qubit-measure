@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import NotRequired, TypedDict, TypeVar
@@ -11,8 +12,9 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.control_service import RemoteAppSpec, RemoteControlServiceBase
 from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
-from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
+from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions, ReplyDelivery
 from zcu_tools.gui.remote.wire import Request
+from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 _T = TypeVar("_T")
 
@@ -145,6 +147,67 @@ def test_failed_read_preserves_error_projection(prior_read: bool, failure: str):
     if failure == "encoding":
         assert "reason" in reply["error"]
         assert reply["error"]["reason"] == "response_encoding_failed"
+
+
+@pytest.mark.parametrize("arrival", ["late", "timeout_boundary"])
+@pytest.mark.parametrize("accepted", [True, False])
+def test_timed_out_reply_continues_only_accepted_handler_on_owner(
+    monkeypatch: pytest.MonkeyPatch, arrival: str, accepted: bool
+) -> None:
+    scheduler = ManualOwnerScheduler()
+    outcomes: list[tuple[ReplyDelivery, bool]] = []
+    executions: list[bool] = []
+
+    def handler(_adapter: object, _params: Mapping[str, object]) -> dict[str, object]:
+        executions.append(scheduler.is_owner_thread())
+        if not accepted:
+            raise RuntimeError("shutdown rejected")
+        return {"shutting_down": True}
+
+    service = RemoteControlServiceBase(
+        HandlerState(),
+        ControlOptions(port=0),
+        owner_scheduler=scheduler,
+        app=RemoteAppSpec(
+            wire_version=1,
+            gui_version=1,
+            server_name="TimeoutContinuationTest",
+            method_registry=build_method_registry(
+                {"app.shutdown": handler},
+                {"app.shutdown": MethodSpec(5.0, "synthetic shutdown")},
+            ),
+            event_serializers={},
+            wire_event_name=str,
+            reply_continuations={
+                "app.shutdown": lambda outcome: outcomes.append(
+                    (outcome, scheduler.is_owner_thread())
+                )
+            },
+        ),
+    )
+    original_wait = threading.Event.wait
+
+    def expired_wait(event: threading.Event, timeout: float | None = None) -> bool:
+        if timeout != 5.0:
+            return original_wait(event, timeout)
+        if arrival == "timeout_boundary":
+            assert scheduler.pump_once(), "the submitted handler must be queued"
+        return False
+
+    monkeypatch.setattr(threading.Event, "wait", expired_wait)
+    link = ClientLink("timeout-client", token_required=False)
+    service.on_client_open(link)
+    service.route(link, Request("shutdown", "app.shutdown", {}))
+    reply = json.loads(link.outbound.get_nowait())
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "timeout"
+    assert outcomes == [], "continuation must be posted, not run on the IO caller"
+    scheduler.pump_all()
+    assert executions == [True]
+    assert outcomes == ([(ReplyDelivery.FAILED, True)] if accepted else [])
+    scheduler.pump_all()
+    assert outcomes == ([(ReplyDelivery.FAILED, True)] if accepted else [])
+    assert link.outbound.empty(), "late completion must not send a second RPC reply"
 
 
 @pytest.mark.uses_wall_clock
