@@ -64,14 +64,16 @@ def input_key(
     levels. Initial density and optional continuous Hamiltonian expansion are
     separate source inputs and are hashed by content. Every batch/track field,
     including unused envelope candidates and beyond-readout values, participates.
-    Fixed kernels/numerics belong to the owning Engine's in-process lifetime,
-    not to a persistent or cross-engine key namespace.
+    The source's midpoint subdivision policy also participates. Other fixed
+    kernel policies belong to the owning Engine's in-process lifetime, not to
+    a persistent or cross-engine key namespace.
     """
     digest = _InputDigest()
     loops = batches[0].flux.level.shape[1]
     digest.text(source.model((0,) * loops).identity)
     digest.array(source.initial_density)
     digest.text(float(budget).hex())
+    digest.text(str(source.slow_envelope_segments_per_period))
     try:
         expansion = source.flux_expansion()
     except ValueError:
