@@ -56,7 +56,10 @@ before increasing point count or rounds.
 Each tone supplies a gain range in normalized units within `[-1, 1]`.
 Set each tone's Start and Stop in gain units. Expts follows Tones and sets one
 shared positive point count, including nonparticipants (default 51).
-At each point, the selected drives use their corresponding gain values together.
+One program advances the selected drives' gains together in a shared hardware loop.
+Each drive retains its own Start and Stop. Plots and saved axes use the actual
+hardware-quantized gains; integer register steps can shift points from a separately
+rounded linear grid.
 The sequence is common reset, simultaneous drives, then mux readout after the
 longest drive. Pulse pre/post delays stay as configured, with early-finishing
 drives waiting for the longest branch.
@@ -88,7 +91,8 @@ A missing source configuration leaves the name unavailable.
 Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
-Cancellation retains acquired data and leaves missing data as NaN.
+Live plots update the full sweep after each completed round. Stop retains the
+completed-round average across all points. If no round completes, signals remain NaN.
 Partial data from a failed operation retains its failure status.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
