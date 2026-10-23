@@ -1,5 +1,8 @@
 # Entry working values and wiring, separate from physical simulation settings.
-# No calibrated module library or pulse sequence is supplied.
+# No module library or pulse sequence is supplied.
+# simulated-truth: default.yaml DC offset_phi0=0.5, flux_per_unit=100 Phi0/A;
+# int=-offset/coefficient, period=1/coefficient, half=(0.5-offset)/coefficient.
+# Resonator kappa and route TOF come from readout settings, not measurements.
 format: zcu.entry-template
 format_version: "1.0"
 components:
@@ -12,12 +15,17 @@ components:
     resonator: R1
     flux_source: flux_bias
     flux_unit: A
+    flux_half: 0.0
+    flux_period: 0.01
+    flux_int: -0.005
     wiring:
       ch: 1
       lo_flux_ch: 2
   R1:
     kind: resonator
     freq: 7000.0 # MHz
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
     wiring:
       ch: 0
       ro_ch: 0

@@ -15,8 +15,8 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
-from qtpy.QtCore import QCoreApplication, QEvent, Qt, QTimer
-from qtpy.QtGui import QCloseEvent
+from qtpy.QtCore import QCoreApplication, QEvent, QSize, Qt, QTimer
+from qtpy.QtGui import QCloseEvent, QResizeEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
@@ -83,6 +83,22 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # MainWindow — implements ViewProtocol
 # ---------------------------------------------------------------------------
+
+
+class _StatusLabel(QLabel):
+    """Give QStatusBar a wrapped height at the allocated message width."""
+
+    def sizeHint(self) -> QSize:
+        """Use current width, not QLabel's unconstrained wrapping estimate."""
+        hint = super().sizeHint()
+        hint.setHeight(self.heightForWidth(max(1, self.width())))
+        return hint
+
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        """Recompute the status bar's height when message width changes."""
+        super().resizeEvent(a0)
+        if a0 is not None and a0.size().width() != a0.oldSize().width():
+            self.updateGeometry()
 
 
 class _MainWindowTabActions:
@@ -316,7 +332,7 @@ class MainWindow(QMainWindow):
         status_bar = QStatusBar()
         # A label, not showMessage(): QStatusBar paints its own message text,
         # which users cannot select or copy.
-        self._status_label = QLabel("Ready")
+        self._status_label = _StatusLabel("Ready")
         self._status_label.setWordWrap(True)
         self._status_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Minimum
