@@ -378,7 +378,7 @@ recipe 作者另外明確 `tab.save()`。
 `tab_interact` 不帶 payload 時讀 committed state、commands、info、preview_active 與圖，
 不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。
 `done` 加入原 operation 的完成，不另建 analysis runner。
-Recipe 的 done 回原 recipe 後續結果或問題，standalone 則完成自己的 execution。
+Recipe 的 done 跳過剛完成 operation 的舊 interactive 快照，回原 recipe 的下一個 handoff 或終局；standalone 則完成自己的 execution。
 純讀與 command 都要求 holder，owner-loop commit 依序生效，沒有自動 retry。
 
 GUI 將 analysis summary 的非有限數字投影為 null，以 invalid 記路徑與原因。
