@@ -13,7 +13,7 @@ from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
-from zcu_tools.gui.session.value_lookup import ValueInfo
+from zcu_tools.gui.session.value_lookup import MissingValue, ValueInfo
 from zcu_tools.resources.entry import document_value
 
 from ._wire_values import context_wire_value
@@ -308,6 +308,13 @@ def h_value_read(
     type_name = raw_type
     try:
         info, value = adapter.context_control.read_value_source(key, type_name)
+    except MissingValue as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            str(exc),
+            reason="unregistered_source",
+            data={"path": exc.key},
+        ) from exc
     except ValueError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {**_value_info_to_wire(info), "value": value}

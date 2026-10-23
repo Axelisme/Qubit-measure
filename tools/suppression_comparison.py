@@ -106,6 +106,9 @@ def _value_key(value: object) -> str:
 
 
 def _header(node: ast.AST) -> str:
+    if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        # Bases and signatures can change without introducing a different owner.
+        return repr((type(node).__name__, node.name))
     fields = tuple(
         (name, _value_key(value))
         for name, value in ast.iter_fields(node)
@@ -252,6 +255,8 @@ def compare_ignores(before: str, after: str) -> tuple[IgnoreRegression, ...]:
     Each returned site identifies the candidate line, ignore kind and reason.
     Exact unchanged input preserves even ambiguous existing debt. Otherwise,
     unique AST statement, owner/branch and logical line role determine position.
+    Class and function headers use their definition kind and name, not bases or
+    signatures. Their full owner/branch path must still be unique on both sides.
     Type-ignore to pyright-ignore requires a valid, nonempty diagnostic list.
 
     Only a result originally classified as unproven-position can retain debt

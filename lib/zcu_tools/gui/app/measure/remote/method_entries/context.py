@@ -155,7 +155,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Resolve one registered value source immediately. Returns "
             "{key, type, owner, description, value}. Optional 'type' is one of "
-            "int|float|str|bool and must match the registered source type.",
+            "int|float|str|bool and must match the registered source type. "
+            "An unregistered key returns invalid_params with reason=unregistered_source "
+            "and data.path naming the missing source.",
             (
                 required_string(
                     "key", "Registered value source key, e.g. device.flux.value"

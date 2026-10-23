@@ -170,12 +170,19 @@ class ComponentDriver:
 
     @staticmethod
     def _can_interact(widget: QWidget) -> bool:
+        if not ComponentDriver._on_screen(widget) or not widget.isEnabled():
+            return False
         modal = QApplication.activeModalWidget()
-        return (
-            ComponentDriver._on_screen(widget)
-            and widget.isEnabled()
-            and (modal is None or widget is modal or modal.isAncestorOf(widget))
-        )
+        if modal is None:
+            return True
+        # Qt excludes child windows (including combo popups) from isAncestorOf.
+        # Only controls whose ownership chain reaches the active modal may act.
+        parent = widget
+        while parent is not None:
+            if parent is modal:
+                return True
+            parent = parent.parentWidget()
+        return False
 
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.

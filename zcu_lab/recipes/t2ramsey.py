@@ -137,7 +137,6 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),

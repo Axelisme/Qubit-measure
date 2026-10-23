@@ -138,13 +138,14 @@ receives their catalogs by injection and never imports the user package.
 
 ## Figure presentation
 
-Run、Analysis、Post-analysis 與 Data 的具名圖預覽，四張以內在同一頁平鋪，
+Run、Analysis、Post-analysis、Workflow 與 Data 的具名圖預覽，四張以內在同一頁平鋪，
 超過四張時每頁最多四張。上一頁／下一頁按鈕與 `i / N` 顯示目前頁次。
 換頁會將該頁第一張設為「目前圖」，點選 canvas tile 會改選該張。
-RPC screenshot 與 `get_current_figure_for_pane` 讀取這張原生 Figure。
+Run／Analysis／Post-analysis 的 RPC screenshot 與 `get_current_figure_for_pane`
+讀取這張原生 Figure。Workflow 的 `get_current_figure()` 提供同樣的唯讀查詢。
 同一 FigureCollection 重送時保留頁次與目前圖，清空時隱藏分頁列。
 Data 預覽只保存圖名與 raster cache，分頁不移動原始 canvas。
-Workflow 圖形區沿用原有選單，不使用這組分頁列。
+Workflow 共用這組平鋪與分頁列，不顯示圖名下拉選單。
 
 ## Workflow hosting
 
@@ -196,9 +197,10 @@ its original cause and fails after worker cleanup. Only terminal owner delivery
 settles the operation and releases RUN.
 The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
 same-host operation Plots and finishes before returning or being discarded.
-`WorkflowFigures` groups workflow figures and the current operation in its
-selector. Pane and MCP read `WorkflowPlots.figures()`: workflow names stay
-unchanged and operation names are `operation/<name>`. Workflow registration
+`WorkflowFigures` tiles workflow figures and the current operation together,
+with up to four figures per page and page controls for larger sets.
+Pane and MCP read `WorkflowPlots.figures()`: workflow names stay unchanged and
+operation names are `operation/<name>`. Workflow registration
 rejects that prefix. A new attempt releases and replaces the whole operation
 group. Terminal runs retain the latest group; replacement Start and close
 release both groups without destroying retained Figures.

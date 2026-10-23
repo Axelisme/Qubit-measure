@@ -18,7 +18,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -39,6 +39,7 @@ from zcu_tools.gui.remote.rpc_endpoint import (
     ClientLink,
     ControlOptions,
     NdjsonRpcEndpoint,
+    ReplyDelivery,
 )
 from zcu_tools.gui.remote.session_discovery import clear_session, write_session
 from zcu_tools.gui.remote.wire import Request
@@ -71,6 +72,16 @@ class RemoteAppSpec:
     """Domain event keys mapped to lazy payload projections; None drops an event."""
     wire_event_name: Callable[[Any], str]
     """Map the same domain event keys to their subscribed wire names."""
+    reply_continuations: Mapping[str, Callable[[ReplyDelivery], None]] = field(
+        default_factory=dict
+    )
+    """Successful method names mapped to owner-thread terminal-reply actions.
+
+    DELIVERED reports a complete success frame sent to the OS, not peer ack.
+    FAILED reports encoding/enqueue/send/close failure. Both outcomes post the
+    action after handler acceptance; handler rejection does not run an action.
+    Actions must not assume that FAILED rolls back an accepted command.
+    """
 
 
 def _store_expected_error(
@@ -157,6 +168,7 @@ class RemoteControlServiceBase:
         self._opts = opts
         self._wire_version = app.wire_version
         self._method_registry = app.method_registry
+        self._reply_continuations = app.reply_continuations
         self._event_serializers = app.event_serializers
         self._wire_event_name = app.wire_event_name
         self._owner_scheduler = owner_scheduler
@@ -548,7 +560,15 @@ class RemoteControlServiceBase:
         result = holder["result"]
         assert isinstance(result, dict), f"handler {method!r} returned non-dict result"
         self._after_success(ctx, method, params, result)
-        self._endpoint.reply_ok(link, rid=rid, result=result)
+        continuation = self._reply_continuations.get(method)
+        if continuation is None:
+            self._endpoint.reply_ok(link, rid=rid, result=result)
+        else:
+
+            def completed(outcome: ReplyDelivery) -> None:
+                self._owner_scheduler.post(lambda: continuation(outcome))
+
+            self._endpoint.reply_ok(link, rid=rid, result=result, on_complete=completed)
 
     # ------------------------------------------------------------------
     # EventBus integration (subscribe on owner thread; push via broadcast)

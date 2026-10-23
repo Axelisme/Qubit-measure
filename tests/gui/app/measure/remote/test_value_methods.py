@@ -57,7 +57,7 @@ def test_value_read_returns_info_and_resolved_value() -> None:
     }
 
 
-def test_value_read_missing_source_is_invalid_params() -> None:
+def test_value_read_missing_source_has_structured_reason_and_path() -> None:
     ctrl = MagicMock()
     ctrl.read_value_source.side_effect = MissingValue("ghost", "missing")
 
@@ -65,6 +65,8 @@ def test_value_read_missing_source_is_invalid_params() -> None:
         _dispatch(ctrl, "value.read", {"key": "ghost"})
 
     assert exc.value.code is ErrorCode.INVALID_PARAMS
+    assert exc.value.reason == "unregistered_source"
+    assert exc.value.data == {"path": "ghost"}
 
 
 def test_value_read_type_mismatch_is_invalid_params() -> None:
