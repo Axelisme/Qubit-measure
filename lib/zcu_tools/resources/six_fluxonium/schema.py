@@ -1,4 +1,4 @@
-"""Six independent circuits sharing one live DC current source."""
+"""Six independent circuits with local DC currents and one shared coil."""
 
 from typing import Literal, Self
 
@@ -13,14 +13,15 @@ from zcu_tools.resources.single_fluxonium.schema import (
 )
 
 
-class GlobalDCSource(Values):
-    """name: flux_bias; unit: A. limits: increasing inclusive bounds in A.
+class CurrentSource(Values):
+    """name: addressed driver name; unit: A. limits: inclusive bounds in A.
 
-    initial: startup current within limits. ramp_step: positive A increment.
-    Only one driver is created. Per-qubit flux conversion lives on GlobalBias.
+    initial: startup current within increasing limits. ramp_step: positive A
+    increment. SixFluxoniumSettings requires coil_bias or the matching Qn_bias.
+    Per-qubit local and coil conversion lives on CircuitBias.
     """
 
-    name: Literal["flux_bias"]
+    name: Name
     unit: Literal["A"]
     limits: tuple[Finite, Finite]
     initial: Finite
@@ -35,22 +36,35 @@ class GlobalDCSource(Values):
         return self
 
 
-class GlobalBias(Values):
-    """offset_phi0: reduced-flux offset; flux_per_unit: signed finite Phi0/A.
+class CircuitBias(Values):
+    """source: this qubit's local current driver, Qn_bias, in A.
 
-    This qubit's flux equals offset_phi0 + flux_per_unit * live global current.
-    No independent source or pulsed flux input is defined.
+    offset/period: local zero-flux current and signed nonzero current per Phi0,
+    both in A. coil_offset/coil_period: corresponding coil calibration in A.
+    Reduced flux is (I_local - offset)/period + (I_coil - coil_offset)/coil_period.
+    Each driver affects only its circuit, except coil_bias, which affects all six.
+    There is no pulsed flux input or local-line crosstalk.
     """
 
-    offset_phi0: Finite
-    flux_per_unit: Finite
+    source: CurrentSource
+    offset: Finite
+    period: Finite
+    coil_offset: Finite
+    coil_period: Finite
+
+    @field_validator("period", "coil_period")
+    @classmethod
+    def _nonzero(cls, value: float) -> float:
+        if value == 0:
+            raise ValueError("must be nonzero")
+        return value
 
 
 class SixFluxoniumQubit(Values):
-    """One circuit's material without a local DC driver or fast-flux route.
+    """One circuit's material with local and coil DC inputs, no fast-flux route.
 
     format/version: single-fluxonium, strict integer 1. chip: circuit and K.
-    dc_bias: this circuit's global-current conversion. drive_line: microwave
+    dc_bias: local driver and both current-to-flux calibrations. drive_line: microwave
     calibration. readout: bare cavity, incident-field and ADC calibrations.
     numerics: truncation, solver and seed/pacing choices, as on single settings.
     """
@@ -58,7 +72,7 @@ class SixFluxoniumQubit(Values):
     format: Literal["zcu.single-fluxonium"]
     version: Literal[1]
     chip: Chip
-    dc_bias: GlobalBias
+    dc_bias: CircuitBias
     drive_line: DriveLine
     readout: Readout
     numerics: Numerics
@@ -114,10 +128,10 @@ class SixFluxoniumSettings(Values):
     """Immutable six-independent-fluxonium v1 physical/configuration snapshot.
 
     format: zcu.six-fluxonium; version: strict integer 1. qubits: Q1..Q6 material.
-    dc_source: one shared A driver. mux_gen_ch: integer 0. pulse_gen_ch: integer
+    dc_source: shared coil_bias driver in A. mux_gen_ch: integer 0. pulse_gen_ch: integer
     13; pulse_ro_ch: integer 6, dedicated to single-tone frequency sweeps.
     Q_i requires microwave gen i, mux readout gen 0 and mux ADC i-1. Microwave
-    source names are globally unique and differ from the shared DC source name.
+    source names differ from all seven DC names. Q_i's local source is Q{i}_bias.
     Tones/pulse frequencies select the nearest bare cavity at each point;
     equal-distance routing fails at acquisition. No joint Hilbert space is used.
     Q1's seed selects the environment root stream. The maximum of the six
@@ -131,7 +145,7 @@ class SixFluxoniumSettings(Values):
     version: Literal[1]
     qubits: SixQubits
     numerics: SixFluxoniumNumerics = Field(default_factory=SixFluxoniumNumerics)
-    dc_source: GlobalDCSource
+    dc_source: CurrentSource
     mux_gen_ch: Literal[0]
     pulse_gen_ch: Literal[13]
     pulse_ro_ch: Literal[6]
@@ -147,8 +161,14 @@ class SixFluxoniumSettings(Values):
 
     @model_validator(mode="after")
     def _wiring(self) -> Self:
-        names: set[str] = {self.dc_source.name}
+        if self.dc_source.name != "coil_bias":
+            raise ValueError("dc_source.name: must equal coil_bias")
+        names = {"coil_bias", *(f"Q{i}_bias" for i in range(1, 7))}
         for index, qubit in enumerate(self.qubits.ordered(), 1):
+            if qubit.dc_bias.source.name != f"Q{index}_bias":
+                raise ValueError(
+                    f"qubits.Q{index}.dc_bias.source.name: must equal Q{index}_bias"
+                )
             bindings = (
                 ("drive_line.gen_ch", qubit.drive_line.gen_ch, index),
                 ("readout.drive.gen_ch", qubit.readout.drive.gen_ch, self.mux_gen_ch),

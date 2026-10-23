@@ -16,7 +16,8 @@ def parse_six_fluxonium(document: object) -> SixFluxoniumSettings:
     """Validate decoded six-fluxonium v1 material without I/O or device creation.
 
     Accept a mapping or SixFluxoniumSettings. Require Q1..Q6 physical materials,
-    one global DC source and the fixed channel map on SixFluxoniumSettings.
+    six local DC sources, one shared coil and the fixed channel map on
+    SixFluxoniumSettings.
     Unknown fields, invalid physical values and invalid wiring raise ValueError
     with dotted field diagnostics. The returned snapshot owns its nested values.
     """
