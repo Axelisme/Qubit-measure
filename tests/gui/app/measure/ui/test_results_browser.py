@@ -385,7 +385,7 @@ def test_unresolved_identity_remains_browsable_and_refuses_new_tab(
     ui.click("Open in new analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     assert "old_tag" in feedback and "No load-capable adapter" in feedback
-    assert ui.tabs("saving (1)").captions == ("saving (1)",)
+    assert ui.tabs("saving").captions == ("saving",)
     ui.screenshot(tmp_path / "unknown-identity.png")
 
 
@@ -398,19 +398,24 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
     session, ctrl, window, _tab_id = live_ui
     live_registry.register("alternative", AnalysisSavingAdapter)
     session.save()
+    figures = session.native_data_path.parent / "figures"
+    figures.mkdir()
+    image = QImage(120, 100, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.cyan)
+    assert image.save(str(figures / "saved.png"))
     ctrl.add_view(window)
     window.show()
     qapp.processEvents()
     ui = ComponentDriver(window)
     ui.select_menu("Results ▾", ("Results browser…",))
-    ui.select_list_row("test/saving")
-    ui.select_list_row("original / p")
-    ui.select_list_row("original / " + session.native_data_path.parent.name)
+    for _ in range(3):
+        ui.click(object_name="results.figure.0")
+    assert "test/saving" in ui.observe(object_name="results.details").text
     ui.click("Open in new analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     assert "Multiple load-capable adapters" in feedback
     assert all(name in feedback for name in ("saving", "alternative", "test/saving"))
-    assert ui.tabs("saving (1)").captions == ("saving (1)",)
+    assert ui.tabs("saving").captions == ("saving",)
     ui.screenshot(tmp_path / "ambiguous-identity.png")
 
 
