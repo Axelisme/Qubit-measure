@@ -95,7 +95,8 @@ Lab 新增 `mux_onetone`、`onetone_range_find`、`twotone_flux_dep` 三個工�
 它們分別操作 `mux/onetone`、`onetone/range_find`、`twotone/flux_dep`。
 用這些 adapter 名呼叫 `recipe_guide` 可讀各自的參數、分析與 writeback 說明。
 三者都先 Run，再 Analyze，經問答接受選定候選後才寫入，最後保存。
-Range find 的 `min_separation` 目前沿用 GUI 分析預設，待接 analyze updates。
+Range find 的 `min_separation` 透過同一 tracked Analyze 的 `updates` 傳給 owner。
+它使用 MHz，預設 1 MHz，必須有限且大於零，只影響 dip 選取，不改 acquisition grid。
 
 作者用 `await tab.run()`、`await tab.analyze("primary"|"post", result=T)`、
 `await tab.ask_writeback()` 與 `await session.ask(question)` 串接流程。
@@ -377,6 +378,14 @@ Standalone 與 recipe 使用同一欄位，缺欄時用 5 秒。GUI Post read ha
 Post 結果讀取失敗時，execution 回覆保留同一份 `recovery`；依上方 Runtime 的 snapshot 與 source-bound RPC 步驟讀回。
 這個自動保存是 standalone 工具契約，不適用 recipe 的 `await tab.analyze()`；
 recipe 作者另外明確 `tab.save()`。
+
+`RecipeTab.analyze(stage, result=T, updates=...)` 接受 `Mapping[str, YamlValue]`。
+Key 是 adapter 的具名分析參數，value 使用該欄位的原生單位，不求值 Form Expr 或換算單位。
+省略或空 mapping 保留 owner 參數，明填 null 原樣傳給 owner。
+Owner 在同一個 tracked Primary／Post operation 驗證並套用更新，不先開另一個分析 operation。
+`interactive=True` 仍交付 PendingAnalysis，由 `tab_interact` 的 done 完成原 operation，恢復原 recipe await。
+`answer` 只回答 recipe 明確提出的問題，不控制 picker，也不直接寫回。
+未知參數、型別不符與 owner admission 錯誤直接回報，不重試。
 
 `tab_interact` 不帶 payload 時讀 committed state、commands、info、preview_active 與圖，
 不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。

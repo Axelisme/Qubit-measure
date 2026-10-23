@@ -111,6 +111,11 @@ def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
 
 Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gui.app.measure`。Adapter 從固定 Run capture 讀初始參數，交 FluxPickInputs 與普通數值。Lib 不讀具體 Result 或 ctx_helpers。兩個 adapter 保留各自的 magnitude-only 政策，共用原有 kernel／plugin。
 
+`mux_flux_adapter.MuxFluxPickParams` 以原始 `tone` index 選 participant，不把 acquisition row 重編號。
+`flux_half`／`flux_int` 是可選的有限 native DC 初線值，每個 None 各自沿用該 tone 的 Run capture，缺校準才用 shared picker 初值。
+Recipe 經同一個 Analyze operation 的 typed updates 傳入，不更改 capture 或其他 tone。
+Picker done 保留原始 tone／Q 身分並產生該 Q 的 writeback proposal，不直接接受寫回。
+
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
 range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的
 target、description、field updates 與 role 建立 proposal，保留既有 DPM 校準政策。
