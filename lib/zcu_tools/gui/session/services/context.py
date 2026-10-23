@@ -42,7 +42,6 @@ from zcu_tools.resources.context.library import (
 )
 from zcu_tools.resources.entry import (
     DestinationExistsError,
-    document_value,
     snapshot,
     source_path,
     validate_path_segment,
@@ -63,6 +62,8 @@ from zcu_tools.resources.entry.writeback import (
     WritebackItem,
     WritebackResult,
     apply_writeback,
+    commit_library_updates,
+    commit_parameter_updates,
 )
 
 if TYPE_CHECKING:
@@ -604,13 +605,7 @@ class ContextService:
             if target == parameters.target and self._point is not None
             else entry.use_point(target.point)
         )
-        actual: list[YamlValue] = []
-        with point.edit() as draft:
-            for update in updates:
-                draft.set(update.path, update.value)
-                if update.metadata is not None:
-                    draft.set_meta(update.path, update.metadata)
-                actual.append(document_value(snapshot(draft), update.path))
+        actual = commit_parameter_updates(point, updates)
         document = snapshot(point)
         self._points = tuple(
             replace(info, description=document.general.description or "")
@@ -619,7 +614,7 @@ class ContextService:
             for info in self._points
         )
         if target != parameters.target:
-            return tuple(actual)
+            return actual
         self._publish_write(
             ParameterContext(
                 point=document,
@@ -636,7 +631,7 @@ class ContextService:
             ),
             parameter=True,
         )
-        return tuple(actual)
+        return actual
 
     def set_module(
         self,
@@ -691,20 +686,10 @@ class ContextService:
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
         handle = self._write_library(entry, target, parameters)
-        actual: list[YamlMap] = []
-        with handle.edit() as draft:
-            for update in updates:
-                item = update.item
-                if isinstance(item, ModuleWriteback):
-                    draft.set_module(item.path, item.value, provenance=update.source)
-                    kind = "module"
-                else:
-                    draft.set_waveform(item.path, item.value, provenance=update.source)
-                    kind = "waveform"
-                actual.append(draft.snapshot().entry_value(item.path, kind=kind))
+        actual = commit_library_updates(handle, updates)
         library = handle.snapshot()
         if target != parameters.target:
-            return tuple(actual)
+            return actual
         self._publish_write(
             ParameterContext(
                 point=parameters.document(),
@@ -715,7 +700,7 @@ class ContextService:
             ),
             parameter=False,
         )
-        return tuple(actual)
+        return actual
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange

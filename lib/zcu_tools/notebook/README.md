@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-23
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -34,7 +34,7 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 `SavedRun.accept(parameter=..., module=..., waveform=..., samples=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Samples 是具體元件名到 JSON 欄位 dict；流程只補 run_id、point、at 與 accepted source。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，samples 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
 
-流程先追加一筆 typed accepted 事件，再依 parameter → module → waveform → samples 及各 mapping 的迭代順序逐項提交。項目失敗拋出 `WritebackApplyError`，帶 accepted `event_id`、成功前綴項數 `applied` 與原始 `__cause__`，並停止後項。已成功前項及事件保留，不提供跨項回復、retry 或恢復流程。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
+流程先追加一筆 typed accepted 事件，再依目的地文件分組提交。Parameter 為 point 一組，module 與 waveform 共用 library 一組，samples 逐筆提交。提交順序為 point、library、samples，組內保留各 mapping 的迭代順序。Point 與 library 各使用一次 edit，任一項無效整組不寫，並停止後組。`WritebackApplyError` 保留 accepted `event_id`、已成功組的項目數 `applied`、逐項實際值的 `result.committed` 與原始 `__cause__`。已成功組及事件保留，不提供跨文件回復、retry 或恢復流程。單項 parameter／library setter 仍可獨立使用，accept 的整組提交不逐項呼叫它們。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 
 Caller 明確提供 Notebook 自己的 bindings，RoleView 保留顯式 kind／via 契約。
 GUI 的 `aliases.yaml` 與 Measure alias preset 由 GUI 使用。

@@ -737,13 +737,13 @@ def test_accept_rejects_invalid_input_without_point_writes(
     assert snapshot(point) == before_point
 
 
-def test_accept_schema_failure_keeps_event_and_prior_writes_and_stops(
+def test_accept_schema_failure_keeps_event_and_rolls_back_point_group(
     accept_point: PointView, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
     source = exp.run(SavingCfg())
     saved = exp.save_run(accept_point, source=source)
-    before_source = accept_point.meta("D1.rate")
+    before_point = snapshot(accept_point)
     with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
             parameter={
@@ -759,14 +759,12 @@ def test_accept_schema_failure_keeps_event_and_prior_writes_and_stops(
     assert event.payload.run_id == saved.run_id
     assert event.payload.writes[1].value == "not a number"
     assert caught.value.event_id == event.id
-    assert caught.value.applied == 1
+    assert caught.value.applied == 0
+    assert caught.value.result.committed == ()
     assert isinstance(caught.value.__cause__, ValueError)
     assert "rate" in str(caught.value.__cause__)
     accept_point.refresh()
-    assert accept_point.description == "candidate"
-    assert accept_point.D1.rate == 1000.0
-    assert accept_point.D2.rate == 2000.0
-    assert accept_point.meta("D1.rate") == before_source
+    assert snapshot(accept_point) == before_point
     binding = capture_point_storage(accept_point)
     entry = ResultEntry.open(
         binding.entry_name,
@@ -934,7 +932,7 @@ def test_accept_library_only_is_nonempty(
         assert library.waveform_keys() == ("D1.waveforms.base",)
 
 
-def test_accept_library_failure_keeps_prior_commits_and_stops(
+def test_accept_library_failure_keeps_point_and_rolls_back_library_group(
     accept_point: PointView, tmp_path: Path, ledger: RecordsLedger
 ) -> None:
     exp = experiment()
@@ -965,14 +963,26 @@ def test_accept_library_failure_keeps_prior_commits_and_stops(
         "entry", result_root=tmp_path / "results", database_root=tmp_path / "Database"
     )
     library = entry.module_library("sweet").snapshot()
-    assert library.module_keys() == ("D1.pulses.good",)
+    assert library.module_keys() == ()
     assert caught.value.event_id == ledger.events()[-1].id
-    assert caught.value.applied == 2
+    assert caught.value.applied == 1
+    assert [
+        (item.index, item.path, item.value) for item in caught.value.result.committed
+    ] == [(0, "D1.rate", 1700.0)]
     assert isinstance(caught.value.__cause__, ValueError)
     assert "Wrong module family" in str(caught.value.__cause__)
     assert library.waveform_keys() == ()
-    module_meta = library.meta("D1.pulses.good.gain")
-    assert module_meta is not None and module_meta.source == ledger.events()[-1].id
+    event = ledger.events()[-1]
+    assert event.kind == "accepted"
+    assert isinstance(event.payload, AcceptedPayload)
+    assert event.payload.run_id == saved.run_id
+    assert [item.path for item in event.payload.writes] == [
+        "D1.rate",
+        "D1.pulses.good",
+        "D1.pulses.bad",
+        "D1.pulses.later",
+        "D1.waveforms.later",
+    ]
 
 
 def test_accept_rejects_empty_writeback_before_ledger(

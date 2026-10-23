@@ -187,14 +187,21 @@ def test_owner_submission_receipt_retains_prefix_and_rejects_duplicate_commit(
     completed = TypeAdapter(list[WritebackCompleted]).validate_python(
         receipt["completed"]
     )
-    assert [(row.subtab_id, row.item.id, row.item.value) for row in completed] == [
-        ("analysis", "param-1", 20.0),
-        ("post_analysis", "param-1", 30.0),
-    ]
-    assert [row.item.target for row in completed] == [
-        "general.ext.first",
-        "general.ext.second",
-    ]
+    expected = [("analysis", "param-1", 20.0)]
+    expected_targets = ["general.ext.first"]
+    if not partial:
+        expected.append(("post_analysis", "param-1", 30.0))
+        expected_targets.append("general.ext.second")
+    assert [
+        (row.subtab_id, row.item.id, row.item.value) for row in completed
+    ] == expected
+    assert [row.item.target for row in completed] == expected_targets
+    if partial:
+        assert receipt["error"] == "synthetic setter refused the value"
+        current = gui.read_context()
+        assert not current.lookup("general.ext.second").present
+        assert not current.lookup("general.ext.rejected").present
+        assert not current.lookup("general.ext.later").present
     assert all(row.item.destination["point"] == "point" for row in completed)
     gui.respond(
         "tab.writeback_set",
@@ -323,10 +330,12 @@ def test_captured_owner_writes_in_order_and_retains_confirmed_prefix(
         if mode == "module":
             pulse = current.library.entry_value("Q1.pulses.pi", kind="module")
             assert isinstance(pulse, dict) and pulse["gain"] == 0.2
-        else:
+        elif mode == "parameters":
             assert current.value("general.ext.second") == 30.0
         receipt = receipts[0]
-        assert [item.stage for item in receipt.items] == ["primary", "post"]
+        assert [item.stage for item in receipt.items] == (
+            ["primary"] if mode == "partial" else ["primary", "post"]
+        )
         snapshot = execution.snapshot()
         assert snapshot.status == ("failed" if mode == "partial" else "completed")
         assert receipt.status == ("failed" if mode == "partial" else "completed")
@@ -335,6 +344,7 @@ def test_captured_owner_writes_in_order_and_retains_confirmed_prefix(
                 snapshot.error is not None
                 and "setter refused" in snapshot.error.message
             )
+            assert not current.lookup("general.ext.second").present
             assert not current.lookup("general.ext.rejected").present
             assert not current.lookup("general.ext.later").present
         assert snapshot.details[0].writeback_receipts == (receipt,)

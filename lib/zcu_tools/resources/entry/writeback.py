@@ -279,6 +279,64 @@ class WritebackTarget(Protocol):
     ) -> JsonObject: ...
 
 
+def commit_parameter_updates(
+    point: PointView, updates: tuple[ParameterUpdate, ...]
+) -> tuple[YamlValue, ...]:
+    """Commit ordered updates through an already-bound point's single edit.
+
+    point is the caller's existing PointView; this function does not reopen it
+    or select a GUI target. updates must be nonempty. ParameterUpdate defines
+    concrete paths, YAML values and optional metadata replacement.
+    Return one detached actual value per update in supplied order, captured
+    immediately after its draft validation, only after the whole edit commits.
+    Later updates cannot change earlier receipts. Empty input raises ValueError.
+    Path, schema, metadata, conflict and I/O errors propagate without committing
+    any update in this batch. No GUI publication or accepted event is produced.
+    """
+    if not updates:
+        raise ValueError("parameter updates must be nonempty")
+    actual: list[YamlValue] = []
+    with point.edit() as draft:
+        for update in updates:
+            draft.set(update.path, update.value)
+            if update.metadata is not None:
+                draft.set_meta(update.path, update.metadata)
+            actual.append(document_value(snapshot(draft), update.path))
+    return tuple(actual)
+
+
+def commit_library_updates(
+    library: ModuleLibrary, updates: tuple[LibraryUpdate, ...]
+) -> tuple[YamlMap, ...]:
+    """Commit ordered module/waveform updates through one existing library edit.
+
+    library is the caller's already-bound ModuleLibrary; it is not reopened.
+    updates must be nonempty. LibraryUpdate defines each concrete key, named
+    Spec family and source; the library validates sources against its ledger.
+    Return one detached actual Spec mapping per update in supplied order,
+    captured after that draft setter, only after the whole edit commits.
+    Later updates cannot change earlier receipts. Empty input raises ValueError.
+    Key, family, schema, source, conflict and I/O errors propagate without
+    committing batch updates. The library's edit-time disk cleanup policy still
+    applies; completed cleanup is not rolled back. No GUI publication or
+    accepted event is produced.
+    """
+    if not updates:
+        raise ValueError("library updates must be nonempty")
+    actual: list[YamlMap] = []
+    with library.edit() as draft:
+        for update in updates:
+            item = update.item
+            if isinstance(item, ModuleWriteback):
+                draft.set_module(item.path, item.value, provenance=update.source)
+                kind = "module"
+            else:
+                draft.set_waveform(item.path, item.value, provenance=update.source)
+                kind = "waveform"
+            actual.append(draft.snapshot().entry_value(item.path, kind=kind))
+    return tuple(actual)
+
+
 class PointWritebackTarget:
     """Bind a captured PointView/storage for Notebook or other persistent callers.
 
@@ -305,16 +363,7 @@ class PointWritebackTarget:
         self, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
         """Commit one nonempty point batch under WritebackTarget's batch contract."""
-        if not updates:
-            raise ValueError("parameter updates must be nonempty")
-        actual: list[YamlValue] = []
-        with self._point.edit() as draft:
-            for update in updates:
-                draft.set(update.path, update.value)
-                if update.metadata is not None:
-                    draft.set_meta(update.path, update.metadata)
-                actual.append(document_value(snapshot(draft), update.path))
-        return tuple(actual)
+        return commit_parameter_updates(self._point, updates)
 
     def _library(self) -> ModuleLibrary:
         # Library imports entry provenance; defer to avoid the package cycle.
@@ -349,18 +398,7 @@ class PointWritebackTarget:
         """Commit one nonempty mixed module/waveform batch, or leave it unwritten."""
         if not updates:
             raise ValueError("library updates must be nonempty")
-        actual: list[YamlMap] = []
-        with self._library().edit() as draft:
-            for update in updates:
-                item = update.item
-                if isinstance(item, ModuleWriteback):
-                    draft.set_module(item.path, item.value, provenance=update.source)
-                    kind = "module"
-                else:
-                    draft.set_waveform(item.path, item.value, provenance=update.source)
-                    kind = "waveform"
-                actual.append(draft.snapshot().entry_value(item.path, kind=kind))
-        return tuple(actual)
+        return commit_library_updates(self._library(), updates)
 
     def append_sample(
         self,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import TypeAdapter
-from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot, TabSnapshot
 from zcu_tools.gui.app.measure.writeback import (
@@ -27,25 +27,21 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.entry.writeback import ParameterUpdate
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from ._helpers import dispatch_handler
 
 
 class RejectingContext(ContextService):
-    """A producer opt-in expected failure after a real committed prefix."""
+    """A producer opt-in expected failure of the entire point group."""
 
-    def set_parameter(
-        self,
-        target: ContextTarget,
-        path: str,
-        value: YamlValue,
-        *,
-        metadata: YamlMap | None = None,
-    ) -> YamlValue:
-        if path == "general.ext.rejected":
+    def set_parameters(
+        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+    ) -> tuple[YamlValue, ...]:
+        if any(update.path == "general.ext.rejected" for update in updates):
             raise InvalidInputError("rejected fit", reason_code="fit_rejected")
-        return super().set_parameter(target, path, value, metadata=metadata)
+        return super().set_parameters(target, updates)
 
 
 class WritebackHarness:
@@ -387,6 +383,7 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         experiment_name="test/expected",
     )
     harness = WritebackHarness(context, service, draft)
+    before_description = entry.use_point("a").description
     with pytest.raises(RemoteError) as caught:
         dispatch_handler(
             harness, "tab.writeback_apply", {"tab_id": "tab", "subtab_id": "analysis"}
@@ -399,10 +396,11 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         None,
     )
     assert service.get_all_applied(draft) == {
-        "param-1": True,
+        "param-1": False,
         "param-2": False,
         "param-3": False,
     }
-    assert entry.use_point("a").description == "retained"
+    assert entry.use_point("a").description == before_description
+    assert not context.read_context().lookup("general.ext.rejected").present
     assert not context.read_context().lookup("general.ext.later").present
     assert entry.ledger.events()[-1].kind == "accepted"

@@ -46,12 +46,13 @@ def mux_readout_initial(
     (alias/source faults propagate). With a captured readout, ignore absent/null
     kappas, add 5/(2*pi*min(set kappas)) us (zero if all unset) to its trigger,
     preserve ro_length, and seed length=max(original length, trigger+ro_length).
-    Without a slot, require all group kappas before seeding any of mixer_freq,
-    trig_offset, ro_length or length; otherwise leave all four required and blank.
-    Seed mixer_freq=(min(freq)+max(freq))/2 MHz when all tone frequencies exist,
-    and ro_length=5/(2*pi*min(kappas)) us. Seed trig_offset=max(time_of_fly)+ro_length
-    and length=trig_offset+ro_length only when every resonator.ext.time_of_fly
-    exists. Missing/null frequency or flight time leaves its dependent fields
+    Without a slot, always seed ro_length=1.0 us, independent of kappa.
+    Require all group kappas before seeding mixer_freq, trig_offset or length;
+    otherwise leave those fields required and blank.
+    Seed mixer_freq=(min(freq)+max(freq))/2 MHz when all tone frequencies exist.
+    Seed trig_offset=max(time_of_fly)+5/(2*pi*min(kappas)) us and
+    length=trig_offset+ro_length only when every resonator.ext.time_of_fly exists.
+    Missing/null frequency or flight time leaves its dependent fields
     blank; invalid set values raise ValueError. These are editable candidates,
     not device-confirmed settings; capability checks remain at Run.
     This spectroscopy exception uses a detached slot copy when available and
@@ -116,7 +117,7 @@ def mux_readout_seed_metadata(
                 )
     formulas = {
         "mixer_freq": "(min+max group resonator.freq)/2",
-        "ro_length": "5/(2*pi*min group resonator.kappa)",
+        "ro_length": "Fixed 1.0 us ADC window candidate; independent of group kappa",
         "trig_offset": "max group resonator.ext.time_of_fly + ringup",
         "length": "trig_offset + ro_length",
     }
@@ -178,6 +179,7 @@ def _blank_ringup_timing(
     seeds: dict[str, TemplateSeed] = dict.fromkeys(
         ("mixer_freq", "trig_offset", "ro_length", "length")
     )
+    seeds["ro_length"] = 1.0
     source_values: dict[str, list[float]] = {}
     for field in ("freq", "ext.time_of_fly"):
         values: list[float] = []
@@ -204,14 +206,13 @@ def _blank_ringup_timing(
     if len(kappas) != len(group.resonators):
         return seeds
     wait_us = 5 / (2 * pi * min(kappas))
-    seeds["ro_length"] = wait_us
     frequencies = source_values["freq"]
     if len(frequencies) == len(group.resonators):
         seeds["mixer_freq"] = (min(frequencies) + max(frequencies)) / 2
     flight_times = source_values["ext.time_of_fly"]
     if len(flight_times) == len(group.resonators):
         trigger = max(flight_times) + wait_us
-        seeds.update({"trig_offset": trigger, "length": trigger + wait_us})
+        seeds.update({"trig_offset": trigger, "length": trigger + 1.0})
     return seeds
 
 

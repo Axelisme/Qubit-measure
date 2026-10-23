@@ -44,7 +44,7 @@ Tone label 是可重複的顯示文字，不是 component 名稱，也不改變�
 `mux/onetone_fine` adapter 從 group 的 resonators 產生 readout tones。
 有 readout slot 時以副本保留 scalar 初值，再套用 ringup timing。
 缺 slot 時使用 blank mux 範本，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。
-完整 group 的 kappa 都有效時填入可編輯的 mixer／timing 候選，來源見 [fine guide](mux/onetone_fine/guide.md#無-readout-slot-的候選來源)。
+ADC window 固定填入 1.0 us，完整 group 的 kappa 都有效時再推導其餘 mixer／timing 候選，來源見 [fine guide](mux/onetone_fine/guide.md#無-readout-slot-的候選來源)。
 active_tones=None 量全部，指定非空、唯一的整數 list 則按輸入順序量測原始序號。
 Lab 將 subset 交 program，不改完整 cfg。
 RunRecord 與 native cfg restore 保留完整 readout、labels 及 selection，不以目前表單補歷史資料。
@@ -64,10 +64,11 @@ Gen_ch 取 `$mux.wiring.gen_ch`，各 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`�
 Pulse length 與 ro_length 留空必填，頻率缺失或無效時也留空必填。
 `mux/onetone_fine` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
 Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
-Fine 缺 slot 時仍使用 blank 範本，完整 group 的 kappa 都有效才推導四個候選欄位。
-Mixer 取 tone 頻率最小與最大值中點，ADC window 取五倍 ringup 時間。
-Trigger 取全部 resonators.ext.time_of_fly 最大值加 ringup，pulse 長度取 trigger 加 window。
-任一 kappa 缺值時四欄留空；任一 time_of_fly 缺值時 trigger 與 pulse 長度留空。
+Fine 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
+完整 group 的 kappa 都有效才推導其餘 mixer／timing 候選。Mixer 取 tone 頻率最小與最大值中點。
+Trigger 取全部 resonators.ext.time_of_fly 最大值加五倍 ringup 時間，pulse 長度取 trigger 加 window。
+任一 kappa 缺值時 mixer、trigger 與 pulse 長度留空；任一 time_of_fly 缺值時 trigger 與 pulse 長度留空。
+上述缺值情境仍保留 1.0 us 的 ADC window。
 Readout 欄位說明列來源與未經裝置確認的限制，Run 仍執行 capability 檢查。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
 Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
