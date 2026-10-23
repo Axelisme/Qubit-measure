@@ -50,6 +50,14 @@ def test_clean_reload_does_not_present_a_draft_conflict(conflict_ui) -> None:
     assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
 
 
+def _external_candidate(document: str, original: str) -> str:
+    return {
+        "parameters": original.replace("4300.0", "4700.0"),
+        "library": original.replace("0.1", "0.7"),
+        "aliases": "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n",
+    }[document]
+
+
 def _assert_notice_fits(ui: ComponentDriver, document: str) -> None:
     message = ui.observe(object_name=f"inspect.{document}.sync.message")
     reload = ui.observe(object_name=f"inspect.{document}.sync.reload")
@@ -452,11 +460,7 @@ def test_clean_pages_show_human_pending_and_invalid_source(conflict_ui) -> None:
         ]
     )
     original = path.read_text()
-    changed = {
-        "parameters": original.replace("4300.0", "4700.0"),
-        "library": original.replace("0.1", "0.7"),
-        "aliases": "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n",
-    }[document]
+    changed = _external_candidate(document, original)
     path.write_text(changed)
     source.synchronize_files(admit_reload=False)
     message = ui.observe(object_name=f"inspect.{document}.sync.message")
@@ -517,11 +521,7 @@ def test_source_publications_keep_visible_drafts_until_valid_reload(
         ui.press_key(Qt.Key.Key_Return)
     ui.screenshot(evidence / "01-draft.png")
     original = path.read_text()
-    changed = {
-        "parameters": original.replace("4300.0", "4700.0"),
-        "library": original.replace("0.1", "0.7"),
-        "aliases": "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n",
-    }[document]
+    changed = _external_candidate(document, original)
     path.write_text(changed)
     source.synchronize_files(admit_reload=True)
     assert ui.observe(object_name=f"inspect.{document}.sync.message").visible

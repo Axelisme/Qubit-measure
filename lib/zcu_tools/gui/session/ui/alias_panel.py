@@ -7,6 +7,7 @@ from qtpy.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -120,7 +121,11 @@ class AliasPanel(QWidget):
     # ------------------------------------------------------------------
 
     def is_unsaved(self) -> bool:
-        """Return True while the shown rows differ from those last loaded or applied."""
+        """Return True if draft rows, including live text, differ from loaded/applied.
+
+        Transfer active editor text into the local table draft without closing
+        the editor or writing through control. Run on the owner's Qt thread.
+        """
         return self._draft_rows() != self._base
 
     def apply(self) -> bool:
@@ -220,6 +225,11 @@ class AliasPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _draft_rows(self) -> tuple[AliasRow, ...]:
+        # Qt keeps live text outside the items until Enter or focus loss.
+        # Commit to the local draft only; keep the editor and baseline intact.
+        editor = self._table.focusWidget()
+        if isinstance(editor, QLineEdit) and editor.isVisible():
+            self._table.commitData(editor)
         rows: list[AliasRow] = []
         for index in range(self._table.rowCount()):
             alias = self._table.item(index, 0)

@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import PointFileRevision
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
 class PointFileBanner(QWidget):
@@ -52,6 +53,7 @@ class PointFileBanner(QWidget):
         self._message = QLabel()
         self._message.setObjectName(f"inspect.{document}.sync.message")
         self._message.setWordWrap(True)
+        make_label_selectable(self._message)
         self._message.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
         )
