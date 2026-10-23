@@ -9,7 +9,7 @@
 1. 先完成 lookback，確認 ADC window 與 trigger 能接到 readout。確認 generator、mixer、ADC 通道與功率已獲本次量測授權。能開表單不表示硬體設定安全。
 2. 設定 alias `resonator`。Open／Reset 與 `onetone/freq` linear 使用相同的 readout Template、gain 與 timing 初值。`time_of_fly` 必須可讀。未設 kappa 時只用 time-of-flight；已設 kappa 時再加五個 ringup time。Readout 與 reset 的欄位規則沿用普通 one-tone，不使用 mux generator 或 tone 序號。
 3. 從 New Tab 選 `onetone/range_find`。檢查 generator `gen_ch`、ADC `ro_ch`、mixer、gain、pulse 長度、ADC window 與 trigger。Open／Reset 產生可編輯的 readout 副本，不引用 `$mux` 的 readout 接線。
-4. 展開 Sweep → Freq，填 Start、Stop 與 Expts。初值與 `onetone/freq` linear 相同，仍是所選 resonator 附近的窄窗，須手動擴大。Start／Stop 是 MHz 絕對頻率，不是 mixer offset。讓範圍涵蓋所有預期凹陷，並用足夠點數讓每個凹陷有數個取樣點。這裡只有 linear sampling，不使用 homophasal 校準參數。
+4. 展開 Sweep → Freq。Open／Reset 後 Start／Stop 空白且必填，Expts 初值為 301。填入絕對 MHz 範圍涵蓋所有預期凹陷，不是 mixer offset。用足夠點數讓每個凹陷有數個取樣點。這裡只有 linear sampling，不使用 homophasal 校準參數。
 5. 填寫由低頻到高頻對應的 resonator 名稱。名稱與選中的 dip 依頻率升冪配對。Open／Reset 有 `$mux` 時讀 group resonators。全部成員都有目前 freq 才依 freq 升冪排序，否則保留 group 順序。沒有 `$mux` 則從空列表開始。這個可編輯的列表隨本次 cfg 保存，不影響 acquisition。Run 可留空，Analyze 前須核對名稱與頻率順序。圖形本身不能證明 component 身分。
 6. 設定 Reps、Rounds 與 Relax delay，必要欄位有效後才按 Run。來源修改後須按 Reset 才重新建立初值。Reset 會丟棄目前 draft。
 
@@ -35,7 +35,7 @@ Analyze 以這次 JSON 名單逐項讀取固定 Run／Load capture 的 `<name>.f
 
 Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景，再以一個取樣點的 Gaussian sigma 平滑去背景曲線。候選 prominence 必須超過五倍相鄰差值的穩健雜訊估計，也須超過原始 magnitude 動態範圍的百萬分之一。分析依 prominence 由大到小選取，排除距離太近的候選，直到取得名稱數量。掃描邊緣的最低點不算凹陷。曲線至少需要 11 個不同且有限的頻率點。
 
-上圖顯示原始 magnitude 與直線背景，下圖顯示去背景曲線。每個位置的 legend 顯示名稱、MHz 頻率與 depth，summary 也逐列列出這三項。Depth 是去背景平滑曲線的 prominence，單位 a.u.，不是 linewidth 或擬合誤差。非線性背景、邊緣凹陷或低訊噪比可能影響選點，須看圖判讀。
+分析只顯示一張量測 magnitude 對絕對 MHz 的曲線圖。每個找到的凹陷以紅色星號標在量測曲線上，旁邊標名稱。Legend 顯示名稱、MHz 頻率與 depth，summary 也逐列列出這三項。Depth 是去背景平滑曲線的 prominence，單位 a.u.，不是 linewidth 或擬合誤差。非線性背景、邊緣凹陷或低訊噪比可能影響選點，須看圖判讀。
 
 找到的凹陷少於名稱數量時，整次 Analyze 失敗，訊息列出找到與需要的數量，不產生部分 proposal。先檢查掃描範圍、點數、功率與名稱數量，再重跑或調整分析參數。不要替看不見的凹陷配名。
 
