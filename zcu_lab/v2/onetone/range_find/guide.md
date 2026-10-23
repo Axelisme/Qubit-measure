@@ -52,3 +52,13 @@ Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景，再以�
 Save All 的 native 資料保存本次 cfg、量化頻率與 complex IQ。頻率在記憶體是 MHz，在檔案是 Hz。Load Data 還原該次 cfg 與原始資料，不從目前 Form 或 library 補歷史設定，也不覆寫目前 draft。
 
 Labber 匯出包含絕對頻率與 complex IQ，不是 native Load 的替代來源。同 entry 且具有歷史 point 的 native Load 使用歷史 capture；沒有可用 capture 時仍可純分析，但不提議寫回。
+
+## MCP recipe
+
+呼叫 `onetone_range_find`，必填 `freq:{start,stop}` 與 `n`，端點使用絕對 MHz。
+Recipe 不猜頻率初值。`target` 指定這次 Reset 的 resonator alias，`reuse_tab_id` 可重用 idle matching tab。
+`resonators` 可提供由低頻到高頻的名稱，省略或 null 保留表單初值。
+`reps`、`rounds` 省略或 null 保留表單值。Run 前驗證完整欄位。
+分析沿用 GUI 的 `min_separation` 預設，目前 recipe 不收此參數。分析參數之後可經 analyze updates 設定。
+Run、Analyze 後回覆每個 dip 的 name、freq、depth，以及 `identity_diagnostic`、`writeback_diagnostic`。
+Recipe 詢問 writeback，只接受選定候選，略過不寫入，最後保存 raw data 與分析。
