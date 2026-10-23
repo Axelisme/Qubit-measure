@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-23，mux summaries 與 seed diagnostics
+**Last updated:** 2026-10-24，mux alias participant capture
 
 # Measure domain support
 
@@ -35,6 +35,7 @@ Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
+`captured_mux_participants(ctx, names)` 在 Open／Reset 從同一固定 capture 的 alias owner 解析 `$participants`，包含清單內的 `$` 軟連結。Drive 與 flux Forms 以完整 `$mux.qubits` 排序，onetone 以完整 `$mux.resonators` 排序，把名稱轉成原始索引。缺列、未綁或空清單選全部原始索引。非空清單的未綁元素照常報錯，不 fallback。外群名稱保留為 participants 的普通 invalid draft，讓操作員看到原名稱並改成合法索引；一般整數驗證阻擋 cfg。Alias 改動不影響現有輸入，需 Reset 或重新 Open。MuxGroup 不保存 participants，recipe 只收索引，null 保留捕捉的選取。
 所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Reset 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。

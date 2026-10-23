@@ -8,6 +8,7 @@ from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 from zcu_lab.v2._support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
+    captured_mux_participants,
     mux_readout_initial,
     mux_readout_seed_metadata,
     mux_relax_delay,
@@ -28,7 +29,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     apply to every branch. No native conversion or device access occurs.
     """
     names = captured_mux_names(ctx)
-    participants = list(range(len(names)))
+    participants = captured_mux_participants(ctx, names)
     tones: list[dict[str, FormNode]] = []
     for name in names:
         drive, stop = len_rabi_initial_values(ctx.parameters, qubit=name)

@@ -32,6 +32,13 @@ out-of-range participants block Run and remain editable for correction.
 Selected tones need drives on independent generators, distinct from readout.
 Open/Reset fills selected tones' drive defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
+Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
+Alias list elements may use `$` links. A missing, unbound or empty row selects all
+original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+An out-of-group name stays visible as an invalid Participants draft until corrected.
+Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
 tone still needs valid frequency and ADC identity, even when not selected.

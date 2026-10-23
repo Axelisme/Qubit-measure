@@ -6,6 +6,7 @@ from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 from zcu_lab.v2._support.measure.mux_bindings import require_mux_group
 from zcu_lab.v2._support.measure.mux_forms import (
     captured_mux_names,
+    captured_mux_participants,
     mux_readout_initial,
     mux_readout_seed_metadata,
     mux_tone_initials,
@@ -39,7 +40,7 @@ def make_flux_form[
     inputs and seed capture.
     """
     names = captured_mux_names(ctx)
-    participants = list(range(len(names)))
+    participants = captured_mux_participants(ctx, names)
     group = require_mux_group(ctx.parameters)
     readout = mux_readout_initial(ctx, wait_for_ringup=not twotone)
     tree: dict[str, FormNode] = {

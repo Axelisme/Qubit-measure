@@ -6,6 +6,7 @@ from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 from zcu_lab.v2._support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
+    captured_mux_participants,
     mux_readout_initial,
     mux_readout_seed_metadata,
     mux_tone_initials,
@@ -25,7 +26,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
     """
     # Start each sweep around its qubit calibration, keeping all group positions.
     names = captured_mux_names(ctx)
-    participants = list(range(len(names)))
+    participants = captured_mux_participants(ctx, names)
     tones: list[dict[str, FormNode]] = [
         {
             "name": name,

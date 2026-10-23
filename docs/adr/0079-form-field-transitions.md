@@ -121,7 +121,7 @@ Mux 的 lab cfg 使用完整有序 `tones: list[ToneCfg]`。每個元素的 `nam
 
 使用者於 2026-10-18 裁定：「那設定也不用逐個toggle了，直接[Q1,Q2]這樣就好。」同日授權「可以，之後就交給advisor，我就不直接對話」。顧問據此採具名 list，未採使用者仍不確定的 mapping 傾向。理由是 list 的位置直接保存原始 tone index，不需依賴 mapping 順序或另一張對照表。保存還原及下節契約同樣由顧問代裁，待使用者覆核。
 
-Group 固定到 Reset 是討論中的傾向，尚不把它提升為新增的獨立政策。既有 Form host 仍遵守 [[0065]] 的固定 capture；本設計不引入自動刷新。
+Mux Forms 在 Open／Reset 從同次固定 capture 的 `$participants` 取得工作焦點。Lab 透過 alias owner 解析名稱清單與其中的 `$` 軟連結，再依完整 `$mux.qubits`（drive／flux）或 `$mux.resonators`（onetone）的位置轉成原始索引，保留選取順序。缺列、未綁或空清單選全部索引；非空清單的未綁元素報錯，不 fallback。外群名稱保留在 participants 的普通 invalid draft，以原有整數錯誤阻擋 cfg，操作員可直接修正。MuxGroup 不加欄位，recipe 不做名稱轉換，onetone 的 cfg／Form／recipe 同樣使用 participants。Edit、preview 與 Run 沿用捕捉，修改全域 aliases 後須 Reset 或重新 Open。此政策沿用 [[0065]] 的固定 capture，不引入自動刷新。
 
 ### Remote 與 recipe
 

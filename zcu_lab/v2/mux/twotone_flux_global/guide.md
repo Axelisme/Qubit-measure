@@ -73,6 +73,13 @@ Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
 Set `participants: list[int]`, full `tones`, and `modules` at top level.
 Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
+Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
+and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
+Alias list elements may use `$` links. A missing, unbound or empty row selects all
+original indices in order. An unbound element in a nonempty list rejects Open/Reset.
+An out-of-group name stays visible as an invalid Participants draft until corrected.
+Changing aliases requires Reset or reopening; ordinary participant edits keep tone values.
+
 Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values.
 All readout identities and local flux_dev names stay required. Local driver

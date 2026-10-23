@@ -159,7 +159,7 @@ async def mux_onetone(
         },
         edits=[
             FieldEdit(
-                path=("active_tones",),
+                path=("participants",),
                 value=None if inputs.participants is None else [*inputs.participants],
             )
         ],

@@ -1,5 +1,6 @@
 """Mux group readout slots, qubit identities and shared recovery initial values."""
 
+from collections.abc import Sequence
 from math import isfinite, pi
 
 from zcu_tools.cfg_model import (
@@ -12,6 +13,8 @@ from zcu_tools.cfg_model import (
     TemplateSeed,
 )
 from zcu_tools.gui.form_adapter import FixedElements, FormContext
+from zcu_tools.gui.session.aliases import AliasTable
+from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
 
@@ -24,7 +27,7 @@ READOUT_ELEMENTS = FixedElements(("modules", "readout", "module", "tones"))
 
 def mux_tone_initials(
     tones: list[dict[str, FormNode]],
-    participants: list[int],
+    participants: Sequence[int | str],
     *,
     fields: tuple[str, ...],
 ) -> list[FormNode]:
@@ -42,6 +45,32 @@ def mux_tone_initials(
         }
         for index, tone in enumerate(tones)
     ]
+
+
+def captured_mux_participants(
+    ctx: FormContext, names: Sequence[str]
+) -> list[int | str]:
+    """Seed original indices from this Open/Reset capture's $participants.
+
+    names is the complete captured qubit order for drive/flux Forms, or
+    resonator order for onetone. Resolve scalar/list aliases and $ links through
+    the alias owner. Missing or unbound rows (including []) select every index.
+    Other alias/source faults propagate, including unbound nonempty elements.
+    Preserve unknown names as ordinary invalid drafts so the field shows the
+    name and rejects cfg until corrected. Never refresh sources or edit tones.
+    """
+    if ctx.parameters is None:
+        raise ValueError("Mux participants require a parameter capture")
+    try:
+        value = AliasTable(ctx.parameters.aliases).resolve_value(
+            "participants", ctx.parameters.document()
+        )
+    except RoleResolutionError as error:
+        if error.reason not in ("Unknown alias", "Alias is not bound"):
+            raise
+        return list(range(len(names)))
+    selected = [value] if isinstance(value, str) else value
+    return [names.index(name) if name in names else name for name in selected]
 
 
 def captured_mux_names(ctx: FormContext) -> tuple[str, ...]:

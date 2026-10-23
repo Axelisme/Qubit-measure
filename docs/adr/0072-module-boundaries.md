@@ -122,16 +122,16 @@ Scalar alias `mux=MG12` 已足以讓 adapter 經固定 ParameterContext 讀取 `
 Mux 缺 slot 時用 blank 範本加 group tones；FTF 八張缺 slot 用 blank 範本，rb 保持 Invalid。
 `mux/onetone` 以副本加 group tones 調整 readout，並套用 ringup timing 初值。
 使用者於 2026-10-20 裁定：「不只twotone，應該說除了onetone與readout optimize/mist等本身就在處理readout相關，其他實驗的readout預設值請優先使用ref。」
-Framework 不認得 group/mux 或 resonators，
-也不新增 list alias、group registry、RPC 或保存格式。
+Framework 不認得 group/mux 或 resonators，不新增 group registry、RPC 或保存格式。
+有序 alias 清單由通用 alias owner 解析；lab 在 Open／Reset 才把 `$participants` 名稱轉成原始索引，見 [[0079]]。
 使用者於 2026-10-16 對只用 scalar mux alias 的方案裁定：「B」。
 
 完整 readout 的 tones[i] 綁定 resonators[i]，cfg 不保存 writeback 目標或 group snapshot。
-active_tones=None 量全部；指定非空、唯一且有效的原始 index list，則依輸入順序投影 subset
-給 program。Program 不知道 MG 或 resonators。RunRecord 保存完整 readout 與 selection，
+Lab cfg 的 participants 是非空、唯一且有效的原始 index list，依輸入順序投影 subset
+給 program。底層 program／raw 的 active_tones 介面保持不變。Program 不知道 MG 或 resonators。RunRecord 保存完整 readout 與 selection，
 資料軸保留原始序號，不重新編號。使用者於 2026-10-16 提議：「一個MG component類，內部屬性綁定到R1, R2，gui中預設指定MG，寫回目標也是從MG的綁定取」，並補充「為了能只讀特定幾個R，可以考慮MG外cfg另外提供mask之類的」。對 active_tones 方案裁定：「可以」。
 
-[[0079]] 採用但尚待實作的 lab 表單契約使用完整具名 tones list 與獨立 participants。元素位置是原始 tone index，name 不可編輯；participants 的順序是執行順序，未參與元素同樣驗證。Lab runtime 邊界一次解析名稱到原始 index，再交給既有 program／raw active_tones 接口。這不把 group snapshot 或 writeback 目的地塞進 cfg，也不讓 framework 解讀 group。具體實驗 cfg 與 recipe 接線由 lab 交付。
+[[0079]] 的 lab 表單契約使用完整具名 tones list 與獨立 participants。元素位置是原始 tone index，name 不可編輯；participants 的順序是執行順序。Open／Reset 在 lab 捕捉邊界一次把 alias 名稱轉成原始 index，非 participant drive／sweep 初始化為 None；一般編輯保值。Readout 身分全 tone 必填。Runtime 直接把 indices 交給既有 program／raw active_tones 接口。這不把 group snapshot 或 writeback 目的地塞進 cfg，也不讓 framework 解讀 group。具體實驗 cfg 與 recipe 接線由 lab 交付。
 
 Program cfg 驗證錯誤沿既有宿主 result／Run 診斷定位 `active_tones` 並拒絕 Run，不保證欄位變紅。
 FormState 的 preview／describe 不執行 lowering，也不新增 FormEditor 外部錯誤投影。

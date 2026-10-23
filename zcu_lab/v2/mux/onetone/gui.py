@@ -153,18 +153,14 @@ def _validate_source(source: MuxOnetoneRunResult) -> MuxOnetoneCfg:
         raise ValueError(
             "Mux FIT requires the saved complete cfg; current form is not a substitute"
         )
-    indices = (
-        cfg.active_tones
-        if cfg.active_tones is not None
-        else list(range(len(cfg.modules.readout.tones)))
-    )
+    indices = cfg.participants
     if (
         data.tone_indices.ndim != 1
         or data.tone_indices.dtype.kind not in "iu"
         or not np.array_equal(data.tone_indices, indices)
     ):
         raise ValueError(
-            "tone_indices must match saved cfg active_tones in original-index column order"
+            "tone_indices must match saved cfg participants in original-index column order"
         )
     if data.dfs.ndim != 1 or data.signals.shape != (data.dfs.size, len(indices)):
         raise ValueError(
