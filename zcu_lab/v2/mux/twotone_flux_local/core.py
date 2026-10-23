@@ -10,17 +10,14 @@ from zcu_lab.v2._support.mux_flux import (
     mux_flux_spec,
     run_flux_scan,
 )
-from zcu_lab.v2.mux.twotone_spectrum.core import MuxFreqCfg
 
 
-class TwotoneFluxLocalCfg(LocalFluxCfg[MuxFreqCfg]):
+class TwotoneFluxLocalCfg(LocalFluxCfg[FluxFrequencyCfg]):
     """Full mux twotone settings and local native-unit DC scan.
 
     Inherited tones retain original readout identity; participants determines
     acquisition order. See LocalFluxCfg for range, unit and settle contracts.
     """
-
-    spectrum: FluxFrequencyCfg
 
 
 class TwotoneFluxLocalExp(PersistableExperiment[MuxFluxResult, TwotoneFluxLocalCfg]):

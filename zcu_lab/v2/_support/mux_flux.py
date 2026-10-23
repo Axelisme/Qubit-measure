@@ -20,11 +20,21 @@ from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import ProgramV2Cfg, SweepCfg
 
 from zcu_lab.v2._support.device import check_flux_unit, set_flux
-from zcu_lab.v2._support.mux_sweep_cfg import ToneRangeCfg, participant_indices
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg, MuxOnetoneExp
+from zcu_lab.v2._support.mux_sweep_cfg import (
+    MuxDriveModuleCfg,
+    MuxToneCfg,
+    ToneRangeCfg,
+    participant_indices,
+)
+from zcu_lab.v2.mux.onetone.core import (
+    MuxOnetoneCfg,
+    MuxOnetoneExp,
+    MuxOnetoneModuleCfg,
+    MuxOnetoneSweepCfg,
+)
 from zcu_lab.v2.mux.twotone_spectrum.core import (
     MuxFreqCfg,
     MuxFreqExp,
@@ -32,20 +42,26 @@ from zcu_lab.v2.mux.twotone_spectrum.core import (
 )
 
 
-class FluxFrequencyCfg(MuxFreqCfg):
-    """Inner spectrum with full fixed identities; outer participants selects Run.
+class FluxFrequencyToneCfg(MuxToneCfg):
+    """One original qubit drive and finite absolute MHz frequency bounds.
 
-    participants retains all names for inner cfg validation and is read-only in
-    the Form. run_flux_scan replaces it only on the detached acquisition copy.
+    Inherited name fixes identity; drive supplies the fixed pulse. sweep.start
+    and sweep.stop are MHz, with the point count in frequency.expts.
     """
 
-    participants: Annotated[
-        list[str],
-        FieldMeta(
-            readonly=True,
-            description="Full inner identity list; use outer participants to select acquisition",
-        ),
-    ]
+    sweep: Annotated[ToneRangeCfg, FieldMeta(unit="MHz")]
+
+
+class FluxFrequencyCfg(ConfigBase):
+    """Twotone drive frequency scan, separate from DC ranges and timing.
+
+    tones contains every original qubit, in readout order, with independent
+    drive pulses and absolute MHz bounds. expts is their shared positive point
+    count. Top-level participants selects acquisition order, not this list.
+    """
+
+    tones: Annotated[list[FluxFrequencyToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(strict=True, gt=0)
 
 
 class FluxIdentityCfg(ConfigBase):
@@ -65,16 +81,24 @@ class FluxLineCfg(FluxIdentityCfg):
     sweep: ToneRangeCfg
 
 
-class MuxFluxCfg[S: (MuxOnetoneCfg, MuxFreqCfg), T: FluxIdentityCfg](ExpCfgModel):
-    """Full spectrum settings, original identities and ordered participants.
+class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
+    ProgramV2Cfg, ExpCfgModel
+):
+    """Flat acquisition settings, original identities and ordered participants.
 
-    spectrum retains the complete readout, not an active subset. tones has one
-    identity per original readout position. participants is a nonempty unique
-    selection in acquisition order. flux_unit is the driver's native unit, with
-    no conversion. settle is the cancellable wait in seconds after all writes.
+    modules contains optional common reset and the full mux readout. frequency
+    is MuxOnetoneSweepCfg(df: SweepCfg in nominal MHz offsets) for onetone, or
+    FluxFrequencyCfg(tones: full named drives/ranges in MHz, expts: int) for
+    twotone. tones has one identity/DC range per original readout position.
+    participants is a nonempty unique selection in acquisition order.
+    Inherited reps/rounds are positive averaging counts; initial_delay and
+    relax_delay are finite nonnegative us. flux_unit is A, V or native, with
+    no conversion. settle is the cancellable wait in seconds after DC writes.
+    Persisted cfg uses these same top-level fields, with no nested spectrum.
     """
 
-    spectrum: S
+    modules: MuxDriveModuleCfg
+    frequency: S
     tones: Annotated[list[T], FieldMeta(element_label="name")]
     participants: list[str]
     flux_unit: Literal["A", "V", "native"] = "A"
@@ -86,21 +110,56 @@ class MuxFluxCfg[S: (MuxOnetoneCfg, MuxFreqCfg), T: FluxIdentityCfg](ExpCfgModel
     def validate_identities(self) -> MuxFluxCfg[S, T]:
         """Reject invalid full identities before projecting participant indices."""
         names = [tone.name for tone in self.tones]
-        if len(names) != len(self.spectrum.modules.readout.tones) or len(
-            set(names)
-        ) != len(names):
+        if len(names) != len(self.modules.readout.tones) or len(set(names)) != len(
+            names
+        ):
             raise ValueError(
                 "tones must name every original readout position exactly once"
             )
         participant_indices(names, self.participants)
-        if isinstance(self.spectrum, MuxFreqCfg) and names != [
-            t.name for t in self.spectrum.tones
+        if isinstance(self.frequency, FluxFrequencyCfg) and names != [
+            t.name for t in self.frequency.tones
         ]:
-            raise ValueError("flux tone names must match the full spectrum tone order")
+            raise ValueError("flux tone names must match the full frequency tone order")
+        self.inner_cfg()
         return self
 
+    def inner_cfg(self) -> MuxOnetoneCfg | MuxFreqCfg:
+        """Build the existing typed inner acquisition cfg without mutating self.
 
-class GlobalFluxCfg[S: (MuxOnetoneCfg, MuxFreqCfg)](MuxFluxCfg[S, FluxIdentityCfg]):
+        Copies references only into validated models; callers must deep-copy
+        before mutation. Inner owners validate modules, drives and timing.
+        Invalid settings raise their validation errors before any DC write.
+        """
+        if isinstance(self.frequency, FluxFrequencyCfg):
+            return MuxFreqCfg(
+                modules=self.modules,
+                tones=list(self.frequency.tones),
+                expts=self.frequency.expts,
+                participants=list(self.participants),
+                reps=self.reps,
+                rounds=self.rounds,
+                initial_delay=self.initial_delay,
+                relax_delay=self.relax_delay,
+            )
+        return MuxOnetoneCfg(
+            modules=MuxOnetoneModuleCfg(
+                reset=self.modules.reset, readout=self.modules.readout
+            ),
+            sweep=self.frequency,
+            active_tones=participant_indices(
+                [tone.name for tone in self.tones], self.participants
+            ),
+            reps=self.reps,
+            rounds=self.rounds,
+            initial_delay=self.initial_delay,
+            relax_delay=self.relax_delay,
+        )
+
+
+class GlobalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
+    MuxFluxCfg[S, FluxIdentityCfg]
+):
     """One global coil source and one finite native-unit flux sweep."""
 
     flux_dev: str = Field(min_length=1)
@@ -116,7 +175,9 @@ class GlobalFluxCfg[S: (MuxOnetoneCfg, MuxFreqCfg)](MuxFluxCfg[S, FluxIdentityCf
         return self
 
 
-class LocalFluxCfg[S: (MuxOnetoneCfg, MuxFreqCfg)](MuxFluxCfg[S, FluxLineCfg]):
+class LocalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
+    MuxFluxCfg[S, FluxLineCfg]
+):
     """Independent local line ranges with one shared positive point count.
 
     Every full tone has a different source, even when it does not participate.
@@ -153,10 +214,10 @@ class MuxFluxResult:
 
 
 def run_flux_scan(
-    cfg: GlobalFluxCfg[MuxOnetoneCfg]
-    | LocalFluxCfg[MuxOnetoneCfg]
-    | GlobalFluxCfg[MuxFreqCfg]
-    | LocalFluxCfg[MuxFreqCfg],
+    cfg: GlobalFluxCfg[MuxOnetoneSweepCfg]
+    | LocalFluxCfg[MuxOnetoneSweepCfg]
+    | GlobalFluxCfg[FluxFrequencyCfg]
+    | LocalFluxCfg[FluxFrequencyCfg],
     *,
     context: RunContext,
 ) -> MuxFluxResult:
@@ -188,7 +249,7 @@ def run_flux_scan(
     for name in devices:
         check_flux_unit(context.devices[name].get_info(), cfg.flux_unit)
 
-    spectrum = cfg.spectrum.model_copy(deep=True)
+    spectrum = cfg.inner_cfg().model_copy(deep=True)
     if isinstance(spectrum, MuxOnetoneCfg):
         spectrum.active_tones = list(indices)
         dfs = np.linspace(

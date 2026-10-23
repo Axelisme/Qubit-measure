@@ -40,14 +40,14 @@ from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2._support.measure.mux_bindings import require_mux_group
 from zcu_lab.v2._support.measure.mux_results import captured_qubits
 from zcu_lab.v2._support.mux_flux import (
+    FluxFrequencyCfg,
     GlobalFluxCfg,
     LocalFluxCfg,
     MuxFluxResult,
     run_flux_scan,
     validate_flux_result,
 )
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
-from zcu_lab.v2.mux.twotone_spectrum.core import MuxFreqCfg
+from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
 
 
 @dataclass
@@ -69,10 +69,10 @@ class MuxFluxPickResult(FluxPickResult):
 
 
 class MuxFluxAdapter[
-    C: GlobalFluxCfg[MuxOnetoneCfg]
-    | LocalFluxCfg[MuxOnetoneCfg]
-    | GlobalFluxCfg[MuxFreqCfg]
-    | LocalFluxCfg[MuxFreqCfg]
+    C: GlobalFluxCfg[MuxOnetoneSweepCfg]
+    | LocalFluxCfg[MuxOnetoneSweepCfg]
+    | GlobalFluxCfg[FluxFrequencyCfg]
+    | LocalFluxCfg[FluxFrequencyCfg]
 ](BaseAdapter[C, RunRecord[C, MuxFluxResult], MuxFluxPickResult, MuxFluxPickParams]):
     """Reuse the single-map picker for one acquired participant at a time.
 

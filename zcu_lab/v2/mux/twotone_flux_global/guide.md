@@ -28,11 +28,11 @@ edits and captures sources again.
   half-to-integer intervals. Any missing half/int leaves both endpoints blank.
   Changing participants later does not recompute these starting values.
 - `settle` is the wait in seconds after all DC writes at each flux point.
-- `spectrum` contains the inner mux settings, averaging and readout.
-  Each `spectrum.tones[i].sweep` has drive-frequency Start/Stop in MHz.
-  `spectrum.expts` is the shared hardware point count. Inner participants
-  displays the fixed full identity list; outer participants supplies the Run
-  selection. All selected drives sweep together in one hardware loop.
+- `modules` contains the optional common reset and full mux readout.
+- `frequency` contains only frequency-scan inputs.
+  Each `frequency.tones[i].sweep` has drive-frequency Start/Stop in MHz.
+  `frequency.expts` is the shared hardware point count. The frequency tone picker retains all original names;
+  top-level participants supplies the Run selection. All selected drives sweep together in one hardware loop.
 
 Readout references the captured group readout slot when present. Without a
 slot, generator and ADCs come from group wiring, mixer from group
@@ -43,6 +43,51 @@ Q's probe template and calibrated frequency/linewidth.
 These initial values are editable candidates, not confirmed calibrations.
 Averaging starts at 1000 reps and 10 rounds. Reduce both and the sweep point
 counts for an offline smoke.
+
+## Starting scenarios
+
+1. **Blank kickstart.** Confirm group wiring, resonator nominal frequencies and
+   the coil source. Missing DC calibration leaves both shared bounds
+   required and blank. Enter deliberate native-unit bounds before Run.
+   Fill each drive-frequency range if qubit frequency or linewidth is absent. Confirm readout mixer, ADC channels, trigger and pulse/ADC durations; a blank readout template does not invent timing.
+2. **Frequencies without a readout slot.** Open or Reset to capture updated
+   frequencies. The readout template takes generator/ADCs from group wiring.
+   Readout timing remains required. Drive bounds derive from each qubit frequency and linewidth only when both exist.
+   Review gain 0.1 and the DC bounds rather than treating seeds as calibrations.
+3. **Captured readout slot.** Open or Reset after assigning the group readout.
+   The form references the stored readout without replacing its timing, gains or tones.
+   Confirm frequency and DC scan bounds. Refresh preserves your edits and the
+   original seed provenance while recapturing validation sources. Reset
+   discards edits and captures sources again.
+4. **Agent recipe.** Use the corresponding mux flux recipe with explicit
+   missing DC bounds and drive-frequency bounds. Its inputs must describe the same full identities,
+   native units and frequency ranges as this form. After acquisition, answer
+   one picker handoff per participant and review the selected proposals.
+   The recipe guide owns invocation and answer payload details.
+
+## Typed cfg and form paths
+
+Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
+Set `participants: list[str]`, full `tones`, and `modules` at top level.
+`modules.reset` is optional; `modules.readout` is the complete numeric mux
+readout. In the form, module selectors expose inline fields below
+`modules.readout.module`; this selector wrapper is not part of Python cfg.
+`frequency.tones[i]` contains the fixed name, numeric drive pulse and `sweep.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
+`tones[i]` contains only its fixed name. `flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
+`flux_unit` is `A`, `V` or `native`; no conversion occurs.
+`reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
+are finite nonnegative microseconds. `settle` is finite nonnegative seconds.
+Every SweepCfg supplies `start`, `stop`, positive `expts` and
+`step = (stop-start)/(expts-1)`; a single point requires equal bounds and zero
+step. Form/recipe range editors use `n` for that point count and derive step.
+
+The form orders participants, tone identities, modules, frequency/DC scans,
+averaging, then timing. Source descriptions distinguish captured settings,
+derived candidates and missing required values. Generated candidates are
+marked uncalibrated; a stored value alone is not evidence of calibration.
+All full-list entries must validate even when not selected for acquisition.
+Generated seeds never imply calibration approval. Inspect source descriptions
+and required-field errors before Run.
 
 ## Run and Stop
 

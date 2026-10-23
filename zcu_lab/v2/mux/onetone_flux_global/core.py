@@ -9,10 +9,10 @@ from zcu_lab.v2._support.mux_flux import (
     mux_flux_spec,
     run_flux_scan,
 )
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
+from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
 
 
-class OnetoneFluxGlobalCfg(GlobalFluxCfg[MuxOnetoneCfg]):
+class OnetoneFluxGlobalCfg(GlobalFluxCfg[MuxOnetoneSweepCfg]):
     """Full mux onetone settings and global native-unit DC scan.
 
     Inherited tones retain original readout identity; participants determines

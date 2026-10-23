@@ -9,16 +9,15 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
-from zcu_lab.v2._support.mux_flux import GlobalFluxCfg, LocalFluxCfg
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
-from zcu_lab.v2.mux.twotone_spectrum.core import MuxFreqCfg
+from zcu_lab.v2._support.mux_flux import FluxFrequencyCfg, GlobalFluxCfg, LocalFluxCfg
+from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
 
 
 def make_flux_form[
-    C: GlobalFluxCfg[MuxOnetoneCfg]
-    | LocalFluxCfg[MuxOnetoneCfg]
-    | GlobalFluxCfg[MuxFreqCfg]
-    | LocalFluxCfg[MuxFreqCfg]
+    C: GlobalFluxCfg[MuxOnetoneSweepCfg]
+    | LocalFluxCfg[MuxOnetoneSweepCfg]
+    | GlobalFluxCfg[FluxFrequencyCfg]
+    | LocalFluxCfg[FluxFrequencyCfg]
 ](
     ctx: FormContext,
     cfg_type: type[C],
@@ -26,20 +25,20 @@ def make_flux_form[
     local: bool,
     twotone: bool,
 ) -> Form[C]:
-    """Build a fixed full identity list and editable native-unit DC scan.
+    """Build a flat form from its Open/Reset capture, with no live source reads.
 
-    ctx is the Open/Reset capture. cfg_type identifies one of the four cores;
-    local/twotone choose its line and inner spectrum policies. All participants
-    start selected. Missing calibration leaves required ranges blank. Local
-    ranges use per-qubit Expr seeds; global uses the union of captured coil
-    int/half intervals only when every selected qubit has both values.
-    Readout defaults reuse mux ringup policy for onetone and slot policy for
-    twotone. Values remain editable, uncalibrated candidates, not safety limits.
+    cfg_type selects the concrete core; local/twotone select its DC/frequency
+    policies. Order is participants, DC identities, modules, frequency/DC
+    scans, averaging, timing. Missing calibration leaves required bounds blank.
+    Local bounds are per-Q Expr seeds; global bounds are a captured union.
+    Refs retain stored settings; generated defaults carry source metadata and
+    remain uncalibrated candidates. Refresh preserves inputs and seed capture.
     """
     names = captured_mux_names(ctx)
     group = require_mux_group(ctx.parameters)
     readout = mux_readout_initial(ctx, wait_for_ringup=not twotone)
-    spectrum: dict[str, FormNode] = {
+    tree: dict[str, FormNode] = {
+        "participants": list(names),
         "modules": {
             "reset": Slot("$mux.module.reset") if twotone else Hidden(),
             "readout": readout,
@@ -47,58 +46,70 @@ def make_flux_form[
         "reps": 1000,
         "rounds": 10,
         "relax_delay": 1.0,
-        "initial_delay": Hidden(),
-    }
-    fixed = [
-        FixedElements(("tones",), "name", ("participants",)),
-        FixedElements(("spectrum", "modules", "readout", "module", "tones")),
-    ]
-    if twotone:
-        spectrum.update(
-            {
-                "tones": [
-                    {
-                        "name": name,
-                        "drive": Template(
-                            "qub_probe",
-                            bindings={"qubit": name},
-                            set={
-                                "freq": Hidden(0.0),
-                                "gain": 0.1,
-                                "waveform.length": 1.0,
-                            },
-                        ),
-                        "sweep": {
-                            "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
-                            "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
-                        },
-                    }
-                    for name in names
-                ],
-                "expts": 301,
-                "participants": list(names),
-            }
-        )
-        fixed.append(
-            FixedElements(("spectrum", "tones"), "name", ("spectrum", "participants"))
-        )
-    else:
-        spectrum.update(
-            {
-                "sweep": {"df": Range.between(-1.0, 1.0, expts=101)},
-                "active_tones": Hidden(None),
-            }
-        )
-    tree: dict[str, FormNode] = {
-        "spectrum": spectrum,
-        "participants": list(names),
+        "initial_delay": 1.0,
         "flux_unit": "A",
         "settle": 0.1,
     }
-    metadata = {
-        ("spectrum", *path): value
-        for path, value in mux_readout_seed_metadata(readout).items()
-    }
+    fixed = [
+        FixedElements(("tones",), "name", ("participants",)),
+        FixedElements(("modules", "readout", "module", "tones")),
+    ]
+    metadata = mux_readout_seed_metadata(readout)
+    for field, description in (
+        ("reps", "Fixed 1000 repetitions per round candidate"),
+        ("rounds", "Fixed 10 software rounds candidate"),
+        ("relax_delay", "Fixed 1.0 us recovery delay candidate"),
+        ("initial_delay", "Fixed 1.0 us initial delay candidate"),
+        ("settle", "Fixed 0.1 s DC settling candidate; confirm for each driver"),
+        ("flux_unit", "Initial A native-unit selection; must match connected drivers"),
+    ):
+        metadata[(field,)] = FieldMeta(
+            description=description, calibration="uncalibrated"
+        )
+    metadata[("modules", "readout")] = FieldMeta(
+        description="Captured $mux.module.readout slot, or readout/mux:blank from group wiring; confirm calibration"
+    )
+    if twotone:
+        tree["frequency"] = {
+            "tones": [
+                {
+                    "name": name,
+                    "drive": Template(
+                        "qub_probe",
+                        bindings={"qubit": name},
+                        set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
+                    ),
+                    "sweep": {
+                        "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
+                        "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
+                    },
+                }
+                for name in names
+            ],
+            "expts": 301,
+        }
+        fixed.append(FixedElements(("frequency", "tones"), "name", ("participants",)))
+        metadata[("frequency", "expts")] = FieldMeta(
+            description="Shared 301-point hardware frequency scan candidate",
+            calibration="uncalibrated",
+        )
+        for index, name in enumerate(names):
+            for endpoint in ("start", "stop"):
+                metadata[("frequency", "tones", index, "sweep", endpoint)] = FieldMeta(
+                    description=f"From captured {name}.freq and {name}.kappa in MHz; missing calibration requires input",
+                    calibration="uncalibrated",
+                )
+            metadata[("frequency", "tones", index, "drive")] = FieldMeta(
+                description=f"qub_probe template bound to {name}; gain 0.1 and length 1.0 us candidates",
+                calibration="uncalibrated",
+            )
+    else:
+        tree["frequency"] = {"df": Range.between(-1.0, 1.0, expts=101)}
+        for endpoint in ("start", "stop", "n"):
+            metadata[("frequency", "df", endpoint)] = FieldMeta(
+                description="Nominal common offset candidate -1..1 MHz, 101 points",
+                calibration="uncalibrated",
+            )
     if local:
         tree["tones"] = [
             {
@@ -112,13 +123,17 @@ def make_flux_form[
             for name in names
         ]
         tree["flux_expts"] = 101
+        metadata[("flux_expts",)] = FieldMeta(
+            description="Shared 101-point zipped local DC scan candidate",
+            calibration="uncalibrated",
+        )
         for index, name in enumerate(names):
             metadata[("tones", index, "flux_dev")] = FieldMeta(
                 description=f"Device name captured from {name}.flux_source"
             )
             for endpoint in ("start", "stop"):
                 metadata[("tones", index, "sweep", endpoint)] = FieldMeta(
-                    description=f"From {name}.flux_int and {name}.flux_half; own DC line",
+                    description=f"From {name}.flux_int and {name}.flux_half; own DC line, required when missing",
                     calibration="uncalibrated",
                 )
     else:
@@ -133,9 +148,9 @@ def make_flux_form[
             [None if value is None else value.half for value in calibrations],
         )
         tree["flux"] = Range.between(start, stop, expts=101)
-        for endpoint in ("start", "stop"):
+        for endpoint in ("start", "stop", "n"):
             metadata[("flux", endpoint)] = FieldMeta(
-                description="Union of captured participant $mux.coil_flux.<Q>.int/half intervals",
+                description="Union of captured participant $mux.coil_flux.<Q>.int/half intervals; shared 101 points, missing calibration requires input",
                 calibration="uncalibrated",
             )
     return Form(
@@ -145,9 +160,14 @@ def make_flux_form[
         field_order=(
             "participants",
             "tones",
-            "flux_expts" if local else "flux",
-            "spectrum",
+            "modules",
+            "frequency",
+            *(("flux_dev", "flux") if not local else ("flux_expts",)),
             "flux_unit",
+            "reps",
+            "rounds",
+            "initial_delay",
+            "relax_delay",
             "settle",
         ),
     ).with_seed_metadata(metadata)
