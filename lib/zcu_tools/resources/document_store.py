@@ -46,12 +46,25 @@ __all__ = (
     "ConflictError",
     "DocumentChange",
     "DocumentStore",
+    "DocumentRevision",
     "DocumentValue",
     "FieldPath",
     "LockTimeoutError",
 )
 
 _SUPPORTED_VERSION = FormatVersion(1, 0)
+
+
+@dataclass(frozen=True)
+class DocumentRevision:
+    """An installed file version, without reading the current disk contents.
+
+    path is the absolute owner file path. revision is its validated raw bytes'
+    SHA-256 hex digest; None denotes an absent optional aliases file only.
+    """
+
+    path: Path
+    revision: str | None
 
 
 @dataclass(frozen=True)
@@ -508,14 +521,14 @@ class DocumentStore[T: BaseModel]:
         survives replace failure. Cleanup never runs on new draft validation.
         Later body/commit failure does not roll back completed read cleanup.
         """
-        self._path = path
+        self._path = path.resolve()
         self._model = model
         self._format = format
         self._supported_version = supported_version
         self._validate = validate
         self._check_dependencies = check_dependencies
         self._read_cleanup = read_cleanup
-        self._lock_path = lock_path or Path(f"{path}.lock")
+        self._lock_path = lock_path or Path(f"{self._path}.lock")
         self._lock_timeout = lock_timeout
         self._lock = FileLock(str(self._lock_path))
         self._editing = False
@@ -525,12 +538,22 @@ class DocumentStore[T: BaseModel]:
         self._validated_key: tuple[int, bytes] | None = None
         self._validated_read: tuple[YamlMap, YamlMap, T] | None = None
         if read_cleanup is None:
-            self._document, _, self._snapshot = self._read()
+            self._document, _, self._snapshot, self._revision = self._read()
         else:
             # FileLock would create a missing parent; opening is not creation.
             self._path.parent.stat()
             with self.locked():
-                self._document, _, self._snapshot = self._read()
+                self._document, _, self._snapshot, self._revision = self._read()
+
+    @property
+    def source_path(self) -> Path:
+        """Return the absolute bound YAML path without reading disk."""
+        return self._path
+
+    @property
+    def document_revision(self) -> DocumentRevision:
+        """Return the installed raw-byte version; failed edits/refreshes retain it."""
+        return DocumentRevision(self.source_path, self._revision)
 
     def snapshot(self) -> T:
         """Return a deep independent copy in working units, without I/O or notice."""
@@ -555,13 +578,16 @@ class DocumentStore[T: BaseModel]:
         self._editing = True
         try:
             with self.locked():
-                _, base_normalized, base = self._read()
+                _, base_normalized, base, _ = self._read()
             draft = base.model_copy(deep=True)
             yield draft
             with self.locked():
-                document, snapshot, paths = self._commit(base_normalized, base, draft)
+                document, snapshot, paths, revision = self._commit(
+                    base_normalized, base, draft
+                )
                 self._snapshot = snapshot
                 self._document = document
+                self._revision = revision
         finally:
             self._editing = False
         if paths:
@@ -569,14 +595,14 @@ class DocumentStore[T: BaseModel]:
 
     def _commit(
         self, base_normalized: YamlMap, base: T, draft: T
-    ) -> tuple[YamlMap, T, tuple[FieldPath, ...]]:
+    ) -> tuple[YamlMap, T, tuple[FieldPath, ...], str]:
         """Merge canonical-path edits, validate, then patch raw nodes atomically."""
         base_values = _projection(base)
         draft_values = _draft_projection(base, draft)
         patches = tuple(_changes(base_values, draft_values))
-        document, normalized, snapshot = self._read()
+        document, normalized, snapshot, revision = self._read()
         if not patches:
-            return document, snapshot, ()
+            return document, snapshot, (), revision
         self._merge_patches(
             normalized, base_normalized, base_values, draft_values, patches
         )
@@ -588,7 +614,12 @@ class DocumentStore[T: BaseModel]:
             _apply(document, path, _patch_node(raw_node, raw_node, value))
         content = self._replace_document(document)
         self._cache_read(content, (document, final_normalized, snapshot))
-        return document, snapshot, tuple(path for path, _ in patches)
+        return (
+            document,
+            snapshot,
+            tuple(path for path, _ in patches),
+            sha256(content).hexdigest(),
+        )
 
     def _replace_document(self, document: YamlMap) -> bytes:
         """Atomically replace via a sibling temporary and return the written bytes."""
@@ -656,7 +687,7 @@ class DocumentStore[T: BaseModel]:
                     proposed=_lookup(draft, prefix),
                 )
 
-    def _read(self) -> tuple[YamlMap, YamlMap, T]:
+    def _read(self) -> tuple[YamlMap, YamlMap, T, str]:
         """Read raw nodes, normalized YAML values and a public typed snapshot.
 
         No lock is acquired here. Edit/refresh callers own their lock scope;
@@ -670,7 +701,8 @@ class DocumentStore[T: BaseModel]:
             if self._check_dependencies is None or self._check_dependencies(
                 self._validated_read[2].model_copy(deep=True)
             ):
-                return deepcopy(self._validated_read)
+                document, normalized, snapshot = deepcopy(self._validated_read)
+                return document, normalized, snapshot, key[1].hex()
             raw = deepcopy(self._validated_read[0])
         else:
             yaml = YAML(typ="rt")
@@ -701,7 +733,7 @@ class DocumentStore[T: BaseModel]:
                 ", ".join(removed),
             )
         self._cache_read(original, (document, normalized, snapshot))
-        return document, normalized, snapshot
+        return document, normalized, snapshot, sha256(original).hexdigest()
 
     def _cache_read(self, content: bytes, values: tuple[YamlMap, YamlMap, T]) -> None:
         """Retain isolated read results only after validation and any write succeed."""
@@ -763,10 +795,11 @@ class DocumentStore[T: BaseModel]:
         observer failures are logged separately from successful publication.
         """
         with self.locked():
-            document, _, snapshot = self._read()
+            document, _, snapshot, revision = self._read()
             paths = tuple(path for path, _ in _changes(self._document, document))
             self._snapshot = snapshot
             self._document = document
+            self._revision = revision
         if paths:
             self._dispatch_change(DocumentChange(self._path, paths, "refresh"))
         return bool(paths)

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         EntryInfo,
         LibraryChange,
         PointCreateRequest,
+        PointFileRevision,
         PointUseRequest,
         SavedPoint,
         WorkingPointInfo,
@@ -194,6 +195,10 @@ class ContextControlPort(Protocol):
         """Return the opened entry predictor directory, or None; no I/O or creation."""
         ...
 
+    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+        """Read installed point file versions, or (); no I/O or refresh."""
+        ...
+
     def get_entry_info(self) -> EntryInfo | None:
         """Read cached entry identity/paths, or None without an entry."""
         ...
@@ -237,14 +242,13 @@ class ContextControlPort(Protocol):
         ...
 
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Atomically submit the complete ordered session-only alias table.
+        """Submit authored rows, saving first when a point is selected.
 
-        Run on the owner thread; no entry or currently resolvable component is
-        required. Invalid syntax, duplicate names and links to self/later rows
-        raise InvalidInputError(alias_invalid) and preserve rows and versions.
+        Run on the owner thread. Before point selection this only sets memory
+        initial rows; a selected point uses apply_alias_rows write-through.
+        Invalid syntax/order and storage failures preserve rows and versions.
         Changed rows publish AliasesChangedPayload after installation; identical
-        submissions publish nothing. Selecting a point replaces memory-only
-        edits with its saved rows. No files, preferences or ledger records are written.
+        submissions publish nothing. No preferences or ledger records are written.
         """
         ...
 
@@ -364,6 +368,10 @@ class ContextControlFacet(ContextControlPort):
     def get_predictors_path(self) -> Path | None:
         """Return the opened entry predictor directory, or None; no I/O or creation."""
         return self._context.get_predictors_path()
+
+    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+        """Read installed point file versions, or (); no I/O or refresh."""
+        return self._context.get_file_revisions()
 
     def get_entry_info(self) -> EntryInfo | None:
         return self._context.get_entry_info()

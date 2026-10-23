@@ -18,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
     EntryInfo,
     LibraryChange,
     PointBindingError,
+    PointFileRevision,
     SavedPoint,
     WorkingPointInfo,
 )
@@ -40,8 +41,10 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibrary,
 )
+from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import (
     DestinationExistsError,
+    document_revision,
     snapshot,
     source_path,
     validate_path_segment,
@@ -166,6 +169,7 @@ class ContextService:
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
         self._aliases = AliasTable(alias_rows)
+        self._aliases_revision: DocumentRevision | None = None
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
 
@@ -199,6 +203,7 @@ class ContextService:
         self._library = None
         self._points = points
         self._aliases = AliasTable()
+        self._aliases_revision = None
         self._publish(None, sources, ContextReadiness.EMPTY, active_label="")
         return info
 
@@ -212,6 +217,28 @@ class ContextService:
         Query performs no I/O and does not select a point.
         """
         return deepcopy(self._source_binding)
+
+    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+        """Return installed parameters/library/aliases versions, or () without a point.
+
+        Paths are absolute. No disk reads or implicit refresh occur. Failed
+        writes and point preparation retain the previous installed versions.
+        """
+        self._owner.assert_owner()
+        if (
+            self._point is None
+            or self._library is None
+            or self._aliases_revision is None
+        ):
+            return ()
+        parameters = document_revision(self._point)
+        library = self._library.document_revision
+        aliases = self._aliases_revision
+        return (
+            PointFileRevision("parameters", parameters.path, parameters.revision),
+            PointFileRevision("library", library.path, library.revision),
+            PointFileRevision("aliases", aliases.path, aliases.revision),
+        )
 
     def get_predictors_path(self) -> Path | None:
         """Return the opened entry predictor directory, or None without an entry.
@@ -257,7 +284,7 @@ class ContextService:
         parameters, library, sources, info, aliases = self._prepare_point(
             entry, request.label, point
         )
-        self._aliases = aliases
+        self._aliases, self._aliases_revision = aliases
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
@@ -305,7 +332,7 @@ class ContextService:
             raise PointBindingError(
                 entry_id=entry.entry_id, label=request.label
             ) from exc
-        self._aliases = aliases
+        self._aliases, self._aliases_revision = aliases
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
@@ -322,6 +349,7 @@ class ContextService:
         self._library = None
         self._points = ()
         self._aliases = AliasTable()
+        self._aliases_revision = None
         self._publish(None, (), ContextReadiness.EMPTY, active_label="")
 
     def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
@@ -431,22 +459,25 @@ class ContextService:
         return self._aliases.rows
 
     def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Install a complete ordered memory-only table on the owner sequence.
+        """Install authored rows, saving first when a point is selected.
 
-        Invalid syntax, duplicate names and non-backward $ links raise
-        InvalidInputError(alias_invalid) without changing rows or versions.
-        Bindings are checked only when read, not against the current point here.
-        A changed table bumps context once and publishes AliasesChangedPayload
-        after installation. An identical explicit submission publishes nothing
-        and writes no file or ledger. No point is required. Selecting a point
-        replaces these memory-only rows with its saved table.
+        Before point selection this sets memory-only initial rows. Otherwise it
+        follows apply_alias_rows' write-through and failure contract. Invalid
+        syntax/order preserves rows and versions. Changed rows publish once
+        after installation; identical rows publish nothing.
         """
         self._owner.assert_owner()
+        if self._point is not None:
+            self.apply_alias_rows(rows)
+            return
+        self._install_alias_rows(AliasTable(rows))
+
+    def _install_alias_rows(self, candidate: AliasTable) -> None:
         previous = self._aliases.rows
-        self._aliases.replace(rows)
-        if self._aliases.rows != previous:
+        self._aliases = candidate
+        if candidate.rows != previous:
             self._state.version.bump("context")
-            self._bus.emit(AliasesChangedPayload(rows=self._aliases.rows))
+            self._bus.emit(AliasesChangedPayload(rows=candidate.rows))
 
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Validate and atomically save authored rows to the selected point.
@@ -458,7 +489,7 @@ class ContextService:
         InvalidInputError(alias_invalid) and storage errors preserve rows,
         versions and the old file; causes propagate unchanged. Identical rows
         still save but publish no event. No ledger or other point-container
-        write occurs; set_alias_rows remains memory-only.
+        write occurs; set_alias_rows uses this path when a point is selected.
         """
         self._owner.assert_owner()
         label = self._state.session_env.active_label
@@ -467,11 +498,12 @@ class ContextService:
                 "Select or create a working point first", reason_code="no_context"
             )
         candidate = AliasTable(rows)
-        self._entry.save_aliases(
+        revision = self._entry.save_aliases(
             EntryAliases(aliases={row.alias: row.value for row in candidate.rows}),
             point=label,
         )
-        self.set_alias_rows(candidate.rows)
+        self._aliases_revision = revision
+        self._install_alias_rows(candidate)
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
@@ -825,7 +857,7 @@ class ContextService:
         ModuleLibrary,
         tuple[ContextSource, ...],
         WorkingPointInfo,
-        AliasTable,
+        tuple[AliasTable, DocumentRevision],
     ]:
         if self._setup is None:
             raise RuntimeError("Opened entry has no setup binding")
@@ -845,13 +877,13 @@ class ContextService:
             ContextSource("module_cfg", library.source_path, None),
         )
         info = WorkingPointInfo(label, document.general.description or "")
-        saved_aliases = entry.load_aliases(point=label)
+        saved_aliases, alias_revision = entry.load_aliases_with_revision(point=label)
         aliases = AliasTable(
             tuple(
                 AliasRow(name, value) for name, value in saved_aliases.aliases.items()
             )
         )
-        return parameters, library, sources, info, aliases
+        return parameters, library, sources, info, (aliases, alias_revision)
 
     def _install_point(
         self,

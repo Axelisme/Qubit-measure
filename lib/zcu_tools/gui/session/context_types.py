@@ -82,6 +82,20 @@ class EntryRequest:
 
 
 @dataclass(frozen=True)
+class PointFileRevision:
+    """One installed selected-point document, without reading disk.
+
+    document is parameters, library or aliases, in that order in file lists.
+    path is the absolute owner file. revision is the installed raw-byte SHA-256
+    hex digest; None is allowed only for a missing aliases file.
+    """
+
+    document: Literal["parameters", "library", "aliases"]
+    path: Path
+    revision: str | None
+
+
+@dataclass(frozen=True)
 class EntryInfo:
     """Opened entry UUID, directory name, and absolute owner-supplied roots.
 
