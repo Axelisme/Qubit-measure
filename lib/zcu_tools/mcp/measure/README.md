@@ -87,7 +87,14 @@ Readonly、ref、selector、來源與 cfg admission 都由 Form owner 檢查，�
 結構或來源拒絕不留下成功前綴。預設保留一般 invalid draft，再拋 invalid_cfg。
 `require_valid=True` 先驗證 detached candidate 與完整 native cfg，無效時不安裝欄位。
 空 batch 可驗證目前 cfg。先前 open、Reset、library 與 inline 操作不回滾。
-七個 mux recipe 在最後一批 participants／overrides 明填 require_valid=True。
+八個 mux recipe 在最後一批 participants／overrides 明填 require_valid=True。
+
+Lab 新增 `mux_onetone`、`onetone_range_find`、`twotone_flux_dep` 三個工具，
+由注入的 `RECIPES` 產生 schema 與註冊，不在 framework 硬編工具表。
+它們分別操作 `mux/onetone`、`onetone/range_find`、`twotone/flux_dep`。
+用這些 adapter 名呼叫 `recipe_guide` 可讀各自的參數、分析與 writeback 說明。
+三者都先 Run，再 Analyze，經問答接受選定候選後才寫入，最後保存。
+Range find 的 `min_separation` 目前沿用 GUI 分析預設，待接 analyze updates。
 
 作者用 `await tab.run()`、`await tab.analyze("primary"|"post", result=T)`、
 `await tab.ask_writeback()` 與 `await session.ask(question)` 串接流程。

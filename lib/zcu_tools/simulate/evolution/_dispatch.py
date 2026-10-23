@@ -34,6 +34,7 @@ from .kernel import (
     SegmentTable,
 )
 from .kernels.floquet import FloquetKernel, FloquetPlan
+from .kernels.floquet_period import MIN_FREQUENCY_GHZ
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_gate import populate_gate_inventory
 from .kernels.multitone_rwa import MultitoneRWAKernel
@@ -84,13 +85,18 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
     ordinary = ~flux
     constant = table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
     single = ordinary & (table.tones == 1)
+    slow = single & constant
+    if table.tone_frequency_ghz.shape[1]:
+        slow &= np.abs(table.tone_frequency_ghz[:, 0]) < MIN_FREQUENCY_GHZ
     adiabatic = geometry.flux_drive & (table.tones == 0)
     return {
         "idle": _CandidateDomain((table.tones == 0) & ~adiabatic, ("t4",)),
         "adiabatic": _CandidateDomain(adiabatic, ("adiabatic_map",)),
         "flux": _CandidateDomain(flux, ("flux_dop853",)),
+        "slow": _CandidateDomain(slow, ("slow_envelope",)),
         "plateau": _CandidateDomain(
-            single & constant, ("dyson", "single_tone_rwa", "floquet_period", "t6")
+            single & constant & ~slow,
+            ("dyson", "single_tone_rwa", "floquet_period", "t6"),
         ),
         "shaped": _CandidateDomain(
             single & ~constant,
@@ -668,7 +674,7 @@ class _Classifier:
     def classify(self) -> Dispatch:
         table = self.table
         rows = np.flatnonzero(self.scope)
-        for name in ("idle", "adiabatic", "flux"):
+        for name in ("idle", "adiabatic", "flux", "slow"):
             domain = self.domains[name]
             self.accept(rows[domain.mask[rows]], domain.families)
         # Group shaped and constant consumers together before any legacy prepare.
