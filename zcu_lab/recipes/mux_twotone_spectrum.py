@@ -1,4 +1,7 @@
-"""Measure mux qubit spectra and review frequency and linewidth writeback."""
+"""Measure mux qubit spectra and review frequency and linewidth writeback.
+
+Recipe n → expts: one shared scan point count for every tone.
+"""
 
 from pydantic import BaseModel, Field
 from zcu_tools.gui.form import FormModel

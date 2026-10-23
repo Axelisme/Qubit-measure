@@ -176,7 +176,7 @@ class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
-    delay: SweepCfg
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:
