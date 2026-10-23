@@ -43,16 +43,11 @@ class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult])
     ) -> OneTonePowerDepRunResult:
         """Acquire a power/frequency map from accepted cfg values.
 
-        cfg is this adapter's validated Form output. Nonpositive earlystop_snr
-        disables stopping on a detached copy; context supplies live SoC/device
-        handles, cancellation and plots. req is unused.
+        cfg is this adapter's validated Form output. earlystop_snr is positive
+        or None to disable stopping. context supplies live SoC/device handles,
+        cancellation and plots. req is unused.
         Return this run's typed cfg and result. Acquisition errors propagate.
         """
         del req
-        cfg = cfg.with_updates(
-            earlystop_snr=cfg.earlystop_snr
-            if cfg.earlystop_snr is not None and cfg.earlystop_snr > 0
-            else None
-        )
         result = PowerDepExp().run(cfg, context=context)
         return RunRecord(cfg=cfg, result=result)

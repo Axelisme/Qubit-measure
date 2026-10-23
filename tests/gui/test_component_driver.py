@@ -640,6 +640,37 @@ def choice_surface(qapp) -> Generator[QWidget]:
     qapp.processEvents()
 
 
+def test_choose_option_interacts_with_active_modal_popup_but_not_blocked_window(
+    choice_surface, qapp, tmp_path: Path
+) -> None:
+    dialog = QDialog(choice_surface)
+    dialog.setWindowTitle("Modal selection")
+    layout = QVBoxLayout(dialog)
+    combo = QComboBox()
+    combo.setObjectName("modal_choice")
+    combo.addItems(["One", "Two", "Three"])
+    layout.addWidget(combo)
+    dismiss = QPushButton("Dismiss")
+    dismiss.clicked.connect(dialog.reject)
+    layout.addWidget(dismiss)
+    dialog.open()
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(choice_surface)
+    try:
+        driver.screenshot(tmp_path / "modal-before.png")
+        driver.choose_option(object_name="choice", value="Two")
+        assert driver.observe(object_name="choice").text == "One"
+        driver.choose_option(object_name="modal_choice", value="Three")
+        driver.screenshot(tmp_path / "modal-after.png")
+        assert driver.observe(object_name="modal_choice").text == "Three"
+        driver.click("Dismiss")
+        driver.choose_option(object_name="choice", value="Two")
+        assert driver.observe(object_name="choice").text == "Two"
+    finally:
+        dialog.reject()
+        dialog.deleteLater()
+
+
 def test_choose_option_and_context_action_use_visible_captions(choice_surface) -> None:
     driver = _user_input.ComponentDriver(choice_surface)
     driver.choose_option("Selection:", "Three")

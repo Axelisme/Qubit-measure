@@ -14,7 +14,11 @@ from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     spectrum_version_key,
 )
-from zcu_tools.gui.expected_error import ExpectedError, InvalidInputError
+from zcu_tools.gui.expected_error import (
+    ExpectedError,
+    FailedPreconditionError,
+    InvalidInputError,
+)
 
 
 def test_load_spectrum_populates_state(spectrum_hdf5):
@@ -70,6 +74,40 @@ def test_load_spectrum_inherits_alignment(spectrum_hdf5):
     assert (entry.flux_half, entry.flux_int, entry.flux_period) == (1.0, 2.0, 2.0)
     # fluxs derived from inherited alignment: (dev - 1.0)/2.0 + 0.5
     np.testing.assert_allclose(entry.raw["fluxs"], (dev_values - 1.0) / 2.0 + 0.5)
+
+
+def test_load_rejects_unaligned_unseeded_inheritance_without_publication(spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    st = FluxDepState()
+    svc = LoadService(st)
+    source = svc.load_spectrum(filepath, spec_type="OneTone")
+    original = st.get_spectrum(source)
+    versions = st.version.snapshot()
+
+    with pytest.raises(FailedPreconditionError):
+        svc.load_spectrum(filepath, spec_type="TwoTone", inherit_from=source)
+
+    assert st.get_spectrum(source) is original
+    assert st.version.snapshot() == versions
+
+
+def test_load_accepts_seeded_unaligned_inheritance(spectrum_hdf5):
+    filepath, *_ = spectrum_hdf5
+    st = FluxDepState()
+    svc = LoadService(st)
+    source = svc.load_spectrum(filepath, spec_type="OneTone")
+    st.set_alignment(
+        source,
+        alignment=AlignmentPublication(flux_half=1.0, flux_int=2.0, flux_period=2.0),
+        new_fluxs=st.get_spectrum(source).raw["dev_values"].copy(),
+        new_point_fluxs=np.empty(0, dtype=np.float64),
+    )
+    seeded = svc.load_spectrum(filepath, spec_type="TwoTone", inherit_from=source)
+    assert not st.get_spectrum(seeded).aligned
+    inherited = svc.load_spectrum(filepath, spec_type="OneTone", inherit_from=seeded)
+    entry = st.get_spectrum(inherited)
+    assert entry.alignment_seeded
+    assert (entry.flux_half, entry.flux_int, entry.flux_period) == (1.0, 2.0, 2.0)
 
 
 def test_load_spectrum_inherit_from_unknown_raises(spectrum_hdf5):

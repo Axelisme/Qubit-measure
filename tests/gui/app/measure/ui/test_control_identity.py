@@ -69,7 +69,7 @@ from zcu_tools.resources.waveform_assets import FormulaRecipe
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
-from tests.gui._user_input import key_click, type_text
+from tests.gui._user_input import ComponentDriver, key_click, type_text
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
@@ -673,17 +673,13 @@ def test_inspect_delete_confirmation_uses_live_library_owner(
     ui.window.open_dialog(DialogName.INSPECT)
     inspect = ui.window.findChild(InspectDialog)
     assert inspect is not None
-    tabs = inspect.findChild(QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(1)
-    tree = next(
-        t
-        for t in inspect.findChildren(QTreeWidget)
-        if t.objectName() != "component_tree"
+    driver = ComponentDriver(inspect)
+    driver.select_tab("Modules")
+    driver.expand_tree(
+        ("waveforms", "Q1", "waveforms", "pulse"), object_name="inspect.library"
     )
-    group = tree.topLevelItem(0)
-    assert group is not None
-    tree.setCurrentItem(group.child(0))
+    assert driver.observe(object_name="inspect.entry.name").text == "Q1.waveforms.pulse"
+    assert driver.observe(text="Delete").enabled
 
     failures: list[str] = []
 
@@ -753,17 +749,14 @@ def test_inspect_dirty_save_and_cancel(control_ui, qapp, decision):
     ui.window.open_dialog(DialogName.INSPECT)
     inspect = ui.window.findChild(InspectDialog)
     assert inspect is not None
-    tree = next(
-        t
-        for t in inspect.findChildren(QTreeWidget)
-        if t.objectName() != "component_tree"
+    driver = ComponentDriver(inspect)
+    driver.select_tab("Modules")
+    driver.expand_tree(
+        ("waveforms", "Q1", "waveforms", "pulse"), object_name="inspect.library"
     )
-    group = tree.topLevelItem(0)
-    assert group is not None
-    tree.setCurrentItem(group.child(0))
-    name = next(
-        e for e in inspect.findChildren(QLineEdit) if e.text() == "Q1.waveforms.pulse"
-    )
+    assert driver.observe(object_name="inspect.entry.name").text == "Q1.waveforms.pulse"
+    name = inspect.findChild(QLineEdit, "inspect.entry.name")
+    assert name is not None
     name.setText("Q1.waveforms.renamed")
 
     def choose(prompt: QMessageBox) -> None:
@@ -859,14 +852,13 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
     ui.window.open_dialog(DialogName.INSPECT)
     inspect = ui.window.findChild(InspectDialog)
     assert inspect is not None
-    tree = next(
-        t
-        for t in inspect.findChildren(QTreeWidget)
-        if t.objectName() != "component_tree"
+    driver = ComponentDriver(inspect)
+    driver.select_tab("Modules")
+    driver.expand_tree(
+        ("waveforms", "Q1", "waveforms", "pulse"), object_name="inspect.library"
     )
-    group = tree.topLevelItem(0)
-    assert group is not None
-    tree.setCurrentItem(group.child(0))
+    assert driver.observe(object_name="inspect.entry.name").text == "Q1.waveforms.pulse"
+    assert driver.observe(text="Delete").enabled
     failures: list[str] = []
 
     def dismiss_failure() -> None:
