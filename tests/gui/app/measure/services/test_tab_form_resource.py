@@ -436,7 +436,7 @@ def test_describe_keeps_fixed_capture_and_revokes_retained_handle() -> None:
     resource.write({("amount",): {"expr": "general.ext.amount"}})
     current = 9.0
     before = resource.input.data
-    notifications: list[int] = []
+    notifications: list[str] = []
     resource.subscribe(lambda: notifications.append("changed"))
     description = resource.describe(("amount",))
     assert description.path == ("amount",)
