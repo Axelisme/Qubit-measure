@@ -4,10 +4,10 @@ import math
 from collections.abc import Sequence
 from typing import Annotated, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg, SweepCfg
+from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
@@ -26,6 +26,21 @@ class MuxDriveModuleCfg(ConfigBase):
     readout: MuxReadoutCfg
 
 
+class ToneRangeCfg(ConfigBase):
+    """Finite sweep endpoints; units are determined by the experiment.
+
+    start and stop use MHz, normalized gain or us according to the leaf.
+    The experiment supplies the shared point count, not individual tones.
+    """
+
+    start: float = Field(
+        allow_inf_nan=False, description="First scan value in experiment units."
+    )
+    stop: float = Field(
+        allow_inf_nan=False, description="Last scan value in experiment units."
+    )
+
+
 class MuxToneCfg(ConfigBase):
     """One named original tone's required drive and independent pulse sweep.
 
@@ -33,24 +48,18 @@ class MuxToneCfg(ConfigBase):
     rejects duplicates. drive is required even when not participating. Its MHz
     frequency, normalized gain, degree phase and us delays must be fixed finite
     values, with nonnegative delays and unswept waveform duration. sweep uses
-    MHz, normalized gain or us according to the leaf, with finite bounds/step.
+    MHz, normalized gain or us according to the leaf, with finite bounds.
     Native pulse/waveform schemas own shape and clock conversion.
     """
 
     name: Annotated[str, FieldMeta(readonly=True)]
     drive: PulseCfg
-    sweep: SweepCfg
+    sweep: ToneRangeCfg
 
     @model_validator(mode="after")
     def validate_tone(self) -> Self:
         """Reject a nonfinite sweep or a nonfinite/swept drive for every element."""
         # Sweeps describe the scan; source pulses must stay fixed until preparation.
-        if not all(
-            math.isfinite(v)
-            for v in (self.sweep.start, self.sweep.stop, self.sweep.step)
-        ):
-            raise ValueError("sweep start/stop/step must be finite")
-
         drive = self.drive
         for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
             value = getattr(drive, name)
@@ -70,14 +79,15 @@ def validate_mux_scan(
     modules: MuxDriveModuleCfg,
     tones: Sequence[MuxToneCfg],
     participants: Sequence[str],
+    expts: int,
 ) -> None:
-    """Validate complete named tones, participants, zip counts and drive channels.
+    """Validate complete named tones, participants, shared count and drive channels.
 
     cfg provides shared positive reps/rounds and finite nonnegative delays in us.
-    tones must match the full numeric readout length. Every sweep must have
-    equal point counts, including nonparticipants; every drive channel must
-    be distinct and different from readout.gen_ch. Raise ValueError with original
-    indices/actual values; never read bindings or change inputs.
+    expts must be a positive integer shared by all tones. tones must match the
+    full numeric readout length and contain finite range endpoints. Every drive
+    channel must be distinct and different from readout.gen_ch. Raise ValueError
+    with original indices/actual values; never read bindings or change inputs.
     """
     # Check shared averaging and readout dimensions before indexing full tones.
     if cfg.reps <= 0 or cfg.rounds <= 0:
@@ -90,14 +100,13 @@ def validate_mux_scan(
         )
     participant_indices([tone.name for tone in tones], participants)
 
-    # All tones share a zip point count but use independent drive channels.
-    count = tones[0].sweep.expts
+    # All tones share one zip point count but use independent drive channels.
+    if type(expts) is not int or expts <= 0:
+        raise ValueError("expts must be a positive integer")
     channels: dict[int, int] = {}
     for i, tone in enumerate(tones):
-        if tone.sweep.expts != count:
-            raise ValueError(
-                f"tones[{i}].sweep.expts={tone.sweep.expts}; expected {count}"
-            )
+        if not all(math.isfinite(v) for v in (tone.sweep.start, tone.sweep.stop)):
+            raise ValueError(f"tones[{i}].sweep start/stop must be finite")
         drive = tone.drive
         if drive.ch == modules.readout.gen_ch or drive.ch in channels:
             raise ValueError(

@@ -54,7 +54,8 @@ before increasing point count or rounds.
 ## Measurement and analysis
 
 Each tone supplies a gain range in normalized units within `[-1, 1]`.
-All tones, including nonparticipants, use the same point count.
+Set each tone's Start and Stop in gain units. Expts follows Tones and sets one
+shared positive point count, including nonparticipants (default 51).
 At each point, the selected drives use their corresponding gain values together.
 The sequence is common reset, simultaneous drives, then mux readout after the
 longest drive. Pulse pre/post delays stay as configured, with early-finishing

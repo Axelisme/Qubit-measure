@@ -56,8 +56,21 @@ All seven recipes accept the same optional inputs:
 | `inline` | A list of `{path}` references to copy for local editing | Keep references |
 | `overrides` | A list of `{path, value}` field edits | Keep Form values |
 
+The three pulse-scan recipes also accept:
+
+| Input | What to supply | If omitted or null |
+| --- | --- | --- |
+| `sweeps` | One `{start, stop}` for every tone in original order, including nonparticipants | Keep all ranges |
+| `n` | A positive integer point count shared by all tones | Keep the common Expts |
+
+Frequency endpoints use MHz, amplitude endpoints normalized gain and length
+endpoints us. Each sweep accepts only start and stop; a per-tone n is rejected
+with those valid fields listed. A sweeps length mismatch fails before the edit
+batch is applied.
+
 The recipe opens or resets the tab, selects library entries, copies references
-inline, then applies participants and overrides in one batch. Each list runs in
+inline, then applies participants, sweeps/n and overrides in one batch.
+Overrides run last and may replace earlier edits. Each list runs in
 the order supplied. A null library key retains and validates the current
 selection. A null override value retains that input. Copy referenced parents
 before their children, outermost first. The final participants/overrides batch
@@ -86,9 +99,10 @@ This example selects a Q3 pulse, copies it inline and changes its gain:
 Use your entry's actual component names, library keys and approved gains.
 `tab.describe_cfg` shows fields, positions, names and available commands.
 `tab.read_elements` shows the complete tone list. Frequency inputs use MHz, time
-inputs use us and gain inputs use native units. Sweep ranges have `start`, `stop`
-and `n` fields. For example, `["tones", 2, "sweep", "n"]` identifies Q3's point
-count.
+inputs use us and gain inputs use native units. Pulse-scan ranges have only
+`start` and `stop`. Use top-level recipe `n`, or the Form override path
+`["expts"]`, for the shared point count. Delay-scan sweep inputs retain their
+own common `start`, `stop` and `n` fields.
 
 An override edits only its path. Set individual range leaves rather than
 expecting a container edit to merge with the previous value. An expression value
@@ -135,8 +149,8 @@ Drive DAC frequencies advance in one shared hardware loop while mux readout
 tones and ADC frequencies stay fixed.
 
 Choose each `tones[i].drive`. Use typed overrides to set MHz bounds at
-`tones[i].sweep.start` and `stop`, and the point count at `tones[i].sweep.n`. Every tone's sweep must have the same point
-count. The scans advance together by point number, not through every combination
+`tones[i].sweep.start` and `stop`, or supply the full `sweeps` list.
+Set shared `n` for all tones. The scans advance together by point number, not through every combination
 of frequencies.
 
 Successful report rows contain `freq` and `fwhm` in MHz with their errors.
@@ -156,8 +170,9 @@ using the [Save and Apply procedure](#save-review-and-apply).
 fits Rabi oscillations to estimate pi and pi/2 gains.
 
 Choose each `tones[i].drive`. Set `tones[i].sweep.start` and `stop` in native
-gain units and the point count at `tones[i].sweep.n`. Copy a referenced drive inline before editing its fields.
-All tone sweeps need equal point counts. Each scan point applies the corresponding
+gain units, or supply the full `sweeps` list and one shared `n`.
+Copy a referenced drive inline before editing its fields.
+Each scan point applies the corresponding
 gain to all participants before mux readout.
 
 Successful report rows contain `pi_gain` and `pi2_gain` with errors.
@@ -178,8 +193,8 @@ oscillations to estimate pi and pi/2 lengths and the Rabi frequency.
 
 Set `tones[i].drive` to a const or flat_top pulse. A flat_top duration must exceed
 both ramps. Arb waveforms are not supported for this scan. Set each
-`tones[i].sweep.start` and `stop` in us, and `tones[i].sweep.n` to the point count.
-All tones need equal point counts.
+`tones[i].sweep.start` and `stop` in us, or supply the full `sweeps` list.
+Set shared `n` for all tones.
 The recipe does not stretch or crop a waveform to make it valid.
 
 Successful report rows contain `pi_len` and `pi2_len` in us and `rabi_f`

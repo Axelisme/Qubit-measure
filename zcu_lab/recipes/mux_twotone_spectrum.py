@@ -15,7 +15,9 @@ from .mux_helpers import (
     MuxSummaryFailure,
     MuxSummaryTone,
     MuxToneReport,
+    ToneRangeInputs,
     mux_overrides,
+    mux_sweep_edits,
 )
 
 
@@ -24,7 +26,7 @@ class MuxTwotoneSpectrumInputs(FormModel):
 
     Optional fields default to null. Null keeps Form inputs, uses global mux
     aliases and opens a new tab. The edit lists run in library, inline,
-    overrides order; participants precedes overrides.
+    sweeps/n, overrides order; participants precedes sweeps/n.
     """
 
     target: str | None = Field(
@@ -43,6 +45,16 @@ class MuxTwotoneSpectrumInputs(FormModel):
     inline: list[MuxInline] | None = Field(
         default=None,
         description="Ordered captured-module copies, ancestors first; null keeps the GUI value.",
+    )
+    sweeps: list[ToneRangeInputs] | None = Field(
+        default=None,
+        description="Start/stop for every tone in original order, including nonparticipants; null keeps ranges. No per-tone n.",
+    )
+    n: int | None = Field(
+        default=None,
+        strict=True,
+        gt=0,
+        description="Positive hardware scan point count shared by all tones; null keeps Expts.",
     )
     overrides: list[FieldEdit] | None = Field(
         default=None,
@@ -130,7 +142,10 @@ async def mux_twotone_spectrum(
     tab. library selects modules, inline copies captures outer-first, then
     participants and overrides edit the Form. Integer paths use full original
     tone positions, not participant rows. Null keeps GUI input. Frequencies use
-    MHz, times us and gains normalized units; sweep counts use n.
+    MHz, times us and gains normalized units. sweeps supplies start/stop for
+    every tone in original order; a length mismatch raises before applying edits.
+    n sets the shared Expts; per-tone n is rejected (only start/stop are accepted).
+    Null keeps ranges/count. overrides runs last and may replace these edits.
     The GUI scans each drive frequency with equal point counts. No range or
     calibration is inferred. All tones must validate, even nonparticipants.
     Analyze Primary, then ask before applying calibration items.
@@ -160,6 +175,7 @@ async def mux_twotone_spectrum(
             else [name for name in inputs.participants],
         )
     ]
+    edits.extend(mux_sweep_edits(tab, inputs.sweeps, inputs.n))
     edits.extend(mux_overrides(inputs.overrides))
     tab.apply(edits, require_valid=True)
 

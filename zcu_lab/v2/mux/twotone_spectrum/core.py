@@ -13,9 +13,9 @@ including nonparticipants, on independent generators distinct from readout.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
-Sweep ranges may differ but every tone, including nonparticipants, must have the
-same point count. Point p pairs each active tone's p-th value, not a Cartesian
-product. One program sweeps drive DAC frequencies in a shared hardware loop.
+Sweep ranges may differ; cfg.expts supplies one positive point count shared by
+all tones, including nonparticipants. Point p pairs each active tone's p-th value,
+not a Cartesian product. One program sweeps drive DAC frequencies in a shared hardware loop.
 Each point executes optional common reset, Join of independent drive pulses,
 then active fixed-frequency mux readout. Branches start together;
 short branches wait for the longest branch at that point. Pre/post delays stay
@@ -77,13 +77,14 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -109,20 +110,23 @@ class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules supplies optional reset and the full readout tone list. tones gives
     each original readout position a unique name, a drive and a MHz sweep.
     participants selects a nonempty, unique list of names in measurement order.
-    All tones need distinct drive generators, separate from readout, and equal
-    sweep point counts, even when not selected. Sweeps advance together by point,
-    not as a Cartesian product. reps/rounds are positive averaging counts;
+    All tones need distinct drive generators, separate from readout.
+    expts is the positive hardware point count shared by all tones.
+    Sweeps advance together by point, not as a Cartesian product. reps/rounds are positive averaging counts;
     initial_delay/relax_delay are finite nonnegative waits in us.
     """
 
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True, gt=0, description="Hardware scan point count shared by all tones."
+    )
     participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
-        """Reject mismatched tones, shared drive channels or unequal sweep counts."""
-        validate_mux_scan(self, self.modules, self.tones, self.participants)
+        """Reject mismatched tones, shared drive channels or an invalid point count."""
+        validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
         return self
 
 
@@ -158,7 +162,7 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqSca
         tone = cfg.tones[index]
         drive = tone.drive
         actual = sweep2array(
-            tone.sweep,
+            make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
             "freq",
             {"soccfg": soccfg, "gen_ch": drive.ch, "mixer_freq": drive.mixer_freq},
         )
@@ -240,7 +244,13 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
             for index in scan.indices:
                 tone = cfg.tones[index]
                 drive = tone.drive.model_copy(deep=True)
-                drive.set_param("freq", sweep2param("point", tone.sweep))
+                drive.set_param(
+                    "freq",
+                    sweep2param(
+                        "point",
+                        make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+                    ),
+                )
                 drives.append(Pulse(f"drive_{index}", drive))
 
             # Reset -> simultaneous drives -> fixed mux readout after the longest drive.

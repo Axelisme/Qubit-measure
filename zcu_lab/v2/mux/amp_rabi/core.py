@@ -13,9 +13,9 @@ including nonparticipants, on independent generators distinct from readout.
 The caller supplies the complete qubit/resonator bindings; numeric cfg validation
 does not resolve component identities.
 
-Sweep ranges may differ but every tone, including nonparticipants, must have the
-same point count. Point p pairs each active tone's p-th value, not a Cartesian
-product. Each point compiles once and executes optional common reset, Join of
+Sweep ranges may differ; cfg.expts supplies one positive point count shared by
+all tones, including nonparticipants. Point p pairs each active tone's p-th value,
+not a Cartesian product. Each point compiles once and executes optional common reset, Join of
 independent drive pulses, then active mux readout. Branches start together;
 short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
@@ -77,13 +77,14 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import PersistableExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -111,19 +112,23 @@ class MuxAmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
     participants is a nonempty, duplicate-free list of those names; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Every drive is required/validated, including nonparticipants, on independent
-    generators distinct from readout. Independent normalized-gain sweeps stay in [-1,1], with equal point counts.
+    generators distinct from readout. Independent normalized-gain ranges stay
+    in [-1,1]; expts is the positive hardware point count shared by all tones.
     Inherited reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True, gt=0, description="Hardware scan point count shared by all tones."
+    )
     participants: list[str]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
         """Reject invalid full length, drive channels, counts or gain ranges."""
-        validate_mux_scan(self, self.modules, self.tones, self.participants)
+        validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
         for index, tone in enumerate(self.tones):
             if max(abs(tone.sweep.start), abs(tone.sweep.stop)) > 1:
                 raise ValueError(f"tones[{index}].sweep gains must be in [-1,1]")
@@ -142,11 +147,13 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
     indices = participant_indices([tone.name for tone in cfg.tones], cfg.participants)
     coordinates = []
-    points = [[] for _ in range(cfg.tones[indices[0]].sweep.expts)]
+    points = [[] for _ in range(cfg.expts)]
     for index in indices:
         tone = cfg.tones[index]
         drive = tone.drive
-        nominal = sweep2array(tone.sweep, "none")
+        nominal = sweep2array(
+            make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts), "none"
+        )
         actual = round_zcu_gain(nominal, soccfg, drive.ch)
         coordinates.append(actual)
         for point, value in enumerate(nominal):
