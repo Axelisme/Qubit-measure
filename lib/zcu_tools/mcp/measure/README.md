@@ -72,6 +72,7 @@ Adapter tab 的 Form 仍由 GUI owner 產生與驗證。
 非空 mapping 只覆寫這次固定 capture，不寫全域 aliases 或 memento。
 Recipe 不自動選重用 tab，也不自動關閉 tab；關閉用 `tab_close`。
 `session.context.read(source_path)` 直接讀 session 層的 `value.read`，不需先開 tab。
+明填 `missing_ok=True` 只把 owner 回覆的 `unregistered_source` 轉成 None；其他來源與連線錯誤照常拋出。
 `tab.read(path)` 讀該 tab 固定 Form capture，回 detached `FormField`。
 Structured value 保留 owner 的 `YamlValue` mapping，作者需要 model 時自行 TypeAdapter 解碼。
 Value_status 區分 available、missing、unavailable；available null 是有效觀察，不證明整份 cfg 有效。
@@ -378,7 +379,7 @@ recipe 作者另外明確 `tab.save()`。
 `tab_interact` 不帶 payload 時讀 committed state、commands、info、preview_active 與圖，
 不改焦點。帶 payload 時 GUI 驗證命令並跟隨 Analysis pane。
 `done` 加入原 operation 的完成，不另建 analysis runner。
-Recipe 的 done 回原 recipe 後續結果或問題，standalone 則完成自己的 execution。
+Recipe 的 done 跳過剛完成 operation 的舊 interactive 快照，回原 recipe 的下一個 handoff 或終局；standalone 則完成自己的 execution。
 純讀與 command 都要求 holder，owner-loop commit 依序生效，沒有自動 retry。
 
 GUI 將 analysis summary 的非有限數字投影為 null，以 invalid 記路徑與原因。
