@@ -1,4 +1,7 @@
-"""Measure spin-echo decay versus total delay to estimate refocused coherence."""
+"""Measure spin-echo decay versus total delay to estimate refocused coherence.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 
@@ -126,7 +129,6 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),

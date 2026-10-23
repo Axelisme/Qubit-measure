@@ -284,6 +284,26 @@ def test_template_kind_reselection_at_each_depth_is_fresh(depth: int) -> None:
     assert current().get(leaf) == (1.7 if depth else expected)
 
 
+@pytest.mark.parametrize("key", ["Q.pulses.gone", "missing.pulses.probe"])
+def test_missing_module_key_reports_captured_library_and_full_key(key: str) -> None:
+    form = Form(ModuleCore, {})
+    env = module_env()
+    state = FormState(
+        FormInput(
+            form.model,
+            {"modules": {"probe": {"kind": "ref", "name": key}}},
+        )
+    )
+
+    result = state.result(env)
+
+    assert isinstance(result, FormErrors)
+    message = result.messages[("modules", "probe", "name")]
+    assert key in message
+    assert "module" in message.lower()
+    assert "captured library" in message.lower()
+
+
 def module_env() -> FormEnv:
     """A fixed library contains a usable persistent pulse."""
     return FormEnv(

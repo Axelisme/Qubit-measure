@@ -170,12 +170,19 @@ class ComponentDriver:
 
     @staticmethod
     def _can_interact(widget: QWidget) -> bool:
+        if not ComponentDriver._on_screen(widget) or not widget.isEnabled():
+            return False
         modal = QApplication.activeModalWidget()
-        return (
-            ComponentDriver._on_screen(widget)
-            and widget.isEnabled()
-            and (modal is None or widget is modal or modal.isAncestorOf(widget))
-        )
+        if modal is None:
+            return True
+        # Qt excludes child windows (including combo popups) from isAncestorOf.
+        # Only controls whose ownership chain reaches the active modal may act.
+        parent = widget
+        while parent is not None:
+            if parent is modal:
+                return True
+            parent = parent.parentWidget()
+        return False
 
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.
@@ -576,7 +583,8 @@ class ComponentDriver:
         or ambiguous widget/option captions raise LookupError; a non-combo target
         raises TypeError. Disabled, hidden, clipped or modal-blocked targets and
         disabled options are no-ops. value is a caption, never userData or index.
-        No target is shown or scrolled into view. Popups close on failure.
+        No target is shown or scrolled into view. If activation does not open an
+        interactable popup, selection stays unchanged. Popups close on failure.
         """
         widget = self._field_control(text, object_name)
         if not isinstance(widget, QComboBox):
@@ -600,6 +608,12 @@ class ComponentDriver:
             view = widget.view()
             if view is None:
                 raise RuntimeError("Combo has no option view")
+            viewport = view.viewport()
+            if viewport is None:
+                raise RuntimeError("Combo option view has no viewport")
+            # The viewport paints the options and covers the view's visible region.
+            if not self._can_interact(viewport):
+                return
             key_click(view, Qt.Key.Key_Home)
             for _ in range(index):
                 key_click(view, Qt.Key.Key_Down)

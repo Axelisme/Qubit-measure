@@ -198,7 +198,7 @@ class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
     modules: MuxDriveModuleCfg
     tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
     participants: list[str]
-    delay: SweepCfg
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2EchoCfg:

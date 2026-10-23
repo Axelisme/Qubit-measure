@@ -1,4 +1,7 @@
-"""Measure excited-state relaxation versus delay to estimate T1."""
+"""Measure excited-state relaxation versus delay to estimate T1.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 
@@ -132,7 +135,6 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     frequency = choose_frequency(
         tab,
         ("modules", "readout", "freq"),
-        session,
         calibration=FrequencyCalibration(
             path="$resonator.freq", required="readout_ref"
         ),
