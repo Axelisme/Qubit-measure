@@ -101,7 +101,8 @@ Run does not restore bias automatically.
 Stop interrupts ramps, settle and acquisition. A flux point is published only
 after the complete inner spectrum returns. Earlier completed points remain;
 the interrupted point and later points stay NaN. Analyze needs at least five
-completed flux points. Device and acquisition failures are errors, not empty
+completed flux points and at least two distinct frequency values.
+Device and acquisition failures are errors, not empty
 successful maps.
 
 ## Analyze and Writeback
@@ -109,6 +110,8 @@ successful maps.
 The Analysis parameter `tone` is an original group tone index, not the
 participant-list position. It initially selects the first acquired participant.
 Choose another acquired index and click Analyze to calibrate that Q.
+The shared picker displays GHz. Acquisition and loaded frequency coordinates
+remain MHz; the adapter converts only the picker input.
 The picker starts in magnitude mode.
 Move the half-flux and integer-flux lines, then click Done. The existing picker
 also provides Swap Lines, Auto Align and Cancel. Period is twice the absolute

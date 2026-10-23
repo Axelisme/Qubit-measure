@@ -279,6 +279,9 @@ def run_flux_scan(
         )
         for i in indices
     ]
+    # Publish planned coordinates with no measured cells before the first point.
+    for row, viewer in enumerate(viewers):
+        viewer.update(flux_values[row], frequencies[row], np.abs(signals[row]))
     for point in range(flux_values.shape[1]):
         if context.scope.stop.is_set():
             break

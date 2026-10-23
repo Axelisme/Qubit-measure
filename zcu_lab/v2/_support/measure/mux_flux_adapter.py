@@ -112,6 +112,7 @@ class MuxFluxAdapter[
         tone must name an acquired original index. Completed flux rows survive
         Stop; unfinished rows are excluded. Historical cfg is required for Q
         identity. Missing capture permits picking but not parameter proposals.
+        Frequencies are converted from core MHz to the shared picker\'s GHz.
         Onetone starts in magnitude, twotone in phase-aware mode. Each analysis
         returns one Q's lines; repeat Analyze for other acquired participants.
         """
@@ -131,7 +132,7 @@ class MuxFluxAdapter[
         inputs = FluxPickInputs(
             data.signals[row, complete],
             data.flux_values[row, complete],
-            data.frequencies[row],
+            data.frequencies[row] * 1e-3,  # The shared picker displays GHz.
         )
         half, integer = self._initial_lines(req, tone)
 
