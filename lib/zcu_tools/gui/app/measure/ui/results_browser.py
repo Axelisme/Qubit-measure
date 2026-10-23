@@ -16,11 +16,12 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class _Focus:
+    entry: str | None = None
     experiment: str | None = None
     point: tuple[str, str | None] | None = None
     run_key: str | None = None
@@ -104,15 +106,17 @@ class ResultsBrowser(QWidget):
         self._focus = _Focus()
         self._history = [self._focus]
         self._history_position = 0
-        self._navigation: list[_Focus] = []
+        self._navigation: list[tuple[QTreeWidgetItem, _Focus]] = []
+        self._navigation_runs: tuple[ResultRun, ...] | None = None
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_filters())
         layout.addLayout(self._build_history())
         splitter = QSplitter()
-        self._list = QListWidget()
-        self._list.setObjectName("results.navigation")
-        self._list.itemClicked.connect(self._navigate)
-        splitter.addWidget(self._list)
+        self._tree = QTreeWidget()
+        self._tree.setObjectName("results.navigation")
+        self._tree.setHeaderHidden(True)
+        self._tree.itemClicked.connect(self._navigate)
+        splitter.addWidget(self._tree)
         self._gallery = ResultsGallery(index)
         splitter.addWidget(self._gallery)
         splitter.addWidget(self._build_details())
@@ -206,9 +210,7 @@ class ResultsBrowser(QWidget):
         self._render_details(self._focused(self._filtered()))
 
     def _change_group(self) -> None:
-        self._focus = _Focus()
-        self._history = [self._focus]
-        self._history_position = 0
+        self._navigation_runs = None
         self._render()
 
     def _visit(self, focus: _Focus) -> None:
@@ -260,7 +262,8 @@ class ResultsBrowser(QWidget):
         return tuple(
             run
             for run in runs
-            if (
+            if (focus.entry is None or run.entry == focus.entry)
+            and (
                 focus.experiment is None
                 or self._experiment_name(run) == focus.experiment
             )
@@ -269,10 +272,11 @@ class ResultsBrowser(QWidget):
         )
 
     def _render(self) -> None:
-        runs = self._focused(self._filtered())
+        filtered = self._filtered()
+        runs = self._focused(filtered)
         self._back.setEnabled(self._history_position > 0)
         self._forward.setEnabled(self._history_position + 1 < len(self._history))
-        title = "All results"
+        title = self._focus.entry or "All results"
         if self._focus.experiment is not None:
             title = self._focus.experiment
         if self._focus.point is not None:
@@ -280,44 +284,73 @@ class ResultsBrowser(QWidget):
         if self._focus.run_key is not None:
             title = self._index.get_run(self._focus.run_key).run_path.name
         self._focus_label.setText(f"{title} · {len(runs)} runs")
-        self._render_navigation(runs)
-        self._gallery.present(runs, self._activate_figure, self._figure_action)
+        self._render_navigation(filtered)
+        self._gallery.present(
+            runs,
+            self._activate_figure,
+            self._figure_action,
+            all_figures=self._focus.run_key is not None,
+        )
         self._render_details(runs)
 
-    def _next_focus(self, run: ResultRun, figure: str | None = None) -> _Focus:
-        focus = self._focus
-        point_first = self._group.currentIndex() == 1
-        if point_first and focus.point is None:
-            return replace(focus, point=(run.entry, run.point))
-        if focus.experiment is None:
-            return replace(focus, experiment=self._experiment_name(run))
-        if focus.point is None:
-            return replace(focus, point=(run.entry, run.point))
-        return replace(focus, run_key=run.key, figure=figure)
+    def _run_branch(self, run: ResultRun) -> tuple[tuple[str, _Focus], ...]:
+        entry = _Focus(entry=run.entry)
+        experiment = self._experiment_name(run)
+        point = (run.entry, run.point)
+        if self._group.currentIndex() == 1:
+            first = replace(entry, point=point)
+            second = replace(first, experiment=experiment)
+            captions = (run.point or "Global / unknown", experiment)
+        else:
+            first = replace(entry, experiment=experiment)
+            second = replace(first, point=point)
+            captions = (experiment, run.point or "Global / unknown")
+        return (
+            (run.entry, entry),
+            (captions[0], first),
+            (captions[1], second),
+            (run.run_path.name, replace(second, run_key=run.key)),
+        )
 
     def _render_navigation(self, runs: tuple[ResultRun, ...]) -> None:
-        self._list.clear()
-        self._navigation.clear()
-        for run in runs:
-            target = self._next_focus(run)
-            if target in self._navigation:
-                continue
-            self._navigation.append(target)
-            if target.run_key is not None:
-                caption = f"{run.entry} / {run.run_path.name}"
-            elif target.point != self._focus.point:
-                caption = _point_label((run.entry, run.point))
-            else:
-                caption = self._experiment_name(run)
-            self._list.addItem(caption)
+        if self._navigation_runs != runs:
+            expanded = {focus for item, focus in self._navigation if item.isExpanded()}
+            self._tree.clear()
+            self._navigation.clear()
+            nodes: dict[_Focus, QTreeWidgetItem] = {}
+            for run in runs:
+                parent = self._tree.invisibleRootItem()
+                for caption, focus in self._run_branch(run):
+                    if focus not in nodes:
+                        item = QTreeWidgetItem(parent, [caption])
+                        item.setExpanded(focus in expanded)
+                        nodes[focus] = item
+                        self._navigation.append((item, focus))
+                    parent = nodes[focus]
+            self._navigation_runs = runs
+        for item, focus in self._navigation:
+            if focus == replace(self._focus, figure=None):
+                self._tree.setCurrentItem(item)
+                break
+        else:
+            self._tree.clearSelection()
 
-    def _navigate(self) -> None:
-        row = self._list.currentRow()
-        if 0 <= row < len(self._navigation):
-            self._visit(self._navigation[row])
+    def _navigate(self, item: QTreeWidgetItem, _column: int) -> None:
+        for node, focus in self._navigation:
+            if node is item:
+                self._visit(focus)
+                break
 
     def _activate_figure(self, run: ResultRun, figure: str) -> None:
-        self._visit(self._next_focus(run, figure))
+        self._visit(
+            _Focus(
+                entry=run.entry,
+                experiment=self._experiment_name(run),
+                point=(run.entry, run.point),
+                run_key=run.key,
+                figure=figure,
+            )
+        )
 
     def _render_details(self, runs: tuple[ResultRun, ...]) -> None:
         run = (

@@ -421,6 +421,36 @@ class ComponentDriver:
                 visit(item, ())
         return rows
 
+    def select_tree_row(self, path: tuple[str, ...], *, object_name: str) -> None:
+        """Click an enabled, visible tree row by its exact column-zero caption path.
+
+        Collapsed ancestors and off-screen rows are not bypassed. Missing or
+        ambiguous visible paths raise LookupError; a non-tree raises TypeError.
+        Hidden, disabled or modal-blocked trees are no-ops.
+        """
+        tree = self._find(None, object_name)
+        if not isinstance(tree, QTreeWidget):
+            raise TypeError(f"{object_name!r} is not a QTreeWidget")
+        if not self._can_interact(tree):
+            return
+        rows = self._visible_tree_items(tree)
+        item = _unique(
+            repr(path),
+            [item for item, captions in rows if captions == path],
+            [repr(captions) for _, captions in rows],
+        )
+        viewport = tree.viewport()
+        assert viewport is not None
+        rect = tree.visualItemRect(item)
+        target = QPoint(rect.left() + 10, rect.center().y())
+        if (
+            item.flags() & Qt.ItemFlag.ItemIsEnabled
+            and not tree.isColumnHidden(0)
+            and viewport.visibleRegion().contains(target)
+        ):
+            mouse_click(viewport, target)
+        QApplication.processEvents()
+
     def expand_tree(self, path: tuple[str, ...], *, object_name: str) -> None:
         """Expand an on-screen QTreeWidget row by clicking it then pressing Right.
 

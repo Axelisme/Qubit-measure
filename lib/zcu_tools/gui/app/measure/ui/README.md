@@ -102,12 +102,17 @@ the existing Load owner reports file/format errors after selection.
 The Results menu retains an independent top-level Results browser. Closing the
 measure window closes this browser. It reads the Controller results query once
 and filters the shared index without changing the opened entry or point.
-Experiment-first and point-first navigation share focus history. Saved PNGs use
-a vertically scrolling gallery, separate from the measure figure pager.
+The navigation tree starts with entries, then experiment → point → run or
+point → experiment → run. Both orders share focus history and keep entries
+isolated even when experiment, point and run names match. Group galleries show
+one representative PNG per run. Selecting a run shows all its saved PNGs in a
+vertically scrolling gallery, separate from the measure figure pager.
+Runs without PNGs remain selectable in the tree.
 The catalog owner resolves historical adapter names and loadable tags once per
 identity. Both grouping orders, the experiment filter and new-tab Load share that
 resolution. Unresolved identities keep their saved figures and refusal reason.
-Left clicks drill down and select the current run figure. Context menus copy
+A left click on a group image opens its run directly and selects that figure.
+Within a run, left clicks select the current figure. Context menus copy
 a member path or image and pin its run in ResultsComparison.
 Cfg values and analysis summaries use relative paths; analysis parameters have
 their own sections. New-tab Load uses the application owner. A missing analysis

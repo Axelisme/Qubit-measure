@@ -72,7 +72,7 @@ def populated_browser(browser_host: MainWindow, tmp_path: Path) -> ComponentDriv
     for entry_name, point, run_id, experiment, day in (
         ("alpha", "p1", "20261021T010000Z-aaaaaa", "mux/readout", "21"),
         ("alpha", "p2", "20261022T010000Z-bbbbbb", "mux/readout", "22"),
-        ("beta", "p3", "20261023T010000Z-cccccc", "sweep", "23"),
+        ("beta", "p1", "20261021T010000Z-aaaaaa", "mux/readout", "23"),
     ):
         entry_path = tmp_path / "result" / entry_name
         entry = (
@@ -161,20 +161,122 @@ def populated_browser(browser_host: MainWindow, tmp_path: Path) -> ComponentDriv
     return ui
 
 
+@pytest.mark.parametrize("point_first", [False, True])
+def test_entry_tree_paths_keep_entries_isolated(
+    populated_browser: ComponentDriver, tmp_path: Path, point_first: bool
+) -> None:
+    ui = populated_browser
+    if point_first:
+        ui.select_combo("Point → experiment", object_name="results.group")
+    assert {
+        row.path
+        for row in ui.visible().tree_rows
+        if row.tree_name == "results.navigation"
+    } == {("alpha",), ("beta",)}
+    for entry, experiment, point, run_id, count in (
+        ("alpha", "mux/readout", "p1", "20261021T010000Z-aaaaaa", 2),
+        ("beta", "mux/readout", "p1", "20261021T010000Z-aaaaaa", 1),
+    ):
+        ui.select_tree_row((entry,), object_name="results.navigation")
+        assert ui.observe(object_name="results.focus").text == f"{entry} · {count} runs"
+        path = (entry,)
+        for caption in (point, experiment) if point_first else (experiment, point):
+            ui.expand_tree(path, object_name="results.navigation")
+            path = (*path, caption)
+        ui.expand_tree(path, object_name="results.navigation")
+        path = (*path, run_id)
+        assert path in {row.path for row in ui.visible().tree_rows}
+        ui.select_tree_row(path, object_name="results.navigation")
+        assert ui.observe(object_name="results.focus").text == f"{run_id} · 1 runs"
+        assert (
+            f"{entry} / {point}" in ui.observe(object_name="results.figure.0").tooltip
+        )
+    ui.screenshot(tmp_path / f"entry-tree-{point_first}.png")
+
+
+def test_group_gallery_has_one_representative_per_run(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    assert {
+        w.object_name
+        for w in ui.visible().widgets
+        if w.object_name.startswith("results.figure.")
+    } == {"results.figure.0", "results.figure.1", "results.figure.2"}
+    assert not ui.scroll_area(object_name="results.gallery").vertical_scrollable
+    ui.screenshot(tmp_path / "group-one-card-per-run.png")
+    for path, count in (
+        (("alpha",), 2),
+        (("alpha", "mux/readout"), 2),
+        (("alpha", "mux/readout", "p1"), 1),
+    ):
+        ui.select_tree_row(path, object_name="results.navigation")
+        assert {
+            w.object_name
+            for w in ui.visible().widgets
+            if w.object_name.startswith("results.figure.")
+        } == {f"results.figure.{i}" for i in range(count)}
+        ui.expand_tree(path, object_name="results.navigation")
+
+
+def test_group_image_click_opens_run_and_current_figure_in_one_step(
+    populated_browser: ComponentDriver, tmp_path: Path
+) -> None:
+    ui = populated_browser
+    ui.click(object_name="results.figure.0")
+    assert (
+        ui.observe(object_name="results.focus").text
+        == "20261021T010000Z-aaaaaa · 1 runs"
+    )
+    assert (
+        ui.observe(object_name="results.current_figure").text
+        == "Current figure: plot-0.png"
+    )
+    assert ui.scroll_area(object_name="results.gallery").vertical_scrollable
+    ui.click(object_name="results.figure.1")
+    assert (
+        ui.observe(object_name="results.current_figure").text
+        == "Current figure: plot-1.png"
+    )
+    ui.click("Back")
+    assert (
+        ui.observe(object_name="results.current_figure").text
+        == "Current figure: plot-0.png"
+    )
+    ui.click("Back")
+    assert ui.observe(object_name="results.focus").text == "All results · 3 runs"
+    ui.click("Forward")
+    assert (
+        ui.observe(object_name="results.focus").text
+        == "20261021T010000Z-aaaaaa · 1 runs"
+    )
+    ui.screenshot(tmp_path / "direct-run-current-figure.png")
+
+
 def test_filters_grouping_and_focus_history(
     populated_browser: ComponentDriver, tmp_path: Path
 ) -> None:
     ui = populated_browser
     assert ui.observe(object_name="results.focus").text == "All results · 3 runs"
-    assert {r.text for r in ui.list_rows()} >= {"mux/readout", "sweep"}
+    ui.expand_tree(("alpha",), object_name="results.navigation")
+    assert ("alpha", "mux/readout") in {r.path for r in ui.visible().tree_rows}
     ui.select_combo("Point → experiment", object_name="results.group")
-    assert {r.text for r in ui.list_rows()} >= {"alpha / p1", "alpha / p2", "beta / p3"}
+    ui.expand_tree(("alpha",), object_name="results.navigation")
+    ui.expand_tree(("beta",), object_name="results.navigation")
+    assert {r.path for r in ui.visible().tree_rows} >= {
+        ("alpha", "p1"),
+        ("alpha", "p2"),
+        ("beta", "p1"),
+    }
+    ui.click("All results")
     ui.enter_text(value="Q2", object_name="results.search")
     ui.select_combo("mux/readout", object_name="results.experiment")
     ui.enter_text(value="2026-10-22", object_name="results.date_from")
     ui.enter_text(value="2026-10-22", object_name="results.date_to")
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
-    ui.select_list_row("alpha / p2")
+    ui.select_tree_row(("alpha", "p2"), object_name="results.navigation")
+    assert ui.observe(object_name="results.focus").text == "alpha / p2 · 1 runs"
+    ui.select_combo("Experiment → point", object_name="results.group")
     assert ui.observe(object_name="results.focus").text == "alpha / p2 · 1 runs"
     ui.click("Back")
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
@@ -190,12 +292,8 @@ def test_figure_drilldown_details_scroll_and_pins(
 ) -> None:
     ui = populated_browser
     assert "results.gallery" in {w.object_name for w in ui.visible().widgets}
+    ui.click(object_name="results.figure.0")
     assert ui.scroll_area(object_name="results.gallery").vertical_scrollable
-    ui.click(object_name="results.figure.0")
-    assert ui.observe(object_name="results.focus").text == "mux/readout · 2 runs"
-    ui.click(object_name="results.figure.0")
-    assert ui.observe(object_name="results.focus").text == "alpha / p1 · 1 runs"
-    ui.click(object_name="results.figure.0")
     assert "20261021T010000Z-aaaaaa" in ui.observe(object_name="results.focus").text
     ui.click(object_name="results.figure.1")
     assert (
@@ -225,6 +323,28 @@ def test_figure_drilldown_details_scroll_and_pins(
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 0"
 
 
+def test_run_without_images_is_reachable_from_tree(
+    browser_host: MainWindow, tmp_path: Path
+) -> None:
+    (tmp_path / "Database" / "bare" / "runs" / "unknown").mkdir(parents=True)
+    ui = ComponentDriver(browser_host)
+    ui.select_menu("Results ▾", ("Results browser…",))
+    path = ("bare",)
+    for caption in ("Unknown experiment", "Global / unknown", "unknown"):
+        ui.expand_tree(path, object_name="results.navigation")
+        path = (*path, caption)
+    ui.select_tree_row(path, object_name="results.navigation")
+    assert ui.observe(object_name="results.focus").text == "unknown · 1 runs"
+    assert "Unregistered" in ui.observe(object_name="results.details").text
+    assert (
+        ui.observe(object_name="results.current_figure").text == "Current figure: none"
+    )
+    assert not any(
+        w.object_name.startswith("results.figure.") for w in ui.visible().widgets
+    )
+    ui.screenshot(tmp_path / "no-images-tree-details.png")
+
+
 def test_figure_only_run_explains_open_refusal(
     browser_host: MainWindow, tmp_path: Path
 ) -> None:
@@ -237,8 +357,7 @@ def test_figure_only_run_explains_open_refusal(
     ui.select_menu("Results ▾", ("Results browser…",))
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
     assert "results.figure.0" in {w.object_name for w in ui.visible().widgets}
-    for _ in range(3):
-        ui.click(object_name="results.figure.0")
+    ui.click(object_name="results.figure.0")
     button = ui.observe("Open in new analysis tab")
     assert not button.enabled
     assert "No data.h5" in button.tooltip
@@ -301,8 +420,7 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
 ) -> None:
     ui, variant = load_browser
     ui.select_menu("Results ▾", ("Results browser…",))
-    for _ in range(3):
-        ui.click(object_name="results.figure.0")
+    ui.click(object_name="results.figure.0")
     ui.click("Open in new analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     if variant == "available":
@@ -364,18 +482,33 @@ def test_adapter_identity_groups_alias_and_tag_and_filters_both(
     identity_browser: ComponentDriver, tmp_path: Path
 ) -> None:
     ui = identity_browser
-    assert {row.text for row in ui.list_rows()} == {"saving", "other", "old_tag"}
-    ui.select_list_row("saving")
+    ui.expand_tree(("original",), object_name="results.navigation")
+    assert {row.path for row in ui.visible().tree_rows} >= {
+        ("original", "saving"),
+        ("original", "other"),
+        ("original", "old_tag"),
+    }
+    ui.select_tree_row(("original", "saving"), object_name="results.navigation")
     assert ui.observe(object_name="results.focus").text == "saving · 2 runs"
     ui.click("All results")
     ui.select_combo("saving", object_name="results.experiment")
     assert ui.observe(object_name="results.focus").text == "All results · 2 runs"
     ui.select_combo("Point → experiment", object_name="results.group")
-    ui.select_list_row("original / p")
-    assert {row.text for row in ui.list_rows()} == {"saving"}
+    ui.expand_tree(("original",), object_name="results.navigation")
+    ui.select_tree_row(("original", "p"), object_name="results.navigation")
+    ui.expand_tree(("original", "p"), object_name="results.navigation")
+    assert {row.path for row in ui.visible().tree_rows} == {
+        ("original",),
+        ("original", "p"),
+        ("original", "p", "saving"),
+    }
     assert ui.observe(object_name="results.focus").text == "original / p · 2 runs"
     ui.select_combo("All experiments", object_name="results.experiment")
-    assert {row.text for row in ui.list_rows()} == {"saving", "other", "old_tag"}
+    assert {row.path for row in ui.visible().tree_rows} >= {
+        ("original", "p", "saving"),
+        ("original", "p", "other"),
+        ("original", "p", "old_tag"),
+    }
     ui.screenshot(tmp_path / "identity-groups.png")
 
 
@@ -384,8 +517,8 @@ def test_unresolved_identity_remains_browsable_and_refuses_new_tab(
     tmp_path: Path,
 ) -> None:
     ui = identity_browser
-    ui.select_list_row("old_tag")
-    ui.click(object_name="results.figure.0")
+    ui.expand_tree(("original",), object_name="results.navigation")
+    ui.select_tree_row(("original", "old_tag"), object_name="results.navigation")
     ui.click(object_name="results.figure.0")
     assert "old_tag" in ui.observe(object_name="results.details").text
     ui.click("Open in new analysis tab")
@@ -414,8 +547,7 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
     qapp.processEvents()
     ui = ComponentDriver(window)
     ui.select_menu("Results ▾", ("Results browser…",))
-    for _ in range(3):
-        ui.click(object_name="results.figure.0")
+    ui.click(object_name="results.figure.0")
     assert "test/saving" in ui.observe(object_name="results.details").text
     ui.click("Open in new analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
@@ -444,8 +576,7 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
     if rejection == "format":
         # A file can change after indexing; Load, not the browser, admits bytes.
         session.native_data_path.write_bytes(b"not a native container")
-    for _ in range(3):
-        ui.click(object_name="results.figure.0")
+    ui.click(object_name="results.figure.0")
     ui.click("Open in new analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     expected = {

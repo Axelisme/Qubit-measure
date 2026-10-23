@@ -66,7 +66,7 @@ class ResultImage(QLabel):
 
 
 class ResultsGallery(QScrollArea):
-    """Show all figures in two columns; selection and commands belong to the browser."""
+    """Tile saved previews in two columns; the browser owns focus and commands."""
 
     def __init__(self, index: ResultsIndex, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -80,8 +80,14 @@ class ResultsGallery(QScrollArea):
         runs: tuple[ResultRun, ...],
         activate: Callable[[ResultRun, str], None],
         action: Callable[[ResultRun, str, str], None],
+        *,
+        all_figures: bool = False,
     ) -> None:
-        """Replace visible cards; unreadable members retain their filename and error."""
+        """Replace cards with each run's first PNG, or all PNGs when all_figures.
+
+        Runs without PNGs have no card. Unreadable members retain their filename
+        and error. Left clicks call activate; context-menu actions call action.
+        """
         old = self.takeWidget()
         if old is not None:
             old.setParent(None)
@@ -90,7 +96,8 @@ class ResultsGallery(QScrollArea):
         grid = QGridLayout(content)
         number = 0
         for run in runs:
-            for path in run.figure_paths:
+            paths = run.figure_paths if all_figures else run.figure_paths[:1]
+            for path in paths:
                 card = QWidget()
                 layout = QVBoxLayout(card)
                 caption = QLabel(
