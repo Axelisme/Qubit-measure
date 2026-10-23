@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
+    SampleWriteback,
     WritebackDraft,
     WritebackEdit,
     WritebackItem,
@@ -31,6 +32,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -132,13 +134,83 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
             },
         ),
     )
+    if fails:
+        expected = ((),)
     assert asdict(result).get("written") == expected
-    assert result.applied_ids == (("param-1",),)
+    assert result.applied_ids == (((),) if fails else (("param-1",),))
     assert (result.error is not None) == fails
     draft.edit("param-1", proposed_value=0.9)
     session.control.set_parameter(captured.target, "Q1.ext.accepted", 0.7)
     assert asdict(result)["written"] == expected
     assert not session.control.read_context().lookup("Q1.ext.later").present
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
+    session: WritebackSession, fails: bool
+) -> None:
+    session.control.set_alias_rows((AliasRow("coordinate", "device"),))
+    captured = session.control.read_context()
+    draft = session.service.create_draft(
+        [
+            ModuleWriteback(
+                "Q1.pulses.pi",
+                "Pulse",
+                PulseSpec(
+                    ch=0, nqz=1, freq=100.0, gain=0.3, waveform="Q1.waveforms.base"
+                ),
+            ),
+            SampleWriteback(
+                "invalid/component" if fails else "Q1", "Sample", {"freq": 12.0}
+            ),
+            ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
+            ParameterWriteback("Q1.ext.rate", "Rate", proposed_value=5000.0),
+        ],
+        parameters=captured,
+        experiment_name="synthetic",
+        run_id="run-1",
+        sample_device_alias="$coordinate",
+        device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
+    )
+    ids = tuple(item.session_id for item in draft.items)
+    result = session.service.accept_drafts((WritebackSelection(draft, ids),))
+    expected_ids = ("param-1", "param-2", "ml-1") + (() if fails else ("sample-1",))
+    assert tuple(item.id for item in result.written[0]) == expected_ids
+    assert set(result.applied_ids[0]) == set(expected_ids)
+    assert session.service.get_all_applied(draft) == {
+        "ml-1": True,
+        "sample-1": not fails,
+        "param-1": True,
+        "param-2": True,
+    }
+    assert [item.value for item in result.written[0][:2]] == [0.4, 5000.0]
+    assert result.written[0][2].kind == "module"
+    assert (result.error is not None) == fails
+
+
+def test_write_draft_associates_before_and_after_values_after_group_reordering(
+    session: WritebackSession,
+) -> None:
+    session.control.set_alias_rows((AliasRow("coordinate", "device"),))
+    draft = session.service.create_draft(
+        [
+            SampleWriteback("Q1", "Sample", {"freq": 12.0}),
+            ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
+        ],
+        parameters=session.control.read_context(),
+        experiment_name="synthetic",
+        run_id="run-1",
+        sample_device_alias="$coordinate",
+        device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
+    )
+    receipts = session.service.write_draft(
+        draft, tuple(WritebackEdit(item.session_id) for item in draft.items)
+    )
+    assert [item.id for item in receipts] == ["param-1", "sample-1"]
+    by_id = {item.id: item for item in receipts}
+    assert by_id["param-1"].after == 0.4
+    assert isinstance(by_id["sample-1"].after, dict)
+    assert by_id["sample-1"].after["freq"] == 12.0
 
 
 @pytest.mark.parametrize("readback_fails", [False, True])

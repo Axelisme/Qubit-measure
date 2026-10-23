@@ -497,20 +497,51 @@ def test_shared_writeback_entry_retains_order_metadata_and_failure_prefix(
             ),
         )
     error = caught.value
-    assert error.applied == 2
+    assert error.applied == 0
     assert isinstance(error.__cause__, ValueError)
     event = session.entry.ledger.get(error.event_id).event
     assert event.kind == "accepted"
     current = session.control.read_target(target)
-    assert current.value("general.description") == "retained"
+    assert current.document().general.description is None
     assert not current.lookup("general.ext.later").present
-    assert current.library.waveform_spec("Q1.waveforms.base") == ConstWaveformCfg(
-        length=0.1
+    assert current.library.waveform_keys() == ()
+    assert document_meta(current.document(), "general.description") is None
+    assert events == []
+    assert session.state.version.get("context") == before
+    assert session.entry.use_point("a").description is None
+
+
+def test_grouped_writeback_publishes_one_fact_per_committed_document(
+    session: _Session,
+) -> None:
+    from zcu_tools.resources.entry import writeback
+
+    target = _select(session, "a")
+    events: list[object] = []
+    session.bus.subscribe(MdChangedPayload, events.append)
+    session.bus.subscribe(MlChangedPayload, events.append)
+    before = session.state.version.get("context")
+    result = session.service.apply_writeback(
+        target,
+        (
+            writeback.WaveformWriteback(
+                "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
+            ),
+            writeback.ParameterWriteback("general.ext.fit", {"gain": 0.1}),
+            writeback.ModuleWriteback(
+                "Q1.pulses.pi",
+                PulseSpec(
+                    ch=0, nqz=1, freq=100.0, gain=0.5, waveform="Q1.waveforms.base"
+                ),
+            ),
+            writeback.ParameterWriteback("general.ext.fit.gain", 0.2),
+        ),
+        evidence=writeback.WritebackEvidence(kind="test/grouped", origin="gui"),
     )
-    assert document_meta(current.document(), "general.description") == {"stderr": 0.2}
-    assert [type(item) for item in events] == [MlChangedPayload, MdChangedPayload]
+    assert [type(event) for event in events] == [MdChangedPayload, MlChangedPayload]
     assert session.state.version.get("context") == before + 2
-    assert session.entry.use_point("a").description == "retained"
+    assert [item.value for item in result.committed[:2]] == [{"gain": 0.1}, 0.2]
+    assert session.control.read_context().value("general.ext.fit.gain") == 0.2
 
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
@@ -638,7 +669,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
         "source": event_id,
     }
     assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
-    assert result.committed[0].value == expected
+    assert result.committed[1].value == expected
     assert session.control.read_sample(target, "Q1", "run-1") == expected
     assert session.control.read_sample(target, "Q1", "missing") is None
     second = session.control.apply_writeback(

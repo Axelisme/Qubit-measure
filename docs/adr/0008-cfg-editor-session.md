@@ -26,7 +26,7 @@ Adapter 的 `ModuleWriteback` 直接提供持久 `ModuleSpec`，不提供舊編�
 
 Analysis 與 Post-Analysis 各保存自己的 opaque draft。Remote 以 `(tab_id, subtab_id)` 定址 pane，再以 item session id 選項目。這個 id 只屬於 draft，不是 editor handle。`tab.writeback_set` 的 module edits 使用 Form 路徑陣列，回同一項目的 schema、input、values 與 errors。結構錯誤拒絕該 Form batch，普通 invalid 值留在 draft，Apply 與 `tab.writeback_write` 拒絕提交。
 
-Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依序呼叫 setters。Setter 首錯停止，保留 accepted evidence 與成功前綴，不 rollback，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
+Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依目的地文件分組提交：point 一組、library 一組、樣本逐筆，組內順序保留。任一項無效整組不寫，首錯停止，保留 accepted evidence 與已提交組；不回復前組，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
 
 Draft 固定來源的 run_id 與 SavedPoint。後來切 point、改 alias 或切換 pane 都不改目的地。Host 的 busy、writable、result、context 與 [[0070]] holder admission 仍各自生效。可預期的 `LibraryEntryInvalid` 保留 dialog、row、selection 與 draft，供使用者修正；非預期錯誤向外傳遞。
 

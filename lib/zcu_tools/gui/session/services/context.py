@@ -48,13 +48,17 @@ from zcu_tools.resources.entry import (
     validate_path_segment,
 )
 from zcu_tools.resources.entry.aliases import EntryAliases
-from zcu_tools.resources.entry.ledger_models import JsonObject, JsonValue
+from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.entry.schema import (
     PointDocument,
     SetupDocument,
 )
 from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
 from zcu_tools.resources.entry.writeback import (
+    LibraryUpdate,
+    ModuleWriteback,
+    ParameterUpdate,
+    WaveformWriteback,
     WritebackEvidence,
     WritebackItem,
     WritebackResult,
@@ -94,18 +98,13 @@ class _ContextWritebackTarget:
         self.ledger = entry.ledger
         self.point = target.point
 
-    def set_parameter(
-        self, path: str, value: JsonValue, metadata: YamlMap | None
-    ) -> YamlValue:
-        return self._context.set_parameter(self._target, path, value, metadata=metadata)
+    def set_parameters(
+        self, updates: tuple[ParameterUpdate, ...]
+    ) -> tuple[YamlValue, ...]:
+        return self._context.set_parameters(self._target, updates)
 
-    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> YamlMap:
-        return self._context.set_module(self._target, path, value, source=source)
-
-    def set_waveform(
-        self, path: str, value: WaveformSpec, source: Provenance
-    ) -> YamlMap:
-        return self._context.set_waveform(self._target, path, value, source=source)
+    def set_modules(self, updates: tuple[LibraryUpdate, ...]) -> tuple[YamlMap, ...]:
+        return self._context.set_modules(self._target, updates)
 
     def append_sample(
         self,
@@ -533,16 +532,18 @@ class ContextService:
         Validate the opened entry and captured SavedPoint before append.
         ResultEntry.use_point validates its label, existence and point document;
         ValueError/FileNotFoundError and other load errors propagate before
-        append. The executor appends accepted before invoking setters in item
-        order. Parameter/library setters require a currently selected point and
+        append. The executor appends accepted, then commits one point group,
+        one library group and individual samples, preserving each group's order.
+        Parameter/library setters require a currently selected point and
         commit the captured point's files, not the selected point's files when
         different. Samples need no selection and append to entry JSONL with the
         captured point label. Thus a direct call without selection may append
         accepted and then fail at a parameter/library item; sample-only can
         succeed. Application GuardService admission rejects missing selection
         before calling this entry point.
-        Each successful item installs and publishes its actual content prefix,
-        even when a later item fails. Detached point writes never select it.
+        Each successful point/library group installs and publishes once.
+        A failing item rolls back its whole group, not previously committed
+        groups. Detached point writes never select it.
         Return the accepted event and each owner's actual committed values.
         WritebackApplyError retains this result's successful prefix, event_id,
         applied and original cause for item failures; append errors propagate
@@ -580,7 +581,22 @@ class ContextService:
         representation, conflict and I/O failures propagate without publishing
         a candidate. No retry or batch receipt.
         """
+        return self.set_parameters(target, (ParameterUpdate(path, value, metadata),))[0]
+
+    def set_parameters(
+        self, target: ContextTarget, updates: tuple[ParameterUpdate, ...]
+    ) -> tuple[YamlValue, ...]:
+        """Commit nonempty ordered point updates in one edit and publish once.
+
+        ParameterUpdate defines path/value/metadata semantics. Target, selection
+        and failure rules match set_parameter. Return detached values captured
+        after each validated draft update, only when the entire group commits.
+        An invalid update leaves all group values and metadata unwritten and
+        publishes nothing. Later overwrites do not change earlier receipts.
+        """
         self._owner.assert_owner()
+        if not updates:
+            raise ValueError("parameter updates must be nonempty")
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
         point = (
@@ -588,10 +604,13 @@ class ContextService:
             if target == parameters.target and self._point is not None
             else entry.use_point(target.point)
         )
+        actual: list[YamlValue] = []
         with point.edit() as draft:
-            draft.set(path, value)
-            if metadata is not None:
-                draft.set_meta(path, metadata)
+            for update in updates:
+                draft.set(update.path, update.value)
+                if update.metadata is not None:
+                    draft.set_meta(update.path, update.metadata)
+                actual.append(document_value(snapshot(draft), update.path))
         document = snapshot(point)
         self._points = tuple(
             replace(info, description=document.general.description or "")
@@ -599,9 +618,8 @@ class ContextService:
             else info
             for info in self._points
         )
-        actual = document_value(document, path)
         if target != parameters.target:
-            return actual
+            return tuple(actual)
         self._publish_write(
             ParameterContext(
                 point=document,
@@ -618,7 +636,7 @@ class ContextService:
             ),
             parameter=True,
         )
-        return actual
+        return tuple(actual)
 
     def set_module(
         self,
@@ -635,27 +653,9 @@ class ContextService:
         this entry's ledger. SavedPoint uses one library transaction.
         No lowering, materialization, accepted event production or batch receipt.
         """
-        self._owner.assert_owner()
-        entry = self._require_write_target(target)
-        parameters = self._published_parameters()
-        handle = self._write_library(entry, target, parameters)
-        with handle.edit() as draft:
-            draft.set_module(path, value, provenance=source)
-        library = handle.snapshot()
-        actual = library.entry_value(path, kind="module")
-        if target != parameters.target:
-            return actual
-        self._publish_write(
-            ParameterContext(
-                point=parameters.document(),
-                library=library,
-                target=target,
-                roles=None,
-                storage=parameters.storage,
-            ),
-            parameter=False,
-        )
-        return actual
+        return self.set_modules(
+            target, (LibraryUpdate(ModuleWriteback(path, value), source),)
+        )[0]
 
     def set_waveform(
         self,
@@ -670,16 +670,41 @@ class ContextService:
         Target/publication/source/error rules match set_module. Owner rejects
         invalid roots/families/sources before installing any candidate.
         """
+        return self.set_modules(
+            target, (LibraryUpdate(WaveformWriteback(path, value), source),)
+        )[0]
+
+    def set_modules(
+        self, target: ContextTarget, updates: tuple[LibraryUpdate, ...]
+    ) -> tuple[YamlMap, ...]:
+        """Commit a nonempty mixed module/waveform group and publish once.
+
+        LibraryUpdate defines each key, family, Spec and source. Target and
+        failure rules match set_module. Each update validates in one draft;
+        any failure leaves the entire group unwritten and publishes nothing.
+        Return each detached validated value only after the group commits,
+        preserving update order and values before subsequent overwrites.
+        """
         self._owner.assert_owner()
+        if not updates:
+            raise ValueError("library updates must be nonempty")
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
         handle = self._write_library(entry, target, parameters)
+        actual: list[YamlMap] = []
         with handle.edit() as draft:
-            draft.set_waveform(path, value, provenance=source)
+            for update in updates:
+                item = update.item
+                if isinstance(item, ModuleWriteback):
+                    draft.set_module(item.path, item.value, provenance=update.source)
+                    kind = "module"
+                else:
+                    draft.set_waveform(item.path, item.value, provenance=update.source)
+                    kind = "waveform"
+                actual.append(draft.snapshot().entry_value(item.path, kind=kind))
         library = handle.snapshot()
-        actual = library.entry_value(path, kind="waveform")
         if target != parameters.target:
-            return actual
+            return tuple(actual)
         self._publish_write(
             ParameterContext(
                 point=parameters.document(),
@@ -690,7 +715,7 @@ class ContextService:
             ),
             parameter=False,
         )
-        return actual
+        return tuple(actual)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange

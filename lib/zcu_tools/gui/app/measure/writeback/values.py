@@ -71,30 +71,32 @@ def applied_values(
 ) -> tuple[WritebackApplied, ...]:
     """Associate the owner's ordered committed prefix with draft IDs/destination.
 
-    items is the selected submission order; result contains actual values formed
-    by each write owner. No destination read, source refresh or proposal-value
-    substitution occurs. The captured SavedPoint supplies entry/point identity.
+    items is the selected submission order; each committed index selects its
+    item even when document grouping changes commit order. result contains
+    actual values formed by each write owner. No destination read, source
+    refresh or proposal-value substitution occurs. The captured SavedPoint supplies entry/point identity.
     """
     parameters = draft.parameters
     if parameters is None:
         raise FailedPreconditionError("Writeback requires captured parameters")
-    return tuple(
-        WritebackApplied(
-            id=item.session_id,
-            kind="sample"
-            if isinstance(item, SampleWriteback)
-            else "parameter"
-            if isinstance(item, ParameterWriteback)
-            else "module",
-            target=committed.path,
-            value=deepcopy(committed.value),
-            destination={
-                "kind": "saved_point",
-                "entry_id": parameters.target.entry_id,
-                "point": parameters.target.point,
-            },
+    values: list[WritebackApplied] = []
+    for committed in result.committed:
+        item = items[committed.index]
+        values.append(
+            WritebackApplied(
+                id=item.session_id,
+                kind="sample"
+                if isinstance(item, SampleWriteback)
+                else "parameter"
+                if isinstance(item, ParameterWriteback)
+                else "module",
+                target=committed.path,
+                value=deepcopy(committed.value),
+                destination={
+                    "kind": "saved_point",
+                    "entry_id": parameters.target.entry_id,
+                    "point": parameters.target.point,
+                },
+            )
         )
-        for item, committed in zip(
-            items[: len(result.committed)], result.committed, strict=True
-        )
-    )
+    return tuple(values)
