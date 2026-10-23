@@ -13,7 +13,7 @@ from typing import Literal, TypeAlias
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fluxdep.processing import diff_mirror
+from zcu_tools.analysis.fluxdep.processing import diff_mirror, mirror_pairing
 
 FluxLineRole: TypeAlias = Literal["half", "integer"]
 
@@ -97,17 +97,6 @@ def analyze_flux_pick(inputs: FluxPickInputs, state: FluxPickState) -> FluxPickA
     )
 
 
-def _mirror_inbounds_mask(
-    dev_values: NDArray[np.float64], center: float
-) -> NDArray[np.bool_]:
-    """Rows whose mirror counterpart stays inside the device-value axis."""
-    n = len(dev_values)
-    c_idx = (n - 1) * (center - dev_values[0]) / (dev_values[-1] - dev_values[0])
-    idxs = np.arange(n)
-    mirror_idxs = np.round(2 * c_idx - idxs).astype(int)
-    return (mirror_idxs >= 0) & (mirror_idxs < n)
-
-
 def fold_initial_lines(
     dev_values: NDArray[np.float64],
     flux_half: float | None,
@@ -176,7 +165,13 @@ def mirror_loss_at(
     real_signals: NDArray[np.float64],
     center: float,
 ) -> tuple[NDArray[np.float64], float]:
-    """Mirror-loss image and mean over valid device-axis rows at ``center``."""
+    """Return physical mirror differences and their mean over paired rows.
+
+    dev_values is a 1D device axis matching the rows of 2D real_signals. Pairing
+    follows processing.mirror_pairing. Unpaired image rows are NaN and excluded
+    from the mean; no paired rows gives a NaN mean. Signal NaNs propagate even
+    in paired rows. Raise ValueError for invalid shapes, axis, or center.
+    """
     if dev_values.ndim != 1 or dev_values.size < 2:
         raise ValueError("dev_values must be a 1D axis")
     if real_signals.ndim != 2 or real_signals.shape[0] != dev_values.size:
@@ -184,8 +179,7 @@ def mirror_loss_at(
     if not isfinite(center) or dev_values[0] == dev_values[-1]:
         raise ValueError("center and device axis span must be finite")
     image = diff_mirror(dev_values, real_signals, center)
-    # A valid zero loss must not be confused with out-of-bounds zero fill.
-    inbounds = _mirror_inbounds_mask(dev_values, center)
+    inbounds = mirror_pairing(dev_values, center).valid
     mean_loss = float(np.mean(image[inbounds])) if inbounds.any() else float("nan")
     return image, mean_loss
 
