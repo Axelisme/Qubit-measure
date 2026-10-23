@@ -79,7 +79,9 @@ def _plot(plots: Plots, kind: LifetimeKind) -> LinePlot:
         figure.subplots()
 
     plots.draw(name, rebuild)
-    return plots.liveplot_1d(name, "Time (us)", "Signal", axes=plots[name].axes[0])
+    return plots.liveplot_1d(
+        name, "Time (us)", "Signal (raw I)", axes=plots[name].axes[0]
+    )
 
 
 def _t2_rejection(fit: DecayFit, maximum: float) -> str | None:
@@ -105,8 +107,16 @@ def _finish(
 
     def overlay(figure: Figure) -> None:
         ax = figure.axes[0]
+        # Replace raw I with the observations in the fit's projection.
+        ax.clear()
+        ax.plot(times, fit.observed, ".", label="observed")
         ax.plot(times, fit.fitted, label="fit")
-        ax.set_title(f"{kind} = {fit.lifetime_us:.2f} us")
+        ax.set(
+            xlabel="Time (us)",
+            ylabel="Signal (projected)" if kind == "t1" else "Normalized signal",
+            title=f"{kind} = {fit.lifetime_us:.2f} us",
+        )
+        ax.legend()
 
     plots.draw(f"{kind}/decay", overlay)
     plots.save(f"{kind}/decay", directory / f"{kind}-decay.png")
