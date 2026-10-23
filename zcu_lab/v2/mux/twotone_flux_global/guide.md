@@ -59,11 +59,13 @@ counts for an offline smoke.
    Confirm frequency and DC scan bounds. Refresh preserves your edits and the
    original seed provenance while recapturing validation sources. Reset
    discards edits and captures sources again.
-4. **Agent recipe.** Use the corresponding mux flux recipe with explicit
+4. **Agent recipe.** Use `mux_twotone_flux_global` with explicit
    missing DC bounds and drive-frequency bounds. Its inputs must describe the same full identities,
-   native units and frequency ranges as this form. After acquisition, answer
-   one picker handoff per participant and review the selected proposals.
-   The recipe guide owns invocation and answer payload details.
+   native units and frequency ranges as this form. After acquisition, inspect
+   each PendingAnalysis with `tab_interact`, move the native lines and send
+   `done`. Only then use `answer` for the separate writeback question.
+   The [recipe guide](../../../recipes/mux-guide.md#mux-flux-maps) lists inputs,
+   per-Q `flux_half`/`flux_integer` preselections and selected-item writeback.
 
 ## Typed cfg and form paths
 

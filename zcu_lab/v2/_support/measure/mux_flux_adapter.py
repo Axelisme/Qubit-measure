@@ -52,11 +52,32 @@ from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
 
 @dataclass
 class MuxFluxPickParams:
-    """Select one acquired participant by original tone index, not column order."""
+    """Select one acquired original tone and optional initial DC line positions.
+
+    tone is the full readout index, not the participant row; an unacquired index
+    raises ValueError at analysis start. flux_half and flux_int are finite
+    half/integer-flux DC values in the scanned device's native unit (cfg.flux_unit
+    labels A, V or native without conversion). Each None independently uses
+    that tone's Run-captured calibration, then the shared picker default if
+    missing. Explicit values override only this analysis, never the capture.
+    The picker folds the pair near the scan center using its existing period
+    rule; nonfinite positions raise TypeError/ValueError. done publishes one
+    tone/Q result and its proposals; it does not accept writeback.
+    """
 
     tone: int = field(
         default=0,
         metadata={"description": "Original tone index of the participant to calibrate"},
+    )
+    flux_half: float | None = field(
+        default=None,
+        metadata={"description": "Initial half-flux DC value; None uses Run capture"},
+    )
+    flux_int: float | None = field(
+        default=None,
+        metadata={
+            "description": "Initial integer-flux DC value; None uses Run capture"
+        },
     )
 
 
@@ -135,6 +156,10 @@ class MuxFluxAdapter[
             data.frequencies[row] * 1e-3,  # The shared picker displays GHz.
         )
         half, integer = self._initial_lines(req, tone)
+        if req.analyze_params.flux_half is not None:
+            half = req.analyze_params.flux_half
+        if req.analyze_params.flux_int is not None:
+            integer = req.analyze_params.flux_int
 
         def build(
             inputs: FluxPickInputs, state: FluxPickState, plots: Plots

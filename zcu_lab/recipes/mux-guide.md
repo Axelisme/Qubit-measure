@@ -1,6 +1,6 @@
 # Mux recipes
 
-**Readers:** operator, agent. Run seven mux qubit recipes or the mux resonator survey, save results and review calibration proposals.
+**Readers:** operator, agent. Run mux resonator, qubit and DC flux recipes, save results and review calibration proposals.
 
 ## mux_onetone
 
@@ -37,6 +37,143 @@ fit diagnostics, timing checks and proposal destinations.
 
 These seven recipes measure selected qubits with simultaneous mux readout, save
 raw data and fits, and ask before applying calibration updates.
+
+## Mux flux maps
+
+Four recipes open the matching flat-cfg adapters. All four take Q names as
+participants, including onetone flux scans. This differs from `mux_onetone`,
+which takes resonator names.
+
+| Recipe | Frequency input | DC input |
+| --- | --- | --- |
+| `mux_onetone_flux_global` | `df:{start,stop}` common MHz offsets, `n` | `flux:{start,stop}` coil native values, `flux_n` |
+| `mux_onetone_flux_local` | `df:{start,stop}` common MHz offsets, `n` | `flux_sweeps:[{start,stop}]` native local values, `flux_n` |
+| `mux_twotone_flux_global` | `sweeps:[{start,stop}]` absolute MHz per drive, `n` | `flux:{start,stop}` coil native values, `flux_n` |
+| `mux_twotone_flux_local` | `sweeps:[{start,stop}]` absolute MHz per drive, `n` | `flux_sweeps:[{start,stop}]` native local values, `flux_n` |
+
+Both list inputs cover every original tone, including nonparticipants, in full
+group order. Neither accepts a per-tone point count. `n` sets
+`frequency.df.n` in onetone or `frequency.expts` in twotone.
+`flux_n` sets `flux.n` globally or `flux_expts` locally.
+Range editors derive the core SweepCfg step and expts. Counts must be positive;
+a one-point scan requires equal bounds. Picking needs at least five completed
+DC points and two distinct frequency values.
+
+`target` overrides this Reset's mux alias. `reuse_tab_id` resets an idle
+matching tab. Both default to null, using global aliases and opening a new tab.
+`participants` is an optional ordered list of unique Q names. Null retains the
+Form selection. `library` selects captured modules, then `inline` copies them
+outer-first. Range/count edits follow, then `overrides` applies last. Integer
+paths always address original full-list positions. All optional fields default
+to null, retaining Form values. All tones must validate before Run, even when
+not selected. A short range list returns `needs_parameters` before acquisition.
+
+`flux_unit` optionally labels A, V or native; null keeps the Form label.
+The device owner checks it against each selected source. No values are rescaled.
+Global source identity starts at the captured `$mux.flux_source`; local sources
+start at each captured `Q.flux_source`. Use overrides for intentional device,
+averaging or timing edits. There is no nested `spectrum` cfg.
+
+For example, a three-Q group can scan Q3 then Q1 with this onetone global input.
+The numeric bounds are illustrative, not device limits or known calibration.
+
+```json
+{
+  "target": "MG",
+  "participants": ["Q3", "Q1"],
+  "df": {"start": -2.0, "stop": 2.0},
+  "n": 31,
+  "flux": {"start": -0.01, "stop": 0.01},
+  "flux_n": 21,
+  "flux_unit": "A",
+  "flux_half": {"Q3": 0.004},
+  "flux_integer": {"Q3": -0.002},
+  "overrides": [
+    {"path": ["reps"], "value": 10},
+    {"path": ["rounds"], "value": 1}
+  ]
+}
+```
+
+Each picker uses the selected Q's original tone index, so Q3/Q1 is 2/0, not 0/1.
+`flux_half` and `flux_integer` are optional Q-name-to-native-value maps.
+Omit any Q or either line to use its Run-captured calibration, then the picker's
+default if absent. Keys must name final selected participants. Explicit values
+only seed this analysis, never Run cfg or calibration. The owner field for
+`flux_integer` is `flux_int`. The picker may fold initial lines near the scan
+center using its period rule. Review its actual committed state.
+
+### Starting with missing calibration
+
+1. With blank kickstart wiring, use onetone first. Supply deliberate global
+   `flux` or full-list local `flux_sweeps` when DC calibration is missing.
+   Complete required resonator frequencies, mixer and readout timing using
+   library, inline and overrides. Wiring and nominal values alone do not make
+   the Form valid. Do not infer bounds from simulator internals.
+2. With frequencies but no readout slot, Open or Reset creates the captured
+   template. Onetone seeds ADC window 1 us and gain 0.1. Missing linewidths or
+   group flight time leave trigger and pulse length required. Twotone requires
+   readout pulse length and ADC duration; it also requires every drive and MHz
+   range. Supply full-list `sweeps` if frequency/linewidth calibration is absent.
+3. With a readout slot, confirm its captured contents and remaining errors.
+   Onetone copies group tones and applies ringup timing; twotone keeps the slot.
+   Slot existence does not prove complete drives, frequency bounds or DC bounds.
+   Local bounds derive from each Q's captured flux_int/flux_half. Global bounds
+   use the captured union of all initial participants' coil intervals. Missing
+   calibration keeps endpoints required. Selection changes do not recompute seeds.
+4. For an agent recipe, pass explicit missing inputs in the shapes above.
+   `needs_parameters` includes owner paths and reasons. Fix those fields rather
+   than retrying Run unchanged. Inspect `get_cfg` input, values, errors and
+   diagnostics to distinguish missing calibration from an invalid source.
+
+Open and Reset capture fresh sources. Refresh preserves authored inputs,
+explicit selections and resolved seeds; it does not refill defaults. After
+changing aliases, library or calibrations, Reset to use them. Reset discards
+unsaved Form edits. All four forms show participants, tone identities, modules,
+frequency/DC scans, averaging, then timing. Frequency labels use MHz, timing
+uses us except settle in s, and DC coordinates use the chosen flux_unit.
+Seed descriptions expose source paths and mark generated candidates
+uncalibrated. A captured slot is not marked measured merely because it exists.
+
+### Picker handoff and selected writeback
+
+After the single acquisition, the recipe starts one tracked interactive
+Primary analysis per participant. Updates and Analyze use that same operation.
+When the reply contains `PendingAnalysis`, use `tab_interact` without payload
+to inspect state and available commands. Move the native half/integer lines
+with its commands and finish with `done`. This settles that analysis and resumes
+the recipe. A following picker handoff means the next participant is ready.
+A writeback question instead includes a request id and proposals for the Q that
+just completed. `answer` answers only that question; it cannot move picker lines
+or finish analysis.
+
+Review each proposal's original index, Q and destination. Respond with selected
+items or decline. The recipe applies only those selected IDs and reports
+`writeback_applied` from the owner receipt, not from accepted alone.
+Global analysis proposes one complete `MG.coil_flux.<Q>` record containing
+`half`, `period`, `int`. It can create that Q in an empty mapping and preserves
+other Q records. Local analysis proposes that Q's `flux_half`, `flux_period`,
+`flux_int` scalars. Destinations use Run capture, never current aliases.
+
+The report retains completed Q rows in participant order, original index, Q,
+native flux_half/flux_integer/flux_period and per-Q writeback_applied.
+Expected analysis failure stops later analyses, returns analysis_failure and
+keeps earlier rows. Other failures propagate. Save runs once in the finalizer
+after acquisition returns, including analysis or writeback errors. Repeated
+Primary analysis replaces the previous pane, so Save contains raw maps and the
+owner's current completed artifacts, not a promise of one saved pane per Q.
+The report retains earlier Q outcomes.
+
+Native data preserves tone-major three-dimensional IQ and DC/MHz coordinates.
+Labber cannot export this independent grid. Inspect per-output statuses in
+`runs`; native success and Labber failure can coexist. Recipe completion is
+not proof that every output saved.
+
+Adapter details and GUI paths are in the
+[onetone global](../v2/mux/onetone_flux_global/guide.md),
+[onetone local](../v2/mux/onetone_flux_local/guide.md),
+[twotone global](../v2/mux/twotone_flux_global/guide.md) and
+[twotone local](../v2/mux/twotone_flux_local/guide.md) guides.
 
 ## Before running
 
