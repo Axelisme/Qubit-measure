@@ -1,9 +1,10 @@
-"""Wide absolute-frequency survey with explicit bounds and dip identities."""
+"""Wide absolute-frequency survey with optional dip naming after discovery."""
+
+import json
 
 from pydantic import Field
 from zcu_tools.gui.form_adapter.sweep import LinRange
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -35,7 +36,7 @@ class OnetoneRangeFindInputs(RecipeInputs):
     )
     resonators: list[str] | None = Field(
         None,
-        description="Dip names in ascending frequency order; null keeps the Form's captured initial list. Names do not select hardware.",
+        description="Optional Analyze names in ascending frequency order; omitted, null or empty discovers unnamed dips without writeback. Names never enter acquisition cfg.",
     )
     min_separation: float = Field(
         default=DEFAULT_MIN_SEPARATION_MHZ,
@@ -62,7 +63,7 @@ class OnetoneRangeFindReport(RecipeReport):
     """Frequency-ordered dip estimates and identity/writeback limitations."""
 
     resonators: list[ResonatorDipSummary] = Field(
-        description="Each dip's name, absolute MHz frequency and background-relative depth in a.u."
+        description="Each dip's optional name (null during discovery), absolute MHz frequency and background-relative depth in a.u."
     )
     identity_diagnostic: str | None = Field(
         default=None,
@@ -76,7 +77,7 @@ class OnetoneRangeFindReport(RecipeReport):
 
 @recipe(
     "onetone_range_find",
-    description="Survey explicit absolute MHz bounds, report named dips and identity diagnostics, and ask before frequency writeback.",
+    description="Survey explicit absolute MHz bounds, discover unnamed dips or assign analysis names, and ask before frequency writeback.",
 )
 async def onetone_range_find(
     session: RecipeSession, inputs: OnetoneRangeFindInputs
@@ -84,9 +85,9 @@ async def onetone_range_find(
     """Run onetone/range_find, Analyze, ask_writeback, accept selections, Save.
 
     freq and n are required. freq supplies absolute MHz bounds and n sets
-    sweep.freq.expts, the shared acquisition sample count. Null resonators
-    retains the captured Form initial list; names label dips in ascending
-    frequency order, not hardware channels.
+    sweep.freq.expts, the shared acquisition sample count. Omitted, null or empty
+    resonators discovers unnamed dips without writeback. Otherwise names label
+    dips in ascending frequency order through Analyze, not acquisition cfg.
     min_separation is finite positive MHz, default 1 MHz. It overrides the
     owner's dip spacing through the same tracked Analyze operation, including
     when reusing a tab. It does not change the acquired frequency grid.
@@ -94,48 +95,42 @@ async def onetone_range_find(
     owns cancellation and operation failures. Save once after acquisition.
 
     n → sweep.freq.expts sets the absolute-frequency sample count.
-    Analysis uses the captured GUI parameters; no fit controls are added.
+    Analysis receives resonators and min_separation as explicit updates.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_recipe_tab(
         "onetone/range_find", inputs, target_alias="resonator"
     )
     tab.select_sources(inputs)
-    edits: list[FieldEdit] = []
-    edits.extend(
-        [
-            FieldEdit(
-                path=("sweep", "freq"),
-                value=LinRange(
-                    start=inputs.freq.start, stop=inputs.freq.stop, n=inputs.n
-                ),
+    tab.apply_inputs(
+        inputs,
+        {
+            ("sweep", "freq"): LinRange(
+                start=inputs.freq.start, stop=inputs.freq.stop, n=inputs.n
             ),
-            FieldEdit(
-                path=("resonators",),
-                value=None
-                if inputs.resonators is None
-                else [name for name in inputs.resonators],
-            ),
-            FieldEdit(path=("reps",), value=inputs.reps),
-            FieldEdit(path=("rounds",), value=inputs.rounds),
-        ]
+            ("reps",): inputs.reps,
+            ("rounds",): inputs.rounds,
+        },
     )
-    tab.apply_inputs(inputs, {}, edits=edits)
     await tab.run()
     try:
         fit = await tab.analyze(
             "primary",
             result=RangeFindSummary,
-            updates={"min_separation": inputs.min_separation},
+            updates={
+                "resonators": json.dumps(inputs.resonators or []),
+                "min_separation": inputs.min_separation,
+            },
         )
         if fit.result is None:
             return OnetoneRangeFindReport(resonators=[], analysis_failure=fit.reason)
-        answer = await tab.ask_writeback()
         applied = False
-        if answer.accepted:
-            receipt = tab.accept_writeback(answer.items)
-            receipt.raise_for_error()
-            applied = bool(receipt.items)
+        if inputs.resonators:
+            answer = await tab.ask_writeback()
+            if answer.accepted:
+                receipt = tab.accept_writeback(answer.items)
+                receipt.raise_for_error()
+                applied = bool(receipt.items)
         return OnetoneRangeFindReport(
             resonators=[
                 ResonatorDipSummary(
