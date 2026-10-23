@@ -20,7 +20,7 @@ from ._period_channel import advance, advance_segments
 from ._secular import secular_operators
 from ._workload_facts import split_rate
 
-_MIN_FREQUENCY_GHZ = 0.03
+MIN_FREQUENCY_GHZ = 0.03
 _MAX_SPLIT_ESTIMATE = 1.0
 _MAX_SUBDIVISIONS = 64
 
@@ -814,7 +814,7 @@ class FloquetPeriodKernel:
                 continue
             envelope = table.envelopes[int(table.tone_envelope[row, 0])]
             frequency = float(table.tone_frequency_ghz[row, 0])
-            if envelope.kind != "constant" or abs(frequency) < _MIN_FREQUENCY_GHZ:
+            if envelope.kind != "constant" or abs(frequency) < MIN_FREQUENCY_GHZ:
                 continue
             model = table.model(source, row)
             estimate = table.duration_ns[row] * split_rate(
