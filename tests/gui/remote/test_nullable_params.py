@@ -1,7 +1,7 @@
 """Nullable parameter declarations through schema and in-process dispatch."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 import pytest
@@ -12,7 +12,6 @@ from zcu_tools.gui.remote.method_spec import MethodSpec, build_method_registry
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, build_input_schema
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink, ControlOptions
 from zcu_tools.gui.remote.wire import Request
-from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 
 
 @pytest.mark.parametrize(
@@ -56,6 +55,19 @@ def test_nullable_schema_preserves_enum_and_untyped_json() -> None:
     json_schema = build_input_schema((ParamSpec("base", JsonType.JSON, nullable=True),))
     assert json_schema["required"] == ["base"]
     assert json_schema["properties"]["base"] == {}
+
+
+class ImmediateOwnerScheduler:
+    """Deliver synthetic dispatch on the calling owner thread."""
+
+    def is_owner_thread(self) -> bool:
+        return True
+
+    def post(self, callback: Callable[[], None]) -> None:
+        callback()
+
+    def call[T](self, callback: Callable[[], T]) -> T:
+        return callback()
 
 
 @dataclass
@@ -105,7 +117,7 @@ def test_dispatch_nullable_base_distinguishes_absence_null_and_wrong_type() -> N
             event_serializers={},
             wire_event_name=str,
         ),
-        owner_scheduler=ManualOwnerScheduler(),
+        owner_scheduler=ImmediateOwnerScheduler(),
     )
     link = ClientLink("nullable-test", token_required=False)
     service.on_client_open(link)
