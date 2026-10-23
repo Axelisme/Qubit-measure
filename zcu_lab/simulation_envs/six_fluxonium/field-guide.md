@@ -37,19 +37,20 @@ Set the environment's cache allowances in the top-level `numerics` section of
 
 | Field | Default | Scope |
 | --- | --- | --- |
-| `prepare_cache_bytes` | 268435456 bytes, 256 MiB | Total across six sources |
+| `prepare_cache_bytes` | 805306368 bytes, 768 MiB | Total across six sources |
 | `result_memo_bytes` | 67108864 bytes, 64 MiB | Total across six sources |
 | `routing_cache_bytes` | 4194304 bytes, 4 MiB | Total across six sources |
 | `adc_cache_bytes` | 8388608 bytes, 8 MiB | Each source |
 
 Each Engine receives one sixth of the first three totals, rounded down.
+The prepare allowance is 134217728 bytes, or 128 MiB, per Engine.
 The six sources keep independent models and cache keys. They do not build a
 joint Hilbert space or share ADC receiver calibrations.
 All four fields accept nonnegative integers in bytes. Zero disables the
 corresponding cache. There is no fixed upper bound. At most five bytes of each
 divided total remain unused.
 
-These defaults allow at most 372 MiB of cache residency, including estimated
+These defaults allow at most 884 MiB of cache residency, including estimated
 metadata. Previously, six sources each had 256 MiB prepare, 64 MiB result and
 4 MiB routing allowances, plus 8 MiB ADC, for 1992 MiB combined.
 Evicted or oversized products compute again without changing the result or RNG
@@ -74,8 +75,9 @@ Runs used 65536 reps and one round. All four used a 2.2 us readout pulse and
 1.12 us trigger offset. Mux Runs used a 0.99 us ADC window and mixer 7250 MHz.
 Drive pulses were 0.1 us, except Q3's 0.2 us Rabi pulse.
 
-The first old/new pair retained the same tracemalloc and ownership profiler in
-both GUI processes. Old was `f5362637e`, before shared budgets; new was
+The first old/new pair reduced the total prepare allowance from 1536 MiB to
+256 MiB. It retained the same tracemalloc and ownership profiler in both GUI
+processes. Old was `f5362637e`, before shared budgets; new was
 `2eaf50e62`, with shared budgets. They ran consecutively in one heavy-slot call,
 with separate initially empty Numba caches. A separate check used the reconciled
 candidate `27757d875`, including main `bf67ce263`, without tracemalloc or ownership
@@ -84,7 +86,7 @@ scans. Its RPC handshake reported wire version 121. Every GUI exited with code 0
 | GUI measurement | Largest sampled VmRSS, bytes | Kernel VmHWM, bytes |
 | --- | ---: | ---: |
 | Old, with ownership profiler | 3239047168 | 3239047168 |
-| Shared budgets, with ownership profiler | 2731687936 | 2731724800 |
+| 256 MiB prepare total, with ownership profiler | 2731687936 | 2731724800 |
 | Reconciled candidate, /proc only | 1553829888 | 1559523328 |
 
 These are GUI Python process measurements, not launcher RSS or marker maxima.
@@ -93,8 +95,8 @@ samples. The paired profiled peak fell 15.66%. It still exceeded the original
 1.5 GiB target of 1610612736 bytes. The final /proc-only peak was 51089408 bytes
 below that target. This is one workflow observation, not an RSS guarantee.
 
-At all 31 profiled markers, each source's cache residency stayed within its
-share. The largest observed totals were:
+At all 31 profiled markers with the 256 MiB prepare total, each source's cache
+residency stayed within its share. The largest observed totals were:
 
 | Cache | Divided six-source limit, bytes | Largest observed charged or resident bytes |
 | --- | ---: | ---: |
@@ -119,6 +121,41 @@ heap allocations or the maximum active solver scratch separately.
 The paired profiled Runs and analyses produced identical numeric field dtypes,
 shapes and C-order bytes at all eight completion markers. This comparison used
 raw numeric arrays and SHA256 hashes, not timestamp-filtered metadata.
+
+### 768 MiB prepare recheck
+
+The 2026-10-23 recheck used base `5d0ae6237` with
+`prepare_cache_bytes: 805306368`. The same four-Run harness repeated the
+settings, Run/analysis order and tab closes described above. Its configuration
+edits and eight completion statuses matched the archived 256 MiB run.
+The GUI loaded both the framework and demo startup from the changed checkout,
+using that checkout's interpreter. It ran offscreen on CPUs 2 and 3 in a heavy
+slot, with one thread for BLAS, OpenMP and Numba. It used no hardware or measured
+data. All four Runs and analyses finished, and the GUI exited with code 0.
+
+The observer sampled the GUI Python process's `/proc` status about every 20 ms
+and saved numeric outputs at the eight completion markers. It did not enable
+tracemalloc, recursive ownership scans or forced collection at close markers.
+At startup and every completion marker, all six Engines reported prepare
+limits of 134217728 bytes, or 128 MiB each.
+
+| GUI measurement | Largest sampled VmRSS, bytes | Kernel VmHWM, bytes |
+| --- | ---: | ---: |
+| 768 MiB prepare total, /proc plus numeric dumps | 1868263424 | 1882968064 |
+
+The kernel peak exceeds the earlier 1.5 GiB reference target by 272355328 bytes.
+This run did not reproduce the earlier below-target result.
+It is one workflow observation, not an RSS guarantee. The observer differs from both the
+ownership-profiled pair and the earlier /proc-only run, so their RSS differences
+do not isolate the prepare-budget change or identify native/Qt allocations.
+
+All 733 numeric fields across the eight completion snapshots matched the
+256 MiB run's manifests in dtype, shape, byte count and C-order SHA256.
+The snapshots contain 115642 numeric bytes in total, including repeated fields
+from tabs retained across markers. The 256 MiB run's raw files were no longer
+retained. Its manifests matched the retained pre-shared-budget raw arrays.
+The recheck compared its saved arrays directly with those retained arrays and
+revalidated their manifest hashes. Every C-order byte matched.
 
 ### Paired warm Run timings
 

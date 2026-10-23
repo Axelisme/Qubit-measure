@@ -18,18 +18,20 @@
 
 ### 無 readout slot 的候選來源
 
-Open／Reset 在所有 group resonators 都有有效 `kappa` 時，填入下列可編輯候選。
+Open／Reset 固定填入 `ro_length = 1.0 us`，不依賴 `kappa`。
+其餘欄位在所有 group resonators 都有有效 `kappa` 時，填入下列可編輯候選。
 `kappa` 與 tone frequency 的單位為 MHz，時間的單位為 us。
 
 | 欄位 | 初值來源 |
 | --- | --- |
 | `mixer_freq` | 全部 group tone 頻率的最小值與最大值中點。任一頻率缺值時留空。 |
-| `ro_length` | `5 / (2π · min kappa)`，作為五倍 ringup 時間的積分窗候選。 |
-| `trig_offset` | 全部 resonators 的 `ext.time_of_fly` 最大值，加上上述 ringup 時間。 |
+| `ro_length` | 固定 1.0 us 的 ADC 積分窗候選，不依賴 `kappa` 或 `time_of_fly`。 |
+| `trig_offset` | 全部 resonators 的 `ext.time_of_fly` 最大值，加上五倍 ringup 時間 `5 / (2π · min kappa)`。 |
 | `length` | `trig_offset + ro_length`，讓 pulse 覆蓋 ADC window。 |
 
-任一 resonator 的 `kappa` 缺失或 null，四欄都留空必填，不使用其餘成員的子集推導。
+任一 resonator 的 `kappa` 缺失或 null，`mixer_freq`、`trig_offset` 與 `length` 留空必填，不使用其餘成員的子集推導。
 任一 `ext.time_of_fly` 缺失或 null，`trig_offset` 與 `length` 留空必填。
+上述缺值情境仍填入 `ro_length = 1.0 us`。
 已設的 kappa 須為有限正數，頻率須為有限數，time_of_fly 須為有限非負數。
 無效的已設來源會讓 Open／Reset 報錯。
 Readout 欄位說明逐項列出這些來源。
