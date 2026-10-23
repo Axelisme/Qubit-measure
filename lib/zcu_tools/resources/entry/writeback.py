@@ -166,24 +166,58 @@ def _accepted_write(item: WritebackItem) -> AcceptedWrite:
 
 
 @dataclass(frozen=True)
+class ParameterUpdate:
+    """One concrete point path/value/metadata command in a single-file batch.
+
+    path is dotted and role-resolved. value uses the point owner's YAML value
+    representation. metadata=None preserves existing metadata; a mapping
+    replaces it, including {} to clear it. The point owner validates each draft
+    change and commits the entire batch only when every change succeeds.
+    """
+
+    path: str
+    value: YamlValue
+    metadata: YamlMap | None = None
+
+
+@dataclass(frozen=True)
+class LibraryUpdate:
+    """One module or waveform command and its optional source in a library batch.
+
+    item supplies the concrete key, named Spec and family. source=None requests
+    manual provenance; otherwise the library owner validates the explicit source
+    against its ledger. item.stderr is not interpreted here: accepted executors
+    already include it in source. All commands share one library transaction.
+    """
+
+    item: ModuleWriteback | WaveformWriteback
+    source: Provenance | None = None
+
+
+@dataclass(frozen=True)
 class CommittedWrite:
     """One confirmed item at its concrete path, detached at commit time.
 
-    path is a point path, library key or sample component, in submission order.
-    value is the owner's actual working-unit value, including sample metadata.
+    index is this item's zero-based position in the supplied apply_writeback
+    tuple, not its commit position. path is a point path, library key or sample
+    component and need not be unique. value is the owner's actual working-unit
+    value, including sample metadata.
     It never borrows a proposal or a later destination snapshot.
     """
 
+    index: int
     path: str
     value: YamlValue
 
 
 @dataclass(frozen=True)
 class WritebackResult:
-    """One accepted event and its ordered, detached successful item prefix.
+    """One accepted event and detached items in document commit order.
 
     event_id identifies the single accepted ledger event. committed contains
-    every item on success, or only completed items on WritebackApplyError.
+    point items, then library items, then samples, preserving supplied order
+    within each group. On failure it includes only fully committed groups (each
+    sample is a group). Each item's index identifies its supplied position.
     """
 
     event_id: str
@@ -191,10 +225,10 @@ class WritebackResult:
 
 
 class WritebackApplyError(RuntimeError):
-    """An accepted item failed; prior items and the accepted event remain.
+    """An accepted group failed; prior groups and the accepted event remain.
 
     event_id identifies the already-appended accepted event. applied counts the
-    successfully committed prefix, not attempted items. result retains the same
+    items in fully committed groups, not groups or attempted items. result retains the same
     event ID and each detached committed value. __cause__ is the original
     item failure. Ledger append failures occur before this error boundary and
     propagate unchanged. No rollback, automatic retry or recovery is provided.
@@ -210,17 +244,16 @@ class WritebackApplyError(RuntimeError):
 
 
 class WritebackTarget(Protocol):
-    """Bound single-item write capabilities for a saved point.
+    """Bound document-batch write capabilities for a saved point.
 
     entry_id/ledger identify the owning entry; point is its saved label.
-    Each setter commits/validates one item and returns its detached actual value,
-    formed by that write owner without reopening the destination, or raises.
-    set_parameter accepts a concrete dotted point path, a working-unit JSON
-    value and caller metadata: None keeps the path's metadata, a mapping
-    replaces it in the same commit. set_module/set_waveform accept concrete
-    library keys and named Specs; source is the accepted library Provenance for
-    that item. Publication belongs to the
-    context owner, not this protocol or the executor. append_sample accepts a
+    set_parameters/set_modules each validate an ordered nonempty batch in one
+    draft and commit one file, or raise without committing any batch item.
+    They return one detached actual value per command, captured immediately
+    after that command's validation so later overwrites do not alter receipts.
+    Values are returned only after the entire batch commits. ParameterUpdate
+    and LibraryUpdate describe value, metadata and source contracts.
+    Publication belongs to the context owner, not this protocol or executor. append_sample accepts a
     safe component segment, producer fields and separate accepted run_id/UTC
     at/event source; it records this target's point label through the sample owner.
     """
@@ -229,15 +262,12 @@ class WritebackTarget(Protocol):
     ledger: RecordsLedger
     point: str
 
-    def set_parameter(
-        self, path: str, value: JsonValue, metadata: YamlMap | None
-    ) -> YamlValue: ...
-    def set_module(
-        self, path: str, value: ModuleSpec, source: Provenance
-    ) -> YamlMap: ...
-    def set_waveform(
-        self, path: str, value: WaveformSpec, source: Provenance
-    ) -> YamlMap: ...
+    def set_parameters(
+        self, updates: tuple[ParameterUpdate, ...]
+    ) -> tuple[YamlValue, ...]: ...
+    def set_modules(
+        self, updates: tuple[LibraryUpdate, ...]
+    ) -> tuple[YamlMap, ...]: ...
     def append_sample(
         self,
         component: str,
@@ -268,12 +298,23 @@ class PointWritebackTarget:
     def set_parameter(
         self, path: str, value: JsonValue, metadata: YamlMap | None
     ) -> YamlValue:
-        """Commit value/metadata and return the actual cached value, without I/O."""
+        """Commit one value/metadata pair; return its detached actual value."""
+        return self.set_parameters((ParameterUpdate(path, value, metadata),))[0]
+
+    def set_parameters(
+        self, updates: tuple[ParameterUpdate, ...]
+    ) -> tuple[YamlValue, ...]:
+        """Commit one nonempty point batch under WritebackTarget's batch contract."""
+        if not updates:
+            raise ValueError("parameter updates must be nonempty")
+        actual: list[YamlValue] = []
         with self._point.edit() as draft:
-            draft.set(path, value)
-            if metadata is not None:
-                draft.set_meta(path, metadata)
-        return document_value(snapshot(self._point), path)
+            for update in updates:
+                draft.set(update.path, update.value)
+                if update.metadata is not None:
+                    draft.set_meta(update.path, update.metadata)
+                actual.append(document_value(snapshot(draft), update.path))
+        return tuple(actual)
 
     def _library(self) -> ModuleLibrary:
         # Library imports entry provenance; defer to avoid the package cycle.
@@ -292,19 +333,34 @@ class PointWritebackTarget:
 
     def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> YamlMap:
         """Commit one module and return its actual cached Spec mapping."""
-        library = self._library()
-        with library.edit() as draft:
-            draft.set_module(path, value, provenance=source)
-        return library.snapshot().entry_value(path, kind="module")
+        return self.set_modules((LibraryUpdate(ModuleWriteback(path, value), source),))[
+            0
+        ]
 
     def set_waveform(
         self, path: str, value: WaveformSpec, source: Provenance
     ) -> YamlMap:
         """Commit one waveform and return its actual cached Spec mapping."""
-        library = self._library()
-        with library.edit() as draft:
-            draft.set_waveform(path, value, provenance=source)
-        return library.snapshot().entry_value(path, kind="waveform")
+        return self.set_modules(
+            (LibraryUpdate(WaveformWriteback(path, value), source),)
+        )[0]
+
+    def set_modules(self, updates: tuple[LibraryUpdate, ...]) -> tuple[YamlMap, ...]:
+        """Commit one nonempty mixed module/waveform batch, or leave it unwritten."""
+        if not updates:
+            raise ValueError("library updates must be nonempty")
+        actual: list[YamlMap] = []
+        with self._library().edit() as draft:
+            for update in updates:
+                item = update.item
+                if isinstance(item, ModuleWriteback):
+                    draft.set_module(item.path, item.value, provenance=update.source)
+                    kind = "module"
+                else:
+                    draft.set_waveform(item.path, item.value, provenance=update.source)
+                    kind = "waveform"
+                actual.append(draft.snapshot().entry_value(item.path, kind=kind))
+        return tuple(actual)
 
     def append_sample(
         self,
@@ -321,13 +377,38 @@ class PointWritebackTarget:
         )
 
 
+def _append_accepted_sample(
+    target: WritebackTarget,
+    write: AcceptedWrite,
+    evidence: WritebackEvidence,
+    event: LedgerEvent,
+) -> JsonObject:
+    """Pass normalized producer fields and accepted coordinates to the sample owner."""
+    if evidence.run_id is None:
+        raise ValueError("sample writeback requires a run_id")
+    if not isinstance(write.value, dict):
+        raise TypeError("accepted sample fields must be a JSON object")
+    fields = {
+        key: value
+        for key, value in write.value.items()
+        if key not in {"run_id", "point", "at", "source"}
+    }
+    return target.append_sample(
+        write.path,
+        fields,
+        run_id=evidence.run_id,
+        at=datetime.fromisoformat(event.at),
+        source=event.id,
+    )
+
+
 def apply_writeback(
     items: tuple[WritebackItem, ...],
     *,
     target: WritebackTarget,
     evidence: WritebackEvidence,
 ) -> WritebackResult:
-    """Validate concrete values, append accepted, then commit in supplied order.
+    """Validate values, append accepted, then commit point/library/sample groups.
 
     target binds the destination and its entry ledger; callers resolve roles
     before this entry. Nonempty items, strict JSON/Spec values, parameter
@@ -335,17 +416,24 @@ def apply_writeback(
     run_id are validated before append. Sample dict/list values first normalize
     numpy floating/integer scalars to Python numbers without mutating producers;
     non-finite results and other non-JSON values remain invalid. Target owners
-    validate paths, schema, sources and transactions when each item is reached. Parameters commit the
+    validate paths, schema, sources and transactions within each group draft. Parameters commit the
     caller's metadata unchanged, or keep existing metadata when it is None; no
     event, source or time is added to it. Library items receive the accepted
     Provenance. Samples receive run_id, saved point, UTC at and accepted source;
     producer device fields are preserved, not inferred. Return WritebackResult
     with the accepted event ID and each owner's confirmed committed value.
 
-    Ledger append failures propagate unchanged, with no writes. An item failure
-    raises WritebackApplyError(result) from its original cause, stops
-    later items and retains the successful prefix and event. No per-item progress
-    callback, cross-file rollback or automatic retry is provided.
+    Accepted payload writes retain supplied order. Committed results instead
+    follow point group, library group, then individual samples; supplied order
+    is preserved within each group. Each CommittedWrite.index maps back to the
+    supplied tuple even when paths repeat. Point and library each use one edit;
+    a failing item leaves its entire group unwritten. Receipts capture each
+    validated draft value and are released only after that group commits.
+
+    Ledger append failures propagate unchanged, with no writes. A group failure
+    raises WritebackApplyError(result) from its original cause, stops later
+    groups and retains fully committed groups and the event. applied counts
+    their items, not groups. No cross-file rollback or automatic retry occurs.
     """
     if not items:
         raise ValueError("writeback items must be nonempty")
@@ -368,43 +456,50 @@ def apply_writeback(
         ),
     )
     target.ledger.append(event)
+    parameters: list[ParameterUpdate] = []
+    parameter_indices: list[int] = []
+    library: list[LibraryUpdate] = []
+    library_indices: list[int] = []
+    sample_indices: list[int] = []
+    for index, (item, write) in enumerate(zip(items, writes, strict=True)):
+        if isinstance(item, ParameterWriteback):
+            parameters.append(ParameterUpdate(write.path, write.value, item.metadata))
+            parameter_indices.append(index)
+        elif isinstance(item, SampleWriteback):
+            sample_indices.append(index)
+        else:
+            library.append(
+                LibraryUpdate(
+                    item,
+                    Provenance(
+                        source=event.id,
+                        kind=kind,
+                        run_id=evidence.run_id,
+                        at=event.at,
+                        stderr=item.stderr,
+                    ),
+                )
+            )
+            library_indices.append(index)
+
     committed: list[CommittedWrite] = []
-    for item, write in zip(items, writes, strict=True):
-        try:
-            if isinstance(item, SampleWriteback):
-                if evidence.run_id is None:
-                    raise ValueError("sample writeback requires a run_id")
-                if not isinstance(write.value, dict):
-                    raise TypeError("accepted sample fields must be a JSON object")
-                fields = {
-                    key: value
-                    for key, value in write.value.items()
-                    if key not in {"run_id", "point", "at", "source"}
-                }
-                value = target.append_sample(
-                    item.component,
-                    fields,
-                    run_id=evidence.run_id,
-                    at=datetime.fromisoformat(event.at),
-                    source=event.id,
-                )
-            elif isinstance(item, ParameterWriteback):
-                value = target.set_parameter(write.path, write.value, item.metadata)
-            else:
-                provenance = Provenance(
-                    source=event.id,
-                    kind=kind,
-                    run_id=evidence.run_id,
-                    at=event.at,
-                    stderr=item.stderr,
-                )
-                if isinstance(item, ModuleWriteback):
-                    value = target.set_module(item.path, item.value, provenance)
-                else:
-                    value = target.set_waveform(item.path, item.value, provenance)
-        except Exception as exc:
-            raise WritebackApplyError(
-                WritebackResult(event.id, tuple(committed))
-            ) from exc
-        committed.append(CommittedWrite(write.path, deepcopy(value)))
+    try:
+        if parameters:
+            values = target.set_parameters(tuple(parameters))
+            committed.extend(
+                CommittedWrite(index, writes[index].path, deepcopy(value))
+                for index, value in zip(parameter_indices, values, strict=True)
+            )
+        if library:
+            library_values = target.set_modules(tuple(library))
+            committed.extend(
+                CommittedWrite(index, writes[index].path, deepcopy(value))
+                for index, value in zip(library_indices, library_values, strict=True)
+            )
+        for index in sample_indices:
+            write = writes[index]
+            value = _append_accepted_sample(target, write, evidence, event)
+            committed.append(CommittedWrite(index, write.path, deepcopy(value)))
+    except Exception as exc:
+        raise WritebackApplyError(WritebackResult(event.id, tuple(committed))) from exc
     return WritebackResult(event.id, tuple(committed))
