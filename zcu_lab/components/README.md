@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-10-23，DC 局部線與 global coil 校準
+**Last updated:** 2026-10-23，具名 global coil 校準 mapping
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -43,6 +43,6 @@ Mux generator 未知時可省略 `gen_ch` 或填 null，但 group 必須提供 w
 
 Qubit 的 `flux_half`／`flux_period`／`flux_int` 保存自己的 DC 線校準，單位由 `flux_unit` 指定。`wiring.lo_flux_ch` 仍是 fast-flux 通道，不是 DC device。
 
-Mux group 的 `coil_flux_half`／`coil_flux_period`／`coil_flux_int` 保存每顆 qubit 對 global coil 的校準，使用 coil device 的原生單位，依 qubits 順序排列。整欄 null 表示未知，list 內的 null 表示該 qubit 未校準。qubits 為 None 或空時，任一非 null 校準欄位都拒絕，包含空 list，錯誤訊息為「coil 校準需要 qubits 順序對齊」。qubits 有值時，非 null 校準 list 必須與 qubits 等長。
+Mux group 的 `coil_flux: dict[str, CoilFluxCalibration]` 保存每顆 qubit 對 global coil 的校準，預設為 `{}`。Key 必須是 group `qubits` 中的名稱，不依列表位置對齊。每筆 `CoilFluxCalibration` 有 `half`、`period`、`int`，分別代表半整數磁通的 coil bias、一個磁通量子的 bias span、整數磁通的 coil bias。三欄各為有限數值或 null，預設 null，使用 coil device 的原生單位。尚未校準的 qubit 可省略整筆，部分校準可只填已知欄位。未知 qubit key 會拒絕。qubits 為 None 或空時，coil key 條件只允許 `{}`；既有 qubits／resonators 等長規則仍適用。
 
 這些字串不在載入時預檢整張引用圖；解析時才查目標。單位見 [component 欄位單位](../README.md#component-欄位單位)，共用欄位與 ext 政策見 [component 教學](../tutorial/01-components.md#1-宣告欄位)，registry 與 field specs 契約見 [元件與定義](../../lib/zcu_tools/resources/entry/README.md#元件與定義)。

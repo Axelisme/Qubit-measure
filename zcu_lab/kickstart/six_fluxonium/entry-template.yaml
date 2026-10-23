@@ -132,9 +132,7 @@ components:
     resonators: [R1, R2, R3, R4, R5, R6]
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
     flux_source: coil_bias
-    coil_flux_half: null # Coil calibration lists follow the qubits order.
-    coil_flux_period: null
-    coil_flux_int: null
+    coil_flux: {} # Calibrations keyed by qubit name, filled after measurement.
     wiring:
       gen_ch: 0
       ro_ch: [0, 1, 2, 3, 4, 5]

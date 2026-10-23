@@ -54,9 +54,12 @@ Q1–Q6 的 EJ／EC／EL 使用 GHz，R1–R6 名目頻率為 7000、7100、7200
 Group 的 `mixer_freq: 7250` MHz 是示意 LO 設定，使用前須確認硬體 LO 設定並更新。
 六顆 qubit 的 `freq` 與 resonator、mux group 的 `time_of_fly` 全部保留 null。
 Qubit 的 `flux_half`／`flux_period`／`flux_int` 描述自己的局部 DC 線，初始未校準。
-Group 的 `coil_flux_half`／`coil_flux_period`／`coil_flux_int` 全部保留 null。
-量測後以 qubits 的 Q1–Q6 順序填入 coil 校準 list，數值使用 `coil_bias` device 的原生單位。
-個別元素可保留 null。
+Group 的 `coil_flux` 預設為 `{}`。
+量測後以 group 的 qubit 名稱填入 coil 校準，例如 `coil_flux: {Q1: {half: 0.5, period: 1.0, int: 0.0}}`。
+範例數值只是欄位示意，使用 `coil_bias` device 的原生單位。
+每筆的 `half`／`period`／`int` 各可保留 null 或省略，未校準的 qubit 可不加入 mapping。
+Key 必須屬於 group 的 qubits，不依 Q1–Q6 的列表位置寫入。
+Writeback 每個 participant 提一筆 record 到 `MG123456.coil_flux.Q1` 這類路徑，建立該 qubit 的校準，不替換其他 qubit。
 
 範本不含 module library、readout 校準、qubit pulse 校準或已填好的量測序列。
 缺 readout slot 的 mux 表單在 Open／Reset 時，從 group 取得 gen_ch、ro_ch 與 mixer_freq。

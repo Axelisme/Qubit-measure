@@ -32,6 +32,31 @@ class MuxWiringSchema(BaseModel):
     )
 
 
+class CoilFluxCalibration(BaseModel):
+    """One qubit's global-coil calibration in the coil device's native unit.
+
+    half is the coil bias at half a flux quantum, period is the bias span of
+    one flux quantum, and int is the bias at an integer flux quantum.
+    Each field defaults to None until measured. Supplied numbers must be
+    finite; unknown fields and non-numeric values raise ValidationError.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    half: Flux = Field(
+        default=None,
+        description="Coil bias at half a flux quantum; None until measured.",
+    )
+    period: Flux = Field(
+        default=None,
+        description="Coil bias span of one flux quantum; None until measured.",
+    )
+    int: Flux = Field(
+        default=None,
+        description="Coil bias at an integer flux quantum; None until measured.",
+    )
+
+
 class MuxGroupSchema(BuiltinComponent):
     """A mux module owner with 1..8 ordered resonators and optional qubits.
 
@@ -43,10 +68,10 @@ class MuxGroupSchema(BuiltinComponent):
     time_of_fly stores this mux route's measured flight time in us, or None
     until known. Resonator pulse-route flight times are separate.
     flux_source names the global coil device, or None until assigned.
-    coil_flux_half/period/int hold coil bias calibrations in qubits order,
-    using the coil device's native unit. None means the whole calibration is
-    unknown; a None element means that qubit has not been calibrated.
-    Non-null calibration lists require qubits and must match its length.
+    coil_flux maps qubit names to CoilFluxCalibration, defaulting to an empty
+    mapping until measured. Keys must belong to qubits; when qubits is None
+    or empty, only an empty mapping satisfies this condition. Unknown keys
+    raise ValidationError. The qubits/resonators length rule still applies.
     """
 
     wiring: MuxWiringSchema = Field(
@@ -80,25 +105,11 @@ class MuxGroupSchema(BuiltinComponent):
     flux_source: str | None = Field(
         default=None, description="Device name supplying the global coil bias."
     )
-    coil_flux_half: list[Flux] | None = Field(
-        default=None,
+    coil_flux: dict[str, CoilFluxCalibration] = Field(
+        default_factory=dict,
         description=(
-            "Coil biases at half a flux quantum, in coil device units and qubits order; "
-            "None for an unknown list or element."
-        ),
-    )
-    coil_flux_period: list[Flux] | None = Field(
-        default=None,
-        description=(
-            "Coil bias spans of one flux quantum, in coil device units and qubits order; "
-            "None for an unknown list or element."
-        ),
-    )
-    coil_flux_int: list[Flux] | None = Field(
-        default=None,
-        description=(
-            "Coil biases at integer flux quanta, in coil device units and qubits order; "
-            "None for an unknown list or element."
+            "Global-coil calibrations in coil device units, keyed by group qubit name; "
+            "empty until calibrated. Keys must be a subset of qubits."
         ),
     )
 
@@ -131,22 +142,14 @@ class MuxGroupSchema(BuiltinComponent):
         return self
 
     @model_validator(mode="after")
-    def validate_coil_calibration_lengths(self) -> Self:
-        """Reject coil calibrations without a matching, nonempty qubit order."""
-        for field, values in (
-            ("coil_flux_half", self.coil_flux_half),
-            ("coil_flux_period", self.coil_flux_period),
-            ("coil_flux_int", self.coil_flux_int),
-        ):
-            if values is None:
-                continue
-            if not self.qubits:
-                raise ValueError(f"{field}: coil 校準需要 qubits 順序對齊")
-            if len(values) != len(self.qubits):
-                raise ValueError(
-                    f"{field}/qubits: lengths differ; "
-                    f"{field}={values!r}, qubits={self.qubits!r}"
-                )
+    def validate_coil_calibration_keys(self) -> Self:
+        """Reject coil calibration keys that are not group qubit names."""
+        unknown = self.coil_flux.keys() - set(self.qubits or ())
+        if unknown:
+            raise ValueError(
+                "coil_flux: keys must belong to qubits; "
+                f"unknown={sorted(unknown)!r}, qubits={self.qubits!r}"
+            )
         return self
 
     @model_validator(mode="after")
