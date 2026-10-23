@@ -48,6 +48,7 @@ from zcu_tools.gui.widgets import (
     set_foreground,
 )
 from zcu_tools.gui.widgets.form import FormEditor
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from ..writeback import WritebackWidget
 from .experiment_figure_area import ExperimentFigureArea
@@ -195,6 +196,12 @@ class ExpTabWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.setSpacing(2)
+        self._analysis_source_notice = QLabel()
+        self._analysis_source_notice.setObjectName("history.analysis_source")
+        self._analysis_source_notice.setWordWrap(True)
+        make_label_selectable(self._analysis_source_notice)
+        self._analysis_source_notice.hide()
+        root_layout.addWidget(self._analysis_source_notice)
 
         # --- main content area: [splitter] ---
         self._content_widget = QWidget()
@@ -900,6 +907,11 @@ class ExpTabWidget(QWidget):
                 f"capability mismatch for tab {self.tab_id!r}: "
                 f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
             )
+        issue = snapshot.run.analysis_source_issue if snapshot.run is not None else None
+        self._analysis_source_notice.setText(
+            f"History loaded, no analysis source: {issue}" if issue else ""
+        )
+        self._analysis_source_notice.setVisible(issue is not None)
         state = snapshot.interaction
         capabilities = snapshot.capabilities
         writable = self._writable

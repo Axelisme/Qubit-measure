@@ -129,7 +129,9 @@ class MainWindowToolbar:
         action = menu.addAction("Results browser…")
         try:
             selected = menu.exec(
-                self._results_button.mapToGlobal(self._results_button.rect().bottomLeft())
+                self._results_button.mapToGlobal(
+                    self._results_button.rect().bottomLeft()
+                )
             )
         finally:
             menu.deleteLater()

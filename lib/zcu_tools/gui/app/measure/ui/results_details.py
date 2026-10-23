@@ -7,11 +7,17 @@ from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsI
 
 def _lines(value: object, prefix: str = "") -> list[str]:
     if isinstance(value, dict):
-        return [line for key, child in value.items()
-                for line in _lines(child, f"{prefix}.{key}" if prefix else str(key))]
+        return [
+            line
+            for key, child in value.items()
+            for line in _lines(child, f"{prefix}.{key}" if prefix else str(key))
+        ]
     if isinstance(value, list):
-        return [line for i, child in enumerate(value)
-                for line in _lines(child, f"{prefix}[{i}]")]
+        return [
+            line
+            for i, child in enumerate(value)
+            for line in _lines(child, f"{prefix}[{i}]")
+        ]
     return [f"{prefix} = {value}"]
 
 
@@ -21,11 +27,15 @@ def result_details(index: ResultsIndex, run: ResultRun) -> str:
     Parameters remain a separate named section. Per-document read failures are
     displayed beside the affected filename rather than hiding the run.
     """
-    sections = [f"{run.entry} / {run.point or 'Global / unknown'}",
-                run.experiment or "Unknown experiment", run.run_path.name,
-                "Registered" if run.registered else "Unregistered",
-                f"Time: {run.at or 'Unknown'}", f"Roles: {dict(run.roles)}",
-                str(run.run_path)]
+    sections = [
+        f"{run.entry} / {run.point or 'Global / unknown'}",
+        run.experiment or "Unknown experiment",
+        run.run_path.name,
+        "Registered" if run.registered else "Unregistered",
+        f"Time: {run.at or 'Unknown'}",
+        f"Roles: {dict(run.roles)}",
+        str(run.run_path),
+    ]
     if run.data_path is not None:
         try:
             cfg = index.read_cfg(run.key)
@@ -39,8 +49,12 @@ def result_details(index: ResultsIndex, run: ResultRun) -> str:
         except (OSError, ValueError, KeyError) as error:
             sections.append(f"{path.name}: {error}")
             continue
-        sections.extend([f"\nSummary · {path.name}", *_lines(document.get("summary", document))])
+        sections.extend(
+            [f"\nSummary · {path.name}", *_lines(document.get("summary", document))]
+        )
         if "parameters" in document:
-            sections.extend([f"\nParameters · {path.name}", *_lines(document["parameters"])])
+            sections.extend(
+                [f"\nParameters · {path.name}", *_lines(document["parameters"])]
+            )
     sections.extend(run.issues)
     return "\n".join(sections)

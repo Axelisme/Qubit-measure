@@ -179,7 +179,9 @@ class LoadService:
                     roles=RoleBinding(None, {}, history.roles),
                 )
             except MissingPointError as error:
-                analysis_source_issue = f"Historical point {history.point!r} is unavailable: {error}"
+                analysis_source_issue = (
+                    f"Historical point {history.point!r} is unavailable: {error}"
+                )
         retired = self._state.update_tab_loaded_result(
             tab_id,
             restored.record,

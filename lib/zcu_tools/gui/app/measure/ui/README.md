@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -98,6 +98,17 @@ callers must not substitute the last valid params.
 completion, not ledger event times. Unreadable metadata stays visible as a file
 row with its error and a selectable path. Selection does not promise Load success;
 the existing Load owner reports file/format errors after selection.
+
+The Results menu retains an independent top-level Results browser. Closing the
+measure window closes this browser. It reads the Controller results query once
+and filters the shared index without changing the opened entry or point.
+Experiment-first and point-first navigation share focus history. Saved PNGs use
+a vertically scrolling gallery, separate from the measure figure pager.
+Left clicks drill down and select the current run figure. Context menus copy
+a member path or image and pin its run in ResultsComparison.
+Cfg values and analysis summaries use relative paths; analysis parameters have
+their own sections. New-tab Load uses the application owner. A missing analysis
+source remains visible in both the browser outcome and the loaded tab.
 
 `ArtifactSaveCenter` shows each output on two lines: the filename, status and
 actions above, and the secondary-colour path below. Failure messages appear

@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date
-import logging
 from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage
 from qtpy.QtWidgets import (
-    QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QMainWindow, QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget,
+    QApplication,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QPlainTextEdit,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
 
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .results_comparison import ResultsComparison
 from .results_details import result_details
@@ -43,19 +54,26 @@ def _point_label(point: tuple[str, str | None]) -> str:
 class ResultsBrowserWindow(QMainWindow):
     """Retain one read-only results view; the measure window owns its lifetime."""
 
-    def __init__(self, controller: Controller, parent: QMainWindow | None = None) -> None:
+    def __init__(
+        self, controller: Controller, parent: QMainWindow | None = None
+    ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.setObjectName("results.browser")
         self.setWindowTitle("Results browser")
         self.resize(1400, 850)
         index = controller.query_results()
-        self.setCentralWidget(ResultsBrowser(
+        self._browser = ResultsBrowser(
             index,
             lambda run: controller.tab_control.open_tab_from_file(
                 run.experiment or "", str(run.data_path)
             ),
             self,
-        ))
+        )
+        self.setCentralWidget(self._browser)
+
+    def set_writable(self, *, writable: bool) -> None:
+        """Gate new-tab commands while retaining read-only browsing and local pins."""
+        self._browser.set_writable(writable=writable)
 
 
 class ResultsBrowser(QWidget):
@@ -67,12 +85,14 @@ class ResultsBrowser(QWidget):
     """
 
     def __init__(
-        self, index: ResultsIndex,
+        self,
+        index: ResultsIndex,
         open_run: Callable[[ResultRun], LoadTabResultOutcome],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._index = index
+        self._writable = True
         self._open_run = open_run
         self._focus = _Focus()
         self._history = [self._focus]
@@ -93,6 +113,7 @@ class ResultsBrowser(QWidget):
         layout.addWidget(splitter, 1)
         self._feedback = QLabel("")
         self._feedback.setObjectName("results.feedback")
+        make_label_selectable(self._feedback)
         self._feedback.setWordWrap(True)
         layout.addWidget(self._feedback)
         self._render()
@@ -107,7 +128,9 @@ class ResultsBrowser(QWidget):
         self._experiment = QComboBox()
         self._experiment.setObjectName("results.experiment")
         self._experiment.addItem("All experiments")
-        self._experiment.addItems(sorted({r.experiment for r in self._index.runs if r.experiment}))
+        self._experiment.addItems(
+            sorted({r.experiment for r in self._index.runs if r.experiment})
+        )
         self._experiment.currentIndexChanged.connect(self._render)
         layout.addWidget(self._experiment)
         self._search = QLineEdit()
@@ -115,7 +138,9 @@ class ResultsBrowser(QWidget):
         self._search.setPlaceholderText("Search entries, roles, cfg and analysis")
         self._search.textChanged.connect(self._render)
         layout.addWidget(self._search, 1)
-        self._date_from = self._date_filter("results.date_from", "From YYYY-MM-DD", layout)
+        self._date_from = self._date_filter(
+            "results.date_from", "From YYYY-MM-DD", layout
+        )
         self._date_to = self._date_filter("results.date_to", "To YYYY-MM-DD", layout)
         return layout
 
@@ -123,8 +148,10 @@ class ResultsBrowser(QWidget):
         edit = QLineEdit()
         edit.setObjectName(name)
         edit.setPlaceholderText(hint)
-        edit.setMaximumWidth(155)
-        edit.setToolTip("Inclusive UTC date; runs without a timestamp are excluded when set")
+        edit.setFixedWidth(140)
+        edit.setToolTip(
+            "Inclusive UTC date; runs without a timestamp are excluded when set"
+        )
         edit.editingFinished.connect(self._render)
         layout.addWidget(edit)
         return edit
@@ -141,6 +168,7 @@ class ResultsBrowser(QWidget):
             layout.addWidget(button)
         self._focus_label = QLabel()
         self._focus_label.setObjectName("results.focus")
+        make_label_selectable(self._focus_label)
         layout.addWidget(self._focus_label, 1)
         return layout
 
@@ -149,6 +177,7 @@ class ResultsBrowser(QWidget):
         layout = QVBoxLayout(pane)
         self._current_figure = QLabel("Current figure: none")
         self._current_figure.setObjectName("results.current_figure")
+        make_label_selectable(self._current_figure)
         layout.addWidget(self._current_figure)
         self._details = QPlainTextEdit()
         self._details.setObjectName("results.details")
@@ -164,6 +193,11 @@ class ResultsBrowser(QWidget):
         layout.addWidget(self.comparison, 1)
         return pane
 
+    def set_writable(self, *, writable: bool) -> None:
+        """Enable new-tab Load only for Local, without disabling navigation or pins."""
+        self._writable = writable
+        self._render_details(self._focused(self._filtered()))
+
     def _change_group(self) -> None:
         self._focus = _Focus()
         self._history = [self._focus]
@@ -172,7 +206,7 @@ class ResultsBrowser(QWidget):
 
     def _visit(self, focus: _Focus) -> None:
         if focus != self._focus:
-            self._history = self._history[:self._history_position + 1]
+            self._history = self._history[: self._history_position + 1]
             self._history.append(focus)
             self._history_position += 1
             self._focus = focus
@@ -198,19 +232,30 @@ class ResultsBrowser(QWidget):
             self._feedback.setText(f"Invalid date filter: {error}")
             return ()
         search = self._search.text().casefold().strip()
-        experiment = self._experiment.currentText() if self._experiment.currentIndex() else None
-        return tuple(run for run in self._index.runs
-                     if (experiment is None or run.experiment == experiment)
-                     and search in run.search_text
-                     and (not lower or (run.at is not None and run.at[:10] >= lower))
-                     and (not upper or (run.at is not None and run.at[:10] <= upper)))
+        experiment = (
+            self._experiment.currentText() if self._experiment.currentIndex() else None
+        )
+        return tuple(
+            run
+            for run in self._index.runs
+            if (experiment is None or run.experiment == experiment)
+            and search in run.search_text
+            and (not lower or (run.at is not None and run.at[:10] >= lower))
+            and (not upper or (run.at is not None and run.at[:10] <= upper))
+        )
 
     def _focused(self, runs: tuple[ResultRun, ...]) -> tuple[ResultRun, ...]:
         focus = self._focus
-        return tuple(run for run in runs
-                     if (focus.experiment is None or (run.experiment or "Unknown experiment") == focus.experiment)
-                     and (focus.point is None or (run.entry, run.point) == focus.point)
-                     and (focus.run_key is None or run.key == focus.run_key))
+        return tuple(
+            run
+            for run in runs
+            if (
+                focus.experiment is None
+                or (run.experiment or "Unknown experiment") == focus.experiment
+            )
+            and (focus.point is None or (run.entry, run.point) == focus.point)
+            and (focus.run_key is None or run.key == focus.run_key)
+        )
 
     def _render(self) -> None:
         runs = self._focused(self._filtered())
@@ -264,11 +309,21 @@ class ResultsBrowser(QWidget):
         self._visit(self._next_focus(run, figure))
 
     def _render_details(self, runs: tuple[ResultRun, ...]) -> None:
-        run = self._index.get_run(self._focus.run_key) if self._focus.run_key and runs else None
-        self._details.setPlainText(result_details(self._index, run) if run else "Select a run to inspect cfg and analysis")
+        run = (
+            self._index.get_run(self._focus.run_key)
+            if self._focus.run_key and runs
+            else None
+        )
+        self._details.setPlainText(
+            result_details(self._index, run)
+            if run
+            else "Select a run to inspect cfg and analysis"
+        )
         reason = "Select a run"
         if run is not None:
             reason = "No data.h5 in this saved run" if run.data_path is None else ""
+        if not self._writable:
+            reason = "Local control is required to open an analysis tab"
         self._open_button.setEnabled(not reason)
         self._open_button.setToolTip(reason)
         self._pin_button.setEnabled(run is not None)
@@ -276,7 +331,9 @@ class ResultsBrowser(QWidget):
 
     def _pin_selected(self) -> None:
         if self._focus.run_key is not None:
-            self.comparison.pin_run(self._index.get_run(self._focus.run_key), self._focus.figure)
+            self.comparison.pin_run(
+                self._index.get_run(self._focus.run_key), self._focus.figure
+            )
 
     def _open_selected(self) -> None:
         if self._focus.run_key is None:
@@ -288,9 +345,17 @@ class ResultsBrowser(QWidget):
             logger.exception("Cannot open saved history in a new tab")
             self._feedback.setText(f"Cannot open analysis tab: {error}")
         else:
-            self._feedback.setText(f"Loaded history: {outcome.data_path}")
+            messages = [f"Loaded history: {outcome.data_path}"]
+            if outcome.analysis_source_issue is not None:
+                messages.append(
+                    f"History loaded, no analysis source: {outcome.analysis_source_issue}"
+                )
+            self._feedback.setText("\n".join(messages))
             if outcome.analysis_error:
-                self._feedback.setText(f"History loaded; analysis preparation failed: {outcome.analysis_error}")
+                self._feedback.setText(
+                    self._feedback.text()
+                    + f"\nAnalysis preparation failed: {outcome.analysis_error}"
+                )
 
     def _figure_action(self, run: ResultRun, figure: str, action: str) -> None:
         clipboard = QApplication.clipboard()

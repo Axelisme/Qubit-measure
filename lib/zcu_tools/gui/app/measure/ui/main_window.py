@@ -322,6 +322,8 @@ class MainWindow(QMainWindow):
         """Project Local write availability to this window and all mounted views."""
         self._writable = writable
         self._toolbar.set_writable(writable=writable)
+        if self._results_browser is not None:
+            self._results_browser.set_writable(writable=writable)
         self._workflow_tabs.set_writable(writable=writable)
         workflow_busy = any(s.busy for s in self._ctrl.workflow_control().tabs())
         self._dialog_registry.set_running(
@@ -849,6 +851,7 @@ class MainWindow(QMainWindow):
                 logger.exception("Cannot open results browser")
                 self.show_error_dialog("Results browser failed", str(error))
                 return
+        self._results_browser.set_writable(writable=self._writable)
         self._results_browser.show()
         self._results_browser.raise_()
         self._results_browser.activateWindow()

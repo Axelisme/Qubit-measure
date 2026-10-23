@@ -10,6 +10,8 @@
 
 `ResultEntry.read_identity(name, *, result_root)` 只驗 setup header 與 general 的 UUID／UTC 建立時間，回 `EntryIdentity`。它不解析 component schema、不要求註冊歷史 component kind，也不要求 points 或 records 目錄。讀取不建立檔案或鎖，格式與 I/O 錯誤傳遞。
 
+`use_point` 的必需 `point.yaml` 或 `module_cfg.yaml` 缺失時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
+
 兩個入口都不檢查或建立 Database，只有 Result 也能開啟。第一次 Save 才建立所需輸出目錄；既有同名 Database 照用，混雜不另處理，見 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
 
 `predictors_path` 是 Result 條目下 `predictors/` 的唯讀路徑。讀取 property 不建立目錄，也不列檔或驗證內容。`resources.predictor_file` 擁有其中 predictor JSON 的格式與讀寫。

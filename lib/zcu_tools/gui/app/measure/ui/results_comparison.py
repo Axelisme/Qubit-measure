@@ -6,6 +6,7 @@ from PyQt6.QtCore import pyqtSignal
 from qtpy.QtWidgets import QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget
 
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
 class ResultsComparison(QWidget):
@@ -24,6 +25,7 @@ class ResultsComparison(QWidget):
         layout = QVBoxLayout(self)
         self._count = QLabel("Pinned runs: 0")
         self._count.setObjectName("results.pin_count")
+        make_label_selectable(self._count)
         layout.addWidget(self._count)
         self._list = QListWidget()
         self._list.setObjectName("results.pins")

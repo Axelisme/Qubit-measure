@@ -8,10 +8,17 @@ from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QPoint, Qt
 from qtpy.QtGui import QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
-    QGridLayout, QLabel, QMenu, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QGridLayout,
+    QLabel,
+    QMenu,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
 from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsIndex
+from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
 class ResultImage(QLabel):
@@ -40,8 +47,13 @@ class ResultImage(QLabel):
 
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)
-        self.setPixmap(self._image.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation))
+        self.setPixmap(
+            self._image.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def _context_menu(self, point: QPoint) -> None:
         menu = QMenu(self)
@@ -81,8 +93,11 @@ class ResultsGallery(QScrollArea):
             for path in run.figure_paths:
                 card = QWidget()
                 layout = QVBoxLayout(card)
-                caption = QLabel(f"{run.entry} / {run.point or 'Global / unknown'}\n{path.name}")
+                caption = QLabel(
+                    f"{run.entry} / {run.point or 'Global / unknown'}\n{path.name}"
+                )
                 caption.setWordWrap(True)
+                make_label_selectable(caption)
                 try:
                     image = ResultImage(self._index.read_figure(run.key, path.name))
                 except (OSError, ValueError, KeyError) as error:
@@ -95,7 +110,9 @@ class ResultsGallery(QScrollArea):
                         f"{run.at or 'Unknown date'}\n{path}"
                     )
                     image.activated.connect(lambda r=run, f=path.name: activate(r, f))
-                    image.action_requested.connect(lambda a, r=run, f=path.name: action(r, f, a))
+                    image.action_requested.connect(
+                        lambda a, r=run, f=path.name: action(r, f, a)
+                    )
                     layout.addWidget(image)
                 layout.addWidget(caption)
                 grid.addWidget(card, number // 2, number % 2)
