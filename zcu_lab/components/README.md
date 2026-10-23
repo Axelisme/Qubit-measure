@@ -9,7 +9,7 @@
 | Kind | 代表什麼 | 哪些實驗讀它 |
 | --- | --- | --- |
 | `resonator` | Readout resonator 的頻率、linewidth 與 wiring。 | `onetone/*`、`twotone/*`、`jpa/*` 與 mux tone 初值。 |
-| `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux wiring、module 槽與 global coil 校準。 | `mux/*` 與 `ftf/*` 的表單。 |
+| `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux wiring、module 槽與 global coil 校準。 | `mux/*` 與 `two_qubit/*` 的表單。 |
 | `device/current_source` | Flux bias 來源的 component 記錄，只有共用 ext、module，沒有 wiring。 | 不代替 driver；flux 實驗讀 device alias 指向的已連線裝置。 |
 | `amplifier/jpa` | JPA pump frequency、power 與 flux bias 校準。 | `jpa/*` 的表單與 writeback。 |
 | `qubit/fluxonium` | 共用 qubit 校準加上 EJ、EC、EL。 | `twotone/*` 與其他讀 qubit 校準的表單；mux／FTF 表單也可經 group 讀取。 |

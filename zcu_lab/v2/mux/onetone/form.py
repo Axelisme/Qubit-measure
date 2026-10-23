@@ -9,7 +9,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
-from zcu_lab.v2.mux.onetone_fine.core import MuxOnetoneCfg
+from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
 
 
 def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:

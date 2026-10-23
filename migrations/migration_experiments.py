@@ -28,15 +28,6 @@ from zcu_lab.v2.fastflux.distortion.phase import core as fastflux_distortion_pha
 from zcu_lab.v2.fastflux.mist import core as fastflux_mist
 from zcu_lab.v2.fastflux.t1 import core as fastflux_t1
 from zcu_lab.v2.fastflux.twotone import core as fastflux_twotone
-from zcu_lab.v2.ftf.chevron import core as ftf_chevron
-from zcu_lab.v2.ftf.conditional_phase import core as ftf_conditional_phase
-from zcu_lab.v2.ftf.conditional_spectroscopy import core as ftf_conditional_spectroscopy
-from zcu_lab.v2.ftf.constructive_phase import core as ftf_constructive_phase
-from zcu_lab.v2.ftf.cz_amplitude import core as ftf_cz_amplitude
-from zcu_lab.v2.ftf.idle_zz import core as ftf_idle_zz
-from zcu_lab.v2.ftf.joint_readout import core as ftf_joint_readout
-from zcu_lab.v2.ftf.local_z import core as ftf_local_z
-from zcu_lab.v2.ftf.rb import core as ftf_rb
 from zcu_lab.v2.jpa.auto_optimize import core as jpa_auto_optimize
 from zcu_lab.v2.jpa.check import core as jpa_check
 from zcu_lab.v2.jpa.flux import core as jpa_flux
@@ -49,7 +40,7 @@ from zcu_lab.v2.mist.power_dep.drive_freq import core as mist_power_dep_drive_fr
 from zcu_lab.v2.mist.power_dep.single_trace import core as mist_power_dep_single_trace
 from zcu_lab.v2.mux.amp_rabi import core as mux_amp_rabi
 from zcu_lab.v2.mux.len_rabi import core as mux_len_rabi
-from zcu_lab.v2.mux.onetone_fine import core as mux_onetone_fine
+from zcu_lab.v2.mux.onetone import core as mux_onetone
 from zcu_lab.v2.mux.singleshot_ge import core as mux_singleshot_ge
 from zcu_lab.v2.mux.t1 import core as mux_t1
 from zcu_lab.v2.mux.t2echo import core as mux_t2echo
@@ -71,6 +62,17 @@ from zcu_lab.v2.singleshot.reset_check import core as singleshot_reset_check
 from zcu_lab.v2.singleshot.t1.t1 import core as singleshot_t1_t1
 from zcu_lab.v2.singleshot.t1.t1_with_tone import core as singleshot_t1_t1_with_tone
 from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep import core as singleshot_t1_tone_sweep
+from zcu_lab.v2.two_qubit.chevron import core as ftf_chevron
+from zcu_lab.v2.two_qubit.conditional_phase import core as ftf_conditional_phase
+from zcu_lab.v2.two_qubit.conditional_spectroscopy import (
+    core as ftf_conditional_spectroscopy,
+)
+from zcu_lab.v2.two_qubit.constructive_phase import core as ftf_constructive_phase
+from zcu_lab.v2.two_qubit.cz_amplitude import core as ftf_cz_amplitude
+from zcu_lab.v2.two_qubit.idle_zz import core as ftf_idle_zz
+from zcu_lab.v2.two_qubit.joint_readout import core as ftf_joint_readout
+from zcu_lab.v2.two_qubit.local_z import core as ftf_local_z
+from zcu_lab.v2.two_qubit.rb import core as ftf_rb
 from zcu_lab.v2.twotone.ac_stark import core as twotone_ac_stark
 from zcu_lab.v2.twotone.allxy import core as twotone_allxy
 from zcu_lab.v2.twotone.ckp import core as twotone_ckp
@@ -216,7 +218,7 @@ MIGRATION_EXPERIMENTS = (
     _declaration(mux_amp_rabi.MuxAmpRabiExp.AXES_SPEC),
     _declaration(mux_twotone_spectrum.MuxFreqExp.AXES_SPEC, source_tag="mux/freq"),
     _declaration(mux_len_rabi.MuxLenRabiExp.AXES_SPEC),
-    _declaration(mux_onetone_fine.MuxOnetoneExp.AXES_SPEC, source_tag="mux/onetone"),
+    _declaration(mux_onetone.MuxOnetoneExp.AXES_SPEC, source_tag="mux/onetone"),
     _declaration(mux_singleshot_ge.MuxGEExp.AXES_SPEC),
     _declaration(mux_t1.MuxT1Exp.AXES_SPEC),
     _declaration(mux_t2echo.MuxT2EchoExp.AXES_SPEC),

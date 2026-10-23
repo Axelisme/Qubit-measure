@@ -67,7 +67,7 @@ class ChevronExp(PersistableExperiment[RabiScanResult, ChevronCfg]):
         result_type=RabiScanResult,
         cfg_type=ChevronCfg,
         cfg_schema_version="1.0",
-        tag="ftf/chevron",
+        tag="two_qubit/chevron",
     )
 
     def run(self, config: ChevronCfg, *, context: RunContext) -> RabiScanResult:

@@ -64,7 +64,7 @@ class ConstructivePhaseExp(PersistableExperiment[RabiScanResult, ConstructivePha
         result_type=RabiScanResult,
         cfg_type=ConstructivePhaseCfg,
         cfg_schema_version="1.0",
-        tag="ftf/constructive_phase",
+        tag="two_qubit/constructive_phase",
     )
 
     def run(

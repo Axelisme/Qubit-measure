@@ -6,7 +6,7 @@
 
 ## Before run
 
-Select `ftf/rb` after calibrating the F1/F2 X90 pulses, complete mux readout,
+Select `two_qubit/rb` after calibrating the F1/F2 X90 pulses, complete mux readout,
 two charge-line CZ pulses and their local-Z corrections. Bind scalar aliases
 `f1`, `f2`, `coupler` and `mux`, then Open or Reset the Form. The fixed capture
 maps logical Q0 to F1 and Q1 to F2. Their tone positions come from the captured
