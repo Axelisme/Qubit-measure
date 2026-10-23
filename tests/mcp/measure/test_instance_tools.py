@@ -7,6 +7,46 @@ import pytest
 from ._support import make_client
 
 
+def test_fixed_tool_contract_is_available_without_gui_access(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    try:
+        assert set(client.tools) == {
+            "connect",
+            "status",
+            "wait",
+            "cancel",
+            "rpc_list",
+            "rpc_describe",
+            "rpc_call",
+            "tab_analyze",
+            "tab_interact",
+            "tab_close",
+            "answer",
+            "apply_writeback",
+            "device_setup",
+            "recipe_guide",
+            "workflow_open",
+            "workflow_close",
+            "workflow_status",
+            "workflow_start",
+            "workflow_pause",
+            "workflow_resume",
+            "workflow_stop",
+            "workflow_form",
+            "workflow_describe_form",
+            "workflow_edit_form",
+            "workflow_tunables",
+            "workflow_records",
+            "workflow_figures",
+            "workflow_figure",
+            "workflow_answer",
+        }
+        assert all(callable(entry["handler"]) for entry in client.tools.values())
+        assert client.transport.sent == []
+    finally:
+        client.context.session.close()
+
+
 def test_fixed_rpc_tools_keep_their_own_transport_and_catalog(tmp_path: Path) -> None:
     first = make_client(tmp_path)
     second = make_client(tmp_path)
