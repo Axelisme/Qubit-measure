@@ -140,8 +140,8 @@ class LoadDataDialog(QDialog):
     def _draw_preview_overlay(self, ax: Axes) -> None:
         """Draw app marks over the rendered 2D preview; the default draws nothing.
 
-        ax shows the preview after the chosen transpose: x is the device (flux)
-        axis and y the frequency axis, in the file's native units. Called on
+        ax shows the preview after the chosen transpose, in the file's native
+        units. Transposing swaps both coordinates and axis labels. Called on
         every render that draws a 2D spectrum, before the canvas redraws.
         """
 
@@ -218,8 +218,7 @@ class LoadDataDialog(QDialog):
             self._canvas.draw_idle()
             return
 
-        # Apply the preview-only transpose so the user sees the orientation that
-        # the chosen flag will produce (x=flux, y=freq after the swap).
+        # Swap labels with coordinates so the preview describes the displayed axes.
         amp = np.abs(signals)
         if self._transpose:
             amp, x_axis, y_axis = amp.T, y, x
@@ -231,7 +230,7 @@ class LoadDataDialog(QDialog):
             origin="lower",
             extent=(x_axis[0], x_axis[-1], y_axis[0], y_axis[-1]),
         )
-        self._ax.set_xlabel("Device value (flux)")
-        self._ax.set_ylabel("Frequency")
+        self._ax.set_xlabel("Frequency" if self._transpose else "Device value (flux)")
+        self._ax.set_ylabel("Device value (flux)" if self._transpose else "Frequency")
         self._draw_preview_overlay(self._ax)
         self._canvas.draw_idle()
