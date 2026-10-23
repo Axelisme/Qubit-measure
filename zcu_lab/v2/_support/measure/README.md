@@ -29,13 +29,13 @@ trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_leng
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
 上述缺值情境仍填入 ro_length=1.0 us。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。只有 mixer 初值、推導 timing 與 gain 0.1 標為 uncalibrated，ref-only slot 不標記，未改寫的 captured 欄位保持未知。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
 Label 不是 identity。這些初值不保證硬體安全，操作員仍須核對接線。缺少必要欄位仍擋 Run。
 每個 Form 使用公開 `FixedElements`、native readonly／element_label metadata 與逐位置初值。
-所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Form 的 FixedElements 宣告 drive、Echo pi_pulse 與逐 tone sweep 的適用性，未參與欄位灰掉且不驗證，readout 身分始終必填。切回 participant 時立即驗證保留草稿。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填或停用集合。
+所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Reset 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
 

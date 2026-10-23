@@ -87,7 +87,7 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 `FixedElements.identify(data, path)` 依同份 input 的完整原始 index 回傳 `ElementIdentity`，不讀 participants。Logical field observation 同時攜帶該 identity，供 Run capture 保留當次名稱；巢狀固定 list 使用最深的宣告。
 
-普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且原始索引合法。Bool 與字串不能作 index。錯誤保留欄位與輸入位置，順序不變。`participant_fields` 列出元素相對路徑，欄位必須 nullable。Adapter 依完整 raw list 的原始索引產生 Core applicability 宣告，停用區保留草稿並投影為 None，active 空值立即報錯。未宣告的欄位始終驗證，readout 不隨 participants 停用。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
+普通 mutation 比較目前與候選的有序 raw 名稱，增刪、重排或改名以 `FormInputRejected` 原子拒絕。元素的一般 invalid 值仍可保存。Participants 在一般 Pydantic 驗證檢查非空、無重複且原始索引合法。Bool 與字串不能作 index。錯誤保留欄位與輸入位置，順序不變。Nullable 元素欄位保留明填 None，包含普通 model、module 與 sweep。非 None 值照常驗證。實驗自行在 Open／Reset 選定 participants，再初始化各 tone；native cfg validator 決定哪些值必填。一般 participants 編輯不改 tone 值，readout 身分始終必填。還原不比新 capture，存檔 list 成為普通 mutation 的邊界；Reset 才建 fresh input。
 
 宣告者另外提供 `Display(element_label=name_field)` 作 picker label，名稱欄位的 `Display(readonly=True)` 則由 Form core 強制唯讀。同值寫入通過，不同值拒絕；父層或批次寫入不能繞過唯讀名稱。名稱若不接受 expression，可用既有 `InputPolicy(expression=False)` 明訂 literal input。
 

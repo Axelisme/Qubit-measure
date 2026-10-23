@@ -71,8 +71,10 @@ counts for an offline smoke.
 
 Python cfg and saved cfg share a flat layout. There is no `spectrum` wrapper.
 Set `participants: list[int]`, full `tones`, and `modules` at top level.
-Unselected drive and per-tone sweep fields are grey, retain their drafts and do
-not validate. Adding a participant immediately validates its restored settings.
+Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
+these fields to None on other tones. The nullable fields remain editable.
+Editing participants preserves every tone value. Fill any newly selected tone's
+missing settings at the indicated tone path. Removing a tone keeps its values.
 All readout identities and local flux_dev names stay required. Local driver
 uniqueness is checked only for selected tones.
 `modules.reset` is optional; `modules.readout` is the complete numeric mux

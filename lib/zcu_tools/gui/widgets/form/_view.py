@@ -48,7 +48,6 @@ class FieldView:
     option value, not read-only children or commands. group is the same-level
     display group name, or None for an ungrouped row. elements lists a
     FixedList row's picker entries by original index and name, else None.
-    disabled projects core applicability independently of readonly/fixed.
     """
 
     path: FormWritePath
@@ -75,7 +74,6 @@ class FieldView:
     fixed: bool
     group: str | None
     commands: tuple[FormCommandDescription, ...]
-    disabled: bool = False
     elements: tuple[FormElementDescription, ...] | None = None
 
 
@@ -211,5 +209,4 @@ def project_field(
         group=field.group,
         commands=field.commands,
         elements=field.elements,
-        disabled=field.disabled,
     )

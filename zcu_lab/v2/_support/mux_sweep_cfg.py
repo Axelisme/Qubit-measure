@@ -4,7 +4,8 @@ import math
 from collections.abc import Sequence
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import Field, ValidationError
+from pydantic_core import PydanticCustomError
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg
@@ -92,6 +93,27 @@ class MuxToneCfg(MuxDriveToneCfg):
         return self.sweep
 
 
+def require_tone_value(value: object, path: tuple[str | int, ...]) -> None:
+    """Reject None with a directed native cfg error asking to fill this setting.
+
+    path identifies the original tone field, including enclosing frequency when
+    needed. Non-null values retain their ordinary schema/scan validation.
+    """
+    if value is None:
+        raise ValidationError.from_exception_data(
+            "Mux tone",
+            [
+                {
+                    "type": PydanticCustomError(
+                        "required_tone", "填入 {setting}", {"setting": path[-1]}
+                    ),
+                    "loc": path,
+                    "input": None,
+                }
+            ],
+        )
+
+
 def validate_mux_tones(
     cfg: ProgramV2Cfg,
     modules: MuxDriveModuleCfg,
@@ -120,6 +142,7 @@ def validate_mux_tones(
     channels: dict[int, int] = {}
     for i in participants:
         tone = tones[i]
+        require_tone_value(tone.drive, ("tones", i, "drive"))
         tone.validate_tone()
         drive = tone.require_drive()
         if drive.ch == modules.readout.gen_ch or drive.ch in channels:
@@ -146,6 +169,7 @@ def validate_mux_scan(
     if type(expts) is not int or expts <= 0:
         raise ValueError("expts must be a positive integer")
     for i in participants:
+        require_tone_value(tones[i].sweep, ("tones", i, "sweep"))
         sweep = tones[i].require_sweep()
         if not all(math.isfinite(v) for v in (sweep.start, sweep.stop)):
             raise ValueError(f"tones[{i}].sweep start/stop must be finite")

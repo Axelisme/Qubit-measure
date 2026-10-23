@@ -13,7 +13,6 @@ from pydantic.fields import FieldInfo
 
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.form import (
-    FieldApplicability,
     FormEnv,
     FormInput,
     FormInputRejected,
@@ -105,16 +104,13 @@ class FixedElements:
     prevent swapping values or assert component identity. Legal branch switches
     are allowed, and a newly active list establishes its own length boundary.
     Restore/Reset establish new boundaries in either mode. No sources, saved
-    identities or secondary ordering are stored. participant_fields lists nullable
-    element-relative paths that apply only to participant original indices.
-    Other fields, including readout identity, always validate. Empty means every
-    field stays applicable. Participants is a nonempty, unique list[int].
+    identities or secondary ordering are stored.
+    Participants is a nonempty, unique list[int].
     """
 
     list_path: FormWritePath
     name_field: str | None = None
     participants_path: FormWritePath | None = None
-    participant_fields: tuple[FormWritePath, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject empty paths/names and incomplete named policies with ValueError."""
@@ -123,15 +119,13 @@ class FixedElements:
             or ((self.name_field is None) != (self.participants_path is None))
             or self.name_field == ""
             or self.participants_path == ()
-            or (self.participant_fields and self.participants_path is None)
-            or any(not path for path in self.participant_fields)
         ):
             raise ValueError(
                 "Fixed elements require a list path and either both name/participants or neither"
             )
 
     def check_declaration(self, model: type[BaseModel]) -> None:
-        """Require list[Model], str names, list[int] and nullable participant fields."""
+        """Require list[Model], str names and list[int]."""
         info = _field(model, self.list_path)
         if get_origin(info.annotation) is not list:
             raise ValueError(f"{self.list_path!r}: fixed elements require list[Model]")
@@ -152,9 +146,6 @@ class FixedElements:
             raise ValueError(
                 f"{self.participants_path!r}: participants require list[int]"
             )
-        for path in self.participant_fields:
-            if type(None) not in members(_field(element, path).annotation):
-                raise ValueError(f"{path!r}: participant fields must be nullable")
 
     def names(self, data: dict[str, JsonValue]) -> tuple[JsonValue, ...] | None:
         """Read ordered literal names; slots and missing/non-list return None."""
@@ -305,29 +296,6 @@ class FixedElementsForm(FormModel):
         return input
 
     @classmethod
-    def applicability(
-        cls, data: Mapping[str, JsonValue]
-    ) -> tuple[FieldApplicability, ...]:
-        """Declare nullable participant fields by each original raw list index."""
-        declarations = list(super().applicability(data))
-        for item in cls.fixed_elements:
-            elements = _at(dict(data), item.list_path)
-            if item.participants_path is not None and isinstance(elements, list):
-                declarations.extend(
-                    FieldApplicability(
-                        item.participants_path,
-                        index,
-                        tuple(
-                            (*item.list_path, index, *path)
-                            for path in item.participant_fields
-                        ),
-                    )
-                    for index in range(len(elements))
-                    if item.participant_fields
-                )
-        return tuple(declarations)
-
-    @classmethod
     def check_input_change(
         cls, before: dict[str, JsonValue], after: dict[str, JsonValue]
     ) -> None:
@@ -359,15 +327,4 @@ class FixedElementsForm(FormModel):
         data: dict[str, JsonValue] = self.model_dump(mode="json")
         for declaration in self.fixed_elements:
             declaration.validate_participants(data)
-            path = declaration.participants_path
-            indices = _at(data, path) if path is not None else None
-            if isinstance(indices, list):
-                for index in indices:
-                    if type(index) is int:
-                        for field in declaration.participant_fields:
-                            target = (*declaration.list_path, index, *field)
-                            if _at(data, target) is None:
-                                raise field_error(
-                                    target, "Active participant setting required"
-                                )
         return self

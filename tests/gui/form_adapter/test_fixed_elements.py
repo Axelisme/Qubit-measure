@@ -450,3 +450,41 @@ def test_owner_checks_complete_command_converter_and_prepared_replacements(opera
     assert state.base.same_as(base)
     assert state.input.selections == before.selections
     assert events == []
+
+
+@pytest.mark.parametrize(
+    "participants, path",
+    [
+        ([0, 0], ("participants", 1)),
+        ([2], ("participants", 0)),
+        ([-1], ("participants", 0)),
+        ([True], ("participants", 0)),
+    ],
+)
+def test_participant_errors_keep_original_index_path(
+    participants: list[int], path: core.FormPath
+) -> None:
+    # Reuse the ordinary generated declaration, but supply a simple valid model
+    # so the assertion isolates index admission from missing drive/sweep values.
+    class Element(core.FormModel):
+        name: str
+
+    class Named(adapter.FixedElementsForm):
+        tones: list[Element]
+        participants: list[int]
+
+    Named.fixed_elements = (
+        adapter.FixedElements(("tones",), "name", ("participants",)),
+    )
+    state = core.FormState(
+        core.FormInput(
+            Named,
+            {
+                "tones": [{"name": "A"}, {"name": "B"}],
+                "participants": [value for value in participants],
+            },
+        )
+    )
+    result = state.result(core.FormEnv())
+    assert isinstance(result, core.FormErrors)
+    assert path in result.messages

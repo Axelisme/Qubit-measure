@@ -30,9 +30,10 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Unselected drive/sweep fields are grey and may remain blank. Their raw drafts
-stay in the form without evaluation or validation. Adding a participant restores
-its draft and reports missing or invalid settings immediately. Every readout
+Open/Reset fills selected tones' drive and pi_pulse defaults and sets
+these fields to None on other tones. The nullable fields remain editable.
+Editing participants preserves every tone value. Fill any newly selected tone's
+missing settings at the indicated tone path. Removing a tone keeps its values. Every readout
 tone still needs valid frequency and ADC identity, even when not selected.
 
 ## FTF cost example
@@ -59,7 +60,7 @@ The nonzero-detune fringe fit had enormous T2 uncertainty and was not calibratio
 
 Each tone needs a fixed x90 drive and x180 pi pulse on the same generator.
 The two pulses may have different waveforms, carriers, gains and phases.
-Validate both pulses for each selected tone. Inactive drive/pi_pulse fields stay grey.
+Validate both pulses for each selected tone. Open/Reset sets unselected drive/pi_pulse fields to None; both remain editable.
 Use finite, nonnegative bounds for the shared total-delay range in us.
 Each tone has its own detune in MHz.
 

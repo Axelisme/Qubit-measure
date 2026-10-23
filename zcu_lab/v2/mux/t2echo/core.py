@@ -166,7 +166,7 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, require_tone_value
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
 
@@ -212,6 +212,8 @@ class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
         validate_coherence_scan(
             self, self.modules, self.tones, self.delay, self.participants
         )
+        for index in self.participants:
+            require_tone_value(self.tones[index].pi_pulse, ("tones", index, "pi_pulse"))
         validate_coherence_scan(
             self,
             self.modules,

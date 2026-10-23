@@ -8,6 +8,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     captured_mux_names,
     mux_readout_initial,
     mux_readout_seed_metadata,
+    mux_tone_initials,
 )
 
 from .core import MuxFreqCfg
@@ -17,13 +18,15 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
     """Build per-qubit drive sweeps and shared averaging/readout controls.
 
     ctx supplies the mux group and calibration values at Open/Reset. Every qubit
-    needs valid readout identity; only selected drive/sweep fields validate. Missing
+    needs valid readout identity. Selected drive/sweep fields are required;
+    others start with None and stay editable. Missing
     calibration leaves required inputs blank; invalid group mappings raise.
     The tone picker chooses which qubit to edit, not which qubits to measure.
     """
     # Start each sweep around its qubit calibration, keeping all group positions.
     names = captured_mux_names(ctx)
-    tones: list[FormNode] = [
+    participants = list(range(len(names)))
+    tones: list[dict[str, FormNode]] = [
         {
             "name": name,
             "drive": Template(
@@ -49,24 +52,16 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
                 "reset": Slot("$mux.module.reset"),
                 "readout": readout,
             },
-            "tones": tones,
+            "tones": mux_tone_initials(tones, participants, fields=("drive", "sweep")),
             "expts": 301,
-            "participants": list(range(len(names))),
+            "participants": [index for index in participants],
             "relax_delay": 1.0,
             "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },
         fixed_elements=(
-            FixedElements(
-                ("tones",),
-                "name",
-                ("participants",),
-                participant_fields=(
-                    ("drive",),
-                    ("sweep",),
-                ),
-            ),
+            FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
         field_order=(
