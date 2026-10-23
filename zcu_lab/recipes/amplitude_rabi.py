@@ -1,4 +1,7 @@
-"""Measure Rabi oscillations versus drive gain to calibrate rotation amplitudes."""
+"""Measure Rabi oscillations versus drive gain to calibrate rotation amplitudes.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from math import isfinite
 from typing import Literal

@@ -45,6 +45,20 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         SpectroscopyCfg,
+        field_order=(
+            "roles",
+            "modules",
+            "drive",
+            "contrast",
+            "dc_device",
+            "dc_unit",
+            "frequency",
+            "dc_values",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "reps": 1000,
             "rounds": 10,

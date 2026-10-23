@@ -1,4 +1,7 @@
-"""Measure excited-state relaxation versus delay to estimate T1."""
+"""Measure excited-state relaxation versus delay to estimate T1.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 

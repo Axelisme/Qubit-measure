@@ -1,4 +1,8 @@
-"""Resonator frequency/gain map with raw save and Run preview only."""
+"""Resonator frequency/gain map with raw save and Run preview only.
+
+Recipe freq_points → sweep.freq.expts; gain_points → sweep.gain.expts.
+Both scan counts appear as Expts in the GUI.
+"""
 
 from pydantic import Field
 from zcu_tools.gui.form import FormModel

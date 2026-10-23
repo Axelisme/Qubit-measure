@@ -1,4 +1,7 @@
-"""Qubit drive-frequency sweep, transition fit and reviewed calibration."""
+"""Qubit drive-frequency sweep, transition fit and reviewed calibration.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 

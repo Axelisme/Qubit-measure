@@ -1,4 +1,7 @@
-"""Resonator frequency sweep, spectral fit and reviewed calibration."""
+"""Resonator frequency sweep, spectral fit and reviewed calibration.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from pydantic import BaseModel, Field
 from zcu_tools.gui.form import FormModel

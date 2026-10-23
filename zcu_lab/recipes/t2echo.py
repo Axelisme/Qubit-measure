@@ -1,4 +1,7 @@
-"""Measure spin-echo decay versus total delay to estimate refocused coherence."""
+"""Measure spin-echo decay versus total delay to estimate refocused coherence.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
 
 from typing import Literal
 
