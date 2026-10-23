@@ -29,9 +29,27 @@ from .joint_readout.core import GECenters
 class RabiModules(ConfigBase):
     """Calibrated Xπ preparation/contrast pulses and complete ordered mux."""
 
-    x180_f1: PulseCfg
-    x180_f2: PulseCfg
-    readout: MuxReadoutCfg
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
+        ),
+    ]
 
 
 class DurationScanCfg(ProgramV2Cfg, ExpCfgModel):
@@ -46,10 +64,35 @@ class DurationScanCfg(ProgramV2Cfg, ExpCfgModel):
 
     modules: RabiModules
     roles: JointRoles
-    drive: DualLineCfg
-    duration: Annotated[SweepCfg, FieldMeta(unit="us", label="Drive duration")]
-    f1_centers: GECenters
-    f2_centers: GECenters
+    drive: Annotated[
+        DualLineCfg,
+        FieldMeta(
+            label="Dual-line drive",
+            description="填入 F1/F2 charge-line pulses，先以 conditional spectroscopy 選頻，再確認 cz_f1／cz_f2 slots。",
+        ),
+    ]
+    duration: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="us",
+            label="Duration",
+            description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
+        ),
+    ]
+    f1_centers: Annotated[
+        GECenters,
+        FieldMeta(
+            label="F1 GE centers",
+            description="填入 singleshot/ge 取得的 F1 normalized complex IQ centers。",
+        ),
+    ]
+    f2_centers: Annotated[
+        GECenters,
+        FieldMeta(
+            label="F2 GE centers",
+            description="填入 singleshot/ge 取得的 F2 normalized complex IQ centers。",
+        ),
+    ]
 
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:

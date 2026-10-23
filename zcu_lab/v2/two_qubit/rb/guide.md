@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Before run
 
 Select `two_qubit/rb` after calibrating the F1/F2 X90 pulses, complete mux readout,

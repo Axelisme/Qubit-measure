@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Parameter sources
 
 Delay runs 0 to 5 * qubit.t1 us over 101 points. Relax delay is 5 * qubit.t1 us. Other missing required calibration leaves the affected fields empty and Invalid.
