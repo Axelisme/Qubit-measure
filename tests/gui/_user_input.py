@@ -905,6 +905,15 @@ class ComponentDriver:
                 key_click(widget, Qt.Key.Key_Return)
         QApplication.processEvents()
 
+    def type_text(self, value: str) -> None:
+        """Type into the current visible, enabled keyboard focus without moving it."""
+        widget = self._window.focusWidget()
+        if widget is None:
+            raise LookupError("No focused input")
+        if self._can_interact(widget):
+            type_text(widget, value)
+        QApplication.processEvents()
+
     def press_key(
         self,
         key: Qt.Key,
