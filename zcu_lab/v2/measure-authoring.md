@@ -1,8 +1,8 @@
 # Measure adapter authoring
 
-**Last updated:** 2026-10-23
+**讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、operator guide 與校準 writeback。
+**Last updated:** 2026-10-23
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -12,6 +12,7 @@
 - [實驗重載](#實驗重載)
 - [Form 與固定來源](#form-與固定來源)
 - [表單設計與預演](#表單設計與預演)
+- [Recipe 撰寫](#recipe-撰寫)
 - [執行與分析契約](#執行與分析契約)
 - [Operator guide 格式](#operator-guide-格式)
 - [Readout 分析與 writeback](#readout-分析與-writeback)
@@ -143,6 +144,105 @@ Mux participants 只決定執行順序，未參與 tone 仍須通過驗證。
 預演不呼叫 Run、不連硬體，也不操作使用者正在使用的桌面 GUI，除非另有明確授權。
 Guide 必須提醒來源修改後需 Reset；Refresh 只更新 source／choice，
 Reset 可能覆蓋尚未儲存的輸入。
+
+## Recipe 撰寫
+
+「我會希望zcu_lab中的內容有最大化的可讀性，上手時間最短，實作內容一看就懂」
+
+在 zcu_lab 內，可讀性優先於 lib 的強型別、防禦分支與抽象規則。衝突時選一眼就懂的寫法，
+型別與驗證由 lib 在邊界承擔，不在 recipe 另寫一套驗證。
+審查標準是「新人多久能看懂這個 recipe／core」，不是 class 數或型別完整性。
+
+「加入自己的客製化修改也很自然」
+
+改脈衝、多欄位或換分析步驟，應像改腳本，不必先理解基底或 helper 契約。
+lib 基底只給可選的預設路徑，不限制 recipe 直接寫自己的步驟，也不要求套進固定流程。
+新增自己的設定時，在輸入宣告欄位，再在步驟發生的位置使用它。
+
+Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六項，審查裁決見
+[程式碼品質](../../docs/code-quality.md#zcu_lab-審查裁決)：
+
+1. 主體直接寫開 tab、改欄位、Run、Analyze、問答、寫回及 Save 的順序。
+   共用的來源選取與 overrides 套用交給 lib，但量測動作不藏進 helper。
+2. 分析結果引用 owner 匯出的型別，不另寫 FitQuality、QualityIssue 或 summary 鏡像 model。
+3. Recipe class 只宣告實驗輸入與報告，不為步驟再建 runner 或 pipeline class。
+4. Helper 只做數字呈現等機械格式化。選脈衝、掃描範圍、重測與寫回判斷留在主體。
+5. Review core 時逐項說明 class 與抽象的用途，讓讀者從 `run` 看見脈衝序列。
+   Class 數只提示閱讀成本，不是新增或刪除 class 的配額。
+6. Docstring 寫使用者要填的量、單位、null 語意、量測動作與分析參數的效果。
+   明列 `n → expts` 或 `points → expts`，不要用框架術語取代實驗說明。
+
+以下是目標 API 示意，非可執行範例。共用輸入、套用與報告 API 尚未落地。
+`CommonInputs`、`CommonReport`、`apply_common` 與 `OwnerSummary` 都是佔位名，
+沒有可 import 的路徑。前三者代表 lib 提供的預設路徑，最後一個代表分析 owner 匯出的結果型別。
+省略既有型別的 imports。可用介面以 [recipe 公開契約](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)
+及 [`recipe_api.py`](../../lib/zcu_tools/mcp/measure/recipe_api.py) 為準。
+
+骨架在預設路徑之後直接加入「改 drive pulse 長度」的自訂步驟。
+這個改動只增加一個輸入欄位與主體中的欄位編輯，不新增 helper 或改基底：
+
+```python
+# Target API sketch only. Common* / apply_common / OwnerSummary are placeholders.
+class Inputs(CommonInputs):
+    """Qubit sweep inputs; common fields select the tab and module sources."""
+
+    start_mhz: float = Field(description="Drive sweep start in MHz.")
+    stop_mhz: float = Field(description="Drive sweep stop in MHz.")
+    n: int = Field(description="Sweep sample count, mapped to GUI Expts.")
+    pulse_length_us: float = Field(description="Custom drive pulse length in us.")
+    fit_phase: bool = Field(False, description="Fit the IQ response phase.")
+
+
+class Report(CommonReport):
+    """Transition estimate plus the common writeback and analysis status."""
+
+    frequency_mhz: float | None = Field(description="Fit frequency; null if failed.")
+
+
+@recipe("custom_spectrum", description="Sweep drive frequency with a custom pulse.")
+async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
+    """Sweep drive frequency, fit a transition, ask before writeback, then save.
+
+    n → expts sets the sweep sample count. Frequencies use MHz.
+    pulse_length_us changes the drive duration in us before acquisition.
+    fit_phase changes analysis only. Null field edits keep the Form values.
+    Missing required Form values stop Run and report the fields to fill.
+    """
+    tab = apply_common(session, "twotone/freq", inputs)  # Placeholder default path.
+
+    # Custom step outside the base: copy the drive inline and edit its duration.
+    tab.select(("modules", "qub_pulse"), inline=True)
+    tab.select(("modules", "qub_pulse", "waveform"), inline=True)
+    tab.apply([
+        FieldEdit(path=("sweep", "freq"),
+                  value=LinRange(start=inputs.start_mhz, stop=inputs.stop_mhz,
+                                 n=inputs.n), source="recipe sweep"),
+        FieldEdit(path=("modules", "qub_pulse", "waveform", "length"),
+                  value=inputs.pulse_length_us, source="custom pulse"),
+    ], require_valid=True)
+
+    await tab.run()
+    try:
+        analysis = await tab.analyze(
+            "primary", result=OwnerSummary, updates={"fit_phase": inputs.fit_phase}
+        )
+        if analysis.result is None:
+            return Report(frequency_mhz=None, analysis_failure=analysis.reason)
+        decision = await tab.ask_writeback()
+        applied = False
+        if decision.accepted:
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            applied = bool(receipt.items)
+        return Report(frequency_mhz=analysis.result.freq, writeback_applied=applied)
+    finally:
+        tab.save()
+```
+
+`select`、`apply`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
+`run` 成功後才進入 Save 的 `finally`，分析失敗仍保存 raw data 與已完成產物。
+不要把整段改成無法插入步驟的 `run_all`。需要換分析時，就在 `analyze` 呼叫處換 stage、
+owner 型別或分析參數，不必先修改基底。
 
 ## 執行與分析契約
 
