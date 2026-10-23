@@ -102,8 +102,10 @@ async def onetone_range_find(
 ) -> OnetoneRangeFindReport:
     """Run onetone/range_find, Analyze, ask_writeback, accept selections, Save.
 
-    freq and n are required. Null resonators retains the captured Form initial
-    list; names label dips in ascending frequency order, not hardware channels.
+    freq and n are required. freq supplies absolute MHz bounds and n sets
+    sweep.freq.expts, the shared acquisition sample count. Null resonators
+    retains the captured Form initial list; names label dips in ascending
+    frequency order, not hardware channels.
     min_separation is finite positive MHz, default 1 MHz. It overrides the
     owner's dip spacing through the same tracked Analyze operation, including
     when reusing a tab. It does not change the acquired frequency grid.
