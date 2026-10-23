@@ -20,6 +20,7 @@ from zcu_tools.resources.entry import (
     document_value,
     resolve_path,
 )
+from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
 from zcu_tools.resources.entry.storage import PointStorageBinding
 
@@ -48,7 +49,8 @@ class RoleBinding:
 
     focus is the captured component name, or None for default-focus inference.
     declarations preserves ordered role kind/via rules. names contains only
-    bound role-to-component names; omitted declared roles are unbound.
+    bound scalar names or ordered alias lists; omitted roles are unbound.
+    Declared component consumers require scalar names and reject lists.
     explicit preserves manual choices: a component name binds that role, None
     explicitly leaves it unbound, and an absent key allows inference. It is
     process-local capture state, not storage or ledger metadata.
@@ -61,7 +63,7 @@ class RoleBinding:
 
     focus: str | None
     declarations: Mapping[str, RoleSpec]
-    names: Mapping[str, str]
+    names: Mapping[str, AliasValue]
     explicit: Mapping[str, str | None] = field(default_factory=dict)
     aliases: tuple[AliasRow, ...] | None = None
 
@@ -138,22 +140,18 @@ class ParameterContext:
             and self._roles is not None
             and not self._source_faults
         ):
-            for role, name in self._roles.names.items():
-                if (
-                    role in self._roles.declarations
-                    and name not in self._point.components
-                ):
-                    spec = self._roles.declarations.get(role)
-                    raise RoleResolutionError(
-                        role,
-                        self._roles.focus,
-                        None if spec is None else spec.kind,
-                        f"Captured target {name!r} is missing or has the wrong kind",
-                    )
             for role, spec in self._roles.declarations.items():
                 if role not in self._roles.names:
                     continue
                 name = self._roles.names[role]
+                if not isinstance(name, str):
+                    raise RoleResolutionError(
+                        role,
+                        self._roles.focus,
+                        spec.kind,
+                        "Alias is a list",
+                        message=f"${role} is a list; this consumer requires one component name",
+                    )
                 component = self._point.components.get(name)
                 if component is None or not fnmatchcase(component.kind, spec.kind):
                     raise RoleResolutionError(
@@ -205,7 +203,7 @@ class ParameterContext:
         rows: list[ResolvedAliasRow] = []
         for row in self._aliases.rows:
             try:
-                name = self._aliases.resolve(row.alias, self._point)
+                name = self._aliases.resolve_value(row.alias, self._point)
             except RoleResolutionError as exc:
                 rows.append(ResolvedAliasRow(row.alias, row.value, None, str(exc)))
             else:
@@ -315,7 +313,8 @@ class ParameterContext:
     def resolve_path(self, path: str) -> str:
         """Expand $ aliases while keeping bare paths in the concrete namespace.
 
-        $alias returns its resolved name; $alias.path expands its prefix.
+        This scalar path API rejects lists. $alias returns one resolved name;
+        $alias.path expands its scalar prefix. Use lookup for a bare list alias.
         Both use authored rows or fixed resolved names, never concrete-prefix
         inference. Missing, unbound and wrong-kind aliases raise
         RoleResolutionError. Bare paths name concrete components or general
@@ -327,27 +326,40 @@ class ParameterContext:
             alias, separator, suffix = path[1:].partition(".")
             if not alias or (separator and not suffix):
                 raise ValueError(f"Expected $alias or $alias.path: {path!r}")
-            spec = (
-                self._roles.declarations.get(alias) if self._roles is not None else None
-            )
-            if self._aliases is not None:
-                name = self._aliases.resolve(
-                    alias, self._point, kind=spec.kind if spec is not None else None
+            name = self._alias_value(alias)
+            if isinstance(name, list):
+                raise RoleResolutionError(
+                    alias,
+                    None,
+                    None,
+                    "Alias is a list",
+                    message=f"${alias} is a list; a path requires one component or device name",
                 )
-            else:
-                if self._roles is None or alias not in self._roles.names:
-                    raise RoleResolutionError(
-                        alias,
-                        None,
-                        spec.kind if spec is not None else None,
-                        "Alias is not bound",
-                        message=f"${alias} is not bound in this capture",
-                    )
-                name = self._roles.names[alias]
             if not separator:
                 return name
             return resolve_path(self._point, f"{name}.{suffix}", roles={})
         return resolve_path(self._point, path, roles={})
+
+    def _alias_value(self, alias: str) -> AliasValue:
+        self._ensure_readable()
+        spec = self._roles.declarations.get(alias) if self._roles is not None else None
+        if self._aliases is not None:
+            if spec is not None:
+                return self._aliases.resolve(alias, self._point, kind=spec.kind)
+            return self._aliases.resolve_value(alias, self._point)
+        if (
+            self._roles is None
+            or alias not in self._roles.names
+            or not self._roles.names[alias]
+        ):
+            raise RoleResolutionError(
+                alias,
+                None,
+                spec.kind if spec is not None else None,
+                "Alias is not bound",
+                message=f"${alias} is not bound in this capture",
+            )
+        return deepcopy(self._roles.names[alias])
 
     def library_key(self, path: str) -> str:
         """Resolve a three-segment library root or a point module slot.
@@ -425,18 +437,28 @@ class ParameterContext:
     def lookup(self, path: str) -> DocumentValue:
         """Read a fixed name or point/library value, preserving explicit null.
 
-        $alias returns a name string without catalog validation. Field paths use
+        Bare $alias returns a scalar name or ordered name list without catalog
+        validation. Missing/unbound rows (including []) and invalid list elements
+        raise RoleResolutionError; there is no same-name fallback. An unbound
+        list element uses reason "Alias list element is not bound", distinct from
+        the empty-row reason "Alias is not bound". Field paths use
         their point/library owner. Missing data returns present=False; syntax,
         namespace, source and materialization errors propagate. Unset/dangling
         module slots raise ModuleSlotError naming the slot path.
         """
-        resolved = self.resolve_path(path)
         if path.startswith("$") and "." not in path:
-            return DocumentValue(True, resolved)
+            return self._alias_lookup(path[1:])
+        resolved = self.resolve_path(path)
         library_path = self._library_path(resolved)
         if library_path is not None:
             return self._library.lookup(library_path)
         return self._point_value(resolved)
+
+    def _alias_lookup(self, alias: str) -> DocumentValue:
+        value = self._alias_value(alias)
+        if isinstance(value, str):
+            return DocumentValue(True, value)
+        return DocumentValue(True, [name for name in value])
 
     def _point_value(self, resolved: str) -> DocumentValue:
         try:
@@ -451,12 +473,14 @@ class ParameterContext:
         Missing leaves return present=False; explicit null is present=True.
         Library partitions and module-slot namespaces, including their roots,
         raise InvalidInputError with reason_code parameter_path_not_readable.
-        $alias returns its fixed name. Other syntax, namespace and source errors
+        Bare $alias returns its fixed scalar name or ordered name list. Missing
+        or unbound aliases (including []) raise RoleResolutionError. Dotted alias
+        paths require a scalar name. Other syntax, namespace and source errors
         propagate unchanged.
         """
-        resolved = self.resolve_path(path)
         if path.startswith("$") and "." not in path:
-            return DocumentValue(True, resolved)
+            return self._alias_lookup(path[1:])
+        resolved = self.resolve_path(path)
         parts = resolved.split(".")
         if (
             len(parts) > 1

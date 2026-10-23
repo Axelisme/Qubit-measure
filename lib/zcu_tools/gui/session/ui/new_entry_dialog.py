@@ -170,12 +170,20 @@ class NewEntryDialog(QDialog):
         except FailedPreconditionError as exc:
             self._show_error(str(exc))
             return
+        resolved = parameters.resolved_aliases()
+        required = self._templates[template_id].placeholder_names()
+        lists = {
+            row.alias for row in resolved if isinstance(row.resolved, list)
+        } & required
+        if lists:
+            self._show_error(
+                f"Template aliases {', '.join(sorted(lists))} are lists; bind each to one name in Aliases"
+            )
+            return
         bindings = {
-            row.alias: row.resolved
-            for row in parameters.resolved_aliases()
-            if row.resolved is not None
+            row.alias: row.resolved for row in resolved if isinstance(row.resolved, str)
         }
-        missing = self._templates[template_id].placeholder_names() - bindings.keys()
+        missing = required - bindings.keys()
         if missing:
             names = "、".join(f"{{{name}}}" for name in sorted(missing))
             self._show_error(

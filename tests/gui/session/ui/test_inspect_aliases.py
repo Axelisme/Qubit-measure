@@ -307,6 +307,36 @@ def test_alias_revert_loads_current_target_then_apply_saves_there(
     assert entry.load_aliases(point="working").aliases == {}
 
 
+def test_driver_edits_list_applies_and_reopens(entry_session, tmp_path: Path) -> None:
+    dialog = _open(entry_session)
+    driver = ComponentDriver(dialog)
+    driver.select_tab("Aliases")
+    driver.edit_table_value(
+        "qubit", "participants", object_name="inspect.aliases.table", column="Alias"
+    )
+    driver.edit_table_value(
+        "Q1", "[Q3, Q1]", object_name="inspect.aliases.table", column="Value"
+    )
+    driver.screenshot(tmp_path / "list-draft.png")
+    driver.click(object_name="inspect.aliases.apply")
+    driver.screenshot(tmp_path / "list-applied.png")
+    assert driver.observe(object_name="inspect.aliases.error").text == ""
+    assert driver.table_rows(object_name="inspect.aliases.table")[0].columns == (
+        "participants",
+        "[Q3, Q1]",
+        "[Q3, Q1]",
+    )
+    driver.click("Close")
+    reopened = ComponentDriver(_open(entry_session))
+    reopened.select_tab("Aliases")
+    reopened.screenshot(tmp_path / "list-reopened.png")
+    assert reopened.table_rows(object_name="inspect.aliases.table")[0].columns == (
+        "participants",
+        "[Q3, Q1]",
+        "[Q3, Q1]",
+    )
+
+
 def test_aliases_page_shows_the_installed_ordered_rows(memory_session) -> None:
     page = _aliases_page(_open(memory_session))
     table = _table(page)

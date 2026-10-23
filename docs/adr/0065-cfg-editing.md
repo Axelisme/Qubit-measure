@@ -100,7 +100,9 @@ New 從 Registry 注入的 TemplateDef 目錄建立 entry input。換範本建�
 
 Inspect、Device 與 ARB UI 及其 service 由 session 提供，host 經公開入口注入必填協作者，不靠 host 差異猜能力。Inspect 有 Parameters、Modules、Aliases 三頁。Parameters 使用自己的 YamlValue／FieldSpec，不屬 Form 遷移。Run 或 agent 接管時，Inspect 表單不可改，但仍可選取文字、展開與捲動。
 
-Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Apply 將有序 authored rows 整表交 `apply_alias_rows`。它要求已選 point，否則回 `no_context`；成功時先原子保存該 point 的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與 draft。Alias draft 固定載入時的 entry／point，沿用 Modules 固定 capture 的慣例。Clean draft 隨切換換表，dirty draft 保留。Apply 發現來源與目前 target 不同時拒絕並提示，兩端檔案都不改。同 target 才能提交；Revert 或重開會丟棄草稿並載入目前 point 的表。關閉時未存修改仍走 Save／Discard／Cancel。
+使用者於 2026-10-23 對 alias 表加 participants 列裁定：「甲」。Alias 是目前工作焦點，parameters 是元件事實。Participants 的有序名稱清單由通用 alias owner 保存與解析，不在 recipe 重做這些規則。名稱轉索引屬於領域表單捕捉邊界，不放進通用 alias owner。
+
+Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Value 欄可輸入單一識別名、既有 `$` link 或 YAML flow list，例如 `[Q3, Q1]`。清單元素各自沿用 earlier-row link 規則，順序不變。空清單是未綁，不是已選零個元件。List 讀回使用普通固定 capture 的 `lookup`／`lookup_point`／`value`，不另造字串編碼。單一元件路徑及 template placeholder 拒絕清單，不取首項。Apply 將有序 authored rows 整表交 `apply_alias_rows`。它要求已選 point，否則回 `no_context`；成功時先原子保存該 point 的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與 draft。Alias draft 固定載入時的 entry／point，沿用 Modules 固定 capture 的慣例。Clean draft 隨切換換表，dirty draft 保留。Apply 發現來源與目前 target 不同時拒絕並提示，兩端檔案都不改。同 target 才能提交；Revert 或重開會丟棄草稿並載入目前 point 的表。關閉時未存修改仍走 Save／Discard／Cancel。
 
 MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.aliases_set` 回已安裝的 authored rows，不解析；解析另讀 snapshot。`context.set_parameter` 用一次 capture 固定具體 target 與 before，保留 metadata、不寫 ledger。這些 mutation 沿既有 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的固定 capture。`dialog.screenshot` 只擷取目前已開 dialog 的當前頁，不切 Inspect tab。
 

@@ -51,6 +51,26 @@ def test_metadata_from_container_returns_typed_evidence_without_io(
     assert container.docs["metadata"]["future"] == {"unknown": [True, None]}
 
 
+def test_native_metadata_preserves_ordered_alias_lists(
+    metadata_doc: datafile.JsonObject,
+) -> None:
+    snapshot = metadata_doc["snapshot"]
+    assert isinstance(snapshot, dict)
+    snapshot["roles"] = {"participants": ["Q3", "Q1"], "qubit": "Q1"}
+    container = datafile.Container(
+        {},
+        {"metadata": metadata_doc},
+        {},
+        datafile.ContainerAttrs("3.0", "synthetic", "experiment-run", {}),
+    )
+    try:
+        actual = native_persistence.metadata_from_container(container)
+    except ValueError as error:
+        pytest.fail(f"Historical alias lists must load: {error}")
+    assert actual.snapshot.roles == {"participants": ["Q3", "Q1"], "qubit": "Q1"}
+    assert actual.model_dump(mode="json")["snapshot"]["roles"] == snapshot["roles"]
+
+
 def test_metadata_from_container_rejects_missing_metadata() -> None:
     container = datafile.Container(
         {}, {}, {}, datafile.ContainerAttrs("3.0", "synthetic", None, {})

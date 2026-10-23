@@ -239,7 +239,10 @@ def export_run(
     )
     table = None
     if "samples" in outputs and result is not None:
-        table = bind_sample_table(result, plan.snapshot.roles["qubit"])
+        qubit = plan.snapshot.roles["qubit"]
+        if not isinstance(qubit, str):
+            raise ValueError("Sample export requires one qubit name, not an alias list")
+        table = bind_sample_table(result, qubit)
     written = (
         ()
         if prepared is None
