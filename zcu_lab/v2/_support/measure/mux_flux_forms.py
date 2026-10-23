@@ -79,7 +79,9 @@ def make_flux_form[
                 "participants": list(names),
             }
         )
-        fixed.append(FixedElements(("spectrum", "tones"), "name"))
+        fixed.append(
+            FixedElements(("spectrum", "tones"), "name", ("spectrum", "participants"))
+        )
     else:
         spectrum.update(
             {
@@ -111,6 +113,9 @@ def make_flux_form[
         ]
         tree["flux_expts"] = 101
         for index, name in enumerate(names):
+            metadata[("tones", index, "flux_dev")] = FieldMeta(
+                description=f"Device name captured from {name}.flux_source"
+            )
             for endpoint in ("start", "stop"):
                 metadata[("tones", index, "sweep", endpoint)] = FieldMeta(
                     description=f"From {name}.flux_int and {name}.flux_half; own DC line",
@@ -119,6 +124,9 @@ def make_flux_form[
     else:
         tree["tones"] = [{"name": name} for name in names]
         tree["flux_dev"] = group.flux_source
+        metadata[("flux_dev",)] = FieldMeta(
+            description="Device name captured from $mux.flux_source"
+        )
         calibrations = [group.coil_flux.get(name) for name in names]
         start, stop = global_flux_interval(
             [None if value is None else value.int for value in calibrations],

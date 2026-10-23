@@ -53,7 +53,7 @@ Run does not restore bias automatically.
 
 Stop interrupts ramps, settle and acquisition. A flux point is published only
 after the complete inner spectrum returns. Earlier completed points remain;
-the interrupted point and later points stay NaN. Analyze needs at least two
+the interrupted point and later points stay NaN. Analyze needs at least five
 completed flux points. Device and acquisition failures are errors, not empty
 successful maps.
 

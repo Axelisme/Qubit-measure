@@ -128,8 +128,6 @@ class MuxFluxAdapter[
             raise ValueError(f"tone={tone!r} is not an acquired original tone index")
         row = list(data.tone_indices).index(tone)
         complete = np.isfinite(data.signals[row]).all(axis=1)
-        if np.count_nonzero(complete) < 2:
-            raise ValueError("Flux picking needs at least two completed flux points")
         inputs = FluxPickInputs(
             data.signals[row, complete],
             data.flux_values[row, complete],
