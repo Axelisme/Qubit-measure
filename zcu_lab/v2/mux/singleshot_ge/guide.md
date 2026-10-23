@@ -151,9 +151,12 @@ Restoration reports dropped fields and keeps the original parameter source.
 Unreadable saved inputs produce a diagnostic and fresh defaults.
 Reset captures current parameters and rebuilds initial values.
 
-MCP field paths use original tone positions, for example
-`("tones", 0, "drive", "gain")`. The integer selects the full tone list.
-See the [mux recipe guide](../../../recipes/mux-guide.md#mux_singleshot_ge) for typed overrides,
+Recipe writes and override paths use dotted strings, for example
+`"tones.0.drive.gain"`. The decimal index addresses the complete tone list.
+Omission retains a Form input; null clears it. Analysis inputs also use
+omission to retain settings and pass explicit null to their owner.
+The recipe applies overrides last, then calls `check_ready()` before Run.
+See the [mux recipe guide](../../../recipes/mux-guide.md#mux_singleshot_ge) for dotted-path overrides,
 parameter origins and explicit writeback decisions.
 
 The MCP recipe is `mux_singleshot_ge`.

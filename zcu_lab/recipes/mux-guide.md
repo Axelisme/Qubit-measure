@@ -8,7 +8,7 @@
 It does not require qubit drives. The seven qubit recipes below have different
 participant and sweep contracts.
 
-| Input | Meaning | If omitted or null |
+| Input | Meaning | If omitted |
 | --- | --- | --- |
 | `target`, `reuse_tab_id` | Mux alias override and idle matching tab to Reset | Use global aliases and open a tab |
 | `participants` | Unique original readout indices in execution order | Keep Active tones |
@@ -18,13 +18,16 @@ participant and sweep contracts.
 | `model_type` | Resonator model: `hm`, `t` or `auto` | Keep analysis settings |
 | `fit_bg_amp_slope`, `fit_bg_phase_curvature` | Fit the background slope or phase curvature | Keep analysis settings |
 | `edelay` | Manual cable-delay seed in inverse MHz | Keep analysis settings |
-| `library`, `inline`, `overrides` | Ordered source selections, copies and final edits | Keep Form values |
+| `overrides` | Ordered final `{path, value}` edits using dotted paths | No extra edits |
 
 Indices address the complete captured readout list, not display labels or
 current global aliases. Empty, duplicate, negative and out-of-range indices
 return field errors before acquisition.
-Library selections precede inline copies. Participants, df/n and counts come
-next, then overrides. The complete batch must validate before Run.
+The Form chooses captured sources at Open or Reset. The recipe sets participants,
+df/n and counts, then applies overrides in order and calls `check_ready()`.
+Omission retains a Form input. Explicit null clears it, including range bounds.
+Analysis inputs also retain settings when omitted; null goes to the analysis owner.
+For `target` and `reuse_tab_id`, null keeps the global alias and opens a new tab.
 
 Analyze reports each original index, bound name, display label, frequency,
 kappa, fit_quality, and any per-tone failure. `resonators_diagnostic` explains
@@ -61,15 +64,17 @@ a one-point scan requires equal bounds. Picking needs at least five completed
 DC points and two distinct frequency values.
 
 `target` overrides this Reset's mux alias. `reuse_tab_id` resets an idle
-matching tab. Both default to null, using global aliases and opening a new tab.
-`participants` is an optional ordered list of unique original tone indices. Null retains the
-Form selection. `library` selects captured modules, then `inline` copies them
-outer-first. Range/count edits follow, then `overrides` applies last. Integer
-paths always address original full-list positions. All optional fields default
-to null, retaining Form values. All readout identities must validate before Run. Drive/sweep
-values validate only for selected tones, and inactive drafts stay in the form. A short range list returns `needs_parameters` before acquisition.
+matching tab. Omitting either control, or passing null, uses global aliases and
+opens a new tab. `participants` is an optional ordered list of unique original
+tone indices. Omission retains the Form selection; null clears it.
+The Form chooses sources. Range/count edits follow, then `overrides` applies last.
+Dotted paths always address original full-list positions. Omitted inputs keep
+Form values; null clears them. All readout identities must validate before Run.
+Drive/sweep values validate only for selected tones, and inactive drafts stay
+in the form. A range list with the wrong length returns `needs_parameters` with
+the missing or extra original positions before acquisition.
 
-`flux_unit` optionally labels A, V or native; null keeps the Form label.
+`flux_unit` optionally labels A, V or native. Omission keeps the label; null clears it.
 The device owner checks it against each selected source. No values are rescaled.
 Global source identity starts at the captured `$mux.flux_source`; local sources
 start at each captured `Q.flux_source`. Use overrides for intentional device,
@@ -90,8 +95,8 @@ The numeric bounds are illustrative, not device limits or known calibration.
   "flux_half": {"Q3": 0.004},
   "flux_integer": {"Q3": -0.002},
   "overrides": [
-    {"path": ["reps"], "value": 10},
-    {"path": ["rounds"], "value": 1}
+    {"path": "reps", "value": 10},
+    {"path": "rounds", "value": 1}
   ]
 }
 ```
@@ -109,7 +114,7 @@ center using its period rule. Review its actual committed state.
 1. With blank kickstart wiring, use onetone first. Supply deliberate global
    `flux` or full-list local `flux_sweeps` when DC calibration is missing.
    Complete required resonator frequencies, mixer and readout timing using
-   library, inline and overrides. Wiring and nominal values alone do not make
+   Form selectors and final overrides. Wiring and nominal values alone do not make
    the Form valid. Do not infer bounds from simulator internals.
 2. With frequencies but no readout slot, Open or Reset creates the captured
    template. Onetone seeds ADC window 1 us and gain 0.1. Missing linewidths or
@@ -199,7 +204,7 @@ Without it, the Form starts with an inline mux template and group tones.
 Complete its required fields before Run. The template is not a hardware-safe
 preset.
 
-All tones need valid drives, including qubits you do not measure. Drives use
+Selected tones need valid drives. All tones need valid readout identities. Drives use
 independent generators, separate from the readout generator. Choose a scan range
 for the intended calibration. Recipes retain Form defaults where you omit an
 input; they do not infer a new scan range.
@@ -216,20 +221,23 @@ Choose the recipe for the measurement:
 
 ## Choose inputs
 
-All seven recipes accept the same optional inputs:
+All seven recipes accept the following controls and Form edits:
 
-| Input | What to supply | If omitted or null |
+| Input | What to supply | If omitted |
 | --- | --- | --- |
-| `target` | MuxGroup component name, such as `MG3`, for this tab's `$mux` binding | Use global aliases |
-| `reuse_tab_id` | An idle tab of the matching experiment, which the recipe resets | Open a new tab |
+| `target` | MuxGroup component name, such as `MG3`, for this Reset's `$mux` binding | Use global aliases |
+| `reuse_tab_id` | An idle matching tab to Reset | Open a new tab |
 | `participants` | Nonempty, unique original tone indices in measurement order | Keep Reset defaults |
-| `library` | A list of `{path, key}` library selections | Keep current selections |
-| `inline` | A list of `{path}` references to copy for local editing | Keep references |
-| `overrides` | A list of `{path, value}` field edits | Keep Form values |
+| `overrides` | Ordered `{path, value}` edits with dotted paths | No extra edits |
 
-Analysis inputs go to the same Primary analysis operation, not to the measurement Form.
-Omitted or null analysis inputs retain that tab's analysis settings.
-They do not change the captured Run settings or writeback policy.
+Explicit null clears a Form input. Null `participants` does not retain the
+selection; it produces a missing selection. Null `target` or `reuse_tab_id`
+retains the Open/Reset control behavior shown above. `overrides` cannot be null.
+
+Analysis inputs go to the same Primary operation, not the measurement Form.
+Omission retains that tab's analysis setting. Explicit null goes to the analysis
+owner, which may reject it for a required setting. These inputs do not change
+captured Run settings or writeback policy.
 
 | Recipe | Analysis inputs |
 | --- | --- |
@@ -243,58 +251,63 @@ They do not change the captured Run settings or writeback policy.
 
 The three pulse-scan recipes also accept:
 
-| Input | What to supply | If omitted or null |
+| Input | What to supply | If omitted |
 | --- | --- | --- |
-| `sweeps` | One `{start, stop}` for every tone in original order, including nonparticipants | Keep all ranges |
-| `n` | A positive integer point count shared by all tones | Keep the common Expts |
+| `sweeps` | One `{start, stop}` for every original tone, including nonparticipants | Keep ranges |
+| `n` | A positive integer point count shared by all tones | Keep Expts |
 
 Frequency endpoints use MHz, amplitude endpoints normalized gain and length
-endpoints us. Each sweep accepts only start and stop; a per-tone n is rejected
-with those valid fields listed. A sweeps length mismatch fails before the edit
-batch is applied.
+endpoints us. Each sweep accepts only start and stop; use top-level `n` for the
+shared count. A list length mismatch returns `needs_parameters` naming missing
+or extra original positions. Null `sweeps` clears every range's bounds; null
+`n` clears the common count.
 
-The recipe opens or resets the tab, selects library entries, copies references
-inline, then applies participants, sweeps/n and overrides in one batch.
-Overrides run last and may replace earlier edits. Each list runs in
-the order supplied. A null library key retains and validates the current
-selection. A null override value retains that input. Copy referenced parents
-before their children, outermost first. The final participants/overrides batch
-requires a valid cfg with complete readout identities and valid active
-drive/sweep settings. Inactive settings may be blank. If it is invalid,
-the recipe returns needs_parameters with every owner-reported path and reason.
-It installs none of that batch and does not start Run. Earlier open, Reset,
-library selections and inline copies remain in the tab.
+The recipe opens or resets the tab, sets experiment values, applies overrides
+in order, then calls `check_ready()`. Duplicate override paths run in order;
+the last value wins, including null. Readiness errors list every owner path and
+reason. They prevent Run but do not roll back earlier edits. Readout identities
+must be valid for all tones; only participant drive/sweep settings are required.
+Inactive settings may stay blank.
 
-Paths are JSON lists. Strings name fields and integers select positions in the
-complete tone list. For complete tones Q1/Q2/Q3, `participants: [2, 0]`
-measures original positions `[2, 0]`. Q3 edits still use position 2, not row 0
-or the string `Q3`. Recipe participants accept integers only, not component names.
-Null participants leave the selection captured by Open or Reset unchanged.
-
-This example selects a Q3 pulse, copies it inline and changes its gain:
+Paths are dotted strings. Decimal segments address the complete tone list.
+For Q1/Q2/Q3, `participants: [2, 0]` measures Q3 then Q1.
+Q3 edits still use `tones.2`, not row 0 or the name `Q3`.
+For example, set a common point count and override Q3's amplitude range:
 
 ```json
 {
   "target": "MG3",
   "participants": [2, 0],
-  "library": [{"path": ["tones", 2, "drive"], "key": "Q3.pulses.pi"}],
-  "inline": [{"path": ["tones", 2, "drive"]}],
-  "overrides": [{"path": ["tones", 2, "drive", "gain"], "value": 0.3}]
+  "n": 51,
+  "overrides": [
+    {"path": "tones.2.sweep.start", "value": 0.0},
+    {"path": "tones.2.sweep.stop", "value": 0.3}
+  ]
 }
 ```
 
-Use your entry's actual component names, library keys and approved gains.
-`tab.describe_cfg` shows fields, positions, names and available commands.
-`tab.read_elements` shows the complete tone list. Frequency inputs use MHz, time
-inputs use us and gain inputs use native units. Pulse-scan ranges have only
-`start` and `stop`. Use top-level recipe `n`, or the Form override path
-`["expts"]`, for the shared point count. Delay-scan sweep inputs retain their
-own common `start`, `stop` and `n` fields.
+These bounds illustrate the format, not approved device limits.
+Use your entry's names and approved ranges. The Form chooses module sources;
+a broken source reports an error rather than falling back to calibration.
+There are no generic `library` or `inline` recipe inputs.
 
-An override edits only its path. Set individual range leaves rather than
-expecting a container edit to merge with the previous value. An expression value
-uses `{"expr": "..."}` and remains an expression in the Form. Reps, rounds,
-recovery delay and the delay-scan axis are shared, not per-qubit controls.
+To customize source selection, edit the recipe's setup before overrides.
+Use `tab.select` to choose an intentional module option.
+Before editing a scalar on the current source, read its selector.
+If `selector.mode == "ref"`, use
+`tab.command("tones.2.drive", "to_inline")` to copy the source first.
+Already-inline modules need no conversion. For nested waveform length, read
+that waveform's selector and copy only if referenced. This preserves its
+family and other values rather than replacing it with a const waveform.
+Do not use a scalar override to edit through a reference.
+
+`tab.describe_cfg` lists fields and commands. `tab.read_elements` lists complete
+tone identities. Pulse-scan ranges use `start` and `stop`, with common count
+`expts`. Delay-scan ranges retain their own common `start`, `stop` and `n`.
+Set individual leaves when changing part of a range. Container replacement does
+not merge with its previous value. An expression uses `{"expr": "..."}` and
+stays an expression in the Form. Reps, rounds, recovery delay and the delay-scan
+axis are shared, not per-qubit controls.
 
 ## Read conditions and results
 
@@ -335,7 +348,7 @@ together at each scan point; mux readout waits for the longest drive.
 Drive DAC frequencies advance in one shared hardware loop while mux readout
 tones and ADC frequencies stay fixed.
 
-Choose each `tones[i].drive`. Use typed overrides to set MHz bounds at
+Choose each `tones[i].drive`. Use dotted-path overrides to set MHz bounds at
 `tones[i].sweep.start` and `stop`, or supply the full `sweeps` list.
 Set shared `n` for all tones. The scans advance together by point number, not through every combination
 of frequencies. Set `model_type` to `lor` or `sinc` to select the fit model.
@@ -402,7 +415,7 @@ and slot destinations in the [review step](#save-review-and-apply).
 and measures mux IQ to fit their energy relaxation.
 
 Select calibrated pi pulses at `tones[i].drive`. Set the shared us range with
-`["delays", "start"]`, `["delays", "stop"]` and `["delays", "n"]` overrides.
+`"delays.start"`, `"delays.stop"` and `"delays.n"` overrides.
 There is one requested-delay axis for all participants.
 
 Successful report rows contain `t1` and optional second decay `t1b` in us
@@ -420,8 +433,8 @@ Review the decay, error and destination before [Apply](#save-review-and-apply).
 and a final x90, then fits decay or Ramsey fringes to estimate T2*.
 
 Select x90 pulses at `tones[i].drive` and set each tone's `detune` in MHz.
-Set the common us range with `["delay", "start"]`, `["delay", "stop"]` and
-`["delay", "n"]`. The final x90 phase varies with detune and delay.
+Set the common us range with `"delay.start"`, `"delay.stop"` and
+`"delay.n"`. The final x90 phase varies with detune and delay.
 
 Successful report rows contain `t2` in us and fitted `detune` in MHz with
 errors. Inspect `measurement` and `fit_i` for the fitted model, fringe rate and
@@ -445,7 +458,7 @@ estimate echo coherence.
 
 Select `tones[i].drive` for x90 and `tones[i].pi_pulse` for x180. Both pulses
 for one qubit use the same generator. Set each tone's `detune` in MHz and the
-shared us range at `["delay", "start"]`, `["delay", "stop"]` and `["delay", "n"]`.
+shared us range at `"delay.start"`, `"delay.stop"` and `"delay.n"`.
 
 Successful report rows contain `t2` in us and fitted `detune` in MHz with
 errors. Inspect `measurement` and `fit_i` for the decay model and fit quality.
@@ -463,7 +476,7 @@ Review those coherence results before [Apply](#save-review-and-apply).
 IQ shots for selected qubits. Primary fits their GE separation. Post uses that
 Primary result to estimate a discrimination radius and confusion matrix.
 
-Select each probe pulse at `tones[i].drive` and set `["shots"]` to the number of
+Select each probe pulse at `tones[i].drive` and set `"shots"` to the number of
 shots per preparation. An optional init pulse runs in both preparations.
 The Form fixes reps and rounds at one. Shot pairing across tones remains intact.
 
@@ -507,7 +520,7 @@ preview and waiting for an answer do not write calibrations.
 
 `cancel(execution=..., scope="run")` stops only acquisition and retains partial
 data for subsequent analysis and Save. With no Run in progress it is a no-op.
-`scope="script"` ends the script as cancelled, with a null report and the run
+`scope="recipe"` ends the script as cancelled, with a null report and the run
 receipts. The recipe's finalizer still saves available output after Run.
 A failed step reports its error without retrying acquisition. Inspect saved data
 and artifact statuses before starting another run.

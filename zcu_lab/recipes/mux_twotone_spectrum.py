@@ -3,16 +3,21 @@
 Recipe n → expts: one shared scan point count for every tone.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
+)
+from zcu_tools.mcp.measure.recipe_contracts import (
+    MissingParameter,
+    RecipeNeedsParameters,
 )
 
 from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
@@ -21,35 +26,32 @@ from zcu_lab.v2.mux.twotone_spectrum.gui import MuxTwotoneSpectrumSummary
 from .mux_helpers import (
     MuxToneReport,
     ToneRangeInputs,
-    mux_sweep_edits,
 )
 
 
 class MuxTwotoneSpectrumInputs(RecipeInputs):
-    """Experiment inputs; null retains captured Form values, overrides apply last."""
+    """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
-    participants: list[StrictInt] | None = Field(
-        default=None,
-        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
+    participants: list[StrictInt] | None | Keep = Field(
+        default=KEEP,
+        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
     )
-    sweeps: list[ToneRangeInputs] | None = Field(
-        default=None,
-        description="Start/stop for every tone in original order, including nonparticipants; null keeps ranges. No per-tone n.",
+    sweeps: list[ToneRangeInputs] | None | Keep = Field(
+        default=KEEP,
+        description="Start/stop for every tone in original order, including nonparticipants; omission keeps ranges; null clears their bounds. No per-tone n.",
     )
-    n: int | None = Field(
-        default=None,
-        strict=True,
-        gt=0,
-        description="Positive hardware scan point count shared by all tones; null keeps Expts.",
+    n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
+        default=KEEP,
+        description="Positive hardware scan point count shared by all tones; omission keeps Expts; null clears it.",
     )
 
-    model_type: Literal["lor", "sinc"] | None = Field(
-        None,
-        description="Frequency fit model: Lorentzian or sinc. Null retains analysis settings.",
+    model_type: Literal["lor", "sinc"] | None | Keep = Field(
+        default=KEEP,
+        description="Frequency fit model: Lorentzian or sinc. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    plot_fit: bool | None = Field(
-        None,
-        description="Draw the fitted frequency curve. Null retains analysis settings.",
+    plot_fit: bool | None | Keep = Field(
+        default=KEEP,
+        description="Draw the fitted frequency curve. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
 
 
@@ -91,7 +93,7 @@ async def mux_twotone_spectrum(
 ) -> MuxTwotoneSpectrumReport:
     """Measure mux qubit spectra and review frequency and linewidth writeback.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
@@ -100,22 +102,44 @@ async def mux_twotone_spectrum(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/twotone_spectrum", inputs, target_alias="mux")
-
-    tab.select_sources(inputs)
-    tab.apply_inputs(
-        inputs,
-        {},
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            ),
-            *mux_sweep_edits(tab, inputs.sweeps, inputs.n),
-        ],
+    tab = session.open_tab(
+        "mux/twotone_spectrum", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
+    tab.set(
+        "participants",
+        [*inputs.participants]
+        if isinstance(inputs.participants, list)
+        else inputs.participants,
+    )
+    if not isinstance(inputs.sweeps, Keep):
+        input_tones = tab.read(("tones",)).value
+        if not isinstance(input_tones, list):
+            raise RecipeNeedsParameters(
+                (MissingParameter("tones", "Full tone list is unavailable."),)
+            )
+        if inputs.sweeps is not None and len(inputs.sweeps) != len(input_tones):
+            raise RecipeNeedsParameters(
+                (
+                    MissingParameter(
+                        "sweeps",
+                        f"Expected {len(input_tones)} ranges in original tone order; missing indices {list(range(len(inputs.sweeps), len(input_tones)))}; extra indices {list(range(len(input_tones), len(inputs.sweeps)))}.",
+                    ),
+                )
+            )
+        for index in range(len(input_tones)):
+            tab.set(
+                f"tones.{index}.sweep.start",
+                None if inputs.sweeps is None else inputs.sweeps[index].start,
+            )
+            tab.set(
+                f"tones.{index}.sweep.stop",
+                None if inputs.sweeps is None else inputs.sweeps[index].stop,
+            )
+    tab.set("expts", inputs.n)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
-    # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()
     try:
         fit = await tab.analyze(
@@ -126,7 +150,7 @@ async def mux_twotone_spectrum(
                     "model_type": inputs.model_type,
                     "plot_fit": inputs.plot_fit,
                 }.items()
-                if value is not None
+                if not isinstance(value, Keep)
             },
             result=MuxTwotoneSpectrumSummary,
         )
