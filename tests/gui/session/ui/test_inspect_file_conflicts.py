@@ -122,7 +122,9 @@ def test_alias_draft_revision_includes_missing_file(conflict_ui) -> None:
     ui.type_text("x")
     ui.press_key(Qt.Key.Key_Return)
     ui.screenshot(evidence / "01-draft.png")
-    path.write_text("aliases:\n  external: Q2\n")
+    path.write_text(
+        "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n"
+    )
     ui.click(object_name="inspect.aliases.apply")
     assert ui.observe(object_name="inspect.aliases.error").text
     assert len(ui.table_rows(object_name="inspect.aliases.table")) == initial_count + 1
