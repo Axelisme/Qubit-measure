@@ -84,10 +84,7 @@ class RecordingDevice:
         self._log.add("device", "get_cached_device_value", name)
         return 0.125
 
-    def poll_device_info(self, name: str) -> None:
-        self._log.add("device", "poll_device_info", name)
-
-    def try_poll_device_info(self, name: str) -> bool:
+    def poll_device_info(self, name: str) -> bool:
         self._log.add("device", "poll_device_info", name)
         return True
 

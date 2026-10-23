@@ -340,8 +340,10 @@ class SetupDialog(QDialog):
         self._refresh_context_list()
         info = self._ctrl.get_entry_info()
         if info is not None:
+            self._refresh_entries()
             self._select_entry_name(info.name)
             self._show_entry_paths(info)
+            self._set_project_status(f"Opened entry: {info.name}")
 
     def _on_bus_device_changed(self, payload: object) -> None:
         del payload
@@ -383,6 +385,7 @@ class SetupDialog(QDialog):
                 f"Failed to refresh result entries: {exc}", error=True
             )
             return
+        self._set_project_hint("")
         current = self._entry_combo.currentText()
         self._entry_combo.clear()
         self._entry_combo.addItems(list(names))

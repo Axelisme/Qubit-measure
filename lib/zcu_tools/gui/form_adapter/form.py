@@ -60,7 +60,10 @@ class Form[C: ConfigBase]:
     hosts use the same env until Reset. The host calls bind_templates with its
     template catalog before resolving Template nodes. Slot copies
     and Template defaults are detached persistent Specs, not library-editor
-    structural defaults. Only Expr nodes become expression envelopes. Ordinary
+    structural defaults. Whole dict/Mapping Expr declarations raise TypeError
+    at construction with the field path and mapping type. Literal mappings
+    come from core defaults or FormState input, not authored tree seeds;
+    their expr keys remain data. Only Expr nodes become expression envelopes. Ordinary
     strings, including $-prefixed strings, remain literal. Expr initial values
     remove static defaults in this form only; failed evaluation requires input
     instead of falling back to core defaults. Range endpoints authored as None

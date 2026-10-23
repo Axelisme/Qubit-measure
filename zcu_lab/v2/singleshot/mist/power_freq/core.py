@@ -212,40 +212,26 @@ class FreqPowerExp(PersistableExperiment[FreqPowerResult, FreqPowerCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
-        fig, _ = plots.subplots("fit", nrows=3, ncols=1, figsize=(8, 10))
+        fig, _ = plots.subplots(
+            "fit", nrows=3, ncols=1, figsize=(8, 10), layout="constrained"
+        )
         ax_g, ax_e, ax_o = fig.axes
 
-        im_g = ax_g.imshow(
-            populations[..., 0],
-            extent=(gains[0], gains[-1], freqs[0], freqs[-1]),
-            aspect="auto",
-            origin="lower",
-        )
+        # Stored populations are (gain, frequency, state); display frequency rows.
+        im_g = ax_g.pcolormesh(gains, freqs, populations[..., 0].T, shading="nearest")
         ax_g.set_title("Ground State Population")
         ax_g.set_xlabel("Drive Gain (a.u.)")
         ax_g.set_ylabel("Drive Frequency (MHz)")
         fig.colorbar(im_g, ax=ax_g, label="Population (a.u.)")
 
-        im_e = ax_e.imshow(
-            populations[..., 1],
-            extent=(gains[0], gains[-1], freqs[0], freqs[-1]),
-            aspect="auto",
-            origin="lower",
-        )
+        im_e = ax_e.pcolormesh(gains, freqs, populations[..., 1].T, shading="nearest")
         ax_e.set_title("Excited State Population")
         ax_e.set_xlabel("Drive Gain (a.u.)")
         ax_e.set_ylabel("Drive Frequency (MHz)")
         fig.colorbar(im_e, ax=ax_e, label="Population (a.u.)")
 
-        im_o = ax_o.imshow(
-            populations[..., 2],
-            extent=(gains[0], gains[-1], freqs[0], freqs[-1]),
-            aspect="auto",
-            origin="lower",
-        )
+        im_o = ax_o.pcolormesh(gains, freqs, populations[..., 2].T, shading="nearest")
         ax_o.set_title("Other States Population")
         ax_o.set_xlabel("Drive Gain (a.u.)")
         ax_o.set_ylabel("Drive Frequency (MHz)")
         fig.colorbar(im_o, ax=ax_o, label="Population (a.u.)")
-
-        fig.tight_layout()

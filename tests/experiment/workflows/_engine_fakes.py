@@ -1,6 +1,6 @@
 """Deterministic ports and worker lifetime for public async Engine tests."""
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -128,8 +128,13 @@ class Rig:
             )
         )
 
-    def progress(self, **kwargs: object) -> RecordingBar:
-        bar = RecordingBar(**kwargs)
+    def progress(
+        self,
+        iterable: Iterable[object] | None = None,
+        desc: str | None = None,
+        **kwargs: object,
+    ) -> RecordingBar:
+        bar = RecordingBar(iterable=iterable, desc=desc, **kwargs)
         self.bars.append(bar)
         return bar
 
