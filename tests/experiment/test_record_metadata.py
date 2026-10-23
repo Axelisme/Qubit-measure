@@ -11,8 +11,8 @@ from uuid import UUID
 
 import numpy as np
 import pytest
-from pydantic import TypeAdapter
 import zcu_tools.experiment as experiment
+from pydantic import TypeAdapter
 from zcu_tools.datafile import DataVariable, LabberMetadata, load, save
 
 
