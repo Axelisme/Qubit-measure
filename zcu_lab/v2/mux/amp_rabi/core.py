@@ -15,9 +15,10 @@ does not resolve component identities.
 
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 all tones, including nonparticipants. Point p pairs each active tone's p-th value,
-not a Cartesian product. Each point compiles once and executes optional common reset, Join of
-independent drive pulses, then active mux readout. Branches start together;
-short branches wait for the longest branch at that point. Pre/post delays stay
+not a Cartesian product. One program advances all gains in a shared hardware loop.
+Each point executes optional common reset, Join of independent drive pulses,
+then active mux readout. Branches start together; short branches wait for the
+longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
 All participants share reps, rounds, initial_delay and relax_delay.
 Program modules perform native conversion and averaging.
@@ -25,17 +26,18 @@ Program modules perform native conversion and averaging.
 Results and cancellation
 ------------------------
 MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
-float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
-ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
+float64 (K,P) on each drive's actual hardware-quantized gain grid. Signals are
+complex128 (K,P), ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
 original tone indices and each tone's own coordinates, so duplicate labels retain
-distinct plots. Cancellation preserves completed points and the current point's
-completed-round average. Unacquired points remain NaN.
+distinct plots. Cancellation preserves completed-round averages across the full
+sweep. If no round completes, all signals remain NaN.
 
 Amplitude scan and analysis
 --------------------------
 MuxAmpRabiCfg.modules contains optional common reset and full mux readout.
 Sweep bounds are normalized gains within [-1, 1]. prepare_amplitude_scan copies
-cfg and builds per-drive actual gain grids.
+cfg and builds independently rounded scalar gain grids. run publishes the
+compiled integer-step gain grids instead.
 
 Analysis uses the single-qubit undamped Rabi fitter and zero-gain phase policy.
 Options.skip removes leading zipped points before finite-IQ filtering. Each
@@ -90,6 +92,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
+from zcu_tools.program.v2.utils import sweep2param
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
@@ -140,8 +143,10 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
 
     cfg supplies the complete tones and ordered participants; it is not mutated.
     soccfg describes the target board. Each participant gets its own normalized
-    gain coordinates and one pulse per point. Sweeps advance together by point
-    index, not as a Cartesian product. Pulses retain nominal gains for compilation.
+    gain coordinates and one pulse per point, rounded as independent scalar
+    pulses. Sweeps advance together by point index, not as a Cartesian product.
+    Pulses retain nominal gains for compilation. run replaces these preliminary
+    coordinates with the compiled hardware sweep's integer-step gain grid.
     Invalid cfg raises ValueError; board conversion errors propagate.
     """
     cfg = MuxAmpRabiCfg.model_validate(cfg.model_dump())
@@ -186,8 +191,10 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
         it is copied before use. After reset, all drives start together. Readout
         waits for the longest drive at that point, without end-alignment padding.
         context supplies the board, plots and stop signal. Coordinates and IQ have
-        shape (participants, points), in participant order, with normalized gains.
-        Cancellation keeps completed averages and leaves unmeasured points NaN.
+        shape (participants, points), in participant order, with actual hardware-
+        quantized normalized gains. All gains advance in one shared hardware loop.
+        Each completed round updates the full sweep's live plots. Cancellation
+        keeps completed-round averages, or NaN if no round completes.
         Call context.scope.stop.raise_if_error() before reporting success;
         the caller also finishes/releases plots. Invalid cfg/build errors propagate.
         """
@@ -221,35 +228,41 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
             for module in prog.modules:
                 if isinstance(module, MuxReadout) and module.name == "readout":
                     iq = module.collect_iq(prog, acquired, read_index=0)
-                    return iq[:, 0] + 1j * iq[:, 1]
+                    return iq[..., 0] + 1j * iq[..., 1]
             raise ValueError("Mux scan program is missing its named MuxReadout")
 
-        # Store points first so each acquisition writes one complete tone vector.
+        # Advance each drive gain in the same tProc point loop.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
         with Schedule(cfg, signals, scope=context.scope) as sched:
-            for pulses, step in sched.scan("point", scan.point_pulses):
-                # Reset, start all drives together, then read after the longest.
-                builder = (
-                    step.prog_builder(context.soc, context.soccfg)
-                    .add_reset("reset", cfg.modules.reset)
-                    .add(
-                        Join(
-                            *[
-                                Pulse(f"drive_{index}", pulse)
-                                for index, pulse in zip(
-                                    scan.indices, pulses, strict=True
-                                )
-                            ]
-                        ),
-                        MuxReadout("readout", readout),
-                    )
+            drives = []
+            for index in scan.indices:
+                tone = cfg.tones[index]
+                drive = tone.drive.model_copy(deep=True)
+                drive.set_param(
+                    "gain",
+                    sweep2param(
+                        "point",
+                        make_sweep(tone.sweep.start, tone.sweep.stop, cfg.expts),
+                    ),
                 )
+                drives.append(Pulse(f"drive_{index}", drive, pulse_id=f"drive_{index}"))
 
-                # Compile once per point; preserve completed-round partial averages.
-                prog = builder.build()
-                _ = builder.run_program(
-                    prog, raw2signal_fn=partial(averaged_signal, prog)
+            # Reset -> simultaneous drives -> fixed readout after the longest drive.
+            builder = (
+                sched.prog_builder(context.soc, context.soccfg)
+                .add_reset("reset", cfg.modules.reset)
+                .add(Join(*drives), MuxReadout("readout", readout))
+                .declare_sweep("point", cfg.expts)
+            )
+
+            # Integer register steps can differ from independently rounded points.
+            # Keep live plots, analysis and persistence on the compiled gain grid.
+            prog = builder.build()
+            for row, index in enumerate(scan.indices):
+                scan.coordinates[row] = prog.get_pulse_param(
+                    f"drive_{index}", "gain", as_array=True
                 )
+            _ = builder.run_program(prog, raw2signal_fn=partial(averaged_signal, prog))
 
         # Publish final plots and return tone-major data, including unmeasured NaNs.
         signals.trigger_update(flush=True)
