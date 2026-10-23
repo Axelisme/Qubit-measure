@@ -270,7 +270,12 @@ The entry template sets group `mixer_freq: 7250` MHz for readout centers from
 7000 to 7500 MHz. Blank mux forms read `$mux.mixer_freq`; missing or null stays
 required and blank, without deriving a midpoint or depending on kappa.
 Group `time_of_fly: 0.4` us matches the receivers' `time_of_flight_ns: 400`.
-Resonator pulse routes have separate top-level `time_of_fly` values, initially null.
+Resonator pulse routes have separate top-level `time_of_fly: 0.4` us values
+from their own receivers. The template seeds total linewidth 1.1 MHz and both
+local-line and coil calibrations as simulated-truth, not measurement results.
+Each line's calibration uses `int=offset`, `half=offset+period/2` and its own
+period in A; coil records use `coil_offset` and `coil_period`. These describe
+each line's contribution alone, excluding the other line's background flux.
 For blank `mux/onetone`, trigger starts at `$mux.time_of_fly + 5/(2π·min κ)`,
 ro_length at 1.0 us, and length at trigger plus ro_length. Missing group TOF or
 any kappa leaves trigger and length required and blank. These editable seeds

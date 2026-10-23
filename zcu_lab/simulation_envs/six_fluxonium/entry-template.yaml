@@ -1,5 +1,9 @@
 # Entry working values and wiring, separate from physical simulation settings.
-# No calibrated module library or pulse sequence is supplied.
+# No module library or pulse sequence is supplied.
+# simulated-truth: default.yaml dc_bias offsets/periods in A, per line's own
+# contribution: int=offset, half=offset+period/2. Other lines are excluded.
+# coil_flux uses coil_offset/coil_period, not the qubit's local calibration.
+# Resonator kappa and route TOF come from readout settings, not measurements.
 format: zcu.entry-template
 format_version: "1.0"
 components:
@@ -12,11 +16,15 @@ components:
     resonator: R1
     flux_source: Q1_bias
     flux_unit: A
+    flux_half: 0.0
+    flux_period: 0.002
+    flux_int: -0.001
     wiring:
       ch: 1
   R1:
     kind: resonator
-    time_of_fly: null # us; measure the single-tone readout route.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7000.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -30,11 +38,15 @@ components:
     resonator: R2
     flux_source: Q2_bias
     flux_unit: A
+    flux_half: 0.000125
+    flux_period: 0.0025
+    flux_int: -0.001125
     wiring:
       ch: 2
   R2:
     kind: resonator
-    time_of_fly: null # us; measure the single-tone readout route.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7100.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -48,11 +60,15 @@ components:
     resonator: R3
     flux_source: Q3_bias
     flux_unit: A
+    flux_half: -0.00009
+    flux_period: 0.0018
+    flux_int: -0.00099
     wiring:
       ch: 3
   R3:
     kind: resonator
-    time_of_fly: null # us; measure the single-tone readout route.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7200.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -66,11 +82,15 @@ components:
     resonator: R4
     flux_source: Q4_bias
     flux_unit: A
+    flux_half: 0.00022
+    flux_period: 0.0022
+    flux_int: -0.00088
     wiring:
       ch: 4
   R4:
     kind: resonator
-    time_of_fly: null # us; measure the single-tone readout route.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7300.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -84,11 +104,15 @@ components:
     resonator: R5
     flux_source: Q5_bias
     flux_unit: A
+    flux_half: -0.00028
+    flux_period: 0.0028
+    flux_int: -0.00168
     wiring:
       ch: 5
   R5:
     kind: resonator
-    time_of_fly: null # us; measure the single-tone readout route.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7400.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -102,11 +126,15 @@ components:
     resonator: R6
     flux_source: Q6_bias
     flux_unit: A
+    flux_half: 0.0
+    flux_period: 0.003
+    flux_int: -0.0015
     wiring:
       ch: 6
   R6:
     kind: resonator
-    time_of_fly: null # us; measure the single-tone readout route.
+    time_of_fly: 0.4 # us; readout.adc.time_of_flight_ns / 1000.
+    kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7500.0 # MHz
     wiring:
       ch: 13 # Shared pulse readout, separate from the mux group.
@@ -132,7 +160,13 @@ components:
     resonators: [R1, R2, R3, R4, R5, R6]
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
     flux_source: coil_bias
-    coil_flux: {} # Calibrations keyed by qubit name, filled after measurement.
+    coil_flux: # simulated-truth, A; each coil contribution, excluding local bias.
+      Q1: {half: 0.005, period: 0.01, int: 0.0}
+      Q2: {half: 0.00625, period: 0.0125, int: 0.0}
+      Q3: {half: 0.004166666666666667, period: 0.008333333333333333, int: 0.0}
+      Q4: {half: 0.005555555555555556, period: 0.011111111111111112, int: 0.0}
+      Q5: {half: 0.004545454545454545, period: 0.00909090909090909, int: 0.0}
+      Q6: {half: 0.007142857142857143, period: 0.014285714285714285, int: 0.0}
     wiring:
       gen_ch: 0
       ro_ch: [0, 1, 2, 3, 4, 5]

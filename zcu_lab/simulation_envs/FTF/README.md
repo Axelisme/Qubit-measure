@@ -52,11 +52,11 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 再指定該處的 startup。範本與設定按 startup 檔案位置定位，不跟隨 shell cwd。
 要改 entry、point 或 tab 名稱，編輯自己的 startup 副本。
 
-模擬用 `entry-template.yaml` 省略 qubit energies 與 R1／R2 的 `freq`，只提供接線、元件關聯與 aliases。物理模型的 energies 與 resonator 頻率由 `ftf.yaml` 提供，不會自動填入 entry。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的頻率與其他輸入，範本不提供 module library 或校準完成的量測參數。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 另外預填示意 energies 與 R1／R2 頻率，不代表模擬 entry 也有這些值。若修改工作副本的接線，也要調整 entry 範本或已建立的 entry。
+模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準使用各迴路的 offset 與主線係數，其他 sources 固定為零；不使用 `design` 猜值。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。
-模擬範本的 `MG12.time_of_fly: 0.4` us 對應 `ftf.yaml` 的 mux receivers 400 ns。Kickstart 的 group TOF 留 null，R1／R2 的頂層 `time_of_fly` 也留 null，等待各自路徑的量測。
+模擬範本的 `MG12.time_of_fly: 0.4` us 對應 `ftf.yaml` 的 mux receivers 400 ns。R1／R2 的頂層 `time_of_fly: 0.4` us 則對應 pulse ADC 的 400 ns。Kickstart 的 group 與 resonator TOF 保留 null，等待各自路徑的量測。
 `mux/onetone` 缺 slot 時，trigger 初值取 group TOF 加 `5/(2π·min κ)`，length 取 trigger 加固定 1.0 us ADC window。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填，mixer 不受影響。有 slot 時沿用 slot mixer 與既有 timing 規則。
 R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 1`、`ro_ch: [1, 2]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
 範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從已知的 group wiring 補通道，tone gain 補 0.1。文件允許 `wiring: {}`；`ro_ch` 未知時，各 tone ADC 留空必填，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
