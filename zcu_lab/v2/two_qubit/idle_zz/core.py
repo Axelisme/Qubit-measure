@@ -36,11 +36,41 @@ from ._analysis import IdleZZAnalysis, fit_branch, plot_analysis
 class IdleModules(ConfigBase):
     """Calibrated π and π/2 pulses on each role's charge generator; full mux."""
 
-    x180_f1: PulseCfg
-    x180_f2: PulseCfg
-    x90_f1: PulseCfg
-    x90_f2: PulseCfg
-    readout: MuxReadoutCfg
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x90_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    x90_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+        ),
+    ]
 
 
 class IdleZZCfg(ProgramV2Cfg, ExpCfgModel):
@@ -65,11 +95,12 @@ class IdleZZCfg(ProgramV2Cfg, ExpCfgModel):
         float,
         Field(allow_inf_nan=False),
         FieldMeta(
+            label="Detune",
             unit="MHz",
-            description="Signed artificial phase ramp; magnitude must exceed expected |ζ| plus frequency error.",
+            description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
         ),
     ]
-    delay: Annotated[SweepCfg, FieldMeta(unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     dc_device: Annotated[
         str | None,
         FieldMeta(

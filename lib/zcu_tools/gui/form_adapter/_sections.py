@@ -61,7 +61,7 @@ from .sweep import CenterSpan, LinRange, StepCenter, StepRange
 
 
 def _sweep_branch(
-    base: type[FormModel], node: FormNode, decimals: int | None
+    base: type[FormModel], node: FormNode, decimals: int | None, unit: str | None
 ) -> type[FormModel]:
     """Specialize authored endpoint requirements and float display precision."""
     fields: dict[str, FieldInfo] = {}
@@ -73,7 +73,7 @@ def _sweep_branch(
             and name in ("start", "stop")
             and (getattr(node, name) is None or isinstance(getattr(node, name), Expr))
         )
-        if not required and decimals is None:
+        if not required and decimals is None and unit is None:
             continue
         endpoint = deepcopy(info)
         if required:
@@ -81,6 +81,8 @@ def _sweep_branch(
             endpoint.default_factory = None
         if decimals is not None:
             endpoint.metadata.append(Display(decimals=decimals))
+        if unit is not None:
+            endpoint.metadata.append(Display(unit=unit))
         fields[name] = endpoint
     model = new_class(
         f"Authored{base.__name__}",
@@ -102,13 +104,13 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> object:
     """Build four active branches; Expr and None endpoints lose inherited defaults.
 
     node is the authored sweep; info is its core field declaration. Float
-    precision applies to all coordinates and step, never n or the outer model.
+    precision and units apply to all coordinates and step, never n.
     No expression is evaluated and no shared branch class is modified.
     """
     meta = get_field_meta(info)
     decimals = meta.decimals if meta is not None else None
     branches = tuple(
-        _sweep_branch(base, node, decimals)
+        _sweep_branch(base, node, decimals, meta.unit if meta is not None else None)
         for base in (LinRange, CenterSpan, StepRange, StepCenter)
     )
     return Annotated[union_type(branches), Field(discriminator="kind")]

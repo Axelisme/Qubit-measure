@@ -7,6 +7,8 @@
 每個 sweep 點的名目頻率是原始 tone 的 base frequency 加上共同 offset。
 圖與擬合都使用這個名目座標，DDS 實際量化頻率可能有差異。
 
+修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+
 ## 準備輸入
 
 1. 在 Inspect 的 Parameters 建立 `kind: group/mux` 元件，例如 `MG12`。設定有序 `resonators: [R1, R2, R3]`、mux generator `wiring.gen_ch`，以及同序的各 tone ADC `wiring.ro_ch`。若已有 `readout/mux` library key，可把 module 槽 `module.readout` 指向它。完整 tones[i] 對應 resonators[i]，綁定依據是位置。

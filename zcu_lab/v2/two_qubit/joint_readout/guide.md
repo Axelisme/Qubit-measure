@@ -4,6 +4,8 @@
 
 **Last updated:** 2026-10-21
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Before run
 
 Bind `f1` and `f2` to two different fluxonium components. Bind `coupler` to their transmon and `mux` to the MuxGroup. Open and Reset capture these scalar aliases, the point parameters and the module library. An open form keeps its original bindings. Reset to capture changed aliases.
