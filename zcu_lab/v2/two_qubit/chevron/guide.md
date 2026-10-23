@@ -6,6 +6,8 @@
 
 Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
 
+After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+
 ## Purpose and sequence
 
 Scan common drive frequency in MHz and common envelope duration in us at fixed

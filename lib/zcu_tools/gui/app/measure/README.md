@@ -26,6 +26,7 @@ RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 For
 - [`writeback/`](writeback/service.py)：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
 - [`ui/`](ui/main_window.py)：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
+  Footer 訊息在可用寬度內換行，不以長錯誤文字撐大視窗；tooltip 與 view snapshot 保留完整文字。
 - [`remote/`](remote/README.md)：與 `ui/` 平級的 GUI-process driving adapter，將 RPC 意圖交給
   application commands/queries。`remote.method_specs` public import path 不載入
   Qt-bound service code；MCP bridge 不在本 package。

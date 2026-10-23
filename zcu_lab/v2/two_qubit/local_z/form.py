@@ -23,6 +23,18 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
     readout = mux_readout_initial(ctx)
     return Form(
         LocalZCfg,
+        field_order=(
+            "roles",
+            "modules",
+            "drive",
+            "f1_centers",
+            "f2_centers",
+            "gate_counts",
+            "reps",
+            "rounds",
+            "relax_delay",
+            "initial_delay",
+        ),
         tree={
             "reps": 1000,
             "rounds": 10,
