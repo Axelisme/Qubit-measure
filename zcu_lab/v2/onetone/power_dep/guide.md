@@ -24,4 +24,4 @@ The run produces a 2D map for visual inspection. Read the punch-out power and lo
 
 ## Recommended use
 
-A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled, with `None` or a nonpositive value. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.
+A typical sweep uses gain from about 0.001 to 0.5 over about 101 points, ordered from low to high power. Sweep frequency around `resonator.freq` by a few linewidths over about 201 points. `earlystop_snr` starts disabled. Leave it blank (`None`) to keep early stopping disabled. Zero and negative thresholds are rejected by the Form. Set it positive to stop a column early once the signal-to-noise target is reached. Narrow the gain range once you have located the transition.
