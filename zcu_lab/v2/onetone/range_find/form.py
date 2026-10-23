@@ -1,4 +1,4 @@
-"""Pulse-readout initial values and captured analysis names for a wide survey."""
+"""Pulse-readout initial values for a wide absolute-frequency survey."""
 
 from collections.abc import Sequence
 from math import isfinite
@@ -13,41 +13,6 @@ from zcu_lab.v2._support.measure.pulse_readout_metadata import (
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 
 from .core import RangeFindCfg
-
-
-def initial_resonators(ctx: FormContext) -> list[str]:
-    """Seed editable names from the captured mux group, or empty without a mux.
-
-    All members with present, finite MHz frequencies are sorted by frequency.
-    Any missing/null frequency preserves the entire group order. Malformed
-    source types or set nonfinite/nonnumeric frequencies raise ValueError.
-    Duplicate names remain editable; only Analyze requires unique names.
-    No readout settings are taken from the mux and no source is changed.
-    """
-    parameters = ctx.parameters
-    if (
-        parameters is None
-        or parameters.roles is None
-        or "mux" not in parameters.roles.names
-    ):
-        return []
-    raw = parameters.value("$mux.resonators")
-    if not isinstance(raw, list):
-        raise ValueError("$mux.resonators must be a list of strings")
-    names: list[str] = []
-    for name in raw:
-        if not isinstance(name, str):
-            raise ValueError("$mux.resonators must contain strings")
-        names.append(name)
-    frequencies = resonator_frequencies(parameters, names)
-    if frequencies is None:
-        return names
-    return [
-        name
-        for _, name in sorted(
-            zip(frequencies, names, strict=True), key=lambda item: item[0]
-        )
-    ]
 
 
 def resonator_frequencies(
@@ -79,16 +44,15 @@ def resonator_frequencies(
 
 
 def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
-    """Leave sweep endpoints blank with 301 points and seed editable analysis names.
+    """Leave sweep endpoints blank with 301 points.
 
     ctx is the Open/Reset capture. The operator must enter absolute MHz endpoints.
-    Other defaults match freq linear. Names do not select hardware channels.
+    Other defaults match freq linear. Dip naming is a later Analyze choice.
     Timing failures propagate; no hardware I/O or live refresh occurs here.
     """
     return Form(
         RangeFindCfg,
         field_order=(
-            "resonators",
             "modules",
             "sweep",
             "reps",
@@ -99,6 +63,5 @@ def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
         tree={
             **initial_spectrum_tree(ctx),
             "sweep": {"freq": Range(None, None, expts=301)},
-            "resonators": [name for name in initial_resonators(ctx)],
         },
     ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))
