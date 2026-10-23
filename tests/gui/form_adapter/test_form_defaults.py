@@ -30,12 +30,49 @@ from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.program.v2.modules import BathResetCfg, PulseCfg, PulseReadoutCfg
+from zcu_tools.program.v2.modules import ConstWaveformCfg as NativeConstWaveformCfg
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+
+
+class NativeDefaultCore(ConfigBase):
+    """A native pulse default needs no authored tree or captured sources."""
+
+    pulse: PulseCfg = PulseCfg(
+        ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.2,
+        waveform=NativeConstWaveformCfg(length=0.1),
+    )
+
+
+def test_native_module_default_is_valid_selectable_and_round_trips() -> None:
+    form = Form(NativeDefaultCore, {})
+    env = FormEnv()
+    state = FormState(form.default_input(env))
+
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    cfg = form.to_cfg(value, env)
+    assert isinstance(cfg, NativeDefaultCore), cfg
+    assert type(cfg.pulse) is PulseCfg
+    assert type(cfg.pulse.waveform) is NativeConstWaveformCfg
+    assert cfg == NativeDefaultCore()
+
+    target = state.describe(("pulse",), env).target
+    assert target is not None and target.options is not None
+    assert target.selected is not None
+    selected = target.options[target.selected]
+    assert selected.value == {"kind": "inline", "module": {"type": "pulse"}}
+    state.select(("pulse",), selected.value, env)
+    value = state.result(env)
+    assert not isinstance(value, FormErrors), value
+    assert form.to_cfg(value, env) == cfg
 
 
 class Core(ConfigBase):

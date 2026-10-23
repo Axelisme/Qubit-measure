@@ -576,7 +576,8 @@ class ComponentDriver:
         or ambiguous widget/option captions raise LookupError; a non-combo target
         raises TypeError. Disabled, hidden, clipped or modal-blocked targets and
         disabled options are no-ops. value is a caption, never userData or index.
-        No target is shown or scrolled into view. Popups close on failure.
+        No target is shown or scrolled into view. If activation does not open an
+        interactable popup, selection stays unchanged. Popups close on failure.
         """
         widget = self._field_control(text, object_name)
         if not isinstance(widget, QComboBox):
@@ -600,6 +601,12 @@ class ComponentDriver:
             view = widget.view()
             if view is None:
                 raise RuntimeError("Combo has no option view")
+            viewport = view.viewport()
+            if viewport is None:
+                raise RuntimeError("Combo option view has no viewport")
+            # The viewport paints the options and covers the view's visible region.
+            if not self._can_interact(viewport):
+                return
             key_click(view, Qt.Key.Key_Home)
             for _ in range(index):
                 key_click(view, Qt.Key.Key_Down)

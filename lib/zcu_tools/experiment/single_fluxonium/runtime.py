@@ -93,6 +93,7 @@ def _build_facts(
         (drive,),
         noise=FluxoniumNoise(qubit.q_cap, qubit.q_ind, qubit.xqp, qubit.aphi),
         resonator=dispersive_resonator(settings),
+        slow_envelope_segments_per_period=settings.numerics.slow_envelope_segments_per_period,
     )
     return SingleFluxoniumFacts(model, source, readout_model(settings, model, source))
 

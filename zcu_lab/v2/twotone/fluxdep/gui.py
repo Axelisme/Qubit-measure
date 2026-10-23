@@ -85,7 +85,7 @@ class FluxDepAdapter(
         context or legacy md/ml is read. plots receives the pick figure on Done.
         """
         result = req.run_result.result
-        inputs = FluxPickInputs(result.signals, result.values, result.freqs)
+        inputs = FluxPickInputs(result.signals, result.values, result.freqs * 1e-3)
         parameters = req.parameters
         flux_half = (
             None

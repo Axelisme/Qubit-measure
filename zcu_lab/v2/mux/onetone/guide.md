@@ -139,3 +139,16 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 可用的歷史值以已保存內容為準。
 缺少分析參數來源的 Load 可以純計算並列 module 候選；選取非空候選後 Apply 會報錯。
 套用前檢查目的地、頻率變化與 fit quality。
+
+## MCP recipe
+
+呼叫 `mux_onetone`，`target` 可指定這次 Reset 的 mux alias，`reuse_tab_id` 可重用 idle matching tab。
+`participants` 收 resonator 名稱，依 tab 固定 `$mux.resonators` 順序映射 Active tones 原始 index。
+名稱不讀 display label。未知或重複綁定的名字回 `needs_parameters` 並列合法名單。
+`participants` 省略時保留表單 Active tones。重複綁定要以原始 index 的 `active_tones` override 選取。
+`df:{start,stop}` 是所有 tone 共用的 MHz offset，`n` 是共用點數，不是絕對頻率。
+`reps`、`rounds` 可覆寫 acquisition 次數。以上參數 null 都保留表單值。
+`library`、`inline` 依序選來源與複製，`overrides` 最後執行，integer path 使用完整 readout tone 原始位置。
+Run 前整批驗證，缺值列出可讀的欄位路徑。
+Run 後 Analyze，回覆每 tone 的 index、name、label、freq、kappa、fit_quality 與失敗原因，以及 `resonators_diagnostic`。
+再詢問 writeback，只套用回答選定的候選。略過不寫入。最後保存 raw data 與分析。

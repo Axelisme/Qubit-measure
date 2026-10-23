@@ -15,6 +15,7 @@ from .period_table import PeriodTableKernel
 from .shaped_sambe import ShapedSambeKernel
 from .single_tone_gate import SingleToneGateKernel
 from .single_tone_rwa import SingleToneRWAKernel
+from .slow_envelope import SlowEnvelopeKernel
 from .t4 import T4
 from .t6 import T6Kernel
 
@@ -23,6 +24,7 @@ REGISTRY: tuple[Kernel, ...] = (
     AdiabaticMapKernel(),
     CommonFrameKernel(),
     T6Kernel(),
+    SlowEnvelopeKernel(),
     FloquetPeriodKernel(),
     DysonKernel(),
     DOP853Kernel(),

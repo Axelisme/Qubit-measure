@@ -10,7 +10,7 @@ import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtCore import QCoreApplication, QEvent
-from qtpy.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
+from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -190,7 +190,7 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
 
 
 @pytest.mark.parametrize("pane", ["Run", "Analysis", "Data"])
-def test_user_sees_four_figures_then_selects_from_five(
+def test_user_sees_four_figures_then_pages_through_five(
     layout_window: QWidget, pane: str, tmp_path: Path
 ) -> None:
     flow = ComponentDriver(layout_window)
@@ -236,13 +236,18 @@ def test_user_sees_four_figures_then_selects_from_five(
         flow.select_tab("Data")
     flow.screenshot(shots / "03-five.png")
     if pane != "Data":
-        assert flow.legends().texts == (f"{prefix} tone 1",)
-    flow.choose_option(f"{prefix} tone 1", f"{prefix} tone 5")
+        assert flow.legends().texts == tuple(f"{prefix} tone {i}" for i in range(1, 5))
+    assert flow.observe("1 / 2").visible
+    flow.click("Next page")
+    assert flow.observe("2 / 2").visible
     if pane == "Data":
         assert flow.observe("Run tone 5").visible
     else:
         assert flow.legends().texts == (f"{prefix} tone 5",)
-    flow.screenshot(shots / "04-selected.png")
+    flow.screenshot(shots / "04-second-page.png")
+    flow.click("Previous page")
+    assert flow.observe("1 / 2").visible
+    flow.screenshot(shots / "05-first-page.png")
 
 
 @pytest.fixture(params=["mounted", "unmounted"])
@@ -397,17 +402,11 @@ def test_data_activation_uses_public_reader_and_isolates_each_failure(
         )
 
 
-@pytest.mark.parametrize(
-    "pane,label",
-    [("analysis", "Analysis figure"), ("post_analysis", "Post-analysis figure")],
-)
-def test_named_collection_identity_blocks_selector_repopulation_and_keeps_figures_saveable(
-    presentation_window: QWidget, pane: str, label: str
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_named_collection_keeps_figures_saveable_after_clear(
+    presentation_window: QWidget, pane: str
 ) -> None:
     (tab,) = presentation_window.findChildren(ExpTabWidget)
-    selector = next(
-        w for w in tab.findChildren(QComboBox) if w.accessibleName() == label
-    )
     collection = FigureCollection()
     first = Figure()
     second = Figure()
@@ -416,24 +415,14 @@ def test_named_collection_identity_blocks_selector_repopulation_and_keeps_figure
     for index in range(3):
         collection.adopt(f"extra-{index}", Figure())
     collection.seal()
-    changes: list[int] = []
-    selector.currentIndexChanged.connect(changes.append)
     show = (
         tab.show_analysis_figures
         if pane == "analysis"
         else tab.show_post_analysis_figures
     )
     show(collection)
-    assert changes == []
-    selector.setCurrentIndex(1)
-    assert changes == [1]
-    assert tab.get_current_figure_for_pane(pane) is second
-    show(collection)
-    assert changes == [1]
-    assert selector.currentText() == "second"
-    assert tab.get_current_figure_for_pane(pane) is second
+    assert tab.get_current_figure_for_pane(pane) is first
     tab.clear_all_figures()
-    assert changes == [1]
     assert tab.get_current_figure_for_pane(pane) is None
     for figure in (first, second):
         output = BytesIO()
