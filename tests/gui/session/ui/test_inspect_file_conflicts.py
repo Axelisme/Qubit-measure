@@ -367,3 +367,61 @@ def test_clean_pages_show_human_pending_and_invalid_source(conflict_ui) -> None:
     ui.click(object_name=f"inspect.{document}.sync.reload")
     assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
     ui.screenshot(evidence / "05-valid-reloaded.png")
+
+
+@pytest.mark.parametrize("conflict_ui", ["parameters", "library", "aliases"], indirect=True)
+def test_source_publications_keep_visible_drafts_until_valid_reload(conflict_ui) -> None:
+    ui, path, evidence, source, _ = conflict_ui
+    document = next(file.document for file in source.get_file_revisions() if file.path == path)
+    evidence = evidence / "published-draft"
+    if document == "parameters":
+        ui.enter_text(object_name="inspect.parameters.filter", value="Q1.rate", commit=False)
+        ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="9", commit=False)
+    elif document == "library":
+        ui.select_tab("Modules")
+        ui.select_tree_row(("waveforms", "Q1", "waveforms", "flat"), object_name="inspect.library")
+        ui.enter_text(object_name="inspect.entry.name", value="Q1.waveforms.draft", commit=False)
+    else:
+        ui.select_tab("Aliases")
+        ui.click(object_name="inspect.aliases.add")
+        ui.type_text("draft")
+        ui.press_key(Qt.Key.Key_Return)
+    ui.screenshot(evidence / "01-draft.png")
+    original = path.read_text()
+    changed = {
+        "parameters": original.replace("4300.0", "4700.0"),
+        "library": original.replace("0.1", "0.7"),
+        "aliases": "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n",
+    }[document]
+    path.write_text(changed)
+    source.synchronize_files(admit_reload=True)
+    assert ui.observe(object_name=f"inspect.{document}.sync.message").visible
+    if document == "parameters":
+        assert ui.focused_input().text == "9"
+        ui.press_key(Qt.Key.Key_Return)
+        assert ui.observe(object_name="component_error").text
+    elif document == "library":
+        assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
+        ui.click(object_name="inspect.entry.apply")
+        assert ui.observe(object_name="inspect.entry.status").text == "Unsaved"
+    else:
+        assert any(row.columns[0] == "draft" for row in ui.table_rows(object_name="inspect.aliases.table"))
+        ui.click(object_name="inspect.aliases.apply")
+        assert ui.observe(object_name="inspect.aliases.error").text
+    ui.screenshot(evidence / "02-reloaded-source-rejects-draft.png")
+    path.write_text("invalid: true\n")
+    source.synchronize_files(admit_reload=True)
+    ui.click(object_name=f"inspect.{document}.sync.reload")
+    assert str(path) in ui.observe(object_name=f"inspect.{document}.sync.message").text
+    ui.screenshot(evidence / "03-invalid-keeps-draft.png")
+    path.write_text(changed)
+    ui.click(object_name=f"inspect.{document}.sync.reload")
+    assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
+    if document == "parameters":
+        assert any(row.path == ("Q1", "rate") and row.columns[1] == "4700.0" for row in ui.visible().tree_rows)
+    elif document == "library":
+        assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.flat"
+        assert ui.observe(object_name="inspect.entry.status").text == "Saved"
+    else:
+        assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == ("external", "Q2")
+    ui.screenshot(evidence / "04-valid-reload-discards-draft.png")
