@@ -1,5 +1,6 @@
 """Exact discrete path sums; noiseless baselines are reusable, never shot LUTs."""
 
+from dataclasses import replace
 from typing import NamedTuple
 
 import numpy as np
@@ -206,6 +207,17 @@ class IntegratedPaths:
         rtol: float,
         atol: float,
     ) -> None:
+        # Linear propagation, including jump memory, commutes with a constant
+        # factor per carrier. Weight noiseless baselines before superposition;
+        # the conjugation below then gives B(f) in microwave IQ, not conj(B(f)).
+        pulses = tuple(
+            replace(
+                p,
+                amplitude=p.amplitude
+                * np.conj(model.receiver.background(p.frequency_ghz)),
+            )
+            for p in pulses
+        )
         self.model, self.pulses, self.grids = model, pulses, grids
         self.start = min(pulse.start_ns for pulse in pulses)
         self.v = np.asarray(
@@ -377,6 +389,7 @@ class IntegratedPaths:
         for grid, outgoing in zip(self.grids, output, strict=True):
             if not np.isfinite(outgoing).all():
                 raise RuntimeError("readout paths produced nonfinite fields")
+            # B(f_abs) is already included carrier-wise in the baselines/memory.
             calibrated = (
                 np.conj(outgoing) * receiver.gain * np.exp(1j * receiver.phase_rad)
             )

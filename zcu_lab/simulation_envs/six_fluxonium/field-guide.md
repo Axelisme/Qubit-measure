@@ -32,6 +32,28 @@ Old `offset_phi0`/`flux_per_unit` six-system documents have no schema fallback. 
 Each resonator component instead declares
 pulse wiring `ch: 13`, `ro_ch: 6`. `onetone/range_find` uses that pulse route.
 
+## Receiver background
+
+Each `qubits.Q1..Q6.readout.adc` receiver accepts its own `background`.
+The shared pulse ADC6 uses Q1's receiver background, as it does Q1's gain and noise.
+
+The optional receiver `background` object multiplies each carrier's microwave
+I+iQ line response before receiver gain and phase. It uses the absolute incident
+frequency, not the ADC demodulation frequency. Omission or an empty object gives
+a flat unity background. Null is invalid.
+
+| Field under `background` | Meaning and unit | Constraint and omitted value |
+| --- | --- | --- |
+| `ripple_depth` | Reflected standing-wave amplitude, dimensionless | Finite, 0 ≤ depth < 1; default 0 |
+| `ripple_period_mhz` | Standing-wave period, MHz | Finite and positive; default 1000 |
+| `ripple_phase_deg` | Standing-wave phase, degrees | Finite signed value; default 0 |
+| `slope_db_per_ghz` | Amplitude slope, dB/GHz | Finite signed value; default 0 |
+| `pivot_ghz` | Absolute frequency where the slope factor is unity, GHz | Finite signed value; default 0 |
+
+The complex ripple changes amplitude and phase. The full background need not be
+unity at the pivot. It stays fixed across rounds and does not change noise,
+offset or intracavity physics. See the [ADC formula](../../../lib/zcu_tools/simulate/adc/README.md).
+
 ## Low-frequency drive evolution
 
 Single-tone plateaus below 30 MHz use full-Hamiltonian midpoint matrix

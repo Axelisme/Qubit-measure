@@ -29,6 +29,13 @@ class Receiver:
         Delays the physical output before demodulation and calibration, including
         ringup/ringdown, and gives microwave exp(-2πi*f*delay) at absolute carrier f.
         Offset and noise remain present before the delayed signal arrives.
+    ripple_depth: finite reflected amplitude in [0,1), default zero.
+    ripple_period_ghz: finite positive standing-wave period in GHz, default 1.
+    ripple_phase_rad: finite standing-wave phase in radians, default zero.
+    slope_db_per_ghz: finite amplitude slope in dB/GHz, default zero.
+    pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
+        background(f) multiplies microwave IQ per incident carrier before
+        gain/phase, without changing cavity dynamics, offset or noise.
     offset: owned read-only (2,) [I,Q] ADC sample units, added once per sample.
     noise_covariance: owned read-only symmetric positive-semidefinite (2,2) I/Q
         covariance in ADC sample units squared, per sample. Degenerate and zero
@@ -44,8 +51,47 @@ class Receiver:
     offset: RealArray = field(default_factory=lambda: np.zeros(2))
     noise_covariance: RealArray = field(default_factory=lambda: np.zeros((2, 2)))
     time_of_flight_ns: float = 0.0
+    ripple_depth: float = 0.0
+    ripple_period_ghz: float = 1.0
+    ripple_phase_rad: float = 0.0
+    slope_db_per_ghz: float = 0.0
+    pivot_ghz: float = 0.0
+
+    def background(self, frequency_ghz: float) -> complex:
+        """Return the complex microwave-IQ background at an absolute carrier GHz.
+
+        B(f) = 10**(slope_db_per_ghz*(f-pivot_ghz)/20)
+               * (1 + ripple_depth*exp(i*(2*pi*f/ripple_period_ghz
+                                         + ripple_phase_rad))).
+        The slope term, not the complete ripple, is unity at the pivot.
+        Defaults give B(f)=1. Nonfinite frequency raises ValueError.
+        """
+        if not np.isfinite(frequency_ghz):
+            raise ValueError("background frequency_ghz must be finite")
+        slope = 10 ** (self.slope_db_per_ghz * (frequency_ghz - self.pivot_ghz) / 20)
+        ripple = 1 + self.ripple_depth * np.exp(
+            1j
+            * (
+                2 * np.pi * frequency_ghz / self.ripple_period_ghz
+                + self.ripple_phase_rad
+            )
+        )
+        return complex(slope * ripple)
 
     def __post_init__(self) -> None:
+        for name in (
+            "ripple_depth",
+            "ripple_period_ghz",
+            "ripple_phase_rad",
+            "slope_db_per_ghz",
+            "pivot_ghz",
+        ):
+            if not np.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite")
+        if not 0 <= self.ripple_depth < 1:
+            raise ValueError("ripple_depth must be in [0, 1)")
+        if self.ripple_period_ghz <= 0:
+            raise ValueError("ripple_period_ghz must be positive")
         if not np.isfinite(self.time_of_flight_ns) or self.time_of_flight_ns < 0:
             raise ValueError("time_of_flight_ns must be finite and nonnegative")
         offset = readonly_array(self.offset, "receiver offset")
@@ -162,6 +208,11 @@ def readout_model_key(model: ReadoutModel) -> tuple[object, ...]:
         receiver.time_of_flight_ns,
         receiver.gain,
         receiver.phase_rad,
+        receiver.ripple_depth,
+        receiver.ripple_period_ghz,
+        receiver.ripple_phase_rad,
+        receiver.slope_db_per_ghz,
+        receiver.pivot_ghz,
         receiver.offset.tobytes(),
         receiver.noise_covariance.tobytes(),
     )
