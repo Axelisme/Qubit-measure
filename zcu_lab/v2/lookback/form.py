@@ -18,7 +18,7 @@ def _initial_trig_offset(ctx: FormContext) -> float | None:
     """
     if ctx.parameters is None:
         return 0.0
-    result = ctx.parameters.lookup("$resonator.ext.time_of_fly")
+    result = ctx.parameters.lookup("$resonator.time_of_fly")
     if not result.present or result.value is None:
         return 0.0
     value = result.value

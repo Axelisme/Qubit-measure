@@ -34,7 +34,8 @@ def mux_readout_initial(
     preserving all stored tones and scalar settings. Without a slot, seed the
     blank template with each resonator's calibration frequency and name label,
     generator from $mux.wiring.gen_ch, tone ADCs from $mux.wiring.ro_ch in group
-    order, and gain 0.1. Generator and frequency use Expr seeds; tone ADCs
+    order, mixer from $mux.mixer_freq, and gain 0.1. Generator, mixer and
+    frequency use Expr seeds; tone ADCs
     are detached integers from the captured group wiring because scalar Expr
     does not support indexing. When group ro_ch is None (not yet wired), tone
     ADCs stay blank and required, with missing seed status. Missing/invalid Expr
@@ -48,13 +49,13 @@ def mux_readout_initial(
     kappas, add 5/(2*pi*min(set kappas)) us (zero if all unset) to its trigger,
     preserve ro_length, and seed length=max(original length, trigger+ro_length).
     Without a slot, always seed ro_length=1.0 us, independent of kappa.
-    Require all group kappas before seeding mixer_freq, trig_offset or length;
-    otherwise leave those fields required and blank.
-    Seed mixer_freq=(min(freq)+max(freq))/2 MHz when all tone frequencies exist.
-    Seed trig_offset=max(time_of_fly)+5/(2*pi*min(kappas)) us and
-    length=trig_offset+ro_length only when every resonator.ext.time_of_fly exists.
-    Missing/null frequency or flight time leaves its dependent fields
-    blank; invalid set values raise ValueError. These are editable candidates,
+    Mixer uses $mux.mixer_freq independently of kappa and tone frequencies;
+    missing/null mixer leaves that required field blank.
+    Seed trig_offset=$mux.time_of_fly+5/(2*pi*min(kappas)) us and
+    length=trig_offset+ro_length only when all group kappas and the group's
+    flight time exist. Missing/null kappa or group flight time leaves trigger
+    and length required and blank. Set flight time must be finite nonnegative
+    us or raise ValueError. These are editable candidates,
     not device-confirmed settings; capability checks remain at Run.
     This spectroscopy exception uses a detached slot copy when available and
     replaces tones from the group on both paths. Open/Reset leaves editable
@@ -93,6 +94,7 @@ def mux_readout_initial(
     if has_readout:
         return Slot("$mux.module.readout", copy=True, set=seeds)
     seeds["gen_ch"] = Expr("$mux.wiring.gen_ch")
+    seeds["mixer_freq"] = Expr("$mux.mixer_freq")
     return Template("readout/mux:blank", set=seeds)
 
 
@@ -119,9 +121,9 @@ def mux_readout_seed_metadata(
                     calibration="uncalibrated",
                 )
     formulas = {
-        "mixer_freq": "(min+max group resonator.freq)/2",
+        "mixer_freq": "from $mux.mixer_freq",
         "ro_length": "Fixed 1.0 us ADC window candidate; independent of group kappa",
-        "trig_offset": "max group resonator.ext.time_of_fly + ringup",
+        "trig_offset": "$mux.time_of_fly + ringup",
         "length": "trig_offset + ro_length",
     }
     if isinstance(initial, Slot):
@@ -161,7 +163,7 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
             )
         kappas.append(kappa)
     if not ctx.has("$mux.module.readout"):
-        return _blank_ringup_timing(ctx, group, kappas)
+        return _blank_ringup_timing(group, kappas)
     wait_us = 5 / (2 * pi * min(kappas)) if kappas else 0.0
     readout = parameters.library.module_spec(
         parameters.library_key("$mux.module.readout")
@@ -174,48 +176,18 @@ def _ringup_timing(ctx: FormContext, group: MuxGroupSchema) -> dict[str, Templat
 
 
 def _blank_ringup_timing(
-    ctx: FormContext, group: MuxGroupSchema, kappas: list[float]
+    group: MuxGroupSchema, kappas: list[float]
 ) -> dict[str, TemplateSeed]:
-    parameters = ctx.parameters
-    if parameters is None:
-        raise ValueError("Mux timing requires a parameter capture")
     seeds: dict[str, TemplateSeed] = dict.fromkeys(
-        ("mixer_freq", "trig_offset", "ro_length", "length")
+        ("trig_offset", "ro_length", "length")
     )
     seeds["ro_length"] = 1.0
-    source_values: dict[str, list[float]] = {}
-    for field in ("freq", "ext.time_of_fly"):
-        values: list[float] = []
-        for resonator in group.resonators:
-            source = parameters.lookup_point(f"{resonator}.{field}")
-            value = source.value
-            if not source.present or value is None:
-                continue
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not isfinite(value)
-                or (field == "ext.time_of_fly" and value < 0)
-            ):
-                requirement = (
-                    "finite nonnegative us"
-                    if field == "ext.time_of_fly"
-                    else "finite MHz"
-                )
-                raise ValueError(f"{resonator}.{field}: expected {requirement}")
-            values.append(value)
-        source_values[field] = values
-
-    if len(kappas) != len(group.resonators):
+    flight_time = group.time_of_fly
+    if flight_time is None or len(kappas) != len(group.resonators):
         return seeds
     wait_us = 5 / (2 * pi * min(kappas))
-    frequencies = source_values["freq"]
-    if len(frequencies) == len(group.resonators):
-        seeds["mixer_freq"] = (min(frequencies) + max(frequencies)) / 2
-    flight_times = source_values["ext.time_of_fly"]
-    if len(flight_times) == len(group.resonators):
-        trigger = max(flight_times) + wait_us
-        seeds.update({"trig_offset": trigger, "length": trigger + 1.0})
+    trigger = flight_time + wait_us
+    seeds.update({"trig_offset": trigger, "length": trigger + 1.0})
     return seeds
 
 

@@ -12,7 +12,7 @@ Defaults use the tab's fixed resonator selection, captured when the form opens o
 
 - Pulse and ADC frequency start at `resonator.freq + resonator.kappa` in MHz. Missing or null `kappa` uses 1 MHz. Both stored values must be positive, finite real numbers, with booleans excluded. Missing or null frequency, invalid frequency or linewidth, or an absent resonator capture leaves frequency required and blank.
 - `resonator.wiring.ch` and `resonator.wiring.ro_ch` supply the generator and ADC channels through the readout slot.
-- Missing or null `resonator.ext.time_of_fly` starts the trigger offset at 0 us. A valid time of flight is a finite real number >= 0, with booleans excluded. The trigger offset starts at `time_of_fly - 0.1` us, including negative results. Invalid stored time of flight leaves the trigger offset required and blank.
+- Missing or null `resonator.time_of_fly` starts the trigger offset at 0 us. A valid time of flight is a finite real number >= 0, with booleans excluded. The trigger offset starts at `time_of_fly - 0.1` us, including negative results. Invalid stored time of flight leaves the trigger offset required and blank.
 - The ADC window starts at 1.5 us. Extend it when the arrival time plus pulse duration exceeds this window.
 
 Alias, path, or parameter-source lookup failures appear as errors. Other missing required calibration leaves the form Invalid. Initial values remain editable; calibration changes require writeback.
@@ -23,7 +23,7 @@ The readout slot uses the captured resonator as its parameter source. Its initia
 
 ## Typical writeback
 
-Analysis proposes the detected arrival time in us for `$resonator.ext.time_of_fly`. The destination is the resonator captured for that analysis, even if the current selection changes. Writeback updates only this parameter; module and waveform definitions stay unchanged.
+Analysis proposes the detected arrival time in us for `$resonator.time_of_fly`. The destination is the resonator captured for that analysis, even if the current selection changes. Writeback updates only this parameter; module and waveform definitions stay unchanged.
 
 ## Recommended
 

@@ -304,6 +304,8 @@ Nested copy 由 Form adapter 擁有，不讀 asset，不改來源或無關 child
 ### Lookback 與 Onetone 採樣
 
 Lookback 的 Form 不提供 Reset 與 Init pulse；core 保留兩欄。
+Resonator 與 mux group 各自擁有頂層 time_of_fly，單位 µs；Lookback 初值與 writeback 使用 `$resonator.time_of_fly`。
+Onetone timing 讀 resonator 的頂層值，mux timing 讀 group 的 `$mux.time_of_fly`，不從 ext 或另一條路徑補值。
 缺 time_of_fly 時，trig_offset 初值為 0 µs，ro_length 維持可編輯的 1.5 µs。
 有效 TOF 是非 bool 的有限實數且 ≥ 0；重測使用 TOF−0.1 µs。
 即使結果為負也原樣帶入，不 clamp、不改 core 限制。

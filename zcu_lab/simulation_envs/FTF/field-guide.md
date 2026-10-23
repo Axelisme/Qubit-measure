@@ -376,6 +376,10 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 
 兩份 entry 範本保留 R1／R2 的 pulse wiring，另在 MG12 填 mux `gen_ch: 1`、`ro_ch: [1, 2]`。`ro_ch` 列表必須與 resonators 等長、同序。八張 mux 表單缺 slot 時從這些欄位補通道，tone gain 補 0.1。範本不附 mux module 或 library key；`module.readout` 是既有 library key，不接受內嵌 readout 設定。
 
+MG12 的 `mixer_freq: 7135` MHz 是 group LO 設定，無 slot 表單從 `$mux.mixer_freq` 取初值，缺值留空必填。它不依賴 tone 頻率或 κ。
+模擬範本的頂層 `MG12.time_of_fly: 0.4` us 來自 mux receivers 的 `time_of_flight_ns: 400`。Kickstart 的 group TOF 留 null；resonator 的 pulse 路徑 TOF 是各自的頂層 `time_of_fly`，不供 mux 使用。
+Fine 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)`，ro_length 固定 1.0 us，length 是 trigger 加 ro_length。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填。這些初值未經裝置確認，有 slot 時保留既有 mixer 與 timing 規則。
+
 需要沿用完整校準模組時，另做以下設定：
 
 1. 在 Library 建立 `readout/mux` 模組。設 `gen_ch: 1`，依 R1／R2 順序填兩筆 tones，`ro_ch` 分別為 1／2，初始 `freq` 可用 7190／7080 MHz。填入有效的 `nqz`、`mixer_freq`、各 tone gain／phase、共用 `length`、`ro_length` 與 `trig_offset`。時間欄位使用 us，receiver 的 YAML 延遲使用 ns，不可直接照抄數字。
