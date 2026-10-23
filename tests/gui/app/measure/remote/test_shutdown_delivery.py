@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import socket
 from threading import Event
 
@@ -79,4 +80,39 @@ def test_shutdown_waits_for_reply_send_terminal_before_requesting_close(
         client.close()
         fixture.stop()
         owner.deleteLater()
+        qapp.processEvents()
+
+
+def test_shutdown_still_closes_after_accepted_reply_cannot_be_enqueued(
+    qapp, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = Fixture(project_root=str(tmp_path), empty_project=True)
+    port = fixture.start()
+    rejected = Event()
+    shutdown_after_rejection: list[bool] = []
+    fixture.view.request_shutdown.side_effect = lambda: shutdown_after_rejection.append(
+        rejected.is_set()
+    )
+    original_put = queue.Queue.put_nowait
+
+    def reject_shutdown_reply(outbound: queue.Queue[bytes], line: bytes) -> None:
+        if b'"shutting_down"' in line:
+            rejected.set()
+            raise queue.Full
+        original_put(outbound, line)
+
+    monkeypatch.setattr(queue.Queue, "put_nowait", reject_shutdown_reply)
+    client = open_client(port)
+    try:
+        send(client, {"id": "shutdown", "method": "app.shutdown", "params": {}})
+        qt_until(rejected.is_set, label="accepted shutdown reply rejected by queue")
+        qt_until(
+            lambda: bool(shutdown_after_rejection), label="unenqueued accepted shutdown"
+        )
+        assert shutdown_after_rejection == [True], (
+            "shutdown preceded terminal enqueue failure"
+        )
+    finally:
+        client.close()
+        fixture.stop()
         qapp.processEvents()
