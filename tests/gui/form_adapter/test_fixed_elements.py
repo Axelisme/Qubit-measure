@@ -204,6 +204,65 @@ def test_hidden_module_list_keeps_values_and_sources_per_position():
     assert env.library.module_spec("Q.pulses.drive").model_dump()["freq"] == 100
 
 
+@pytest.mark.parametrize("inactive_index", [0, 1])
+def test_nullable_module_list_keeps_hidden_policy_with_explicit_none(inactive_index):
+    from zcu_tools.cfg_model import FormNode, PulseCfg, PulseSpec, Template, TemplateDef
+
+    class Tone(ConfigBase):
+        drive: PulseCfg | None = None
+
+    class Group(ConfigBase):
+        tones: list[Tone]
+
+    tones: list[FormNode] = [
+        {"drive": Template("pulse", set={"freq": Hidden(11.0)})},
+        {"drive": Template("pulse", set={"freq": Hidden(22.0)})},
+    ]
+    tones[inactive_index] = {"drive": None}
+    definition = adapter.Form(Group, {"tones": tones})
+    try:
+        definition.bind_templates(
+            {
+                "pulse": TemplateDef(
+                    PulseSpec,
+                    "Pulse",
+                    {
+                        "ch": 1,
+                        "nqz": 1,
+                        "gain": 0.3,
+                        "waveform.style": "const",
+                        "waveform.length": 0.2,
+                    },
+                )
+            },
+            adapter="synthetic",
+        )
+    except ValueError as error:
+        pytest.fail(
+            f"Explicit nullable None must not conflict with Hidden policy: {error}"
+        )
+    env = core.FormEnv()
+    state = core.FormState(definition.default_input(env))
+    active_index = 1 - inactive_index
+    target = state.describe(
+        ("tones", active_index, "drive", "module", "freq"), env
+    ).target
+    assert target is not None and target.hidden
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert cfg.tones[inactive_index].drive is None
+    drive = cfg.tones[active_index].drive
+    assert drive is not None and drive.freq == (22.0 if active_index else 11.0)
+    state.write({("tones", active_index, "drive"): None}, env)
+    result = state.result(env)
+    assert not isinstance(result, core.FormErrors), result
+    cfg = definition.to_cfg(result, env)
+    assert not isinstance(cfg, core.FormErrors), cfg
+    assert [tone.drive for tone in cfg.tones] == [None, None]
+
+
 @pytest.mark.parametrize("second_path", ["gain", None])
 def test_hidden_module_list_rejects_mismatched_paths(second_path):
     from zcu_tools.cfg_model import Slot
