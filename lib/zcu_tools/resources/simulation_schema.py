@@ -4,6 +4,7 @@ No devices or numeric models are created. All records reject unknown fields
 and nonfinite numbers. Energies are H/h in GHz, physical time is ns.
 """
 
+from collections.abc import Mapping
 from typing import Annotated, Self
 
 import numpy as np
@@ -41,6 +42,25 @@ class Values(BaseModel):
     """Frozen extra-forbidden YAML record; nested records share this policy."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+
+class RoundPacing(Values):
+    """Environment pacing policy shared by FTF and fluxonium numeric settings.
+
+    time_scale: finite nonnegative physical-time multiplier, default 1.0.
+    One follows physical duration, 0.1 runs ten times faster, zero skips waiting.
+    The removed fixed-duration field raises with the replacement field name.
+    """
+
+    time_scale: Nonnegative = 1.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_fixed_duration(cls, value: object) -> object:
+        """Reject old fixed seconds rather than interpreting them as a multiplier."""
+        if isinstance(value, Mapping) and "min_round_duration_s" in value:
+            raise ValueError("min_round_duration_s: removed; use time_scale")
+        return value
 
 
 class Fluxonium(Values):

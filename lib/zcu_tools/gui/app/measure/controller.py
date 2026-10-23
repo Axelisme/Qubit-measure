@@ -88,6 +88,7 @@ if TYPE_CHECKING:
 
     from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
     from zcu_tools.experiment.artifacts import SaveReport
+    from zcu_tools.gui.session.adapters.point_file_watcher import PointFileWatcher
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
     from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
@@ -400,6 +401,8 @@ class Controller(SessionControllerMixin):
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
+        self._point_file_watcher: PointFileWatcher | None = None
+        self._stop_point_authority_watch: Callable[[], None] | None = None
         self._hardware_close_attempted = False
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
@@ -857,9 +860,34 @@ class Controller(SessionControllerMixin):
         decide whether to discard data, disconnect devices, or establish RF safety;
         use begin_shutdown for operation cancellation before final teardown.
         """
+        if self._stop_point_authority_watch is not None:
+            self._stop_point_authority_watch()
+            self._stop_point_authority_watch = None
+        if self._point_file_watcher is not None:
+            self._point_file_watcher.close()
         self._background_svc.stop_accepting()
         if not self._background_svc.quiesce(timeout_ms):
             raise TimeoutError("Controller background work did not drain in time")
+
+    def start_point_file_sync(self) -> None:
+        """Attach point watching once after Qt assembly; close owns its teardown.
+
+        Remote holder admits automatic reload; Local only publishes pending
+        observations. Authority changes retry pending files on the owner loop.
+        """
+        if self._point_file_watcher is not None:
+            return
+        from zcu_tools.gui.session.adapters.point_file_watcher import PointFileWatcher
+
+        watcher = PointFileWatcher(
+            self._ctx_svc,
+            self._bus,
+            admit_reload=lambda: self.control_identity.status().holder != "gui",
+        )
+        self._point_file_watcher = watcher
+        self._stop_point_authority_watch = self.control_identity.watch(
+            lambda _status: watcher.flush()
+        )
 
     def register_device[Info: BaseDeviceInfo](
         self, name: str, driver: BaseDevice[Info]

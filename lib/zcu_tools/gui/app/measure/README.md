@@ -41,6 +41,8 @@ App composition 協調 Artifact 與 Writeback。
 
 ## Composition root
 
+`MeasureGuiBehavior` 組裝後啟用 point 檔案監看。Controller 從目前 holder 注入 admission：Local 僅發布 pending，Remote 才自動重載。Authority 改變時重查 pending 檔案。Controller.close 先解除 watcher 與 authority listener，再 drain 背景工作，避免關閉後重載。
+
 `MeasureGuiBehavior` is the process-runtime behavior for the shared
 `gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
 persistence caretaker, and the app-local `RemoteControlAdapter`

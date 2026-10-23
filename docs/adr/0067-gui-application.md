@@ -32,7 +32,7 @@ WritebackService 先以分析來源的固定 capture 解析與 lower 全部選�
 
 目前 point 的有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_presets` 提供具名 catalog，default rows 僅作為未開 entry 的 memory 初值。框架不宣告領域 preset，也不反向 import zcu_lab。
 
-普通 `set_alias_rows` 只改 memory，不要求 point。Dialog Apply、RPC 與 startup Apply 要求已選 point，否則以 `no_context` 拒絕。Apply 先原子驗證整表，再由 entry owner 保存該 point 的 `points/<label>/aliases.yaml`，成功後才安裝 memory 與發布 fact。失敗保舊表、舊檔與 dialog draft。開 entry 或 clear 清空表，選取 point 就換成該 point 的表。缺檔視為空，不回退 setup 或 preset，也不自填空列。這不寫 preference、setup alias、其他 point 容器或 ledger；保存分界見 [[0063]]。
+普通 `set_alias_rows` 在未選 point 時只改 memory；選定 point 後先保存該 point 的表，再安裝 memory 與發布 fact，見 [[0081]]。Dialog Apply、RPC 與 startup Apply 要求已選 point，否則以 `no_context` 拒絕。Apply 先原子驗證整表，再由 entry owner 保存該 point 的 `points/<label>/aliases.yaml`，成功後才安裝 memory 與發布 fact。失敗保舊表、舊檔與 dialog draft。開 entry 或 clear 清空表，選取 point 就換成該 point 的表。缺檔視為空，不回退 setup 或 preset，也不自填空列。這不寫 preference、setup alias、其他 point 容器或 ledger；保存分界見 [[0063]]。
 
 使用者於 2026-10-20 裁定：「採用乙，alias. yaml的獨立檔案，找不到就視內容為空，與其他兩個資料容器並列」。Setup 與 point 的表獨立，建立時複製，之後不繼承。
 

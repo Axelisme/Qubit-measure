@@ -39,8 +39,8 @@ from ._helpers import Fixture, call, open_client, recv_push
 
 
 @pytest.fixture()
-def fx(qapp):
-    f = Fixture()
+def fx(tmp_path, qapp):
+    f = Fixture(project_root=str(tmp_path / "project"))
     f.start()
     yield f
     f.stop()

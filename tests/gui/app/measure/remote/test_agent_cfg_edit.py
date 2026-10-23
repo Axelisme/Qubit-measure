@@ -16,8 +16,8 @@ from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 
 
 @pytest.fixture()
-def live_tab(qapp):
-    fixture = Fixture()
+def live_tab(tmp_path, qapp):
+    fixture = Fixture(project_root=str(tmp_path / "project"))
     tab_id = fixture.ctrl.new_tab("fake")
     fixture.start()
     yield fixture, tab_id
@@ -172,8 +172,11 @@ def test_tab_edit_mcp_rejection_preserves_entire_previous_publication(mcp_tab):
     assert call(sock, "tab.get_cfg", {"tab_id": tab_id})["result"] == before
 
 
-def test_cfg_edit_requires_authentication(qapp):
-    fixture = Fixture(ControlOptions(port=0, token="cfg-auth-test"))
+def test_cfg_edit_requires_authentication(tmp_path, qapp):
+    fixture = Fixture(
+        ControlOptions(port=0, token="cfg-auth-test"),
+        project_root=str(tmp_path / "project"),
+    )
     tab_id = fixture.ctrl.new_tab("fake")
     fixture.start()
     authorized = open_client(fixture.service.port)
@@ -241,8 +244,8 @@ class TextAdapter(SampleAdapter):
         return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
 
 
-def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(qapp):
-    fixture = Fixture()
+def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(tmp_path, qapp):
+    fixture = Fixture(project_root=str(tmp_path / "project"))
     fixture.registry.register("text", TextAdapter)
     tab_id = fixture.ctrl.new_tab("text")
     owner = fixture.ctrl.cfg_resources.lookup(tab_id)

@@ -47,6 +47,13 @@ These declarations do not add generic range admission: domain owners validate
 ranges and provide the same constants to schemas, including dependent limits
 in descriptions. Undeclared-field behavior stays unchanged.
 
+`ParamSpec.nullable=True` admits explicit null as `None`, independently of
+whether the key is required. Schemas retain required keys and add `"null"` to
+the declared type and enum when present. JSON parameters keep their untyped
+schema. The default `False` preserves existing null handling: required values
+reject null, while optional values use their declared default. Missing optional
+keys still use that default, even when nullable is True.
+
 `ParamSpec.omit_when_missing=True` 讓 optional、default=None 的欄位在 absent 時不進 handler params，explicit null 仍以 None 傳入。Handler 可用 membership 判斷有沒有提供該欄位。Required 或帶非 None default 的宣告在建構時拒絕此設定。預設 False 保持原有 absent/null/default 行為，schema requiredness 仍由 required 決定。
 
 Measure startup selection belongs to the launch composition, not transport.

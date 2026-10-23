@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import (
         ContextSourceBinding,
         ContextSourceFault,
+        PointFileSyncStatus,
     )
     from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
@@ -35,6 +36,7 @@ class SessionEvent(str, Enum):
     ML_CHANGED = "ml_changed"  # published library content/health changed
     CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
     ALIASES_CHANGED = "aliases_changed"
+    POINT_FILE_CHANGED = "point_file_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
     DEVICE_SETUP_STARTED = "device_setup_started"  # payload: DeviceSetupStartedPayload
@@ -51,6 +53,14 @@ class SessionPayload(BasePayload):
     """Base for all session-core EventBus payloads. Subclasses set ``EVENT``."""
 
     EVENT: ClassVar[SessionEvent]
+
+
+@dataclass(frozen=True)
+class PointFileChangedPayload(SessionPayload):
+    """External source observation; status is installed before this fact emits."""
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.POINT_FILE_CHANGED
+    status: PointFileSyncStatus
 
 
 @dataclass(frozen=True)

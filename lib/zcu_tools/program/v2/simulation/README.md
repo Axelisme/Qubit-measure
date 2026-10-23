@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24, physical-time pacing
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -12,11 +12,21 @@ it before consuming the acquire sequence or constructing a request. Failure
 releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
-`SimulationBinding(..., min_round_duration_s=0.0)` optionally paces each
-successful round using monotonic wall time, including snapshot and execution.
-It waits only for a positive remainder and propagates failures without waiting.
-Zero disables pacing and clock reads; generic bindings remain unpaced by default.
-The environment builder owns the policy (FTF defaults to 0.2 seconds), not the GUI.
+`SimulationBinding(..., time_scale=0.0)` optionally paces each round to
+`time_scale × reps × Σ(point timeline duration_us + relax_delay_us) × 1e-6` seconds.
+Timeline durations include readout, pre/post delays and pending ADC activity;
+structural templates cover every scan point once. The binding subtracts snapshot
+and execution wall time, then sleeps only for a positive remainder. Failures do
+not wait. With cancellation, waits check Stop at intervals of at most 10 ms; the
+integrated acquisition discards the interrupted round, while decimated
+acquisition keeps its completed trace and stops before the next round.
+A finite nonnegative `time_scale` of 1.0 follows physical time, 0.1 is ten times
+faster, and zero disables pacing and its clock reads. Generic bindings default
+to zero; FTF, single- and six-fluxonium environments default to 1.0. The environment
+builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
+100 reps and 10 rounds target 2 ms total. For 25 points averaging 20 us plus
+500 us relaxation, 100 reps target 1.3 s per round. Actual wall time can exceed
+the target when numeric work dominates.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
 The callback receives captured `RoundRequest` records and admitted wall seconds,
@@ -242,7 +252,9 @@ before overwriting the active call. `finally` releases call-owned buffers and
 admission on normal return or exception. Integrated Stop reaches evolution's
 chunk checkpoints through `RoundRequest.cancel`, discards the interrupted round,
 and retains completed rounds (or no result when none completed); warmup and
-hardware acquisition are unchanged. ADC work and pacing sleeps remain synchronous.
+hardware acquisition are unchanged. Decimated Stop reaches pacing only, without
+adding backend evolution cancellation; its completed-trace policy is unchanged.
+ADC work and pacing sleeps remain synchronous.
 
 Only `SimulationProvenance.identifier` is copied to public Run metadata as optional
 `simulation_id`. Backend/RNG versions and private requests remain on the typed

@@ -9,6 +9,16 @@ from zcu_tools.resources.ftf import load_ftf, parse_ftf
 from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
+def test_fixed_round_duration_reports_time_scale_migration():
+    document = ftf_document()
+    document["numerics"] = {
+        **parse_ftf(document).numerics.model_dump(),
+        "min_round_duration_s": 0.2,
+    }
+    with pytest.raises(ValueError, match=r"numerics.min_round_duration_s.*time_scale"):
+        parse_ftf(document)
+
+
 def _design_record() -> dict[str, object]:
     return {
         "ej_ghz": 4.2,

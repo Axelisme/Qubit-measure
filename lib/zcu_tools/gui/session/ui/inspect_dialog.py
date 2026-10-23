@@ -42,6 +42,7 @@ from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
     MdChangedPayload,
     MlChangedPayload,
+    PointFileChangedPayload,
     SessionPayload,
 )
 from zcu_tools.gui.session.library_entry import (
@@ -55,6 +56,7 @@ from zcu_tools.gui.session.library_entry import (
 from zcu_tools.gui.session.ui.alias_panel import AliasPanel
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
+from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -201,6 +203,7 @@ class InspectDialog(QDialog):
         bus.subscribe(ContextSwitchedPayload, self._on_bus_refresh)
         bus.subscribe(MdChangedPayload, self._on_bus_refresh)
         bus.subscribe(MlChangedPayload, self._on_bus_refresh)
+        bus.subscribe(PointFileChangedPayload, self._on_file_changed)
         self._bus_subs_active = True
         self.finished.connect(self._on_finished)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
@@ -230,6 +233,11 @@ class InspectDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 4, 0, 0)
+        self._library_sync = PointFileBanner(
+            self._ctrl, "library", self._reload_library, parent=widget
+        )
+        self._library_revision = self._library_sync.capture()
+        layout.addWidget(self._library_sync)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_library_panel())
@@ -313,6 +321,7 @@ class InspectDialog(QDialog):
         no longer asks about it. Call again with False to unlock.
         """
         self._read_only = read_only
+        self._library_sync.set_read_only(read_only=read_only)
         self._component_tree.set_read_only(read_only=read_only)
         self._aliases.set_read_only(read_only=read_only)
         self._new_btn.setEnabled(not read_only)
@@ -328,6 +337,7 @@ class InspectDialog(QDialog):
         """
         self._aliases.refresh()
         self._component_tree.refresh()
+        self._library_sync.refresh(has_draft=self._is_unsaved())
         try:
             parameters = self._ctrl.read_context()
         except FailedPreconditionError:
@@ -474,6 +484,7 @@ class InspectDialog(QDialog):
         # setWidget deletes the previous form, so folds and scroll start fresh.
         self._scroll.setWidget(editor)
         self._entry = entry
+        self._library_revision = self._library_sync.capture()
         self._editor = editor
         self._unsubscribe_state = entry.state.subscribe(self._update_controls)
         self._name_edit.blockSignals(True)
@@ -549,6 +560,7 @@ class InspectDialog(QDialog):
             local_errors = editor.local_parse_errors()
             if local_errors is not None:
                 raise LibraryEntryInvalid(entry.kind, local_errors)
+            self._library_sync.check(self._library_revision)
             self._ctrl.apply_library_change(
                 entry.parameters, entry.replace(key[1], new_name)
             )
@@ -658,6 +670,17 @@ class InspectDialog(QDialog):
     # Lifetime
     # ------------------------------------------------------------------
 
+    def _reload_library(self) -> None:
+        self._close_entry()
+        self._populate_from_context()
+
+    def _on_file_changed(self, payload: PointFileChangedPayload) -> None:
+        del payload
+        # Source observations alone must not rebuild an active parameter editor.
+        self._library_sync.refresh(has_draft=self._is_unsaved())
+        self._aliases.refresh()
+        self._component_tree.refresh_file_status()
+
     def _on_bus_refresh(self, payload: SessionPayload) -> None:
         del payload
         self.refresh()
@@ -668,6 +691,7 @@ class InspectDialog(QDialog):
         self._bus.unsubscribe(ContextSwitchedPayload, self._on_bus_refresh)
         self._bus.unsubscribe(MdChangedPayload, self._on_bus_refresh)
         self._bus.unsubscribe(MlChangedPayload, self._on_bus_refresh)
+        self._bus.unsubscribe(PointFileChangedPayload, self._on_file_changed)
         self._bus_subs_active = False
 
     def _on_finished(self, *_args: object) -> None:

@@ -1,5 +1,6 @@
 """Entry RPC binding through real socket, setup and context owners."""
 
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from ._point_application import PointApplication
 def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
     application: PointApplication, tmp_path: Path
 ) -> None:
-    assert application.result("entry.info", {}) == {"entry": None}
+    assert application.result("entry.info", {}) == {"entry": None, "files": []}
     (tmp_path / "result").mkdir()
     assert application.result("entry.list", {}) == {"entries": []}
     reply = application.result("entry.new", {"name": "cooldown-A"})
@@ -25,7 +26,7 @@ def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
         "result_path": str(tmp_path / "result" / "cooldown-A"),
         "database_path": str(tmp_path / "Database" / "cooldown-A"),
     }
-    assert application.result("entry.info", {}) == {"entry": reply}
+    assert application.result("entry.info", {}) == {"entry": reply, "files": []}
     assert application.result("entry.list", {}) == {"entries": ["cooldown-A"]}
     assert application.state.session_env.readiness == ContextReadiness.EMPTY
     assert application.state.session_env.parameters is None
@@ -33,6 +34,26 @@ def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
     assert application.state.session_env.soc is None
     assert application.state.session_env.soccfg is None
     assert application.controller.device_control.list_devices() == []
+
+
+def test_entry_info_reports_installed_point_files(
+    application: PointApplication,
+) -> None:
+    application.result("entry.new", {"name": "files"})
+    application.result("point.new", {"label": "selected"})
+    reply = application.result("entry.info", {})
+    assert "files" in reply, "entry.info must publish point file revisions"
+    files = reply["files"]
+    assert isinstance(files, list)
+    assert [item["document"] for item in files] == ["parameters", "library", "aliases"]
+    for item in files:
+        path = Path(item["path"])
+        assert path.is_absolute()
+        assert item["revision"] == (
+            sha256(path.read_bytes()).hexdigest() if path.exists() else None
+        )
+    Path(files[0]["path"]).write_text("external invalid bytes", encoding="utf-8")
+    assert application.result("entry.info", {})["files"] == files
 
 
 def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
@@ -62,7 +83,7 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     created = application.result("point.new", {"label": "next"})
     assert created["entry_id"] == second.entry_id
     application.result("entry.open", {"name": "first"})
-    assert application.result("entry.info", {}) == {"entry": first}
+    assert application.result("entry.info", {}) == {"entry": first, "files": []}
     assert application.state.session_env.readiness == ContextReadiness.EMPTY
     assert application.result("point.list", {})["points"] == [
         {"label": "bias", "description": ""}
@@ -139,4 +160,4 @@ def test_discovery_io_error_is_not_reported_as_cached_success(
     assert isinstance(error, dict)
     assert error["code"] == "controller_error"
     assert error["message"] == "entry discovery unavailable"
-    assert application.result("entry.info", {}) == {"entry": opened}
+    assert application.result("entry.info", {}) == {"entry": opened, "files": []}

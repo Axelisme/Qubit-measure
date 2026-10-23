@@ -19,10 +19,10 @@ from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
 from tests.gui.app.measure.remote._helpers import make_ctx
 
 
-def _state() -> State:
+def _state(tmp_path) -> State:
     return State(
         SessionEnv(
-            parameters=make_ctx().parameters,
+            parameters=make_ctx(tmp_path).parameters,
             soc=None,
             soccfg=None,
             result_dir="/result",
@@ -40,8 +40,8 @@ def _binder(state: State) -> tuple[ValueRegistry, BaseEventBus, ValueSourceBinde
     return registry, bus, binder
 
 
-def test_context_sources_read_live_context_values() -> None:
-    state = _state()
+def test_context_sources_read_live_context_values(tmp_path) -> None:
+    state = _state(tmp_path)
     registry, bus, _ = _binder(state)
 
     assert registry.get_as("context.active_label", str) == "flux_0.0_A"
@@ -53,8 +53,8 @@ def test_context_sources_read_live_context_values() -> None:
     assert registry.get_as("context.active_label", str) == "next_point"
 
 
-def test_device_sources_read_cached_state_without_polling() -> None:
-    state = _state()
+def test_device_sources_read_cached_state_without_polling(tmp_path) -> None:
+    state = _state(tmp_path)
     registry, bus, _ = _binder(state)
     state.put_device(
         DeviceState(
@@ -82,8 +82,8 @@ def test_device_sources_read_cached_state_without_polling() -> None:
         registry.get_as("device.flux.status", str)
 
 
-def test_device_sources_do_not_publish_active_flux_alias() -> None:
-    state = _state()
+def test_device_sources_do_not_publish_active_flux_alias(tmp_path) -> None:
+    state = _state(tmp_path)
     registry, bus, _ = _binder(state)
     state.put_device(
         DeviceState(
@@ -103,9 +103,10 @@ def test_device_sources_do_not_publish_active_flux_alias() -> None:
 
 
 def test_capture_snapshot_reads_published_cache_and_detaches_values(
+    tmp_path,
     monkeypatch,
 ) -> None:
-    state = _state()
+    state = _state(tmp_path)
     registry, bus, binder = _binder(state)
     state.put_device(
         DeviceState(
@@ -134,8 +135,10 @@ def test_capture_snapshot_reads_published_cache_and_detaches_values(
     assert binder.snapshot().values["device.flux.value"] == 0.75
 
 
-def test_capture_cache_removal_and_recreation_does_not_reuse_old_publication() -> None:
-    state = _state()
+def test_capture_cache_removal_and_recreation_does_not_reuse_old_publication(
+    tmp_path,
+) -> None:
+    state = _state(tmp_path)
     _registry, bus, binder = _binder(state)
     state.put_device(
         DeviceState(

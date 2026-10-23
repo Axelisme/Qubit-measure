@@ -71,5 +71,7 @@ such a pulse must not be interpreted as a supported measurement.
 Solver tolerances control numerical integration, not basis convergence.
 Seed selects the root RNG identity. Acquire sequence and software round select
 independent streams; raw shots use a stream separate from direct means.
-`min_round_duration_s` sets the successful-round pacing floor in seconds.
+`time_scale` multiplies physical round time: reps times the sum of each point's
+timeline duration and relax delay. The default is 1.0; 0.1 is ten times faster,
+and zero disables waiting. Stop interrupts pacing at 10 ms checkpoints.
 The current assembly starts no background numerical preparation.

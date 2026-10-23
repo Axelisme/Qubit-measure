@@ -20,7 +20,7 @@ def fixture_qt(qapp):
 @pytest.fixture()
 def fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Fixture:
     monkeypatch.setattr(arb_waveform, "gettempdir", lambda: str(tmp_path))
-    fx = Fixture()
+    fx = Fixture(project_root=str(tmp_path / "project"))
     db_path = tmp_path / "Database" / "entry_a"
     fx.state.session_env = replace(fx.state.session_env, database_path=str(db_path))
     return fx

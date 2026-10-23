@@ -59,13 +59,63 @@ def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
     [
         (
             "context.ml_edit",
-            {"name": "readout", "changes": []},
+            {"kind": "module", "name": "Q1.readout.seed", "edits": []},
             {"applied": [], "failed": None, "skipped": []},
         ),
         (
             "entry.info",
             {},
-            {"chip_name": "chip", "qub_name": "q1", "result_dir": "/results/q1"},
+            {
+                "entry": {"entry_id": "entry-uuid", "name": "synthetic"},
+                "files": [
+                    {
+                        "document": "parameters",
+                        "path": "/entry/points/base/point.yaml",
+                        "revision": "a" * 64,
+                    }
+                ],
+            },
+        ),
+        (
+            "context.reload",
+            {
+                "path": "/entry/points/base/point.yaml",
+                "expected_revision": "a" * 64,
+            },
+            {
+                "document": "parameters",
+                "path": "/entry/points/base/point.yaml",
+                "revision": "b" * 64,
+            },
+        ),
+        (
+            "context.reload",
+            {
+                "path": "/entry/points/base/aliases.yaml",
+                "expected_revision": None,
+            },
+            {
+                "document": "aliases",
+                "path": "/entry/points/base/aliases.yaml",
+                "revision": "c" * 64,
+            },
+        ),
+        ("value.list", {}, {"keys": ["Q1.rate"]}),
+        ("value.read", {"key": "Q1.rate"}, {"value": 10.0}),
+        (
+            "tab.parameter_read",
+            {"tab_id": "tab-1", "path": "Q1.rate"},
+            {"value": 10.0},
+        ),
+        (
+            "context.set_parameter",
+            {"path": "Q1.rate", "value": 20.0, "expected_revision": "a" * 64},
+            {"before": 10.0, "after": 20.0},
+        ),
+        (
+            "context.aliases_set",
+            {"rows": [{"alias": "driver", "value": "Q1"}]},
+            {"rows": [{"alias": "driver", "value": "Q1"}]},
         ),
         ("context.labels", {}, {"labels": ["zero", "half"]}),
     ],

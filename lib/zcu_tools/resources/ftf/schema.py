@@ -28,6 +28,7 @@ from zcu_tools.resources.simulation_schema import (
     Nonnegative,
     Positive,
     Receiver,
+    RoundPacing,
     Solver,
     Values,
 )
@@ -382,19 +383,18 @@ class TelemetrySettings(Values):
     directory: Path | None = None
 
 
-class Numerics(Values):
+class Numerics(RoundPacing):
     """truncation: basis sizes; solver: accuracy; seed: nonnegative root RNG seed.
 
     Omitted/None seed generates once at environment startup, not once per round.
-    min_round_duration_s: finite nonnegative wall-time floor per successful binding
-    round, in seconds. Default 0.2 gives live plotting time; zero disables pacing.
+    time_scale: finite nonnegative physical-time multiplier per binding round,
+    default 1.0; zero disables pacing.
     telemetry: local acquire-summary policy; omitted settings enable logging.
     """
 
     truncation: Truncation
     solver: Solver
     seed: Index | None = None
-    min_round_duration_s: Nonnegative = 0.2
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 
 
