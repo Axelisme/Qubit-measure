@@ -123,6 +123,20 @@ def test_reload_rejects_paths_outside_current_point(
         context.check_file_revision(PointFileRevision("parameters", path, None))
 
 
+def test_sync_status_projects_current_installed_version_after_owner_write(
+    selected,
+) -> None:
+    context, _, _ = selected
+    assert hasattr(context, "reload_file"), (
+        "Sync status must project installed versions"
+    )
+    file = context.get_file_revisions()[0]
+    file.path.write_text(file.path.read_text().replace("4300.0", "5100.0"))
+    context.reload_file(file.path, file.revision)
+    context.set_parameter(context.read_context().target, "Q1.rate", 6100.0)
+    assert context.get_file_sync_status()[0].file == context.get_file_revisions()[0]
+
+
 def test_switch_clears_sync_status(selected) -> None:
     context, _, entry = selected
     assert hasattr(context, "reload_file"), "Reload status must follow point lifetime"
