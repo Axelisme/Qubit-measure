@@ -1,6 +1,6 @@
 """Starting values for jpa/freq; Qt-free declarations."""
 
-from zcu_tools.cfg_model import AliasName, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
@@ -9,6 +9,13 @@ from zcu_lab.v2.jpa.freq.core import FreqCfg
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
+    rf_source = (
+        ctx.parameters.lookup_point("$jpa.rf_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if rf_source is not None and not isinstance(rf_source, str):
+        raise ValueError("$jpa.rf_source must name a device")
     return Form(
         FreqCfg,
         tree={
@@ -21,7 +28,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "jpa_rf_dev": AliasName("jpa_rf_dev"),
+            "jpa_rf_dev": rf_source,
             "sweep": {
                 "jpa_freq": Range.between(
                     "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101

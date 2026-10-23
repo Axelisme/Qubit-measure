@@ -62,7 +62,7 @@ cp zcu_lab/kickstart/FTF/startup.py \
 
 ## 綁定 alias rows
 
-FTF 範本先放 `qubit: Q1`，再放 `resonator: $qubit.resonator` 與 `flux_dev: $qubit.flux_source`。後兩列讀取已綁定的 Q1 欄位，分別得到 `R1` 與 `f1_bias`。軟連結只能引用排在前面的 alias，不能引用自己或後面的列。
+FTF 範本先放 `qubit: Q1`，再放 `resonator: $qubit.resonator`。後一列讀取 Q1 的 resonator 欄位，得到 `R1`。表單在 Open／Reset 從 `$qubit.flux_source` 取得 `f1_bias`，不需要 flux 裝置 alias。軟連結只能引用排在前面的 alias，不能引用自己或後面的列。
 
 Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者的差別如下：
 
@@ -74,7 +74,7 @@ Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者�
 
 若要讓 `f1` 與 `qubit1` 指向同一元件，兩列都填具體名稱 `Q1`。不要填 `f1: $qubit1`，Aliases 不接受裸 alias 作為另一列的連結。`$qubit.resonator` 才是可接受的欄位連結，而且 `qubit` 必須排在 `resonator` 前面。這是 Aliases 的儲存語法，不是表單 expression 中裸 `$alias` 的求值語法。
 
-在 GUI 開啟 Inspect 的 Aliases 頁，把 `qubit` 改成 `Q2`，再按 Apply。`resonator` 與 `flux_dev` 會分別解析成 `R2` 與 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。Alias 綁定裝置名稱不會連線或建立 device。
+在 GUI 開啟 Inspect 的 Aliases 頁，把 `qubit` 改成 `Q2`，再按 Apply。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_source 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
 
 Apply 保存目前 point 的 `points/initial/aliases.yaml`。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 setup 或 preset。Alias 解析與保存細節見 [context 與 Run snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
 

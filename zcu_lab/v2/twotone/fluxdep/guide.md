@@ -12,7 +12,7 @@ Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiri
 
 ## Module slots
 
-Readout uses the qubit.module.readout slot captured at Open/Reset, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Open/Reset fill flux_dev with the device named by the captured flux_dev alias; a missing or unbound alias leaves it Invalid. Choose flux_unit explicitly in the connected device's units; values keep that unit throughout the run.
+Readout uses the qubit.module.readout slot captured at Open/Reset, or a fresh readout template when the slot is unset or points to a missing module. Optional qubit.module.reset stays disabled when absent. Saved modules remain selectable; sweeps replace only the swept fields at Run. Open/Reset fill flux_dev from the captured `$qubit.flux_source`; the direct name remains editable, and a missing source leaves it empty and Invalid. Choose flux_unit explicitly in the connected device's units; values keep that unit throughout the run.
 
 ## Typical writeback
 

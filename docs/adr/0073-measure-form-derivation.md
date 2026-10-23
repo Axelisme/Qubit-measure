@@ -182,9 +182,20 @@ Session、startup 與 FormEnv 不提供模板綁定預設值。模板展開不�
 
 Core 用 `flux_dev: str` 等具名欄位取代 `dev: Mapping[str, str]`。
 可選裝置使用 `str | None`。Core 不認得 alias 或 session，透過
-`context.devices[cfg.flux_dev]` 取得 driver。Form 用 `AliasName("flux_dev")`
-在 Open／Reset 把 alias 解析為 direct 字串；既有 input 不隨 alias 表更新。
-缺名稱或不在捕捉的候選清單時由表單報錯，不使用靜態裝置 fallback。
+`context.devices[cfg.flux_dev]` 取得 driver。Form 在 Open／Reset 從實驗對象的
+來源欄位讀取 direct 裝置名稱，單 qubit 用 `$qubit.flux_source`，mux 全域線圈用
+`$mux.flux_source`，JPA 用 `$jpa.flux_source` 與 `$jpa.rf_source`。
+初值可覆寫，既有 input 不隨 alias 表或元件參數更新。
+缺來源時欄位留空，必填欄位由表單報錯，可選欄位保留 None 的原有語意。
+不使用靜態裝置 fallback，也不從 cache 推測裝置。
+
+Alias 表選擇實驗元件，不再用 `flux_dev`、`coupler_flux_dev` 或 `jpa_rf_dev` 列選裝置。
+新 entry 範本只保存元件焦點 aliases，既有 point 的 aliases.yaml 不遷移。
+`resonator` 元件 alias 與既有 readout 推導不變。
+Sample writeback 從固定 Run／Load capture 的元件來源欄位讀名稱，再取該次 device snapshot 的座標。
+缺來源時只省略 Sample proposal 並記 unavailable reason。
+
+使用者 2026-10-23：「我認為flux_dev應該是由qubit/resonator推導，而不是意圖，因為沒有對象是以device為目標的」。
 
 Flux_unit 獨立保存在 cfg。Recipe 的公開參數與來源政策不變，helper 寫 caller
 指定的具名欄位。它只比 cached unit，不換算、不連裝置。受影響 cfg 升 major，

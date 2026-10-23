@@ -1,6 +1,6 @@
 """Starting values for jpa/auto_optimize; Qt-free declarations."""
 
-from zcu_tools.cfg_model import AliasName, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
@@ -9,6 +9,20 @@ from zcu_lab.v2.jpa.auto_optimize.core import JPAOptCfg
 
 def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
     """Build starting values and shape from the captured source availability."""
+    flux_source = (
+        ctx.parameters.lookup_point("$jpa.flux_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if flux_source is not None and not isinstance(flux_source, str):
+        raise ValueError("$jpa.flux_source must name a device")
+    rf_source = (
+        ctx.parameters.lookup_point("$jpa.rf_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if rf_source is not None and not isinstance(rf_source, str):
+        raise ValueError("$jpa.rf_source must name a device")
     return Form(
         JPAOptCfg,
         tree={
@@ -21,8 +35,8 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "jpa_rf_dev": AliasName("jpa_rf_dev"),
-            "jpa_flux_dev": AliasName("flux_dev"),
+            "jpa_rf_dev": rf_source,
+            "jpa_flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
                 "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),

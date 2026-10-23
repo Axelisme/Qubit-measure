@@ -4,7 +4,7 @@
 
 ## Parameter sources
 
-Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring. The qubit alias supplies an optional reset module. Opening or resetting the form selects the RF default from `jpa_rf_dev`; an unbound alias leaves the optional field empty. Select the connected JPA RF device in the form. The check uses the existing pump-frequency, pump-power and flux settings on the hardware. Missing required resonator calibration marks the form Invalid.
+Uses the resonator alias for `$resonator.freq`, `$resonator.kappa` and resonator wiring, and the jpa (`amplifier/jpa`) alias for `$jpa.rf_source`. The qubit alias supplies an optional reset module. Opening or resetting the form reads the RF default from `$jpa.rf_source`; a missing source leaves the field empty and Invalid. The direct device name remains editable. Select the connected JPA RF device in the form. The check uses the existing pump-frequency, pump-power and flux settings on the hardware. Missing required resonator calibration marks the form Invalid.
 
 ## Module slots
 

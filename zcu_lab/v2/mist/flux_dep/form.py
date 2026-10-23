@@ -1,6 +1,6 @@
 """Captured starting values for the MIST flux/gain map."""
 
-from zcu_tools.cfg_model import AliasName, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
@@ -11,9 +11,16 @@ from .core import FluxDepCfg
 def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     """Seed optional preparation, resonator probe, readout and native flux sweep.
 
-    Missing flux aliases/calibration leave required fields invalid. Open/Reset
+    Missing flux_source/calibration leave required fields invalid. Open/Reset
     captures sources; editing and Run do not refresh them or connect devices.
     """
+    flux_source = (
+        ctx.parameters.lookup_point("$qubit.flux_source").value
+        if ctx.parameters is not None
+        else None
+    )
+    if flux_source is not None and not isinstance(flux_source, str):
+        raise ValueError("$qubit.flux_source must name a device")
     return Form(
         FluxDepCfg,
         tree={
@@ -30,7 +37,7 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "flux_dev": AliasName("flux_dev"),
+            "flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
                 "flux": Range.between("$qubit.flux_int", "$qubit.flux_half", expts=101),

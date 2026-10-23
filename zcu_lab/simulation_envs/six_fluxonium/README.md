@@ -64,8 +64,8 @@ The script creates or reopens `six-fluxonium-demo/initial`. On first use it seed
 Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 `Q6_bias`, shared `coil_bias` and the `MG123456` mux group. Each Qi references
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
-to `MG123456`, `qubit` to `Q1`, `resonator` to `$qubit.resonator` and `flux_dev`
-to `$qubit.flux_source`.
+to `MG123456`, `qubit` to `Q1` and `resonator` to `$qubit.resonator`.
+Scalar flux forms read `$qubit.flux_source` on Open/Reset without a device alias.
 The template seeds `coil_flux` for all six qubits from `default.yaml` as
 simulated-truth, in A: `int=coil_offset`, `period=coil_period`, and
 `half=coil_offset+coil_period/2`. Each record describes the coil contribution
@@ -109,7 +109,7 @@ stays blank and required in the form before Run.
 Qubit `freq` starts at null. Measure each transition before supplying frequencies
 for `mux/twotone_spectrum` or calibrated excitation for `mux/t1`. Changing alias
 `qubit` changes the scalar target, not the mux group's ordered six-qubit mapping.
-Changing `flux_dev` current affects the selected qubit only. The mux group's
+Changing the scalar form's selected local-source current affects that qubit only. The mux group's
 `coil_bias` affects every qubit. Each circuit's reduced flux equals
 `(I_coil - coil_offset)/coil_period + (I_local - offset)/period`, with all
 currents, offsets and periods in A. The [settings guide](field-guide.md#dc-and-control-units)
