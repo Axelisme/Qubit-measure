@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -38,9 +39,26 @@ class LookbackAnalyzeParams:
     plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
 
+class LookbackSummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    predict_offset: float | None = Field(
+        description="Owner predict_offset in us; null retains an unavailable estimate."
+    )
+
+
 @dataclass
 class LookbackAnalyzeResult(AnalyzeResultBase):
     predict_offset: float
+
+    def summary(self) -> LookbackSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return LookbackSummary(
+            predict_offset=self.predict_offset,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class LookbackAdapter(

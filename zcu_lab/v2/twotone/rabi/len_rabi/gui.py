@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
+from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -42,6 +43,34 @@ class LenRabiAnalyzeParams:
     fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
 
 
+class TimeRabiSummary(BaseModel):
+    """Analysis summary in native units; null retains an unavailable estimate."""
+
+    pi_len: float | None = Field(
+        description="Owner pi_len in us; null retains an unavailable estimate."
+    )
+
+    pi_len_err: float | None = Field(
+        description="Owner pi_len_err in us; null retains an unavailable estimate."
+    )
+
+    pi2_len: float | None = Field(
+        description="Owner pi2_len in us; null retains an unavailable estimate."
+    )
+
+    pi2_len_err: float | None = Field(
+        description="Owner pi2_len_err in us; null retains an unavailable estimate."
+    )
+
+    rabi_f: float | None = Field(
+        description="Owner rabi_f in MHz; null retains an unavailable estimate."
+    )
+
+    rabi_f_err: float | None = Field(
+        description="Owner rabi_f_err in MHz; null retains an unavailable estimate."
+    )
+
+
 @dataclass
 class LenRabiAnalyzeResult(AnalyzeResultBase):
     pi_len: float
@@ -52,6 +81,20 @@ class LenRabiAnalyzeResult(AnalyzeResultBase):
     rabi_f: float
     rabi_f_err: float
     fit_quality: dict[str, dict[str, object]] | None = None
+
+    def summary(self) -> TimeRabiSummary:
+        """Return the named scalar summary consumed by recipes, in native units."""
+        return TimeRabiSummary(
+            pi_len=self.pi_len,
+            pi_len_err=self.pi_len_err,
+            pi2_len=self.pi2_len,
+            pi2_len_err=self.pi2_len_err,
+            rabi_f=self.rabi_f,
+            rabi_f_err=self.rabi_f_err,
+        )
+
+    def to_summary_dict(self) -> dict[str, object]:
+        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class LenRabiAdapter(

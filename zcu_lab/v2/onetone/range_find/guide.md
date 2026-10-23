@@ -67,3 +67,17 @@ Recipe 在同一個 Analyze operation 傳入此值，重用 tab 時也不沿用�
 非正數或非有限值在開 tab 前拒絕。間距過大而找不到指定數量的凹陷時，分析失敗且不詢問寫回。
 Run、Analyze 後回覆每個 dip 的 name、freq、depth，以及 `identity_diagnostic`、`writeback_diagnostic`。
 Recipe 詢問 writeback，只接受選定候選，略過不寫入，最後保存 raw data 與分析。
+
+## Four starting situations
+
+1. With an empty kickstart project, Open the Form and inspect its required blanks.
+   Enter absolute frequency bounds and frequency-ordered resonator names. Check readout timing before the coarse survey.
+   Nominal wiring and fallback values are candidates, not measured calibration.
+2. With frequencies but no module slots, Reset to recapture those values.
+   Fill the remaining pulse, timing and calibration errors before Run. Refresh keeps existing inputs.
+3. With a readout slot, Reset and review the captured module and remaining errors separately.
+   A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
+4. Through the agent, call `onetone_range_find` after inspecting the same Form errors.
+   freq with absolute MHz start/stop and n are required. n maps to frequency Expts. resonators labels dips; min_separation sets their minimum MHz spacing during Analyze.
+   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-23，具名 global coil 校準 mapping
+**Last updated:** 2026-10-23，recipe 共用輸入與 owner 分析結果
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -20,13 +20,13 @@ GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 
 
 `MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱。選填 qubits 必須等長且不重複。`flux_source` 保存 global coil 的 device 名稱。`coil_flux` 預設為 `{}`，以 group qubit 名稱為 key，value 是公開的 `CoilFluxCalibration`。其 `half`／`period`／`int` 各為有限數值或 null，使用 coil device 的原生單位，預設 null。尚未校準的 qubit 可省略整筆。未知 qubit key 會拒絕；qubits 為 None 或空時，coil key 條件只允許 `{}`，不放寬既有等長規則。提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
 
-Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.readout` 取得 Readout 初值。完整 tones[i] 綁定 resonators[i]。active_tones 只選擇量測哪些原始序號，不改綁定或保存 resonators。Module owner 是 group，不是第一個 resonator；重排不會改 owner。Framework 不知道 group schema，也不需要 list alias。定位與 writeback capture 邊界見 [ADR-0072](../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
+Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.readout` 取得 Readout 初值。完整 tones[i] 綁定 resonators[i]。participants 以 list[int] 選擇量測的原始序號並指定順序，不改綁定或保存的 resonators。Module owner 是 group，不是第一個 resonator；重排不會改 owner。Framework 不知道 group schema。定位與 writeback capture 邊界見 [ADR-0072](../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
 
 ## Component 欄位單位
 
 元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 flux_half／flux_period／flux_int 描述自己的 DC 線，依該 qubit 的 `flux_unit` 解讀。Mux group 的 coil 校準使用 coil device 的原生單位，不標固定單位。Global flux 原值仍可存於 `general.ext.flux_value`。`Q1.flux_unit` 與 JPA 的 `J1.flux_unit` 各自維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
-`recipes.RECIPES` 明列 `@recipe(name, description)` 產生的宣告。作者寫 `async def (session, inputs: FormModel) -> Report`，框架由 inputs model 產生 MCP JSON schema，不手寫 schema 或 summary declarations。Recipe inputs 只作 JSON schema／pydantic 驗證，不渲染 GUI Form。MCP 組合根把清單注入 framework，import 不執行量測或註冊。Recipes 保留 target 輸入，以 `aliases={"qubit": target}` 交給 `RecipeSession.open_tab`，省略時沿用 Reset 的全域 aliases。GUI adapters 的 cfg 與 Run 使用該 tab 的固定 capture，後續全域 alias 變動不追改既有 Run。
+`recipes.RECIPES` 明列 `@recipe(name, description)` 產生的宣告。作者寫 `async def (session, inputs: RecipeInputs) -> Report`，在 RecipeInputs 子類加入實驗欄位，在 RecipeReport 子類加入報告欄位。框架由 inputs model 產生 MCP JSON schema，不渲染 GUI Form。MCP 組合根把清單注入 framework，import 不執行量測或註冊。RecipeSession.open_recipe_tab 處理 target／reuse，RecipeTab.select_sources 選 library／inline，apply_inputs 最後合併實驗值、具名 edits 與 overrides。作者在這些呼叫之間插入自己的步驟，不必使用 prepare_tab 捷徑。Target 省略時沿用 Reset 的全域 aliases。GUI adapters 的 cfg 與 Run 使用該 tab 的固定 capture，後續全域 alias 變動不追改既有 Run。
 
 Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
 `onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
@@ -39,7 +39,7 @@ Alias 變更不更新既有 input；Open／Reset 才讀新名稱。缺列、未�
 Framework 的 `RecipeTab` 提供通用 Form read／set／select／apply、RPC call，以及 Run／Analyze／問答／同步 Save。Session 的 `context.read` 讀 session 值，不需要 tab；tab.read 讀固定 Form capture。
 `recipes.helpers` 使用這些公開介面，擁有 frequency／flux 的來源順序、校準範圍與 device unit policy。明填 frequency 優先，其次是有效 library leaf，再讀 caller 指定的 calibration。`FrequencySweepCalibration` 明列 frequency／linewidth 路徑與 full-span 倍率。三個 resonator spectrum 的預設倍率為 freq 3、power 3、flux 2，點數沿 GUI 的 301／201／101。Helper 讀目前數值，集中算 span 與 numeric start／stop。無效 linewidth 在 sweep edit／Run 前拒絕，不從 raw expression 抽倍率。Twotone 的 center_mhz／span_mhz／points 與 flux survey 的 flux_range／flux_points 必填且不能為 null。Flux helper 只比 snapshot unit，成功後寫 cfg 的 device identity 與獨立 flux_unit。它不換算 native 座標，也不連裝置。
 
-Recipe 的 Report 由作者選欄位，不另宣告 SummaryElements 或 estimates 路徑。框架回 `RecipeOutcome(status, report, runs)`；runs 保留各次 Run 與 Save 收據，full query 另保留 Run 前條件、owner-native analysis summary／invalid 與明確捕捉的寫回提案。元素位置與名稱由 owner 提供，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。
+Recipe 直接引用分析 owner 的具名 summary，不另宣告 FitQuality、QualityIssue 或 summary 鏡像。Recipe 的 Report 由作者選欄位並繼承 RecipeReport，不另宣告 SummaryElements 或 estimates 路徑。框架回 `RecipeOutcome(status, report, runs)`；runs 保留各次 Run 與 Save 收據，full query 另保留 Run 前條件、owner-native analysis summary／invalid 與明確捕捉的寫回提案。元素位置與名稱由 owner 提供，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。
 
 所有 lab async def 的 await 只允許 env／tab／session 呼叫或靜態解析到 lab 定義的 async helper，helper 可以再呼叫 helper。Quality gate 全掃本文，不分 recipe、workflow 或 helper。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫不論有無 await 都拒絕，其他 async with／async for 不另禁。這是 AST guardrail，不追蹤 assignment aliases、動態分派或包裝，不是完整 type checker。作者仍須遵守序列執行契約，詳見 [recipes](recipes/README.md)。
 

@@ -172,72 +172,94 @@ Recipe 放在 [`../recipes/`](../recipes/README.md)。撰寫時遵守以下六�
 6. Docstring 寫使用者要填的量、單位、null 語意、量測動作與分析參數的效果。
    明列 `n → expts` 或 `points → expts`，不要用框架術語取代實驗說明。
 
-以下是目標 API 示意，非可執行範例。共用輸入、套用與報告 API 尚未落地。
-`CommonInputs`、`CommonReport`、`apply_common` 與 `OwnerSummary` 都是佔位名，
-沒有可 import 的路徑。前三者代表 lib 提供的預設路徑，最後一個代表分析 owner 匯出的結果型別。
-省略既有型別的 imports。可用介面以 [recipe 公開契約](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)
-及 [`recipe_api.py`](../../lib/zcu_tools/mcp/measure/recipe_api.py) 為準。
+以下骨架使用 `recipe_api` 的真實介面與 twotone owner 的具名 summary。
+輸入繼承 `RecipeInputs`，報告繼承 `RecipeReport`。
+共用 library 清單選 key，inline 清單複製 selector，overrides 在最後覆寫實驗值。
+只有本次需要的非 None 值會改 Form。
 
-骨架在預設路徑之後直接加入「改 drive pulse 長度」的自訂步驟。
-這個改動只增加一個輸入欄位與主體中的欄位編輯，不新增 helper 或改基底：
+來源選好後，骨架直接插入「複製 drive waveform」的自訂步驟。
+最後一批同時套用掃描、脈衝長度與 overrides，才驗完整 cfg。
+這個位置也能插入自己的 Form 讀取或換 pulse，不需要 hook class：
 
 ```python
-# Target API sketch only. Common* / apply_common / OwnerSummary are placeholders.
-class Inputs(CommonInputs):
-    """Qubit sweep inputs; common fields select the tab and module sources."""
+from typing import Literal
+
+from pydantic import Field
+from zcu_tools.gui.form_adapter.sweep import LinRange
+from zcu_tools.mcp.measure.recipe_api import (
+    RecipeInputs, RecipeReport, RecipeSession, recipe, report_number,
+)
+from zcu_lab.v2.twotone.freq.gui import TwotoneSpectrumSummary
+
+
+class Inputs(RecipeInputs):
+    """Drive sweep bounds in MHz and a custom constant-pulse duration in us."""
 
     start_mhz: float = Field(description="Drive sweep start in MHz.")
     stop_mhz: float = Field(description="Drive sweep stop in MHz.")
-    n: int = Field(description="Sweep sample count, mapped to GUI Expts.")
-    pulse_length_us: float = Field(description="Custom drive pulse length in us.")
-    fit_phase: bool = Field(False, description="Fit the IQ response phase.")
+    n: int = Field(ge=2, description="Sweep sample count, mapped to GUI Expts.")
+    pulse_length_us: float = Field(gt=0, description="Custom drive duration in us.")
+    model_type: Literal["lor", "sinc"] = "lor"
+    plot_fit: bool = True
 
 
-class Report(CommonReport):
-    """Transition estimate plus the common writeback and analysis status."""
+class Report(RecipeReport):
+    """Transition estimate and the inherited writeback/analysis facts."""
 
-    frequency_mhz: float | None = Field(description="Fit frequency; null if failed.")
+    frequency_mhz: float | None = None
 
 
 @recipe("custom_spectrum", description="Sweep drive frequency with a custom pulse.")
 async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
-    """Sweep drive frequency, fit a transition, ask before writeback, then save.
+    """Sweep, fit a transition, ask before writeback, then save.
 
-    n → expts sets the sweep sample count. Frequencies use MHz.
-    pulse_length_us changes the drive duration in us before acquisition.
-    fit_phase changes analysis only. Null field edits keep the Form values.
-    Missing required Form values stop Run and report the fields to fill.
+    n → sweep.freq.expts sets the sample count. Frequencies use MHz.
+    pulse_length_us changes the drive duration before acquisition.
+    model_type selects the existing lor/sinc fit; plot_fit controls its overlay.
+    Missing Form values stop before acquisition. Null common values retain input.
     """
-    tab = apply_common(session, "twotone/freq", inputs)  # Placeholder default path.
+    tab = session.open_recipe_tab("twotone/freq", inputs, target_alias="qubit")
+    tab.select_sources(inputs)
 
-    # Custom step outside the base: copy the drive inline and edit its duration.
+    # Custom experiment step between source selection and complete admission.
     tab.select(("modules", "qub_pulse"), inline=True)
     tab.select(("modules", "qub_pulse", "waveform"), inline=True)
-    tab.apply([
-        FieldEdit(path=("sweep", "freq"),
-                  value=LinRange(start=inputs.start_mhz, stop=inputs.stop_mhz,
-                                 n=inputs.n), source="recipe sweep"),
-        FieldEdit(path=("modules", "qub_pulse", "waveform", "length"),
-                  value=inputs.pulse_length_us, source="custom pulse"),
-    ], require_valid=True)
+    tab.apply_inputs(inputs, {
+        ("sweep", "freq"): LinRange(
+            start=inputs.start_mhz, stop=inputs.stop_mhz, n=inputs.n
+        ),
+        ("modules", "qub_pulse", "waveform", "length"): inputs.pulse_length_us,
+    })
 
     await tab.run()
     try:
         analysis = await tab.analyze(
-            "primary", result=OwnerSummary, updates={"fit_phase": inputs.fit_phase}
+            "primary", result=TwotoneSpectrumSummary,
+            updates={"model_type": inputs.model_type, "plot_fit": inputs.plot_fit},
         )
         if analysis.result is None:
-            return Report(frequency_mhz=None, analysis_failure=analysis.reason)
+            return Report(analysis_failure=analysis.reason)
         decision = await tab.ask_writeback()
         applied = False
         if decision.accepted:
             receipt = tab.accept_writeback(decision.items)
             receipt.raise_for_error()
             applied = bool(receipt.items)
-        return Report(frequency_mhz=analysis.result.freq, writeback_applied=applied)
+        return Report(
+            frequency_mhz=report_number(analysis.result.freq),
+            writeback_applied=applied,
+        )
     finally:
         tab.save()
 ```
+
+沒有中途自訂步驟時，可用
+`session.prepare_tab(adapter, inputs, target_alias="qubit", values=...)`。
+它只做 Open／Reset、來源選取與完整批次驗證，不做 Run。
+既有校準計算若已產生帶 source 的 `FieldEdit`，在分拆路徑用
+`tab.apply_inputs(inputs, values, edits=calibration_edits)`。
+Lib 依序提交 values、具名 edits、overrides，保留每筆 source。
+不要先用 `tab.set` 提交半套欄位，否則其他必填值尚未補齊就會得到 invalid_cfg。
 
 `select`、`apply`、`run`、`analyze`、問答、寫回與 `save` 沿用 RecipeTab 的公開介面。
 `run` 成功後才進入 Save 的 `finally`，分析失敗仍保存 raw data 與已完成產物。

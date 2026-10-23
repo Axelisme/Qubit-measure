@@ -21,6 +21,8 @@ from pydantic import (
 from zcu_tools.core.complex_codec import encode_complex
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 
+from .aliases import AliasValue
+
 
 def _json_value(value: object) -> object:
     """Reject non-JSON Python values before Pydantic can coerce them."""
@@ -162,7 +164,7 @@ class AcquiredPayload(_LedgerModel):
 
     run_id identifies the run, tab its display name, tab_id its optional stable
     ID, experiment the spec tag, point the optional point label, and roles maps
-    role names to component names. Configuration is stored only with run data.
+    aliases to scalar names or ordered name lists. Configuration lives with run data.
     """
 
     run_id: StrictStr
@@ -170,7 +172,7 @@ class AcquiredPayload(_LedgerModel):
     tab_id: StrictStr | None = None
     experiment: StrictStr
     point: StrictStr | None = None
-    roles: dict[StrictStr, StrictStr]
+    roles: dict[StrictStr, AliasValue]
 
 
 class SavedPayload(_LedgerModel):
