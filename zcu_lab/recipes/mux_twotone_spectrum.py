@@ -3,7 +3,7 @@
 Recipe n → expts: one shared scan point count for every tone.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
@@ -38,7 +38,7 @@ class MuxTwotoneSpectrumInputs(FormModel):
     reuse_tab_id: str | None = Field(
         default=None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[int] | None = Field(
+    participants: list[StrictInt] | None = Field(
         default=None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )

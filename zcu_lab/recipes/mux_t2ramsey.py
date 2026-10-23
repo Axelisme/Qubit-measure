@@ -1,6 +1,6 @@
 """Measure mux Ramsey fringes, save the decay fits and review calibrations."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import (
     FieldEdit,
@@ -33,7 +33,7 @@ class MuxT2RamseyInputs(FormModel):
     reuse_tab_id: str | None = Field(
         default=None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[int] | None = Field(
+    participants: list[StrictInt] | None = Field(
         default=None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )

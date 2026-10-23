@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, StrictInt, TypeAdapter
 from typing_extensions import TypedDict
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeTab
@@ -28,7 +28,7 @@ class MuxFluxInputs(FormModel):
     reuse_tab_id: str | None = Field(
         None, min_length=1, description="Idle matching tab to Reset; null opens a tab."
     )
-    participants: list[int] | None = Field(
+    participants: list[StrictInt] | None = Field(
         None,
         description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
     )

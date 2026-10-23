@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import FieldEdit, RecipeSession, recipe
 
@@ -19,7 +19,7 @@ class MuxOnetoneInputs(FormModel):
     reuse_tab_id: str | None = Field(
         None, description="Idle matching tab to reset; null opens a tab."
     )
-    participants: list[int] | None = Field(
+    participants: list[StrictInt] | None = Field(
         None,
         description="Original tone indices in execution order; null keeps the captured Form selection.",
     )
