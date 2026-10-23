@@ -335,6 +335,42 @@ class ComponentDriver:
         mouse_click(viewport, table.visualItemRect(item).center())
         QApplication.processEvents()
 
+    def edit_table_value(
+        self, current: str, value: str, *, object_name: str, column: str
+    ) -> None:
+        """Edit the matching caption under a public header, using real keys."""
+        table = self._find(None, object_name)
+        if not isinstance(table, QTableWidget):
+            raise TypeError(f"{object_name!r} is not a QTableWidget")
+        if not self._can_interact(table):
+            return
+        columns = [
+            index
+            for index in range(table.columnCount())
+            if (header := table.horizontalHeaderItem(index)) is not None
+            and header.text() == column
+        ]
+        index = _unique(column, columns, [str(index) for index in columns])
+        viewport = table.viewport()
+        assert viewport is not None
+        items = [
+            item
+            for row in range(table.rowCount())
+            if (item := table.item(row, index)) is not None
+            and item.text() == current
+            and viewport.visibleRegion().contains(table.visualItemRect(item))
+        ]
+        item = _unique(current, items, [item.text() for item in items])
+        mouse_click(viewport, table.visualItemRect(item).center())
+        self.press_key(Qt.Key.Key_F2, object_name=object_name)
+        widget = self._window.focusWidget()
+        if not isinstance(widget, QLineEdit) or not self._can_interact(widget):
+            raise RuntimeError("Table cell did not open a visible text editor")
+        key_click(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        type_text(widget, value)
+        key_click(widget, Qt.Key.Key_Return)
+        QApplication.processEvents()
+
     def visible(self) -> VisibleObservation:
         """Snapshot all visible widgets for completion predicates with changing captions."""
         return VisibleObservation(
