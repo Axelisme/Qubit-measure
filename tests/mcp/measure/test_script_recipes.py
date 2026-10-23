@@ -7,7 +7,7 @@ from threading import Event, get_ident
 import pytest
 from pydantic import BaseModel, ValidationError
 from zcu_tools.gui.form_adapter.sweep import LinRange
-from zcu_tools.mcp.measure.recipe_api import Expr, FieldEdit, RecipeSession, recipe
+from zcu_tools.mcp.measure.recipe_api import KEEP, Expr, RecipeSession, recipe
 from zcu_tools.mcp.measure.recipe_contracts import (
     MissingParameter,
     RecipeNeedsParameters,
@@ -31,11 +31,11 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
 
     @recipe("synthetic", "Run and analyze a synthetic tab")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        tab = session.open_tab("synthetic", aliases={"qubit": "Q1"})
-        tab.set(("count",), inputs.count)
-        tab.set(("kept",), None)
-        tab.select(("module",), ref="captured-key")
-        tab.select(("module",), inline=True)
+        tab = session.open_tab("synthetic", target={"qubit": "Q1"})
+        tab.set("count", inputs.count)
+        tab.set("kept", KEEP)
+        tab.select("module", "captured-key")
+        tab.command("module", "to_inline")
         run = await tab.run()
         assert run.run_id == "native-1"
         fit = await tab.analyze("primary", result=Fit)
@@ -80,45 +80,7 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
         client.context.session.close()
 
 
-def test_apply_sends_all_indexed_edits_together_before_cfg_validation(
-    tmp_path: Path,
-) -> None:
-    gui = SyntheticGui()
-    edits = [FieldEdit(path=("rounds",), value=1)]
-    for index in range(6):
-        edits.extend(
-            [
-                FieldEdit(path=("tones", index, "start"), value=100.0 + index),
-                FieldEdit(path=("tones", index, "stop"), value=200.0 + index),
-            ]
-        )
-
-    @recipe("synthetic", "Fill a complete indexed cfg before validation")
-    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        tab = session.open_tab("synthetic")
-        tab.apply(edits)
-        await tab.run()
-        return Report(count=inputs.count)
-
-    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
-    try:
-        execution = start(client, "synthetic")
-        execution.wait(3)
-        batches = [
-            params["edits"]
-            for method, params in client.transport.sent
-            if method == "tab.edit_recipe_fields"
-        ]
-        assert batches == [
-            [{"path": list(edit.path), "value": edit.value} for edit in edits]
-        ]
-        assert execution.snapshot().status == "completed"
-        assert gui.runs == 1
-    finally:
-        client.context.session.close()
-
-
-@pytest.mark.parametrize("preflight", ["apply", "run"])
+@pytest.mark.parametrize("preflight", ["check_ready", "run"])
 def test_cfg_preflight_lists_all_indexed_errors_without_starting_run(
     tmp_path: Path, preflight: str
 ) -> None:
@@ -131,15 +93,15 @@ def test_cfg_preflight_lists_all_indexed_errors_without_starting_run(
 
     def respond(method: str, params: dict[str, object]) -> dict[str, object]:
         reply = gui.respond(method, params)
-        if method in {"tab.edit_recipe_fields", "tab.read_recipe_field"}:
+        if method in {"tab.check_recipe_ready", "tab.read_recipe_field"}:
             return {**reply, "errors": errors}
         return reply
 
     @recipe("synthetic", "Report all incomplete fields before acquisition")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic")
-        if preflight == "apply":
-            tab.apply([FieldEdit(path=("rounds",), value=1)], require_valid=True)
+        if preflight == "check_ready":
+            tab.check_ready()
         await tab.run()
         return Report(count=inputs.count)
 
@@ -529,10 +491,9 @@ def test_save_transport_failure_does_not_claim_an_unreceived_report(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("method", ["set", "apply"])
 @pytest.mark.parametrize("value_kind", ["expression", "range"])
 def test_form_writes_roundtrip_named_values_through_the_owner(
-    tmp_path: Path, method: str, value_kind: str
+    tmp_path: Path, value_kind: str
 ) -> None:
     from ._recipe_support import LookbackGui
 
@@ -551,10 +512,7 @@ def test_form_writes_roundtrip_named_values_through_the_owner(
     @recipe("synthetic", "Roundtrip named Form values")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("lookback")
-        if method == "set":
-            tab.set(path, value)
-        else:
-            tab.apply([FieldEdit(path=path, value=value)])
+        tab.set(".".join(map(str, path)), value)
         observed = tab.read(path)
         assert observed.value == expected
         assert observed.errors == ()
@@ -588,7 +546,7 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
         module = tab.read(("modules", "readout"))
         assert module.fields
         assert tab.read(("rounds",)).value == 3
-        tab.set(("rounds",), inputs.count)
+        tab.set("rounds", inputs.count)
         assert tab.read(("rounds",)).value == inputs.count
         return Report(count=inputs.count)
 
@@ -620,13 +578,13 @@ def test_full_recipe_status_retains_run_conditions_analysis_and_writeback(
         tab = session.open_tab("synthetic")
         await tab.run()
         await tab.analyze("primary", result=Fit)
-        tab.writeback_proposal()
+        await tab.ask_writeback()
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.join()
+        execution.wait(3)
         before = list(client.transport.sent)
         full = client.call(
             "status", {"execution": execution.snapshot().execution, "detail": "full"}

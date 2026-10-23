@@ -69,7 +69,7 @@ def test_optional_frequency_source_or_explicit_input(
             raise RecipeNeedsParameters(
                 (MissingParameter("frequency_mhz", "Provide a frequency in MHz"),)
             )
-        tab.set(("frequency",), frequency)
+        tab.set("frequency", frequency)
         await tab.run()
         return FrequencyReport(frequency_mhz=frequency)
 
