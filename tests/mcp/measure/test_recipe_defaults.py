@@ -20,6 +20,74 @@ class OwnerSummary:
     quality: FitQuality
 
 
+@pytest.mark.parametrize(
+    ("arguments", "error_kind", "value"),
+    [
+        pytest.param({"typo": 1}, "extra_forbidden", None, id="unknown-field"),
+        pytest.param({"gain": float("nan")}, "finite_number", 0.0, id="nan"),
+        pytest.param({"gain": float("inf")}, "finite_number", -2.5, id="inf"),
+        pytest.param({"gain": -float("inf")}, "finite_number", 1.25, id="neg-inf"),
+    ],
+)
+def test_recipe_input_admission_rejects_invalid_values_before_measurement(
+    tmp_path: Path, arguments: dict[str, object], error_kind: str, value: float | None
+) -> None:
+    class Inputs(api.RecipeInputs):
+        gain: float | None = None
+
+    gui = SyntheticGui()
+    received: list[float | None] = []
+
+    @api.recipe("synthetic", "Validate experiment inputs before acquisition")
+    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
+        received.append(inputs.gain)
+        tab = session.prepare_tab(
+            "synthetic", inputs, target_alias="qubit", values={("gain",): inputs.gain}
+        )
+        await tab.run()
+        return Report(count=1)
+
+    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    try:
+        rejected = client.context.session.recipes.start(
+            client.context, "synthetic", arguments
+        )
+        rejected.join()
+        snapshot = rejected.snapshot()
+        assert snapshot.status == "failed", snapshot
+        assert snapshot.error is not None
+        assert error_kind in snapshot.error.message
+        assert snapshot.outcome is not None
+        assert snapshot.outcome.status == "failed"
+        assert received == []
+        assert client.transport.sent == []
+        assert gui.runs == 0
+
+        accepted = client.context.session.recipes.start(
+            client.context,
+            "synthetic",
+            {
+                "gain": value,
+                "target": None,
+                "reuse_tab_id": None,
+                "library": None,
+                "inline": None,
+                "overrides": None,
+            },
+        )
+        accepted.join()
+        assert accepted.snapshot().status == "completed", accepted.snapshot()
+        assert received == [value]
+        assert gui.runs == 1
+        assert [
+            p["edits"]
+            for m, p in client.transport.sent
+            if m == "tab.edit_recipe_fields"
+        ] == ([[]] if value is None else [[{"path": ["gain"], "value": value}]])
+    finally:
+        client.context.session.close()
+
+
 @pytest.mark.parametrize("reuse", [None, "tab-1"])
 def test_prepare_tab_orders_sources_values_and_overrides(
     tmp_path: Path, reuse: str | None
