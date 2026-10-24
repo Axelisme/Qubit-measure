@@ -316,7 +316,8 @@ class TabFormResource:
         """Run an available command at a logical path under all mutation guards.
 
         name is the declared command identifier, such as to_inline. Copy uses
-        fixed captured sources and preserves child keys. Unavailable commands,
+        fixed captured sources and preserves child keys. An inline selector
+        succeeds with changed=False and no publication. Unavailable commands,
         readonly/ref ancestry and source errors preserve input/publication.
         Return changed, not validity. No source refresh or retry occurs.
         """
@@ -477,8 +478,9 @@ class TabFormResource:
         name comes from field commands or selected option commands, for example
         run_command(("modules", "qub_pulse"), "to_inline"). The Form owner
         computes the replacement; this host never copies or refreshes sources.
-        Success commits one atomic FormState write and publishes once through
-        the same resource subscribers and cfg version authority as write.
+        Changed input commits one atomic FormState write and publishes once
+        through the same resource subscribers and cfg version authority as write.
+        to_inline on an inline module preserves input and does not publish.
         Unknown paths, unmatched options and unavailable commands raise
         ValueError. Source/callable/structural failures propagate with no input
         change or publication. Ordinary invalid results remain editable drafts.
@@ -487,8 +489,10 @@ class TabFormResource:
         editor_state is read-only to callers; editors must use this entrypoint.
         """
         with self._mutation():
+            before = self._state.input
             self._state.run_command(path, name, self._sources.env)
-            self._notify()
+            if not self._state.input.same_as(before):
+                self._notify()
 
     def restore_input(self, saved: FormInput[FormModel]) -> tuple[FormPath, ...]:
         """Restore saved authored input and report dropped paths using Core rules.

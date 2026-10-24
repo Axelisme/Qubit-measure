@@ -113,13 +113,9 @@ async def amplitude_rabi(
     if not isinstance(inputs.frequency_mhz, Keep) or not isinstance(
         inputs.pulse_length_us, Keep
     ):
-        pulse_selector = tab.read(("modules", "qub_pulse")).selector
-        if pulse_selector is not None and pulse_selector.mode == "ref":
-            tab.command("modules.qub_pulse", "to_inline")
+        tab.command("modules.qub_pulse", "to_inline")
     if not isinstance(inputs.pulse_length_us, Keep):
-        waveform_selector = tab.read(("modules", "qub_pulse", "waveform")).selector
-        if waveform_selector is not None and waveform_selector.mode == "ref":
-            tab.command("modules.qub_pulse.waveform", "to_inline")
+        tab.command("modules.qub_pulse.waveform", "to_inline")
     tab.set("modules.qub_pulse.freq", inputs.frequency_mhz)
     tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
     if inputs.gain_range is None:

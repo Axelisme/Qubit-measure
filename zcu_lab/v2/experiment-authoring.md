@@ -79,8 +79,8 @@ Recipe 本體依序開 tab、選 module、逐欄 set、依序套 overrides、che
 
 Run 留在 try 外，成功返回後的流程以既有 finally 同步 `tab.save()`。根取消使下一個 await raise 普通 ScriptCancelled，進行中的 Run 先 drain 並保留 facts。該 Run await 被根取消時不進後續 Save finalizer，partial 留在 tab 交 agent 決定。作者不新增取消分支或 Save finalizer。
 Inputs 繼承 RecipeInputs，框架只作 pydantic／MCP JSON schema 驗證，不渲染 recipe inputs Form。
-可省略欄位用 KEEP，null 原樣交 owner。寫入用 dotted string，read 保留 typed tuple。
-明填 scalar 前只在 selector.mode 為 ref 時 command to_inline，保留 waveform family。
+可省略欄位用 KEEP，null 原樣交 owner。Read 與寫入都用 dotted string。
+明填 scalar 前直接 command to_inline，保留 waveform family。已 inline 時不改值。
 完整宣告、Analyze 失敗值與根取消契約見 [recipe 教學](../tutorial/04-recipe.md)。
 
 ### 3. Docstring 說明量測、序列與結果

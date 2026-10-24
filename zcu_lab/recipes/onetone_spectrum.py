@@ -109,9 +109,7 @@ async def onetone_spectrum(
     )
     tab.select("modules.readout", inputs.readout_ref)
     if not isinstance(inputs.gain, Keep):
-        pulse_selector = tab.read(("modules", "readout")).selector
-        if pulse_selector is not None and pulse_selector.mode == "ref":
-            tab.command("modules.readout", "to_inline")
+        tab.command("modules.readout", "to_inline")
     if isinstance(inputs.center_mhz, Keep) != isinstance(inputs.span_mhz, Keep):
         missing = "span_mhz" if isinstance(inputs.span_mhz, Keep) else "center_mhz"
         raise RecipeNeedsParameters(

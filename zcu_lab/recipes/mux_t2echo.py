@@ -90,12 +90,7 @@ async def mux_t2echo(
     tab = session.open_tab(
         "mux/t2echo", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()

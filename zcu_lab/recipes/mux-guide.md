@@ -298,12 +298,12 @@ There are no generic `library` or `inline` recipe inputs.
 
 To customize source selection, edit the recipe's setup before overrides.
 Use `tab.select` to choose an intentional module option.
-Before editing a scalar on the current source, read its selector.
-If `selector.mode == "ref"`, use
-`tab.command("tones.2.drive", "to_inline")` to copy the source first.
-Already-inline modules need no conversion. For nested waveform length, read
-that waveform's selector and copy only if referenced. This preserves its
-family and other values rather than replacing it with a const waveform.
+Before editing a scalar on the current source, call
+`tab.command("tones.2.drive", "to_inline")` to copy a reference first.
+Already-inline modules succeed without changing their draft.
+For nested waveform length, call
+`tab.command("tones.2.drive.waveform", "to_inline")` before setting the length.
+This preserves its family and other values rather than replacing it with a const waveform.
 Do not use a scalar override to edit through a reference.
 
 `tab.describe_cfg` lists fields and commands. `tab.read_elements` lists complete

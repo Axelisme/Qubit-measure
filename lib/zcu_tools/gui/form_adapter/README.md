@@ -29,7 +29,7 @@ Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `
 
 新型別的每個欄位若在舊型別有同名且相同的可編輯 Form 型別，就沿用原始輸入；否則用目標初值。比較沿生成器去除 QickParam 的規則，不依 raw 值的 Python 型別或有效性判斷。各次生成的同一持久 model 視為同型，巢狀逐層套用。Waveform 與 Pulse、PulseReadout、MuxReadout、各 Reset 都用這條規則。Expression、缺席與 invalid 值原樣保留，超出目標限制由一般驗證報錯，不求值或修正。同型 ref→inline 與 inline→inline 保留全部可編輯欄位，ref 讀固定 Spec，inline 不重新讀來源。Gauss 切 FlatTop 保留 length，raise_waveform 用初值，不把舊 waveform 包進去。Pulse 切 PulseReadout 保留 freq／gain／waveform，但 ch 與 gen_ch 不同名，不搬移。Core 不加入 domain 規則或補 defaults，converter 提供完整目標 input。
 
-每個 key 選項帶 `to_inline` 指令，label 是 Convert to inline。`FormState.run_command` 用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製或缺來源 fallback。
+每個 key 與 inline 選項帶 `to_inline` 指令，label 是 Convert to inline。Inline 上重複執行不改草稿，也不發通知。`FormState.run_command` 用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製或缺來源 fallback。
 
 持久 Spec 與範本 seed 路徑仍使用原欄位名稱，不含 wrapper。生成器在 input 邊界加入 wrapper，`to_cfg` 去掉 wrapper，保留 child key 字串。Nested ref 使用本 package 的 `KeyRef`，不限制 choices，也不新增 captured source 檢查。Core module ref 仍使用 `ModuleRef` 並檢查固定 library。兩種 ref 的 name 都只接受 literal key，不求 Expr。
 

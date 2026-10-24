@@ -513,7 +513,7 @@ def test_form_writes_roundtrip_named_values_through_the_owner(
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("lookback")
         tab.set(".".join(map(str, path)), value)
-        observed = tab.read(path)
+        observed = tab.read(".".join(map(str, path)))
         assert observed.value == expected
         assert observed.errors == ()
         return Report(count=inputs.count)
@@ -540,14 +540,14 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
     )
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("lookback")
-        sweep = tab.read(("sweep",))
+        sweep = tab.read("sweep")
         assert {"start", "stop", "n"}.issubset(sweep.fields)
         assert sweep.value == {"kind": "linrange", "start": 1.0, "stop": 2.0, "n": 51}
-        module = tab.read(("modules", "readout"))
+        module = tab.read("modules.readout")
         assert module.fields
-        assert tab.read(("rounds",)).value == 3
+        assert tab.read("rounds").value == 3
         tab.set("rounds", inputs.count)
-        assert tab.read(("rounds",)).value == inputs.count
+        assert tab.read("rounds").value == inputs.count
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, LookbackGui(), recipes=(synthetic,))

@@ -382,8 +382,10 @@ class Form[C: ConfigBase]:
         """Prepare an active declared command at a logical field path.
 
         name is a command identifier, for example to_inline copies the fixed
-        captured Spec. The owner rejects unavailable commands, ref ancestors,
-        readonly and source failures without changing input. No defaults,
+        captured Spec. to_inline on an inline selector succeeds with
+        changed=False, preserving the complete draft; nonselector paths reject
+        that command. Unavailable commands, ref ancestors, readonly and source
+        failures preserve input. No defaults,
         recapture or installation occurs. Candidate lifetime is one guarded turn.
         """
         self._check_logical_input(input)

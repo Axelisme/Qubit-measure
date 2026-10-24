@@ -110,12 +110,7 @@ async def mux_onetone(
     tab = session.open_tab(
         "mux/onetone", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     if isinstance(inputs.df, ToneRangeInputs):
         tab.set("sweep.df.start", inputs.df.start)
         tab.set("sweep.df.stop", inputs.df.stop)

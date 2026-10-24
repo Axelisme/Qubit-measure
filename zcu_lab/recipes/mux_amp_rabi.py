@@ -101,14 +101,9 @@ async def mux_amp_rabi(
     tab = session.open_tab(
         "mux/amp_rabi", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     if not isinstance(inputs.sweeps, Keep):
-        input_tones = tab.read(("tones",)).value
+        input_tones = tab.read("tones").value
         if not isinstance(input_tones, list):
             raise RecipeNeedsParameters(
                 (MissingParameter("tones", "Full tone list is unavailable."),)

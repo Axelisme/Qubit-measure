@@ -183,7 +183,7 @@ RecipeInputs 只提供 target、reuse_tab_id 與 overrides，不提供通用 lib
 可省略的實驗欄位用 `T | None | Keep = KEEP`，省略保留，null 原樣交 owner。
 以下例子的掃描端點與 pulse length 都必填，分析選項可省略。
 
-骨架先讀 drive 與 waveform 的 selector.mode，只在 ref 時 command to_inline。
+骨架先對 drive 與 waveform command to_inline。已 inline 時 command 不改值。
 這樣改長度會保留既有 waveform family，不固定換成 const，單 kind module 也照此處理。
 每欄 set 完才逐筆套 overrides，最後 check_ready。中間可插入自己的步驟：
 
@@ -228,12 +228,8 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
         "twotone/freq", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
     )
 
-    pulse_selector = tab.read(("modules", "qub_pulse")).selector
-    if pulse_selector is not None and pulse_selector.mode == "ref":
-        tab.command("modules.qub_pulse", "to_inline")
-    waveform_selector = tab.read(("modules", "qub_pulse", "waveform")).selector
-    if waveform_selector is not None and waveform_selector.mode == "ref":
-        tab.command("modules.qub_pulse.waveform", "to_inline")
+    tab.command("modules.qub_pulse", "to_inline")
+    tab.command("modules.qub_pulse.waveform", "to_inline")
     tab.set("sweep.freq.start", inputs.start_mhz)
     tab.set("sweep.freq.stop", inputs.stop_mhz)
     tab.set("sweep.freq.n", inputs.n)
@@ -270,7 +266,7 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
 逐筆 set 不去重、不過濾 null，也不提供整批 rollback。每次操作允許尚未 ready 的合法草稿。
 `check_ready` 唯讀驗完整 Form／cfg，缺值回 needs_parameters 與所有 path／reason。
 結構、來源與 readonly 錯誤仍在 mutation 時立即拒絕。
-讀取用 typed tuple，寫入用 dotted string，數字段是完整清單的原始位置，不按 participants 重編。
+讀取與寫入都用 dotted string，數字段是完整清單的原始位置，不按 participants 重編。
 若輸入代表完整 tone 範圍，先檢查與完整 tones 等長，回報缺少或多出的原始位置。
 Center／span 成對提供或成對省略，不從目前 endpoints 或校準補齊。
 明填 null 不做算術，原樣交 owner。全部 module scalar 省略時不轉 inline。
