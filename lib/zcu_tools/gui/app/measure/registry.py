@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
 
 from zcu_tools.cfg_model import TemplateDef
@@ -21,6 +22,19 @@ def _validate_contract(adapter: object, name: str) -> None:
     if not isinstance(adapter, ExpAdapterProtocol):
         raise TypeError(f"Adapter {name!r} does not satisfy ExpAdapterProtocol")
     _validate_capabilities(adapter.capabilities, name)
+
+
+@dataclass(frozen=True)
+class ExperimentResolution:
+    """Catalog identity for a historical experiment string.
+
+    adapter_name is the exact registered name, or None when unresolved.
+    reason is None on success, otherwise a diagnostic explaining missing identity,
+    no load-capable tag owner, or ambiguous tag owners.
+    """
+
+    adapter_name: str | None
+    reason: str | None
 
 
 class Registry:
@@ -68,6 +82,35 @@ class Registry:
 
     def has(self, name: str) -> bool:
         return name in self._mapping
+
+    def resolve_experiment(self, experiment: str | None) -> ExperimentResolution:
+        """Resolve a historical name/tag without creating a tab or reading files.
+
+        Exact registered names win, even without Load capability. Otherwise only
+        load-capable adapters with the matching experiment_tag are candidates.
+        Missing, unknown and ambiguous identities return a reason, never a guess.
+        Adapter construction failures propagate.
+        """
+        if not experiment:
+            return ExperimentResolution(None, "Missing experiment identity")
+        if self.has(experiment):
+            return ExperimentResolution(experiment, None)
+        candidates: list[str] = []
+        for name in self.list_names():
+            adapter = self.create(name)
+            if adapter.capabilities.load_data and adapter.experiment_tag == experiment:
+                candidates.append(name)
+        if len(candidates) == 1:
+            return ExperimentResolution(candidates[0], None)
+        if not candidates:
+            return ExperimentResolution(
+                None, f"No load-capable adapter for experiment {experiment!r}"
+            )
+        return ExperimentResolution(
+            None,
+            f"Multiple load-capable adapters for experiment {experiment!r}: "
+            + ", ".join(sorted(candidates)),
+        )
 
     def validate(self) -> None:
         """Check constructibility and the framework contract before publication."""

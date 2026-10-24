@@ -92,7 +92,7 @@ GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包�
 
 GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion 與 Labber 子欄位，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
 
-使用者於 2026-10-16 選擇「A」，採用修改文件、不新增 GUI 入口的方案。原始 cfg 保存在 native 資料檔，透過公開 datafile.load 離線讀取 Container 的 docs/cfg。GUI 不提供原始 cfg 檢視入口，不擴大本次範圍。
+原始 cfg 正本保存在 native 資料檔的 docs/cfg，可透過公開 datafile.load 離線讀取。使用者於 2026-10-16 選擇「A」時不新增 GUI 入口；2026-10-23 批准的 Results browser 是唯讀檢視例外，呈現保存的 cfg_type、schema_version 與以 values 為根的相對路徑。瀏覽器不修改檔案、不回填表單，也不重新分析。視窗與前端邊界見 [[0067]]；Load 與 adapter 的 opaque record 契約不變。
 
 相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
 

@@ -24,6 +24,8 @@ from zcu_tools.gui.app.measure.writeback import (
 )
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 
+from tests.gui.app.measure._form_fakes import configure_form_lookup
+
 
 def items(count: int) -> list[WritebackItem]:
     result: list[WritebackItem] = []
@@ -166,6 +168,7 @@ def test_shipped_analysis_scroll_reaches_apply_and_the_last_ledger_row(
     qapp: QApplication,
 ) -> None:
     ctrl = MagicMock()
+    configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []

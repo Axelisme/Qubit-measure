@@ -11,9 +11,12 @@ from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
 from PyQt6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractButton,
+    QAbstractScrollArea,
     QApplication,
+    QCalendarWidget,
     QCheckBox,
     QComboBox,
+    QDateTimeEdit,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -21,14 +24,17 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMainWindow,
     QMenu,
     QPlainTextEdit,
     QScrollArea,
+    QSplitter,
     QStatusBar,
     QStyle,
     QStyleOptionButton,
     QStyleOptionComboBox,
     QTabBar,
+    QTableView,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -88,7 +94,7 @@ def mouse_click(widget: QWidget, at: QPoint) -> None:
 
 
 def _display_text(widget: QWidget) -> str:
-    if isinstance(widget, (QAbstractButton, QLabel, QLineEdit)):
+    if isinstance(widget, (QAbstractButton, QLabel, QLineEdit, QDateTimeEdit)):
         return widget.text()
     if isinstance(widget, QComboBox):
         return widget.currentText()
@@ -212,6 +218,25 @@ class ComponentDriver:
             self._window.resize(width, height)
         QApplication.processEvents()
 
+    def close_window(self) -> None:
+        """Request the shown window's normal Qt close, then flush owner events."""
+        if self._can_interact(self._window):
+            self._window.close()
+        QApplication.processEvents()
+
+    def click_at(self, x: int, y: int) -> None:
+        """Click global logical coordinates through the window's actual hit target.
+
+        Coordinates outside this shown window are a no-op. Child overlays receive
+        the event instead of covered controls, just as with physical mouse input.
+        """
+        point = self._window.mapFromGlobal(QPoint(x, y))
+        if self._can_interact(self._window) and self._window.rect().contains(point):
+            target = self._window.childAt(point) or self._window
+            if self._can_interact(target):
+                mouse_click(target, target.mapFromGlobal(QPoint(x, y)))
+        QApplication.processEvents()
+
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.
 
@@ -257,6 +282,26 @@ class ComponentDriver:
                 and widget.isCheckable()
                 else None
             ),
+        )
+
+    def image_center_colour(self, *, object_name: str) -> str:
+        """Read the displayed QLabel raster's centre pixel as a hex RGB colour.
+
+        Hidden/clipped labels raise LookupError; a label without a displayed
+        raster raises ValueError. Other widget kinds raise TypeError.
+        """
+        widget = self._find(None, object_name)
+        if not self._on_screen(widget):
+            raise LookupError("Raster is not visible")
+        if not isinstance(widget, QLabel):
+            raise TypeError("Expected a raster label")
+        pixmap = widget.pixmap()
+        if pixmap.isNull():
+            raise ValueError("Label has no displayed raster")
+        return (
+            pixmap.toImage()
+            .pixelColor(pixmap.width() // 2, pixmap.height() // 2)
+            .name()
         )
 
     def list_rows(self) -> tuple[ListRowObservation, ...]:
@@ -335,11 +380,14 @@ class ComponentDriver:
                 )
         return tuple(rows)
 
-    def select_table_row(self, text: str, *, object_name: str) -> None:
+    def select_table_row(
+        self, text: str, *, object_name: str, double_click: bool = False
+    ) -> None:
         """Click the unique fully visible table cell with this exact caption.
 
         Disabled, hidden, clipped and modal-blocked tables cannot be clicked.
         The target must already be in the viewport; this does not auto-scroll.
+        double_click sends the normal press/release followed by a double-click event.
         """
         table = self._find(None, object_name)
         if not isinstance(table, QTableWidget):
@@ -359,7 +407,79 @@ class ComponentDriver:
                 ):
                     items.append(item)
         item = _unique(text, items, [item.text() for item in items])
-        mouse_click(viewport, table.visualItemRect(item).center())
+        point = table.visualItemRect(item).center()
+        mouse_click(viewport, point)
+        if double_click:
+            for kind, buttons in (
+                (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+                (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+            ):
+                QApplication.sendEvent(
+                    viewport,
+                    QMouseEvent(
+                        kind,
+                        QPointF(point),
+                        QPointF(viewport.mapToGlobal(point)),
+                        Qt.MouseButton.LeftButton,
+                        buttons,
+                        Qt.KeyboardModifier.NoModifier,
+                    ),
+                )
+        QApplication.processEvents()
+
+    def drag_column(self, column: int, delta: int, *, object_name: str) -> None:
+        """Drag a visible table/tree header's right boundary by delta pixels.
+
+        column is a zero-based logical column. Hidden, disabled or clipped
+        boundaries are not driven. A non-table selector raises TypeError;
+        out-of-range columns raise IndexError. Resize mode is left unchanged.
+        """
+        table = self._find(None, object_name)
+        if not isinstance(table, (QTableWidget, QTreeWidget)):
+            raise TypeError(f"{object_name!r} is not a table or tree")
+        if not 0 <= column < table.columnCount():
+            raise IndexError(column)
+        header = (
+            table.header()
+            if isinstance(table, QTreeWidget)
+            else table.horizontalHeader()
+        )
+        if header is None:
+            raise RuntimeError("Table has no header")
+        viewport = header.viewport()
+        assert viewport is not None
+        start = QPoint(
+            header.sectionViewportPosition(column) + header.sectionSize(column) - 1,
+            viewport.height() // 2,
+        )
+        end = start + QPoint(delta, 0)
+        if not self._can_interact(viewport) or not all(
+            viewport.visibleRegion().contains(point) for point in (start, end)
+        ):
+            return
+        left = Qt.MouseButton.LeftButton
+        for kind, point, button, buttons in (
+            (
+                QEvent.Type.MouseMove,
+                start,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.NoButton,
+            ),
+            (QEvent.Type.MouseButtonPress, start, left, left),
+            (QEvent.Type.MouseMove, end, Qt.MouseButton.NoButton, left),
+            (QEvent.Type.MouseButtonRelease, end, left, Qt.MouseButton.NoButton),
+        ):
+            QApplication.sendEvent(
+                viewport,
+                QMouseEvent(
+                    kind,
+                    QPointF(point),
+                    QPointF(viewport.mapToGlobal(point)),
+                    button,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
         QApplication.processEvents()
 
     def edit_table_value(
@@ -598,7 +718,13 @@ class ComponentDriver:
                 key_click(editor, Qt.Key.Key_Return)
         QApplication.processEvents()
 
-    def click(self, text: str | None = None, *, object_name: str | None = None) -> None:
+    def click(
+        self,
+        text: str | None = None,
+        *,
+        object_name: str | None = None,
+        double_click: bool = False,
+    ) -> None:
         """Click a usable widget with real mouse events.
 
         Checkboxes use the style's indicator centre: a stretched checkbox's
@@ -607,6 +733,9 @@ class ComponentDriver:
         """
         widget = self._find(text, object_name)
         if self._can_interact(widget):
+            if isinstance(widget, QDateTimeEdit):
+                editor = widget.findChild(QLineEdit)
+                widget = editor
             point = widget.rect().center()
             if isinstance(widget, QCheckBox):
                 option = QStyleOptionButton()
@@ -618,6 +747,77 @@ class ComponentDriver:
                     QStyle.SubElement.SE_CheckBoxIndicator, option, widget
                 ).center()
             mouse_click(widget, point)
+            if double_click:
+                for kind, buttons in (
+                    (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+                    (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+                ):
+                    QApplication.sendEvent(
+                        widget,
+                        QMouseEvent(
+                            kind,
+                            QPointF(point),
+                            QPointF(widget.mapToGlobal(point)),
+                            Qt.MouseButton.LeftButton,
+                            buttons,
+                            Qt.KeyboardModifier.NoModifier,
+                        ),
+                    )
+        QApplication.processEvents()
+
+    def drag_splitter(self, delta: int, *, object_name: str) -> None:
+        """Drag the first visible splitter handle by delta pixels along its axis.
+
+        The splitter must have two or more children. Hidden/disabled handles and
+        clipped drag endpoints are not driven. Non-splitters raise TypeError.
+        """
+        splitter = self._find(None, object_name)
+        if not isinstance(splitter, QSplitter):
+            raise TypeError(f"{object_name!r} is not a splitter")
+        handle = splitter.handle(1)
+        if handle is None:
+            raise ValueError("Splitter has no handle")
+        if not self._can_interact(handle):
+            return
+        start = handle.rect().center()
+        end = start + (
+            QPoint(delta, 0)
+            if splitter.orientation() == Qt.Orientation.Horizontal
+            else QPoint(0, delta)
+        )
+        if not splitter.rect().contains(handle.mapTo(splitter, end)):
+            return
+        for kind, point, button, buttons in (
+            (
+                QEvent.Type.MouseButtonPress,
+                start,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseMove,
+                end,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseButtonRelease,
+                end,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+            ),
+        ):
+            QApplication.sendEvent(
+                handle,
+                QMouseEvent(
+                    kind,
+                    QPointF(point),
+                    QPointF(handle.mapToGlobal(point)),
+                    button,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
         QApplication.processEvents()
 
     def expand_section(self, object_name: str) -> None:
@@ -736,6 +936,7 @@ class ComponentDriver:
         *,
         object_name: str | None = None,
         evidence: Path | None = None,
+        tree_path: tuple[str, ...] | None = None,
     ) -> None:
         """Open a control's context menu and click an exact visible action caption.
 
@@ -746,9 +947,34 @@ class ComponentDriver:
         delivery has a 30-second watchdog; all popup/callback failures are returned
         to the caller after closing the menu, never left in Qt's event loop.
         evidence optionally captures the visible popup before selecting the action.
+        tree_path targets a visible QTreeWidget row instead of the control centre;
+        missing/ambiguous paths raise LookupError and non-tree targets TypeError.
         """
         widget = self._field_control(text, object_name)
         if not self._can_interact(widget):
+            return
+        target = (
+            widget.viewport() if isinstance(widget, QAbstractScrollArea) else widget
+        )
+        assert target is not None
+        point = target.rect().center()
+        if tree_path is not None:
+            if not isinstance(widget, QTreeWidget):
+                raise TypeError("Expected a tree for tree_path")
+            item = _unique(
+                repr(tree_path),
+                [
+                    i
+                    for i, path in self._visible_tree_items(widget)
+                    if path == tree_path
+                ],
+                [repr(path) for _, path in self._visible_tree_items(widget)],
+            )
+            point = QPoint(
+                widget.columnViewportPosition(0) + widget.columnWidth(0) // 2,
+                widget.visualItemRect(item).center().y(),
+            )
+        if not target.visibleRegion().contains(point):
             return
         errors: list[Exception] = []
 
@@ -774,11 +1000,10 @@ class ComponentDriver:
         watchdog.start(30_000)
         QTimer.singleShot(0, choose)
         try:
-            point = widget.rect().center()
             QApplication.sendEvent(
-                widget,
+                target,
                 QContextMenuEvent(
-                    QContextMenuEvent.Reason.Mouse, point, widget.mapToGlobal(point)
+                    QContextMenuEvent.Reason.Mouse, point, target.mapToGlobal(point)
                 ),
             )
             QApplication.processEvents()
@@ -1039,6 +1264,48 @@ class ComponentDriver:
             key_click(widget, key, modifiers)
         QApplication.processEvents()
 
+    def open_calendar(self, *, object_name: str) -> None:
+        """Click an enabled date edit's visible right-side calendar arrow.
+
+        A date edit without calendarPopup raises ValueError. Other selectors
+        raise TypeError. Hidden, disabled or clipped edits are not driven.
+        """
+        widget = self._find(None, object_name)
+        if not isinstance(widget, QDateTimeEdit):
+            raise TypeError(f"{object_name!r} is not a date edit")
+        if not widget.calendarPopup():
+            raise ValueError("Date edit has no calendar popup")
+        if self._can_interact(widget):
+            mouse_click(widget, QPoint(widget.width() - 8, widget.height() // 2))
+        QApplication.processEvents()
+
+    def choose_calendar_day(self, day: int) -> None:
+        """Click a unique visible day number in the active calendar popup.
+
+        day belongs to the displayed month. Missing/ambiguous visible day cells
+        raise LookupError; no date or model state is assigned directly.
+        """
+        popup = QApplication.activePopupWidget()
+        if popup is None:
+            raise LookupError("No visible calendar popup")
+        calendar = _unique("calendar", popup.findChildren(QCalendarWidget), [])
+        view = _unique("calendar view", calendar.findChildren(QTableView), [])
+        model = view.model()
+        viewport = view.viewport()
+        assert model is not None and viewport is not None
+        cells = [
+            model.index(row, column)
+            for row in range(model.rowCount())
+            for column in range(model.columnCount())
+            if str(model.index(row, column).data()) == str(day)
+            and viewport.visibleRegion().contains(
+                view.visualRect(model.index(row, column))
+            )
+        ]
+        cell = _unique(f"day {day}", cells, [])
+        mouse_click(viewport, view.visualRect(cell).center())
+        QApplication.processEvents()
+
     def select_combo(self, value: str, *, object_name: str) -> None:
         """Select an exact combo-box option using keyboard events, if usable."""
         widget = self._find(None, object_name)
@@ -1253,6 +1520,7 @@ class ComponentDriver:
 
         Visible dialogs are grabbed separately beside it as ``<stem>-dialog-N.png``
         because top-level dialog windows are not included in QWidget.grab().
+        Owned top-level main windows are saved as ``<stem>-window-N.png``.
         The active visible popup belonging to this window is saved separately as
         ``<stem>-popup.png``. Other windows' popups are never captured.
         Raises OSError if Qt cannot save any image.
@@ -1266,6 +1534,11 @@ class ComponentDriver:
             )
             if not widget.grab().save(str(output), "PNG"):
                 raise OSError(f"Could not save screenshot: {output}")
+        for index, window in enumerate(self._window.findChildren(QMainWindow), 1):
+            if window.isVisible() and window.isWindow():
+                output = path.with_stem(f"{path.stem}-window-{index}")
+                if not window.grab().save(str(output), "PNG"):
+                    raise OSError(f"Could not save screenshot: {output}")
         popup = QApplication.activePopupWidget()
         if popup is not None and popup.isVisible():
             # isAncestorOf excludes child windows, so follow Qt's public parent chain.

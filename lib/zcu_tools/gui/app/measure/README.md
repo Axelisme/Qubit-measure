@@ -22,6 +22,8 @@ None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有�
   `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
   ModuleSpec。
 - [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
+  `services.results_index.scan_results(project_root)` 供結果瀏覽器與 RPC 共用唯讀 `ResultsIndex`。它掃描各 Database entry 的 run 目錄，從 datafile.read_doc 讀保存 metadata，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
+  `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
@@ -226,6 +228,13 @@ Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
 and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.
+Only `open_tab_from_file` isolates adapter `make_form` failure so native history
+can still load without a Form. Template binding and default construction still
+fail before publication. The form area and disabled Run show the factory reason.
+Reset uses the normal source capture and factory: success installs a real Form;
+any preparation failure propagates unchanged, leaving no Form and updating the
+visible reason, including capture, template binding and defaults failures. Native cfg
+never supplies form input. See ADR-0073 and ADR-0067.
 Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Setup and each point own independent alias files. Open/Refresh/Reset capture the selected point's table. Inspect Apply, RPC and startup Apply save only that point; without a selected point they fail with no_context. Missing files are empty, without setup or preset fallback. Inspect alias drafts capture entry/point identity. Clean drafts follow selection; dirty drafts reject Apply to another target until Revert loads the current point.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.

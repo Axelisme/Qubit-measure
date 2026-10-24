@@ -63,6 +63,8 @@ class RunPaneSnapshot:
     run_id: str | None = None
     acquisition_run_id: str | None = None
     partial_result: bool = False
+    # Fixed Load source diagnostic, or None for a readable source/non-Load.
+    analysis_source_issue: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,8 +200,14 @@ class TabLifecyclePort(Protocol):
         from_dict: WorkspaceTab | None = None,
         *,
         input: TabInput | None = None,
+        allow_factory_failure: bool = False,
     ) -> str:
-        """Create or restore a tab using the current session sources."""
+        """Create or restore a tab using the current session sources.
+
+        allow_factory_failure is reserved for open_tab_from_file: keep an
+        unavailable form resource if adapter.make_form fails. Other preparation
+        errors propagate before publication; no empty Form or cfg is supplied.
+        """
         ...
 
     def close_tab(self, tab_id: str) -> None: ...

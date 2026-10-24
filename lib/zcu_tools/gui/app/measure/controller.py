@@ -71,7 +71,7 @@ from .events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from .registry import Registry
+from .registry import ExperimentResolution, Registry
 from .remote.dialogs import DialogName
 from .services import (
     AppPersistedState,
@@ -80,6 +80,7 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
+from .services.results_index import ResultsIndex, scan_results
 from .state import State
 from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
@@ -1351,6 +1352,24 @@ class Controller(SessionControllerMixin):
     # ------------------------------------------------------------------
     # Project root and settings
     # ------------------------------------------------------------------
+
+    def resolve_experiment(self, experiment: str | None) -> ExperimentResolution:
+        """Resolve historical identity through the live catalog, without mutation.
+
+        Exact registered names win; otherwise a unique load-capable tag owner is
+        returned. Unknown/missing/ambiguous identities carry a rejection reason.
+        """
+        return self._registry.resolve_experiment(experiment)
+
+    def query_results(self) -> ResultsIndex:
+        """Read all saved Database runs under the current project root.
+
+        Return a fresh detached snapshot shared by the browser and RPC, without
+        changing the opened entry/point or creating files/locks. Missing Database
+        returns an empty index. Ledger/schema and escaping-path errors propagate;
+        individual unreadable run documents remain visible through run.issues.
+        """
+        return scan_results(Path(self.get_project_root()))
 
     def get_project_root(self) -> str:
         """Return the injected base directory for result and Database roots.

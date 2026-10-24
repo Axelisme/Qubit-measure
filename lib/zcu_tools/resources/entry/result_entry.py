@@ -14,15 +14,18 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from zcu_tools.cfg_model import WaveformAssetInfo
+from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
+from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
 from .aliases import EntryAliases, load_entry_aliases_with_revision, save_entry_aliases
-from .errors import DestinationExistsError
+from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
@@ -38,6 +41,7 @@ from .schema import (
     PARAMETER_VERSION,
     PointDocument,
     SetupDocument,
+    SetupGeneral,
 )
 from .storage import bind_sample_table
 from .views import (
@@ -536,7 +540,8 @@ class ResultEntry:
 
         label follows new_point's single-segment path rules. Both point.yaml and
         module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
-        raise ValueError and missing files raise FileNotFoundError. Original
+        raise ValueError. Missing required documents raise MissingPointError,
+        a FileNotFoundError subclass; other I/O and reference errors propagate. Original
         models apply their required fields, defaults and validators. Schema
         ValidationError becomes ValueError with the full document path and original
         diagnostic. The original error remains its cause. References are resolved
@@ -546,8 +551,11 @@ class ResultEntry:
         directory = _entry_path(self._result_path / "points", label)
         source = directory / "point.yaml"
         module = directory / "module_cfg.yaml"
-        if not module.is_file():
-            raise FileNotFoundError(module)
+        for required in (module, source):
+            try:
+                required.stat()
+            except FileNotFoundError as error:
+                raise MissingPointError(required) from error
         return PointView(
             self._point_store(source),
             source,
@@ -603,6 +611,67 @@ class ResultEntry:
             )
         except ValidationError as exc:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
+
+    @classmethod
+    def read_events_snapshot(
+        cls, name: str, *, result_root: str | Path
+    ) -> tuple[LedgerEvent, ...]:
+        """Read validated historical events for a safe single-segment entry name.
+
+        result_root is the exact Result root, not an entry or Database directory.
+        Missing entry, records directory or ledger returns (). An existing entry
+        must have a valid setup header and UUID/UTC identity; components are not
+        interpreted. Ledger validation and I/O errors propagate. Symlinks must
+        preserve root/entry/records containment and keep the ledger in records,
+        otherwise raise ValueError. No entry, file, directory or lock is created,
+        and attachments are not read.
+        """
+        root = Path(result_root).absolute()
+        result = _entry_path(root, name)
+        for path in (root, result):
+            if not path.resolve().is_relative_to(path):
+                raise ValueError(f"{path}: path escapes its entry location")
+        if not result.exists():
+            return ()
+        identity = cls.read_identity(name, result_root=root)
+        records = result / "records"
+        if not records.resolve().is_relative_to(records):
+            raise ValueError(f"{records}: records path escapes its entry location")
+        if not records.exists():
+            return ()
+        ledger = records / "ledger.jsonl"
+        if not ledger.resolve().is_relative_to(records):
+            raise ValueError(f"{ledger}: ledger path escapes records")
+        return RecordsLedger(
+            records, entry_id=str(identity.entry_id)
+        ).read_events_snapshot()
+
+    @classmethod
+    def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:
+        """Read setup header and identity without component registration or locks.
+
+        name is a safe single entry name under result_root. Validate the shared
+        parameter-container header and general UUID/UTC creation time only;
+        do not interpret component kinds or require point/records directories.
+        Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
+        Missing setup and other filesystem errors propagate. No files are written.
+        """
+        source = _entry_path(result_root, name) / "setup.yaml"
+        if not source.resolve().is_relative_to(source.parent.resolve()):
+            raise ValueError(f"{source}: setup escapes its entry")
+        try:
+            with source.open(encoding="utf-8") as stream:
+                document = TypeAdapter(YamlMap).validate_python(
+                    YAML(typ="safe").load(stream)
+                )
+            validate_parameter_header(document, source=source)
+            general = SetupGeneral.model_validate(document.get("general"))
+        except (ValueError, YAMLError) as error:
+            raise ValueError(f"{source}: {error}") from error
+        return EntryIdentity(
+            entry_id=UUID(general.entry_id),
+            created_at=datetime.fromisoformat(general.created_at),
+        )
 
     @classmethod
     def list_names(cls, *, result_root: str | Path) -> tuple[str, ...]:

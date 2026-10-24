@@ -73,6 +73,23 @@ class AcceptedFormConfig:
     source_basis: SourceBasis
 
 
+@dataclass(frozen=True)
+class FormFactoryFailure:
+    """An isolated history-tab factory failure, not an empty Form.
+
+    error is the original adapter exception. Reset re-raises it and only updates
+    the visible reason when the resource still has no real Form.
+    """
+
+    error: Exception
+
+
+@dataclass
+class _FormContent:
+    form: Form[ConfigBase]
+    state: FormState[FormModel]
+
+
 class TabFormResource:
     """Own a tab's inputs and captured sources independently of any frontend.
 
@@ -86,7 +103,7 @@ class TabFormResource:
 
     def __init__[C: ConfigBase](
         self,
-        make_form: Callable[[FormContext], Form[C]],
+        make_form: Callable[[FormContext], Form[C] | FormFactoryFailure],
         *,
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         mutation_allowed: Callable[[], bool],
@@ -97,6 +114,10 @@ class TabFormResource:
 
         make_form builds a definition from the newly captured context on Open
         and Reset. The caller binds its template catalog before returning it.
+        Only the history-tab caller may return FormFactoryFailure instead of a
+        Form. Open then keeps an unavailable resource; Reset re-raises that
+        failure and publishes its new reason while no Form exists. Other reads
+        or edits requiring Form input raise NOT_VALID. No empty Form is created.
         capture accepts one-shot named alias overrides, or None for global rows.
         mutation_allowed is the app busy/control policy; notification_active
         reports notifications in other tab resources. Neither callback may do
@@ -112,8 +133,15 @@ class TabFormResource:
         self._mutation_allowed = mutation_allowed
         self._notification_active = notification_active
         self._sources = capture(None)
-        self._form = make_form(FormContext(self._sources.env.parameters))
-        self._state = FormState(self._form.default_input(self._sources.env))
+        self._content: _FormContent | None = None
+        self._unavailable_reason: str | None = None
+        form = make_form(FormContext(self._sources.env.parameters))
+        if isinstance(form, FormFactoryFailure):
+            self._unavailable_reason = str(form.error)
+        else:
+            self._content = _FormContent(
+                form, FormState(form.default_input(self._sources.env))
+            )
         self._dropped_paths = (
             self._state.restore_input(
                 FormInput.from_json(
@@ -130,6 +158,33 @@ class TabFormResource:
         self._open = True
         self._notifying = False
         self._callbacks: list[Callable[[], None]] = []
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        """Return the current preparation error for a history tab without a Form.
+
+        Initially this is the adapter factory error. A failed Reset updates it.
+        None means a real Form exists. Reset can recover it; other form reads
+        and edits reject an unavailable resource rather than supply empty input.
+        """
+        self._require_open()
+        return self._unavailable_reason
+
+    @property
+    def _form(self) -> Form[ConfigBase]:
+        return self._require_content().form
+
+    @property
+    def _state(self) -> FormState[FormModel]:
+        return self._require_content().state
+
+    def _require_content(self) -> _FormContent:
+        if self._content is None:
+            raise CfgPreconditionError(
+                CfgPreconditionReason.NOT_VALID,
+                self._unavailable_reason or "Form is unavailable",
+            )
+        return self._content
 
     @property
     def input(self) -> FormInput[FormModel]:
@@ -520,6 +575,8 @@ class TabFormResource:
         with self._mutation():
             sources = self._capture(aliases)
             form = self._make_form(FormContext(sources.env.parameters))
+            if isinstance(form, FormFactoryFailure):
+                raise form.error
             current = self._state.input
             form.seed_sources = self._form.seed_sources
             form.seed_metadata = self._form.seed_metadata
@@ -527,8 +584,7 @@ class TabFormResource:
                 FormInput(form.model, current.data, selections=current.selections)
             )
             self._sources = sources
-            self._form = form
-            self._state = state
+            self._content = _FormContent(form, state)
             self._notify()
 
     def reset(self, *, aliases: Mapping[str, str] | None = None) -> None:
@@ -537,16 +593,28 @@ class TabFormResource:
         aliases optionally overrides named bindings for this capture only. It is
         neither retained as an override nor written to the global alias table.
         Capture/factory/default failures preserve the old shape, input and source.
+        For an unavailable history resource, any preparation failure updates the
+        visible reason and propagates unchanged; success installs the first real Form.
         A successful Reset replaces shape and defaults together. Busy, revoked
         and notification-reentrant calls raise CfgPreconditionError.
         """
         with self._mutation():
-            sources = self._capture(aliases)
-            form = self._make_form(FormContext(sources.env.parameters))
-            state = FormState(form.default_input(sources.env))
+            try:
+                sources = self._capture(aliases)
+                form = self._make_form(FormContext(sources.env.parameters))
+                if isinstance(form, FormFactoryFailure):
+                    raise form.error
+                state = FormState(form.default_input(sources.env))
+            except Exception as exc:
+                # Reset never recovers preparation failure. An unavailable tab
+                # still needs the current reason while the original error escapes.
+                if self._content is None:
+                    self._unavailable_reason = str(exc)
+                    self._notify()
+                raise
             self._sources = sources
-            self._form = form
-            self._state = state
+            self._content = _FormContent(form, state)
+            self._unavailable_reason = None
             self._notify()
 
     def require_mutation_allowed(self) -> None:
@@ -636,7 +704,7 @@ class TabFormResources:
     def create[C: ConfigBase](
         self,
         tab_id: str,
-        make_form: Callable[[FormContext], Form[C]],
+        make_form: Callable[[FormContext], Form[C] | FormFactoryFailure],
         *,
         capture: Callable[[Mapping[str, str] | None], TabFormSources],
         initial: Mapping[str, JsonValue] | TabInput | None = None,
@@ -644,7 +712,8 @@ class TabFormResources:
         """Prepare one fixed capture and optional compatible restoration before registration.
 
         tab_id is a nonempty new app identity. make_form builds a catalog-bound
-        definition; capture reads published sources on Open/Reset only. initial
+        definition or an explicit history-only FormFactoryFailure; capture reads
+        published sources on Open/Reset only. initial
         is native Form input JSON or opaque TabInput, never a cfg/result. Owner
         thread only; caller retains input, pool owns the resource. Duplicate/empty
         identities raise ValueError; preparation failures leave no association.

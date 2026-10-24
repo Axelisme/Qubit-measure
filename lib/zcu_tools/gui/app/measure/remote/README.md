@@ -36,6 +36,34 @@ Shared transport primitives live in [`zcu_tools.gui.remote`](../../../remote/REA
 typed request/reply/error envelope, socket endpoint, owner-scheduler dispatch, and
 router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/wire.py).
 
+## Saved results
+
+`results.list()` returns `{runs: [...]}` from a fresh project-wide Database
+snapshot through `Controller.query_results() -> ResultsIndex`, the same query
+used by the results browser. It needs neither an opened entry nor a selected
+point and does not switch either. Missing Database returns an empty list.
+
+Each run includes opaque `key`, `entry`, historical `run_id`, `experiment`,
+`point`, captured `roles`, `at`, `registered`, absolute `run_path`,
+nullable `data_path`, `figure_paths`, `analysis_paths`, `figures`,
+`search_text` and `issues`. Missing historical identity stays null.
+`figures` lists exact PNG filename selectors. `search_text` includes tone names
+from cfg/analysis even when roles captured only one mux component. Full cfg,
+analysis documents and arrays are not returned. The caller filters this list;
+the browser's display filters do not change the common source.
+
+`results.figure(run_key, figure)` uses that opaque key and one exact filename
+from `figures`. It returns `{mime_type: "image/png", png_b64: "..."}` with
+the saved bytes, without rendering or analysis. Arbitrary paths are not accepted.
+Unknown runs/selectors return `invalid_params` with `unknown_result_run` or
+`unknown_result_figure`. Escaping paths and I/O failures retain shared dispatch's
+structured errors. There is no retry.
+
+Both methods are readonly and available to observers in the live catalog through
+`rpc_call`; they do not add fixed MCP tools. Every call rescans the disk.
+Membership and content can change between list and figure. Neither method
+creates files or locks, writes results, or changes entry/point selection.
+
 ## Captured writeback
 
 `tab.writeback_preview` 回 owner 當下的 draft 候選，不帶 revision。

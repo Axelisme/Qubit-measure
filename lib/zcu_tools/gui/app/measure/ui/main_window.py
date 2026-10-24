@@ -63,6 +63,7 @@ from .main_window_activity import activity_marker_presentation
 from .main_window_events import MainWindowEventCoordinator
 from .main_window_tab_list import configure_tab_bar
 from .main_window_toolbar import MainWindowToolbar
+from .results_browser import ResultsBrowserWindow
 from .run_load_dialog import RunLoadDialog
 from .workflow_tabs import WorkflowTabs
 
@@ -155,11 +156,11 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self._ctrl = controller
+        self._results_browser: ResultsBrowserWindow | None = None
         self._workflow_mode = False
         self._workflow_busy = False
         self._writable = True
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        self._cfg_status_message: str | None = None
         self._tab_actions: TabActions = _MainWindowTabActions(self)
         self._dialog_refs = DialogRefStore()
         self._dialog_presenter = dialog_presenter or QtDialogPresenter(
@@ -263,6 +264,8 @@ class MainWindow(QMainWindow):
         if self._control_disposed:
             return
         self._workflow_tabs.dispose()
+        if self._results_browser is not None:
+            self._results_browser.close()
         self._dispose_control()
         if self._shutdown_application is not None:
             self._shutdown_application.aboutToQuit.disconnect(
@@ -289,6 +292,8 @@ class MainWindow(QMainWindow):
             dialog.reject()
         self._cleanup_bus_subscriptions()
         self._dialog_registry.dispose()
+        if self._results_browser is not None:
+            self._results_browser.close()
         for tab in self._tab_widgets.values():
             tab.detach()
         self._tab_widgets.clear()
@@ -316,6 +321,8 @@ class MainWindow(QMainWindow):
         """Project Local write availability to this window and all mounted views."""
         self._writable = writable
         self._toolbar.set_writable(writable=writable)
+        if self._results_browser is not None:
+            self._results_browser.set_writable(writable=writable)
         self._workflow_tabs.set_writable(writable=writable)
         workflow_busy = any(s.busy for s in self._ctrl.workflow_control().tabs())
         self._dialog_registry.set_running(
@@ -568,17 +575,6 @@ class MainWindow(QMainWindow):
         if tab_w is None or not self._ctrl.has_tab(tab_id):
             return
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
-        if self._tabs.currentWidget() is tab_w:
-            self._refresh_cfg_status(tab_w)
-
-    def _refresh_cfg_status(self, tab_w: ExpTabWidget | None) -> None:
-        reason = tab_w.cfg_invalid_reason() if tab_w is not None else None
-        if reason is not None:
-            message = f"Config invalid: {reason}"
-            self.show_status_message(message)
-            self._cfg_status_message = message
-        elif self._cfg_status_message is not None:
-            self.show_status_message("")
 
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
@@ -768,7 +764,6 @@ class MainWindow(QMainWindow):
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
-        self._cfg_status_message = None
         self._status_label.setText(message)
         self._status_label.setToolTip(message)
 
@@ -833,6 +828,20 @@ class MainWindow(QMainWindow):
         self._dialog_registry.set_running(
             running=self._ctrl.get_running_tab_id() is not None or busy
         )
+
+    def open_results_browser(self) -> None:
+        """Show or raise the independent results window without changing session context."""
+        if self._results_browser is None:
+            try:
+                self._results_browser = ResultsBrowserWindow(self._ctrl, self)
+            except Exception as error:
+                logger.exception("Cannot open results browser")
+                self.show_error_dialog("Results browser failed", str(error))
+                return
+        self._results_browser.set_writable(writable=self._writable)
+        self._results_browser.show()
+        self._results_browser.raise_()
+        self._results_browser.activateWindow()
 
     def list_adapter_names(self) -> list[str]:
         if self._workflow_mode:
@@ -1006,11 +1015,9 @@ class MainWindow(QMainWindow):
     def _on_current_tab_changed(self, index: int) -> None:
         widget = self._tabs.widget(index)
         if not isinstance(widget, ExpTabWidget):
-            self._refresh_cfg_status(None)
             return
         if not self._ctrl.has_tab(widget.tab_id):
             return
-        self._refresh_cfg_status(widget)
         if self._ctrl.control_identity.status().holder == "gui":
             self._ctrl.set_active_tab(widget.tab_id)
 
@@ -1044,8 +1051,6 @@ class MainWindow(QMainWindow):
         if reason is not None:
             msg = f"Config invalid: {reason}"
             logger.warning("run_or_stop_tab: blocked — %s", msg)
-            self.show_status_message(msg)
-            self._cfg_status_message = msg
             return
         self._ctrl.start_run(tab_id)
 

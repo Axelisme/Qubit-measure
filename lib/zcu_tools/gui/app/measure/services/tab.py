@@ -26,6 +26,7 @@ from .ports import (
     SavePaneSnapshot,
     TabSnapshot,
 )
+from .tab_form import FormFactoryFailure
 from .tab_input import StartupTab, TabInput
 from .workspace_types import WorkspaceTab
 
@@ -150,7 +151,9 @@ class TabService:
         metadata = None if tab.run.result is None else tab.run.result.metadata
         return TabSnapshot(
             adapter_name=tab.adapter_name,
-            cfg_input=tab.cfg.input.data,
+            cfg_input={}
+            if tab.cfg.unavailable_reason is not None
+            else tab.cfg.input.data,
             tab_id=tab_id,
             interaction=interaction,
             capabilities=tab.adapter.capabilities,
@@ -158,6 +161,7 @@ class TabService:
                 result=tab.run.result,
                 partial_result=tab.run.partial_result,
                 source_path=tab.run.source_path,
+                analysis_source_issue=tab.run.analysis_source_issue,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
                 acquisition_run_id=(metadata.run_id if metadata is not None else None),
@@ -206,6 +210,7 @@ class TabService:
         from_dict: WorkspaceTab | None = None,
         *,
         input: TabInput | None = None,
+        allow_factory_failure: bool = False,
     ) -> str:
         """Create a tab form with one fixed source snapshot and fresh defaults.
 
@@ -217,7 +222,9 @@ class TabService:
         Compatible restoration logs discarded paths, also available through
         dropped_input_paths. Source captures and pane results are not restored.
         Owner-only; GUI owns the created tab, caller retains its input copy.
-        Failed preparation publishes no partial tab.
+        Failed preparation publishes no partial tab. Only open_tab_from_file
+        sets allow_factory_failure: adapter.make_form failure then retains an
+        unavailable resource. Template binding and defaults remain fail-fast.
         """
         if from_dict is not None and input is not None:
             raise ValueError("Specify either reload input or authored input, not both")
@@ -230,8 +237,13 @@ class TabService:
             from_dict is not None,
         )
 
-        def make_form(ctx: FormContext) -> Form[ConfigBase]:
-            form = adapter.make_form(ctx)
+        def make_form(ctx: FormContext) -> Form[ConfigBase] | FormFactoryFailure:
+            try:
+                form = adapter.make_form(ctx)
+            except Exception as exc:
+                if not allow_factory_failure:
+                    raise
+                return FormFactoryFailure(exc)
             form.bind_templates(self._registry.templates, adapter=adapter_name)
             return form
 

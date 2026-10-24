@@ -29,6 +29,7 @@ from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.widgets import error_colour
 
 from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure._form_fakes import configure_form_lookup
 
 
 @pytest.fixture
@@ -198,6 +199,7 @@ def test_analysis_parameter_text_remains_readable_after_hydration(
     qapp: QApplication, tmp_path: Path, hydration: str
 ) -> None:
     ctrl = MagicMock()
+    configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
@@ -253,6 +255,7 @@ def test_analysis_parameter_text_remains_readable_after_hydration(
 
 def test_analysis_parameter_hint_tracks_empty_and_populated_forms(qapp):
     ctrl = MagicMock()
+    configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
@@ -324,6 +327,7 @@ def _post_tab(qapp):
     from zcu_tools.gui.app.measure.adapter import AnalysisMode
 
     ctrl = MagicMock()
+    configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []

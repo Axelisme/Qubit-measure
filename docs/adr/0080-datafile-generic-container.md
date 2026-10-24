@@ -59,7 +59,7 @@ Fluxdep database reader 由 `gui.app.fluxdep.database` 擁有。`analysis_docume
 ### 其他 package 的對應
 
 - `experiment`：擁有 `RunMetadata`（pydantic）與 cfg 的具名型別，save 時 `model_dump(mode="json")` 成 doc、load 時 `TypeAdapter` 驗回（[[0063]] 的 `axes_spec` mapping 不變，只是輸出目標從 `ExperimentPayload` 改為 `vars`）。`RunRecord.metadata` 承載它。`native_persistence.read_run_metadata(path)` 用 read_doc 只讀 metadata；`metadata_from_container(container)` 驗證已載入的 Container。兩者共用同一個 RunMetadata 驗證函式，宿主不重做驗證，也不為取得已載 metadata 再開檔。
-- GUI、notebook、workflow 的宿主：只傳 `RunRecord`，不再另傳 metadata；載入對話框等需要 run_id、point、experiment 的地方讀 experiment 層的型別。
+- GUI、notebook、workflow 的宿主：只傳 `RunRecord`，不再另傳 metadata；載入對話框等需要 run_id、point、experiment 的地方讀 experiment 層的型別。Results browser 的唯讀歷史展示依 [[0067]] 直接讀保存文件，不套用當前實驗 schema；真正 Load 仍走 experiment 驗證。
 - 遷移工具：`migrations/` 讀舊 Labber 與 2.x native，輸出新容器。
 
 ## 後果
