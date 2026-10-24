@@ -3,22 +3,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.lookback.core import (
@@ -61,66 +59,51 @@ class LookbackAnalyzeResult(AnalyzeResultBase):
         return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
-class LookbackAdapter(
-    BaseAdapter[
-        LookbackCfg,
-        LookbackRunResult,
-        LookbackAnalyzeResult,
-        LookbackAnalyzeParams,
-    ]
-):
-    exp_cls = LookbackExp
+def _analyze(
+    req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
+    *,
+    plots: Plots,
+) -> LookbackAnalyzeResult:
+    params = req.analyze_params
+    answer = LookbackExp().analyze(
+        req.run_result,
+        LookbackAnalyzeOptions(
+            ratio=params.ratio,
+            smooth=params.smooth,
+            plot_fit=params.plot_fit,
+        ),
+        plots=plots,
+    )
+    return LookbackAnalyzeResult(predict_offset=answer.predict_offset)
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[LookbackCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _writeback(
+    req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    """Propose detected arrival time in us at captured resonator.time_of_fly.
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: LookbackCfg,
-        *,
-        context: RunContext,
-    ) -> LookbackRunResult:
-        del req
-        result = LookbackExp().run(cfg, context=context)
-        return RunRecord(cfg=cfg, result=result)
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> LookbackAnalyzeResult:
-        params = req.analyze_params
-        answer = LookbackExp().analyze(
-            req.run_result,
-            LookbackAnalyzeOptions(
-                ratio=params.ratio,
-                smooth=params.smooth,
-                plot_fit=params.plot_fit,
-            ),
-            plots=plots,
+    req supplies the analysis and its capture; source.cfg may be None.
+    WritebackService resolves the destination on req.ctx.parameters and
+    rejects missing capture or unbound roles. No live focus lookup or write
+    occurs here.
+    """
+    return [
+        ParameterWriteback(
+            target_name="$resonator.time_of_fly",
+            description="Readout trigger offset prediction (us)",
+            proposed_value=req.analyze_result.predict_offset,
         )
-        return LookbackAnalyzeResult(predict_offset=answer.predict_offset)
+    ]
 
-    def get_writeback_items(
-        self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        """Propose detected arrival time in us at captured resonator.time_of_fly.
 
-        req supplies the analysis and its capture; source.cfg may be None.
-        WritebackService resolves the destination on req.ctx.parameters and
-        rejects missing capture or unbound roles. No live focus lookup or write
-        occurs here.
-        """
-        return [
-            ParameterWriteback(
-                target_name="$resonator.time_of_fly",
-                description="Readout trigger offset prediction (us)",
-                proposed_value=req.analyze_result.predict_offset,
-            )
-        ]
+DEFINITION = Adapter(
+    spec=LookbackExp.AXES_SPEC,
+    make_form=make_form,
+    run=LookbackExp().run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_analyze,
+        options=lambda source, env: LookbackAnalyzeParams(),
+        writeback=_writeback,
+    ),
+)
