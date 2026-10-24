@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-10-24
 
-Recipe 是操作 GUI tab 的 async 函式。Adapter 擁有 cfg、表單、量測與分析。
+Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
 
 ## 宣告與註冊
@@ -41,6 +41,10 @@ Reuse 是 idle matching tab ID，省略／KEEP／null 開新 tab。不改全域 
 `tab.read_parameter(path, missing_ok=False)` 讀 tab 固定捕捉的參數。
 `session.device_unit(name)` 讀裝置快取的 flux 單位，不碰硬體或刷新快取。
 `tab.read(path)` 回 `FormField`，使用 dotted string，例如 `"tones.2.drive"`。
+Module 與掃描欄位位於頂層，例如 `"readout"`、`"length"`，不加 modules／sweep 包裝。
+T2Ramsey／T2Echo 使用 `"detune_ratio"`；CPMG 的共用時間窗使用
+`"min_length_us"`、`"max_length_us"`、`"length_points"`，不加 extras 前綴。
+這些是 adapter 的 Form input 路徑，adapter.run 再轉成保存於 RunRecord 的實驗 cfg。
 
 寫入使用非空 dotted string，例如 `"tones.2.drive.gain"`，索引指完整清單的原始位置。
 `tab.set(path, value)` 原樣替換欄位，不選來源、不自動 convert。

@@ -201,17 +201,16 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             on_update=update_view,
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.qub_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.qub_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
 
             # The board sweeps gain within each reset/drive/readout acquisition.
             program = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .add_reset("reset", modules.reset)
-                .add_pulse("qubit_pulse", modules.qub_pulse)
-                .add_readout("readout", modules.readout)
+                .add_reset("reset", sched.cfg.reset)
+                .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
+                .add_readout("readout", sched.cfg.readout)
                 .declare_sweep("gain", sched.cfg.gain)
                 .build()
             )

@@ -93,7 +93,6 @@ class MistExp(Experiment[MistResult, MistCfg]):
         # Quantize both gain axes for their respective generators.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         flux_gain_sweep = cfg.flux_gain
         mist_gain_sweep = cfg.mist_gain
@@ -101,12 +100,12 @@ class MistExp(Experiment[MistResult, MistCfg]):
         flux_gains = sweep2array(
             flux_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.flux_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.flux_pulse.ch},
         )
         mist_gains = sweep2array(
             mist_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.mist_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.mist_pulse.ch},
         )
 
         # Display the averaged response without classifying individual shots.
@@ -124,11 +123,10 @@ class MistExp(Experiment[MistResult, MistCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.flux_pulse.set_param(
+            sched.cfg.flux_pulse.set_param(
                 "gain", sweep2param("flux_gain", sched.cfg.flux_gain)
             )
-            modules.mist_pulse.set_param(
+            sched.cfg.mist_pulse.set_param(
                 "gain", sweep2param("mist_gain", sched.cfg.mist_gain)
             )
 
@@ -138,13 +136,13 @@ class MistExp(Experiment[MistResult, MistCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
                     Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
-                        Pulse("mist_pulse", modules.mist_pulse),
+                        Pulse("flux_pulse", sched.cfg.flux_pulse),
+                        Pulse("mist_pulse", sched.cfg.mist_pulse),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("flux_gain", sched.cfg.flux_gain)
                 .declare_sweep("mist_gain", sched.cfg.mist_gain)

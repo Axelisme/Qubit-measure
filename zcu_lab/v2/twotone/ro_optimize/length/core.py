@@ -103,9 +103,8 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Quantize integration windows on the ADC clock, not the generator clock.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
-        readout_cfg = modules.readout
+        readout_cfg = cfg.readout
         lengths = sweep2array(
             cfg.length,
             "time",
@@ -128,9 +127,8 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
-                modules = step.cfg
-                modules.readout.set_param("ro_length", step.value)
-                modules.readout.set_param("length", lengths.max() + 0.11)
+                step.cfg.readout.set_param("ro_length", step.value)
+                step.cfg.readout.set_param("length", lengths.max() + 0.11)
                 tracker = MomentTracker()
 
                 _ = (
@@ -141,9 +139,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", cfg=modules.reset),
-                        Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                        PulseReadout("readout", cfg=modules.readout),
+                        Reset("reset", cfg=step.cfg.reset),
+                        Branch("ge", [], Pulse("qub_pulse", cfg=step.cfg.qub_pulse)),
+                        PulseReadout("readout", cfg=step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .build_and_acquire(

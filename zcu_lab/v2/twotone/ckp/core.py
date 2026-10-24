@@ -306,20 +306,18 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg
-
         res_freq_sweep = cfg.res_freq
         qub_freq_sweep = cfg.qub_freq
 
         res_freqs = sweep2array(
             res_freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.res_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.res_pulse.ch},
         )
         qub_freqs = sweep2array(
             qub_freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         figure, _ = context.plots.subplots("measurement", ncols=2, figsize=(10, 4))
@@ -353,11 +351,10 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
 
         # Acquire both preparations and the full frequency grid in one program.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
             res_freq_param = sweep2param("res_freq", sched.cfg.res_freq)
             qub_freq_param = sweep2param("qub_freq", sched.cfg.qub_freq)
-            modules.res_pulse.set_param("freq", res_freq_param)
-            modules.qub_pulse.set_param("freq", qub_freq_param)
+            sched.cfg.res_pulse.set_param("freq", res_freq_param)
+            sched.cfg.qub_pulse.set_param("freq", qub_freq_param)
 
             # State preparation precedes the parallel probes and common readout.
             _ = (
@@ -365,13 +362,13 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", cfg=modules.reset),
-                    Branch("ge", [], Pulse("pi_pulse", cfg=modules.pi_pulse)),
+                    Reset("reset", cfg=sched.cfg.reset),
+                    Branch("ge", [], Pulse("pi_pulse", cfg=sched.cfg.pi_pulse)),
                     Join(
-                        Pulse("res_pulse", cfg=modules.res_pulse),
-                        Pulse("qub_pulse", cfg=modules.qub_pulse),
+                        Pulse("res_pulse", cfg=sched.cfg.res_pulse),
+                        Pulse("qub_pulse", cfg=sched.cfg.qub_pulse),
                     ),
-                    Readout("readout", cfg=modules.readout),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("ge", 2)
                 .declare_sweep("res_freq", sched.cfg.res_freq)

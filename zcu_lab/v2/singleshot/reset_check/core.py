@@ -165,25 +165,24 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
-            modules = sched.cfg
-            modules.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
             builder = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("rabi_pulse", modules.rabi_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("rabi_pulse", sched.cfg.rabi_pulse),
                     Branch(
                         "reset_sel",
                         [],  # Before tested reset.
-                        Reset("tested_reset_1", modules.tested_reset),
+                        Reset("tested_reset_1", sched.cfg.tested_reset),
                         [
-                            Reset("tested_reset_2", modules.tested_reset),
-                            Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
+                            Reset("tested_reset_2", sched.cfg.tested_reset),
+                            Pulse("rabi_pulse_after_reset", sched.cfg.rabi_pulse),
                         ],
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("gain", sched.cfg.gain)
                 .declare_sweep("reset_sel", 3)

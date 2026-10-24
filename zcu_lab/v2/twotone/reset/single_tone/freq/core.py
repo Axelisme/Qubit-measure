@@ -90,9 +90,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Quantize reset frequency on the tested pulse's generator.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         freqs = sweep2array(
             cfg.freq,
             "freq",
@@ -108,17 +107,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # Sweep the tested reset frequency after the optional preparation.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.tested_reset.set_param("freq", sweep2param("freq", sched.cfg.freq))
+            sched.cfg.tested_reset.set_param(
+                "freq", sweep2param("freq", sched.cfg.freq)
+            )
             _ = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    PulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    PulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("freq", sched.cfg.freq)
                 .build_and_acquire(rounds=cfg.rounds)

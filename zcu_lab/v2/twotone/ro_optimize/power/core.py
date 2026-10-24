@@ -110,12 +110,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # Quantize normalized readout gain on the pulse generator.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
         # Display ground/excited separation rather than either mean IQ trace.
@@ -133,10 +132,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # Compare pulse-off/on branches at each hardware-swept readout gain.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
             gain_sweep = sched.cfg.gain
             gain_param = sweep2param("gain", gain_sweep)
-            modules.readout.set_param("gain", gain_param)
+            sched.cfg.readout.set_param("gain", gain_param)
             tracker = MomentTracker()
 
             _ = (
@@ -144,9 +142,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", cfg=modules.reset),
-                    Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                    Readout("readout", cfg=modules.readout),
+                    Reset("reset", cfg=sched.cfg.reset),
+                    Branch("ge", [], Pulse("qub_pulse", cfg=sched.cfg.qub_pulse)),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("ge", 2)
                 .declare_sweep("gain", gain_sweep)

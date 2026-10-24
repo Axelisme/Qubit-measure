@@ -105,9 +105,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg
-
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         gains1 = sweep2array(
             cfg.gain1,
             "gain",
@@ -140,11 +138,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # Sweep both reset gains in hardware and collect mean IQ.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.tested_reset.set_param(
+            sched.cfg.tested_reset.set_param(
                 "gain1", sweep2param("gain1", sched.cfg.gain1)
             )
-            modules.tested_reset.set_param(
+            sched.cfg.tested_reset.set_param(
                 "gain2", sweep2param("gain2", sched.cfg.gain2)
             )
             _ = (
@@ -152,10 +149,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    TwoPulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("gain1", sched.cfg.gain1)
                 .declare_sweep("gain2", sched.cfg.gain2)

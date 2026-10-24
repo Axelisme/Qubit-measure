@@ -95,12 +95,11 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         # 1. Prepare gain coordinates for the probe's generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
         viewer = live_line(context.plots, "measurement", "Pulse gain", "MIST")
@@ -111,8 +110,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         # 2. Bind the board gain sweep without changing the other probe settings.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
 
             # 3. Reset and initialize before each probe/readout sequence.
             _ = (
@@ -120,10 +118,10 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Pulse("probe_pulse", sched.cfg.probe_pulse),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("gain", sched.cfg.gain)
                 .build_and_acquire(rounds=cfg.rounds)

@@ -109,12 +109,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Quantize the readout frequency grid on the pulse generator.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
         # Show the separation score rather than either preparation's mean IQ.
@@ -132,10 +131,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # Compare pulse-off/on branches at each hardware-swept readout frequency.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
             freq_sweep = sched.cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
+            sched.cfg.readout.set_param("freq", freq_param)
             tracker = MomentTracker()
 
             _ = (
@@ -143,9 +141,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", cfg=modules.reset),
-                    Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                    Readout("readout", cfg=modules.readout),
+                    Reset("reset", cfg=sched.cfg.reset),
+                    Branch("ge", [], Pulse("qub_pulse", cfg=sched.cfg.qub_pulse)),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("ge", 2)
                 .declare_sweep("freq", freq_sweep)

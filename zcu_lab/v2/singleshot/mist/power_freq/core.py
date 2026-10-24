@@ -112,7 +112,6 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         # Prepare host gain points and the board frequency grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
         freq_sweep = cfg.freq
         gain_sweep = cfg.gain
@@ -120,13 +119,13 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
             allow_array=True,
         )
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
         # Display all classification regions while storing only G/E fractions.
@@ -161,8 +160,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             sched.cfg.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
             for gain, step in sched.scan("gain", gains.tolist()):
-                modules = step.cfg
-                modules.probe_pulse.set_param("gain", gain)
+                step.cfg.probe_pulse.set_param("gain", gain)
 
                 # Fix gain for this row and sweep probe frequency after preparation.
                 _ = (
@@ -172,10 +170,10 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
                         reps=step.cfg.reps,
                         relax_delay=step.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("probe_pulse", modules.probe_pulse)
-                    .add_readout("readout", modules.readout)
+                    .add_reset("reset", step.cfg.reset)
+                    .add_pulse("init_pulse", step.cfg.init_pulse)
+                    .add_pulse("probe_pulse", step.cfg.probe_pulse)
+                    .add_readout("readout", step.cfg.readout)
                     .declare_sweep("freq", step.cfg.freq)
                     .build_and_acquire(
                         # Classify individual shots before averaging populations.

@@ -89,12 +89,11 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         # 1. Prepare the quantized gain axis without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.rabi_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.rabi_pulse.ch},
         )
 
         # 2. Project all three mean-IQ curves onto the before-reset IQ axis.
@@ -107,25 +106,26 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             # 3. Both drives use the same gain sweep but distinct module names.
-            modules = sched.cfg
-            modules.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
             builder = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("rabi_pulse", modules.rabi_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("rabi_pulse", sched.cfg.rabi_pulse),
                     Branch(
                         "reset_sel",
                         [],  # 0: Before the tested reset.
-                        Reset("tested_reset_1", modules.tested_reset),  # 1: Reset only.
+                        Reset(
+                            "tested_reset_1", sched.cfg.tested_reset
+                        ),  # 1: Reset only.
                         [  # 2: Reset followed by a second swept Rabi pulse.
-                            Reset("tested_reset_2", modules.tested_reset),
-                            Pulse("rabi_pulse_after_reset", modules.rabi_pulse),
+                            Reset("tested_reset_2", sched.cfg.tested_reset),
+                            Pulse("rabi_pulse_after_reset", sched.cfg.rabi_pulse),
                         ],
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("reset_sel", 3)
                 .declare_sweep("gain", sched.cfg.gain)

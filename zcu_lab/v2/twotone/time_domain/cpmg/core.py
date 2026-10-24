@@ -238,10 +238,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         soc, soccfg = context.soc, context.soccfg
         detune_ratio, earlystop_snr = cfg.detune_ratio, cfg.earlystop_snr
 
-        modules = cfg
-
-        pi2_pulse = modules.pi2_pulse
-        pi_pulse = modules.pi_pulse
+        pi2_pulse = cfg.pi2_pulse
+        pi_pulse = cfg.pi_pulse
 
         times = np.array(cfg.times, dtype=np.int64)
 
@@ -316,11 +314,10 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             for idx, (time_value, step) in enumerate(sched.scan("times", times)):
                 current_length_idx = idx
                 cfg = step.cfg
-                modules = cfg
 
                 time = int(time_value)
-                pi2_pulse = modules.pi2_pulse
-                pi_pulse = modules.pi_pulse
+                pi2_pulse = cfg.pi2_pulse
+                pi_pulse = cfg.pi_pulse
                 dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
 
                 length_sweep = make_sweep(
@@ -351,7 +348,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
+                        Reset("reset", cfg.reset),
                         Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
                         Delay("first_delay", interval - 0.5 * dpulse_len),
                         Repeat("pi_loop", time - 1).add_content(
@@ -368,7 +365,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                                 phase=pi2_pulse.phase + detune_param
                             ),
                         ),
-                        Readout("readout", modules.readout),
+                        Readout("readout", cfg.readout),
                     )
                     .declare_sweep("length", length_sweep)
                     .build_and_acquire(

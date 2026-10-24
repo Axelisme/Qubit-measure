@@ -87,8 +87,6 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         signals_buffer = SignalBuffer((cfg.shots,))
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-
             # Prepare the same state for every shot before probing and readout.
             program = (
                 sched.prog_builder(
@@ -99,10 +97,10 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Pulse("probe_pulse", sched.cfg.probe_pulse),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .build()
             )

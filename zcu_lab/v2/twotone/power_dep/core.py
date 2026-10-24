@@ -85,7 +85,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # Prepare drive-gain rows and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gain_sweep = cfg.gain
         freq_sweep = cfg.freq
@@ -93,13 +92,13 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
             allow_array=True,
         )
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         viewer = live_heatmap_with_line(
@@ -119,11 +118,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
-                modules = cfg
 
-                modules.qub_pulse.set_param("gain", step.value)
+                cfg.qub_pulse.set_param("gain", step.value)
                 freq_sweep = cfg.freq
-                modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+                cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
                 # Reset and initialize before each probe; read out its response.
                 _ = (
@@ -133,10 +131,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                         reps=step.cfg.reps,
                         relax_delay=step.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    .add_reset("reset", cfg.reset)
+                    .add_pulse("init_pulse", cfg.init_pulse)
+                    .add_pulse("qubit_pulse", cfg.qub_pulse)
+                    .add_readout("readout", cfg.readout)
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(rounds=cfg.rounds)
                 )

@@ -3,28 +3,16 @@
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure import adapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
-
-
-def saving_form(context: FormContext) -> Form[SavingCfg]:
-    del context
-    return Form(SavingCfg, {})
-
-
-def saving_run(
-    cfg: SavingCfg, *, context: RunContext
-) -> RunRecord[SavingCfg, SavingResult]:
-    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
+from tests.gui.app.measure._pane_adapter import saving_form, saving_run
 
 
 @dataclass(frozen=True)

@@ -184,7 +184,6 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
-            modules = run_cfg
 
             # 3. Sweep delay outside the I/pi branch, then read out each state.
             if delay_table is None:
@@ -201,10 +200,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                         relax_delay=sched.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Reset("reset", run_cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
                         Delay("t1_delay", delay=length_param),
-                        Readout("readout", modules.readout),
+                        Readout("readout", run_cfg.readout),
                     )
                     .declare_sweep("length", inner_length_sweep)
                     .declare_sweep("ge", 2)
@@ -226,10 +225,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                             val_reg="t1_delay_cycle",
                             auto_compress=False,
                         ),
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Reset("reset", run_cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
                         DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", modules.readout),
+                        Readout("readout", run_cfg.readout),
                     )
                     .declare_sweep("length_idx", len(length_cycles))
                     .declare_sweep("ge", 2)

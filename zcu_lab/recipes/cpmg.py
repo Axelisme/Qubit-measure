@@ -148,9 +148,9 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
             )
             counts = count_grid.values
             tab.set("times", count_grid)
-    tab.set("extras.min_length_us", inputs.min_length_us)
-    tab.set("extras.max_length_us", inputs.max_length_us)
-    tab.set("extras.length_points", inputs.length_points)
+    tab.set("min_length_us", inputs.min_length_us)
+    tab.set("max_length_us", inputs.max_length_us)
+    tab.set("length_points", inputs.length_points)
     tab.set("detune_ratio", inputs.detune_ratio)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)

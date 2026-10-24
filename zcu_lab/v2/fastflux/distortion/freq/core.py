@@ -117,12 +117,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Quantize probe timing and frequency on the configured hardware.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         length_sweep = cfg.length
         freq_sweep = cfg.freq
 
-        qub_pulse = modules.qub_pulse
+        qub_pulse = cfg.qub_pulse
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         freqs = sweep2array(
@@ -141,9 +140,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
             length_param = sweep2param("length", sched.cfg.length)
-            modules.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
+            sched.cfg.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
 
             # Probe while flux is scheduled independently; read after all branches.
             _ = (
@@ -151,16 +149,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
+                    Reset("reset", sched.cfg.reset),
                     Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
+                        Pulse("flux_pulse", sched.cfg.flux_pulse),
                         [
                             SoftDelay("wait_time", delay=length_param),
-                            Pulse("qub_pulse", modules.qub_pulse),
+                            Pulse("qub_pulse", sched.cfg.qub_pulse),
                         ],
                         SoftDelay("readout_t", sched.cfg.readout_t),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("length", sched.cfg.length)
                 .declare_sweep("freq", sched.cfg.freq)
@@ -188,10 +186,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Analysis requires source.cfg")
-        modules = cfg
 
-        flux_pulse = modules.flux_pulse
-        qub_len = float(modules.qub_pulse.waveform.length)
+        flux_pulse = cfg.flux_pulse
+        qub_len = float(cfg.qub_pulse.waveform.length)
 
         lengths, freqs, signals = result.lengths, result.freqs, result.signals
 

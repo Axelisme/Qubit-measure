@@ -1,9 +1,3 @@
-from .sweep import format_sweep1D, get_single_sweep_name, make_sweep
+from .sweep import make_sweep
 
-__all__ = [
-    # sweep
-    "format_sweep1D",
-    "get_single_sweep_name",
-    "make_sweep",
-    # comment
-]
+__all__ = ["make_sweep"]

@@ -141,7 +141,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg
 
             length_sweep = cfg.length
             length_param = sweep2param("length", length_sweep)
@@ -153,18 +152,18 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi2_pulse1", modules.pi2_pulse),
+                    Reset("reset", cfg.reset),
+                    Pulse("pi2_pulse1", cfg.pi2_pulse),
                     Delay("t2e_delay1", delay=0.5 * length_param),
-                    Pulse("pi_pulse", modules.pi_pulse),
+                    Pulse("pi_pulse", cfg.pi_pulse),
                     Delay("t2e_delay2", delay=0.5 * length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg=modules.pi2_pulse.with_updates(
-                            phase=modules.pi2_pulse.phase + detune_param
+                        cfg=cfg.pi2_pulse.with_updates(
+                            phase=cfg.pi2_pulse.phase + detune_param
                         ),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", cfg.readout),
                 )
                 .declare_sweep("length", length_sweep)
                 .build_and_acquire(rounds=cfg.rounds)

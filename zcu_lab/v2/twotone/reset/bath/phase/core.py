@@ -90,14 +90,13 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         # Quantize the final pi/2 phase on its own generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         phases = sweep2array(
             cfg.phase,
             "phase",
             {
                 "soccfg": soccfg,
-                "gen_ch": modules.tested_reset.pi2_cfg.ch,
+                "gen_ch": cfg.tested_reset.pi2_cfg.ch,
             },
         )
 
@@ -110,8 +109,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         # Sweep only the final rotation; keep the simultaneous bath tones fixed.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.tested_reset.set_param(
+            sched.cfg.tested_reset.set_param(
                 "pi2_phase", sweep2param("phase", sched.cfg.phase)
             )
             _ = (
@@ -119,10 +117,10 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    BathReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    BathReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("phase", sched.cfg.phase)
                 .build_and_acquire(rounds=cfg.rounds)

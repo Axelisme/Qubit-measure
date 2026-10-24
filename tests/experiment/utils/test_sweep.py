@@ -1,49 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment.utils import get_single_sweep_name, make_sweep
-from zcu_tools.program.v2 import SweepCfg
-
-
-class Tone(ConfigBase):
-    detuning: SweepCfg
-
-
-class NoAxis(ConfigBase):
-    tones: list[Tone]
-
-
-class OneAxis(NoAxis):
-    scan_window: SweepCfg
-
-
-class TwoAxes(OneAxis):
-    bias: SweepCfg
-
-
-class OptionalAxis(ConfigBase):
-    scan_window: SweepCfg | None = None
-
-
-class NamedContainer(ConfigBase):
-    sweep: Tone
-
-
-@pytest.mark.parametrize(
-    ("model", "expected"),
-    [
-        (NoAxis, None),
-        (OneAxis, "scan_window"),
-        (TwoAxes, None),
-        (OptionalAxis, "scan_window"),
-        (NamedContainer, None),
-    ],
-)
-def test_single_sweep_name_uses_only_top_level_sweep_annotations(
-    model: type[ConfigBase], expected: str | None
-) -> None:
-    assert get_single_sweep_name(model) == expected
+from zcu_tools.experiment.utils import make_sweep
 
 
 @pytest.mark.parametrize(

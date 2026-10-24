@@ -179,7 +179,6 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Prepare probe frequencies and gain points spaced by nominal drive power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gain_sweep = cfg.gain
         freq_sweep = cfg.freq
@@ -187,12 +186,12 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.stark_pulse2.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.stark_pulse2.ch},
         )
         gains = np.sqrt(
             np.linspace(gain_sweep.start**2, gain_sweep.stop**2, gain_sweep.expts)
         )
-        gains = round_zcu_gain(gains, soccfg, modules.stark_pulse1.ch)
+        gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse1.ch)
 
         current_snr = 0.0
 
@@ -223,11 +222,10 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
-                modules = step_cfg
 
-                modules.stark_pulse1.set_param("gain", step.value)
+                step_cfg.stark_pulse1.set_param("gain", step.value)
                 freq_sweep = step_cfg.freq
-                modules.stark_pulse2.set_param("freq", sweep2param("freq", freq_sweep))
+                step_cfg.stark_pulse2.set_param("freq", sweep2param("freq", freq_sweep))
 
                 _ = (
                     step.prog_builder(
@@ -237,11 +235,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
+                        Reset("reset", step_cfg.reset),
                         # Launch the Stark tone without waiting before the probe.
-                        Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
-                        Pulse("stark_pulse2", modules.stark_pulse2),
-                        Readout("readout", modules.readout),
+                        Pulse("stark_pulse1", step_cfg.stark_pulse1, block_mode=False),
+                        Pulse("stark_pulse2", step_cfg.stark_pulse2),
+                        Readout("readout", step_cfg.readout),
                     )
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(
@@ -426,19 +424,18 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         # Prepare Ramsey delays and gain points spaced by nominal Stark power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gain_sweep = cfg.gain
 
         lengths = sweep2array(
             cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.stark_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.stark_pulse.ch},
         )
         gains = np.sqrt(
             np.linspace(gain_sweep.start**2, gain_sweep.stop**2, gain_sweep.expts)
         )
-        gains = round_zcu_gain(gains, soccfg, modules.stark_pulse.ch)
+        gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse.ch)
 
         viewer = live_heatmap_with_line(
             context.plots,
@@ -462,9 +459,8 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
-                modules = step_cfg
 
-                modules.stark_pulse.set_param("gain", step.value)
+                step_cfg.stark_pulse.set_param("gain", step.value)
                 length_sweep = step_cfg.length
                 length_param = sweep2param("length", length_sweep)
 
@@ -476,24 +472,24 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
+                        Reset("reset", step_cfg.reset),
                         # Join waits for both the tone and the Ramsey branch.
                         Join(
-                            Pulse("stark_pulse", modules.stark_pulse),
+                            Pulse("stark_pulse", step_cfg.stark_pulse),
                             [
                                 SoftDelay("wait_delay", delay=step_cfg.wait_delay),
-                                Pulse("pi2_pulse1", modules.pi2_pulse),
+                                Pulse("pi2_pulse1", step_cfg.pi2_pulse),
                                 SoftDelay("t2_delay", delay=length_param),
                                 Pulse(
                                     name="pi2_pulse2",
-                                    cfg=modules.pi2_pulse.with_updates(
-                                        phase=modules.pi2_pulse.phase
+                                    cfg=step_cfg.pi2_pulse.with_updates(
+                                        phase=step_cfg.pi2_pulse.phase
                                         + 360 * cfg.detune * length_param
                                     ),
                                 ),
                             ],
                         ),
-                        Readout("readout", modules.readout),
+                        Readout("readout", step_cfg.readout),
                     )
                     .declare_sweep("length", length_sweep)
                     .build_and_acquire(rounds=cfg.rounds)

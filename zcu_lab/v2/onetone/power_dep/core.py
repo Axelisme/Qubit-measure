@@ -102,11 +102,10 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         # Prepare the gain points and matched generator/ADC frequency grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gain_sweep = cfg.gain
 
-        readout_cfg = modules.readout
+        readout_cfg = cfg.readout
         gains = sweep2array(
             gain_sweep,
             "gain",
@@ -150,11 +149,10 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
-                modules = cfg
 
-                modules.readout.set_param("gain", step.value)
+                cfg.readout.set_param("gain", step.value)
                 freq_sweep = cfg.freq
-                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+                cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
                 # Repeat reset/readout across frequency at this fixed gain.
                 _ = (
@@ -164,8 +162,8 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                         reps=step.cfg.reps,
                         relax_delay=step.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add(PulseReadout("readout", modules.readout))
+                    .add_reset("reset", cfg.reset)
+                    .add(PulseReadout("readout", cfg.readout))
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(
                         options=AcquireOptions(

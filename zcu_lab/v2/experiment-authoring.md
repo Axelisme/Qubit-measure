@@ -35,6 +35,10 @@ GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 
 
 ### 1. 在 core 直接寫出 pulse 序列與分析政策
 
+core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
+擬合、逐 tone 迴圈、失敗隔離與分析結果型別都歸 core。GUI 為 writeback 做的有限值檢查與摘要整理不算分析計算。
+目前 mux/onetone 的既有逐 tone 計算仍在 gui.py，搬家另行處理。
+
 `core.py` 的 `run()` 直接列出 `Pulse`、`Delay`、`Join` 與 readout 的先後關係。
 共用 helper 只做驗證、資料整形、平均等機械工作，不用 mode 或旗標切換不同實驗。
 兩個實驗可以共用平均工具，但各自在 `run()` 寫出自己的序列。

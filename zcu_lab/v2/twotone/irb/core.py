@@ -139,7 +139,6 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             tables = make_seed_tables(
                                 seed, depths, run_cfg.target_gate if arm else None
                             )
-                            modules = run_cfg
                             (
                                 rand_gate_seq,
                                 prefix_len_by_depth,
@@ -148,9 +147,9 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             ) = tables
                             max_rand_len = max(prefix_len_by_depth, default=0)
 
-                            Id_pulse = modules.I_pulse
-                            X90_pulse = modules.X90_pulse
-                            X180_pulse = modules.X180_pulse
+                            Id_pulse = run_cfg.I_pulse
+                            X90_pulse = run_cfg.X90_pulse
+                            X180_pulse = run_cfg.X180_pulse
                             MX90_pulse = X90_pulse.with_updates(
                                 phase=X90_pulse.phase + 180.0
                             )
@@ -198,7 +197,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                         idx_reg="depth_idx",
                                         val_reg="recovery_gate_1",
                                     ),
-                                    Reset("reset", cfg=modules.reset),
+                                    Reset("reset", cfg=run_cfg.reset),
                                     Repeat(
                                         "rand_gate_idx",
                                         "rand_len",
@@ -230,7 +229,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                         val_reg="recovery_gate_1",
                                         pulses=gate_pulses,
                                     ),
-                                    Readout("readout", cfg=modules.readout),
+                                    Readout("readout", cfg=run_cfg.readout),
                                 )
                                 .declare_sweep("depth_idx", len(prefix_len_by_depth))
                                 .build()

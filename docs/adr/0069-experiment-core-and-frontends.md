@@ -67,7 +67,7 @@ Schedule 在自己的 with 保護區域接住 KeyboardInterrupt，將該 scope �
 
 ### Experiment tag 與 adapter
 
-實驗核心以 `AXES_SPEC.tag` 宣告持久化身分。GUI BaseAdapter 預設轉接這個 tag，concrete adapter 可明確覆寫 `experiment_tag`。Framework 只讀 adapter 的公開 tag，不取得實驗類別，也不從泛型反推實驗類。
+實驗核心以 `AXES_SPEC.tag` 宣告持久化身分。GUI Adapter 值接收 spec，`experiment_tag` 由 `spec.tag` 取得，不另外宣告實驗類或覆寫 tag。Framework 只讀 adapter 的公開 tag，不取得實驗類別，也不從泛型反推實驗類。
 
 原裁決日期未記錄，使用者於 2026-10-16 map 結案時確認沿用，原話「都採用建議」。原裁決原話為「插隊問題我的想法是tag應該放實驗類讓adapter轉接或複寫才對」及「不太建議暴露實驗類給框架，最好都經由adapter轉接」。
 

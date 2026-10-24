@@ -99,12 +99,10 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg
-
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         viewer = live_line(context.plots, "measurement", "Pulse gain", "Amplitude")
@@ -116,19 +114,18 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg
 
             gain_sweep = cfg.gain
-            modules.qub_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+            cfg.qub_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
             _ = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .add_reset("reset", modules.reset)
-                .add_pulse("init_pulse", modules.init_pulse)
-                .add_pulse("qubit_pulse", modules.qub_pulse)
-                .add_readout("readout", modules.readout)
+                .add_reset("reset", cfg.reset)
+                .add_pulse("init_pulse", cfg.init_pulse)
+                .add_pulse("qubit_pulse", cfg.qub_pulse)
+                .add_readout("readout", cfg.readout)
                 .declare_sweep("gain", gain_sweep)
                 .build_and_acquire(rounds=cfg.rounds)
             )

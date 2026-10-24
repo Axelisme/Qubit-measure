@@ -113,14 +113,13 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
-        modules = cfg
-        assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
+        assert cfg.qub_pulse.waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
         lengths = sweep2array(
             cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
         expected_shape = (len(lengths), cfg.shots)
 
@@ -158,8 +157,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             for length, step in sched.scan("length", lengths.tolist()):
-                modules = step.cfg
-                modules.qub_pulse.set_param("length", length)
+                step.cfg.qub_pulse.set_param("length", length)
 
                 # Acquire one length at a time to bound the board raw-buffer size.
                 program = (
@@ -170,9 +168,9 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                         initial_delay=cfg.initial_delay,
                         relax_delay=cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    .add_reset("reset", step.cfg.reset)
+                    .add_pulse("qubit_pulse", step.cfg.qub_pulse)
+                    .add_readout("readout", step.cfg.readout)
                     .build()
                 )
                 try:

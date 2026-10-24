@@ -105,7 +105,7 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     tab.select("pi2_pulse", inputs.pi2_ref)
     tab.set("length.stop", inputs.max_delay_us)
     tab.set("length.n", inputs.points)
-    tab.set("extras.detune_ratio", inputs.detune_ratio)
+    tab.set("detune_ratio", inputs.detune_ratio)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

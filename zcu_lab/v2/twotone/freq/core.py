@@ -144,11 +144,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Prepare the frequency axis and display the background-subtracted contrast.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         # predicted sweep points before FPGA coercion
         freqs = sweep2array(
-            cfg.freq, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
+            cfg.freq, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
         viewer = live_line(context.plots, "measurement", "Frequency (MHz)", "Amplitude")
@@ -161,19 +160,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg
 
             freq_sweep = cfg.freq
-            modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+            cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
             # Reset before each probe; sweep frequency on the FPGA, then read out.
             _ = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .add_reset("reset", modules.reset)
-                .add_pulse("qub_pulse", modules.qub_pulse)
-                .add_readout("readout", modules.readout)
+                .add_reset("reset", cfg.reset)
+                .add_pulse("qub_pulse", cfg.qub_pulse)
+                .add_readout("readout", cfg.readout)
                 .declare_sweep("freq", freq_sweep)
                 .build_and_acquire(rounds=cfg.rounds)
             )

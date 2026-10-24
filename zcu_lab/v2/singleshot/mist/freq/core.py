@@ -104,12 +104,11 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         # Prepare the hardware frequency grid before collecting populations.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
         # Show G/E and the unclassified remainder without altering saved fractions.
@@ -136,19 +135,18 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
-            modules = run_cfg
             freq_sweep = run_cfg.freq
-            modules.probe_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+            run_cfg.probe_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
             # Repeat reset/preparation/probe/readout at each hardware sweep point.
             _ = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .add_reset("reset", modules.reset)
-                .add_pulse("init_pulse", modules.init_pulse)
-                .add_pulse("probe_pulse", modules.probe_pulse)
-                .add_readout("readout", modules.readout)
+                .add_reset("reset", run_cfg.reset)
+                .add_pulse("init_pulse", run_cfg.init_pulse)
+                .add_pulse("probe_pulse", run_cfg.probe_pulse)
+                .add_readout("readout", run_cfg.readout)
                 .declare_sweep("freq", freq_sweep)
                 .build_and_acquire(
                     # Classify individual shots, then average their G/E fractions.

@@ -5,30 +5,18 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, SessionEnv
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.state import Session, State
-from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.form_adapter import FormContext
 
-from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.experiment._saving_support import SavingCfg, SavingCore
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._pane_adapter import saving_form, saving_run
 from tests.gui.app.measure._record_support import require_record
-
-
-def saving_form(context: FormContext) -> Form[SavingCfg]:
-    del context
-    return Form(SavingCfg, {})
-
-
-def saving_run(
-    cfg: SavingCfg, *, context: RunContext
-) -> RunRecord[SavingCfg, SavingResult]:
-    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
 
 
 def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupported(

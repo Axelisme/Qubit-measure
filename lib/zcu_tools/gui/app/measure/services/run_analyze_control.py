@@ -96,7 +96,7 @@ class RunAnalyzeControlPort(Protocol):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
-        """Read the captured result budget: 5 s + 5 s/tone, capped at 60 s."""
+        """Return the fixed 60-second budget for reading analysis results."""
         ...
 
     def start_run(
