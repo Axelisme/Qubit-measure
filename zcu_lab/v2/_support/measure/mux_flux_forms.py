@@ -121,7 +121,7 @@ def make_flux_form[
                 fallback=True,
             )
     else:
-        tree["frequency"] = {"df": Range.between(-1.0, 1.0, expts=101)}
+        tree["frequency"] = {"df": Range(-1.0, 1.0, expts=101)}
         for endpoint in ("start", "stop", "n"):
             metadata[("frequency", "df", endpoint)] = seed_metadata(
                 "Nominal common offset candidate -1..1 MHz, 101 points", fallback=True
@@ -169,7 +169,7 @@ def make_flux_form[
             [None if value is None else value.int for value in calibrations],
             [None if value is None else value.half for value in calibrations],
         )
-        tree["flux"] = Range.between(start, stop, expts=101)
+        tree["flux"] = Range(start, stop, expts=101)
         for endpoint in ("start", "stop"):
             metadata[("flux", endpoint)] = seed_metadata(
                 "Union of captured $mux.coil_flux.<qubit>.int/half intervals for $mux.qubits in flux_unit; missing calibration requires input"

@@ -27,7 +27,7 @@ class TupleAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[TupleCfg]:
         del ctx
-        return Form(TupleCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+        return Form(TupleCfg, {"sweep": Range(1.0, 2.0, expts=3)})
 
 
 class ExtraInputs(BaseModel):
@@ -44,7 +44,7 @@ class ExtrasAdapter(SampleAdapter):
         del ctx
         return Form(
             SampleCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            {"sweep": Range(1.0, 2.0, expts=3)},
             extras=ExtraInputs,
             lower=retain_cfg,
         )
@@ -166,7 +166,7 @@ class FailingOptionsAdapter(SampleAdapter):
         del ctx
         return Form(
             SampleCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            {"sweep": Range(1.0, 2.0, expts=3)},
             extras=FailingOptionsExtras,
             lower=retain_failing_cfg,
         )
@@ -195,7 +195,7 @@ class MissingValuesAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[MissingValuesCfg]:
         del ctx
-        return Form(MissingValuesCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+        return Form(MissingValuesCfg, {"sweep": Range(1.0, 2.0, expts=3)})
 
 
 def test_describe_cfg_distinguishes_missing_from_null(form_rpc) -> None:
@@ -526,7 +526,7 @@ class TaggedExtrasAdapter(ModuleRpcAdapter):
         del ctx
         return Form(
             ModuleRpcCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            {"sweep": Range(1.0, 2.0, expts=3)},
             extras=TaggedExtraInputs,
             lower=retain_tagged_cfg,
         )

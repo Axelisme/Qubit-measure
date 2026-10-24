@@ -131,7 +131,7 @@ def test_live_frontend_preview_remote_commit_and_done_share_result(fx, qapp) -> 
         assert done["preview_active"] is False
         assert widget.preview_active is False
         assert base64.b64decode(done["figure"]["png_b64"]).startswith(b"\x89PNG")
-        result = fx.ctrl.get_tab_analyze_result(tab_id)
+        result = fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id)
         assert result.flx_half == pytest.approx(after_gui["flux_half"])
         assert fx.state.get_tab(tab_id).analysis.plots["pick"] is not widget.figure
         assert (
@@ -336,7 +336,10 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
             assert committed.result is not old_result
             assert committed.result.flx_half == pytest.approx(changed["flux_half"])
             assert committed.result.flx_int == pytest.approx(changed["flux_int"])
-            assert fx.ctrl.get_tab_analyze_result(tab_id) is committed.result
+            assert (
+                fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id)
+                is committed.result
+            )
             assert committed.plots is not old_plots
         else:
             assert rpc(sock, "operation.cancel", {"operation_id": token})["result"][
@@ -561,7 +564,7 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
         rejected = interact(sock, tab_id, {"command": "done"})
         assert rejected["error"]["code"] == "precondition_failed"
         assert window.interactive_presentation(tab_id)[0] is widget.figure
-        assert fx.ctrl.get_tab_analyze_result(tab_id) is None
+        assert fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id) is None
         moved = interact(
             sock,
             tab_id,

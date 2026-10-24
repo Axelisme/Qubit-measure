@@ -53,15 +53,15 @@ class CoherenceTunablesForm(FormModel):
     not capture sources, submit revisions or control hardware.
     """
 
-    cal: Annotated[
-        CalibrationTunablesForm, Display(label="Calibration", collapsed=True)
-    ] = Field(default_factory=CalibrationTunablesForm)
-    t1: Annotated[T1TunablesForm, Display(label="T1", collapsed=True)]
-    t2ramsey: Annotated[
-        T2RamseyTunablesForm, Display(label="Ramsey", collapsed=True)
-    ] = Field(default_factory=T2RamseyTunablesForm)
-    t2echo: Annotated[T2EchoTunablesForm, Display(label="Echo", collapsed=True)] = (
-        Field(default_factory=T2EchoTunablesForm)
+    cal: Annotated[CalibrationTunablesForm, Display(label="Calibration")] = Field(
+        default_factory=CalibrationTunablesForm
+    )
+    t1: Annotated[T1TunablesForm, Display(label="T1")]
+    t2ramsey: Annotated[T2RamseyTunablesForm, Display(label="Ramsey")] = Field(
+        default_factory=T2RamseyTunablesForm
+    )
+    t2echo: Annotated[T2EchoTunablesForm, Display(label="Echo")] = Field(
+        default_factory=T2EchoTunablesForm
     )
 
     @classmethod

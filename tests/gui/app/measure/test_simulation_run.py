@@ -110,7 +110,7 @@ def noise_run(qapp, tmp_path, outcome):
         )
     sock = None
     try:
-        ctrl.install_soc(env.soc, env.soccfg)
+        ctrl.session_services.soc_connection.install_soc(env.soc, env.soccfg)
         ctrl.setup_control.new_entry(EntryRequest("offline"))
         ctrl.setup_control.new_point(
             PointCreateRequest("point", "", CommandOrigin("gui"))

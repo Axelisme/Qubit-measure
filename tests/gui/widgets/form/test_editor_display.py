@@ -27,6 +27,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._user_input import mouse_click
 from tests.gui.widgets.form._field_errors import field_error
+from tests.gui.widgets.form._sections import expand_sections
 from tests.gui.widgets.form._text_input import commit_text
 
 type View = tuple[FormEditor[FormModel], FormState[FormModel]]
@@ -227,15 +228,14 @@ def test_hidden_field_is_not_drawn_but_kept_and_validated(build: Build) -> None:
 
 def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
     class TagForm(FormModel):
-        choice: Annotated[
-            Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
-        ] = Field(default_factory=Alpha)
-        alone: Annotated[Alpha, Display(collapsed=False)] = Field(default_factory=Alpha)
-        sweep: Annotated[LinRange, Display(collapsed=False)] = Field(
-            default_factory=lambda: LinRange(start=0, stop=1, n=3)
+        choice: Annotated[Alpha | Beta, Field(discriminator="kind")] = Field(
+            default_factory=Alpha
         )
+        alone: Alpha = Field(default_factory=Alpha)
+        sweep: LinRange = Field(default_factory=lambda: LinRange(start=0, stop=1, n=3))
 
     view, _state = build(TagForm, None)
+    expand_sections(view, "choice", "alone", "sweep")
     assert row_names(view, "alone.kind") == []
     assert row_names(view, "sweep.kind") == []
     assert child(view, QLineEdit, "form.input.sweep.start").text() == "0.0"
@@ -249,20 +249,15 @@ def test_one_value_tag_outside_a_union_is_not_drawn(build: Build) -> None:
 
 def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
     class TitleForm(FormModel):
-        ro_cfg: Annotated[Section, Display(collapsed=False)] = Field(
-            default_factory=Section
-        )
-        labelled: Annotated[Section, Display(label="Readout", collapsed=False)] = Field(
+        ro_cfg: Section = Field(default_factory=Section)
+        labelled: Annotated[Section, Display(label="Readout")] = Field(
             default_factory=Section
         )
         drive: Annotated[
             DriveRef | DriveInline,
             Field(discriminator="kind"),
-            Display(collapsed=False),
         ]
-        choice: Annotated[
-            Alpha | Beta, Field(discriminator="kind"), Display(collapsed=False)
-        ]
+        choice: Annotated[Alpha | Beta, Field(discriminator="kind")]
 
     view, state = build(
         TitleForm,
@@ -272,6 +267,7 @@ def test_sections_and_selectors_are_titled_by_field_name(build: Build) -> None:
             "choice": {"x": 3.0},
         },
     )
+    expand_sections(view, "drive")
     assert row_label(view, "ro_cfg") == "Ro cfg"
     assert row_label(view, "labelled") == "Readout"
     assert row_label(view, "drive") == "Drive"
@@ -308,7 +304,7 @@ class Packed(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["packed"] = "packed"
-    payload: Annotated[Body, Display(collapsed=False)] = Field(default_factory=Body)
+    payload: Body = Field(default_factory=Body)
 
 
 class Bare(BaseModel):
@@ -325,7 +321,7 @@ class Nullable(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["optional"] = "optional"
-    payload: Annotated[Body | None, Display(collapsed=False)] = None
+    payload: Body | None = None
 
 
 class Nested(BaseModel):
@@ -334,9 +330,9 @@ class Nested(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["nested"] = "nested"
-    payload: Annotated[
-        Packed | Bare, Field(discriminator="kind"), Display(collapsed=False)
-    ] = Field(default_factory=Packed)
+    payload: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+        default_factory=Packed
+    )
 
 
 class Pair(BaseModel):
@@ -345,7 +341,7 @@ class Pair(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["pair"] = "pair"
-    payload: Annotated[Body, Display(collapsed=False)] = Field(default_factory=Body)
+    payload: Body = Field(default_factory=Body)
     note: float = 0.0
 
 
@@ -353,11 +349,12 @@ def test_an_option_holding_one_ordinary_model_draws_that_models_rows(
     build: Build,
 ) -> None:
     class FlattenForm(FormModel):
-        choice: Annotated[
-            Packed | Bare, Field(discriminator="kind"), Display(collapsed=False)
-        ] = Field(default_factory=Packed)
+        choice: Annotated[Packed | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Packed
+        )
 
     view, state = build(FlattenForm, None)
+    expand_sections(view, "choice")
 
     # The lone model has no row of its own; its fields keep their full paths.
     assert row_names(view, "choice.payload") == []
@@ -396,17 +393,18 @@ def test_an_option_whose_lone_field_is_nullable_or_selectable_keeps_its_row(
     build: Build,
 ) -> None:
     class KeepForm(FormModel):
-        optional: Annotated[
-            Nullable | Bare, Field(discriminator="kind"), Display(collapsed=False)
-        ] = Field(default_factory=Nullable)
-        nested: Annotated[
-            Nested | Bare, Field(discriminator="kind"), Display(collapsed=False)
-        ] = Field(default_factory=Nested)
-        pair: Annotated[
-            Pair | Bare, Field(discriminator="kind"), Display(collapsed=False)
-        ] = Field(default_factory=Pair)
+        optional: Annotated[Nullable | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Nullable
+        )
+        nested: Annotated[Nested | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Nested
+        )
+        pair: Annotated[Pair | Bare, Field(discriminator="kind")] = Field(
+            default_factory=Pair
+        )
 
     view, _state = build(KeepForm, None)
+    expand_sections(view, "optional", "nested", "pair")
 
     assert row_label(view, "optional.payload") == "Payload"
     assert child(view, QCheckBox, "form.enabled.optional.payload") is not None

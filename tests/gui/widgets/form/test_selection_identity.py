@@ -11,7 +11,7 @@ import pytest
 from pydantic import Field, JsonValue, create_model
 from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.gui import form as api
-from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormInput, FormModel, FormState
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -29,9 +29,7 @@ class Second(FormModel):
 
 
 class SelectionForm(FormModel):
-    branch: Annotated[First | Second, Display(collapsed=False)] = Field(
-        discriminator="kind"
-    )
+    branch: First | Second = Field(discriminator="kind")
 
 
 @pytest.mark.parametrize("with_converter", [False, True], ids=["plain", "converter"])
@@ -116,6 +114,7 @@ def test_selection_only_keeps_visible_child_and_local_parse_error(
     editor.show()
     qapp.processEvents()
     driver = ComponentDriver(editor)
+    driver.click(object_name="form.fold.branch")
 
     def snapshot(name: str) -> None:
         driver.screenshot(tmp_path / f"{name}.png")
@@ -159,6 +158,7 @@ def test_selection_only_synthetic_host_accepts_and_discards_authored_identity(
     host.show()
     qapp.processEvents()
     driver = ComponentDriver(host)
+    driver.click(object_name="form.fold.branch")
 
     def snapshot(name: str) -> None:
         driver.screenshot(tmp_path / f"{name}.png")
@@ -208,9 +208,7 @@ def test_converter_rejection_restores_selector_and_preserves_visible_drafts(
         "RejectingSelection",
         __base__=SelectionForm,
         branch=(
-            Annotated[
-                First | Second, api.InputConverter(reject), Display(collapsed=False)
-            ],
+            Annotated[First | Second, api.InputConverter(reject)],
             Field(discriminator="kind"),
         ),
     )
@@ -244,6 +242,7 @@ def test_converter_rejection_restores_selector_and_preserves_visible_drafts(
     editor.show()
     qapp.processEvents()
     driver = ComponentDriver(editor)
+    driver.click(object_name="form.fold.branch")
     try:
         driver.enter_text(object_name="form.input.branch.amount", value="broken")
         driver.screenshot(tmp_path / "01-child-draft.png")

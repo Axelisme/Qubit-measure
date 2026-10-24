@@ -596,7 +596,7 @@ def test_logical_metadata_keeps_structural_tags_distinct_from_real_names() -> No
     env = FormEnv()
     form = adapter.Form(
         WithSweep,
-        {"sweep": Range.between(1.0, 2.0, expts=3)},
+        {"sweep": Range(1.0, 2.0, expts=3)},
         extras=Extras,
         lower=lambda _extras, cfg: cfg,
     )

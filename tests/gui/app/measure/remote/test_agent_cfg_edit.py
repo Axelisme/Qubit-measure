@@ -241,7 +241,7 @@ class TextAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[TextCfg]:
         del ctx
-        return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+        return Form(TextCfg, {"sweep": Range(1.0, 2.0, expts=3)})
 
 
 def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(tmp_path, qapp):

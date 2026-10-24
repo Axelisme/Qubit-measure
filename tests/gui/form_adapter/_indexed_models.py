@@ -73,7 +73,7 @@ def indexed_tree() -> dict[str, FormNode]:
             {
                 "name": "B",
                 "drive": Slot("Q.pulses.drive"),
-                "sweep": Range.between(10, 14, expts=3),
+                "sweep": Range(10, 14, expts=3),
             },
         ],
         "participants": [1, 0],

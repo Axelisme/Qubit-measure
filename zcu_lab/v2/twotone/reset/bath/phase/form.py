@@ -27,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "sweep": {"phase": Range.between(-360.0, 360.0, expts=201)},
+            "sweep": {"phase": Range(-360.0, 360.0, expts=201)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

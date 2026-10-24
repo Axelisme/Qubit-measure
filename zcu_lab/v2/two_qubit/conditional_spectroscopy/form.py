@@ -69,8 +69,8 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
                 "readout": readout,
             },
             "drive": drive,
-            "frequency": Range.between(None, None, expts=101),
+            "frequency": Range(None, None, expts=101),
             "dc_device": None,
-            "dc_values": Range.between(0, 0, expts=1),
+            "dc_values": Range(0, 0, expts=1),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))
