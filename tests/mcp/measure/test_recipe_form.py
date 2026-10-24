@@ -155,6 +155,9 @@ def test_select_and_command_follow_owner_options_and_captured_sources(
             "Q.waveforms.gauss", "waveform", ()
         )
         tab.command("pulse.waveform", "to_inline")
+        tab.command("pulse", "to_inline")
+        tab.command("pulse.waveform", "to_inline")
+        assert tab.read("pulse.gain").value == 0.3
         assert tab.read("pulse.waveform.sigma").value == 0.2
         tab.select("pulse.waveform", "Inline: const")
         assert tab.read("pulse.waveform.length").value == 0.8

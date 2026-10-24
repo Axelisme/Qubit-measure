@@ -167,7 +167,7 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
 
 
 @pytest.mark.parametrize("scope", ["core", "spec"])
-def test_inline_command_preserves_draft_without_sources_or_notifications(
+def test_inline_copy_preserves_draft_without_sources_or_notifications(
     scope: str,
 ) -> None:
     form = Form(ModuleSection, {}) if scope == "core" else module_form(PulseSpec)
@@ -183,9 +183,12 @@ def test_inline_command_preserves_draft_without_sources_or_notifications(
     notifications: list[str] = []
     state.subscribe(lambda: notifications.append("changed"))
 
-    state.run_command(path, "to_inline", env)
-    state.run_command(path, "to_inline", env)
+    candidate = form.prepare_inline_copy(state.input, path, env)
+    repeated = form.prepare_inline_copy(candidate.input, path, env)
 
+    assert not candidate.changed and not repeated.changed
+    assert candidate.input.same_as(before)
+    assert repeated.input.same_as(before)
     assert state.input.same_as(before)
     assert notifications == []
 

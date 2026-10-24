@@ -156,21 +156,9 @@ def _module_options(
                 "Inline" if len(kinds) == 1 else f"Inline: {value}",
                 {"kind": "inline", "module": {tag: value}},
                 fields=fields,
-                commands=(
-                    OptionCommand("to_inline", "Convert to inline", _keep_inline),
-                ),
             )
         )
     return tuple(options)
-
-
-def _keep_inline(
-    snapshot: FormCommandSnapshot, _context: FormCommandContext
-) -> FormCommandResult:
-    """Keep the complete inline draft, including invalid and missing values."""
-    return FormCommandResult(
-        snapshot.copy_input(), snapshot.structure, snapshot.copy_input()
-    )
 
 
 def _spec_options(

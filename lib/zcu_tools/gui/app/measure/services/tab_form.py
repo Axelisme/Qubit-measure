@@ -489,10 +489,10 @@ class TabFormResource:
         editor_state is read-only to callers; editors must use this entrypoint.
         """
         with self._mutation():
-            before = self._state.input
-            self._state.run_command(path, name, self._sources.env)
-            if not self._state.input.same_as(before):
-                self._notify()
+            candidate = self._form.prepare_command(
+                self._state.input, path, name, self._sources.env
+            )
+            self._install_recipe_candidate(candidate)
 
     def restore_input(self, saved: FormInput[FormModel]) -> tuple[FormPath, ...]:
         """Restore saved authored input and report dropped paths using Core rules.
