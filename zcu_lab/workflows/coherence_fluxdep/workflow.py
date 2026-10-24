@@ -393,8 +393,8 @@ async def run_calibration_stages(
 ) -> None:
     """Initialize GE status, set flux and collect frequency, Rabi, then readout.
 
-    history supplies calibration carry and the latest accepted T1, falling back
-    to the legal initial T1 guess for Rabi/readout relaxation. Read live
+    history supplies calibration carry and an alpha=.5 accepted T1 estimate.
+    With no accepted T1, use the legal initial T1 guess for Rabi/readout relaxation. Read live
     calibration tunables before each stage. Return None, filling the supplied
     mutable record as each result arrives. status=skipped means cancellation,
     so no later stage should run. The caller owns the single finally commit.
@@ -412,7 +412,9 @@ async def run_calibration_stages(
         point_record.status = "skipped"
         return
     estimate = (
-        history.t1_by_flux[-1][1] if history.t1_by_flux else tun.current.t1.guess_us
+        history_guess(history.t1_by_flux[0][1], history.t1_by_flux[1:])
+        if history.t1_by_flux
+        else tun.current.t1.guess_us
     )
     captured = CalibrationInputs(
         qub_pulse=plan.qub_pulse,

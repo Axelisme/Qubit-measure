@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 from zcu_tools.gui.form import Display, FormModel, field_error
@@ -79,11 +79,64 @@ class CalibrationTunablesForm(FormModel):
         default=3.0, gt=0, description="Sweep stop divided by prior pi duration"
     )
 
+    drive_gain_mode: Annotated[
+        Literal["auto_pi_product", "fixed"], Display(label="Drive gain mode")
+    ] = Field(default="auto_pi_product", description="Drive gain mode")
+    target_pi_length_us: Annotated[
+        float, Display(label="Target pi duration", unit="µs")
+    ] = Field(default=1.0, gt=0, description="Target pi duration")
+    rabi_min_start_us: Annotated[
+        float, Display(label="Rabi start floor", unit="µs")
+    ] = Field(default=0.05, ge=0, description="Rabi start floor")
+    rabi_min_stop_us: Annotated[float, Display(label="Rabi stop floor", unit="µs")] = (
+        Field(default=0.5, gt=0, description="Rabi stop floor")
+    )
+    rabi_points: Annotated[int, Display(label="Rabi sweep points")] = Field(
+        default=101, ge=3, description="Rabi sweep points"
+    )
+    rabi_relax_mode: Annotated[
+        Literal["auto", "fixed"], Display(label="Rabi relaxation mode")
+    ] = Field(default="auto", description="Rabi relaxation mode")
+    rabi_relax_factor: Annotated[float, Display(label="Rabi relaxation / T1")] = Field(
+        default=3.0, gt=0, description="Rabi relaxation / T1"
+    )
+    rabi_relax_min_us: Annotated[
+        float, Display(label="Rabi relaxation floor", unit="µs")
+    ] = Field(default=0.0, ge=0, description="Rabi relaxation floor")
+    rabi_relax_delay_us: Annotated[
+        float, Display(label="Fixed Rabi relaxation", unit="µs")
+    ] = Field(default=30.0, ge=0, description="Fixed Rabi relaxation")
+    ro_relax_mode: Annotated[
+        Literal["auto", "fixed"], Display(label="Readout relaxation mode")
+    ] = Field(default="auto", description="Readout relaxation mode")
+    ro_relax_factor: Annotated[float, Display(label="Readout relaxation / T1")] = Field(
+        default=3.0, gt=0, description="Readout relaxation / T1"
+    )
+    ro_relax_min_us: Annotated[
+        float, Display(label="Readout relaxation floor", unit="µs")
+    ] = Field(default=0.0, ge=0, description="Readout relaxation floor")
+    ro_relax_delay_us: Annotated[
+        float, Display(label="Fixed readout relaxation", unit="µs")
+    ] = Field(default=30.0, ge=0, description="Fixed readout relaxation")
+    ro_freq_half_width_mhz: Annotated[
+        float, Display(label="Readout frequency half width", unit="MHz")
+    ] = Field(default=1.0, gt=0, description="Readout frequency half width")
+    ro_gain_half_width: Annotated[float, Display(label="Readout gain half width")] = (
+        Field(default=0.1, gt=0, le=1, description="Readout gain half width")
+    )
+    ro_skew_penalty: Annotated[float, Display(label="Readout skew penalty")] = Field(
+        default=0.0, ge=0, description="Readout skew penalty"
+    )
+
     @model_validator(mode="after")
     def _validate_rabi_range(self) -> Self:
         if self.rabi_stop_factor <= self.rabi_start_factor:
             raise field_error(
                 ("rabi_stop_factor",), "Rabi stop factor must exceed start factor"
+            )
+        if self.rabi_min_stop_us <= self.rabi_min_start_us:
+            raise field_error(
+                ("rabi_min_stop_us",), "Rabi stop floor must exceed start floor"
             )
         return self
 
@@ -109,4 +162,20 @@ class CalibrationTunablesForm(FormModel):
             ro_every=self.ro_every,
             rabi_start_factor=self.rabi_start_factor,
             rabi_stop_factor=self.rabi_stop_factor,
+            drive_gain_mode=self.drive_gain_mode,
+            target_pi_length_us=self.target_pi_length_us,
+            rabi_min_start_us=self.rabi_min_start_us,
+            rabi_min_stop_us=self.rabi_min_stop_us,
+            rabi_points=self.rabi_points,
+            rabi_relax_mode=self.rabi_relax_mode,
+            rabi_relax_factor=self.rabi_relax_factor,
+            rabi_relax_min_us=self.rabi_relax_min_us,
+            rabi_relax_delay_us=self.rabi_relax_delay_us,
+            ro_relax_mode=self.ro_relax_mode,
+            ro_relax_factor=self.ro_relax_factor,
+            ro_relax_min_us=self.ro_relax_min_us,
+            ro_relax_delay_us=self.ro_relax_delay_us,
+            ro_freq_half_width_mhz=self.ro_freq_half_width_mhz,
+            ro_gain_half_width=self.ro_gain_half_width,
+            ro_skew_penalty=self.ro_skew_penalty,
         )

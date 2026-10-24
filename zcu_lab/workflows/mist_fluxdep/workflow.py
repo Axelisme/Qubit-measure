@@ -124,14 +124,17 @@ def mist_cfg(plan: MISTPlan, tun: MISTTunables, cal: CalibratedPi2) -> PowerDepC
     """Configure a fixed disturbance gain scan to measure MIST after a calibrated pi.
 
     Native init_pulse is the calibrated pi preparation; probe_pulse is the
-    selected MIST disturbance pulse. Preserve fixed waveform/gain/routing,
-    replacing only fitted preparation duration/frequency and readout scalars.
+    selected MIST disturbance pulse. Preserve fixed waveform/routing and the
+    disturbance pulse. Apply calibrated preparation gain/duration/frequency and
+    readout scalars. None drive_gain retains template preparation gain.
     gain SweepCfg comes entirely from plan and relax timing from tun. Native
     validation errors propagate; input models stay unchanged and no I/O occurs.
     """
     pi = plan.qub_pulse.model_copy(deep=True)
     pi.set_param("freq", cal.f01_mhz)
     pi.set_param("length", cal.pi_length_us)
+    if cal.drive_gain is not None:
+        pi.set_param("gain", cal.drive_gain)
     readout = plan.readout.model_copy(deep=True)
     apply_readout_calibration(readout, cal)
     return PowerDepCfg(

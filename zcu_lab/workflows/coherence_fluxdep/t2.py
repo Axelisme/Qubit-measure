@@ -102,8 +102,8 @@ def t2echo_cfg(
     """Build detached zero-detune Echo cfg from the successful fitted pi/pi2.
 
     guess_us is the positive finite delay-grid estimate in microseconds.
-    Template waveform/gain is identical for pi and pi/2, with separate fitted
-    durations. Readout scalars use calibration. Delay ends at sweep_factor times
+    Template waveform and calibrated acquisition gain are identical for pi and
+    pi/2, with separate fitted durations. None drive_gain retains template gain. Readout scalars use calibration. Delay ends at sweep_factor times
     guess_us, relax at relax_factor times tun.guess_us. Invalid grid estimates
     raise ValueError; no setup/acquisition occurs or caller models change.
     """
@@ -111,9 +111,13 @@ def t2echo_cfg(
     pi = plan.qub_pulse.model_copy(deep=True)
     pi.set_param("freq", cal.f01_mhz)
     pi.set_param("length", cal.pi_length_us)
+    if cal.drive_gain is not None:
+        pi.set_param("gain", cal.drive_gain)
     pi2 = plan.qub_pulse.model_copy(deep=True)
     pi2.set_param("freq", cal.f01_mhz)
     pi2.set_param("length", cal.pi2_length_us)
+    if cal.drive_gain is not None:
+        pi2.set_param("gain", cal.drive_gain)
     ro = plan.readout.model_copy(deep=True)
     apply_readout_calibration(ro, cal)
     return T2EchoCfg(
@@ -141,6 +145,8 @@ def t2ramsey_cfg(
     pi2 = plan.qub_pulse.model_copy(deep=True)
     pi2.set_param("freq", cal.f01_mhz)
     pi2.set_param("length", cal.pi2_length_us)
+    if cal.drive_gain is not None:
+        pi2.set_param("gain", cal.drive_gain)
     ro = plan.readout.model_copy(deep=True)
     apply_readout_calibration(ro, cal)
     return T2RamseyCfg(
