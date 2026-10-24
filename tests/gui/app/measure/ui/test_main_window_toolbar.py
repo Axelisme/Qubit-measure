@@ -222,7 +222,7 @@ def toolbar_application(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
     ctrl.add_view(window)
-    tab_id = ctrl.new_tab("stoppable")
+    tab_id = ctrl.tab_control.new_tab("stoppable")
     remote = RemoteControlAdapter(
         ctrl, ControlOptions(port=0), scheduler, render_view=window
     )
@@ -234,7 +234,7 @@ def toolbar_application(
     finally:
         remote.on_client_close(link, on_owner_thread=True)
         ctrl.close()
-        for tid in tuple(ctrl.list_tab_ids()):
+        for tid in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -255,7 +255,7 @@ def test_live_new_tab_popup_preserves_local_selection_cancel_and_remote_gate(
     decision: str,
 ) -> None:
     ui = toolbar_application
-    baseline = tuple(ui.controller.list_tab_ids())
+    baseline = tuple(ui.controller.tab_control.list_tab_ids())
     failures: list[Exception] = []
     visited: list[bool] = []
 
@@ -326,10 +326,13 @@ def test_live_new_tab_popup_preserves_local_selection_cancel_and_remote_gate(
     assert visited == [True]
     if failures:
         raise failures[0]
-    after = tuple(ui.controller.list_tab_ids())
+    after = tuple(ui.controller.tab_control.list_tab_ids())
     if decision == "local":
         assert len(after) == len(baseline) + 1
-        assert ui.controller.get_tab_snapshot(after[-1]).adapter_name == adapter_name
+        assert (
+            ui.controller.tab_control.get_tab_snapshot(after[-1]).adapter_name
+            == adapter_name
+        )
     else:
         assert after == baseline
 

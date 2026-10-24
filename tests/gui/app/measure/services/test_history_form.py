@@ -74,7 +74,7 @@ def test_unavailable_reset_updates_nonfactory_error_and_reraises_without_a_form(
         ctrl.context_control.add_component("Q1", "history/source", {})
         ctrl.context_control.set_alias_rows((AliasRow("history", "Q1"),))
         ctrl.context_control.set_module(
-            ctrl.read_context().target,
+            ctrl.context_control.read_context().target,
             "Q1.pulses.template",
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.flat"),
         )

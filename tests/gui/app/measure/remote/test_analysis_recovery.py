@@ -61,7 +61,7 @@ def test_post_start_receipt_binds_recovery(tmp_path, qapp):
     fx.start()
     sock = open_client(fx.service.port)
     fx.registry.register("tone-cost", ToneAdapter)
-    tab = fx.ctrl.new_tab("tone-cost")
+    tab = fx.ctrl.tab_control.new_tab("tone-cost")
     fx.state.update_tab_result(tab, RunRecord(None, SampleResult(np.zeros(6))))
     fx.state.update_tab_analyze(tab, SampleAnalysis(peak=1.0), None)
     fx.state.update_tab_post_analyze_param_instance(tab, EmptyParams())

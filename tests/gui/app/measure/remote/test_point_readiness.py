@@ -63,9 +63,9 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "no_context"
-    tab_id = application.controller.new_tab("pointed")
+    tab_id = application.controller.tab_control.new_tab("pointed")
     with pytest.raises(FailedPreconditionError) as caught:
-        application.controller.start_run(tab_id)
+        application.controller.run_analyze_control.start_run(tab_id)
     assert caught.value.reason_code == "no_active_context"
     reply = application.rpc("tab.run_start", {"tab_id": tab_id})
     assert reply["ok"] is False
@@ -84,7 +84,7 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
     application: PointApplication, qapp
 ) -> None:
     application.open_entry()
-    tab_id = application.controller.new_tab("pointed")
+    tab_id = application.controller.tab_control.new_tab("pointed")
     application.state.update_tab_analyze(tab_id, object(), None)
     window = MainWindow(
         application.controller,
@@ -146,7 +146,7 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
         bus=bus,
     )
     application.remote.writeback_control = facet
-    tab_id = application.controller.new_tab("pointed")
+    tab_id = application.controller.tab_control.new_tab("pointed")
     draft = service.create_draft(
         [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],
         parameters=captured,
@@ -214,7 +214,7 @@ def parameter_writeback_pane(
         bus=bus,
     )
     application.remote.writeback_control = facet
-    tab_id = application.controller.new_tab("pointed")
+    tab_id = application.controller.tab_control.new_tab("pointed")
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.a", "A", proposed_value=11.0),

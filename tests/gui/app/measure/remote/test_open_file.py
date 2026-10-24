@@ -58,7 +58,7 @@ def app(qapp, tmp_path, monkeypatch):
 @pytest.mark.parametrize("path", ["saved.h5", "no-cfg.h5"])
 def test_open_file_loads_without_soc_with_result(app, path):
     fx, sock = app
-    previous = fx.ctrl.new_tab("file")
+    previous = fx.ctrl.tab_control.new_tab("file")
     reply = call(sock, "tab.open_file", {"adapter_name": "file", "data_path": path})
     assert reply["ok"] is True
     outcome = reply["result"]
@@ -82,7 +82,7 @@ def test_open_file_loads_without_soc_with_result(app, path):
 @pytest.mark.parametrize("has_previous", [False, True])
 def test_open_file_failed_load_cleans_up_and_restores_focus(app, has_previous):
     fx, sock = app
-    previous = fx.ctrl.new_tab("file") if has_previous else None
+    previous = fx.ctrl.tab_control.new_tab("file") if has_previous else None
     assert call(sock, "context.snapshot")["ok"] is True
     reply = call(sock, "tab.open_file", {"adapter_name": "file", "data_path": "bad.h5"})
     assert reply["error"]["reason"] == "invalid_data_file"

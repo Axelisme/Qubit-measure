@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -111,9 +111,10 @@ needed. The framework never imports the lab to select it. After showing the wind
 Without a selected script, it opens the shared Setup dialog.
 
 `build_app_services()` constructs the app-local services and injects their driven
-ports. `Controller` is a facade over the service bundle; UI and remote code use
-the controller for app-specific workflow and the exposed session control facets
-for setup/soc/context/device/predictor/progress domains.
+ports. UI and remote code submit tab, run/analyze, save, writeback and session
+commands through the exposed control facets. `Controller` owns app composition,
+lifecycle, experiment reload, template creation and library-edit orchestration.
+It does not duplicate the existing facet commands.
 
 `AppServices.session` and read-only `Controller.session_services` expose that
 same session bundle to embedded borrowers. `Controller.workflow_control()`

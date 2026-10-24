@@ -9,7 +9,7 @@ def test_tab_snapshot_keeps_partial_fact_without_metadata_and_resets_on_replacem
     fixture, tab_id, rpc = form_rpc
     state = fixture.state
     state.update_tab_result(tab_id, RunRecord(None, object()), partial_result=True)
-    snapshot = fixture.ctrl.get_tab_snapshot(tab_id)
+    snapshot = fixture.ctrl.tab_control.get_tab_snapshot(tab_id)
     assert snapshot.run is not None
     assert snapshot.run.partial_result
     response = rpc.call("tab.snapshot", {"tab_id": tab_id})

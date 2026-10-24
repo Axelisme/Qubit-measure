@@ -41,7 +41,7 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
         tab = invoke(
             "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
         )["tab_id"]
-        live_gui.ctrl.start_run(tab)
+        live_gui.ctrl.run_analyze_control.start_run(tab)
         qt_until(
             lambda: live_gui.ctrl.active_operation_count() == 0,
             label="sample Run setup terminal",

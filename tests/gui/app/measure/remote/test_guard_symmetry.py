@@ -72,11 +72,11 @@ def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> ob
 def test_run_start_unselected_context_symmetry(tmp_path, qapp):
     """Unselected context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
     ctrl = _make_controller(ContextReadiness.EMPTY, tmp_path=tmp_path)
-    tab_id = ctrl.new_tab("fake")
+    tab_id = ctrl.tab_control.new_tab("fake")
 
     # UI path
     with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.start_run(tab_id)
+        ctrl.run_analyze_control.start_run(tab_id)
 
     # Remote path — same precondition, mapped to a typed wire error.
     with pytest.raises(RemoteError) as excinfo:
@@ -94,10 +94,10 @@ def test_run_start_unselected_context_symmetry(tmp_path, qapp):
 def test_analyze_without_run_result_symmetry(tmp_path, qapp):
     """ACTIVE context but no run result: both paths reject on the same guard."""
     ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
-    tab_id = ctrl.new_tab("fake")
+    tab_id = ctrl.tab_control.new_tab("fake")
 
     with pytest.raises(GuardError, match="No run result"):
-        ctrl.analyze(tab_id, object())
+        ctrl.run_analyze_control.analyze(tab_id, object())
 
     # The wire path (tab.analyze) checks run-result presence first too, so the
     # agent gets the true reason 'no_run_result' rather than the downstream
@@ -111,7 +111,7 @@ def test_analyze_without_run_result_symmetry(tmp_path, qapp):
 def test_save_no_run_result_carries_reason(tmp_path, qapp):
     """ACTIVE context, no run result: save fails with reason='no_run_result'."""
     ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
-    tab_id = ctrl.new_tab("fake")
+    tab_id = ctrl.tab_control.new_tab("fake")
 
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(ctrl, "tab.save_data", {"tab_id": tab_id})

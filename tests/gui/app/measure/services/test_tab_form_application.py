@@ -109,12 +109,12 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
     error = ValueError if failure == "template" else RuntimeError
     match = "factory.*pulse" if failure == "template" else "factory source failed"
     try:
-        before_tabs = application.ctrl.list_tab_ids()
+        before_tabs = application.ctrl.tab_control.list_tab_ids()
         with pytest.raises(error, match=match):
-            application.ctrl.new_tab("factory")
-        assert application.ctrl.list_tab_ids() == before_tabs
+            application.ctrl.tab_control.new_tab("factory")
+        assert application.ctrl.tab_control.list_tab_ids() == before_tabs
         broken = False
-        tab_id = application.ctrl.new_tab("factory")
+        tab_id = application.ctrl.tab_control.new_tab("factory")
         resource = application.ctrl.cfg_resources.lookup(tab_id)
         resource.write({("amount",): 7.0})
         state, env, authored = resource.editor_state, resource.env, resource.input.data
@@ -138,8 +138,8 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
         assert notifications == [expected]
     finally:
         application.stop()
-        for tab_id in tuple(application.ctrl.list_tab_ids()):
-            application.ctrl.close_tab(tab_id)
+        for tab_id in tuple(application.ctrl.tab_control.list_tab_ids()):
+            application.ctrl.tab_control.close_tab(tab_id)
 
 
 def test_open_edit_run_and_reset_use_public_form_authority(
@@ -153,7 +153,7 @@ def test_open_edit_run_and_reset_use_public_form_authority(
         parameters.target, "general.ext.amount", 2.0
     )
     try:
-        tab_id = application.ctrl.new_tab("trace")
+        tab_id = application.ctrl.tab_control.new_tab("trace")
         resource = application.ctrl.cfg_resources.lookup(tab_id)
         resource.write({("amount",): {"expr": "general.ext.amount * 3"}})
         application.ctrl.context_control.set_parameter(
@@ -169,7 +169,7 @@ def test_open_edit_run_and_reset_use_public_form_authority(
 
         subscription = application.bus.subscribe(RunFinishedPayload, terminal)
         try:
-            application.ctrl.start_run(tab_id)
+            application.ctrl.run_analyze_control.start_run(tab_id)
             # The admitted trace adapter returns and publishes RunFinishedPayload.
             qt_until(lambda: bool(finished), label="form authority run terminal")
         finally:
@@ -184,5 +184,5 @@ def test_open_edit_run_and_reset_use_public_form_authority(
         resource.write({("amount",): {"expr": "unfinished +"}})
     finally:
         application.stop()
-        for tab_id in tuple(application.ctrl.list_tab_ids()):
-            application.ctrl.close_tab(tab_id)
+        for tab_id in tuple(application.ctrl.tab_control.list_tab_ids()):
+            application.ctrl.tab_control.close_tab(tab_id)

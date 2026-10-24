@@ -78,13 +78,13 @@ def test_existing_tab_tracks_unselected_and_active_source(
         assert tabs is not None
         title = tabs.tabText(0)
         cfg = ctrl.cfg_resources.lookup(tab_id)
-        interaction = ctrl.get_tab_snapshot(tab_id).interaction
+        interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None
         assert not interaction.has_context
         assert not interaction.has_active_context
         assert window.get_view_snapshot()["point_label"] == "No point selected"
         ctrl.setup_control.new_entry(EntryRequest("entry"))
-        interaction = ctrl.get_tab_snapshot(tab_id).interaction
+        interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None
         assert not interaction.has_context
         assert not interaction.has_active_context
@@ -93,7 +93,7 @@ def test_existing_tab_tracks_unselected_and_active_source(
             ctrl.setup_control.new_point(
                 PointCreateRequest(label, "", CommandOrigin("gui"))
             )
-            interaction = ctrl.get_tab_snapshot(tab_id).interaction
+            interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
             assert interaction is not None
             assert interaction.has_context and interaction.has_active_context
             assert window.get_view_snapshot()["point_label"] == label

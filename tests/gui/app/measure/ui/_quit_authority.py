@@ -60,7 +60,7 @@ def main(project_root: Path) -> int:
     if not isinstance(ctrl, Controller) or not isinstance(window, MainWindow):
         raise TypeError("Measure composition did not produce its public owners")
     behavior.before_show(assembly)
-    tab_id = ctrl.new_tab("saving")
+    tab_id = ctrl.tab_control.new_tab("saving")
     window.add_tab_widget(tab_id, "saving")
     frontend = RecordingFrontend()
     window.mount_interactive_analysis(tab_id, lambda _env: frontend)

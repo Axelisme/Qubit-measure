@@ -126,7 +126,7 @@ def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
         app.controller.session_services.soc_connection.install_soc(
             MagicMock(), make_mock_soccfg()
         )
-        app.controller.new_tab("synthetic")
+        app.controller.tab_control.new_tab("synthetic")
         # Load's File chooser starts at the opened entry's database directory.
         # Keep both relative-path validation and real chooser input rooted there.
         chooser_directory = Path(app.controller.get_session_env().database_path)

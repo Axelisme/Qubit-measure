@@ -118,7 +118,7 @@ def noise_run(qapp, tmp_path, outcome):
         ctrl.setup_control.new_point(
             PointCreateRequest("point", "", CommandOrigin("gui"))
         )
-        tab = ctrl.new_tab("noise")
+        tab = ctrl.tab_control.new_tab("noise")
         sock = open_client(remote.start())
         yield env, ctrl, sock, tab, entered, release
     finally:

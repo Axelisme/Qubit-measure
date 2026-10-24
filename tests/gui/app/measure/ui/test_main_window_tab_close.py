@@ -32,7 +32,7 @@ def test_tab_close_without_result_closes_immediately(main_window_control_factory
     experiment_tabs(window).tabCloseRequested.emit(0)
 
     assert len(dialogs.calls) == 0
-    ctrl.close_tab.assert_called_once_with("tab-1")
+    ctrl.tab_control.close_tab.assert_called_once_with("tab-1")
 
 
 def test_tab_close_with_saved_data_closes_immediately(
@@ -47,7 +47,7 @@ def test_tab_close_with_saved_data_closes_immediately(
     experiment_tabs(window).tabCloseRequested.emit(0)
 
     assert len(dialogs.calls) == 0
-    ctrl.close_tab.assert_called_once_with("tab-1")
+    ctrl.tab_control.close_tab.assert_called_once_with("tab-1")
 
 
 @pytest.mark.parametrize(
@@ -70,7 +70,7 @@ def test_tab_close_with_unsaved_data_declined_keeps_tab(
     assert call.kind == "destructive_confirm"
     assert call.title == "Unsaved measurement data"
     assert call.action_text == "Discard and Close"
-    ctrl.close_tab.assert_not_called()
+    ctrl.tab_control.close_tab.assert_not_called()
     assert window.has_tab_widget("tab-1") is True
 
 
@@ -90,7 +90,7 @@ def test_tab_close_with_unsaved_data_confirmed_closes_tab(
     assert call.kind == "destructive_confirm"
     assert call.title == "Unsaved measurement data"
     assert call.action_text == "Discard and Close"
-    ctrl.close_tab.assert_called_once_with("tab-1")
+    ctrl.tab_control.close_tab.assert_called_once_with("tab-1")
 
 
 def test_moved_tab_with_unsaved_data_closes_by_captured_identity(
@@ -115,7 +115,7 @@ def test_moved_tab_with_unsaved_data_closes_by_captured_identity(
     assert len(dialogs.calls) == 1
     assert dialogs.calls[0].kind == "destructive_confirm"
     assert dialogs.calls[0].title == "Unsaved measurement data"
-    ctrl.close_tab.assert_called_once_with("tab-a")
+    ctrl.tab_control.close_tab.assert_called_once_with("tab-a")
 
 
 def test_tab_moved_while_confirmation_pending_closes_captured_widget(
@@ -162,7 +162,7 @@ def test_tab_moved_while_confirmation_pending_closes_captured_widget(
     # User confirms the dialog
     decision_cb[0](True)
 
-    ctrl.close_tab.assert_called_once_with("tab-a")
+    ctrl.tab_control.close_tab.assert_called_once_with("tab-a")
 
 
 def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
@@ -205,4 +205,4 @@ def test_tab_close_suppresses_duplicate_prompt_while_decision_pending(
 
     # Confirm
     decision_cb[0](True)
-    ctrl.close_tab.assert_called_once_with("tab-1")
+    ctrl.tab_control.close_tab.assert_called_once_with("tab-1")

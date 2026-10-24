@@ -64,7 +64,7 @@ def history_window(
         active_label="p",
         database_path=str(tmp_path),
     )
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     snapshots = {
         name: TabSnapshot(
             adapter_name=name,
@@ -78,7 +78,7 @@ def history_window(
         )
         for name in ("scan", "missing")
     }
-    ctrl.get_tab_snapshot.side_effect = snapshots.__getitem__
+    ctrl.tab_control.get_tab_snapshot.side_effect = snapshots.__getitem__
     ctrl.save_control.list_saved_runs.return_value = rows
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
@@ -255,8 +255,8 @@ def test_main_window_routes_dialog_selection_to_existing_load(
         active_label="p",
         database_path=str(tmp_path),
     )
-    ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = TabSnapshot(
+    ctrl.tab_control.has_tab.return_value = True
+    ctrl.tab_control.get_tab_snapshot.return_value = TabSnapshot(
         adapter_name="fake",
         tab_id="tab",
         cfg_input={},
@@ -269,7 +269,7 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     ctrl.save_control.list_saved_runs.return_value = rows
     if action == "query-error":
         ctrl.save_control.list_saved_runs.side_effect = ValueError("corrupt ledger")
-    ctrl.load_tab_result.return_value = LoadTabResultOutcome(
+    ctrl.run_analyze_control.load_tab_result.return_value = LoadTabResultOutcome(
         tab_id="tab",
         data_path=str(rows[0].data_path),
         result_type="Result",
@@ -294,9 +294,11 @@ def test_main_window_routes_dialog_selection_to_existing_load(
     monkeypatch.setattr(RunLoadDialog, "exec", choose)
     window.load_tab_data_dialog("tab")
     if action == "load":
-        ctrl.load_tab_result.assert_called_once_with("tab", str(rows[0].data_path))
+        ctrl.run_analyze_control.load_tab_result.assert_called_once_with(
+            "tab", str(rows[0].data_path)
+        )
     else:
-        ctrl.load_tab_result.assert_not_called()
+        ctrl.run_analyze_control.load_tab_result.assert_not_called()
     if action == "query-error":
         assert "corrupt ledger" in dialogs.consume_message_containing(
             "critical", "corrupt ledger"

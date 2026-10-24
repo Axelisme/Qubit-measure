@@ -39,10 +39,10 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     figure = Figure()
     writeback_item = MagicMock()
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "tab-1",
         is_analyzing=False,
         has_analyze_result=True,
@@ -60,7 +60,7 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(
         monkeypatch.setattr(tab, "update_writeback_items", update_writeback_items)
         show_analysis_figures = MagicMock(wraps=tab.show_analysis_figures)
         monkeypatch.setattr(tab, "show_analysis_figures", show_analysis_figures)
-        ctrl.get_tab_snapshot.reset_mock()
+        ctrl.tab_control.get_tab_snapshot.reset_mock()
 
         bus.emit(
             TabInteractionChangedPayload(
@@ -68,9 +68,9 @@ def test_main_window_interaction_event_refreshes_finished_analysis_figure(
             )
         )
 
-        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        ctrl.tab_control.get_tab_snapshot.assert_called_once_with("tab-1")
         update_writeback_items.assert_not_called()
-        snapshot = ctrl.get_tab_snapshot.return_value
+        snapshot = ctrl.tab_control.get_tab_snapshot.return_value
         assert snapshot.analysis is not None
         show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
     finally:
@@ -93,9 +93,9 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     figure = Figure()
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "tab-1",
         is_analyzing=True,
         has_analyze_result=True,
@@ -110,7 +110,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
         )
         show_analysis_figures = MagicMock(wraps=tab.show_analysis_figures)
         monkeypatch.setattr(tab, "show_analysis_figures", show_analysis_figures)
-        ctrl.get_tab_snapshot.reset_mock()
+        ctrl.tab_control.get_tab_snapshot.reset_mock()
 
         bus.emit(
             TabInteractionChangedPayload(
@@ -118,7 +118,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_analyze_st
             )
         )
 
-        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        ctrl.tab_control.get_tab_snapshot.assert_called_once_with("tab-1")
         show_analysis_figures.assert_not_called()
     finally:
         window.remove_tab_widget("tab-1")
@@ -139,7 +139,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     figure = Figure()
     snapshot = make_tab_snapshot(
         "tab-1",
@@ -150,7 +150,7 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
         figure=figure,
     )
     assert snapshot.analysis is not None
-    ctrl.get_tab_snapshot.return_value = snapshot
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
     tab = MagicMock()
     try:
@@ -161,13 +161,13 @@ def test_main_window_interaction_event_does_not_restore_old_figure_on_run_start(
         monkeypatch.setattr(view.analyze_form, "sync", tab.analyze_form.sync)
         monkeypatch.setattr(view, "update_writeback_items", tab.update_writeback_items)
         monkeypatch.setattr(view, "show_analysis_figures", tab.show_analysis_figures)
-        ctrl.get_tab_snapshot.reset_mock()
+        ctrl.tab_control.get_tab_snapshot.reset_mock()
 
         bus.emit(
             TabInteractionChangedPayload("tab-1", TabInteractionFact.RUN_START_REJECTED)
         )
 
-        ctrl.get_tab_snapshot.assert_called_once_with("tab-1")
+        ctrl.tab_control.get_tab_snapshot.assert_called_once_with("tab-1")
         tab.show_analysis_figures.assert_not_called()
         tab.analyze_form.sync.assert_called_once_with(snapshot.analysis.params)
         tab.update_writeback_items.assert_called_once_with(
@@ -191,10 +191,10 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     primary = Figure()
     post = Figure()
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "tab-1",
         is_analyzing=False,
         has_analyze_result=True,
@@ -223,7 +223,7 @@ def test_main_window_interaction_event_shows_post_figure_after_primary(
             )
         )
 
-        snapshot = ctrl.get_tab_snapshot.return_value
+        snapshot = ctrl.tab_control.get_tab_snapshot.return_value
         assert snapshot.analysis is not None and snapshot.post_analysis is not None
         show_analysis_figures.assert_called_once_with(snapshot.analysis.figures)
         show_post_analysis_figures.assert_called_once_with(
@@ -256,7 +256,7 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     primary = Figure()
     post = Figure()
     snapshot = make_tab_snapshot(
@@ -268,7 +268,7 @@ def test_analysis_terminal_restore_rebuilds_real_primary_then_post_canvas(
         figure=primary,
         post_figure=post,
     )
-    ctrl.get_tab_snapshot.return_value = snapshot
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "fake")
@@ -313,7 +313,7 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     snapshot = make_tab_snapshot(
         "tab-1",
         has_run_result=True,
@@ -324,7 +324,7 @@ def test_loaded_content_clears_stale_real_canvas_when_state_has_no_figure(
         figure=None,
         post_figure=None,
     )
-    ctrl.get_tab_snapshot.return_value = snapshot
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "fake")
@@ -359,8 +359,10 @@ def test_finished_run_preserves_selected_subtab(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_run_result=True)
+    ctrl.tab_control.get_running_tab_id.return_value = None
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
+        "tab-1", has_run_result=True
+    )
     window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "fake")
@@ -392,8 +394,10 @@ def test_stopped_run_does_not_auto_switch_to_analysis_tab(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_run_result=True)
+    ctrl.tab_control.get_running_tab_id.return_value = None
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
+        "tab-1", has_run_result=True
+    )
     window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "fake")
@@ -420,8 +424,8 @@ def test_non_analysis_adapter_run_preserves_selected_subtab(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    ctrl.tab_control.get_running_tab_id.return_value = None
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
     window = MainWindow(ctrl, templates=lambda: {})
@@ -456,8 +460,8 @@ def test_refresh_analyze_form_skips_non_analysis_adapter_without_raising(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    ctrl.tab_control.get_running_tab_id.return_value = None
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "tab-1", has_run_result=True, supports_analysis=False, analyze_params=None
     )
     window = MainWindow(ctrl, templates=lambda: {})

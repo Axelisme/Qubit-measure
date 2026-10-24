@@ -325,7 +325,8 @@ class MainWindow(QMainWindow):
         self._workflow_tabs.set_writable(writable=writable)
         workflow_busy = any(s.busy for s in self._ctrl.workflow_control().tabs())
         self._dialog_registry.set_running(
-            running=self._ctrl.get_running_tab_id() is not None or workflow_busy
+            running=self._ctrl.tab_control.get_running_tab_id() is not None
+            or workflow_busy
         )
         self._dialog_registry.set_writable(writable=writable)
         self._tabs.setTabsClosable(writable)
@@ -373,7 +374,7 @@ class MainWindow(QMainWindow):
 
         # Construct the tab from the same immutable capabilities snapshot used
         # for its initial attach, so optional panes never need dynamic rebuilds.
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        snapshot = self._ctrl.tab_control.get_tab_snapshot(tab_id)
         tab_label = adapter_name
         caps = snapshot.capabilities
         if caps is None:
@@ -399,7 +400,7 @@ class MainWindow(QMainWindow):
         # State-owned running identity immediately instead of waiting for a new
         # lifecycle event.
         self._set_tab_activity_marker(
-            tab_id, active=self._ctrl.get_running_tab_id() == tab_id
+            tab_id, active=self._ctrl.tab_control.get_running_tab_id() == tab_id
         )
 
     def remove_tab_widget(self, tab_id: str) -> None:
@@ -435,7 +436,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        snapshot = self._ctrl.tab_control.get_tab_snapshot(tab_id)
         assert snapshot.interaction is not None  # render snapshot fills live fields
         if snapshot.interaction.has_run_result:
             tab_w.focus_result_panel()
@@ -450,7 +451,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        current = snapshot or self._ctrl.tab_control.get_tab_snapshot(tab_id)
         assert current.interaction is not None  # render snapshot fills live fields
         assert current.capabilities is not None  # render snapshot fills live fields
         # Branch from declared capabilities and never touch absent controls.
@@ -469,7 +470,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        current = snapshot or self._ctrl.tab_control.get_tab_snapshot(tab_id)
         assert current.capabilities is not None  # render snapshot fills live fields
         # Branch from capabilities; never touch absent post controls.
         if not current.capabilities.post_analysis:
@@ -485,7 +486,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        current = snapshot or self._ctrl.tab_control.get_tab_snapshot(tab_id)
         assert current.analysis is not None
         assert current.post_analysis is not None
         assert current.capabilities is not None
@@ -503,7 +504,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        current = snapshot or self._ctrl.tab_control.get_tab_snapshot(tab_id)
         assert current.analysis is not None
         assert current.capabilities is not None
         if current.capabilities.analysis is AnalysisMode.NONE:
@@ -516,7 +517,7 @@ class MainWindow(QMainWindow):
         tab_w = self._tab_widgets.get(tab_id)
         if tab_w is None:
             return
-        current = snapshot or self._ctrl.get_tab_snapshot(tab_id)
+        current = snapshot or self._ctrl.tab_control.get_tab_snapshot(tab_id)
         assert current.post_analysis is not None
         assert current.capabilities is not None
         if not current.capabilities.post_analysis:
@@ -561,8 +562,10 @@ class MainWindow(QMainWindow):
         self._refresh_tab_activity_markers(running_tab_id)
         self._toolbar.set_new_tab_enabled(enabled=True)
         for tab_id, tab_w in self._tab_widgets.items():
-            if self._ctrl.has_tab(tab_id):
-                tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
+            if self._ctrl.tab_control.has_tab(tab_id):
+                tab_w.update_interaction_state(
+                    self._ctrl.tab_control.get_tab_snapshot(tab_id)
+                )
         # Progress no longer cleared here — ProgressService.discard_operation on
         # the run's terminal path drops the container and notifies the tab's
         # listener, which re-renders to empty.
@@ -571,9 +574,11 @@ class MainWindow(QMainWindow):
         self, tab_id: str, snapshot: TabSnapshot | None = None
     ) -> None:
         tab_w = self._tab_widgets.get(tab_id)
-        if tab_w is None or not self._ctrl.has_tab(tab_id):
+        if tab_w is None or not self._ctrl.tab_control.has_tab(tab_id):
             return
-        tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
+        tab_w.update_interaction_state(
+            snapshot or self._ctrl.tab_control.get_tab_snapshot(tab_id)
+        )
 
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
@@ -600,8 +605,10 @@ class MainWindow(QMainWindow):
                 warning_colour(self) if entry else secondary_colour(self),
             )
         for tab_id, tab_w in self._tab_widgets.items():
-            if self._ctrl.has_tab(tab_id):
-                tab_w.update_interaction_state(self._ctrl.get_tab_snapshot(tab_id))
+            if self._ctrl.tab_control.has_tab(tab_id):
+                tab_w.update_interaction_state(
+                    self._ctrl.tab_control.get_tab_snapshot(tab_id)
+                )
         self._refresh_empty_hint()
 
     def _refresh_empty_hint(self) -> None:
@@ -754,7 +761,7 @@ class MainWindow(QMainWindow):
         follows the current startup lease; errors use a non-modal notification.
         Call on the Qt owner thread only.
         """
-        self.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self.refresh_run_lock(self._ctrl.tab_control.get_running_tab_id())
         self.show_status_message(payload.message)
         if payload.error is not None:
             self._dialog_presenter.critical(
@@ -816,7 +823,7 @@ class MainWindow(QMainWindow):
             for tab in self._tab_widgets.values():
                 tab.set_writable(writable=self._writable and not busy)
         self._dialog_registry.set_running(
-            running=self._ctrl.get_running_tab_id() is not None or busy
+            running=self._ctrl.tab_control.get_running_tab_id() is not None or busy
         )
 
     def open_results_browser(self) -> None:
@@ -852,7 +859,7 @@ class MainWindow(QMainWindow):
                 self.show_error_dialog("Cannot create workflow tab", str(error))
             return
         try:
-            self._ctrl.new_tab(adapter_name)
+            self._ctrl.tab_control.new_tab(adapter_name)
         except RoleResolutionError as exc:
             self.show_error_dialog("Cannot create tab", str(exc))
 
@@ -929,7 +936,7 @@ class MainWindow(QMainWindow):
             retry_catalog=self._ctrl.can_retry_experiment_reload(),
             skipped_count=self._ctrl.skipped_experiment_tab_count(),
         )
-        active = self._ctrl.get_active_tab_id()
+        active = self._ctrl.tab_control.get_active_tab_id()
         if active is not None and active in self._tab_widgets:
             self._tabs.setCurrentWidget(self._tab_widgets[active])
         if report.catalog_error:
@@ -966,7 +973,7 @@ class MainWindow(QMainWindow):
 
         if not tab_w.has_unsaved_data():
             logger.info("_on_tab_close_requested: tab_id=%r", tab_id)
-            self._ctrl.close_tab(tab_id)
+            self._ctrl.tab_control.close_tab(tab_id)
             return
 
         self._pending_tab_closes.add(tab_id)
@@ -976,9 +983,11 @@ class MainWindow(QMainWindow):
             self._pending_tab_closes.discard(tab_id)
             if not confirmed or self._shutdown_requested or self._closing:
                 return
-            if self._tab_widgets.get(tab_id) is tab_w and self._ctrl.has_tab(tab_id):
+            if self._tab_widgets.get(
+                tab_id
+            ) is tab_w and self._ctrl.tab_control.has_tab(tab_id):
                 logger.info("_on_tab_close_requested confirmed: tab_id=%r", tab_id)
-                self._ctrl.close_tab(tab_id)
+                self._ctrl.tab_control.close_tab(tab_id)
 
         self._dialog_presenter.destructive_confirm(
             self,
@@ -998,22 +1007,24 @@ class MainWindow(QMainWindow):
         tab_ids: list[str] = []
         for index in range(self._tabs.count()):
             widget = self._tabs.widget(index)
-            if isinstance(widget, ExpTabWidget) and self._ctrl.has_tab(widget.tab_id):
+            if isinstance(widget, ExpTabWidget) and self._ctrl.tab_control.has_tab(
+                widget.tab_id
+            ):
                 tab_ids.append(widget.tab_id)
-        self._ctrl.reorder_tabs(tab_ids)
+        self._ctrl.tab_control.reorder_tabs(tab_ids)
 
     def _on_current_tab_changed(self, index: int) -> None:
         widget = self._tabs.widget(index)
         if not isinstance(widget, ExpTabWidget):
             return
-        if not self._ctrl.has_tab(widget.tab_id):
+        if not self._ctrl.tab_control.has_tab(widget.tab_id):
             return
         if self._ctrl.control_identity.status().holder == "gui":
-            self._ctrl.set_active_tab(widget.tab_id)
+            self._ctrl.tab_control.set_active_tab(widget.tab_id)
 
     def _resolve_tab_widget(self, tab_id: str, action: str) -> ExpTabWidget | None:
         """Look up the widget; log + bail if tab_id is unknown to the controller."""
-        if not self._ctrl.has_tab(tab_id):
+        if not self._ctrl.tab_control.has_tab(tab_id):
             logger.warning("%s: unknown tab_id=%r — ignoring", action, tab_id)
             return None
         tab_w = self._tab_widgets.get(tab_id)
@@ -1028,13 +1039,13 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "run_or_stop_tab")
         if tab_w is None:
             return
-        interaction = self._ctrl.get_tab_snapshot(tab_id).interaction
+        interaction = self._ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None  # render snapshot fills live fields
         if interaction.is_running:
             logger.info("run_or_stop_tab: stop requested tab_id=%r", tab_id)
             if self._ctrl.control_identity.status().holder != "gui":
                 self._ctrl.control_identity.reclaim_local()
-            self._ctrl.cancel_run()
+            self._ctrl.run_analyze_control.cancel_run()
             return
         logger.info("run_or_stop_tab: run requested tab_id=%r", tab_id)
         reason = tab_w.cfg_invalid_reason()
@@ -1042,14 +1053,14 @@ class MainWindow(QMainWindow):
             msg = f"Config invalid: {reason}"
             logger.warning("run_or_stop_tab: blocked — %s", msg)
             return
-        self._ctrl.start_run(tab_id)
+        self._ctrl.run_analyze_control.start_run(tab_id)
 
     def analyze_tab(self, tab_id: str) -> None:
         logger.info("analyze_tab: tab_id=%r", tab_id)
         tab_w = self._resolve_tab_widget(tab_id, "analyze_tab")
         if tab_w is None:
             return
-        self._ctrl.analyze(tab_id, tab_w.read_analyze_params())
+        self._ctrl.run_analyze_control.analyze(tab_id, tab_w.read_analyze_params())
 
     def _load_data_dialog_start_dir(self) -> str:
         return nearest_existing(self._ctrl.get_session_env().database_path)
@@ -1070,7 +1081,9 @@ class MainWindow(QMainWindow):
         dialog = RunLoadDialog(
             runs,
             initial_point=self._ctrl.get_session_env().active_label,
-            initial_experiment=self._ctrl.get_tab_snapshot(tab_id).adapter_name,
+            initial_experiment=self._ctrl.tab_control.get_tab_snapshot(
+                tab_id
+            ).adapter_name,
             start_directory=self._load_data_dialog_start_dir(),
             parent=self,
         )
@@ -1083,7 +1096,7 @@ class MainWindow(QMainWindow):
         if path is None:
             raise RuntimeError("Accepted Load Data dialog did not select a path")
         try:
-            outcome = self._ctrl.load_tab_result(tab_id, path)
+            outcome = self._ctrl.run_analyze_control.load_tab_result(tab_id, path)
         except LoadDataError as exc:
             logger.warning(
                 "load_tab_data_dialog rejected data file: tab_id=%r path=%r reason=%s",
@@ -1110,7 +1123,9 @@ class MainWindow(QMainWindow):
         tab_w = self._resolve_tab_widget(tab_id, "post_analyze_tab")
         if tab_w is None:
             return
-        self._ctrl.start_post_analyze(tab_id, tab_w.read_post_analyze_params())
+        self._ctrl.run_analyze_control.start_post_analyze(
+            tab_id, tab_w.read_post_analyze_params()
+        )
 
     def apply_tab_writeback(
         self, tab_id: str, pane: WritebackPane = "analysis"
@@ -1124,11 +1139,11 @@ class MainWindow(QMainWindow):
         this boundary neither rolls them back nor reports failure as success.
         """
         logger.info("apply_tab_writeback: tab_id=%r pane=%r", tab_id, pane)
-        if not self._ctrl.has_tab(tab_id):
+        if not self._ctrl.tab_control.has_tab(tab_id):
             logger.warning("apply_tab_writeback: unknown tab_id=%r — ignoring", tab_id)
             return
         try:
-            result = self._ctrl.apply_writeback_for_pane(tab_id, pane)
+            result = self._ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
         except ExpectedError as error:
             self.show_error_dialog("Writeback failed", str(error))
             return
@@ -1220,7 +1235,7 @@ class MainWindow(QMainWindow):
         ):
             return
         self._dialog_registry.set_running(
-            running=self._ctrl.get_running_tab_id() is not None
+            running=self._ctrl.tab_control.get_running_tab_id() is not None
             or any(s.busy for s in self._ctrl.workflow_control().tabs())
         )
         self._dialog_registry.open(name, writable=self._writable)
@@ -1241,12 +1256,12 @@ class MainWindow(QMainWindow):
         """Read visible labels, status and dialogs as a JSON-friendly ViewSnapshot.
 
         Entry and Point text comes directly from the persistent visible labels.
-        tab_ids and active_tab_id are sourced from State (via ctrl.list_tab_ids)
+        tab_ids and active_tab_id are sourced from State via ctrl.tab_control
         rather than _tab_widgets, so ghost widget entries that have diverged from
         State never leak into the projection (ADR-0068 view = second SSOT reader).
         """
         # State.tabs is the single SSOT for which tabs exist.
-        state_tab_ids: list[str] = self._ctrl.list_tab_ids()
+        state_tab_ids: list[str] = self._ctrl.tab_control.list_tab_ids()
         state_tab_id_set = set(state_tab_ids)
 
         # Resolve the active tab through the widget hierarchy but only accept it
@@ -1285,7 +1300,7 @@ class MainWindow(QMainWindow):
                     f"tab {tab_id!r} run pane has no figure yet"
                 )
             return render_figure_png(fig)
-        snap = self._ctrl.get_tab_snapshot(tab_id)
+        snap = self._ctrl.tab_control.get_tab_snapshot(tab_id)
         if snap.capabilities is None:
             raise FailedPreconditionError("snapshot has no capabilities")
         if subtab_id == "analysis":

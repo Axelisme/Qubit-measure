@@ -112,7 +112,7 @@ def test_cfg_refusal_includes_usable_canonical_paths_without_partial_write(
 ) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("refusal", RefusalAdapter)
-    tab = fixture.ctrl.new_tab("refusal")
+    tab = fixture.ctrl.tab_control.new_tab("refusal")
     try:
         before = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
         refused = rpc.call(

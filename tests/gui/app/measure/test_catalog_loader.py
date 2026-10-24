@@ -116,7 +116,7 @@ def register_all(registry):
         application = Fixture(headless=True, project_root=str(tmp_path / "project"))
         try:
             application.registry.replace_from(candidate)
-            tab_id = application.ctrl.new_tab("demo")
+            tab_id = application.ctrl.tab_control.new_tab("demo")
             resource = application.ctrl.cfg_resources.lookup(tab_id)
             assert resource.read_module(("probe",)).value["gain"] == 0.25
             current.replace_from(candidate)
@@ -128,8 +128,8 @@ def register_all(registry):
             assert resource.read_module(("probe",)).value["gain"] == 0.25
         finally:
             application.stop()
-            for tab_id in tuple(application.ctrl.list_tab_ids()):
-                application.ctrl.close_tab(tab_id)
+            for tab_id in tuple(application.ctrl.tab_control.list_tab_ids()):
+                application.ctrl.tab_control.close_tab(tab_id)
     finally:
         sys.path.remove(str(tmp_path))
         for name in tuple(sys.modules):

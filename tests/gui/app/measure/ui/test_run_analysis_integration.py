@@ -57,14 +57,14 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         ctrl.control_identity = authority
         configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
-        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = AdapterGuide(
             markdown="", resource_dir=None
         )
         ctrl.progress_control.attach_progress.return_value = lambda: None
         ctrl.progress_control.progress_bars.return_value = []
         parameters = _parameters()
-        ctrl.read_context.return_value = parameters
+        ctrl.context_control.read_context.return_value = parameters
         ctrl.get_session_env.return_value = SessionEnv(
             parameters=parameters, soc=None, soccfg=None
         )
