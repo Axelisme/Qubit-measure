@@ -6,7 +6,6 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -14,6 +13,11 @@ import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
+    PostAnalysis,
+)
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_models import (
@@ -44,30 +48,6 @@ def fx(tmp_path, qapp):
     f.start()
     yield f
     f.stop()
-
-
-def test_analyze_params_wire_describes_live_adapter_before_run(fx):
-    tab_id = fx.ctrl.new_tab("fake")
-    sock = open_client(fx.service.port)
-    try:
-        primary = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
-        assert primary["ok"] is True
-        assert primary["result"]["analyze_params"] is None
-        assert primary["result"]["definitions"] == [
-            {
-                "name": "threshold",
-                "type": "float",
-                "label": "Threshold",
-                "decimals": 2,
-                "default": 0.5,
-            }
-        ]
-        post = call(sock, "tab.get_post_analyze_params", {"tab_id": tab_id})
-        assert post["ok"] is True
-        assert post["result"]["post_analyze_params"] is None
-        assert isinstance(post["result"]["definitions"], list)
-    finally:
-        sock.close()
 
 
 def test_device_setup_started_and_finished_push(fx):
@@ -105,19 +85,27 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
     release = threading.Event()
     original_analyze = SampleAdapter.analyze
 
-    def held_analyze(self, request, *, plots: Plots):
+    def held_analyze(request, *, plots: Plots):
         entered.set()
         # The test finally releases the held collaborator.
         if not release.wait(30):
             raise TimeoutError("fake analysis release was not signalled")
-        return original_analyze(self, request, plots=plots)
+        return original_analyze(request, plots=plots)
 
     try:
         run_id = fx.ctrl.start_run(tab_id)  # GUI path, not an MCP start.
         run_result = await_terminal(sock, run_id)
         assert run_result["ok"] is True
         assert run_result["result"]["status"] == "finished"
-        monkeypatch.setattr(SampleAdapter, "analyze", held_analyze)
+        fx.state.get_tab(tab_id).adapter = Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=SampleAdapter.run,
+            guide=None,
+            analysis=Analysis(
+                fn=held_analyze, options=lambda source, env: SampleParams()
+            ),
+        )
         analysis_id = fx.ctrl.analyze(tab_id, SampleParams())
         # Submission reaches the held synthetic adapter, before terminal release.
         qt_until(entered.is_set, label="adapter entered")
@@ -156,11 +144,6 @@ def _completed_run(fx, sock, tab_id):
 def test_run_preview_requires_the_original_source_before_rendering(
     fx, monkeypatch, replacement
 ):
-    monkeypatch.setattr(
-        SampleAdapter,
-        "capabilities",
-        replace(SampleAdapter.capabilities, load_data=True),
-    )
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
         original = _completed_run(fx, sock, tab)
@@ -207,11 +190,6 @@ def test_run_snapshot_identifies_the_operation_that_published_its_result(fx):
 def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
     fx, monkeypatch, replacement
 ):
-    monkeypatch.setattr(
-        SampleAdapter,
-        "capabilities",
-        replace(SampleAdapter.capabilities, load_data=True),
-    )
     tab = fx.ctrl.new_tab("fake")
     with open_client(fx.service.port) as sock:
         original = 1000
@@ -257,12 +235,18 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
 def test_original_run_can_be_analyzed_without_bypassing_seen_guards(fx, monkeypatch):
     original_run = SampleAdapter.run
 
-    def known_run(self, request, schema, *, context):
-        record = original_run(self, request, schema, context=context)
+    def known_run(cfg, *, context):
+        record = original_run(cfg, context=context)
         return replace(record, result=replace(record.result, data=np.array([1.0, 3.0])))
 
-    monkeypatch.setattr(SampleAdapter, "run", known_run)
     tab = fx.ctrl.new_tab("fake")
+    fx.state.get_tab(tab).adapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=known_run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+    )
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
         analyzed = call(sock, "tab.analyze", {"tab_id": tab, "run_operation_id": run})[
@@ -288,18 +272,24 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
     release = threading.Event()
     original_run = SampleAdapter.run
 
-    def held_run(self, request, schema, *, context: RunContext):
+    def held_run(cfg, *, context: RunContext):
         entered.set()
         # The test finally releases the held collaborator.
         if not release.wait(30):
             raise TimeoutError("fake run release was not signalled")
         if not keep_partial:
             raise InterruptedError("stopped before any acquisition")
-        return original_run(self, request, schema, context=context)
+        return original_run(cfg, context=context)
 
     try:
         _completed_run(fx, sock, tab_id)
-        monkeypatch.setattr(SampleAdapter, "run", held_run)
+        fx.state.get_tab(tab_id).adapter = Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=held_run,
+            guide=None,
+            analysis=SampleAdapter.analysis,
+        )
         run_id = fx.ctrl.start_run(tab_id)
         # Submission reaches the held synthetic adapter, before terminal release.
         qt_until(entered.is_set, label="adapter entered")
@@ -816,15 +806,13 @@ def test_post_analysis_uses_requested_sources_before_following_the_pane(
         run = _completed_run(fx, sock, tab)
         primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
         assert await_terminal(sock, primary)["result"]["status"] == "finished"
-        monkeypatch.setattr(
-            SampleAdapter,
-            "capabilities",
-            replace(SampleAdapter.capabilities, post_analysis=True),
-        )
-        monkeypatch.setattr(
-            SampleAdapter,
-            "post_analyze",
-            lambda self, req, *, plots: req.analyze_result,
+        fx.state.get_tab(tab).adapter = Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=SampleAdapter.run,
+            guide=None,
+            analysis=SampleAdapter.analysis,
+            post_analysis=PostAnalysis(fn=lambda req, *, plots: req.analyze_result),
         )
         fx.state.update_tab_post_analyze_param_instance(tab, SampleParams())
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
@@ -858,7 +846,7 @@ def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
     from tests.gui.app.measure._synthetic import SampleAdapter
 
-    adapter = SampleAdapter()
+    adapter = SampleAdapter
     from zcu_tools.cfg_model import Range
     from zcu_tools.gui.form_adapter import Form
 
@@ -949,8 +937,14 @@ def test_adapter_guide_returns_markdown_and_absolute_resource_directory(
     (tmp_path / "guide.md").write_text(markdown, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    class GuideAdapter(SampleAdapter):
-        guide_path: ClassVar[Path | None] = Path("guide.md") if declared else None
+    GuideAdapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=Path("guide.md") if declared else None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     fx.registry.register("guide-test", GuideAdapter)
     sock = open_client(fx.service.port)

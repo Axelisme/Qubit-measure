@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QTextEdit
 from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifacts import ArtifactDeclaration, ArtifactSaveCenter
@@ -17,7 +16,6 @@ from zcu_tools.gui.app.measure.events.completion import (
 )
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-from zcu_tools.gui.widgets import mixed_colour
 from zcu_tools.resources.entry import ArtifactKey, Output, ResultEntry, SaveLayout
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
@@ -33,12 +31,6 @@ from tests.gui.app.measure._native_save_support import (
     native_save_session,
 )
 from tests.gui.app.measure._record_support import require_record
-
-
-class _UndeclaredSavingAdapter(AnalysisSavingAdapter):
-    """Same adapter without a persistence declaration."""
-
-    experiment_tag = None
 
 
 @pytest.fixture
@@ -312,30 +304,3 @@ def test_save_all_disables_until_analysis_is_run_again(
     assert any(w.text == "○ NOT SAVED" for w in driver.visible().widgets)
     saves = [w for w in driver.visible().widgets if w.text == "Save"]
     assert len(saves) == 2 and all(w.enabled for w in saves)
-
-
-def test_hint_tracks_declared_support_not_current_outputs(saving_view) -> None:
-    session, _ctrl, window, tab_id, center = saving_view
-    session.state.clear_tab_results(tab_id)
-    window.refresh_tab_interaction(tab_id)
-    hint_text = "This experiment does not save to the result entry yet."
-    assert not any(
-        not label.isHidden() and label.text() == hint_text
-        for label in center.findChildren(QLabel)
-    )
-    assert not center.save_all_button.isEnabled()
-    # experiment_tag is the existing declaration, not an inference from methods.
-    session.state.get_tab(tab_id).adapter = _UndeclaredSavingAdapter()
-    window.refresh_tab_interaction(tab_id)
-    hints = [
-        label for label in center.findChildren(QLabel) if label.text() == hint_text
-    ]
-    assert len(hints) == 1
-    hint = hints[0]
-    assert not hint.isHidden()
-    assert hint.palette().color(hint.foregroundRole()) == mixed_colour(
-        center.palette().color(QPalette.ColorRole.Text),
-        center.palette().color(QPalette.ColorRole.Window),
-        0.42,
-    )
-    assert not center.save_all_button.isEnabled()

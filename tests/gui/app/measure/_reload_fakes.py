@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ClassVar, Literal
+from dataclasses import replace
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import Container
-from zcu_tools.experiment.native_persistence import RestoredRun
-from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, PreparedCatalogReload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -23,41 +22,29 @@ class ReloadCfg(ConfigBase):
     knob: int = 7
 
 
-class OldAdapter(DummyAdapter):
-    """Context-free cfg adapter for reload tests, without native persistence."""
-
-    experiment_tag: ClassVar[str | None] = None
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ConfigBase]:
-        del ctx
-        return Form(ReloadCfg, {})
-
-    def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
-        """Reject native Load requests; this reload-only fake has no loader."""
-        del stored
-        raise NotImplementedError("Reload fake does not load native data")
-
-    def analysis_item(
-        self,
-        key: ArtifactKey,
-        result: object,
-        parameters: object | None,
-        *,
-        pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisItem:
-        """Reject result/parameters for either pane; no analysis is persisted."""
-        del result, parameters, pane
-        raise TypeError("Reload fake does not capture analysis documents")
-
-    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
-        """Reject any result/comment; this fake has no persistence declaration."""
-        del result, comment
-        raise NotImplementedError("Reload fake does not prepare native data")
+def OldAdapter_make_form(ctx: FormContext) -> Form[ConfigBase]:
+    del ctx
+    return Form(ReloadCfg, {})
 
 
-class NewAdapter(OldAdapter):
-    pass
+OldAdapter = Adapter(
+    spec=replace(DummyAdapter.spec, cfg_type=ReloadCfg),
+    make_form=OldAdapter_make_form,
+    run=DummyAdapter.run,
+    guide=None,
+    analysis=DummyAdapter.analysis,
+    post_analysis=DummyAdapter.post_analysis,
+)
+
+
+NewAdapter = Adapter(
+    spec=OldAdapter.spec,
+    make_form=OldAdapter.make_form,
+    run=OldAdapter.run,
+    guide=None,
+    analysis=OldAdapter.analysis,
+    post_analysis=OldAdapter.post_analysis,
+)
 
 
 class Loader:

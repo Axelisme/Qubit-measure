@@ -11,7 +11,7 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import build_app_services
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -31,22 +31,25 @@ from ._run_support import make_inputs, make_plots, make_state
 from ._snapshot_adapter import SnapshotAdapter
 
 
-class ReadbackAdapter(SnapshotAdapter):
+def readback_adapter(unused: SnapshotDevice, fail_run: bool):
     """Synthetic acquisition leaves one failed observation after successful capture."""
 
-    def __init__(self, unused: SnapshotDevice, fail_run: bool) -> None:
-        self.unused = unused
-        self.fail_run = fail_run
-
     def run(
-        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
+        cfg: SavingCfg, *, context: RunContext
     ) -> RunRecord[SavingCfg, SavingResult]:
-        result = super().run(req, cfg, context=context)
-        self.unused.set_value(0.9)
-        self.unused.read_failure = OSError("post-run observation failed")
-        if self.fail_run:
+        result = SnapshotAdapter.run(cfg, context=context)
+        unused.set_value(0.9)
+        unused.read_failure = OSError("post-run observation failed")
+        if fail_run:
             raise OSError("acquisition failed after write")
         return result
+
+    return Adapter(
+        spec=SnapshotAdapter.spec,
+        make_form=SnapshotAdapter.make_form,
+        run=run,
+        guide=None,
+    )
 
 
 def _connected_devices() -> tuple[DeviceManager, SnapshotDevice, SnapshotDevice]:
@@ -65,7 +68,7 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
 ) -> None:
     manager, flux, unused = _connected_devices()
     state, tab_id, _ = make_state()
-    adapter = ReadbackAdapter(unused, fail_run)
+    adapter = readback_adapter(unused, fail_run)
     state.get_tab(tab_id).cfg = make_form(
         adapter.make_form(FormContext(state.session_env.parameters)), state=state
     )
@@ -92,7 +95,6 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
         inputs = make_inputs(state, tab_id, adapter)
         inputs = replace(
             inputs,
-            request=replace(inputs.request, soc=None, soccfg=None),
             snapshot=RunSnapshot(
                 entry_id=UUID(int=1),
                 entry_name="entry",

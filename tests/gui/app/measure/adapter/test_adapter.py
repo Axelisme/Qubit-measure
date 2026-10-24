@@ -4,25 +4,23 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, PulseSpec
-from zcu_tools.experiment.base import Experiment
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
     AnalyzeResultBase,
-    ExpAdapterProtocol,
     ModuleWriteback,
     ParameterWriteback,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from tests.gui._adapter_fakes import DummyAdapter, DummyResult
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:
@@ -51,16 +49,14 @@ def test_module_writeback_valid():
     assert item.session_id == ""
 
 
-def _make_concrete_adapter() -> ExpAdapterProtocol:
-    """Create a minimal concrete no-analysis adapter for shared-method tests."""
-
-    class _FakeAdapter(BaseAdapter[ConfigBase, MagicMock]):
-        capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-            analysis=AnalysisMode.NONE
-        )
-        exp_cls = Experiment
-
-    return _FakeAdapter()
+def _make_concrete_adapter():
+    """Use the shared synthetic definition without primary analysis."""
+    return Adapter(
+        spec=DummyAdapter.spec,
+        make_form=DummyAdapter.make_form,
+        run=DummyAdapter.run,
+        guide=None,
+    )
 
 
 def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
@@ -76,55 +72,17 @@ def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
     )
 
 
-def test_base_adapter_validates_forgotten_real_analyze_params_override():
-    # An adapter whose analyze-params REQUIRE values (a field without a default)
-    # but forgetting the override still Fast-Fails (the guard). Params whose every
-    # field has a default instead inherit the base get_analyze_params (covered by
-    # test_base_validation).
-    from dataclasses import dataclass
-
-    @dataclass
-    class _RequiredParams:
-        flag: bool  # no default → base get_analyze_params cannot construct it
-
-    with pytest.raises(TypeError, match="get_analyze_params"):
-
-        class _(BaseAdapter[MagicMock, MagicMock, None, _RequiredParams]):
-            capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-            exp_cls = Experiment
-
-            def analyze(self, req, *, plots: Plots):
-                return None
-
-
 def test_base_adapter_analyze_raises_by_default():
     from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
 
     adapter = _make_concrete_adapter()
     req = AnalyzeRequest(
-        run_result=MagicMock(),
+        run_result=RunRecord(ConfigBase(), DummyResult()),
         analyze_params=None,
         parameters=None,
     )
-    with pytest.raises(NotImplementedError, match="analyze"):
+    with pytest.raises(NotImplementedError, match="analysis"):
         adapter.analyze(req, plots=Plots(NonPresentingHost()))
-
-
-def test_analyze_params_cls_fallback_when_no_annotation():
-
-    class _UnannotatedAdapter(BaseAdapter[ConfigBase, MagicMock]):
-        capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-        exp_cls = Experiment
-
-        def get_analyze_params(self, result, ctx):
-            return None
-
-        def analyze(self, req, *, plots: Plots):
-            return None
-
-    # The overridden get_analyze_params has no type annotation → fallback
-    cls = _UnannotatedAdapter.analyze_params_cls()
-    assert cls is type(None)
 
 
 def test_analysis_summary_retains_degenerate_fit_reasons() -> None:

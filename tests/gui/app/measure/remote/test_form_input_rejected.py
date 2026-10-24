@@ -1,10 +1,14 @@
 """Form refusal projection keeps the existing taxonomy and readonly details."""
 
+from dataclasses import replace
 from typing import Annotated
 
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import ConfigBase, FieldMeta, Range
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.remote.form_errors import input_rejected_to_remote
 from zcu_tools.gui.form import (
     Display,
@@ -68,19 +72,27 @@ class RefusalCfg(SampleCfg):
     slots: list[EditableSlot]
 
 
-class RefusalAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[RefusalCfg]:
-        del ctx
-        return Form(
-            RefusalCfg,
-            {
-                "sweep": Range.between(1, 2, expts=3),
-                "tones": [{"name": "A", "gain": 0.1}, {"name": "B", "gain": 0.2}],
-                "slots": [{"gain": 0.1}],
-            },
-            fixed_elements=(FixedElements(("slots",)),),
-        )
+def RefusalAdapter_make_form(ctx: FormContext) -> Form[RefusalCfg]:
+    del ctx
+    return Form(
+        RefusalCfg,
+        {
+            "sweep": Range.between(1, 2, expts=3),
+            "tones": [{"name": "A", "gain": 0.1}, {"name": "B", "gain": 0.2}],
+            "slots": [{"gain": 0.1}],
+        },
+        fixed_elements=(FixedElements(("slots",)),),
+    )
+
+
+RefusalAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=RefusalCfg),
+    make_form=RefusalAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @pytest.mark.parametrize(

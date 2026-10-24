@@ -1,9 +1,9 @@
 """Markdown delivery from a registered adapter through RPC and MCP."""
 
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
+from zcu_tools.gui.app.measure.adapter import Adapter
 
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.app.measure.remote._helpers import Fixture, mcp_client
@@ -17,8 +17,14 @@ def test_recipe_guide_delivers_markdown_from_registered_adapter(
     (tmp_path / "guide.md").write_text(markdown, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    class GuideAdapter(SampleAdapter):
-        guide_path: ClassVar[Path | None] = Path("guide.md") if declared else None
+    GuideAdapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=Path("guide.md") if declared else None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     fixture = Fixture(
         project_root=str(tmp_path / "project"), empty_project=True, headless=True

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
 
 from tests.gui._adapter_fakes import DummyAdapter as _DummyAdapter
@@ -13,8 +13,8 @@ def test_register_and_create():
     reg = Registry()
     reg.register("dummy", _DummyAdapter)
     adapter = reg.create("dummy")
-    assert isinstance(adapter, _DummyAdapter)
-    assert isinstance(adapter, ExpAdapterProtocol)
+    assert adapter is _DummyAdapter
+    assert isinstance(adapter, Adapter)
 
 
 def test_create_unknown_raises_key_error():
@@ -45,12 +45,12 @@ def test_has_returns_true_for_registered():
     assert not reg.has("other")
 
 
-def test_create_returns_new_instance_each_time():
+def test_create_returns_the_registered_value_each_time():
     reg = Registry()
     reg.register("dummy", _DummyAdapter)
     a1 = reg.create("dummy")
     a2 = reg.create("dummy")
-    assert a1 is not a2
+    assert a1 is a2 is _DummyAdapter
 
 
 def test_replacement_detaches_candidate_and_clear_disables_creation():
@@ -62,7 +62,7 @@ def test_replacement_detaches_candidate_and_clear_disables_creation():
     live.replace_from(candidate)
     candidate.clear()
     assert live.list_names() == ["new"]
-    assert isinstance(live.create("new"), _DummyAdapter)
+    assert live.create("new") is _DummyAdapter
     live.clear()
     with pytest.raises(KeyError):
         live.create("new")

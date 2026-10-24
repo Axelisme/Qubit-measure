@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    SessionEnv,
+)
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError, ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabClosedPayload
 from zcu_tools.gui.app.measure.registry import Registry
@@ -111,7 +114,7 @@ def test_reload_preserves_config_order_selection_and_uses_new_instances(
     assert app.workspace.capture_session() == expected
     assert closed == [first, second]
     assert set(app.state.list_tab_ids()).isdisjoint({first, second})
-    assert all(isinstance(tab.adapter, NewAdapter) for tab in app.state.tabs.values())
+    assert all(tab.adapter is NewAdapter for tab in app.state.tabs.values())
     assert all(tab.run.result is None for tab in app.state.tabs.values())
     app.writeback.teardown_draft.assert_called_once_with(draft)
 
@@ -171,7 +174,7 @@ def test_capture_failure_keeps_tabs_and_catalog(
     with pytest.raises(ValueError, match="bad snapshot"):
         app.reload.reload_confirmed(preview)
     assert app.state.list_tab_ids() == [tab_id]
-    assert isinstance(app.registry.create("demo"), OldAdapter)
+    assert app.registry.create("demo") is OldAdapter
 
 
 def test_late_preflight_failure_does_not_close_tabs(app: App) -> None:
@@ -265,11 +268,18 @@ def test_invalid_defaults_are_reported_without_discarding_other_tabs(app: App) -
         def default_input(self, env: FormEnv) -> FormInput[FormModel]:
             raise ValueError("missing calibration")
 
-    class InvalidAdapter(OldAdapter):
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[ReloadCfg]:
-            del ctx
-            return BrokenForm(ReloadCfg, {})
+    def InvalidAdapter_make_form(ctx: FormContext) -> Form[ReloadCfg]:
+        del ctx
+        return BrokenForm(ReloadCfg, {})
+
+    InvalidAdapter = Adapter(
+        spec=replace(OldAdapter.spec, cfg_type=ReloadCfg),
+        make_form=InvalidAdapter_make_form,
+        run=OldAdapter.run,
+        guide=None,
+        analysis=OldAdapter.analysis,
+        post_analysis=OldAdapter.post_analysis,
+    )
 
     app.registry.register("bad", OldAdapter)
     app.loader.candidate.register("bad", InvalidAdapter)

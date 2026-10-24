@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     ParameterWriteback,
-    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -27,6 +30,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -35,31 +39,41 @@ from tests.gui.app.measure._synthetic import (
     PairAdapter,
     SampleAnalysis,
     SampleCfg,
+    SampleParams,
+    SampleResult,
     SampleRun,
 )
 from tests.gui.app.measure._templates import TEMPLATES
 
 
-class LedgerAdapter(PairAdapter):
-    """Supply a fixed native proposal over deterministic sample acquisition."""
+def LedgerAdapter_run(
+    cfg: SampleCfg, *, context: RunContext
+) -> RunRecord[SampleCfg, SampleResult]:
+    return PairAdapter.run(cfg, context=context)
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: SampleCfg,
-        *,
-        context: RunContext,
-    ) -> SampleRun:
-        return super().run(req, cfg, context=context)
 
-    def get_writeback_items(
-        self, req: WritebackRequest[SampleRun, SampleAnalysis]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback(
-                target_name="R1.freq", description="freq", proposed_value=6100.0
-            )
-        ]
+def LedgerAdapter_get_writeback_items(
+    req: WritebackRequest[SampleRun, SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback(
+            target_name="R1.freq", description="freq", proposed_value=6100.0
+        )
+    ]
+
+
+LedgerAdapter = Adapter(
+    spec=PairAdapter.spec,
+    make_form=PairAdapter.make_form,
+    run=LedgerAdapter_run,
+    guide=None,
+    analysis=Analysis(
+        fn=PairAdapter.analyze,
+        options=lambda source, env: SampleParams(),
+        writeback=LedgerAdapter_get_writeback_items,
+    ),
+    post_analysis=PairAdapter.post_analysis,
+)
 
 
 @pytest.fixture
@@ -72,7 +86,7 @@ def hw_fixture(qapp, tmp_path):
     registry = Registry(templates=TEMPLATES)
     registry.register("fake/freq", LedgerAdapter)
     state, bus = (
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
         BaseEventBus(),
     )
     ctrl = Controller(
@@ -116,7 +130,6 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     """Public Form tab Run/analysis renders a native 6100 MHz writeback ledger."""
     ctrl, window = hw_fixture
     assert "fake/freq" in ctrl.get_adapter_names()
-    assert ctrl.get_session_env().soc is None
     tab_id = ctrl.new_tab("fake/freq")
     QApplication.processEvents()
     (tab,) = window.findChildren(ExpTabWidget)

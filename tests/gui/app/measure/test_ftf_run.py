@@ -1,8 +1,6 @@
 """Registered synthetic FTF experiment uses real Window/RPC Run and Save."""
 
 import sys
-from dataclasses import replace
-from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -11,7 +9,7 @@ from zcu_tools.datafile import load
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -37,45 +35,48 @@ from tests.resources._ftf_data import ftf_document
 pytestmark = pytest.mark.sim
 
 
-class FTFAcquisitionAdapter(SavingAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = replace(
-        SavingAdapter.capabilities, requires_soc=True
+def FTFAcquisitionAdapter_run(cfg, *, context):
+    modules = [
+        PulseCfg(
+            ch=2,
+            nqz=1,
+            freq=300.0,
+            phase=90.0,
+            gain=-0.1,
+            waveform=ConstWaveformCfg(length=0.008),
+        ).build("microwave"),
+        PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=6000.0,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.02),
+            ro_length=0.03,
+        ).build("ro"),
+    ]
+    program = ModularProgramV2(
+        context.soccfg, modules=modules, sweep=[("point", 3)], reps=2
+    )
+    acquired = program.acquire(
+        context.soc, progress=False, cancel_flag=context.scope.stop
+    )
+    assert acquired is not None
+    iq = acquired[0][0]
+    return RunRecord(
+        cfg=cfg,
+        result=SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1]),
     )
 
-    def run(self, req, cfg, *, context):
-        modules = [
-            PulseCfg(
-                ch=2,
-                nqz=1,
-                freq=300.0,
-                phase=90.0,
-                gain=-0.1,
-                waveform=ConstWaveformCfg(length=0.008),
-            ).build("microwave"),
-            PulseReadoutCfg(
-                gen_ch=0,
-                ro_ch=0,
-                nqz=1,
-                freq=6000.0,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=0.02),
-                ro_length=0.03,
-            ).build("ro"),
-        ]
-        program = ModularProgramV2(
-            context.soccfg,
-            modules=modules,
-            sweep=[("point", 3)],
-            reps=2,
-        )
-        acquired = program.acquire(
-            context.soc, progress=False, cancel_flag=context.scope.stop
-        )
-        assert acquired is not None
-        iq = acquired[0][0]
-        return RunRecord(
-            cfg, SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1])
-        )
+
+FTFAcquisitionAdapter = Adapter(
+    spec=SavingAdapter.spec,
+    make_form=SavingAdapter.make_form,
+    run=FTFAcquisitionAdapter_run,
+    guide=None,
+    analysis=SavingAdapter.analysis,
+    post_analysis=SavingAdapter.post_analysis,
+)
 
 
 @pytest.fixture

@@ -251,7 +251,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
                 assert reply["ok"]
                 created = reply["result"]["tab_id"]
                 assert app.ctrl.list_tab_ids() == [*restored, created]
-                assert isinstance(app.state.get_tab(created).adapter, NewAdapter)
+                assert app.state.get_tab(created).adapter is NewAdapter
             else:
                 assert not reply["ok"]
                 assert app.ctrl.list_tab_ids() == restored

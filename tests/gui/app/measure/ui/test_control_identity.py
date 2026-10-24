@@ -5,9 +5,10 @@ from __future__ import annotations
 import socket
 from collections.abc import Callable, Iterator
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QMetaObject, Qt, QTimer
@@ -27,14 +28,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
-from zcu_tools.datafile import Container
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    RunRequest,
+    Adapter,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.controller import Controller
@@ -63,14 +61,17 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
+from tests.gui._adapter_fakes import DummyResult
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
 from tests.gui.app.measure.ui._qt_interactions import modal_action
@@ -79,48 +80,32 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
 
-class StoppableAdapter(OldAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False
-    )
-
-    def run(
-        self, req: RunRequest, cfg: ConfigBase, *, context: RunContext
-    ) -> RunRecord[ConfigBase, object]:
-        del req, cfg
-        # The test Stop/close action releases this held adapter via cancellation.
-        if not context.scope.stop.event.wait(30):
-            raise RuntimeError("test run was not stopped")
-        return RunRecord(None, object())
+def StoppableAdapter_run(
+    cfg: ConfigBase, *, context: RunContext
+) -> RunRecord[ConfigBase, DummyResult]:
+    if not context.scope.stop.event.wait(30):
+        raise RuntimeError("test run was not stopped")
+    return RunRecord(cfg=cfg, result=DummyResult())
 
 
-class ModalRuntimeCfg(ConfigBase):
-    knob: int = 42
+StoppableAdapter = Adapter(
+    spec=OldAdapter.spec,
+    make_form=OldAdapter.make_form,
+    run=StoppableAdapter_run,
+    guide=None,
+    analysis=OldAdapter.analysis,
+    post_analysis=OldAdapter.post_analysis,
+)
 
 
-@dataclass
-class ModalLoadResult:
-    data_path: str
-
-
-class ModalLoadAdapter(OldAdapter):
-    """Legal native owner contract, without file parsing or acquisition."""
-
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
-
-    experiment_tag: ClassVar[str | None] = "test/load"
-
-    def restore(
-        self, stored: Container
-    ) -> RestoredRun[RunRecord[ModalRuntimeCfg, ModalLoadResult]]:
-        return RestoredRun(
-            RunRecord(
-                cfg=ModalRuntimeCfg(),
-                result=ModalLoadResult(metadata_from_container(stored).run_id),
-                metadata=metadata_from_container(stored),
-            ),
-            None,
-        )
+ModalLoadAdapter = Adapter(
+    spec=replace(SavingAdapter.spec, tag="test/load"),
+    make_form=SavingAdapter.make_form,
+    run=SavingAdapter.run,
+    guide=None,
+    analysis=None,
+    post_analysis=None,
+)
 
 
 @dataclass
@@ -203,7 +188,7 @@ def control_ui(
         devices = DeviceManager()
         devices.register_device("bias", FakeDevice(fast_mode=False))
     ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
         registry,
         None,
         BaseEventBus(),

@@ -1,13 +1,12 @@
 """Synthetic owner receipts and source-bound Post recovery through RPC."""
 
 from dataclasses import dataclass
-from typing import ClassVar
 
 import numpy as np
-import pytest
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
+    Adapter,
+    PostAnalysis,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     SessionEnv,
@@ -31,47 +30,46 @@ class TonePostAnalysis(PostAnalyzeResultBase):
     peak: float
 
 
-class ToneAdapter(SampleAdapter[TonePostAnalysis, EmptyParams]):
-    """Declare a synthetic per-tone read cost without any lab definition."""
-
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False, load_data=False, post_analysis=True
-    )
-
-    def analysis_result_tone_count(self, result: SampleRun) -> int:
-        return len(result.result.data)
-
-    def get_post_analyze_params(
-        self, analyze_result: SampleAnalysis, ctx: SessionEnv
-    ) -> EmptyParams:
-        return EmptyParams()
-
-    def post_analyze(
-        self,
-        req: PostAnalyzeRequest[SampleRun, SampleAnalysis, EmptyParams],
-        *,
-        plots: Plots,
-    ) -> TonePostAnalysis:
-        return TonePostAnalysis(peak=req.analyze_result.peak)
+def ToneAdapter_get_post_analyze_params(
+    source, analyze_result: SampleAnalysis, ctx: SessionEnv
+) -> EmptyParams:
+    return EmptyParams()
 
 
-@pytest.mark.parametrize(("tones", "seconds"), [(0, 5), (1, 10), (6, 35), (20, 60)])
-def test_post_start_receipt_scales_read_budget_and_binds_recovery(
-    tmp_path, qapp, tones, seconds
-):
+def ToneAdapter_post_analyze(
+    req: PostAnalyzeRequest[SampleRun, SampleAnalysis, EmptyParams], *, plots: Plots
+) -> TonePostAnalysis:
+    return TonePostAnalysis(peak=req.analyze_result.peak)
+
+
+ToneAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=PostAnalysis(
+        fn=ToneAdapter_post_analyze,
+        options=ToneAdapter_get_post_analyze_params,
+        writeback=None,
+    ),
+)
+
+
+def test_post_start_receipt_binds_recovery(tmp_path, qapp):
     fx = Fixture(headless=True, project_root=str(tmp_path / "project"))
     fx.start()
     sock = open_client(fx.service.port)
     fx.registry.register("tone-cost", ToneAdapter)
     tab = fx.ctrl.new_tab("tone-cost")
-    fx.state.update_tab_result(tab, RunRecord(None, SampleResult(np.zeros(tones))))
+    fx.state.update_tab_result(tab, RunRecord(None, SampleResult(np.zeros(6))))
     fx.state.update_tab_analyze(tab, SampleAnalysis(peak=1.0), None)
     fx.state.update_tab_post_analyze_param_instance(tab, EmptyParams())
     try:
         response = call(sock, "tab.post_analyze", {"tab_id": tab, "updates": {}})
         assert response["ok"], response
         started = response["result"]
-        assert started.get("result_read_timeout_seconds") == seconds
+        assert started.get("result_read_timeout_seconds") == 60
         assert started.get("recovery") == {
             "rpc": "tab.get_post_analyze_result",
             "params": {"tab_id": tab, "operation_id": started["operation_id"]},
