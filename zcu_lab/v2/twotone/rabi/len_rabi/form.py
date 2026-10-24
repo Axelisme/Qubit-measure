@@ -25,6 +25,8 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
             "length",
             "reps",
             "rounds",
+            "acquire_retry",
+            "earlystop_snr",
             "relax_delay",
         ),
         tree={

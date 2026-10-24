@@ -139,12 +139,13 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
@@ -165,6 +166,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.acquire import mux_snr_checker
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
@@ -200,6 +202,20 @@ class MuxT1Cfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop when every active tone reaches this trace SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -376,7 +392,15 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             prog = builder.build()
             # Each completed round supplies the full delay/participant IQ matrix.
             _ = builder.run_program(
-                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+                prog,
+                raw2signal_fn=partial(_averaged_signal, prog),
+                rounds=cfg.rounds,
+                options=AcquireOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=mux_snr_checker(
+                        signals, cfg.earlystop_snr, tone_axis=1
+                    ),
+                ),
             )
 
         # 4. Flush live plots and return one IQ row per original selected tone.

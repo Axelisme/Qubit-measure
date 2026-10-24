@@ -26,6 +26,14 @@ class T1TunablesForm(FormModel):
     rounds: Annotated[int, Display(label="Rounds")] = Field(
         default=10, ge=1, description="T1 averaging rounds"
     )
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    earlystop_snr: float | None = Field(
+        default=20.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     guess_us: Annotated[
         float,
         Display(label="Initial guess", unit="µs", placeholder="general.ext.guess_us"),
@@ -77,6 +85,8 @@ class T1TunablesForm(FormModel):
         return T1Tunables(
             reps=self.reps,
             rounds=self.rounds,
+            acquire_retry=self.acquire_retry,
+            earlystop_snr=self.earlystop_snr,
             guess_us=self.guess_us,
             sweep_factor=self.sweep_factor,
             relax_factor=self.relax_factor,

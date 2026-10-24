@@ -21,6 +21,14 @@ class T2EchoTunablesForm(FormModel):
         default=100, ge=1, description="Echo averages"
     )
     rounds: int = Field(default=10, ge=1, description="Echo averaging rounds")
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    earlystop_snr: float | None = Field(
+        default=20.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     guess_us: Annotated[float, Display(label="Initial guess", unit="µs")] = Field(
         default=20.0, gt=0, description="Initial lifetime estimate (µs)"
     )
@@ -36,6 +44,8 @@ class T2EchoTunablesForm(FormModel):
         return T2EchoTunables(
             reps=self.reps,
             rounds=self.rounds,
+            acquire_retry=self.acquire_retry,
+            earlystop_snr=self.earlystop_snr,
             guess_us=self.guess_us,
             sweep_factor=self.sweep_factor,
             relax_factor=self.relax_factor,
@@ -54,6 +64,14 @@ class T2RamseyTunablesForm(FormModel):
         default=100, ge=1, description="Ramsey averages"
     )
     rounds: int = Field(default=10, ge=1, description="Ramsey averaging rounds")
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    earlystop_snr: float | None = Field(
+        default=20.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     guess_us: Annotated[float, Display(label="Initial guess", unit="µs")] = Field(
         default=20.0, gt=0, description="Initial lifetime estimate (µs)"
     )
@@ -72,6 +90,8 @@ class T2RamseyTunablesForm(FormModel):
         return T2RamseyTunables(
             reps=self.reps,
             rounds=self.rounds,
+            acquire_retry=self.acquire_retry,
+            earlystop_snr=self.earlystop_snr,
             guess_us=self.guess_us,
             sweep_factor=self.sweep_factor,
             relax_factor=self.relax_factor,
