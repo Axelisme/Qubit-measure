@@ -86,8 +86,10 @@ form/action builders live in `experiment_ledger.py`.
 describes how `ExpTabWidget` and `ExperimentFigureArea` divide presentation
 responsibilities. `ExperimentFigureArea` is not a second application controller.
 
-For every adapter, `MainWindow` projects the current tab's cfg invalid reason to the bottom status on interaction refresh and tab selection, while Run stays disabled.
-A valid cfg clears only that cfg diagnostic; background tabs and valid refreshes do not clear unrelated status messages.
+Cfg invalid reasons stay in the form area and disabled Run tooltip. A history tab
+without a form retains the factory's original reason there. Edits, interaction
+refreshes and tab selection preserve unrelated bottom-status messages. They do
+not cover the tab or figure area with a cfg diagnostic. Load behavior is unchanged.
 
 `AnalyzeFormWidget` keeps invalid optional scalar text visible. Only blank text
 means None. A committed parse failure shows a field-labelled error and publishes
