@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
 )
@@ -45,7 +44,7 @@ class MistFluxDepParams:
 
 
 @dataclass
-class MistFluxDepAnalysis(AnalyzeResultBase):
+class MistFluxDepAnalysis:
     """Figure-only MIST analysis; no calibration or writeback is inferred."""
 
 

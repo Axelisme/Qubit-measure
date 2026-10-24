@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -78,25 +77,22 @@ class RangeFindParams:
 
 
 class ResonatorDipSummary(BaseModel):
-    """One frequency-ordered dip; null scalars retain unavailable estimates."""
+    """Decode one native dip; null scalars retain unavailable estimates."""
 
-    name: str | None = Field(
-        description="Analysis name, or null for unnamed discovery; not a hardware channel."
-    )
+    name: str | None = Field(description="Analysis name, or null during discovery.")
     freq: float | None = Field(description="Absolute dip frequency in MHz.")
-    depth: float | None = Field(
-        description="Background-relative magnitude depth in a.u."
-    )
+    depth: float | None = Field(description="Magnitude prominence depth in a.u.")
 
 
 class RangeFindSummary(BaseModel):
-    """Dip estimates and captured identity/writeback limitations."""
+    """Decode native dip results and captured identity/writeback limitations."""
 
-    resonators: list[ResonatorDipSummary] = Field(
+    dips: list[ResonatorDipSummary] = Field(
         description="Dips in ascending frequency order."
     )
-    writeback_diagnostic: str | None = Field(
-        description="Reason some proposals were omitted; null when none were omitted."
+    writable: list[str] = Field(description="Names present in the analysis capture.")
+    diagnostic: str | None = Field(
+        description="Reason frequency proposals were omitted."
     )
     identity_diagnostic: str | None = Field(
         description="Pairing uncertainty; null is not proof of identity."
@@ -104,7 +100,7 @@ class RangeFindSummary(BaseModel):
 
 
 @dataclass
-class RangeFindAnalysis(AnalyzeResultBase):
+class RangeFindAnalysis:
     """Frequency-ordered dips and captured writeback eligibility.
 
     dips contains optional name, absolute MHz and magnitude prominence depth.
@@ -120,20 +116,6 @@ class RangeFindAnalysis(AnalyzeResultBase):
     writable: tuple[str, ...]
     diagnostic: str | None
     identity_diagnostic: str | None
-
-    def summary(self) -> RangeFindSummary:
-        """Return the typed dip summary consumed by recipes, in native units."""
-        return RangeFindSummary(
-            resonators=[
-                ResonatorDipSummary(name=dip.name, freq=dip.freq, depth=dip.depth)
-                for dip in self.dips
-            ],
-            writeback_diagnostic=self.diagnostic,
-            identity_diagnostic=self.identity_diagnostic,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return self.summary().model_dump()
 
 
 class RangeFindAdapter(
