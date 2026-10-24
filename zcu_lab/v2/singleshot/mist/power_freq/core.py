@@ -18,9 +18,10 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+
+from zcu_lab.v2._support import live_heatmap
 
 
 def _default_population_states() -> NDArray[np.int64]:

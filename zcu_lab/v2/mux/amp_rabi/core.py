@@ -89,7 +89,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
-from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
 from zcu_tools.program.v2.modules import (
@@ -100,6 +99,7 @@ from zcu_tools.program.v2.modules import (
 )
 from zcu_tools.program.v2.utils import sweep2param
 
+from zcu_lab.v2._support import live_line
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan

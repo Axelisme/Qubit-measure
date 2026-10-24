@@ -10,7 +10,7 @@ from zcu_tools.cfg_model import TemplateDef
 from .adapter import Adapter
 
 # Host payload types are erased only at entry to this registry.
-RegisteredAdapter = Adapter[Any, Any, Any, Any, Any, Any]
+RegisteredAdapter = Adapter[Any, Any, Any, Any, Any, Any, Any]
 
 logger = logging.getLogger(__name__)
 

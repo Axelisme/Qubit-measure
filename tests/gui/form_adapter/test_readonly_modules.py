@@ -7,6 +7,7 @@ from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.form import (
     Display,
+    FormInput,
     FormInputRejected,
     FormModel,
     FormPath,
@@ -16,6 +17,7 @@ from zcu_tools.gui.form_adapter import Form, ModuleRef
 
 from tests.gui._form_converters import RebuildingForm
 from tests.gui.form_adapter._indexed_models import indexed_env
+from tests.gui.form_adapter._input_models import specialize_input
 
 
 class InlinePulse(FormModel):
@@ -37,20 +39,16 @@ class ExperimentCfg(ConfigBase):
     rounds: int = 1
 
 
-def lower_source(_extras: SourceExtras, cfg: ExperimentCfg) -> ExperimentCfg:
-    """Keep this synthetic experiment independent of the author-only source."""
-    return cfg
-
-
 def test_readonly_inline_child_allows_ancestor_library_selection() -> None:
-    definition = Form(ExperimentCfg, {}, extras=SourceExtras, lower=lower_source)
+    definition = Form(ExperimentCfg, {})
+    input_model = specialize_input(definition, SourceExtras)
     env = indexed_env()
-    state = FormState(definition.default_input(env))
+    state = FormState(
+        FormInput(input_model, {"pulse": InlinePulse().model_dump(mode="json")})
+    )
     with pytest.raises(FormInputRejected) as rejected:
-        state.write({("extras", "pulse", "freq"): 125.0}, env)
+        state.write({("pulse", "freq"): 125.0}, env)
     assert rejected.value.reason == "readonly"
-    state.select(("extras", "pulse"), {"kind": "ref"}, env)
-    state.write({("extras", "pulse", "name"): "Q.pulses.drive"}, env)
-    assert state.input.data["extras"] == {
-        "pulse": {"kind": "ref", "name": "Q.pulses.drive"}
-    }
+    state.select(("pulse",), {"kind": "ref"}, env)
+    state.write({("pulse", "name"): "Q.pulses.drive"}, env)
+    assert state.input.data["pulse"] == {"kind": "ref", "name": "Q.pulses.drive"}
