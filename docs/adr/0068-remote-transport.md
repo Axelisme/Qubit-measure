@@ -66,6 +66,8 @@ Edit 以 model-field paths 原子寫入目前 input。`tab.refresh_sources(alias
 
 共用 ParamSpec 同時擁有 string enum 的宣告驗證、schema 投影與 request membership。Flux plugin 從 domain FluxLineRole 提供選項，typed Action 仍做 domain 驗證。`device.snapshot.unit` 讀 cached Info 的 `value_unit`，YOKO 為 A／V，Fake 為 native。缺 Info 標 none，不按 device type 猜單位，不讀硬體。Zcu_lab flux recipe helper 比對 caller 明填 unit 與 snapshot unit，包括 native，沒有 Fake 特例；none 不是可用 flux 座標。Recipe policy 不延伸到共用 device 或 cfg 安全規則。
 
+分析函數回傳的物件就是 summary 的來源。框架以單一轉換器將它轉成 JSON 物件，根物件必須是 dataclass、pydantic model 或 Mapping。JSON key 使用 core 結果的欄位名。非有限值依下述規則換成 `null`，其路徑在 RPC envelope 回報，不存進 artifact。2026-10-24 使用者裁定：「那直接拿分析回傳結果當summary 不就好了？」。
+
 Measure remote 擁有分析結果的 JSON 投影。它將非有限 summary 數字換成 null，以 `invalid` 記錄原 summary 路徑與 `non_finite` 原因。MCP execution 原樣保留這份 summary 與 invalid，不解讀 fit_quality、不改寫路徑，不猜測物理原因，不改 operation outcome、保存事實或 writeback policy。有擬合時附 fit_quality 是實驗定義者的約定，框架不檢查。這項轉換不延伸到 generic context 或 framing。
 
 認證與 wire 檢查後，MCP 以 `control.connect(label, mode)` 初始化身份，再讀 live catalog。Owner 預設自動取得未鎖定 Local，readonly 不取得。相同初始化不 reacquire，換身份須重連。`control.status/acquire/release` 的回覆及 `not_holder`、`control_locked`、`control_held`、`readonly_connection` 錯誤保留原生結構；MCP 不重分類或重試。完整 wire 初始化及管理例外見 [[0070]]。

@@ -34,7 +34,8 @@
 每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 提供 Qt-free `make_form(ctx)`。
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
 分析計算包含擬合、逐 tone 迴圈、失敗隔離與結果型別。GUI 為 writeback 做的有限值檢查與摘要整理不算分析計算。
-目前 mux/onetone 的逐 tone 計算仍在 gui.py，搬入 core 是獨立的分析層清理工作，不代表允許新分析沿用此位置。
+mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core 擁有。
+gui.py 保留來源與 route prior 解析，以及 writeback。
 `gui.py` 宣告具名參數的 `Adapter` 值。Form 從 adapter 輸入型別推導形狀；tree 只宣告初值、Slot／Template、鎖定與隱藏。
 完整作者契約見 [ADR-0073](../../docs/adr/0073-measure-form-derivation.md)。
 
