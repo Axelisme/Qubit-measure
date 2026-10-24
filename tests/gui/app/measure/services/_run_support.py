@@ -33,7 +33,7 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import Module, ProgramV2Cfg
+from zcu_tools.program.v2 import Module
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -136,15 +136,13 @@ class FakeBg:
 
 
 class ConstructorFailingProgram:
-    @property
-    def cfg_model(self) -> ProgramV2Cfg:
-        raise NotImplementedError
-
     def __init__(
         self,
         soccfg: Any,
-        cfg: ProgramV2Cfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         modules: list[Any],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:

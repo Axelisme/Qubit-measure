@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.program.v2 import ProgramV2Cfg
 
 
 class ExpCfgModel(ConfigBase):
@@ -13,7 +12,7 @@ class ExpCfgModel(ConfigBase):
     """
 
 
-class ProgramExpCfg(ProgramV2Cfg, ExpCfgModel):
+class ProgramExpCfg(ExpCfgModel):
     """Base for zcu_lab experiment inputs that also configure a v2 program.
 
     Inherits reps, rounds and initial/relax delay (us), with the same defaults

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeAlias
@@ -16,7 +16,6 @@ from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
 from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
     Module,
-    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -41,6 +40,11 @@ SignalArray: TypeAlias = NDArray[Any]
 StopCondition: TypeAlias = Callable[[], bool]
 
 
+def _require_positive_rounds(rounds: object) -> None:
+    if isinstance(rounds, bool) or not isinstance(rounds, int) or rounds < 1:
+        raise ValueError("rounds must be a positive integer")
+
+
 class _AcquireStopped(Exception):
     """An acquire child was cancelled; retain its completed-round slot."""
 
@@ -56,7 +60,7 @@ class _CallbackError(Exception):
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     """Synchronous producer accepted by the builder's run methods.
 
-    cfg_model supplies the positive round count. Both acquire methods receive
+    rounds supplies the positive integer software average count. Both methods receive
     the caller's soc, native progress policy and extra acquisition keywords.
     They call round_hook with a one-based completed round, cumulative raw data
     and the supplied cancel_flag; they check that flag before starting another
@@ -67,13 +71,11 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     to the builder's partial-result policy.
     """
 
-    @property
-    def cfg_model(self) -> ProgramV2Cfg: ...
-
     def acquire(
         self,
         soc: object,
         *,
+        rounds: int,
         progress: bool,
         round_hook: Callable[[int, T_AcquireRaw_co, CancelFlagProtocol], object],
         cancel_flag: CancelFlagProtocol,
@@ -85,6 +87,7 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
         self,
         soc: object,
         *,
+        rounds: int,
         progress: bool,
         round_hook: Callable[[int, T_DecimatedRaw_co, CancelFlagProtocol], object],
         cancel_flag: CancelFlagProtocol,
@@ -170,10 +173,11 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
     """Build and synchronously acquire a program within an active Schedule.
 
     owner is the root Schedule or a ScheduleStep and selects the default writable
-    SignalBuffer slot. soc and soccfg are borrowed producer handles. cfg supplies
-    ProgramV2Cfg runtime fields; typed ProgramV2Cfg subclasses keep their exact
-    type. program_cls is called with soccfg, a deep-copied program cfg, modules,
-    sweep and program_kwargs. Build also deep-copies modules and sweep specs.
+    SignalBuffer slot. soc and soccfg are borrowed producer handles.
+    program_kwargs contains the positive integer reps control and initial_delay /
+    relax_delay in us, as supplied by Schedule.prog_builder. program_cls receives
+    soccfg, these keyword controls, modules, sweep and extra compilation keywords. Build deep-copies modules and sweep specs.
+    Acquisition rounds default to one and never come from the owner's cfg.
 
     Build/run operations require an active owner scope and a configured default
     slot for acquisition. Build methods require at least one explicit module.
@@ -196,7 +200,6 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
         soc: object,
         soccfg: object,
-        cfg: object,
         program_cls: ProgramFactory[ProgramT],
         program_kwargs: dict[str, object],
     ) -> None:
@@ -207,7 +210,6 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self._schedule = owner if isinstance(owner, Schedule) else owner.schedule
         self._soc = soc
         self._soccfg = soccfg
-        self._cfg = cfg
         self._program_cls = program_cls
         self._program_kwargs = dict(program_kwargs)
         self._modules: list[Module] = []
@@ -234,14 +236,15 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         return self
 
     def build(self) -> ProgramT:
-        """Return a new isolated program; propagate cfg, module or factory errors."""
+        """Return a new program with isolated modules/sweeps; factory errors propagate."""
         self._schedule.ensure_active()
         self._ensure_modules()
-        return self._build_program(self._isolated_cfg())
+        return self._build_program()
 
     def build_and_acquire(
         self,
         *,
+        rounds: int = 1,
         raw2signal_fn: Callable[[Any], SignalArray] | None = None,
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
@@ -255,6 +258,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self._schedule.ensure_active()
         self._ensure_modules()
         return self._build_and_run(
+            rounds=rounds,
             runner=self.run_program,
             raw2signal_fn=raw2signal_fn,
             options=AcquireOptions() if options is None else options,
@@ -264,6 +268,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
     def build_and_acquire_decimated(
         self,
         *,
+        rounds: int = 1,
         raw2signal_fn: Callable[[Any], SignalArray] | None = None,
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
@@ -277,6 +282,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self._schedule.ensure_active()
         self._ensure_modules()
         return self._build_and_run(
+            rounds=rounds,
             runner=self.run_program_decimated,
             raw2signal_fn=raw2signal_fn,
             options=AcquireOptions() if options is None else options,
@@ -287,13 +293,14 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self,
         program: ProgramProtocol[T_Raw, object],
         *,
+        rounds: int = 1,
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
         """Run a caller-owned program without rebuilding it, returning its live slot.
 
-        program follows ProgramProtocol and supplies cfg_model.rounds (> 0).
+        rounds is the positive integer software average count (bool is rejected).
         raw2signal_fn maps raw data to the slot shape; None uses the builder
         converter or default_raw2signal_fn. options controls retry/progress/stop;
         acquire_kwargs pass to acquire. Retry reuses this program. See the class
@@ -301,7 +308,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         """
         return self._run_program(
             acquire=program.acquire,
-            rounds=self._rounds_from(program),
+            rounds=rounds,
             raw2signal_fn=raw2signal_fn,
             default_raw2signal_fn=default_raw2signal_fn,
             options=AcquireOptions() if options is None else options,
@@ -312,6 +319,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self,
         program: ProgramProtocol[object, T_Raw],
         *,
+        rounds: int = 1,
         raw2signal_fn: Callable[[T_Raw], SignalArray] | None = None,
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
@@ -324,7 +332,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         """
         return self._run_program(
             acquire=program.acquire_decimated,
-            rounds=self._rounds_from(program),
+            rounds=rounds,
             raw2signal_fn=raw2signal_fn,
             default_raw2signal_fn=default_decimated_raw2signal_fn,
             options=AcquireOptions() if options is None else options,
@@ -334,18 +342,21 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
     def _build_and_run(
         self,
         *,
+        rounds: int,
         runner: Callable[..., SignalArray],
         raw2signal_fn: Callable[[Any], SignalArray] | None,
         options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
+        _require_positive_rounds(rounds)
         if options.retry < 0:
             raise ValueError("retry must be non-negative")
         if self._schedule.check_stop_requested():
             return self._default_slot().view
-        program = self._build_program(self._isolated_cfg())
+        program = self._build_program()
         return runner(
             program,
+            rounds=rounds,
             raw2signal_fn=raw2signal_fn,
             options=options,
             **acquire_kwargs,
@@ -361,6 +372,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
+        _require_positive_rounds(rounds)
         retry = options.retry
         if retry < 0:
             raise ValueError("retry must be non-negative")
@@ -385,7 +397,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                     raw = self._acquire_once(
                         acquire=acquire,
                         options=options,
-                        acquire_kwargs=acquire_kwargs,
+                        acquire_kwargs=dict(acquire_kwargs, rounds=rounds),
                         signal_fn=signal_fn,
                         slot=slot,
                         pbar=pbar,
@@ -436,15 +448,11 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         if not self._modules:
             raise ValueError("ProgramBuilder requires explicit modules")
 
-    def _isolated_cfg(self) -> ProgramV2Cfg:
-        return deepcopy(_program_cfg_from(self._cfg))
-
-    def _build_program(self, cfg: ProgramV2Cfg) -> ProgramT:
+    def _build_program(self) -> ProgramT:
         program_kwargs = dict(self._program_kwargs)
         program_kwargs["modules"] = deepcopy(self._modules)
         return self._program_cls(
             self._soccfg,
-            cfg,
             sweep=deepcopy(self._sweeps) or None,
             **program_kwargs,
         )
@@ -491,12 +499,6 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         finally:
             scope.release()
 
-    def _rounds_from(self, program: ProgramProtocol[Any, Any]) -> int:
-        rounds = program.cfg_model.rounds
-        if rounds < 1:
-            raise ValueError("Program cfg.rounds must be positive")
-        return rounds
-
     def _resolve_progress_leave(self, *, progress_leave: bool | None) -> bool:
         # Import the concrete step at call time to avoid a module initialization cycle.
         from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
@@ -507,20 +509,3 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
 
     def _default_slot(self) -> SignalSlot:
         return self._schedule.default_slot_for(self._owner)
-
-
-def _program_cfg_from(cfg: object) -> ProgramV2Cfg:
-    if isinstance(cfg, ProgramV2Cfg):
-        return cfg
-    program_fields = ProgramV2Cfg.model_fields
-    if isinstance(cfg, Mapping):
-        data = {key: cfg[key] for key in program_fields if key in cfg}
-    else:
-        data = {key: getattr(cfg, key) for key in program_fields if hasattr(cfg, key)}
-    if not data:
-        raise TypeError(
-            "ProgramBuilder cfg must be ProgramV2Cfg or provide at least one "
-            "ProgramV2Cfg field; pass ProgramV2Cfg() for default program runtime "
-            "settings"
-        )
-    return ProgramV2Cfg.model_validate(data)

@@ -43,7 +43,6 @@ from zcu_tools.gui.expected_error import (
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.program.v2 import ProgramV2Cfg
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
@@ -396,7 +395,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
     def run_with_schedule_failure(*_args: Any, context: RunContext) -> object:
         with Schedule(
-            ProgramV2Cfg(),
+            {},
             SignalBuffer((1,), dtype=np.float64),
             scope=context.scope,
         ) as sched:

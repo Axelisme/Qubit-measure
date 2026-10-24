@@ -7,7 +7,6 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -21,10 +20,9 @@ def environment(**kwargs):
     return importlib.import_module(name).white_noise(**kwargs)
 
 
-def program(env, *, reps=2, rounds=1, channels=(0,), samples=16):
+def program(env, *, reps=2, channels=(0,), samples=16):
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=reps, rounds=rounds),
         modules=[
             PulseReadoutCfg(
                 gen_ch=ch,
@@ -37,6 +35,7 @@ def program(env, *, reps=2, rounds=1, channels=(0,), samples=16):
             ).build(f"readout_{ch}")
             for ch in channels
         ],
+        reps=reps,
     )
 
 
@@ -49,8 +48,14 @@ def raw_of(prog):
 
 def test_explicit_zero_noise_preserves_shapes_and_raw():
     env = environment(std_adc=0, seed=123)
-    prog = program(env, rounds=2)
-    result = prog.acquire(env.soc, progress=False)
+    prog = program(
+        env,
+    )
+    result = prog.acquire(
+        env.soc,
+        progress=False,
+        rounds=2,
+    )
     assert result is not None
     assert result[0].shape == (1, 2)
     np.testing.assert_array_equal(result[0], 0)
@@ -58,7 +63,11 @@ def test_explicit_zero_noise_preserves_shapes_and_raw():
     assert raw is not None
     assert raw[0].shape == (2, 1, 2)
     assert raw[0].dtype == np.int64
-    dec = prog.acquire_decimated(env.soc, progress=False)
+    dec = prog.acquire_decimated(
+        env.soc,
+        progress=False,
+        rounds=2,
+    )
     assert dec is not None
     assert dec[0].shape == (2, 16, 2)
     np.testing.assert_array_equal(dec[0], 0)
@@ -78,7 +87,7 @@ def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
     env = environment(std_adc=0, seed=13, n_gens=2, n_readouts=2)
     for ch in (0, 1):
         env.soccfg["readouts"][ch]["iq_offset"] = 0.125 * (ch + 1)
-    prog = program(env, reps=3, rounds=3, channels=(1, 0), samples=7)
+    prog = program(env, reps=3, channels=(1, 0), samples=7)
     for ro in prog.ro_chs.values():
         ro["edge_counting"] = edge_counting
     sums = np.array([[13.0, -29.0]])
@@ -108,6 +117,7 @@ def test_integrated_normalization_round_buffers_and_delayed_raw(edge_counting):
                 progress=False,
                 remove_offset=remove_offset,
                 round_hook=lambda count, data, stop: hooks.append((count, data)),
+                rounds=3,
             )
             expected = []
             for ch in (1, 0):
@@ -140,7 +150,9 @@ def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_ro
     from zcu_tools.simulate.evolution import Cancelled
 
     env = environment(std_adc=0, seed=13)
-    prog = program(env, rounds=3)
+    prog = program(
+        env,
+    )
     stop = Event()
     completed_chunks = []
     execute = env.soc.binding.execute
@@ -159,10 +171,20 @@ def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_ro
     try:
         if cancel_round == 0:
             with pytest.raises(StoppedPartialAcquireError):
-                prog.acquire(env.soc, progress=False, cancel_flag=stop)
+                prog.acquire(
+                    env.soc,
+                    progress=False,
+                    cancel_flag=stop,
+                    rounds=3,
+                )
             assert prog.get_raw() is None
         else:
-            result = prog.acquire(env.soc, progress=False, cancel_flag=stop)
+            result = prog.acquire(
+                env.soc,
+                progress=False,
+                cancel_flag=stop,
+                rounds=3,
+            )
             np.testing.assert_array_equal(result[0], 0)
             rounds = prog.get_rounds()
             assert rounds is not None and len(rounds) == 1
@@ -174,7 +196,11 @@ def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_ro
         ]
         # Cancellation releases admission and does not leak into the next acquire.
         env.soc.binding.execute = execute
-        prog.acquire(env.soc, progress=False)
+        prog.acquire(
+            env.soc,
+            progress=False,
+            rounds=3,
+        )
         resumed = prog.get_rounds()
         assert resumed is not None and len(resumed) == 3
     finally:
@@ -229,7 +255,9 @@ def test_step_rounds_rejected_before_consuming_sequence(mode):
 
 def test_reentry_does_not_corrupt_original_rounds_and_stop_consumes_sequence():
     env = environment(seed=21)
-    prog = program(env, rounds=3)
+    prog = program(
+        env,
+    )
     observed = []
 
     def hook(count, data, stop):
@@ -239,17 +267,35 @@ def test_reentry_does_not_corrupt_original_rounds_and_stop_consumes_sequence():
         if count == 2:
             stop.set()
 
-    prog.acquire(env.soc, progress=False, round_hook=hook)
+    prog.acquire(
+        env.soc,
+        progress=False,
+        round_hook=hook,
+        rounds=3,
+    )
     assert observed == [1, 2]
     rounds = prog.get_rounds()
     assert rounds is not None and len(rounds) == 2
-    prog.acquire(env.soc, progress=False)
+    prog.acquire(
+        env.soc,
+        progress=False,
+        rounds=3,
+    )
     assert env.soc.binding.last_request.sequence == 1
     stop = Event()
     stop.set()
     with pytest.raises(StoppedPartialAcquireError):
-        prog.acquire(env.soc, progress=False, cancel_flag=stop)
-    prog.acquire(env.soc, progress=False)
+        prog.acquire(
+            env.soc,
+            progress=False,
+            cancel_flag=stop,
+            rounds=3,
+        )
+    prog.acquire(
+        env.soc,
+        progress=False,
+        rounds=3,
+    )
     assert env.soc.binding.last_request.sequence == 3
 
 
@@ -275,7 +321,7 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     )
 
     env = environment(std_adc=0, seed=12, n_gens=2, n_readouts=2)
-    prog = program(env, reps=1, rounds=2, channels=(1, 0), samples=4)
+    prog = program(env, reps=1, channels=(1, 0), samples=4)
     other = program(env, reps=1)
     readout = prog.modules[0]
     if not isinstance(readout, PulseReadout):
@@ -323,7 +369,12 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
 
     env.soc.binding.capture_snapshot = snapshot
     env.soc.binding.execute = source
-    averaged = prog.acquire(env.soc, progress=False, round_hook=hook)
+    averaged = prog.acquire(
+        env.soc,
+        progress=False,
+        round_hook=hook,
+        rounds=2,
+    )
     assert averaged is not None
     np.testing.assert_array_equal(raw_of(prog)[0], [[[2, 4]]])
     np.testing.assert_array_equal(raw_of(prog)[1], [[[12, 14]]])
@@ -409,8 +460,8 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
     )
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=1),
         modules=[cfg.build("readout")],
+        reps=1,
     )
     prog.acquire(env.soc, progress=False)
     request = env.soc.binding.last_request

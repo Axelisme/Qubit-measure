@@ -13,8 +13,6 @@ from zcu_tools.program.v2 import Module
 from zcu_tools.progress_bar import BaseProgressBar
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
-from tests.experiment.v2.runtime._flow_cfg import FlowCfg
-
 
 def identity_array(raw: np.ndarray) -> np.ndarray:
     """Return the acquired array unchanged, without copying or conversion."""
@@ -145,19 +143,23 @@ class FakeProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
         marker: str,
     ) -> None:
         self.soccfg = soccfg
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
-        self.sweep = sweep
+        self.sweep = [] if sweep is None else sweep
         self.marker = marker
-        self.reps = getattr(cfg, "reps", None)
-        self.rounds = getattr(cfg, "rounds", None)
         self.acquire_kwargs: dict[str, Any] = {}
         self.cancel_flag_seen = False
         FakeProgram.instances.append(self)
@@ -195,20 +197,25 @@ class FakeScalarProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
         self.modules = modules
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.sweep = sweep
 
     def acquire(
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
-        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
-        raw = np.array(float(getattr(self.cfg_model, "value")))  # noqa: B009
+        raw = np.array(self.value)
         round_hook(1, raw, cancel_flag)
         return raw
 
@@ -222,13 +229,19 @@ class FakeCachedProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
         self.soccfg = soccfg
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
         self.sweep = sweep
         self.acquire_count = 0
@@ -238,8 +251,7 @@ class FakeCachedProgram:
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
     ) -> np.ndarray:
         self.acquire_count += 1
-        # tolerated: FlowCfg.value is a dynamic Pydantic extra, not a typed field.
-        raw = np.array(float(getattr(self.cfg_model, "value")))  # noqa: B009
+        raw = np.array(self.value)
         round_hook(1, raw, cancel_flag)
         return raw
 
@@ -253,13 +265,19 @@ class FakeDecimatedProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
         self.soccfg = soccfg
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
         self.sweep = sweep
         self.acquire_decimated_kwargs: dict[str, Any] = {}
@@ -296,12 +314,18 @@ class FlakyBuildProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
         self.sweep = sweep
         self.acquire_count = 0
@@ -327,12 +351,18 @@ class AlwaysFailingProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
         self.sweep = sweep
         self.acquire_count = 0
@@ -356,13 +386,19 @@ class InterruptingProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
         self.soccfg = soccfg
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
         self.sweep = sweep
         self.acquire_count = 0
@@ -382,12 +418,18 @@ class StopBeforeDataProgram:
     def __init__(
         self,
         soccfg: Any,
-        cfg: FlowCfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        value: float = 0.0,
         modules: list[Module],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:
-        self.cfg_model = cfg
+        self.reps = reps
+        self.initial_delay = initial_delay
+        self.relax_delay = relax_delay
+        self.value = value
         self.modules = modules
         self.sweep = sweep
 

@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from zcu_tools.cfg_model import MuxReadoutCfg, MuxReadoutTone
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import ModuleCfgFactory, readout
@@ -78,7 +77,12 @@ class RecordingProgram(ModularProgramV2):
         self.pulse_definitions = []
         self.gen_declarations = []
         self.adc_declarations = []
-        super().__init__(soccfg, ProgramV2Cfg(reps=2), modules=modules, **kwargs)
+        super().__init__(
+            soccfg,
+            modules=modules,
+            **kwargs,
+            reps=2,
+        )
 
     def declare_gen(self, *args, **kwargs):
         self.gen_declarations.append(kwargs.copy())

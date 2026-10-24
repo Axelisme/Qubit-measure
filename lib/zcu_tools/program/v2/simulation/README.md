@@ -65,7 +65,7 @@ simulation implementation.
 Notebook callers import the same builder and use its returned objects:
 
 ```python
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from noise_environment import build_environment
@@ -78,10 +78,10 @@ try:
         waveform=ConstWaveformCfg(length=0.1), ro_length=0.1,
     )
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(reps=4, rounds=2),
+        env.soccfg, reps=4,
         modules=[readout.build("readout")],
     )
-    averaged = prog.acquire(env.soc, progress=False)
+    averaged = prog.acquire(env.soc, rounds=2, progress=False)
     raw = prog.get_raw()
 finally:
     env.devices.close_all_devices()

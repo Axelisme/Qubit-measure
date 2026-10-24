@@ -7,7 +7,7 @@ import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.dmem import LoadWord
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -64,7 +64,9 @@ def mux_program(
     )
     modules = [] if drive is None else [drive.build("drive")]
     return ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(reps=256), modules=[*modules, readout.build("mux")]
+        env.soccfg,
+        modules=[*modules, readout.build("mux")],
+        reps=256,
     )
 
 
@@ -83,13 +85,13 @@ def pulse_program(env, frequencies, *, reps=256):
     )
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=reps),
         modules=[
             LoadWord("gen", gen, "axis", "gen_word"),
             LoadWord("adc", adc, "axis", "adc_word"),
             PulseReadout("pulse", readout, freq_val="gen_word", ro_freq_val="adc_word"),
         ],
         sweep=[("axis", len(frequencies))],
+        reps=reps,
     )
 
 

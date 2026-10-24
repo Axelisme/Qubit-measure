@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from qick import QickConfig
 from qick.asm_v2 import AsmV2, Macro
 
-from .base import MyProgramV2, ProgramV2Cfg
+from .base import MyProgramV2
 from .modules import Module
 from .sweep import SweepCfg
 
@@ -18,16 +18,23 @@ logger = logging.getLogger(__name__)
 
 
 class ModularProgramV2(MyProgramV2):
-    """
-    A class that allows custom behavior based on the provided modules.
+    """Compile ordered modules and optional sweep loops with explicit controls.
+
+    modules run in sequence; sweep names map to SweepCfg or integer counts.
+    reps is a positive integer. initial_delay and relax_delay are in us.
+    Invalid reps raises ValueError before compilation. Other keywords retain
+    QICK compilation behavior. Modules are borrowed; ProgramBuilder isolates them.
     """
 
     def __init__(
         self,
         soccfg: QickConfig,
-        cfg: ProgramV2Cfg,
         modules: Sequence[Module],
         sweep: list[tuple[str, SweepCfg | int]] | None = None,
+        *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         **kwargs,
     ) -> None:
         self.modules = modules
@@ -39,14 +46,20 @@ class ModularProgramV2(MyProgramV2):
         logger.debug(
             "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
             len(modules),
-            cfg.reps,
-            cfg.relax_delay,
+            reps,
+            relax_delay,
         )
 
-        super().__init__(soccfg, cfg, **kwargs)
+        super().__init__(
+            soccfg,
+            reps=reps,
+            initial_delay=initial_delay,
+            relax_delay=relax_delay,
+            **kwargs,
+        )
 
     @override
-    def _initialize(self, cfg: ProgramV2Cfg) -> None:
+    def _initialize(self, cfg: None) -> None:
         # add v2 sweep loops
         if self.sweep_dict is not None:
             for name, sweep in self.sweep_dict:
@@ -63,7 +76,7 @@ class ModularProgramV2(MyProgramV2):
         )
 
     @override
-    def _body(self, cfg: ProgramV2Cfg) -> None:
+    def _body(self, cfg: None) -> None:
         t = 0.0
         for module in self.modules:
             if logger.isEnabledFor(logging.DEBUG):
@@ -183,13 +196,12 @@ class BaseCustomProgramV2(ModularProgramV2, ABC):
     def __init__(
         self,
         soccfg: QickConfig,
-        cfg: ProgramV2Cfg,
         sweep: list[tuple[str, SweepCfg | int]] | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(
-            soccfg, cfg, modules=self.make_modules(cfg), sweep=sweep, **kwargs
-        )
+        super().__init__(soccfg, modules=self.make_modules(), sweep=sweep, **kwargs)
 
     @abstractmethod
-    def make_modules(self, cfg: ProgramV2Cfg) -> Sequence[Module]: ...
+    def make_modules(self) -> Sequence[Module]:
+        """Return the modules to compile; constructor keywords control timing."""
+        ...

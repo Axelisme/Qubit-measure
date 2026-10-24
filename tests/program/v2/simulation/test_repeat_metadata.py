@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
@@ -120,13 +120,13 @@ def repeated_program(env, case):
     )
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=2),
         modules=[
             LoadValue("counts", [0, 2, 1], "axis", "count"),
             repeated,
             readout.build("readout"),
         ],
         sweep=[("axis", 3)],
+        reps=2,
     )
 
 

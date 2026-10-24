@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.experiment.ftf import ftf, runtime
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -51,9 +51,9 @@ def test_ftf_workers_reach_engine_and_preserve_small_acquire(monkeypatch):
             )
             program = ModularProgramV2(
                 env.soccfg,
-                ProgramV2Cfg(reps=2),
                 modules=[pulse.build("drive"), readout.build("ro")],
                 sweep=[("freq", 2)],
+                reps=2,
             )
             acquired = program.acquire_decimated(env.soc, progress=False)
             assert acquired is not None

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Literal, overload
+from typing import Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
-
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
 
 from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
@@ -18,31 +16,9 @@ from .simulation import SimulationAcquireMixin
 logger = logging.getLogger(__name__)
 
 
-class ProgramV2Cfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
+def _require_positive_integer(value: object, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
 
 
 # QICK annotates single ndarrays; our existing mixin returns one array per ADC.
@@ -50,27 +26,39 @@ class ProgramV2Cfg(ConfigBase):
 class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     SimulationAcquireMixin, ImproveAsmV2, AveragerProgramV2, IRCompileMixin
 ):
-    def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
+    def __init__(
+        self,
+        soccfg: QickConfig,
+        *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+        **kwargs,
+    ) -> None:
+        """Compile with positive integer reps and initial/relaxation delays in us.
 
-        # v2 program need to pass reps and final_delay to init
-        self.cfg_model = cfg
+        bool is not a repetition count. Invalid reps raises ValueError before
+        compilation. Additional keywords are QICK compilation options.
+        """
+        _require_positive_integer(reps, "reps")
+        self.relax_delay = relax_delay
         self.pulse_registry = PulseRegistry()
 
         super().__init__(
             soccfg,
             cfg=None,
-            reps=cfg.reps,
-            initial_delay=cfg.initial_delay,
+            reps=reps,
+            initial_delay=initial_delay,
             final_wait=0.0,
-            final_delay=cfg.relax_delay,
+            final_delay=relax_delay,
             **kwargs,
         )
 
         logger.debug("ASM:\n%s", self.asm())
 
-    def _initialize(self, cfg: ProgramV2Cfg) -> None: ...
+    def _initialize(self, cfg: None) -> None: ...
 
-    def _body(self, cfg: ProgramV2Cfg) -> None: ...
+    def _body(self, cfg: None) -> None: ...
 
     def _make_binprog(self) -> None:
         """Build QICK binaries with a NumPy-version-independent dmem payload."""
@@ -106,60 +94,74 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
 
     @overload
     def acquire(
-        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[False] = False,
+        **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
     @overload
     def acquire(
-        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[True],
+        **kwargs: object,
     ) -> None: ...
 
     @overload
     def acquire(
-        self, soc: object, *args, **kwargs
+        self, soc: object, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None: ...
 
-    def acquire(self, soc, *args, **kwargs) -> list[NDArray[np.float64]] | None:
-        """Return averaged IQ for omitted/False step_rounds, using cfg rounds.
-
-        Pass acquisition options by keyword: cfg_model supplies rounds, so any
-        positional option after soc or an explicit rounds keyword duplicates
-        rounds and raises TypeError, as in the original forwarding API.
-        True prepares hardware and returns None; SimulationSoc rejects True
-        with ValueError. Typing is precise with only soc positional; extra
-        positional options or a dynamic bool retain the union. Acquisition errors
-        and cancellation propagate from the acquisition mixins unchanged.
-        """
-        return super().acquire(soc, *args, rounds=self.cfg_model.rounds, **kwargs)
-
-    @overload
-    def acquire_decimated(
-        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
-    ) -> list[NDArray[np.float64]]: ...
-
-    @overload
-    def acquire_decimated(
-        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
-    ) -> None: ...
-
-    @overload
-    def acquire_decimated(
-        self, soc: object, *args, **kwargs
-    ) -> list[NDArray[np.float64]] | None: ...
-
-    def acquire_decimated(
-        self, soc, *args, **kwargs
+    def acquire(
+        self, soc, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None:
-        """Return decimated IQ for omitted/False step_rounds, using cfg rounds.
+        """Acquire averaged IQ over positive integer rounds (default one).
 
-        Pass acquisition options by keyword: cfg_model supplies rounds, so any
-        positional option after soc or an explicit rounds keyword duplicates
-        rounds and raises TypeError, as in the original forwarding API.
-        True prepares hardware and returns None; SimulationSoc rejects True
-        with ValueError. Typing is precise with only soc positional; extra
-        positional options or a dynamic bool retain the union. Acquisition errors
-        and cancellation propagate from the acquisition mixins unchanged.
+        bool is not a round count. Invalid rounds raises ValueError before
+        transport/admission. Other options follow QICK; pass them by keyword.
+        step_rounds=True prepares hardware and returns None; simulation rejects
+        stepped ownership. Cancellation, hooks and partial results are unchanged.
         """
-        return super().acquire_decimated(
-            soc, *args, rounds=self.cfg_model.rounds, **kwargs
-        )
+        _require_positive_integer(rounds, "rounds")
+        return super().acquire(soc, *args, rounds=rounds, **kwargs)
+
+    @overload
+    def acquire_decimated(
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[False] = False,
+        **kwargs: object,
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire_decimated(
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[True],
+        **kwargs: object,
+    ) -> None: ...
+
+    @overload
+    def acquire_decimated(
+        self, soc: object, *args, rounds: int = 1, **kwargs
+    ) -> list[NDArray[np.float64]] | None: ...
+
+    def acquire_decimated(
+        self, soc, *args, rounds: int = 1, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
+        """Acquire decimated IQ over positive integer rounds (default one).
+
+        Validation, options, stepped ownership and failures follow acquire().
+        Software rounds average traces; they do not concatenate repetitions.
+        """
+        _require_positive_integer(rounds, "rounds")
+        return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)

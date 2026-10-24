@@ -441,7 +441,7 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
 
 def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
     from zcu_tools.experiment.ftf import ftf
-    from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+    from zcu_tools.program.v2 import ModularProgramV2
     from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -449,7 +449,6 @@ def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
     try:
         prog = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=3, rounds=3),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -461,6 +460,7 @@ def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
                     ro_length=0.02,
                 ).build("readout")
             ],
+            reps=3,
         )
         observed = []
 
@@ -470,13 +470,23 @@ def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
                 prog.acquire(env.soc, progress=False)
             stop.set()
 
-        prog.acquire(env.soc, progress=False, round_hook=hook)
+        prog.acquire(
+            env.soc,
+            progress=False,
+            round_hook=hook,
+            rounds=3,
+        )
         first_request = env.soc.binding.last_request
         assert first_request is not None
         raw = prog.get_raw()
         assert raw is not None
         first_raw = raw[0].copy()
-        prog.acquire(env.soc, progress=False, round_hook=hook)
+        prog.acquire(
+            env.soc,
+            progress=False,
+            round_hook=hook,
+            rounds=3,
+        )
         assert observed == [1, 1]
         second_request = env.soc.binding.last_request
         assert second_request is not None

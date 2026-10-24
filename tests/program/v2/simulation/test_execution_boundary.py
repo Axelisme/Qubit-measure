@@ -5,7 +5,7 @@ import pytest
 from qick.asm_v2 import AsmInst, QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Join, SoftDelay
@@ -61,7 +61,7 @@ class RawCleanupProgram(ModularProgramV2):
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_raw_compile_hooks_rejected_before_simulation_round(program_type, method):
     env = white_noise(std_adc=0)
-    prog = program_type(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")])
+    prog = program_type(env.soccfg, modules=[readout("readout")])
     with pytest.raises(ValueError, match=f"{program_type.__name__}.*raw.*unsupported"):
         getattr(prog, method)(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -70,7 +70,7 @@ def test_raw_compile_hooks_rejected_before_simulation_round(program_type, method
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(method):
     env = white_noise(std_adc=0)
-    prog = RawProgram(env.soccfg, ProgramV2Cfg(), modules=[readout("readout")])
+    prog = RawProgram(env.soccfg, modules=[readout("readout")])
     with pytest.raises(ValueError, match="RawProgram.*raw.*unsupported"):
         getattr(prog, method)(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -79,7 +79,7 @@ def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(met
 def test_raw_loop_hook_rejected_before_any_backend_round():
     env = white_noise(std_adc=0)
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(), modules=[readout("readout")], sweep=[("axis", 2)]
+        env.soccfg, modules=[readout("readout")], sweep=[("axis", 2)]
     )
     prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
     prog.compile()
@@ -93,9 +93,7 @@ def test_unwired_generator_pulse_is_not_silently_accepted():
     drive = PulseCfg(
         ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
     ).build("unwired_drive")
-    prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(), modules=[drive, readout("readout")]
-    )
+    prog = ModularProgramV2(env.soccfg, modules=[drive, readout("readout")])
     with pytest.raises(ValueError, match="unwired_drive.*1.*bound"):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -118,7 +116,6 @@ def test_unknown_unexecuted_module_rejected_before_any_signal_generation(method)
     env = white_noise(std_adc=0)
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(),
         modules=[
             Repeat("never", 0).add_content(Feedback()),
             readout("readout"),
@@ -142,7 +139,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
         trig_offset=QickParam(0, {"axis": 0.007}),
     )
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(), modules=[cfg.build("readout")], sweep=[("axis", 3)]
+        env.soccfg, modules=[cfg.build("readout")], sweep=[("axis", 3)]
     )
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
@@ -163,7 +160,11 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
             [SoftDelay("middle", 0.2), readout("second")],
         )
     ]
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2, rounds=2), modules=modules)
+    prog = ModularProgramV2(
+        env.soccfg,
+        modules=modules,
+        reps=2,
+    )
     seen = []
 
     def execute(request):
@@ -179,7 +180,11 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
         return RoundSignals((ChannelSignals(0, traces),))
 
     env.soc.binding.execute = execute
-    acquired = prog.acquire_decimated(env.soc, progress=False)
+    acquired = prog.acquire_decimated(
+        env.soc,
+        progress=False,
+        rounds=2,
+    )
     assert acquired is not None
     traces = acquired[0]
     request = seen[0].acquire

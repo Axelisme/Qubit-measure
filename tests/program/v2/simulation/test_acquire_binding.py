@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from qick.qick_asm import AcquireMixin
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -35,7 +35,6 @@ class QickCallable:
 def program(env: SimulationEnvironment) -> ModularProgramV2:
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=3, rounds=2),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -47,6 +46,7 @@ def program(env: SimulationEnvironment) -> ModularProgramV2:
                 ro_length=0.1,
             ).build("readout")
         ],
+        reps=3,
     )
 
 
@@ -59,7 +59,11 @@ def acquisition() -> Iterator[tuple[SimulationEnvironment, ModularProgramV2]]:
     finally:
         # Re-enter with the restored external callable so shared metadata does
         # not retain a test double after this test.
-        prog.acquire(env.soc, progress=False)
+        prog.acquire(
+            env.soc,
+            progress=False,
+            rounds=2,
+        )
         env.devices.close_all_devices()
 
 
@@ -71,7 +75,11 @@ def test_acquire_reuses_callable_metadata_across_programs_without_retaining_self
     with monkeypatch.context() as patch:
         patch.setattr(AcquireMixin, "acquire", callable)
         first = program(env)
-        first.acquire(env.soc, progress=False)
+        first.acquire(
+            env.soc,
+            progress=False,
+            rounds=2,
+        )
         retained = weakref.ref(first)
         del first
         gc.collect()
@@ -127,17 +135,20 @@ def test_acquire_preserves_bind_errors_sampling_identity_and_bitwise_output(
     try:
         with pytest.raises(TypeError) as original_error:
             invalid_call(prog, env.soc)
-        expected = prog.acquire(env.soc, progress=False)
+        expected = prog.acquire(env.soc, rounds=2, progress=False)
         with monkeypatch.context() as patch:
             patch.setattr(AcquireMixin, "acquire", callable)
             with pytest.raises(TypeError) as replay_error:
                 invalid_call(replay, replay_env.soc)
-            actual = replay.acquire(replay_env.soc, progress=False)
+            actual = replay.acquire(
+                replay_env.soc,
+                progress=False,
+                rounds=2,
+            )
             assert str(replay_error.value) == str(original_error.value)
             expected_request, actual_request = request_of(env), request_of(replay_env)
-            # Duplicate cfg-owned rounds fail in the outer program entry,
-            # before simulation admission; bind failures consume one sequence.
-            expected_sequence = 0 if invalid == "duplicate" else 1
+            # QICK argument binding happens after simulation admission.
+            expected_sequence = 1
             assert (
                 actual_request.sequence
                 == expected_request.sequence

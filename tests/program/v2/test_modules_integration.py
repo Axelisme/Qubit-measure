@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
 from zcu_tools.program.v2 import SweepCfg, sweep2param
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
@@ -69,8 +68,7 @@ RO_LENGTH = 1.0  # µs
 
 def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
-    cfg = ProgramV2Cfg(**cfg_kwargs)
-    return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
+    return ModularProgramV2(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 
 def _pulse_cfg(
@@ -361,7 +359,6 @@ class TestReadoutIntegration:
         cfg = _readout_cfg(freq=freqs[0])
         prog = ModularProgramV2(
             soccfg,
-            ProgramV2Cfg(),
             modules=[
                 TablePulseReadout(
                     "ro",
@@ -641,7 +638,7 @@ class TestDmemIntegration:
         soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
 
         with pytest.raises(ValueError, match="dmem must be one-dimensional"):
-            TwoDimensionalDmemProgram(soccfg, ProgramV2Cfg(), modules=[])
+            TwoDimensionalDmemProgram(soccfg, modules=[])
 
     def test_scan_with_compiles(self):
         vals = list(range(10))
@@ -666,7 +663,7 @@ def test_pulse_runtime_adc_identity_keeps_distinct_qick_definitions(mixer):
     cfg = _pulse_cfg(freq=700.0)
     cfg.mixer_freq = mixer
     pulses = [Pulse(f"p{idx}", cfg, ro_ch=ch) for idx, ch in enumerate((None, 0, 0, 1))]
-    prog = ModularProgramV2(soccfg, ProgramV2Cfg(), modules=pulses)
+    prog = ModularProgramV2(soccfg, modules=pulses)
     assert prog.pulse_registry.count == 3
     assert pulses[1].pulse_id == pulses[2].pulse_id
     assert len({pulses[idx].pulse_id for idx in (0, 1, 3)}) == 3

@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -36,7 +36,6 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     try:
         program = ModularProgramV2(
             observed.soccfg,
-            ProgramV2Cfg(reps=2, rounds=3),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -50,9 +49,18 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
                     ro_length=0.04,
                 ).build("ro")
             ],
+            reps=2,
         )
-        expected = program.acquire(observed.soc, progress=False)
-        actual = program.acquire(plain.soc, progress=False)
+        expected = program.acquire(
+            observed.soc,
+            progress=False,
+            rounds=3,
+        )
+        actual = program.acquire(
+            plain.soc,
+            progress=False,
+            rounds=3,
+        )
         assert np.asarray(expected).tobytes() == np.asarray(actual).tobytes()
         assert not plain_directory.exists()
         files = list(directory.glob("routing-*.jsonl"))
@@ -70,7 +78,11 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
         assert sum(f["rows"] for f in record["families"].values()) == 3
         assert sum(f["cache_hits"] for f in record["families"].values()) == 2
         assert record["estimated_cost_unit"] == "relative scheduling units"
-        program.acquire(observed.soc, progress=False)
+        program.acquire(
+            observed.soc,
+            progress=False,
+            rounds=3,
+        )
         records = [json.loads(line) for line in files[0].read_text().splitlines()]
         assert len(records) == 2
         assert sum(f["cache_hits"] for f in records[1]["families"].values()) == 3

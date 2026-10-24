@@ -24,7 +24,6 @@ from zcu_tools.experiment.workflows import (
     saved_run,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.program.v2.modules import SoftDelay
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
@@ -153,8 +152,6 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     attempts: list[int] = []
 
     class Program:
-        cfg_model = ProgramV2Cfg(rounds=1)
-
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
             attempts.append(1)
             raise OSError("readout disconnected")
@@ -165,7 +162,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         with Schedule(Cfg(), SignalBuffer(1), scope=ctx.scope) as schedule:
             assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
-                schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg()).run_program(
+                schedule.prog_builder("soc", "soccfg").run_program(
                     Program(),
                     raw2signal_fn=lambda raw: raw,
                     options=AcquireOptions(retry=1),
@@ -596,8 +593,6 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
     attempts: list[str] = []
 
     class Program:
-        cfg_model = ProgramV2Cfg(rounds=1)
-
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             attempts.append("build")
             if source == "build":
@@ -623,9 +618,7 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
         with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            builder = schedule.prog_builder(
-                "soc", "soccfg", cfg=ProgramV2Cfg(), program_cls=Program
-            )
+            builder = schedule.prog_builder("soc", "soccfg", program_cls=Program)
             builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
                 raw2signal_fn=convert, options=AcquireOptions(retry=1)
             )
@@ -655,8 +648,6 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     mode: str,
 ) -> None:
     class Program:
-        cfg_model = ProgramV2Cfg(rounds=1)
-
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
             rig.engine.cancel("run", scope="iteration")
             if first_round_stop:
@@ -671,7 +662,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
         with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            builder = schedule.prog_builder("soc", "soccfg", cfg=ProgramV2Cfg())
+            builder = schedule.prog_builder("soc", "soccfg")
             if mode == "integrated":
                 builder.run_program(Program(), raw2signal_fn=lambda raw: raw)
             else:

@@ -283,7 +283,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soc: object,
         soccfg: object,
         *,
-        cfg: object | None = None,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         program_cls: None = None,
         **program_kwargs: object,
     ) -> ProgramBuilder[ModularProgramV2]: ...
@@ -294,7 +296,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soc: object,
         soccfg: object,
         *,
-        cfg: object | None = None,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         program_cls: ProgramFactory[ProgramT],
         **program_kwargs: object,
     ) -> ProgramBuilder[ProgramT]: ...
@@ -304,7 +308,9 @@ class Schedule(Generic[T_Cfg, T_Env]):
         soc: object,
         soccfg: object,
         *,
-        cfg: object | None = None,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
     ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
@@ -314,17 +320,25 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 owner=self,
                 soc=soc,
                 soccfg=soccfg,
-                cfg=self.cfg if cfg is None else cfg,
                 program_cls=ModularProgramV2,
-                program_kwargs=program_kwargs,
+                program_kwargs=dict(
+                    program_kwargs,
+                    reps=reps,
+                    initial_delay=initial_delay,
+                    relax_delay=relax_delay,
+                ),
             )
         return ProgramBuilder(
             owner=self,
             soc=soc,
             soccfg=soccfg,
-            cfg=self.cfg if cfg is None else cfg,
             program_cls=program_cls,
-            program_kwargs=program_kwargs,
+            program_kwargs=dict(
+                program_kwargs,
+                reps=reps,
+                initial_delay=initial_delay,
+                relax_delay=relax_delay,
+            ),
         )
 
     def ensure_active(self) -> None:
@@ -815,7 +829,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soc: object,
         soccfg: object,
         *,
-        cfg: object | None = None,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         program_cls: None = None,
         **program_kwargs: object,
     ) -> ProgramBuilder[ModularProgramV2]: ...
@@ -826,7 +842,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soc: object,
         soccfg: object,
         *,
-        cfg: object | None = None,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         program_cls: ProgramFactory[ProgramT],
         **program_kwargs: object,
     ) -> ProgramBuilder[ProgramT]: ...
@@ -836,7 +854,9 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         soc: object,
         soccfg: object,
         *,
-        cfg: object | None = None,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
     ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
@@ -846,17 +866,25 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
                 owner=self,
                 soc=soc,
                 soccfg=soccfg,
-                cfg=self.cfg if cfg is None else cfg,
                 program_cls=ModularProgramV2,
-                program_kwargs=program_kwargs,
+                program_kwargs=dict(
+                    program_kwargs,
+                    reps=reps,
+                    initial_delay=initial_delay,
+                    relax_delay=relax_delay,
+                ),
             )
         return ProgramBuilder(
             owner=self,
             soc=soc,
             soccfg=soccfg,
-            cfg=self.cfg if cfg is None else cfg,
             program_cls=program_cls,
-            program_kwargs=program_kwargs,
+            program_kwargs=dict(
+                program_kwargs,
+                reps=reps,
+                initial_delay=initial_delay,
+                relax_delay=relax_delay,
+            ),
         )
 
 

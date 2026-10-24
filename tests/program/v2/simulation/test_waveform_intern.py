@@ -6,7 +6,7 @@ from dataclasses import fields, is_dataclass
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -66,7 +66,6 @@ def test_repeat_candidates_extract_compiled_content_once(kind, tmp_path, monkeyp
     ]
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=2),
         modules=[
             LoadValue("select", [0, 1], "axis", "selected"),
             Repeat("repeat", 3).add_content(
@@ -83,6 +82,7 @@ def test_repeat_candidates_extract_compiled_content_once(kind, tmp_path, monkeyp
             ).build("readout"),
         ],
         sweep=[("axis", 2)],
+        reps=2,
     )
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
@@ -138,7 +138,6 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
     waveform = GaussWaveformCfg(length=0.1, sigma=0.02)
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=1),
         modules=[
             PulseCfg(ch=ch, nqz=1, freq=80, gain=0.2, waveform=waveform).build(
                 f"drive{ch}"
@@ -156,6 +155,7 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
                 ro_length=0.1,
             ).build("readout")
         ],
+        reps=1,
     )
     table = prog.envelopes[2]["envs"]
     assert isinstance(table, dict)
@@ -187,7 +187,6 @@ def test_flat_top_durations_keep_distinct_sample_axes():
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=1),
         modules=[
             PulseCfg(
                 ch=1,
@@ -201,6 +200,7 @@ def test_flat_top_durations_keep_distinct_sample_axes():
             ).build(f"flat{i}")
             for i, length in enumerate((0.15, 0.20))
         ],
+        reps=1,
     )
     # The scalar diagnostic seam retains whole flat-tops, making the playback
     # duration part of envelope identity observable without decomposition.

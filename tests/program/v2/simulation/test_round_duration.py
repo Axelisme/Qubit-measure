@@ -13,7 +13,7 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg, make_mock_soccfg
+from zcu_tools.program.v2 import ModularProgramV2, make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
@@ -125,7 +125,6 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
     )
     program = ModularProgramV2(
         make_mock_soccfg(),
-        ProgramV2Cfg(reps=10, initial_delay=0, relax_delay=8),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -139,6 +138,9 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
                 ro_length=adc_length,
             ).build("readout")
         ],
+        reps=10,
+        initial_delay=0,
+        relax_delay=8,
     )
     sequence = binding.begin()
     try:
@@ -202,7 +204,6 @@ def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
     soc = SimulationSoc(env.soccfg, binding, routes=((0, 0),))
     program = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=1, rounds=3, relax_delay=50_000),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -214,9 +215,16 @@ def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
                 ro_length=0.2,
             ).build("readout")
         ],
+        reps=1,
+        relax_delay=50_000,
     )
     try:
-        data = program.acquire_decimated(soc, cancel_flag=cancel, progress=False)
+        data = program.acquire_decimated(
+            soc,
+            cancel_flag=cancel,
+            progress=False,
+            rounds=3,
+        )
         assert data is not None
         assert np.isfinite(data).all()
         assert len(binding.rounds) == 1

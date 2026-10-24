@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.delay import Delay, Join, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -48,11 +48,11 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     ).build("readout")
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=2),
         modules=[
             Delay("origin", 0.5),
             Join(pulse, [SoftDelay("offset", 0.1), readout]),
         ],
+        reps=2,
     )
     try:
         prog.acquire(env.soc, progress=False)

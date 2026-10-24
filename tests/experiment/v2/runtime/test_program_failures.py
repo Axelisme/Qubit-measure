@@ -9,7 +9,6 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
 from zcu_tools.program.acquisition import CancelFlagProtocol
-from zcu_tools.program.v2 import ProgramV2Cfg
 
 from ._flow_cfg import make_flow_cfg
 from ._flow_fakes import FakeModule
@@ -25,11 +24,10 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
     acquires: list[int] = []
 
     class Program:
-        def __init__(self, soccfg: object, cfg: ProgramV2Cfg, **kwargs: object) -> None:
+        def __init__(self, soccfg: object, **kwargs: object) -> None:
             builds.append(1)
             if failure_site == "build":
                 raise cause
-            self.cfg_model = cfg
 
         def acquire(
             self,

@@ -34,6 +34,7 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
                 "soc",
                 "soccfg",
                 program_cls=FakeScalarProgram,
+                value=step.cfg.value,
             ).add(FakeModule("readout")).build_and_acquire(
                 raw2signal_fn=identity_array,
             )
@@ -57,6 +58,7 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
                 "soc",
                 "soccfg",
                 program_cls=FakeScalarProgram,
+                value=step.cfg.value,
             ).add(FakeModule("readout")).build_and_acquire(
                 raw2signal_fn=identity_array,
             )
@@ -87,6 +89,7 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
                     "soc",
                     "soccfg",
                     program_cls=FakeScalarProgram,
+                    value=step.cfg.value,
                 ).add(FakeModule("readout")).build_and_acquire(
                     raw2signal_fn=identity_array,
                 )
@@ -180,6 +183,7 @@ def test_schedule_batch_string_key_default_program_target_marks_failed_outcome()
             "soc",
             "soccfg",
             program_cls=FakeScalarProgram,
+            value=step.cfg.value,
         ).add(FakeModule("readout")).build_and_acquire(
             raw2signal_fn=identity_array,
         )
@@ -204,6 +208,7 @@ def test_schedule_batch_string_key_uses_child_local_default_buffer():
             "soc",
             "soccfg",
             program_cls=FakeScalarProgram,
+            value=signals_step.cfg.value,
         ).add(FakeModule("readout")).build_and_acquire(
             raw2signal_fn=identity_array,
         )

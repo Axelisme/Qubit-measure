@@ -22,7 +22,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -42,7 +41,6 @@ class NoiseAdapter(SavingAdapter):
     def run(self, req, cfg, *, context):
         prog = ModularProgramV2(
             context.soccfg,
-            ProgramV2Cfg(reps=1, rounds=3),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -55,9 +53,13 @@ class NoiseAdapter(SavingAdapter):
                 ).build("readout")
             ],
             sweep=[("point", 3)],
+            reps=1,
         )
         acquired = prog.acquire(
-            context.soc, progress=False, cancel_flag=context.scope.stop
+            context.soc,
+            progress=False,
+            cancel_flag=context.scope.stop,
+            rounds=3,
         )
         assert acquired is not None
         iq = acquired[0][0]

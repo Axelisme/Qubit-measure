@@ -8,7 +8,7 @@ from zcu_tools.core.simulation import (
     PulseEvent,
     ReadoutWindow,
 )
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
@@ -94,7 +94,9 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
             ro_length=0.1,
         )
         program = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(reps=2048), modules=[readout.build("ro")]
+            env.soccfg,
+            modules=[readout.build("ro")],
+            reps=2048,
         )
         acquired = program.acquire(env.soc, progress=False)
         assert acquired is not None
@@ -156,7 +158,9 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
             trig_offset=0.01,
         )
         program = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(reps=256), modules=[readout.build("ro")]
+            env.soccfg,
+            modules=[readout.build("ro")],
+            reps=256,
         )
         acquired = program.acquire_decimated(env.soc, progress=False)
         assert acquired is not None

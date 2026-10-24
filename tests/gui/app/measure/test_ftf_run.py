@@ -22,7 +22,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -63,7 +63,10 @@ class FTFAcquisitionAdapter(SavingAdapter):
             ).build("ro"),
         ]
         program = ModularProgramV2(
-            context.soccfg, ProgramV2Cfg(reps=2), modules=modules, sweep=[("point", 3)]
+            context.soccfg,
+            modules=modules,
+            sweep=[("point", 3)],
+            reps=2,
         )
         acquired = program.acquire(
             context.soc, progress=False, cancel_flag=context.scope.stop

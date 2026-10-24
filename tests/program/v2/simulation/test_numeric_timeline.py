@@ -5,7 +5,7 @@ import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
@@ -33,7 +33,6 @@ def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader
     env = white_noise(std_adc=0)
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(),
         modules=[
             loader("empty", [], "reps", "unused"),
             readout(),
@@ -55,7 +54,11 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     )
     env = white_noise(std_adc=0)
     module = readout(waveform=ArbWaveformCfg(data="signed", path=str(path)))
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2), modules=[module])
+    prog = ModularProgramV2(
+        env.soccfg,
+        modules=[module],
+        reps=2,
+    )
     prog.acquire(env.soc, progress=False)
     event = request_of(env).materialize_point(0).events[0]
     envelope = event.envelope
@@ -82,9 +85,7 @@ def test_adc_read_windows_retain_each_generator_association():
     second.cfg.gen_ch = 1
     # Build again so the owned Pulse and flat readout share the selected route.
     second = second.cfg.build("second")
-    prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(), modules=[readout("first"), second]
-    )
+    prog = ModularProgramV2(env.soccfg, modules=[readout("first"), second])
     prog.acquire(env.soc, progress=False)
     window = request_of(env).materialize_point(0).readouts[0]
     assert getattr(window, "generator_channels", ()) == (0, 1)
@@ -94,11 +95,11 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
     env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((1, 1), (0, 0)))
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=2, rounds=2),
         modules=[
             readout("one", channel=1, samples=7),
             readout("zero", channel=0, samples=3),
         ],
+        reps=2,
     )
     seen = []
 
@@ -123,7 +124,11 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
         )
 
     env.soc.binding.execute = execute
-    traces = prog.acquire_decimated(env.soc, progress=False)
+    traces = prog.acquire_decimated(
+        env.soc,
+        progress=False,
+        rounds=2,
+    )
     assert traces is not None
     assert [trace.shape for trace in traces] == [(2, 7, 2), (2, 3, 2)]
     np.testing.assert_array_equal(traces[0], 10.75)
@@ -138,7 +143,6 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
     env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1)))
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(),
         modules=[
             Join(
                 [SoftDelay("swept", QickParam(0.1, {"axis": 0.3})), readout("a")],
@@ -169,7 +173,6 @@ def test_undefined_scalar_and_out_of_bounds_table_fail_before_signals():
     env = white_noise(std_adc=0)
     uninitialized = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(),
         modules=[
             Branch(
                 "choice",
@@ -187,7 +190,6 @@ def test_undefined_scalar_and_out_of_bounds_table_fail_before_signals():
         uninitialized.acquire(env.soc, progress=False)
     out_of_bounds = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(),
         modules=[
             LoadValue("short_table", [0], "axis", "value"),
             readout(),

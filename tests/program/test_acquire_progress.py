@@ -5,7 +5,6 @@ from collections.abc import Callable
 from zcu_tools.gui.session.pbar_host import ProgressBar
 from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -34,7 +33,6 @@ def _acquire_two_records() -> None:
     soc, soccfg = make_acquisition_soc()
     program = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=500, rounds=1),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -46,6 +44,7 @@ def _acquire_two_records() -> None:
                 freq=5000.0,
             ).build("ro")
         ],
+        reps=500,
     )
     # One-round acquisitions expose reps progress rather than a rounds bar.
     for _ in range(2):

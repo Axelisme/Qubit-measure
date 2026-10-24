@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
@@ -44,7 +44,10 @@ def receiver():
 def acquire(modules, *, sweep=None, reps=1):
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(reps=reps), modules=modules, sweep=sweep
+        env.soccfg,
+        modules=modules,
+        sweep=sweep,
+        reps=reps,
     )
     try:
         prog.acquire(env.soc, progress=False)
@@ -160,9 +163,7 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
     if preceding_pulse:
         modules.insert(0, drive(length=0.04).build("reset"))
     try:
-        prog = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(), modules=modules, sweep=[("length", 2)]
-        )
+        prog = ModularProgramV2(env.soccfg, modules=modules, sweep=[("length", 2)])
     except RuntimeError as exc:
         pytest.fail(f"parallel table-length pulses must compile: {exc}")
     prog.acquire(env.soc, progress=False)
@@ -276,7 +277,7 @@ def test_join_cross_branch_register_dependency_rejected_before_backend():
         receiver().build("readout"),
     ]
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=modules)
+    prog = ModularProgramV2(env.soccfg, modules=modules)
     with pytest.raises(ValueError, match="Join.*register.*selection"):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -289,7 +290,7 @@ def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
         receiver().build("readout"),
     ]
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(), modules=modules)
+    prog = ModularProgramV2(env.soccfg, modules=modules)
     with pytest.raises(ValueError, match="DelayAuto.*invalid_wait.*reps.*cycles.*word"):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
