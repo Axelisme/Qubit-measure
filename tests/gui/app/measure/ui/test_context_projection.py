@@ -5,7 +5,7 @@ from typing import NoReturn
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QTabWidget, QWidget
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
@@ -25,17 +25,18 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 
-class ProjectionAdapter(SampleAdapter):
-    """Keep the source/view seam real while forbidding execution."""
+def ProjectionAdapter_run(cfg: SampleCfg, *, context: RunContext) -> NoReturn:
+    raise AssertionError("This view contract must not start a Run")
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: SampleCfg,
-        *,
-        context: RunContext,
-    ) -> NoReturn:
-        raise AssertionError("This view contract must not start a Run")
+
+ProjectionAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=ProjectionAdapter_run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 def _set_window_colours(widget: QWidget, background: str, text: str) -> None:

@@ -89,7 +89,7 @@ DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer
 
 GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
-GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion、snapshot 與 provenance，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
+GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。Adapter 依 spec 呼叫 restore_run，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion、snapshot 與 provenance，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
 
 原始 cfg 正本保存在 native 資料檔的 docs/cfg，可透過公開 datafile.load 離線讀取。使用者於 2026-10-16 選擇「A」時不新增 GUI 入口；2026-10-23 批准的 Results browser 是唯讀檢視例外，呈現保存的 cfg_type、schema_version 與以 values 為根的相對路徑。瀏覽器不修改檔案、不回填表單，也不重新分析。視窗與前端邊界見 [[0067]]；Load 與 adapter 的 opaque record 契約不變。
 

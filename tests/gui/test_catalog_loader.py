@@ -10,10 +10,12 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import MagicMock
 
 import pytest
 import zcu_tools
-from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.catalog_loader import (
     CatalogReloadError,
@@ -54,9 +56,7 @@ def source_catalog(
     files = {
         "__init__.py": "",
         "core.py": """
-            from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, AdapterCapabilities
-            class Base(ExpAdapterProtocol):
-                capabilities = AdapterCapabilities()
+            from zcu_tools.gui.app.measure.adapter import Adapter as Base
         """,
         "domain/__init__.py": """
             from .experiment import Experiment
@@ -75,11 +75,13 @@ def source_catalog(
         "adapters/example.py": """
             from reload_fixture.core import Base
             from reload_fixture.domain import Experiment
-            from zcu_tools.gui.app.measure.adapter import AdapterGuide
-            class Adapter(Base):
-                @classmethod
-                def guide(cls):
-                    return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
+            from pathlib import Path
+            from tests.gui._adapter_fakes import DummyAdapter
+            label = Experiment().label()
+            guide = Path(__file__).with_name("guide-" + label + ".md")
+            guide.write_text(label)
+            Adapter = Base(spec=DummyAdapter.spec, make_form=DummyAdapter.make_form,
+                           run=DummyAdapter.run, guide=guide)
         """,
         "catalog.py": """
             from .adapters import Adapter
@@ -157,19 +159,33 @@ def test_deferred_import_cannot_use_previous_bytecode(
         "adapters/example.py",
         """
         from reload_fixture.core import Base
-        from zcu_tools.gui.app.measure.adapter import AdapterGuide
-        class Adapter(Base):
-            @classmethod
-            def guide(cls):
-                from reload_fixture.domain.experiment import Experiment
-                return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
+        from dataclasses import dataclass
+        from zcu_tools.experiment import AxesSpec, ZSpec
+        from zcu_tools.cfg_model import ConfigBase
+        from tests.gui._adapter_fakes import DummyAdapter
+        @dataclass
+        class Result:
+            label: str
+        def run(cfg, *, context):
+            from reload_fixture.domain.experiment import Experiment
+            from zcu_tools.experiment.records import RunRecord
+            return RunRecord(cfg=cfg, result=Result(Experiment().label()))
+        Adapter = Base(spec=AxesSpec(axes=(), z=ZSpec("label", "label", ""),
+            result_type=Result, cfg_type=ConfigBase, tag="test/deferred"),
+            make_form=DummyAdapter.make_form, run=run, guide=None)
     """,
     )
     path = source_catalog.root / "domain/experiment.py"
     stat = path.stat()
     path.write_text(path.read_text().replace('"v1"', '"v2"'), encoding="utf-8")
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-    assert source_catalog.reload().create("demo").guide().markdown == "v2"
+    assert (
+        source_catalog.reload()
+        .create("demo")
+        .run(ConfigBase(), context=MagicMock())
+        .result.label
+        == "v2"
+    )
 
 
 def test_fixed_module_corruption_during_failed_import_requires_restart(
@@ -195,11 +211,12 @@ def test_new_adapter_and_shared_helper(source_catalog: CatalogFixture) -> None:
         """
         from .example import Adapter
         from reload_fixture.domain.seed import LABEL
-        from zcu_tools.gui.app.measure.adapter import AdapterGuide
-        class NewAdapter(Adapter):
-            @classmethod
-            def guide(cls):
-                return AdapterGuide(markdown=LABEL, resource_dir=None)
+        from pathlib import Path
+        from zcu_tools.gui.app.measure.adapter import Adapter as Definition
+        guide = Path(__file__).with_name("guide-" + LABEL + ".md")
+        guide.write_text(LABEL)
+        NewAdapter = Definition(spec=Adapter.spec, make_form=Adapter.make_form,
+                                run=Adapter.run, guide=guide)
     """,
     )
     source_catalog.write(
@@ -274,7 +291,7 @@ def test_invalid_adapter_fails_before_publication(
             registry.register("invalid", object)
     """,
     )
-    with pytest.raises(CatalogReloadError, match="ExpAdapterProtocol"):
+    with pytest.raises(CatalogReloadError, match="Adapter value"):
         source_catalog.reload()
 
 
@@ -384,9 +401,7 @@ def dual_catalog(
     (framework / "__init__.py").write_text("", encoding="utf-8")
     (framework / "core.py").write_text(
         textwrap.dedent("""
-            from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, AdapterCapabilities
-            class Base(ExpAdapterProtocol):
-                capabilities = AdapterCapabilities()
+            from zcu_tools.gui.app.measure.adapter import Adapter as Base
         """),
         encoding="utf-8",
     )
@@ -407,11 +422,13 @@ def dual_catalog(
         "catalog.py": """
             from loader_framework.core import Base
             from loader_user.domain import Experiment
-            from zcu_tools.gui.app.measure.adapter import AdapterGuide
-            class Adapter(Base):
-                @classmethod
-                def guide(cls):
-                    return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
+            from pathlib import Path
+            from tests.gui._adapter_fakes import DummyAdapter
+            label = Experiment().label()
+            guide = Path(__file__).with_name("guide-" + label + ".md")
+            guide.write_text(label)
+            Adapter = Base(spec=DummyAdapter.spec, make_form=DummyAdapter.make_form,
+                           run=DummyAdapter.run, guide=guide)
             def register_all(registry):
                 registry.register("demo", Adapter)
         """,
@@ -543,25 +560,25 @@ def leaf_catalog(
         "v2/__init__.py": "from .family.demo.core import Experiment\n",
         "v2/family/__init__.py": "",
         "v2/family/demo/__init__.py": "",
-        "v2/_support/__init__.py": "",
-        "v2/_support/shared.py": "class Result:\n    pass\n",
-        "roles.py": "from .v2._support.shared import Result\nROLE_RESULT = Result()\n",
+        "v2/support/__init__.py": "",
+        "v2/support/shared.py": "class Result:\n    pass\n",
+        "roles.py": "from .v2.support.shared import Result\nROLE_RESULT = Result()\n",
         "v2/family/demo/core.py": """
-            from loader_leaf.v2._support.shared import Result
+            from loader_leaf.v2.support.shared import Result
             class Experiment:
                 def label(self):
                     return "v1"
         """,
         "v2/family/demo/gui.py": """
-            from zcu_tools.gui.app.measure.adapter import (
-                ExpAdapterProtocol, AdapterCapabilities, AdapterGuide,
-            )
+            from pathlib import Path
+            from zcu_tools.gui.app.measure.adapter import Adapter as Definition
+            from tests.gui._adapter_fakes import DummyAdapter
             from .core import Experiment
-            class Adapter(ExpAdapterProtocol):
-                capabilities = AdapterCapabilities()
-                @classmethod
-                def guide(cls):
-                    return AdapterGuide(markdown=Experiment().label(), resource_dir=None)
+            label = Experiment().label()
+            guide = Path(__file__).with_name("guide-" + label + ".md")
+            guide.write_text(label)
+            Adapter = Definition(spec=DummyAdapter.spec, make_form=DummyAdapter.make_form,
+                                 run=DummyAdapter.run, guide=guide)
         """,
         "definitions.py": """
             from .v2.family.demo.gui import Adapter
@@ -588,7 +605,7 @@ def leaf_catalog(
                 SourcePackage("loader_leaf", root),
             ),
             reload_modules=("loader_leaf.v2", "loader_leaf.definitions"),
-            preserved_modules=("loader_leaf.v2._support", "loader_leaf.roles"),
+            preserved_modules=("loader_leaf.v2.support", "loader_leaf.roles"),
             catalog_module="loader_leaf.definitions",
             catalog_builder=lambda: build_registry("loader_leaf.definitions"),
         )
@@ -615,13 +632,13 @@ def leaf_catalog(
 def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types(
     leaf_catalog: CatalogFixture,
 ) -> None:
-    shared = importlib.import_module("loader_leaf.v2._support.shared")
+    shared = importlib.import_module("loader_leaf.v2.support.shared")
     roles = importlib.import_module("loader_leaf.roles")
     old_adapter = importlib.import_module("loader_leaf.v2.family.demo.gui").Adapter
     leaf_catalog.write(
         "v2/family/demo/core.py",
         """
-        from loader_leaf.v2._support.shared import Result
+        from loader_leaf.v2.support.shared import Result
         class Experiment:
             def label(self):
                 return "v2"
@@ -638,7 +655,7 @@ def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types
     adapter = registry.create("demo")
     core = importlib.import_module("loader_leaf.v2.family.demo.core")
     assert adapter.guide().markdown == "v2"
-    assert isinstance(adapter, ExpAdapterProtocol)
+    assert isinstance(adapter, Adapter)
     assert type(adapter) is not old_adapter
     assert core.Experiment is not leaf_catalog.original.Experiment
     assert importlib.import_module("loader_leaf.v2").Experiment is core.Experiment
@@ -647,7 +664,7 @@ def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types
     assert isinstance(roles.ROLE_RESULT, core.Result)
 
 
-@pytest.mark.parametrize("relative", ["v2/_support/shared.py", "roles.py"])
+@pytest.mark.parametrize("relative", ["v2/support/shared.py", "roles.py"])
 def test_leaf_fixed_shared_or_startup_role_change_requires_restart(
     leaf_catalog: CatalogFixture, relative: str
 ) -> None:

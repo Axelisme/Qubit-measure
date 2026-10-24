@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -24,6 +24,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.support import live_line
+
 
 @dataclass(frozen=True)
 class FreqResult:
@@ -37,20 +39,28 @@ def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class FreqModuleCfg(ConfigBase):
+class FreqCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FreqSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
-
-
-class FreqCfg(ProgramExpCfg):
-    modules: FreqModuleCfg
-    sweep: FreqSweepCfg
 
 
 @dataclass(frozen=True)
@@ -65,7 +75,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=FreqResult,
         cfg_type=FreqCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/reset/single_tone/freq",
     )
 
@@ -80,19 +90,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Quantize reset frequency on the tested pulse's generator.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
         # Retain complex IQ and display its projection along the response axis.
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Frequency (MHz)", "Amplitude"
-        )
+        viewer = live_line(context.plots, "measurement", "Frequency (MHz)", "Amplitude")
         signals_buffer = SignalBuffer(
             (len(freqs),),
             on_update=lambda data: viewer.update(freqs, reset_signal2real(data)),
@@ -100,20 +107,21 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         # Sweep the tested reset frequency after the optional preparation.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.tested_reset.set_param(
-                "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            sched.cfg.tested_reset.set_param(
+                "freq", sweep2param("freq", sched.cfg.freq)
             )
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    PulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .declare_sweep("freq", sched.cfg.sweep.freq)
-                .build_and_acquire()
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    PulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("freq", sched.cfg.freq)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return FreqResult(freqs, signals_buffer.array)

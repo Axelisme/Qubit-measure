@@ -58,12 +58,12 @@ async def mist_drive_frequency(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.set("sweep.freq.start", inputs.freq_range[0])
-    tab.set("sweep.freq.stop", inputs.freq_range[1])
-    tab.set("sweep.freq.n", inputs.points)
-    tab.set("sweep.gain.start", inputs.gain_range[0])
-    tab.set("sweep.gain.stop", inputs.gain_range[1])
-    tab.set("sweep.gain.n", inputs.points)
+    tab.set("freq.start", inputs.freq_range[0])
+    tab.set("freq.stop", inputs.freq_range[1])
+    tab.set("freq.n", inputs.points)
+    tab.set("gain.start", inputs.gain_range[0])
+    tab.set("gain.stop", inputs.gain_range[1])
+    tab.set("gain.n", inputs.points)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()

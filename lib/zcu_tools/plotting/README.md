@@ -1,40 +1,63 @@
-# `zcu_tools.plotting` — 繪圖能力家族
+# `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
-**讀者：** framework-dev。共用繪圖能力、liveplot 與診斷圖的分工。
+**讀者：** framework-dev。具名原生圖、通用更新 handle 與診斷圖的分工。
 
-本目錄收納具獨立定位或真實跨入口需求的共用繪圖能力。`liveplot/` 提供即時更新的 plotter、segment 與 frontend-neutral backend 契約，供 standalone caller 與明確 axes 的共用繪圖使用；詳見 [liveplot/README.md](liveplot/README.md)。
+`figures.FigureCollection` 擁有具名原生 Figure。同名同物件登記等冪，名稱衝突、
+同圖別名及跨存活 owner 接管一律拒絕。`seal()` 固定集合，不凍結 artist，
+不 close canvas，也不代表操作成功。登記表不延長集合生命週期。
+`subplots(name, ...)` 直接建立原生 Figure／Axes 與 Agg canvas，保留 Matplotlib
+shape／layout，不登記 pyplot manager 或切換全域 backend。
 
-[fluxdep/](fluxdep/README.md) 提供 Notebook 與 GUI 共用的 database search 診斷圖 builder。
+## 操作與呈現
 
-`figures.FigureCollection` 提供 operation-owned 的具名原生 Figure 集合。同名同物件
-登記等冪，名稱衝突、同圖別名及跨存活 owner 接管一律拒絕。`seal()` 固定集合，
-不凍結 artist、不 close canvas，也不代表操作成功。集合保留期間持有圖及所有權；
-登記表不延長集合生命週期。`subplots(name, ...)` 直接建立原生 Figure／Axes 與 Agg
-canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換全域 backend。
-一般圖可先繪製與保存，adapter 於操作完成後才接上呈現。此接口不處理 frontend
-呈現、保存政策或 Matplotlib thread safety。
-`Plots.fork()` 建立共享同一 presentation host 的全新通用 Plots。兩個集合各自持有圖、finish 與 release，不共享名稱或 typed handles。即使原集合是子型別，fork 也不繼承其命名政策。
-`plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot、單熱圖
-`liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。`liveplot_scatter` 接同長、非空一維實數 xs／ys／colors，保留 scalar color coordinate 與自動色階；更新前複製三組資料，artist mutation 仍由 host owner 執行。兩種 2D handle 共用
-`(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。單熱圖可指定 `clim=(min, max)`，固定色階跨 update 保留，未指定時沿資料自動縮放。
-`liveplot_1d` 的 `configure_axes` callback 在 host owner 初始化 artists 後、呈現前執行一次，供實驗設定原生 ticks／style。Callback 不得保留 active axes 供 worker 後續修改；設定失敗直接傳遞例外，不呈現未完成圖。
-1D／2D factories 可接同一具名 Figure 的既有 axes，支援 workflow 合併圖。外部、移除或已被其他 handle 使用的 axes 會被拒絕；同圖只呈現一次。Heatmap 的 `mark_point` 與 scan-line 的 `mark_line` 由 host owner 更新 reference marker，不把 active artists 交回 worker。`refresh(name)` 在批次 typed update 後刷新整圖。
-`draw(name, callback)` 將具名 Figure 交给 callback，透過同步 host call 在 owner thread 任意繪圖，成功後首次 present 並標為 live 圖，再 refresh；後續 draw 共用同一 presentation。Callback 失敗不 present／refresh，不 rollback。未 draw 的一般圖仍 finish 才 present。Worker 等 callback 完成，不保留 artists 供之後直接修改。自由繪圖與 liveplot 模板可共用 axes；模板的 artist 被清除或移除，或整個 axes 離開 Figure 時，下一次 update 明確 raise。同名圖可透過 draw 清除並重建 axes，再以 factory 的 axes 參數接上新模板；原模板不恢復。`save(name, path)` 在同一 owner 存原生 Figure，不執行繪圖 callback 或 refresh，finish 前後皆可用。模板仍是常用捷徑，不限制自由繪圖。
-`record_animation(name, path)` 以 FFmpeg 保存 live figure；recorder 的 setup、grab_frame、finish 均在 host owner 執行。Caller 在 producer 停止後結束 recorder，Plots.finish 也收尾尚未結束的 recorder。錄影不取得 Figure 所有權，不依賴 ambient backend，writer 錯誤不代表操作成功。
-未 draw 的一般圖在 `finish()` 時呈現，liveplot 與首次成功 draw 立即呈現；update 先驗證與複製資料，
-再同步送到 host owner 修改 artists。不呈現 host 仍建圖、更新 artists 並支援
-原生 savefig。匯入明確 plots 不初始化 pyplot 或 Notebook display；非呈現操作
-只需基本依賴，不決定 GUI backend。Caller 停止 producer 後才 finish；完成後
-拒絕新 typed update。`finish()` 回傳另一個 `NamedFigures`，只有具名 Mapping
-介面，沒有建圖或 host commands。它保留圖與登記 owner，不因 caller 丟棄
-Plots handle 而失去所有權。Presentation owner 另持有 Plots，以 release
-釋放呈現，不銷毀 NamedFigures 中的原 Figure。失敗時可
-finish(present=False) 保留普通診斷圖而不呈現。GUI host 在 gui/plotting，
-shared plotting 不依賴 Qt。Experiment 與 application callers 顯式傳遞 Plots。
-只有需要共用的繪圖能力才納入此家族。Notebook 專用圖、實驗特化圖與 app 專用 renderer 保留在各自 owner；此處不建立通用 PlotManager、統一 Figure schema 或新 plugin framework。根 package 的 `__init__.py` 不載入子 package，避免只匯入家族名稱就載入個別 frontend 或 backend。
+`plots.Plots` 管理具名圖與明確的 `PlotHost`。Host 同步在自己的 owner 執行 callback，
+並負責 present、refresh 與 release。Shared plotting 不 import Qt 或 lab。
+GUI 注入 [QtPlotHost](../gui/plotting/README.md)，Notebook 注入自己的呈現 host。
+`NonPresentingHost` 直接執行 callback，不開視窗或安排繪製，仍支援 artists 與 savefig。
 
-Qt canvas 與 figure container 的接入由 [gui/plotting](../gui/plotting/README.md) 負責。GUI 注入 explicit QtPlotHost，透過 owner scheduler 更新 artists 與呈現。Standalone liveplot backend 仍服務其 public plotters，與 operation-owned Plots 分開。依賴方向為 GUI → plotting，不由 liveplot 偵測 GUI。
+`Plots.create_live(name, initialize, ...)` 在 owner 建圖或接上既有 axes，呼叫作者的
+initializer，成功後立即呈現。Initializer 收到 host、figure、claimed axes 與 active
+checker，可回傳自己的 handle。既有 axes 必須屬於具名圖且尚未被其他 live initializer
+使用。名稱衝突、外部、移除、重複或數量錯誤的 axes 都會被拒絕。
+初始化失敗不呈現新圖，不回滾 callback 已做的修改。
 
-`singleshot.py` 畫分類 IQ 與區域邊界，`singleshot_rabi.py` 畫 joint-fit population／histogram／confusion 圖。Caller 明傳 readout 長度（µs）與圖尺寸，不把 program cfg 或 experiment defaults 帶入繪圖能力。
+`draw(name, callback)` 在 owner 自由修改具名 Figure，成功後首次呈現並 refresh。
+後續 draw 共用同一 presentation。Callback 失敗直接傳遞，不呈現、不 refresh，也不回滾。
+Caller 不得保留 active artists 供 worker 直接修改。Callback 可以清除 axes 或重建 layout，
+既有作者 handle 如何處理被移除的 artists，由該 callback 的契約決定。
+`save(name, path)` 在 owner 執行原生 savefig，不 refresh，finish 前後皆可用。
+
+## 通用即時更新
+
+從 `zcu_tools.plotting` import `LiveUpdate[T]`。在 create_live initializer 中，
+以其 host、figure、active checker 與接受 T 的繪圖 callback 建立 handle。
+`handle.update(data)` 先 deepcopy 資料，再同步在 host owner 執行 callback，成功後 refresh。
+Payload 可包含巢狀 NumPy arrays 或容器，但必須支援 deepcopy。
+自訂 deepcopy 必須保留資料隔離。Copy、callback 與 host 例外直接傳回 caller。
+Callback 失敗不 refresh，已修改的 artists 不回滾。
+
+`update(data, refresh=False)` 允許批次更新，之後用 `handle.refresh()` 或
+`plots.refresh(name)` 刷新整圖。Handle 在 dispatch 前及 owner 執行前都檢查 lifetime，
+finish／release 後拒絕更新與 refresh。Lib 不驗證 payload 的圖格式或實驗語意。
+
+## 完成與保留
+
+Caller 先停止 producer，再呼叫 `finish()`。Finish 固定 membership、最後 refresh live
+圖，並呈現尚未 draw 的一般圖。失敗時可用 `finish(present=False)` 保留診斷圖而不呈現。
+回傳的 `NamedFigures` 只有具名 Mapping 介面，保留原生圖及登記 owner。
+Presentation owner 另持有 Plots，透過 `release()` 釋放呈現，不銷毀保留的圖。
+Release 逐圖嘗試，彙整失敗；失敗的項目可以重試。
+`fork()` 建立同 host 的獨立通用 Plots，不共享名稱、handle 或 finish／release。
+
+## 格式與診斷圖的 owner
+
+四個 live 工具及其線圖、熱圖、非均勻熱圖、scatter 格式由
+[lab 支援套件](../../../zcu_lab/v2/README.md#即時圖工具) 擁有。
+Singleshot 分類圖與 joint-fit 診斷圖分別在 lab 的 `singleshot/plot.py` 與
+`singleshot/plot_rabi.py`。實驗作者可以直接修改這些工具。
+獨立 liveplot plotter／backend、reference marker 與動畫錄影已退休。
+
+[fluxdep](fluxdep/README.md) 保留 Notebook 與 GUI 共用的搜尋、頻譜與選點診斷圖。
+它自己擁有私有非均勻背景 renderer，不依賴 lab 工具。

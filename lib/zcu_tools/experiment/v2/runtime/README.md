@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -65,21 +65,23 @@ signals_buffer = SignalBuffer(
     on_update=lambda data: viewer.update(freqs, signal2real(data)),
 )
 with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-    freq_sweep = sched.cfg.sweep.freq
-    sched.cfg.modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+    freq_sweep = sched.cfg.freq
+    sched.cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
     _ = (
-        sched.prog_builder(soc, soccfg)
-        .add_reset("reset", sched.cfg.modules.reset)
-        .add_readout("readout", sched.cfg.modules.readout)
+        sched.prog_builder(
+            soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+        )
+        .add_reset("reset", sched.cfg.reset)
+        .add_readout("readout", sched.cfg.readout)
         .declare_sweep("freq", freq_sweep)
-        .build_and_acquire()
+        .build_and_acquire(rounds=sched.cfg.rounds)
     )
 ```
 
-- `Schedule` 的 cfg 是泛型，可以是 experiment cfg；`ProgramBuilder` 只會把 builder
-  cfg 投影成 `ProgramV2Cfg` 給 program。若 cfg 已是 `ProgramV2Cfg` instance/subclass
-  則保留原型別；若 mapping/object 沒有任何 `ProgramV2Cfg` 欄位，builder 會 fast-fail。
+- `Schedule` 在入口 deepcopy caller cfg。ProgramBuilder 不讀 cfg，作者明確傳入 program 控制參數。
+  `sched.prog_builder(...)` 與 `step.prog_builder(...)` 都收 `reps=1`、`initial_delay=1.0`、
+  `relax_delay=1.0`，delay 單位為 us。每次 build 隔離 modules 與 sweeps。
 - `Schedule` 的 env 也是泛型，使用 `with Schedule(cfg, buffer, env=RunEnv(...))`
   可讓 `sched.env.xxx` / `step.env.xxx` 取得 linter 型別支援。env 只放穩定 run
   dependencies（例如 soc、soccfg、ModuleLibrary、predictor）；scan/repeat 的動態
@@ -118,12 +120,9 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `build_and_acquire()` 是 `build()` 後立刻 `run_program(...)` 的 convenience。
 - Decimated trace 使用獨立方法：`run_program_decimated(program)` 與
   `build_and_acquire_decimated()`。
-- `build_and_acquire(...)` / `run_program(...)` 使用 cfg 中的 `reps` / `rounds`；builder
-  建出的 program 讀取 cfg-owned `program.cfg_model.reps` / `rounds`。
-- `prog_builder(..., cfg=...)` 可覆寫 program cfg；未指定時繼承 owner cfg。若 cfg 已是
-  `ProgramV2Cfg` instance 則原樣 deepcopy；若是 mapping / object，builder 只抽取
-  `ProgramV2Cfg` 定義的 runtime 欄位；沒有 runtime 欄位時會要求 caller 明確傳入
-  `ProgramV2Cfg()` 或有效 program cfg。
+- 四個 build/run acquire 方法都收具名 `rounds=1`，同時控制 producer 與 rounds progress。
+  Retry 重用同一個 rounds 值。`reps` 與 `rounds` 必須為正整數，拒絕 bool。
+  Builder 不投影或覆寫 cfg；`program_cls` factory 接 soccfg 與具名控制參數、modules、sweep、編譯選項。
 - `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
@@ -169,7 +168,8 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 
 ## 測試
 
-`tests/experiment/v2/runtime/test_program_builder.py` 覆蓋 ProgramBuilder 建構、cfg 投影與 sweep。
+`tests/experiment/v2/runtime/test_program_builder.py` 覆蓋顯式 program 控制、Schedule cfg 隔離、
+modules／sweep 隔離，以及兩種 acquire 的 rounds、retry 與 progress。
 `test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；
 `test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
 `test_schedule.py` 覆蓋 typed env 與 host scan/repeat/batch；`test_schedule_buffers.py` 覆蓋

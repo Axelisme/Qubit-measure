@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, FieldMeta, FormNode, Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     captured_mux_participants,
@@ -49,10 +49,8 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
     return Form(
         MuxFreqCfg,
         tree={
-            "modules": {
-                "reset": Slot("$mux.module.reset"),
-                "readout": readout,
-            },
+            "reset": Slot("$mux.module.reset"),
+            "readout": readout,
             "tones": mux_tone_initials(tones, participants, fields=("drive", "sweep")),
             "expts": 301,
             "participants": [index for index in participants],
@@ -68,7 +66,8 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         field_order=(
             "participants",
             "tones",
-            "modules",
+            "reset",
+            "readout",
             "expts",
             "reps",
             "rounds",

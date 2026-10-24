@@ -12,7 +12,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.program.acquisition import CancelFlagProtocol
-from zcu_tools.program.v2 import ProgramV2Cfg
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 
@@ -21,7 +20,7 @@ class PartialProgram:
     """Return one scalar sample, or interrupt before this point's first round."""
 
     def __init__(self, value: float, *, interrupt: bool) -> None:
-        self.cfg_model = ProgramV2Cfg(rounds=1)
+
         self.value = value
         self.interrupt = interrupt
 
@@ -47,12 +46,9 @@ class PartialProgram:
 class RoundInterruptedProgram:
     """Emit one completed-round partial, then interrupt the same acquire.
 
-    cfg_model declares two rounds. The completed first round contains one
+    The caller requests two rounds. The completed first round contains one
     measured voltage and two unmeasured NaNs; acquire never normally returns.
     """
-
-    def __init__(self) -> None:
-        self.cfg_model = ProgramV2Cfg(rounds=2)
 
     def acquire(
         self,
@@ -104,17 +100,15 @@ class InterruptedCore(SavingCore):
         buffer = SignalBuffer(3)
         with Schedule(config, buffer, scope=context.scope) as sched:
             if self.mode == "program-round":
-                sched.prog_builder(
-                    context.soc, context.soccfg, cfg=ProgramV2Cfg()
-                ).run_program(RoundInterruptedProgram(), raw2signal_fn=identity_signal)
+                sched.prog_builder(context.soc, context.soccfg).run_program(
+                    RoundInterruptedProgram(), rounds=2, raw2signal_fn=identity_signal
+                )
             else:
                 for index, step in sched.scan("point", range(3)):
                     if self.mode == "software" and index == 1:
                         raise KeyboardInterrupt("scan body stopped")
                     if self.mode == "program":
-                        step.prog_builder(
-                            context.soc, context.soccfg, cfg=ProgramV2Cfg()
-                        ).run_program(
+                        step.prog_builder(context.soc, context.soccfg).run_program(
                             PartialProgram(float(index + 1), interrupt=index == 1),
                             raw2signal_fn=identity_signal,
                         )

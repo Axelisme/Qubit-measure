@@ -12,7 +12,7 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
@@ -20,10 +20,9 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
 
-def make_program(env, *, rounds=2):
+def make_program(env):
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=1, rounds=rounds),
         modules=[
             PulseReadoutCfg(
                 gen_ch=ch,
@@ -38,6 +37,7 @@ def make_program(env, *, rounds=2):
             for ch in (1, 0)
         ],
         sweep=[("outer", 2), ("inner", 3)],
+        reps=1,
     )
 
 
@@ -102,7 +102,12 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     env.soc.binding.execute = execute
     for ro in prog.soccfg["readouts"]:
         ro["iq_offset"] = 0.25
-    averaged = prog.acquire(env.soc, progress=False, round_hook=hook)
+    averaged = prog.acquire(
+        env.soc,
+        progress=False,
+        round_hook=hook,
+        rounds=2,
+    )
     assert averaged is not None
     expected = np.array(
         [
@@ -138,7 +143,9 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
 @pytest.mark.parametrize("processing", ["threshold", "classification", "tracker"])
 def test_shot_processing_uses_materialized_statistics(processing):
     env = white_noise(std_adc=0, n_readouts=2, seed=29)
-    prog = make_program(env, rounds=1)
+    prog = make_program(
+        env,
+    )
     records = []
     tracked = []
 
@@ -152,14 +159,14 @@ def test_shot_processing_uses_materialized_statistics(processing):
         return result
 
     env.soc.binding.execute = execute
-    kwargs = {}
     if processing == "threshold":
-        kwargs = {"threshold": 12.5}
+        result = prog.acquire(env.soc, progress=False, threshold=12.5)
     elif processing == "classification":
-        kwargs = {"g_center": 10 - 1j, "e_center": 11 - 1j, "ge_radius": 0.1}
+        result = prog.acquire(
+            env.soc, progress=False, g_center=10 - 1j, e_center=11 - 1j, ge_radius=0.1
+        )
     else:
-        kwargs = {"trackers": [Tracker(), Tracker()]}
-    result = prog.acquire(env.soc, progress=False, **kwargs)
+        result = prog.acquire(env.soc, progress=False, trackers=[Tracker(), Tracker()])
     assert result is not None
     request = request_of(env)
     raw = raw_of(prog)
@@ -194,7 +201,9 @@ def test_shot_processing_uses_materialized_statistics(processing):
 )
 def test_invalid_statistics_raise_at_acquire_without_materializing(invalid):
     env = white_noise(std_adc=0, n_readouts=2)
-    prog = make_program(env, rounds=1)
+    prog = make_program(
+        env,
+    )
 
     def execute(request):
         delivery = statistics(request)
@@ -255,7 +264,9 @@ def test_invalid_statistics_raise_at_acquire_without_materializing(invalid):
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_binding_rejects_result_type_mismatch(mode, monkeypatch):
     env = white_noise(std_adc=0, n_readouts=2)
-    prog = make_program(env, rounds=1)
+    prog = make_program(
+        env,
+    )
     prog.acquire(env.soc, progress=False)
     request = replace(request_of(env), mode=mode)
     monkeypatch.setattr(

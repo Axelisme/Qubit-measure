@@ -155,7 +155,7 @@ def h_tab_analyze(
         )
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None and adapter.tab_control.analyze_param_definitions(
-        adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
+        tab_id, stage="primary"
     ):
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
     # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
@@ -256,7 +256,7 @@ def h_tab_post_analyze(
         )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
     if pp is None and adapter.tab_control.analyze_param_definitions(
-        adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
+        tab_id, stage="post"
     ):
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED, "no post-analysis params available"

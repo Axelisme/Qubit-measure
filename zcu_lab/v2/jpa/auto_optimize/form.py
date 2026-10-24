@@ -1,10 +1,10 @@
 """Starting values for jpa/auto_optimize; Qt-free declarations."""
 
-from zcu_tools.cfg_model import Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.jpa.auto_optimize.core import JPAOptCfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
@@ -26,30 +26,25 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
     return Form(
         JPAOptCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "pi_pulse": Slot("$qubit.module.x180")
-                if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "pi_pulse": Slot("$qubit.module.x180")
+            if ctx.has("$qubit.module.x180")
+            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
             "jpa_rf_dev": rf_source,
             "jpa_flux_dev": flux_source,
             "flux_unit": "A",
-            "sweep": {
-                "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
-                "jpa_freq": Range(
-                    "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
-                ),
-                "jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101),
-            },
+            "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
+            "jpa_freq": Range(
+                "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
+            ),
+            "jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101),
             "num_points": 1001,
             "skew_penalty": 0.0,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=1),
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

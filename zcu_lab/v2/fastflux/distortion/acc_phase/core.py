@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -24,6 +24,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.support import live_heatmap
+
 
 @dataclass(frozen=True)
 class AccPhaseResult:
@@ -36,21 +38,29 @@ def acc_phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return rotate2real(signals).real
 
 
-class AccPhaseModuleCfg(ConfigBase):
+class AccPhaseCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Reset.Cfg | None = None
     flux_pulse: Pulse.Cfg
     pi2_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class AccPhaseSweepCfg(ConfigBase):
     length: SweepCfg
     phase: SweepCfg
-
-
-class AccPhaseCfg(ProgramExpCfg):
-    modules: AccPhaseModuleCfg
-    sweep: AccPhaseSweepCfg
     readout_t: float
 
 
@@ -71,7 +81,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AccPhaseResult,
         cfg_type=AccPhaseCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="fastflux/distortion/acc_phase",
     )
 
@@ -87,12 +97,11 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         # Quantize wait and projection-phase axes on the configured hardware.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        length_sweep = cfg.sweep.length
-        phase_sweep = cfg.sweep.phase
+        length_sweep = cfg.length
+        phase_sweep = cfg.phase
 
-        pi2_pulse = modules.pi2_pulse
+        pi2_pulse = cfg.pi2_pulse
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         phases = sweep2array(
@@ -100,7 +109,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         )
 
         # Keep one mean IQ value for each wait/projection-phase pair.
-        viewer = context.plots.liveplot_2d("measurement", "Time (us)", "Phase (deg)")
+        viewer = live_heatmap(context.plots, "measurement", "Time (us)", "Phase (deg)")
         signals_buffer = SignalBuffer(
             (len(lengths), len(phases)),
             on_update=lambda data: viewer.update(
@@ -109,32 +118,33 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            length_param = sweep2param("length", sched.cfg.sweep.length)
-            phase_param = sweep2param("phase", sched.cfg.sweep.phase)
+            length_param = sweep2param("length", sched.cfg.length)
+            phase_param = sweep2param("phase", sched.cfg.phase)
 
             # End the free phase accumulation with a projection after the join.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
-                    Reset("reset", modules.reset),
+                    Reset("reset", sched.cfg.reset),
                     Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
+                        Pulse("flux_pulse", sched.cfg.flux_pulse),
                         [
                             SoftDelay("wait_time", delay=length_param),
-                            Pulse("pi2_pulse1", modules.pi2_pulse),
+                            Pulse("pi2_pulse1", sched.cfg.pi2_pulse),
                         ],
                         SoftDelay("readout_t", sched.cfg.readout_t),
                     ),
                     Pulse(
                         "pi2_pulse2",
-                        modules.pi2_pulse.with_updates(phase=phase_param),
+                        sched.cfg.pi2_pulse.with_updates(phase=phase_param),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
-                .declare_sweep("length", sched.cfg.sweep.length)
-                .declare_sweep("phase", sched.cfg.sweep.phase)
-                .build_and_acquire()
+                .declare_sweep("length", sched.cfg.length)
+                .declare_sweep("phase", sched.cfg.phase)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return AccPhaseResult(lengths, phases, signals_buffer.array)
@@ -158,10 +168,9 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Analysis requires source.cfg")
-        modules = cfg.modules
 
-        flux_pulse = modules.flux_pulse
-        pi2_len = float(modules.pi2_pulse.waveform.length)
+        flux_pulse = cfg.flux_pulse
+        pi2_len = float(cfg.pi2_pulse.waveform.length)
 
         lengths, phases, signals2D = result.lengths, result.phases, result.signals
 

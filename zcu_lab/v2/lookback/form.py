@@ -77,45 +77,45 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
     return Form(
         LookbackCfg,
         field_order=(
-            "modules",
+            "reset",
+            "init_pulse",
+            "readout",
             "rounds",
             "relax_delay",
             "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Hidden(),
-                "init_pulse": Hidden(),
-                "readout": Template(
-                    "readout",
-                    bindings={"resonator": "$resonator"},
-                    set={
-                        "gain": 1.0,
-                        "freq": _initial_frequency(ctx),
-                        "ro_length": 1.5,
-                        "trig_offset": _initial_trig_offset(ctx),
-                    },
-                ),
-            },
+            "reset": Hidden(),
+            "init_pulse": Hidden(),
+            "readout": Template(
+                "readout",
+                bindings={"resonator": "$resonator"},
+                set={
+                    "gain": 1.0,
+                    "freq": _initial_frequency(ctx),
+                    "ro_length": 1.5,
+                    "trig_offset": _initial_trig_offset(ctx),
+                },
+            ),
             "relax_delay": 0.0,
             "rounds": 10,
             "initial_delay": Hidden(),
         },
     ).with_seed_metadata(
         {
-            ("modules", "readout", "module", "gain"): FieldMeta(
+            ("readout", "module", "gain"): FieldMeta(
                 description="未校準的起始值，來源：固定常數。lookback Template gain 1.0 normalized; operator confirmation required",
                 calibration="uncalibrated",
             ),
-            ("modules", "readout", "module", "freq"): FieldMeta(
+            ("readout", "module", "freq"): FieldMeta(
                 description="$resonator.freq + kappa (MHz); missing/null kappa uses a 1 MHz offset，未校準的起始值，來源：固定常數。operator confirmation required",
                 calibration="uncalibrated",
             ),
-            ("modules", "readout", "module", "trig_offset"): FieldMeta(
+            ("readout", "module", "trig_offset"): FieldMeta(
                 description="$resonator.time_of_fly - 0.1 us; missing/null TOF uses a 0 us offset，未校準的起始值，來源：固定常數。operator confirmation required",
                 calibration="uncalibrated",
             ),
-            ("modules", "readout", "module", "ro_length"): FieldMeta(
+            ("readout", "module", "ro_length"): FieldMeta(
                 description="未校準的起始值，來源：固定常數。lookback Template ADC window 1.5 us; operator confirmation required",
                 calibration="uncalibrated",
             ),

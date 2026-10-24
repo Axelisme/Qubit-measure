@@ -16,7 +16,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -34,6 +34,8 @@ from zcu_tools.program.v2 import (
     TableLengthPulse,
 )
 from zcu_tools.progress_bar import make_pbar
+
+from zcu_lab.v2.support import live_heatmap, live_line
 
 
 def _fit_transition_rates(
@@ -133,7 +135,28 @@ class T1WithToneSweepResult:
     )
 
 
-class T1WithToneSweepSweepCfg(ConfigBase):
+class T1WithToneSweepCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[
         SweepCfg | list[float],
         FieldMeta(
@@ -147,19 +170,6 @@ class T1WithToneSweepSweepCfg(ConfigBase):
     ]
     gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
     freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
-
-
-class T1WithToneSweepModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class T1WithToneSweepCfg(ProgramExpCfg):
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
-    modules: T1WithToneSweepModuleCfg
-    sweep: T1WithToneSweepSweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -191,15 +201,14 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=T1WithToneSweepResult,
         cfg_type=T1WithToneSweepCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/t1/t1_with_tone_sweep",
     )
 
     def _resolve_outer_sweep(
         self, cfg: T1WithToneSweepCfg, soccfg
     ) -> tuple[str, NDArray[np.float64]]:
-        modules = cfg.modules
-        sweep_dict = cfg.sweep.model_dump(exclude_none=True)
+        sweep_dict = cfg.model_dump(exclude_none=True)
         sweep_keys = [name for name in sweep_dict if name != "length"]
         if len(sweep_keys) != 1:
             raise ValueError(
@@ -214,7 +223,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         xs = sweep2array(
             x_sweep,
             sweep_name,
-            round_info={"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            round_info={"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
             allow_array=True,
         )
         return sweep_name, xs
@@ -232,7 +241,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         # Row-major 4x2 grid: columns are initial g/e, rows are states g/e/o then current.
         cells = figure.axes
         heatmaps = tuple(
-            plots.liveplot_2d(
+            live_heatmap(
+                plots,
                 "measurement",
                 sweep_name,
                 "Time (us)" if column == 0 else "",
@@ -243,7 +253,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             for column in (0, 1)
             for row in (0, 1, 2)
         )
-        current_g = plots.liveplot_1d(
+        current_g = live_line(
+            plots,
             "measurement",
             "Time (us)",
             "Population",
@@ -251,7 +262,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             configure_axes=configure_axes,
             axes=cells[6],
         )
-        current_e = plots.liveplot_1d(
+        current_e = live_line(
+            plots,
             "measurement",
             "Time (us)",
             "",
@@ -278,22 +290,21 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
         if cfg.uniform:
-            length_sweep = cfg.sweep.length
+            length_sweep = cfg.length
             assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
             sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
             lengths = sweep2array(
                 length_sweep,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+                {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
             )
         else:
             sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
             lengths = materialize_nonuniform_t1_pulse_lengths(
-                cfg.sweep.length,
+                cfg.length,
                 soccfg=soccfg,
-                gen_ch=modules.probe_pulse.ch,
+                gen_ch=cfg.probe_pulse.ch,
             )
         _require_positive_lengths(lengths)
 
@@ -327,28 +338,32 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             for value_idx, (value, step) in enumerate(
                 sched.scan(sweep_name, xs.tolist())
             ):
-                modules = step.cfg.modules
                 if cfg.uniform:
-                    inner_length_sweep = step.cfg.sweep.length
+                    inner_length_sweep = step.cfg.length
                     assert isinstance(inner_length_sweep, SweepCfg), (
                         "uniform mode requires SweepCfg"
                     )
-                modules.probe_pulse.set_param(sweep_name, value)
+                step.cfg.probe_pulse.set_param(sweep_name, value)
                 current_index = value_idx
 
                 # Read out at each actual probe end, without longest-point padding.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Reset("reset", step.cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
                         TableLengthPulse(
                             "probe_pulse",
-                            modules.probe_pulse,
+                            step.cfg.probe_pulse,
                             lengths=lengths,
                             idx_reg="length",
                         ),
-                        Readout("readout", modules.readout),
+                        Readout("readout", step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .declare_sweep("length", len(lengths))
@@ -357,6 +372,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                         g_center=cfg.g_center,
                         e_center=cfg.e_center,
                         ge_radius=cfg.radius,
+                        rounds=cfg.rounds,
                     )
                 )
 

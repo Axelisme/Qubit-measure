@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.seed_metadata import (
+from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
 
@@ -22,44 +22,41 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
     return Form(
         FreqFluxCfg,
         field_order=(
-            "modules",
+            "reset",
+            "init_pulse",
+            "qub_pulse",
+            "readout",
             "flux_dev",
             "flux_unit",
-            "sweep",
+            "flux",
+            "freq",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Hidden(),
-                # Run supplies the frequency sweep at every flux point.
-                "qub_pulse": Template(
-                    "qub_probe",
-                    bindings={"qubit": "$qubit"},
-                    set={"freq": Hidden(0.0)},
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Hidden(),
+            "qub_pulse": Template(
+                "qub_probe",
+                bindings={"qubit": "$qubit"},
+                set={"freq": Hidden(0.0)},
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
             "flux_dev": flux_source,
             "flux_unit": "A",
-            "sweep": {
-                "freq": Range(None, None, expts=1001),
-                "flux": Range(
-                    "1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half",
-                    "1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int",
-                    expts=101,
-                ),
-            },
+            "freq": Range(None, None, expts=1001),
+            "flux": Range(
+                "1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half",
+                "1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int",
+                expts=101,
+            ),
             "relax_delay": 1.0,
             "reps": 1000,
             "rounds": 10,
             "fail_retry": Hidden(),
-            "initial_delay": Hidden(),
         },
     ).with_seed_metadata(
         {
@@ -69,7 +66,7 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
                 else pulse_readout_seed_metadata(gain=0.1)
             ),
             **{
-                ("modules", "qub_pulse", "module", "gain"): FieldMeta(
+                ("qub_pulse", "module", "gain"): FieldMeta(
                     description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 normalized; operator confirmation required",
                     calibration="uncalibrated",
                 )

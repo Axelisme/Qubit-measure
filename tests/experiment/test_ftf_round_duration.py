@@ -5,7 +5,7 @@ import time
 import numpy as np
 import pytest
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
@@ -43,15 +43,17 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
             ro_length=0.04,
         )
         program = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(reps=2, rounds=2), modules=[readout.build("ro")]
+            env.soccfg,
+            modules=[readout.build("ro")],
+            reps=2,
         )
         acquire = program.acquire if mode == "integrated" else program.acquire_decimated
-        expected = acquire(env.soc, progress=False)
+        expected = acquire(env.soc, rounds=2, progress=False)
         expected_raw = raw_of(program)
         assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
         unpaced = ftf(settings, time_scale=0)
         try:
-            actual = acquire(unpaced.soc, progress=False)
+            actual = acquire(unpaced.soc, rounds=2, progress=False)
             assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
             assert np.asarray(actual).tobytes() == np.asarray(expected).tobytes()
             assert (
@@ -79,7 +81,6 @@ def test_yaml_zero_disables_round_wait(monkeypatch: pytest.MonkeyPatch):
     try:
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=2, rounds=2),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -91,8 +92,13 @@ def test_yaml_zero_disables_round_wait(monkeypatch: pytest.MonkeyPatch):
                     ro_length=0.04,
                 ).build("ro")
             ],
+            reps=2,
         )
-        result = program.acquire(env.soc, progress=False)
+        result = program.acquire(
+            env.soc,
+            progress=False,
+            rounds=2,
+        )
         assert result is not None
         assert waits == []
         assert np.isfinite(result).all()

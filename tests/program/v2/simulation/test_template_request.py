@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
@@ -240,7 +240,10 @@ def test_templates_materialize_like_scalar_interpretation(case):
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     modules, sweep = example(case, env)
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(reps=2), modules=modules, sweep=sweep
+        env.soccfg,
+        modules=modules,
+        sweep=sweep,
+        reps=2,
     )
     request = build_request(prog, "integrated", env.soc.binding, 0)
     assert request.templates, "frontend must produce structural point templates"
@@ -310,7 +313,11 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
         )
     else:
         modules[0] = Branch("choice", cfg.build("a"), cfg.build("b"), compare_by="reps")
-    prog = ModularProgramV2(env.soccfg, ProgramV2Cfg(reps=2), modules=modules)
+    prog = ModularProgramV2(
+        env.soccfg,
+        modules=modules,
+        reps=2,
+    )
     with pytest.raises(
         ValueError, match="^simulation requires reps not to change the timeline$"
     ):
@@ -325,9 +332,9 @@ def test_interpreter_dispatch_work_is_independent_of_points_and_reps():
         cfg.freq = QickParam(100, {"axis": 20})
         prog = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=reps),
             modules=[cfg.build("readout")],
             sweep=[("axis", points)],
+            reps=reps,
         )
         calls = 0
 
@@ -364,7 +371,10 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
     prog = ModularProgramV2(
-        env.soccfg, ProgramV2Cfg(reps=2), modules=[module], sweep=[("axis", 2)]
+        env.soccfg,
+        modules=[module],
+        sweep=[("axis", 2)],
+        reps=2,
     )
     with pytest.raises(
         ValueError, match="^simulation requires reps not to change the timeline$"
@@ -385,7 +395,6 @@ def test_soc_routes_are_checked_from_templates(missing):
     cfg.gen_ch = 1
     prog = ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(),
         modules=[receiver().build("first"), cfg.build("readout")],
     )
     request = build_request(prog, "integrated", env.soc.binding, 0)

@@ -3,10 +3,9 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import ClassVar
 
 from zcu_tools.cfg_model import PulseCfg, Template
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
@@ -30,22 +29,23 @@ class HistoryCfg(SavingCfg):
     pulse: PulseCfg | None = None
 
 
-class SourceDependentAdapter(SavingAdapter):
+def source_dependent_form(ctx: FormContext) -> Form[SavingCfg]:
     """Require a captured library source, never the historical native cfg."""
+    if ctx.has("$history.pulses.template"):
+        return Form(HistoryCfg, {"pulse": Template("missing")})
+    if not ctx.has("$history.pulses.history"):
+        if ctx.has("$history.pulses.retry"):
+            raise ValueError("factory: replacement source is still missing")
+        raise ValueError("factory: history_source is missing")
+    return Form(SavingCfg, {"gain": 0.25})
 
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE, load_data=True, requires_soc=False
-    )
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SavingCfg]:
-        if ctx.has("$history.pulses.template"):
-            return Form(HistoryCfg, {"pulse": Template("missing")})
-        if not ctx.has("$history.pulses.history"):
-            if ctx.has("$history.pulses.retry"):
-                raise ValueError("factory: replacement source is still missing")
-            raise ValueError("factory: history_source is missing")
-        return Form(SavingCfg, {"gain": 0.25})
+SourceDependentAdapter = Adapter(
+    spec=SavingAdapter.spec,
+    make_form=source_dependent_form,
+    run=SavingAdapter.run,
+    guide=None,
+)
 
 
 @contextmanager

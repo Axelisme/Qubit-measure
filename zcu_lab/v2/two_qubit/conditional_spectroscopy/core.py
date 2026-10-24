@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -19,7 +19,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.device import set_flux
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles, collect_joint_shots
@@ -28,9 +29,43 @@ from .analysis import SpectroscopyAnalysis, analyze_spectra
 BRANCH_LABELS = ("00", "01", "10", "11")
 
 
-class SpectroscopyModules(ConfigBase):
-    """Calibrated preparation/contrast Xπ pulses and complete ordered mux readout."""
+class SpectroscopyCfg(ConfigBase):
+    """B00/01/10/11 → dual weak probe → optional Xπ⊗Xπ → full mux.
 
+    roles contains fixed captured component/tone identities. drive contains two
+    ordinary scalar charge pulses with explicit waveforms. frequency is the common
+    MHz host scan; drive's saved base frequency is replaced only on program copies.
+    contrast applies both calibrated Xπ pulses after the probe when True, neither
+    when False. No heralding or shot selection occurs. dc_device=None leaves all
+    sources untouched; otherwise the direct device name is swept in dc_unit at
+    dc_values, without conversion, compensation or automatic restoration.
+    reps/rounds retain all shots in round-major order, not averaged IQ.
+    """
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     x180_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -52,22 +87,6 @@ class SpectroscopyModules(ConfigBase):
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
         ),
     ]
-
-
-class SpectroscopyCfg(ProgramExpCfg):
-    """B00/01/10/11 → dual weak probe → optional Xπ⊗Xπ → full mux.
-
-    roles contains fixed captured component/tone identities. drive contains two
-    ordinary scalar charge pulses with explicit waveforms. frequency is the common
-    MHz host scan; drive's saved base frequency is replaced only on program copies.
-    contrast applies both calibrated Xπ pulses after the probe when True, neither
-    when False. No heralding or shot selection occurs. dc_device=None leaves all
-    sources untouched; otherwise the direct device name is swept in dc_unit at
-    dc_values, without conversion, compensation or automatic restoration.
-    reps/rounds retain all shots in round-major order, not averaged IQ.
-    """
-
-    modules: SpectroscopyModules
     roles: JointRoles
     drive: Annotated[
         DualLineCfg,
@@ -100,11 +119,8 @@ class SpectroscopyCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Require full tones, each probe on its preparation line, and finite axes."""
-        self.roles.validate_readout(self.modules.readout)
-        if (
-            self.drive.f1.ch != self.modules.x180_f1.ch
-            or self.drive.f2.ch != self.modules.x180_f2.ch
-        ):
+        self.roles.validate_readout(self.readout)
+        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each probe must use its role's calibrated Xπ generator")
         if not np.all(np.isfinite(sweep2array(self.frequency))):
             raise ValueError("Probe frequencies must be finite")
@@ -152,7 +168,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=SpectroscopyResult,
         cfg_type=SpectroscopyCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/conditional_spectroscopy",
     )
 
@@ -172,8 +188,9 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         dc_values = (
             np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
         )
-        ntones = len(cfg.modules.readout.tones)
-        viewer = context.plots.liveplot_1d(
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Common probe frequency (MHz)",
             "Completed shots (all DC/branches)",
@@ -201,8 +218,14 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     for frequency, step in branch_step.scan(
                         "frequency", frequencies.tolist()
                     ):
-                        builder = step.prog_builder(context.soc, context.soccfg)
-                        m = cfg.modules
+                        builder = step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=step.cfg.reps,
+                            initial_delay=step.cfg.initial_delay,
+                            relax_delay=step.cfg.relax_delay,
+                        )
+                        m = cfg
                         if branch & 2:
                             builder.add_pulse("prepare_f1", m.x180_f1)
                         if branch & 1:
@@ -219,9 +242,15 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         prog = builder.build()
                         for _, round_step in step.repeat("round", config.rounds):
                             _ = round_step.prog_builder(
-                                context.soc, context.soccfg
+                                context.soc,
+                                context.soccfg,
+                                reps=round_step.cfg.reps,
+                                initial_delay=round_step.cfg.initial_delay,
+                                relax_delay=round_step.cfg.relax_delay,
                             ).run_program(
-                                prog, raw2signal_fn=partial(collect_joint_shots, prog)
+                                prog,
+                                raw2signal_fn=partial(collect_joint_shots, prog),
+                                rounds=round_step.cfg.rounds,
                             )
         buffer.trigger_update(flush=True)
         return SpectroscopyResult(

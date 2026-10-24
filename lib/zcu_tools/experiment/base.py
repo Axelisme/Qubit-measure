@@ -2,15 +2,15 @@
 
 from typing import Any, ClassVar, Generic, TypeVar
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.plotting.plots import Plots
 
 from .axes_spec import AxesSpec, GroupedAxesSpec
-from .cfg_model import ExpCfgModel
 from .context import RunContext
 from .records import RunRecord
 
 T_Result = TypeVar("T_Result")
-T_Config = TypeVar("T_Config", bound=ExpCfgModel)
+T_Config = TypeVar("T_Config", bound=ConfigBase)
 
 
 class Experiment(Generic[T_Result, T_Config]):

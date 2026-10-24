@@ -18,10 +18,9 @@ from zcu_tools.gui.app.measure.services.run_analyze_control import (
     RunAnalyzeControlFacet,
 )
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
-    InteractiveFrontend,
     InteractiveFrontendEnv,
 )
-from zcu_tools.gui.interactive import PluginDefinition
+from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.types import ParameterContext
@@ -73,13 +72,17 @@ class RecordingAdapter:
         self._log.add("adapter", "make_interactive_plugin", req, plots)
         return PluginDefinition("test", 0, (), lambda _state: None, lambda state: state)
 
-    def make_interactive_frontend(
-        self, plugin, session, env, request_finish, request_cancel, *, plots: Plots
-    ) -> object:
-        self._log.add(
-            "adapter", "make_interactive_frontend", plugin, session, env, plots
-        )
-        return object()
+    def make_interactive_frontend(self, req, create_session, *, plots: Plots):
+        plugin = self.make_interactive_plugin(req, plots=plots)
+        session = create_session(plugin)
+
+        def mount(env, request_finish, request_cancel):
+            self._log.add(
+                "adapter", "make_interactive_frontend", plugin, session, env, plots
+            )
+            return object()
+
+        return mount
 
 
 class RecordingGuard:
@@ -155,6 +158,7 @@ class RecordingAnalyze:
         *,
         analyze_params_instance: object,
         plots: Plots,
+        session: Session[int] | None = None,
     ) -> int:
         self._log.add(
             "analyze",
@@ -165,7 +169,9 @@ class RecordingAnalyze:
             analyze_params_instance,
             plots,
         )
-        self.active = ActiveInteractive(plugin, plugin.open(owner), plots)
+        self.active = ActiveInteractive(
+            plugin, session if session is not None else plugin.open(owner), plots
+        )
         return 23
 
     def get_interactive(self, tab_id: str) -> ActiveInteractive:
@@ -278,7 +284,7 @@ class RecordingRenderHost:
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        frontend_factory: Callable[[InteractiveFrontendEnv], InteractiveFrontend],
+        frontend_factory: Callable[[InteractiveFrontendEnv], object],
     ) -> None:
         self._log.add("host", "mount_interactive_analysis", tab_id, frontend_factory)
         if self._mount_error is not None:
@@ -426,7 +432,6 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "state",
         "state",
         "adapter",
-        "analyze",
         "analyze",
         "host",
         "adapter",

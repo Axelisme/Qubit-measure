@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.state import (
@@ -36,7 +37,6 @@ from zcu_tools.gui.version_table import (
 from zcu_tools.resources.entry import ArtifactKey, PointStorageBinding, SaveLayout
 
 from .adapter import (
-    ExpAdapterProtocol,
     T_AnalyzeParams,
     T_Cfg,
 )
@@ -184,7 +184,7 @@ _UNSET: object = object()
 @dataclass
 class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
     adapter_name: str
-    adapter: ExpAdapterProtocol
+    adapter: RegisteredAdapter
     # A handle to the tab's sole cfg authority, not a second input tree.
     cfg: TabFormResource
 

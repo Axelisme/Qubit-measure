@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -18,7 +18,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support.device import set_flux
 
 
 @dataclass(frozen=True)
@@ -34,19 +35,23 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxSweepCfg(ConfigBase):
-    flux: Annotated[SweepCfg, FieldMeta(label="Flux device value", decimals=6)]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
-
-
-class FreqFluxModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FreqFluxCfg(ProgramExpCfg):
+class FreqFluxCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
@@ -54,7 +59,10 @@ class FreqFluxCfg(ProgramExpCfg):
             description="Working unit for the selected driver; no conversion.",
         ),
     ]  # External flux driver unit; no conversion.
-    modules: FreqFluxModuleCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     flux_dev: Annotated[
         str,
         FieldMeta(
@@ -62,7 +70,8 @@ class FreqFluxCfg(ProgramExpCfg):
             description="Name of the connected flux-bias device driven by the sweep.",
         ),
     ]
-    sweep: FreqFluxSweepCfg
+    flux: Annotated[SweepCfg, FieldMeta(label="Flux device value", decimals=6)]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     fail_retry: int = 0
 
 
@@ -98,17 +107,17 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         # Prepare the device-value axis and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        value_sweep = cfg.sweep.flux
-        freq_sweep = cfg.sweep.freq
+        value_sweep = cfg.flux
+        freq_sweep = cfg.freq
 
         dev_values = sweep2array(value_sweep, allow_array=True)
         freqs = sweep2array(
-            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "Flux device value",
             "Frequency (MHz)",
@@ -133,20 +142,26 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                     stop=context.scope.stop,
                     progress=False,
                 )
-                modules = cfg.modules
 
                 # Reset and initialize before each frequency-swept probe and readout.
-                freq_sweep = cfg.sweep.freq
-                modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+                freq_sweep = cfg.freq
+                cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
                 _ = (
-                    step.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
+                    .add_reset("reset", cfg.reset)
+                    .add_pulse("init_pulse", cfg.init_pulse)
+                    .add_pulse("qubit_pulse", cfg.qub_pulse)
+                    .add_readout("readout", cfg.readout)
                     .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(options=AcquireOptions(retry=cfg.fail_retry))
+                    .build_and_acquire(
+                        options=AcquireOptions(retry=cfg.fail_retry), rounds=cfg.rounds
+                    )
                 )
 
         return FreqFluxResult(

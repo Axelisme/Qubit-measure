@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -25,8 +26,8 @@ from zcu_tools.cfg_model import (
     PulseSpec,
     Range,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
@@ -243,7 +244,7 @@ class Pulse(ConfigBase):
     length: float = 1.0
 
 
-class SectionCfg(ExpCfgModel):
+class SectionCfg(ConfigBase):
     """Top-level scalars and one foldable section."""
 
     reps: int = 100
@@ -359,17 +360,21 @@ def test_refresh_capture_failure_is_presented_and_keeps_visible_input(
 def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
     """Open a synthetic tab, then publish a newer source before interaction."""
 
-    class SourceAdapter(SampleAdapter):
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[SampleCfg]:
-            del ctx
-            return Form(
-                SampleCfg,
-                {
-                    "gain": Expr("general.ext.amount"),
-                    "sweep": Range(1, 2, expts=3),
-                },
-            )
+    def SourceAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {"gain": Expr("general.ext.amount"), "sweep": Range(1, 2, expts=3)},
+        )
+
+    SourceAdapter = Adapter(
+        spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+        make_form=SourceAdapter_make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("source", SourceAdapter)

@@ -6,7 +6,7 @@ import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar
+from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
@@ -15,11 +15,10 @@ from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
@@ -30,6 +29,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ComponentSchema
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -52,52 +52,55 @@ class CalibrationSchema(ComponentSchema):
     second: float = 2.0
 
 
-class PlottedSavingAdapter(SavingAdapter):
-    """Persistable signal with plotted analysis and two independent proposals."""
-
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, load_data=True, requires_soc=False
+def PlottedSavingAdapter_analyze(
+    req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
+) -> PaneSummary:
+    _, axes = plots.subplots("fit")
+    axes.plot(
+        req.run_result.result.frequency,
+        req.run_result.result.signal.real,
+        label="Synthetic fit",
     )
+    axes.legend()
+    return PaneSummary()
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
-        *,
-        plots: Plots,
-    ) -> PaneSummary:
-        _, axes = plots.subplots("fit")
-        axes.plot(
-            req.run_result.result.frequency,
-            req.run_result.result.signal.real,
-            label="Synthetic fit",
-        )
+
+def PlottedSavingAdapter_get_writeback_items(
+    req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback("calibration.first", "First", 11.0),
+        ParameterWriteback("calibration.second", "Second", 22.0),
+    ]
+
+
+def PlottedSavingAdapter_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    record = SavingAdapter.run(cfg, context=context)
+    context.plots.subplots("signal")
+
+    def draw(figure: Figure) -> None:
+        axes = figure.axes[0]
+        axes.plot(record.result.frequency, record.result.signal.real, label="Signal")
         axes.legend()
-        return PaneSummary()
 
-    def get_writeback_items(
-        self,
-        req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback("calibration.first", "First", 11.0),
-            ParameterWriteback("calibration.second", "Second", 22.0),
-        ]
+    context.plots.draw("signal", draw)
+    return record
 
-    def run(
-        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
-    ) -> RunRecord[SavingCfg, SavingResult]:
-        record = super().run(req, cfg, context=context)
-        context.plots.subplots("signal")
 
-        def draw(figure: Figure) -> None:
-            axes = figure.axes[0]
-            axes.plot(
-                record.result.frequency, record.result.signal.real, label="Signal"
-            )
-            axes.legend()
-
-        context.plots.draw("signal", draw)
-        return record
+PlottedSavingAdapter = Adapter(
+    spec=SavingAdapter.spec,
+    make_form=SavingAdapter.make_form,
+    run=PlottedSavingAdapter_run,
+    guide=None,
+    analysis=Analysis(
+        fn=PlottedSavingAdapter_analyze,
+        options=lambda source, env: PaneParams(),
+        writeback=PlottedSavingAdapter_get_writeback_items,
+    ),
+    post_analysis=None,
+)
 
 
 @pytest.fixture
@@ -119,6 +122,9 @@ def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
         )
         app.controller.context_control.add_component(
             "calibration", "synthetic/calibration", {}
+        )
+        app.controller.session_services.soc_connection.install_soc(
+            MagicMock(), make_mock_soccfg()
         )
         app.controller.new_tab("synthetic")
         # Load's File chooser starts at the opened entry's database directory.

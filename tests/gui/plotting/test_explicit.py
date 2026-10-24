@@ -10,7 +10,6 @@ import pytest
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
-from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
@@ -19,6 +18,8 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import Plots
+
+from tests._plotting import create_trace
 
 
 @pytest.fixture
@@ -94,9 +95,9 @@ def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
     def work() -> int:
         normal, _ = plots.subplots("fit")
         assert adapters[0].call(lambda: get_figure_container(normal)) is None
-        viewer = plots.liveplot_1d("measurement", "Time", "Signal")
+        viewer = create_trace(plots, "measurement", "Time", "Signal")
         assert adapters[0].call(lambda: stacks[0].count()) == 2
-        viewer.update(np.array([0.0, 1.0]), np.array([3.0, 4.0]), refresh=False)
+        viewer.update((np.array([0.0, 1.0]), np.array([3.0, 4.0])), refresh=False)
         plots.finish()
         return threading.get_ident()
 
@@ -117,75 +118,11 @@ def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
     assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
 
 
-def test_worker_2d_heatmap_and_lines_mutate_on_qt_owner_and_remain_saveable(
-    qapp, hosts, monkeypatch
-) -> None:
-    stacks, containers, adapters = hosts
-    owner_id = threading.get_ident()
-    created_on: list[int] = []
-    image_updated_on: list[int] = []
-    line_updated_on: list[int] = []
-    original_imshow = Axes.imshow
-    original_image_set_data = AxesImage.set_data
-    original_line_set_data = Line2D.set_data
-    plots = Plots(adapters[0])
-
-    def observed_imshow(self, *args, **kwargs):
-        created_on.append(threading.get_ident())
-        return original_imshow(self, *args, **kwargs)
-
-    def observed_image_set_data(self, *args, **kwargs):
-        if "heatmap" in plots and self in plots["heatmap"].axes[0].images:
-            image_updated_on.append(threading.get_ident())
-        return original_image_set_data(self, *args, **kwargs)
-
-    def observed_line_set_data(self, *args, **kwargs):
-        if "heatmap" in plots and self in plots["heatmap"].axes[1].lines:
-            line_updated_on.append(threading.get_ident())
-        return original_line_set_data(self, *args, **kwargs)
-
-    monkeypatch.setattr(Axes, "imshow", observed_imshow)
-    monkeypatch.setattr(AxesImage, "set_data", observed_image_set_data)
-    monkeypatch.setattr(Line2D, "set_data", observed_line_set_data)
-
-    def work() -> int:
-        viewer = plots.liveplot_2d_with_line(
-            "heatmap", "Flux", "Frequency", num_lines=2
-        )
-        viewer.update(
-            np.array([0.0, 1.0]),
-            np.array([10.0, 20.0]),
-            np.array([[1.0, 2.0], [3.0, 4.0]]),
-            refresh=False,
-        )
-        plots.finish()
-        return threading.get_ident()
-
-    assert _run_worker(qapp, work) != owner_id
-    assert created_on and set(created_on) == {owner_id}
-    assert image_updated_on and set(image_updated_on) == {owner_id}
-    assert line_updated_on and set(line_updated_on) == {owner_id}
-    figure = plots["heatmap"]
-    assert stacks[0].count() == 2
-    assert get_figure_container(figure) is containers[0]
-    np.testing.assert_array_equal(
-        np.asarray(figure.axes[0].images[0].get_array()), [[1.0, 3.0], [2.0, 4.0]]
-    )
-    np.testing.assert_array_equal(figure.axes[1].lines[1].get_ydata(), [3.0, 4.0])
-    plots.release()
-    assert stacks[0].count() == 1
-    qapp.processEvents()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
-    output = BytesIO()
-    figure.savefig(output, format="png")
-    assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
-
-
 def test_two_plot_hosts_keep_ownership_and_release_independent(hosts) -> None:
     stacks, containers, adapters = hosts
     first, second = Plots(adapters[0]), Plots(adapters[1])
-    first.liveplot_1d("live", "x", "y")
-    second.liveplot_1d("live", "x", "y")
+    create_trace(first, "live", "x", "y")
+    create_trace(second, "live", "x", "y")
     figure = first["live"]
     canvas = figure.canvas
     with pytest.raises(ValueError, match="another container"):
@@ -215,7 +152,7 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     ax.plot([0, 1], [4, 5])
     plots.finish()
     other = Plots(adapters[1])
-    other.liveplot_1d("live", "x", "y")
+    create_trace(other, "live", "x", "y")
     other.finish()
     assert get_figure_container(first) is containers[0]
     assert get_figure_container(second) is containers[0]

@@ -16,8 +16,8 @@ from zcu_tools.analysis.fluxdep.onetone import (
     analyze_onetone_pick,
 )
 from zcu_tools.analysis.fluxdep.processing import onetone_background
-from zcu_tools.plotting.liveplot.segments.plot2d import PlotNonUniform2DSegment
 
+from ._background import NonUniformBackground
 from .palette import KEPT_COLOR
 
 
@@ -55,7 +55,7 @@ class OneTonePickPlot:
         ax_image = figure.add_subplot(2, 1, 1)
         ax_curve = figure.add_subplot(2, 1, 2)
         background = onetone_background(spectrum.signals)
-        image = PlotNonUniform2DSegment(
+        image = NonUniformBackground(
             "Device value",
             "Frequency (GHz)",
             vmin=background.vmin,

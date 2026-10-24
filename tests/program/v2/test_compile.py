@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pytest
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import BaseCustomProgramV2, ModularProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
@@ -29,8 +28,7 @@ def _make_prog(
     **cfg_kwargs,
 ) -> ModularProgramV2:
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
-    cfg = ProgramV2Cfg(**cfg_kwargs)
-    return ModularProgramV2(soccfg, cfg, modules=modules or [], sweep=sweep)
+    return ModularProgramV2(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 
 def _addr_inc(inst: Mapping[str, object]) -> int:
@@ -65,11 +63,9 @@ def test_empty_program_compiles():
 
 def test_base_custom_program_requires_make_modules():
     soccfg = make_mock_soccfg()
-    cfg = ProgramV2Cfg()
 
-    with pytest.raises(TypeError, match="abstract"):
-        # tolerated: This negative fixture verifies that the abstract program rejects construction without make_modules.
-        BaseCustomProgramV2(soccfg, cfg)  # pyright: ignore[reportAbstractUsage]
+    caught = pytest.raises(TypeError, BaseCustomProgramV2, soccfg)
+    assert caught.match("abstract")
 
 
 def test_binprog_has_pmem():
@@ -133,11 +129,6 @@ def test_compile_refreshes_program_cursors_with_wait():
 def test_reps_propagated():
     prog = _make_prog(reps=4)
     assert prog.reps == 4
-
-
-def test_rounds_propagated():
-    prog = _make_prog(rounds=3)
-    assert prog.cfg_model.rounds == 3
 
 
 def test_datamem_none_when_empty():

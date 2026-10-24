@@ -55,8 +55,7 @@ def _snapshot(
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT,
         post_analysis=True,
-        load_data=False,
-        requires_soc=False,
+        load_data=True,
     )
     ana = AnalysisPaneSnapshot(
         params=None,

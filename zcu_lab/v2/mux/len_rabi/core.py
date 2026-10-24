@@ -33,7 +33,7 @@ completed-round averages across all points, or NaN when no round completed.
 
 Length scan contract
 --------------------
-MuxLenRabiCfg.modules contains optional common reset and full mux readout.
+MuxLenRabiCfg.reset is optional; MuxLenRabiCfg.readout is the full mux readout.
 Sweep bounds are positive requested lengths in us. Every tone must use const
 or flat_top for participants. Const length is the entire pulse.
 Flat_top length includes raise_waveform ramps; the waveform implementation
@@ -103,8 +103,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
-from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -112,22 +112,20 @@ from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveform,
     FlatTopWaveform,
     Join,
     MuxReadout,
+    MuxReadoutCfg,
     TableLengthPulse,
 )
 
-from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
-from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2._support.mux_sweep_cfg import (
-    MuxDriveModuleCfg,
-    MuxToneCfg,
-    validate_mux_scan,
-)
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
+from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 from .analysis import MuxLenRabiFit, analyze_length
@@ -144,10 +142,10 @@ def _averaged_signal(
     raise ValueError("Mux scan program is missing its named MuxReadout")
 
 
-class MuxLenRabiCfg(ProgramExpCfg):
+class MuxLenRabiCfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules holds optional reset and complete mux readout. tones contains one
+    reset and readout hold the common modules. tones contains one
     MuxToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
@@ -155,11 +153,36 @@ class MuxLenRabiCfg(ProgramExpCfg):
     generators distinct from readout. Independent positive us length ranges
     use expts, the positive hardware point count shared by all tones. Every waveform
     must be const or flat_top; arb duration belongs to its asset, not this sweep.
-    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    modules: MuxDriveModuleCfg
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
     expts: int = Field(
         strict=True,
@@ -172,7 +195,7 @@ class MuxLenRabiCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
         """Reject invalid full tones, active generators, counts or length policy."""
-        validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
+        validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
             tone = self.tones[index]
             drive = tone.require_drive()
@@ -269,11 +292,12 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         # 1. Prepare each qubit's length grid and select its original readout tone.
         cfg = MuxLenRabiCfg.model_validate(config.model_dump())
         scan = prepare_length_scan(cfg, soccfg=context.soccfg)
-        readout = cfg.modules.readout.with_updates(
-            tones=[cfg.modules.readout.tones[index] for index in scan.indices]
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[index] for index in scan.indices]
         )
         viewers = [
-            context.plots.liveplot_1d(
+            live_line(
+                context.plots,
                 f"measurement_{index}",
                 "Pulse length (us)",
                 "Magnitude (a.u.)",
@@ -300,15 +324,23 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             ]
             # Reset -> simultaneous drives -> readout after this point's longest drive.
             builder = (
-                sched.prog_builder(context.soc, context.soccfg)
-                .add_reset("reset", cfg.modules.reset)
+                sched.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=sched.cfg.reps,
+                    initial_delay=sched.cfg.initial_delay,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add_reset("reset", cfg.reset)
                 .add(Join(*drives), MuxReadout("readout", readout))
                 .declare_sweep("point", cfg.expts)
             )
             prog = builder.build()
 
             # 3. Publish the full point/tone matrix after each completed round.
-            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
+            _ = builder.run_program(
+                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+            )
         signals.trigger_update(flush=True)
         return MuxSweepResult(
             np.asarray(scan.indices, dtype=np.int64),

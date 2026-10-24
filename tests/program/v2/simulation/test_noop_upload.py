@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -20,7 +20,6 @@ def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
     try:
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=2, rounds=1),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -32,6 +31,7 @@ def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
                     ro_length=0.1,
                 ).build("readout")
             ],
+            reps=2,
         )
         # Extra compiled DAC data is irrelevant to this const readout, but QICK
         # still validates it when uploads are requested.
@@ -56,7 +56,6 @@ def test_integrated_weight_upload_validates_without_serializing():
     try:
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=2, rounds=1),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -68,6 +67,7 @@ def test_integrated_weight_upload_validates_without_serializing():
                     ro_length=0.1,
                 ).build("readout")
             ],
+            reps=2,
         )
         program.soccfg["readouts"][0]["has_weights"] = True
         program.ro_chs[0]["weights"] = np.zeros((8, 2), dtype=np.int16).view(

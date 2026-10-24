@@ -112,12 +112,12 @@ async def mux_onetone(
     )
     tab.set("participants", inputs.participants)
     if isinstance(inputs.df, ToneRangeInputs):
-        tab.set("sweep.df.start", inputs.df.start)
-        tab.set("sweep.df.stop", inputs.df.stop)
+        tab.set("df.start", inputs.df.start)
+        tab.set("df.stop", inputs.df.stop)
     elif inputs.df is None:
-        tab.set("sweep.df.start", None)
-        tab.set("sweep.df.stop", None)
-    tab.set("sweep.df.n", inputs.n)
+        tab.set("df.start", None)
+        tab.set("df.stop", None)
+    tab.set("df.n", inputs.n)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

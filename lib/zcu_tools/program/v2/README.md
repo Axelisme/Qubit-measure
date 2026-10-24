@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。V2 program、module、readout 與 acquisition 契約。
 
@@ -86,8 +86,12 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 
 - `MyProgramV2`: Base class for experiments, wraps QICK's `AveragerProgramV2`.
 - `ModularProgramV2`: Supports pulse blocks and reusable modules.
-- 使用方以 `ProgramV2Cfg`、local module cfg 與自己的 experiment cfg 組合
-  one-tone／two-tone 等實驗的完整 contract。
+- Program 不持有 experiment cfg。建構時以具名參數傳 `reps=1`、
+  `initial_delay=1.0`、`relax_delay=1.0`，兩個 delay 的單位為 us。
+- `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
+  `reps` 與 `rounds` 必須為正整數，bool 不算整數。無效值在編譯或 acquire admission 前 raise ValueError。
+- `BaseCustomProgramV2.make_modules()` 回傳 modules。作者自行保存組裝 modules 所需的輸入，
+  program 的控制參數仍由建構子接收。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## Macro Layer

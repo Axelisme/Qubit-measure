@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 from pydantic import BaseModel
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDeviceInfo
 
-from .cfg_model import ExpCfgModel
 from .operations import Completed, Failed, MissingCapability, RunFunction, RunIdentity
 from .records import RunRecord
 
@@ -110,7 +110,7 @@ class ScopeRuntime(Protocol):
         """Execute blocking work under scope and return attempt facts."""
         ...
 
-    async def execute_run[Cfg: ExpCfgModel, Result](
+    async def execute_run[Cfg: ConfigBase, Result](
         self,
         scope: Scope,
         experiment: RunFunction[Cfg, Result],
@@ -303,7 +303,7 @@ class Scope:
         """
         return await self._capabilities().execute_call(self, fn, name=name)
 
-    async def run[Cfg: ExpCfgModel, Result](
+    async def run[Cfg: ConfigBase, Result](
         self, experiment: RunFunction[Cfg, Result], cfg: Cfg, *, name: str | None = None
     ) -> Completed[RunRecord[Cfg, Result]] | Failed:
         """Run a core (cfg, *, context) callable with a copied cfg, without saving.

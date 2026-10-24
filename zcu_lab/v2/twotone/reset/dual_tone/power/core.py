@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -23,6 +23,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
+from zcu_lab.v2.support import live_heatmap
+
 
 @dataclass(frozen=True)
 class PowerResult:
@@ -33,21 +35,29 @@ class PowerResult:
     signals: NDArray[np.complex128]
 
 
-class PowerModuleCfg(ConfigBase):
+class PowerCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class PowerSweepCfg(ConfigBase):
     gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
     gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
-
-
-class PowerCfg(ProgramExpCfg):
-    modules: PowerModuleCfg
-    sweep: PowerSweepCfg
 
 
 @dataclass(frozen=True)
@@ -78,7 +88,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/reset/dual_tone/power",
     )
 
@@ -95,16 +105,14 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg.modules
-
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         gains1 = sweep2array(
-            cfg.sweep.gain1,
+            cfg.gain1,
             "gain",
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse1_cfg.ch},
         )
         gains2 = sweep2array(
-            cfg.sweep.gain2,
+            cfg.gain2,
             "gain",
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
@@ -118,8 +126,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             return np.abs(signals - signals[ref_i, ref_j])
 
         # Display contrast relative to the minimum-gain corner in either scan direction.
-        viewer = context.plots.liveplot_2d(
-            "measurement", "Gain1 (a.u.)", "Gain2 (a.u.)"
+        viewer = live_heatmap(
+            context.plots, "measurement", "Gain1 (a.u.)", "Gain2 (a.u.)"
         )
         signals_buffer = SignalBuffer(
             (len(gains1), len(gains2)),
@@ -130,24 +138,25 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # Sweep both reset gains in hardware and collect mean IQ.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.tested_reset.set_param(
-                "gain1", sweep2param("gain1", sched.cfg.sweep.gain1)
+            sched.cfg.tested_reset.set_param(
+                "gain1", sweep2param("gain1", sched.cfg.gain1)
             )
-            modules.tested_reset.set_param(
-                "gain2", sweep2param("gain2", sched.cfg.sweep.gain2)
+            sched.cfg.tested_reset.set_param(
+                "gain2", sweep2param("gain2", sched.cfg.gain2)
             )
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .declare_sweep("gain1", sched.cfg.sweep.gain1)
-                .declare_sweep("gain2", sched.cfg.sweep.gain2)
-                .build_and_acquire()
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    TwoPulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("gain1", sched.cfg.gain1)
+                .declare_sweep("gain2", sched.cfg.gain2)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return PowerResult(gains1, gains2, signals_buffer.array)

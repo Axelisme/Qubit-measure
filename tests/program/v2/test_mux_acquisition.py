@@ -5,7 +5,6 @@ import pytest
 from zcu_tools.experiment import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import readout
 from zcu_tools.program.v2.modules.control import Repeat
@@ -46,15 +45,19 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
     module = native_mux().build("mux")
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=3, rounds=2),
         [Repeat("reads", 2).add_content(module)],
         sweep=[("preparation", 4)],
+        reps=3,
     )
     with pytest.raises(ValueError, match="mux.*raw"):
         module.collect_raw_iq(prog)
     # Repeated trigger execution needs an explicit QICK runtime read count.
     prog.set_reads_per_shot(2)
-    averaged = prog.acquire(soc, progress=False)
+    averaged = prog.acquire(
+        soc,
+        progress=False,
+        rounds=2,
+    )
     raw = prog.get_raw()
     iq = module.collect_raw_iq(prog)
     assert iq.dtype == np.float64
@@ -82,10 +85,8 @@ def test_builder_converter_uses_initialized_copy_and_normalized_acquire():
     buffer = SignalBuffer((2,), dtype=np.complex128)
     stop = StopSignal()
     result = buffer.data
-    with Schedule(
-        ProgramV2Cfg(reps=3, rounds=2), buffer, scope=Scope("run", stop=stop)
-    ) as sched:
-        builder = sched.prog_builder(soc, soccfg).add(original)
+    with Schedule({}, buffer, scope=Scope("run", stop=stop)) as sched:
+        builder = sched.prog_builder(soc, soccfg, reps=3).add(original)
         prog = builder.build()
         module = next(m for m in prog.modules if m.name == "mux")
         assert isinstance(module, readout.MuxReadout)
@@ -95,7 +96,7 @@ def test_builder_converter_uses_initialized_copy_and_normalized_acquire():
             iq = module.collect_iq(prog, raw, read_index=0)
             return iq[..., 0] + 1j * iq[..., 1]
 
-        result = builder.run_program(prog, raw2signal_fn=convert)
+        result = builder.run_program(prog, rounds=2, raw2signal_fn=convert)
     stop.raise_if_error()
     np.testing.assert_array_equal(result, [5 - 5j, 2 - 2j])
     np.testing.assert_array_equal(buffer.data, result)

@@ -22,33 +22,35 @@ cp -R zcu_lab/v2/twotone/power_dep zcu_lab/v2/twotone/power_map
 | --- | --- | --- |
 | `core.py` | cfg、Result、experiment 類別、`AXES_SPEC`、`run`，以及是否需要 `analyze` | 核心與持久化名稱獨立，見 [新 experiment 檢查清單](../v2/experiment-authoring.md#寫新-experiment-時的檢查清單)。 |
 | `form.py` | `PowerCfg` import、Form 型別、初值樹、角色引用、Template／Slot | Open／Reset 能建立新 cfg 的輸入樹，見 [Form 與固定來源](../v2/measure-authoring.md#目錄佈局)。 |
-| `gui.py` | core import、RunRecord alias、adapter 類別、capabilities、writeback | GUI 能建立核心並配對同次 cfg／Result，見 [GUI ownership](../v2/gui-contracts.md#ownership)。 |
+| `gui.py` | core import、RunRecord alias、Adapter 值與選填分析／writeback | GUI 能建立核心並配對同次 cfg／Result，見 [GUI ownership](../v2/gui-contracts.md#ownership)。 |
 | `guide.md` | 量測目的、必要校準、操作、結果判讀、writeback | operator 能知道何時能 Run，見 [operator guide 約束](../v2/measure-authoring.md#operator-workflow-guide-約束)。 |
 | `__init__.py` | package 說明，若有 exports 也要更新 | import package 不啟動 GUI 或量測，見 [實驗目錄佈局](../v2/experiment-authoring.md#目錄佈局)。 |
 
 ## 2. 在 core.py 定義資料與量測
 
-把 `PowerResult`、`PowerSweepCfg`、`PowerModuleCfg`、`PowerCfg`、`PowerExp`
-依序改名為 `PowerMapResult`、`PowerMapSweepCfg`、`PowerMapModuleCfg`、`PowerMapCfg`、`PowerMapExp`。
-保留 cfg 的型別關係。Module cfg 描述 pulse／readout，sweep cfg 描述 gain／frequency。
-程式型 cfg 繼承 `ProgramExpCfg`，module 欄位用模組自己的 `.Cfg`：
+把 `PowerResult`、`PowerCfg`、`PowerExp` 改名為 `PowerMapResult`、`PowerMapCfg`、`PowerMapExp`。
+Cfg 繼承 `ConfigBase`。Module 與掃描欄位放在頂層，不加 Modules／Sweep group：
 
 ```python
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import ProgramExpCfg
-from zcu_tools.program.v2 import Pulse, Readout, Reset
+from typing import Annotated
 
-class PowerMapModuleCfg(ConfigBase):
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
+
+class PowerMapCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
     qub_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    reset: Reset.Cfg | None = None
-
-class PowerMapCfg(ProgramExpCfg):
-    modules: PowerMapModuleCfg
+    gain: Annotated[SweepCfg, FieldMeta(unit="normalized")]
+    freq: Annotated[SweepCfg, FieldMeta(unit="MHz")]
+    reps: int = 1
+    rounds: int = 1
+    relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
 ```
 
-這段只示範型別寫法，複製的 power map 仍需保留原本的 sweep 與其他欄位。
-不含 program 欄位的 cfg 仍用 `ExpCfgModel`。完整組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
+這段示範頂層型別與單位，複製的 power map 仍需保留其他實驗欄位。
+Run 明傳 builder 的 reps／relax_delay，acquire 明傳 rounds。
+完整組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
 
 這次不改資料形狀。`PowerMapResult` 保留 `gains`、以 MHz 表示的 `freqs`，
 以及 shape 為 `(Ngain, Nfreq)` 的 complex IQ `signals`。
@@ -66,7 +68,7 @@ Gain 是 drive amplitude，不是 dBm。之後改量測時，直接在 `run` 寫
 若你的實驗需要分析，在 core 實作同步 `analyze(source, options, *, plots)`，
 從 explicit RunRecord 讀資料，回傳數值結果並向本次 Plots 發圖。
 不要從目前表單補歷史 cfg，見 [分析與保存](../v2/experiment-authoring.md#實驗特有的分析與保存)。
-這項變更也需要下一節的 FIT 宣告與 adapter hook，不能只加 core method。
+這項變更也需要下一節的 Analysis 值接線，不能只加 core method。擬合、逐 tone 迴圈、失敗隔離與結果型別都放 core，不放 gui.py。
 
 ## 3. 在 form.py 設定初值樹
 
@@ -86,6 +88,9 @@ frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬�
   不要為了開表單而建立假的 library reference。
 
 新增欄位時，先在 core cfg 定義型別與 FieldMeta，再在 tree 指定初值或顯示方式。
+用 `field_order=("reset", "qub_pulse", "readout", "gain", "freq", "reps", "rounds", "relax_delay")` 排列表單。
+模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單，不再包 Modules／Sweep group。
+Pulse 的 Advanced group 仍將 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 放在可摺疊區塊。
 Tree 不另定義一份 cfg shape。Expression、Slot／Template 與 Reset 的契約見
 [Form 與固定來源](../v2/measure-authoring.md#目錄佈局)。
 
@@ -97,23 +102,35 @@ Tree 不另定義一份 cfg shape。Expression、Slot／Template 與 Reset 的�
 from .core import PowerMapCfg, PowerMapExp, PowerMapResult
 ```
 
-把 `PowerDepRunResult` 改成 `PowerMapRunResult`，其中的 `RunRecord` 型別參數改用新 cfg／Result。
-把 `PowerDepAdapter` 改成 `PowerMapAdapter`。
-同步更新 BaseAdapter 型別參數、`exp_cls`、`experiment_tag`、`make_form`、
-`run` 的型別與 `PowerMapExp().run(...)`。
+把 `PowerDepRunResult` 改成 `PowerMapRunResult`，其中的 RunRecord 型別參數改用新 cfg／Result。
+保留本地 run，明確配對同一次量測：
 
-保留 `RunRecord(cfg=cfg, result=result)`，讓 Save／Load 對應同一次量測。
-`guide_path` 保持指向同目錄 `guide.md`，不指回舊實驗。
-本篇保留 `analysis=AnalysisMode.NONE, load_data=True`，不加 analyze 或 writeback hooks。
+```python
+from pathlib import Path
 
-若你新增 core fit，把 capability 改成 FIT，並在 adapter 提供 `analyze`。
-若分析只出圖，省略 BaseAdapter 的分析結果／參數槽位，讓 `analyze` 回 None。
-沒有輸入參數時不覆寫 `get_analyze_params`，也不宣告空 class。
-Framework 會保存圖與空 summary，不產生 writeback 候選。
-需要寫回時，由 adapter 的 `get_writeback_items()` 提出具體 target 與值，
-讓 operator 審閱後套用。沒有 fit 的 power map 不提出校準。
-Hook 與 capability 必須一致，import 時就會檢查，見
-[capability 宣告](../v2/gui-contracts.md#capability-宣告與實作) 與
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter
+
+from .form import make_form
+
+def run(cfg: PowerMapCfg, *, context: RunContext) -> RunRecord[PowerMapCfg, PowerMapResult]:
+    return RunRecord(cfg=cfg, result=PowerMapExp().run(cfg, context=context))
+
+DEFINITION = Adapter(
+    spec=PowerMapExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+)
+```
+
+這個範例沒有分析，不提供 analysis。不要手填 capabilities、experiment_tag 或 exp_cls。
+若新增 core fit，以 `analysis=Analysis(fn=analyze, options=make_options, writeback=writeback)` 接上。
+`make_options(source, env)` 回傳初值物件，框架從其型別生成欄位。
+無參數時省略 options，不宣告空 class。Figures-only 的 fn 回 None，仍保存圖與空摘要，不提出 writeback。
+Writeback callback 提出具體 target 與值，讓 operator 審閱後套用，不直接更新來源。
+值的簽名與 owner 見 [分析宣告](../v2/gui-contracts.md#capability-宣告與實作) 與
 [writeback ownership](../v2/gui-contracts.md#修改原則)。
 
 ## 5. 寫 guide.md 與 package 說明
@@ -132,16 +149,16 @@ Hook 與 capability 必須一致，import 時就會檢查，見
 在 `zcu_lab/definitions.py` 的 imports 加入：
 
 ```python
-from zcu_lab.v2.twotone.power_map.gui import PowerMapAdapter
+from zcu_lab.v2.twotone.power_map.gui import DEFINITION as POWER_MAP
 ```
 
 再在 `ADAPTERS` 字典加一行，保留原本的 key：
 
 ```python
-"twotone/power_map": PowerMapAdapter,
+"twotone/power_map": POWER_MAP,
 ```
 
-Catalog 不會掃描 class 自動註冊。完整規則見 [adapter 載入契約](../v2/measure-authoring.md#目錄佈局)。
+Catalog 明列 Adapter 值，不掃描 class 或目錄自動註冊。完整規則見 [adapter 載入契約](../v2/measure-authoring.md#目錄佈局)。
 啟動 GUI 並開啟你自己的 entry／point，讓 alias 指向可供這個表單讀取的元件。
 如果 GUI 已在執行，關閉所有 tabs 並等待操作結束，再用 Reload experiments 載入新 catalog。
 修改 startup-only component 或保留的共用基礎層時，要重啟 GUI。
@@ -150,7 +167,7 @@ Catalog 不會掃描 class 自動註冊。完整規則見 [adapter 載入契約]
 
 1. 打開 New Tab，展開 `twotone`，確認有 `power_map`，原本的 `power_dep` 也仍在。
 2. 選 `power_map`，確認出現 modules、gain／frequency sweep 與 averaging 輸入。
-   展開 Sweep 下的 Gain，起始範圍應為 0.001 到 0.2，共 31 點。
+   展開頂層 Gain，起始範圍應為 0.001 到 0.2，共 31 點。
 3. 切到 Guide tab，確認顯示新 `guide.md`，沒有指回舊實驗。
 4. 缺少校準時，補 entry／library 資料後按 Reset 重新捕捉來源。
    能開表單不表示 cfg 有效，也不表示已取得硬體執行授權。

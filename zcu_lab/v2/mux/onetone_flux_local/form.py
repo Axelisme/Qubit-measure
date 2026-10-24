@@ -2,7 +2,7 @@
 
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_flux_forms import make_flux_form
+from zcu_lab.v2.support.measure.mux_flux_forms import make_flux_form
 
 from .core import OnetoneFluxLocalCfg
 

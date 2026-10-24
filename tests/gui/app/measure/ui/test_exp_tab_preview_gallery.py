@@ -75,7 +75,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         owned_authorities.clear()
 
 
-def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=False):
+def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False):
     from zcu_tools.gui.app.measure.services.ports import (
         AnalysisPaneSnapshot,
         PostAnalysisPaneSnapshot,
@@ -83,7 +83,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False, load=Fa
         SavePaneSnapshot,
     )
 
-    caps = AdapterCapabilities(analysis=analysis, post_analysis=post, load_data=load)
+    caps = AdapterCapabilities(analysis=analysis, post_analysis=post, load_data=True)
     run_snap = RunPaneSnapshot(result=object(), source_path=None)
     analysis_snap = AnalysisPaneSnapshot(
         params=DummyParams() if analysis is not AnalysisMode.NONE else None,
@@ -149,7 +149,9 @@ def exp_tab_widget(qapp, make_ctrl):
 def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     # NONE
-    caps_none = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
+    caps_none = AdapterCapabilities(
+        analysis=AnalysisMode.NONE, post_analysis=False, load_data=True
+    )
     snap_none = make_snapshot("t1", analysis=AnalysisMode.NONE, post=False)
     tab_none = exp_tab_widget("t1", ctrl, caps_none)
     tab_none.attach(snap_none, MagicMock())
@@ -168,7 +170,9 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctr
     tab_none.detach()
 
     # FIT + post
-    caps_both = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    caps_both = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
     snap_both = make_snapshot("t2", analysis=AnalysisMode.FIT, post=True)
     tab_both = exp_tab_widget("t2", ctrl, caps_both)
     tab_both.attach(snap_both, MagicMock())
@@ -182,7 +186,9 @@ def test_exp_data_subtab_shows_gallery_run_always(qapp, exp_tab_widget, make_ctr
 
 def test_exp_data_routing_a4(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
     tab = exp_tab_widget("t1", ctrl, caps)
     tab.attach(snap, MagicMock())
@@ -215,7 +221,9 @@ def test_exp_data_activation_refreshes_and_lifecycle_sync(
 ):
     ctrl = make_ctrl()
     # Use fake renderer so we can assert raster not empty after show
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
     tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=fake_renderer)
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=True)
     tab.attach(snap, MagicMock())
@@ -283,7 +291,9 @@ def test_exp_data_invisible_defers_render(qapp, exp_tab_widget, make_ctrl):
         call_log.append("render")
         return bytes(FAKE_PNG_BYTES)
 
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+    )
     tab = exp_tab_widget("t1", ctrl, caps, preview_renderer=counting_renderer)
     snap = make_snapshot("t1", analysis=AnalysisMode.FIT, post=False)
     tab.attach(snap, MagicMock())
@@ -307,7 +317,9 @@ def test_exp_production_reachability_data_gallery_is_active_right_widget(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
     tab = exp_tab_widget("reach", ctrl, caps)
     snap = make_snapshot("reach", analysis=AnalysisMode.FIT, post=True)
     actions = MagicMock()
@@ -340,7 +352,9 @@ def test_exp_gallery_failure_isolated_and_save_controls_remain_usable(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
     fig_run = Figure()
     fig_a = Figure()
     fig_p = Figure()
@@ -393,7 +407,9 @@ def test_gallery_aspect_fit_preserved_after_multiple_resizes_via_exp_tab(
 ):
     """Via shipped ExpTabWidget Data path, verify bounds and ratio before/after resize."""
     ctrl = make_ctrl()
-    caps = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
+    caps = AdapterCapabilities(
+        analysis=AnalysisMode.NONE, post_analysis=False, load_data=True
+    )
     tab = exp_tab_widget("t-aspect", ctrl, caps, preview_renderer=renderer_640x480)
     snap = make_snapshot("t-aspect", analysis=AnalysisMode.NONE, post=False)
     tab.attach(snap, MagicMock())
@@ -521,11 +537,17 @@ def test_gallery_narrow_vs_wide_via_exp_tab_shipped_path(
         QApplication.processEvents()
 
     # 1 card: Run only
-    caps1 = AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False)
+    caps1 = AdapterCapabilities(
+        analysis=AnalysisMode.NONE, post_analysis=False, load_data=True
+    )
     _check_one(caps1, 1)
     # 2 cards: Run + Analysis
-    caps2 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False)
+    caps2 = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+    )
     _check_one(caps2, 2)
     # 3 cards: Run + Analysis + Post
-    caps3 = AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True)
+    caps3 = AdapterCapabilities(
+        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+    )
     _check_one(caps3, 3)

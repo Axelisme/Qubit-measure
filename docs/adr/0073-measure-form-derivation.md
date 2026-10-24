@@ -26,16 +26,27 @@ Builder 要 adapter 再宣告一次 core Pydantic cfg 已有的形狀。初值�
 
 使用者於 2026-10-14 定案：「感覺怪怪的，理論上對框架來說，adapter內是黑盒子，不該知道裡面是實驗」「兩個都同意，adaper就是一個黑盒子」。
 
-Adapter 的 `make_form(ctx)` 回傳 `Form[C]`。框架把該 Form 驗證後的輸出原封不動
-交給 `run` 與 `validate_run_request`，不檢查具體型別，也不重新驗證。
-`BaseAdapter` 以泛型連起 Form 輸出與 consumer；Registry 保持非泛型。
-`ExpAdapterProtocol` 的 make_form、run 與 validate_run_request 用 Any 表示同一 adapter
-自己的不透明輸出，不把這個例外擴到其他資料結構。保存快照時框架只把輸出當可序列化模型。
-`ExpCfg_cls` 與 `build_exp_cfg` 的重複驗證不再存在。
+Adapter 的 `make_form(ctx)` 回傳 `Form[T_Input]`。框架把該 Form 驗證後的輸出
+原封不動交給 `run(inp, *, context)`，不檢查具體型別，也不重新驗證。
+Adapter 值的七個泛型槽連起實驗 cfg、結果、兩層分析 options／result 與 T_Input。
+T_Input 預設等於實驗 cfg 型別，但兩者可以不同。Registry 在唯一邊界抹除異質型別，
+不把這個例外擴到其他資料結構。Lib 不認得 adapter 內部的 Experiment。
 
-Adapter 可以公開不同於 core 的輸入。需要 extras 時，Form 接受小型 Pydantic model
-與具名 `lower(extras, cfg)`，兩者成對宣告。Adapter 自己處理轉換與 Run-only 資訊。
-框架不猜測哪些欄位屬於實驗。
+每個 adapter 自己宣告 run，將 T_Input 轉成實際實驗 cfg、呼叫實驗，
+回傳 `RunRecord(cfg=actual_cfg, result=...)`。不需轉接時也寫本地 run，
+不直接曝露實驗的 bound run，不提供共同 run factory。
+Form 不提供 extras／lower。框架不猜測哪些欄位屬於實驗，也不再次包裝 record。
+Host 可附加 acquisition metadata，但不以 Form input 取代作者回傳的 cfg 或 None。
+
+Record 保存實驗 cfg 與結果，不另存 Form input。Load 依 spec 還原同一種 record，
+不從歷史 cfg 反填 Form，因此不需要反向輸入轉換。分析與 writeback 只讀 record，
+不從目前 Form 補歷史。分析需要的資訊由 run 放進實驗 cfg，或由實驗放進結果。
+Run 後與 Load 後使用同一份分析來源契約。
+
+使用者於 2026-10-24 裁定：「run只吃cfg?這完全是錯誤的想法，adapter就應該在run這個函數轉接cfg，不是直接曝露實驗run，不然我為什麼不直接曝露exp_cls就好？就是讓adapter能夠轉接cfg格式」
+「Form那個很有問題，為什麼要綁定adapter對外的Form必須是內部實驗的Cfg，這本來就該是adapter負責轉接的。」
+「你認為record該放實驗cfg還是表單cfg? 理論上是實驗cfg，但怎麼處理load的cfg呢」。
+同日選擇每個 adapter 本地宣告 run，並指出「方向能接受，但我覺得record_run的寫法不好懂」。
 
 ### 一個實驗的檔案分工
 
@@ -57,8 +68,8 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 
 欄位切換與固定 model list 的新契約見 [[0079]]，已採用但尚待實作。以下切換與還原條款依此描述目標設計。
 
-`gui.form_adapter.Form(core_cfg, tree)` 從 Pydantic 型別推導 FormModel、起始 input
-與輸出轉換。純量、nullable、Literal／enum、巢狀 model 與 module／waveform
+`gui.form_adapter.Form(input_type, tree)` 從 Pydantic 輸入型別推導 FormModel、起始 input
+與輸出轉換。輸入型別可直接使用實驗 cfg，也可由 adapter 自己宣告。純量、nullable、Literal／enum、巢狀 model 與 module／waveform
 由共用生成器處理。SweepCfg 使用 Range／Center 與 Expts／Step 的四個 tagged branches。Count 葉名為 n，步長葉名為 step。新表單選 Range + Expts。每個分支只保存 active 座標與採樣輸入。Center 的 span 是帶正負號的完整寬度，不保存另一份端點快取。
 持久 Spec 保留 child key，to_cfg 不從 library materialize 或改寫 key。
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。

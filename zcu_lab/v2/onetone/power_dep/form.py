@@ -13,37 +13,33 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
     return Form(
         PowerDepCfg,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "readout",
+            "gain",
+            "freq",
             "earlystop_snr",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Hidden(),
-                "readout": Template(
-                    "readout",
-                    bindings={"resonator": "$resonator"},
-                    # Run supplies both scan coordinates, not the module literals.
-                    set={
-                        "freq": Hidden(0.0),
-                        "gain": Hidden(0.0),
-                        **timing,
-                    },
-                ),
-            },
-            "sweep": {
-                "gain": Range(0.001, 1.0, expts=101),
-                "freq": Range.around(
-                    "$resonator.freq", "1.5 * $resonator.kappa", expts=201
-                ),
-            },
+            "reset": Hidden(),
+            "readout": Template(
+                "readout",
+                bindings={"resonator": "$resonator"},
+                # Run supplies both scan coordinates, not the module literals.
+                set={
+                    "freq": Hidden(0.0),
+                    "gain": Hidden(0.0),
+                    **timing,
+                },
+            ),
+            "gain": Range(0.001, 1.0, expts=101),
+            "freq": Range.around(
+                "$resonator.freq", "1.5 * $resonator.kappa", expts=201
+            ),
             "relax_delay": 1.0,
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

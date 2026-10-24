@@ -16,7 +16,6 @@ from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -29,8 +28,9 @@ from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
-from zcu_lab.v2._support.device import set_flux, set_rf_frequency, set_rf_power
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
+from zcu_lab.v2.support import live_scatter
+from zcu_lab.v2.support.device import set_flux, set_rf_frequency, set_rf_power
 
 
 @dataclass(frozen=True)
@@ -53,25 +53,23 @@ class JPAOptimizeAnalysis:
     best_power: float
 
 
-class JPAOptModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class JPAOptSweepCfg(ConfigBase):
-    jpa_flux: Annotated[
-        SweepCfg,
+class JPAOptCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
         FieldMeta(
-            label="JPA flux device value",
-            description="Flux bounds in flux_unit coordinates.",
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
         ),
-    ]
-    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
-    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
-
-
-class JPAOptCfg(ProgramExpCfg):
+    ] = 1.0
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
@@ -79,7 +77,9 @@ class JPAOptCfg(ProgramExpCfg):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
-    modules: JPAOptModuleCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     jpa_flux_dev: Annotated[
         str,
         FieldMeta(
@@ -94,16 +94,19 @@ class JPAOptCfg(ProgramExpCfg):
             description="Connected pump RF device driven at each optimizer point.",
         ),
     ] = ""
-    sweep: Annotated[
-        JPAOptSweepCfg,
+    jpa_flux: Annotated[
+        SweepCfg,
         FieldMeta(
-            label="Search bounds + relative resolution hints",
+            label="JPA flux device value",
             description=(
-                "Start/stop are search bounds. Point counts are relative resolution "
-                "hints for phase-1 allocation, not Cartesian sample counts."
+                "Flux bounds in flux_unit coordinates. Start/stop are search bounds. "
+                "Point counts are relative resolution hints for phase-1 allocation, "
+                "not Cartesian sample counts."
             ),
         ),
     ]
+    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
+    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
     num_points: Annotated[
         int,
         FieldMeta(
@@ -298,9 +301,9 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         num_points = cfg.num_points
-        flux_sweep = cfg.sweep.jpa_flux
-        freq_sweep = cfg.sweep.jpa_freq
-        gain_sweep = cfg.sweep.jpa_power
+        flux_sweep = cfg.jpa_flux
+        freq_sweep = cfg.jpa_freq
+        gain_sweep = cfg.jpa_power
 
         optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
@@ -312,7 +315,8 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         figure.suptitle("JPA Auto Optimization")
         grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
         viewers = [
-            context.plots.liveplot_scatter(
+            live_scatter(
+                context.plots,
                 "measurement",
                 label,
                 "SNR (a.u.)",
@@ -381,14 +385,18 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                 set_rf_power(context.devices[step.cfg.jpa_rf_dev], params[idx, 2])
 
                 # 3. Compare reset-only and pi-prepared readout for this candidate.
-                modules = step.cfg.modules
                 tracker = MomentTracker()
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        Readout("readout", modules.readout),
+                        Reset("reset", step.cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
+                        Readout("readout", step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .build_and_acquire(
@@ -398,6 +406,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                             skew_penalty=sched.cfg.skew_penalty,
                         ),
                         trackers=[tracker],
+                        rounds=cfg.rounds,
                     )
                 )
 

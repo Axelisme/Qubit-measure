@@ -197,7 +197,7 @@ def _validate_axes(source: RunRecord[RBCfg, RBResult]) -> None:
         (data.arms, [0, 1]),
         (data.rounds, np.arange(cfg.rounds)),
         (data.shot_indices, np.arange(cfg.reps)),
-        (data.tone_indices, np.arange(len(cfg.modules.readout.tones))),
+        (data.tone_indices, np.arange(len(cfg.readout.tones))),
     )
     if any(not np.array_equal(actual, wanted) for actual, wanted in expected):
         raise ValueError("RB raw axes do not match saved cfg and original tone order")

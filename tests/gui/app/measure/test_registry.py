@@ -31,7 +31,7 @@ def test_registry_templates_are_detached_and_preserved_across_publication(
     assert set(registry.templates) == {"square"}
 
 
-def test_resolve_experiment_prefers_exact_name_over_loadable_tag() -> None:
+def test_resolve_experiment_prefers_exact_name_over_tag() -> None:
     registry = Registry()
     registry.register("saving", AnalysisSavingAdapter)
     registry.register("test/saving", SavingAdapter)
@@ -40,10 +40,9 @@ def test_resolve_experiment_prefers_exact_name_over_loadable_tag() -> None:
     assert resolution.reason is None
 
 
-def test_resolve_experiment_selects_unique_load_capable_tag_owner() -> None:
+def test_resolve_experiment_selects_unique_tag_owner() -> None:
     registry = Registry()
     registry.register("saving", AnalysisSavingAdapter)
-    registry.register("non-loading", SavingAdapter)
     resolution = registry.resolve_experiment("test/saving")
     assert resolution.adapter_name == "saving"
     assert resolution.reason is None
@@ -54,7 +53,7 @@ def test_resolve_experiment_explains_unknown_or_missing_identity(
     experiment: str | None,
 ) -> None:
     registry = Registry()
-    registry.register("non-loading", SavingAdapter)
+    registry.register("saving", SavingAdapter)
     resolution = registry.resolve_experiment(experiment)
     assert resolution.adapter_name is None
     assert resolution.reason

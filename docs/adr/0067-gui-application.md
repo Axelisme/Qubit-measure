@@ -46,7 +46,7 @@ Measure framework 只保存 Qt 外觀，不保存或還原 SoC、devices、entry
 
 RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。使用者套件 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 
-`zcu_lab.v2._support.device.check_flux_unit(cfg, unit)` 只比對有效 Info 的 `value_unit`，不讀寫硬體或 cache。YOKO Info 擁有 mode／unit validator，Fake 的單位為 native；其他 Info 類型報 TypeError。`set_flux` 委派同一檢查，保既有 mode 查詢、driver safety、stop 與 progress，不新增 get_info 查詢。
+`zcu_lab.v2.support.device.check_flux_unit(cfg, unit)` 只比對有效 Info 的 `value_unit`，不讀寫硬體或 cache。YOKO Info 擁有 mode／unit validator，Fake 的單位為 native；其他 Info 類型報 TypeError。`set_flux` 委派同一檢查，保既有 mode 查詢、driver safety、stop 與 progress，不新增 get_info 查詢。
 
 Workflow 宿主提供同步 `get_device_cfg` 與完整 cfg 的 `setup_device`，zcu_lab 工具組合讀取、單位檢查與修改。框架不新增 value＋unit effect 或部分 cfg 合併。
 
@@ -165,7 +165,7 @@ Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveContr
 
 Adapter 的 data_item 與 analysis_item 只交框架固定內容，不選格式、路徑或寫檔。Figure 取已提交 pane 的具名原生圖。框架在 owner thread 同步編碼，資料準備失敗交共用 experiment.artifacts 報出對應 data outputs，其他圖與分析仍嘗試保存。
 
-LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 RunRecord envelope、record.metadata 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單。原始 cfg 保存在 native 資料檔，可透過公開 datafile.load 離線讀取為 Container，也可在 Results browser 唯讀檢視。這不改變 Load 與 adapter 的 opaque cfg 邊界。使用者裁定、metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
+LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。Adapter 依 spec 呼叫 restore_run；框架只讀 RestoredRun 的 RunRecord envelope、record.metadata 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單。原始 cfg 保存在 native 資料檔，可透過公開 datafile.load 離線讀取為 Container，也可在 Results browser 唯讀檢視。這不改變 Load 與 adapter 的 opaque cfg 邊界。使用者裁定、metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
 
 使用者於 2026-10-24 裁定：「只在 open_tab_from_file 路徑隔離 make_form 失敗，tab 照常建立並 Load，表單區與 Run 顯示 factory 原文錯誤，Reset 走一般 fail-fast；一般 new-tab／Reset 不變」。歷史結果的 Load admission 不要求目前來源能建立量測表單。Framework tab owner 只在這條建立路徑隔離 adapter.make_form，保留明確無 Form 狀態，不改 lab adapter，也不偽造空 Form 或反填 cfg。範本綁定、defaults 與 Load 失敗仍傳出。Load 失敗清除新 tab 並恢復原焦點，不留下 partial tab。無 Form 的 Reset preparation 任一步失敗，表單區與 Run 改顯示本次錯誤，原 exception 仍傳出。已有 Form 的 Reset 失敗保舊。Factory 原因與 Reset 恢復契約見 [[0073]]。
 
@@ -180,9 +180,9 @@ executor 與 remote handler／wire types 留在原 owner。`artifacts` 與 `writ
 `.importlinter` 的 `measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts`
 contracts 分別檢查兩個方向。
 
-Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 明示 SoC 需求、analysis、post-analysis 與 load 的支援範圍。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 依 `requires_soc` 檢查連線；`GuardService.check_load` 與 LoadService 依 `load_data` 拒絕不支援的 load，不要求目前 context。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。`check_analyze` 只要求 Run result，不要求目前 context，也不檢查 analysis capability。非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
+Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 由 Analysis／Interactive 與 PostAnalysis 值推導分析支援範圍，不是作者旗標。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 一律要求 SoC 連線；每個 adapter 都可嘗試 Load，由 spec 判定檔案相容性，不支援時顯示原因並保留舊成果。Load admission 不要求目前 context。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。`check_analyze` 只要求 Run result，不要求目前 context，也不檢查 analysis capability。非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
 
-Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，run guard 呼叫 adapter 的 preflight；preflight 不代替 execution guard 或硬體操作。精確 flags、conditional hooks 和 import-time 驗證見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。
+Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，額外實驗驗證放在 adapter.run 開頭，不提供 validate_run_request hook。這不代替 execution guard 或硬體操作。四種值、options 生成與建值期檢查見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。
 
 Domain 模組定義事件 enum、payload 和已提交的 fact。Producer 不傳 widget 名稱、刷新旗標或重畫遮罩。App 組裝 bus 訂閱與對外投影；GUI coordinator 把 fact 轉為畫面動作。例如 measure 的 tab content fact 在完整 pane state commit 後發布，operation terminal fact 與 content commit 是不同事件，避免成功時畫兩次。具體的保留 figure 恢復順序由 [measure app](../../lib/zcu_tools/gui/app/measure/README.md) 管理。Remote 以自己的投影呈現相同事實；這不規定 wire payload 或診斷通道。
 
@@ -190,7 +190,7 @@ Domain 模組定義事件 enum、payload 和已提交的 fact。Producer 不傳 
 
 ## 繪圖與限制
 
-GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Qt frontend 擁有 canvas、container 與 presentation 的生命週期；release 不銷毀 caller 保留的 Figure。通用 [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 的 standalone backend 契約仍服務其 public plotters，GUI 不透過該契約註冊自訂 pyplot routing。
+GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Qt frontend 擁有 canvas、container 與 presentation 的生命週期；release 不銷毀 caller 保留的 Figure。通用 [LiveUpdate](../../lib/zcu_tools/plotting/README.md#通用即時更新) 複製 caller 資料，再透過 host owner 執行作者 callback 與 refresh。線圖、熱圖與 scatter 工具歸 lab，見 [[0072]]；GUI 不依賴其格式，也不註冊自訂 pyplot routing。
 
 Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 owner scheduler 更新 live artists。兩者都不依賴 ambient pyplot routing。Mathtext parsing 保留 lock／prewarm；這不保證任意 Matplotlib 計算 thread-safe。Queued signal 也不會把共用的可變 Result 變成不可變 snapshot。各 app 仍決定資料的讀寫時機與所有權，具體 presentation 契約見 [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md)。
 

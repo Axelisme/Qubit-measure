@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -16,6 +16,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
+
+from zcu_lab.v2.support import live_heatmap
 
 
 def _default_phase_values() -> NDArray[np.float64]:
@@ -46,21 +48,29 @@ class FreqGainAnalysis:
     freq: float
 
 
-class FreqGainModuleCfg(ConfigBase):
+class FreqGainCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FreqGainSweepCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
-
-
-class FreqGainCfg(ProgramExpCfg):
-    modules: FreqGainModuleCfg
-    sweep: FreqGainSweepCfg
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -83,7 +93,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/reset/bath/freq_gain",
     )
 
@@ -106,24 +116,26 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         # Prepare cavity-drive coordinates and four relative tomography phases.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         phases = _default_phase_values()
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
         # Display opposite-phase contrast while retaining all four complex IQ planes.
-        viewer = context.plots.liveplot_2d(
-            "measurement", "Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)"
+        viewer = live_heatmap(
+            context.plots,
+            "measurement",
+            "Cavity Frequency (MHz)",
+            "Cavity drive Gain (a.u.)",
         )
         signals_buffer = SignalBuffer(
             (4, len(gains), len(freqs)),
@@ -134,29 +146,26 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         # Sweep both cavity knobs and the final pi/2 phase in one program.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            tested_reset = modules.tested_reset
-            tested_reset.set_param(
-                "res_gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
-            tested_reset.set_param(
-                "res_freq", sweep2param("freq", sched.cfg.sweep.freq)
-            )
+            tested_reset = sched.cfg.tested_reset
+            tested_reset.set_param("res_gain", sweep2param("gain", sched.cfg.gain))
+            tested_reset.set_param("res_freq", sweep2param("freq", sched.cfg.freq))
             phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
             tested_reset.set_param("pi2_phase", phase_param)
 
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
                     BathReset("tested_reset", tested_reset),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("phase", 4)
-                .declare_sweep("gain", sched.cfg.sweep.gain)
-                .declare_sweep("freq", sched.cfg.sweep.freq)
-                .build_and_acquire()
+                .declare_sweep("gain", sched.cfg.gain)
+                .declare_sweep("freq", sched.cfg.freq)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return FreqGainResult(

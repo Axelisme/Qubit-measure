@@ -14,13 +14,15 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+
+from zcu_lab.v2.support import live_line
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -36,20 +38,28 @@ class PowerResult:
     )
 
 
-class PowerModuleCfg(ConfigBase):
+class PowerCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class PowerSweepCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
-
-
-class PowerCfg(ProgramExpCfg):
-    modules: PowerModuleCfg
-    sweep: PowerSweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -77,7 +87,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=PowerResult,
         cfg_type=PowerCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/mist/power",
     )
 
@@ -97,12 +107,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # Prepare the hardware gain grid before collecting populations.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg.modules
 
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
         # Show G/E and the unclassified remainder without altering saved fractions.
@@ -114,7 +123,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Pulse gain",
             "MIST",
@@ -128,17 +138,18 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
-            modules = run_cfg.modules
-            gain_sweep = run_cfg.sweep.gain
-            modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+            gain_sweep = run_cfg.gain
+            run_cfg.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
 
             # Repeat reset/preparation/probe/readout at each hardware sweep point.
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add_reset("reset", modules.reset)
-                .add_pulse("init_pulse", modules.init_pulse)
-                .add_pulse("probe_pulse", modules.probe_pulse)
-                .add_readout("readout", modules.readout)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
+                .add_reset("reset", run_cfg.reset)
+                .add_pulse("init_pulse", run_cfg.init_pulse)
+                .add_pulse("probe_pulse", run_cfg.probe_pulse)
+                .add_readout("readout", run_cfg.readout)
                 .declare_sweep("gain", gain_sweep)
                 .build_and_acquire(
                     # Classify individual shots, then average their G/E fractions.
@@ -146,6 +157,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                     g_center=cfg.g_center,
                     e_center=cfg.e_center,
                     ge_radius=cfg.radius,
+                    rounds=cfg.rounds,
                 )
             )
 

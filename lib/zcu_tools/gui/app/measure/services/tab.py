@@ -167,7 +167,7 @@ class TabService:
             save=SavePaneSnapshot(
                 comment=tab.save.comment,
                 display_bases=_display_bases(tab.run.storage),
-                saves_to_entry=tab.adapter.experiment_tag is not None,
+                saves_to_entry=True,
             ),
             artifacts=self._state.get_artifact_snapshots(tab_id),
         )
@@ -269,16 +269,14 @@ class TabService:
         return self._registry.create(adapter_name).guide()
 
     def analyze_param_definitions(
-        self, adapter_name: str, *, stage: Literal["primary", "post"]
+        self, tab_id: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]:
-        """Describe canonical adapter parameters before or after a result exists."""
-        adapter = self._registry.create(adapter_name)
-        params_cls = (
-            adapter.analyze_params_cls()
-            if stage == "primary"
-            else adapter.post_analyze_params_cls()
+        """Describe the generated object without regenerating historical defaults."""
+        tab = self._state.get_tab(tab_id)
+        instance = (
+            tab.analysis.params if stage == "primary" else tab.post_analysis.params
         )
-        return describe_analyze_params(params_cls)
+        return describe_analyze_params(type(instance))
 
     def close_tab(self, tab_id: str) -> None:
         logger.info("close_tab: tab_id=%r", tab_id)
@@ -334,11 +332,13 @@ class TabService:
         the stored params. Missing primary result or adapter failure raises.
         """
         tab = self._state.get_tab(tab_id)
-        if not tab.has_analyze_result():
+        source = tab.run.result
+        if source is None or not tab.has_analyze_result():
             raise RuntimeError(
                 "No primary analyze result available to build post-analysis params"
             )
         instance = tab.adapter.get_post_analyze_params(
+            source,
             tab.analysis.result,
             replace(self._state.session_env, parameters=tab.run.parameters),
         )

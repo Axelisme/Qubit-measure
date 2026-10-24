@@ -12,7 +12,6 @@ from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
     GEFitOptions,
@@ -21,13 +20,13 @@ from zcu_tools.experiment.utils.single_shot.ge import (
 )
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.plotting.singleshot import plot_with_classified
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import ProgramV2Cfg, Pulse, PulseReadout, Reset
+from zcu_tools.program.v2 import Pulse, PulseReadout, Reset
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
-from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
-from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2.singleshot.plot import plot_with_classified
+from zcu_lab.v2.support.singleshot.plot import draw_ge_scatter
+from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 # ------------------------------------------------------------
 # Helper Functions
@@ -273,14 +272,7 @@ class GEPostAnalysis:
     confusion: GEConfusionResult
 
 
-class GEModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class GE_Cfg(ExpCfgModel):
+class GE_Cfg(ConfigBase):
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -296,7 +288,10 @@ class GE_Cfg(ExpCfgModel):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    modules: GEModuleCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots")]
 
 
@@ -333,12 +328,6 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         # Configure raw-shot acquisition rather than averaging the IQ clouds.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
-        program_cfg = ProgramV2Cfg(
-            reps=cfg.shots,
-            rounds=1,
-            initial_delay=cfg.initial_delay,
-            relax_delay=cfg.relax_delay,
-        )
 
         signals_buffer = SignalBuffer(
             (2, cfg.shots),
@@ -346,17 +335,22 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
-                modules = step.cfg.modules
-                probe_cfg = modules.probe_pulse if with_probe else None
+                probe_cfg = step.cfg.probe_pulse if with_probe else None
 
                 # Compare identical preparations with the probe omitted/applied.
                 program = (
-                    step.prog_builder(soc, soccfg, cfg=program_cfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=cfg.shots,
+                        initial_delay=cfg.initial_delay,
+                        relax_delay=cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
+                        Reset("reset", step.cfg.reset),
+                        Pulse("init_pulse", step.cfg.init_pulse),
                         Pulse("probe_pulse", probe_cfg),
-                        PulseReadout("readout", modules.readout),
+                        PulseReadout("readout", step.cfg.readout),
                     )
                     .build()
                 )

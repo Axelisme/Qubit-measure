@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-24，mux alias participant capture
+**Last updated:** 2026-10-24，實驗表單平鋪與 pulse Advanced
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -16,14 +16,30 @@
 - [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
-- [Measure support](_support/measure/README.md) 提供共享 domain mechanics。
+- [Measure support](support/measure/README.md) 提供共享 domain mechanics。
 - [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
 
 ## 套件邊界
 
-每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 是可選的 measure-gui adapter。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
+每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 以具名參數宣告可選的 measure-gui Adapter 值，接上 Form、run、guide 與 Analysis／Interactive／PostAnalysis。Core 擁有 run 與 analyze 的計算，GUI 只接線、解析來源與決定 writeback。Mux/onetone 的既有分析搬家另行處理，尚未完成。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
+
+## 即時圖工具
+
+從 `zcu_lab.v2.support` import `live_line`、`live_scatter`、`live_heatmap` 與
+`live_heatmap_with_line`，以 `live_line(context.plots, name, xlabel, ylabel, ...)`
+建立 typed handle。工具與格式直接放在公開支援套件，不另建 plotting 子套件。
+`support/live.py` 選擇格式與 scan-line 呈現，私有格式及 handle 檔保存 artists 與輸入檢查。
+作者要改 ticks、顏色、最近掃描線或增添工具時，從這裡修改。
+
+四工具保留既有 defaults、數值、具名圖及既有 axes 接入。Line 的 configure_axes 在 owner
+初始化後、呈現前執行。Handle 更新實數資料，保留 NaN 未測點與可選 title；
+`refresh=False` 可批次更新。Lib 的通用 LiveUpdate 負責複製資料、owner 執行與 refresh，
+finish／release 後拒絕更新。Reference marker 與動畫錄影不在這些工具中。
+
+Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`，joint-fit population／histogram／
+confusion 圖在 `singleshot/plot_rabi.py`。它們保留既有用途，分析計算仍由原分析 owner 負責。
 
 ## Mux readout 與表單初值
 
@@ -57,10 +73,10 @@ Module proposal 只更新成功 active tone 的頻率，保留其他完整設定
 單一參數從 Run／Load capture 的 `$mux.resonators` 依完整原始序號對應。Resonators 數不等於完整 tone 數時，保留 readout module 與 capture 可解析的 readout slot 提案，省略逐 resonator scalar，summary 顯示原因。
 MuxGroup 可不填 qubits 做 resonator bring-up，readout 各欄位仍可編輯，不增加完整 qubit 綁定門檻。
 填了則由 model 檢查等長與重複 qubit。Form 在 Open／Reset 呼叫
-`_support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
+`support.measure.mux_bindings.validate_mux_bindings(ctx.parameters)`，以固定 capture
 檢查 component 存在、kind 及逐項 qubit.resonator 對應，無效就拒絕來源。
 其他 mux／FTF Forms 共用此入口，精確 import 與呼叫例見
-[Measure support](_support/measure/README.md#mux-綁定驗證)。
+[Measure support](support/measure/README.md#mux-綁定驗證)。
 Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
 缺 slot 時從 blank mux 範本加 group tones，填入 resonator 校準頻率與名稱 label。
@@ -85,7 +101,11 @@ Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux 
 `mux/onetone_flux_local` 與 `mux/twotone_flux_local` 同步掃各 participant 的局部 DC 線。
 外層以軟體設值並等待 settle，內層重用既有 onetone host sweep 或 twotone hardware sweep。
 Local 每 tone 有自己的 Start／Stop，共用 `flux_expts`。Global 使用一個 `flux` 範圍。
-四份 cfg 與 native 保存形狀都是 flat：`modules`、`reps`、`rounds`、`initial_delay`、`relax_delay` 在 top-level。
+四份 cfg 與 native 保存形狀都是 flat：`reset`、`readout`、`reps`、`rounds`、`initial_delay`、`relax_delay` 在 top-level。
+Module 與掃描欄位依 `field_order` 平鋪，不宣告 Modules／Sweep group。
+模組仍有 selector 與子表單，掃描仍有 `SweepCfg` 子表單。
+Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。
+Schema 為 3.0。Load 舊 major 時保留資料與 metadata，cfg 為 None，不轉換舊巢狀設定。
 Onetone 的 `frequency.df` 是共用 MHz offset；twotone 的 `frequency.tones` 保存各 Q 的 drive 與 MHz 範圍，
 `frequency.expts` 是共用硬體點數。四張表單依 participants、tones、modules、frequency／DC scan、averaging、timing 排列。
 Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Reset／Refresh 的差異。
@@ -115,7 +135,7 @@ Amp Rabi 仍逐點 compile。
 Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
 requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
-`_support.singleshot.plot.draw_ge_scatter` 供單 qubit 與 mux GE 共用，先複製 IQ，
+`support.singleshot.plot.draw_ge_scatter` 供單 qubit 與 mux GE 共用，先複製 IQ，
 再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。
 
@@ -158,7 +178,7 @@ Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## 實驗角色與 device 操作
 
-`_support/device.py` 擁有儀器角色 helpers，供實驗 core 與 workflow 使用。DeviceInfo 是資訊，不再提供 set_flux／set_freq／set_power／set_output 控制命令。Device 層只提供儀器本身的操作，不知道 flux 或 RF 角色；實驗層選 driver、明示單位與操作用途。
+`support/device.py` 擁有儀器角色 helpers，供實驗 core 與 workflow 使用。DeviceInfo 是資訊，不再提供 set_flux／set_freq／set_power／set_output 控制命令。Device 層只提供儀器本身的操作，不知道 flux 或 RF 角色；實驗層選 driver、明示單位與操作用途。
 
 - `check_flux_unit(cfg: BaseDeviceInfo, unit: str) -> None` 是純檢查，只比 YOKO／Fake Info 儲存的 value_unit。YOKO Info 驗 current／A 與 voltage／V，Fake 為建立時固定的 native、V 或 A。Mismatch 或契約外 unit 報 ValueError，其他 Info 報 TypeError 並指名不支援 flux 設定的類別。不換算、不改 cfg，不讀寫硬體或 cache。
 - `set_flux(device, value, *, unit, stop, progress=False)` 委派同一 checker，保既有 mode 查詢、stop、progress 與 driver safety，不新增 get_info 或其他硬體查詢。接受 A、V 或 native。YOKO 的 A 要求 current 模式並呼叫 set_current，V 要求 voltage 模式並呼叫 set_voltage。Fake 比對 driver 實際 get_info() 回報的固定單位，再呼叫 set_value，不新造 native Info。單位或模式不符在寫入前拒絕。Helper 不換算、不切模式、不改 rampstep、不自動開 output，YOKO ramp 使用同一 stop 並沿既有安全限制。
@@ -183,10 +203,10 @@ zcu_lab/
     ├── <family>/<experiment>/
     │   ├── core.py
     │   └── gui.py         # optional measure adapter
-    └── _support/          # shared domain helpers
+    └── support/          # shared domain helpers
 ```
 
-`_support/resonator.py` 集中單 tone 與 mux 的模型 fitting／畫圖 mechanics 及 route prior 解析，不 import GUI。各 caller 保留選擇、失敗隔離與 writeback 政策。Core 不經 `_support/measure/` 取得這些 mechanics。
+`support/resonator.py` 集中單 tone 與 mux 的模型 fitting／畫圖 mechanics 及 route prior 解析，不 import GUI。各 caller 保留選擇、失敗隔離與 writeback 政策。Core 不經 `support/measure/` 取得這些 mechanics。
 
 `definitions.register_all` 明列 measure adapters，從 caller 的 Registry 取得 `templates.TEMPLATES` 持久範本，填入 startup 的 library catalog。組合根以 `Registry(templates=TEMPLATES)` 注入一次，import 不註冊或操作硬體。Reload 重建 leaf、catalog 與 core-typed Notebook helper，保留 measure／singleshot shared support、workflow support、templates 與框架 identity。修改固定依賴需要重啟。
 

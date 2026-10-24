@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -23,6 +23,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.support import live_line
+
 
 @dataclass(frozen=True)
 class LengthResult:
@@ -36,20 +38,28 @@ def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
     return rotate2real(signals).real
 
 
-class LengthModuleCfg(ConfigBase):
+class LengthCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class LengthSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
-
-
-class LengthCfg(ProgramExpCfg):
-    modules: LengthModuleCfg
-    sweep: LengthSweepCfg
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
@@ -59,7 +69,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=LengthResult,
         cfg_type=LengthCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/reset/single_tone/length",
     )
 
@@ -74,18 +84,17 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Quantize the tested reset duration on its generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        length_sweep = cfg.sweep.length
+        length_sweep = cfg.length
 
-        pulse_cfg = modules.tested_reset.pulse_cfg
+        pulse_cfg = cfg.tested_reset.pulse_cfg
 
         lengths = sweep2array(
             length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg.ch)
         )
 
         # Retain complex IQ while displaying the duration-dependent projection.
-        viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Amplitude")
+        viewer = live_line(context.plots, "measurement", "Length (us)", "Amplitude")
         signals_buffer = SignalBuffer(
             (len(lengths),),
             on_update=lambda data: viewer.update(
@@ -95,20 +104,21 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # Sweep only the tested reset length after the optional preparation.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.tested_reset.set_param(
-                "length", sweep2param("length", sched.cfg.sweep.length)
+            sched.cfg.tested_reset.set_param(
+                "length", sweep2param("length", sched.cfg.length)
             )
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    PulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .declare_sweep("length", sched.cfg.sweep.length)
-                .build_and_acquire()
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    PulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("length", sched.cfg.length)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return LengthResult(lengths, signals_buffer.array)

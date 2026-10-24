@@ -10,13 +10,15 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ComputedPulse, LoadValue, Pulse, Readout, Reset
 from zcu_tools.utils.process import rotate2real
+
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
@@ -132,16 +134,28 @@ def _configure_allxy_axes(ax: Axes) -> None:
     line.set_markersize(5)
 
 
-class AllXYModuleCfg(ConfigBase):
+class AllXYCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
     X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class AllXYCfg(ProgramExpCfg):
-    modules: AllXYModuleCfg
 
 
 @dataclass(frozen=True)
@@ -181,7 +195,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AllXY_Result,
         cfg_type=AllXYCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/allxy",
     )
 
@@ -198,8 +212,12 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Gate", "Signal", configure_axes=_configure_allxy_axes
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Gate",
+            "Signal",
+            configure_axes=_configure_allxy_axes,
         )
         signals_buffer = SignalBuffer(
             (len(ALLXY_SEQUENCE),),
@@ -209,12 +227,10 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             ),
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-
             # Derive Y rotations from X calibrations and retain an identity time slot.
-            I_pulse = modules.I_pulse
-            X180_pulse = modules.X180_pulse
-            X90_pulse = modules.X90_pulse
+            I_pulse = sched.cfg.I_pulse
+            X180_pulse = sched.cfg.X180_pulse
+            X90_pulse = sched.cfg.X90_pulse
             Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
             Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
@@ -226,7 +242,9 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
             # Load each gate pair, reset, then play gate 1 -> gate 2 -> readout.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     LoadValue(
                         "load_gate1_idx",
@@ -240,13 +258,13 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
                         idx_reg="allxy_idx",
                         val_reg="gate_idx2",
                     ),
-                    Reset("reset", cfg=modules.reset),
+                    Reset("reset", cfg=sched.cfg.reset),
                     ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
                     ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
-                    Readout("readout", cfg=modules.readout),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("allxy_idx", len(ALLXY_SEQUENCE))
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return AllXY_Result(

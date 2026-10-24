@@ -1,54 +1,32 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
-from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
-from tests.gui._adapter_fakes import DummyAdapter
+from tests.experiment._saving_support import SavingCore, SavingResult
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure._record_support import require_record
 
 from ._helpers import Fixture, dispatch_handler
 
-
-class OpaqueRecord:
-    """No cfg access is part of this adapter's framework contract."""
-
-    @property
-    def cfg(self) -> object:
-        raise AssertionError("The framework must not inspect the opaque record")
-
-
-class StoredAdapter(DummyAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False, analysis=AnalysisMode.NONE, load_data=True
-    )
-    experiment_tag: ClassVar[str | None] = "test/load"
-
-    def __init__(self) -> None:
-        self.received: list[Container] = []
-        self.record = RunRecord[ExpCfgModel, OpaqueRecord](None, OpaqueRecord())
-
-    def restore(
-        self, stored: Container
-    ) -> RestoredRun[RunRecord[ExpCfgModel, OpaqueRecord]]:
-        self.received.append(stored)
-        self.record = RunRecord(
-            None, self.record.result, metadata_from_container(stored)
-        )
-        return RestoredRun(self.record, "adapter cfg unavailable")
+StoredAdapter = Adapter(
+    spec=replace(SavingCore.AXES_SPEC, tag="test/load", cfg_schema_version="2.0"),
+    make_form=SavingAdapter.make_form,
+    run=SavingAdapter.run,
+    guide=None,
+)
 
 
 @pytest.fixture
@@ -64,7 +42,7 @@ def stored_app(qapp, tmp_path: Path):
         fx.stop()
 
 
-def test_registered_adapter_loads_opaque_record_and_cfg_diagnostic(stored_app) -> None:
+def test_registered_adapter_loads_native_record_and_cfg_diagnostic(stored_app) -> None:
     fx, tab_id, path, metadata = stored_app
     tab = fx.state.get_tab(tab_id)
     before = tab.cfg.input.data
@@ -76,13 +54,14 @@ def test_registered_adapter_loads_opaque_record_and_cfg_diagnostic(stored_app) -
     except RemoteError as exc:
         reply = {"error": exc.reason}
 
-    assert reply.get("cfg_issue") == "adapter cfg unavailable", reply
+    assert "/cfg: schema major" in str(reply["cfg_issue"]), reply
     assert reply["result_type"] == "RunRecord"
-    adapter = tab.adapter
-    assert isinstance(adapter, StoredAdapter)
-    assert metadata_from_container(adapter.received[0]) == metadata
-    assert tab.run.result is adapter.record
-    assert require_record(tab.run).metadata == metadata
+    record = require_record(tab.run)
+    assert record.cfg is None
+    assert isinstance(record.result, SavingResult)
+    np.testing.assert_array_equal(record.result.frequency, [1000.0, 1001.0, 1002.0])
+    np.testing.assert_array_equal(record.result.signal, [1 + 2j, 3 - 4j, 5 + 6j])
+    assert record.metadata == metadata
     assert tab.run.source_path == str(path)
     assert tab.cfg.input.data == before
     assert tab.cfg.env is env
@@ -113,9 +92,6 @@ def test_registered_load_rejects_file_before_adapter_and_keeps_result(
         "invalid_data_file" if source == "tag" else "data_file_read_failed"
     )
     assert tab.run is previous
-    adapter = tab.adapter
-    assert isinstance(adapter, StoredAdapter)
-    assert adapter.received == []
 
 
 @dataclass

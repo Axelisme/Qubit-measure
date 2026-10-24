@@ -23,7 +23,7 @@ from zcu_tools.experiment.single_fluxonium.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
 )
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -363,8 +363,8 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
         )
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=8, rounds=2),
             modules=[pulse.build("mw"), readout.build("ro")],
+            reps=8,
         )
         bias = env.create_device("FakeDevice", physical_settings().dc_bias.source.name)
 
@@ -372,7 +372,12 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
             bias.set_value(0.2)
 
         try:
-            average = program.acquire(env.soc, progress=False, round_hook=change_bias)
+            average = program.acquire(
+                env.soc,
+                progress=False,
+                round_hook=change_bias,
+                rounds=2,
+            )
         except NotImplementedError:
             pytest.fail("bound program acquire must return real single-cavity IQ")
         assert average is not None
@@ -381,7 +386,11 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
         raw = program.get_raw()
         assert raw is not None and np.asarray(raw[0]).shape == (8, 1, 2)
         assert np.linalg.norm(average[0]) > 1
-        traces = program.acquire_decimated(env.soc, progress=False)
+        traces = program.acquire_decimated(
+            env.soc,
+            progress=False,
+            rounds=2,
+        )
         assert traces is not None
         raw = program.get_raw()
         assert raw is not None
@@ -516,7 +525,9 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
             ro_length=0.016,
         )
         program = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(reps=8), modules=[readout.build("ro")]
+            env.soccfg,
+            modules=[readout.build("ro")],
+            reps=8,
         )
         average = program.acquire(env.soc, progress=False)
         assert average is not None and np.linalg.norm(average[0]) > 1

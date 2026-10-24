@@ -1,30 +1,32 @@
 """Registered author shared by native pane and MCP figure-contract scenarios."""
 
 import numpy as np
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.workflows import Failed, Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
 
+from tests._plotting import create_trace
+
 from ._workflow_ask import Choose, Native, Values
 
 
-class PlotCfg(ExpCfgModel):
+class PlotCfg(ConfigBase):
     stage: int
 
 
 def acquire(cfg: PlotCfg, *, context: RunContext) -> int:
-    viewer = context.plots.liveplot_1d("measurement", "Delay", f"Attempt {cfg.stage}")
-    viewer.update(np.array([0.0, 1.0]), np.array([1.0, float(cfg.stage)]))
+    viewer = create_trace(context.plots, "measurement", "Delay", f"Attempt {cfg.stage}")
+    viewer.update((np.array([0.0, 1.0]), np.array([1.0, float(cfg.stage)])))
     if cfg.stage == 1:
-        context.plots.liveplot_1d("diagnostic", "Frequency", "Diagnostic")
+        create_trace(context.plots, "diagnostic", "Frequency", "Diagnostic")
     return cfg.stage
 
 
 @workflow("operation-plots", "Replace operation figures without losing workflow trends")
 async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
-    trend = env.plots.liveplot_1d("trend", "Iteration", "Workflow trend")
-    trend.update(np.array([0.0, 1.0]), np.array([1.0, 2.0]))
+    trend = create_trace(env.plots, "trend", "Iteration", "Workflow trend")
+    trend.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
     for stage, iteration in zip((1, 2), env.iterations(), strict=False):
         outcome = await iteration.run(acquire, PlotCfg(stage=stage))
         if isinstance(outcome, Failed):

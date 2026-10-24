@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -16,6 +16,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Join, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
+
+from zcu_lab.v2.support import live_heatmap
 
 
 @dataclass(frozen=True)
@@ -29,22 +31,30 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class MistModuleCfg(ConfigBase):
+class MistCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Reset.Cfg | None = None
     init_pulse: Pulse.Cfg | None = None
     flux_pulse: Pulse.Cfg
     mist_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class MistSweepCfg(ConfigBase):
     flux_gain: SweepCfg
     mist_gain: SweepCfg
-
-
-class MistCfg(ProgramExpCfg):
-    modules: MistModuleCfg
-    sweep: MistSweepCfg
 
 
 @dataclass(frozen=True)
@@ -66,7 +76,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=MistResult,
         cfg_type=MistCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="fastflux/mist",
     )
 
@@ -81,25 +91,27 @@ class MistExp(Experiment[MistResult, MistCfg]):
         # Quantize both gain axes for their respective generators.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        flux_gain_sweep = cfg.sweep.flux_gain
-        mist_gain_sweep = cfg.sweep.mist_gain
+        flux_gain_sweep = cfg.flux_gain
+        mist_gain_sweep = cfg.mist_gain
 
         flux_gains = sweep2array(
             flux_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.flux_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.flux_pulse.ch},
         )
         mist_gains = sweep2array(
             mist_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.mist_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.mist_pulse.ch},
         )
 
         # Display the averaged response without classifying individual shots.
-        viewer = context.plots.liveplot_2d(
-            "measurement", "Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)"
+        viewer = live_heatmap(
+            context.plots,
+            "measurement",
+            "Flux Pulse Gain (a.u.)",
+            "Mist Pulse Gain (a.u.)",
         )
         signals_buffer = SignalBuffer(
             (len(flux_gains), len(mist_gains)),
@@ -109,29 +121,30 @@ class MistExp(Experiment[MistResult, MistCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.flux_pulse.set_param(
-                "gain", sweep2param("flux_gain", sched.cfg.sweep.flux_gain)
+            sched.cfg.flux_pulse.set_param(
+                "gain", sweep2param("flux_gain", sched.cfg.flux_gain)
             )
-            modules.mist_pulse.set_param(
-                "gain", sweep2param("mist_gain", sched.cfg.sweep.mist_gain)
+            sched.cfg.mist_pulse.set_param(
+                "gain", sweep2param("mist_gain", sched.cfg.mist_gain)
             )
 
             # Prepare once per shot, apply the two parallel stimuli, then read out.
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
-                        Pulse("mist_pulse", modules.mist_pulse),
-                    ),
-                    Readout("readout", modules.readout),
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .declare_sweep("flux_gain", sched.cfg.sweep.flux_gain)
-                .declare_sweep("mist_gain", sched.cfg.sweep.mist_gain)
-                .build_and_acquire()
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Join(
+                        Pulse("flux_pulse", sched.cfg.flux_pulse),
+                        Pulse("mist_pulse", sched.cfg.mist_pulse),
+                    ),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("flux_gain", sched.cfg.flux_gain)
+                .declare_sweep("mist_gain", sched.cfg.mist_gain)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return MistResult(flux_gains, mist_gains, signals_buffer.array)

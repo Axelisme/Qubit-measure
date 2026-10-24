@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -16,7 +16,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.simulate import value2flux
 
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support.device import set_flux
 
 
 @dataclass(frozen=True)
@@ -50,21 +51,28 @@ class FluxDepAnalyzeOptions:
     auto_range: bool = True
 
 
-class FluxDepModuleCfg(ConfigBase):
+class FluxDepCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     reset: Reset.Cfg | None = None
     init_pulse: Pulse.Cfg | None = None
     probe_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class FluxDepSweepCfg(ConfigBase):
-    flux: SweepCfg
-    gain: SweepCfg
-
-
-class FluxDepCfg(ProgramExpCfg):
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
-    modules: FluxDepModuleCfg
     flux_dev: Annotated[
         str,
         FieldMeta(
@@ -72,7 +80,8 @@ class FluxDepCfg(ProgramExpCfg):
             description="Connected flux device driven by the sweep.",
         ),
     ]
-    sweep: FluxDepSweepCfg
+    flux: SweepCfg
+    gain: SweepCfg
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
@@ -110,16 +119,16 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         # 1. Prepare external flux values and the board's probe-gain coordinates.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        values = sweep2array(cfg.sweep.flux, allow_array=True)
+        values = sweep2array(cfg.flux, allow_array=True)
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "Flux device value",
             "Readout power (a.u.)",
@@ -144,20 +153,24 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                 )
 
                 # 3. Reset, initialize, perturb with the probe, then measure IQ.
-                modules = step.cfg.modules
-                modules.probe_pulse.set_param(
-                    "gain", sweep2param("gain", step.cfg.sweep.gain)
+                step.cfg.probe_pulse.set_param(
+                    "gain", sweep2param("gain", step.cfg.gain)
                 )
                 _ = (
-                    step.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Pulse("probe_pulse", modules.probe_pulse),
-                        Readout("readout", modules.readout),
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
                     )
-                    .declare_sweep("gain", step.cfg.sweep.gain)
-                    .build_and_acquire()
+                    .add(
+                        Reset("reset", step.cfg.reset),
+                        Pulse("init_pulse", step.cfg.init_pulse),
+                        Pulse("probe_pulse", step.cfg.probe_pulse),
+                        Readout("readout", step.cfg.readout),
+                    )
+                    .declare_sweep("gain", step.cfg.gain)
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         # 4. Preserve raw complex response; baseline subtraction is display-only.

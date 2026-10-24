@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -21,26 +21,28 @@
 - [JPA 校準 family](#jpa-校準-familyjpa)
 - [Reset 校準實驗群](#reset-校準實驗群twotonereset)
 
-`zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
+`zcu_lab/v2/<實驗>/gui.py` 以具名參數宣告框架的 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` 值，接上同資料夾的 core，供 `zcu_tools.gui.app.measure` 驅動。框架不 import 使用者套件，也不含實驗領域知識。
 
 ---
 
 ## 目錄佈局
 
 實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列 adapter catalog，
-`../templates.py` 提供注入 Registry 的持久範本目錄。Private `_support/measure/` 提供跨 adapter
+`../templates.py` 提供注入 Registry 的持久範本目錄。公開支援套件 `support/measure/` 提供跨 adapter
 共用的 analysis、writeback 與 context mechanics，也可集中已定案且供多個 Form 共用的具名初值政策。
 
 每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 提供 Qt-free `make_form(ctx)`。
-`gui.py` 把這個 factory 接到 BaseAdapter，並擁有 Run、analysis、writeback 與 operator guide。
-Form 從 core 型別推導形狀；tree 只宣告初值、Slot／Template、鎖定與隱藏。
+core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
+分析計算包含擬合、逐 tone 迴圈、失敗隔離與結果型別。GUI 為 writeback 做的有限值檢查與摘要整理不算分析計算。
+目前 mux/onetone 的逐 tone 計算仍在 gui.py，搬入 core 是獨立的分析層清理工作，不代表允許新分析沿用此位置。
+`gui.py` 宣告具名參數的 `Adapter` 值。Form 從 adapter 輸入型別推導形狀；tree 只宣告初值、Slot／Template、鎖定與隱藏。
 完整作者契約見 [ADR-0073](../../docs/adr/0073-measure-form-derivation.md)。
 
 ## 實驗重載
 
 新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。組合根重載
 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports 與引用 core 型別的 Notebook flux picker。
-`zcu_lab.templates`、`_support` 下的 measure／singleshot 支援家族，以及框架 identity 保留。
+`zcu_lab.templates`、`support` 下的 measure／singleshot 支援家族，以及框架 identity 保留。
 修改這些固定依賴後要重啟 GUI。
 
 Reload 會先確認關閉全部 tabs 並排除進行中操作，不重啟硬體，也不保留舊 tabs 執行舊版本。
@@ -56,12 +58,13 @@ RAM snapshot、retry 與 tab 恢復由 [framework reload owner](../../lib/zcu_to
 
 ## Form 與固定來源
 
-每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 或已定案初值政策才放進 private `_support/measure/`。單一實驗的初值政策留在 `form.py`。
+每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 或已定案初值政策才放進公開支援套件 `support/measure/`。單一實驗的初值政策留在 `form.py`。
 
-Adapter 以 `guide_path: ClassVar[Path | None]` 宣告同目錄的 operator-facing Markdown。
-BaseAdapter 每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, resource_dir)`。
-只有需要純 preflight 的實驗才覆寫 `validate_run_request(req, cfg)`。框架把 Form 輸出原樣
-交給這個 hook 與 Run，不重新驗型別或 lower。Run 不重新讀目前的 point、library 或 alias。
+Adapter 以 `guide=Path(__file__).with_name("guide.md")` 宣告 operator guide。
+框架每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, resource_dir)`。
+`run(inp, *, context)` 接收 Form 驗證後的輸入，轉成實驗 cfg，再回傳 `RunRecord(cfg=cfg, result=...)`。
+不需轉換時也在本地宣告 run 並配對同次 cfg 與 Result。額外驗證放在 run 開頭，硬體 I/O 前失敗。
+Run 不重新讀目前的 point、library 或 alias。所有 Run 都需要 SoC，框架不提供額外 preflight hook。
 
 Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
 但保留 authored input、explicit selections 與已解析初值，不重新套 defaults。
@@ -77,11 +80,12 @@ Library、writeback 與 Inspect 也使用 gui.form／FormEditor，透過 gui.for
 Child key 保持 key，expression 在固定 env 求成數字後才存 Library。具體 family 固定，
 屏蔽欄位由生成器預設補回。提交與 draft 邊界見 ADR-0065、ADR-0008。
 
-Adapter 如需不同於 core 的欄位，Form 明列 extras 與具名 lower，或直接回傳 adapter 自己的
-型別。Runtime 與 extras 的解讀屬 adapter，框架不知道它是不是實驗 cfg。
-`onetone/freq` 的 Form 以單一 tagged sampling 選擇經 extras／lower 轉回 core 的
-sampling_mode 與 homophasal。Linear 輸出 homophasal=None。Homophasal 的必要參數
-以固定 capture 提供 fresh 初值，可覆寫；缺值或無效值阻止提交，不從 live point 補值。
+Adapter 如需不同於 core 的欄位，Form 直接使用具名輸入型別，轉換由 adapter.run 擁有。
+Form 沒有 extras／lower 容器。T2Ramsey／T2Echo 的 detune_ratio 與 CPMG 的
+min_length_us、max_length_us、length_points 都是輸入的頂層欄位。
+`onetone/freq` 的 sampling 是頂層選擇，由 run 轉回 core 的 sampling_mode 與 homophasal。
+Linear 輸出 homophasal=None。Homophasal 的必要參數由固定 capture 提供 fresh 初值，可覆寫；
+缺值或無效值阻止提交，不從 live point 補值。Record 只保存實際實驗 cfg，不保存另一份 Form input。
 `twotone/time_domain/t1` 的 uniform 隨 RunRecord 保存。False 保原 start／stop／expts 視窗，
 由 runtime 在硬體量化前配置 delay；格點 collision 提示擴大 span 或減少 points，不靜默減點。
 
@@ -95,13 +99,13 @@ $qubit.flux_source、$mux.flux_source 或 JPA 的 flux_source／rf_source 取得
 可見欄位依操作流程排列：participants／tones 或 readonly roles → modules → sweep →
 averaging（reps、rounds、shots）→ timing（relax_delay、initial_delay）。
 可編輯 drive 與必要校準輸入放在 modules 後，掃描設定前。
-`field_order` 只能排列 core cfg 的頂層欄位；nested model 維持宣告順序，extras 仍在最後。
+`field_order` 排列 adapter 輸入型別的頂層欄位；nested model 維持宣告順序。
 若實驗需要例外，在 guide 說明順序與操作步驟。
 
 同一物理量使用一致的可見 label 與單位，例如 Frequency、MHz，Delay、us，
 Gain、normalized，以及掃描點數 Expts。以宣告模型的 `FieldMeta` 指定 label／unit；
 SweepCfg 的座標與 step 繼承 unit，點數不帶物理單位。
-既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `sweep.length` 都可顯示 Delay。
+既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
 Flux 軸使用 `flux_unit`，不能把動態單位寫成固定 MHz 或 us。
 Recipe docstring 明列 `n → expts` 或 `points → expts` 的對應。
@@ -120,7 +124,7 @@ Mux 的 n 是全部 tone 共用點數，不接受每個 tone 各自指定點數�
 它供 diagnostics 使用，不覆寫 GUI label／unit。
 未改寫的 captured slot 不標成 measured；未知狀態保留未知。
 用 `get_cfg.diagnostics` 的 seed_source、seed_status、uncalibrated 核對 Open／Reset 的結果。
-Hidden 只用於 Run 會覆寫或 lower 會計算的值，不用來藏起 required input。
+Hidden 只用於 Run 會覆寫或計算的值，不用來藏起 required input。
 
 必填欄位的靜態 FieldMeta 寫可讀 label、unit 與 description。
 說明用「填入 …」指出角色、單位及取得來源的前置實驗。
@@ -218,7 +222,7 @@ class Report(RecipeReport):
 async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     """Sweep, fit a transition, ask before writeback, then save.
 
-    n sets Form sweep.freq.n, lowered to cfg sweep.freq.expts. Frequencies use MHz.
+    n sets Form freq.n, lowered to cfg freq.expts. Frequencies use MHz.
     pulse_length_us changes the drive duration before acquisition.
     model_type selects the existing lor/sinc fit; plot_fit controls its overlay.
     Missing Form values stop before acquisition. Omitted analysis controls retain
@@ -228,12 +232,12 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
         "twotone/freq", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
     )
 
-    tab.command("modules.qub_pulse", "to_inline")
-    tab.command("modules.qub_pulse.waveform", "to_inline")
-    tab.set("sweep.freq.start", inputs.start_mhz)
-    tab.set("sweep.freq.stop", inputs.stop_mhz)
-    tab.set("sweep.freq.n", inputs.n)
-    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+    tab.command("qub_pulse", "to_inline")
+    tab.command("qub_pulse.waveform", "to_inline")
+    tab.set("freq.start", inputs.start_mhz)
+    tab.set("freq.stop", inputs.stop_mhz)
+    tab.set("freq.n", inputs.n)
+    tab.set("qub_pulse.waveform.length", inputs.pulse_length_us)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()
@@ -281,48 +285,44 @@ owner 型別或分析參數，不必先修改基底。
 
 ## 執行與分析契約
 
-GUI Load 由 `LoadService.load_result` 讀取 native data，核對 adapter 的 `experiment_tag`，
-再呼叫 `restore(stored)`。`BaseAdapter.restore` 預設呼叫
-`restore_run(stored, spec=exp_cls.AXES_SPEC)`，回傳含 record 與 cfg_issue 的 `RestoredRun`。Single 與 grouped spec
-共用此入口，不需要建構 core。自訂結果形式時，adapter 實作 `restore`；不支援 Load
-則宣告 `load_data=False`。Hook 不做 I/O、不讀目前表單、不重捕 history，也不提供 legacy fallback。
-有效 native data 的 typed cfg 不相容時可保留資料與 cfg_issue；缺 cfg envelope 或壞資料仍拒絕。
-失敗在替換結果前回報，既有結果不變。
+GUI Load 由 `LoadService.load_result` 讀 native data、核對 `spec.tag`，再由
+`Adapter.restore(stored)` 呼叫 `restore_run(stored, spec=spec)`。
+Single 與 grouped spec 共用此入口，不需要建構 core。所有 adapter 都可嘗試 Load，
+不支援的檔案會回報原因並保留既有結果。作者不宣告 restore hook 或 load_data 旗標。
+有效 native data 的 typed cfg 不相容時保留資料與 cfg_issue；缺 cfg envelope 或壞資料仍拒絕。
+平鋪 cfg 的 schema major 為 3.0；舊 2.0 cfg 不轉換，record.cfg 為 None，資料與 metadata 保留。
 
-Load 保留 tab input 與表單固定來源，不從 loaded RunRecord.cfg 回填。分析與 WB 另使用檔案
-history 的固定來源，同 entry 有 point 時讀取該 point 的現存持久值，並非重建未保存的歷史參數版本。
-跨 entry、EMPTY 或無 point 時來源為 None，仍可純計算，不回退目前 aliases。Save storage
-獨立固定於 Load request。Adapters 用 RunRecord 配對 cfg 與純 Result，分析不讀 current cfg。
-OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
+Load 保留 tab input 與表單固定來源，不從 loaded RunRecord.cfg 回填。分析與 writeback 另使用檔案
+history 的固定來源。同 entry 有 point 時讀該 point 的現存持久值，不重建未保存的歷史參數版本。
+跨 entry、EMPTY 或無 point 時來源為 None，不回退目前 aliases。Save storage 獨立固定於 Load request。
+分析與 writeback 只讀 record，不讀 current Form input。
 
-GUI Save 呼叫 `data_item(key, result, *, comment)` 與
-`analysis_item(key, result, parameters, *, pane)` 取得保存內容，不呼叫 adapter load/save。
-Base 的 data producer 以明確 RunRecord 與 `exp_cls.AXES_SPEC` 準備 DataItem；
-opaque 自訂結果須覆寫 producer。Analysis producer 只取已提交輸出與當次歷史輸入，不取編輯草稿。
-這些 hooks 不讀 live context、不選路徑或格式，也不寫檔。缺 cfg 不以目前表單補值，
-準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析。檔案寫入由 framework 保存流程負責。
-確切簽名見 [adapter protocol](../../lib/zcu_tools/gui/app/measure/adapter/protocol.py) 與
-[ArtifactHandover](../../lib/zcu_tools/gui/app/measure/artifacts/handover.py)；native／Labber 格式與
-部分失敗政策見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
+作者宣告 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)`。
+Primary 只可為 `Analysis(fn, options=None, writeback=None)`、
+`Interactive(plugin, frontend, options=None, writeback=None)` 或 None，互斥由型別表達。
+第二層使用 `PostAnalysis(fn, options=None, writeback=None)`。
+Capabilities 由值推導，不手填。一般 gui.py 只需 import Adapter 與 Analysis。
 
-`BaseAdapter` 在 class definition/import 時驗證 `AdapterCapabilities` 與 lifecycle method 是否
-一致。`analysis=FIT` 必須實作 `analyze()` 且不得實作 interactive plugin hooks；
-`analysis=INTERACTIVE` 必須實作 `make_interactive_plugin()` 與
-`make_interactive_frontend()` 且不得實作 `analyze()`；`analysis=NONE` 不得實作
-analyze hooks。兩個 flux_dep adapters 共用 `zcu_tools.gui.app.measure.flux_pick_plugin` 的 state/actions/commands，
-以及 Qt-only `zcu_tools.gui.app.measure.flux_pick_frontend` 的 artists 與 preview；adapter 傳 FluxPickInputs 與初始數值，service 建立 session，
-adapter 不持有分析 operation 或 writeback draft。`get_analyze_params()` 只在 analyze-params **無法全 default 建構**（有欄位無 default）
-時才必須覆寫；params 是 None 或每欄位都有 default 時沿用 base default。
-`BaseAdapter[Cfg, RunResult, AnalyzeResult, AnalyzeParams, PostResult, PostParams]` 的後四槽
-預設為 None。沒有參數時省略槽位或填 None，不宣告空 dataclass。只出圖的 `analyze()`／
-`post_analyze()` 回 None，summary 為空 dict、writeback 無候選，圖與空摘要照常保存。
-有數值結果時才宣告結果型別；後面的槽位有值時保留前面的 None 佔位。
-`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作 `post_analyze()`。
-`get_post_analyze_params()` 和 primary 一樣，只在 params 需要值時覆寫。
-Post-analysis 是第二層 CPU-only 探索/比較視圖，
-可選地透過 `get_post_writeback_items()` 提出獨立 writeback。`validate_run_request` 不受
-capabilities 控制：Base 提供 no-op default，Protocol/Base exact signature 與 registry
-conformance tests 共同鎖定 framework mandatory surface。
+Primary options 的生成函式為 `options(source, env)`，回傳物件的型別提供欄位與初值。
+Host 在成功 Run／Load 後建立分析表單時呼叫一次。Post options 另接已採用的 primary 結果。
+MCP schema 與 JSON 重建使用同一物件型別，不重新讀歷史。編輯後的 options 交給 fn。
+沒有 options 時仍能分析，表單為空。現有三個歷史預設生成器接入此機制；
+現有 16 個分析時讀歷史的 wrapper 仍保留，其清理另行處理。
+Figures-only 分析回 None，仍保存具名圖與空摘要，不提出 writeback。
+
+Framework 依 RunRecord/spec 提供 `data_item` 與 `analysis_item`，作者不覆寫 artifact hooks。
+只保存已提交輸出與歷史分析輸入，不取草稿或目前表單。缺 cfg 不補值；
+準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析，檔案寫入由保存流程負責。
+本次 host 仍使用結果的 `to_summary_dict`。通用 converter 已提供 API，但尚未啟用於 Save／MCP。
+實驗 serializer、結果 base、summary keys 與 recipe／workflow consumers 的遷移另行處理。
+
+`SampleWriteback(..., coordinate_device="$qubit.flux_source")` 在 proposal 原地宣告座標來源；
+mux 使用 `"$mux.flux_source"`。Writeback owner 只以固定 parameters 與 Run device snapshot 解析，
+缺證據時保留 unavailable 原因，不查 live 裝置。
+
+完整 callback 簽名見 [adapter hooks](../../lib/zcu_tools/gui/app/measure/adapter/hooks.py)。
+兩個 flux_dep adapters 共用 Qt-free flux_pick_plugin 與 Qt-only flux_pick_frontend，
+service 擁有 session；adapter 不持有分析 operation 或 writeback draft。
 
 `singleshot/ge` 的 primary analysis 只產生 fit 產物：operator可選 backend、histogram log scale、
 T1 alignment、nullable shared length ratio 與 Initial State（ground / excited，預設 ground）；advanced population priors不進GUI。所選 backend擬合
@@ -356,14 +356,12 @@ Adapter guide 是 prose，不是 machine contract。內容放在實驗同目錄�
 
 ```python
 from pathlib import Path
-from typing import ClassVar
-
-# Inside the adapter class:
-guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+# In the Adapter declaration:
+guide=Path(__file__).with_name("guide.md"),
 ```
 
 同目錄的 gain／freq adapters 各自指定 `guide.gain.md`／`guide.freq.md`。
-`BaseAdapter.guide()` 回傳全文 `markdown` 與圖片解析目錄 `resource_dir`。
+`Adapter.guide()` 回傳全文 `markdown` 與圖片解析目錄 `resource_dir`。
 未宣告路徑時回「尚未撰寫」預設文字，目錄為 `None`；已宣告但缺檔時 raise。
 GUI / MCP 只使用這個公開契約。
 
@@ -407,13 +405,13 @@ twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；
 analyze result 加上 current parameter context 補齊且皆為 finite number 時，adapter 同時提出
 ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
 readout role proposal；缺值或 non-finite 值只略過 module writeback。
-`readout_dpm` 以 `source.cfg.modules.readout` 作為 template，將 readout
+`readout_dpm` 以 `source.cfg.readout` 作為 template，將 readout
 `freq` 設為 `best_ro_freq`、`gain` 設為 `best_ro_gain`、
 waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
 ADC readout length 設為 `best_ro_length`。
 
 `onetone/freq` analyze 仍寫回 parameter context `r_f` / `rf_w` / `theta0`；當來源 RunRecord 的
-`source.cfg` 非 None 且 `source.cfg.modules.readout` 是 pulse readout 時，adapter 也提出
+`source.cfg` 非 None 且 `source.cfg.readout` 是 pulse readout 時，adapter 也提出
 ModuleLibrary `readout_rf`，並以 writeback `role_id="readout"` 標示它是 Pulse
 readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id。
 `readout_rf` 以該 snapshot readout 作為 template，只用 fitted `r_f` 覆寫
@@ -447,7 +445,7 @@ GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；�
 Open／Reset 從固定 capture 產生可覆寫的 direct 初值，既有 Form 不隨來源變動重填。
 初值不寫回校準。Notebook 歷史常數不是相容契約。
 單一實驗的政策留在 `form.py`；多個 Form 共用的 T1／Rabi 政策由
-[`_support/measure/`](_support/measure/README.md) 的具名 helper 擁有。
+[`support/measure/`](support/measure/README.md) 的具名 helper 擁有。
 Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic framework。
 
 ### T1 與等待
@@ -466,8 +464,8 @@ Alias 未綁、namespace／path 錯誤與來源讀取故障保留 owner 錯誤�
 | Twotone freq、power_dep、flux_dep，共 3 個頻譜 adapter | 維持 1 µs |
 | Lookback、Onetone freq／power_dep／flux_dep、Mux Onetone、JPA flux_onetone／check，共 7 個 | 維持各自原值 |
 
-普通 T1 的 sweep.stop 為上述時間尺度的五倍，缺 T1 時為 150 µs。
-T1 with tone 的 sweep.stop 依序使用歷史 t1_with_tone、普通 T1、30 µs，再乘五。
+普通 T1 的掃描終點為上述時間尺度的五倍，缺 T1 時為 150 µs。
+T1 with tone 的掃描終點依序使用歷史 t1_with_tone、普通 T1、30 µs，再乘五。
 只有缺值才下探下一來源；tone T1 無效時留空，不跳過它。
 自然等待仍用普通 T1，不用 tone T1。這些初值不保證熱平衡或指定保真度。
 Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
@@ -515,7 +513,7 @@ Linear 不提供 Homophasal 參數，轉回 core 的 homophasal=None。
 Homophasal 的 r_f、rf_w、theta0 必填，分別以 resonator.freq、resonator.kappa、
 resonator.ext.theta0 作初值。缺來源或無法求值時留空。
 可求值但無效的值保留並顯示驗證錯誤，阻止提交，由 core 驗證，不新增 adapter 驗證。
-實驗透過 extras／lower 轉回 core 的 sampling_mode 與 homophasal，widget 不特判實驗。
+Adapter 的 run 將頂層 sampling 輸入轉回 core 的 sampling_mode 與 homophasal，widget 不特判實驗。
 
 ## Operator workflow guide 約束
 
@@ -563,7 +561,7 @@ JPA 表單從 `$jpa.rf_source` 與 `$jpa.flux_source` 取得 `jpa_rf_dev` 與
 
 四個 qubit SNR adapter（`freq` / `flux` / `power` / `auto_optimize`）的
 `relax_delay` 初值為 `1*T1`，不是 Notebook 固定常數。Form 透過
-`_support/measure/ctx_helpers.py` 的 `t1_initial_time`，從 Open／Reset 的固定
+`support/measure/ctx_helpers.py` 的 `t1_initial_time`，從 Open／Reset 的固定
 capture 取得 `$qubit.t1`。有效 T1 是非 bool 的有限正實數。T1 leaf 缺失／null
 或沒有 capture 時，使用 `30 us` 公允時間尺度，等待初值為 `30 us`。
 已存但無效的 T1 讓等待欄位留空，不回落公允值。Alias、path、namespace 或來源
@@ -639,7 +637,7 @@ qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿 Form 驗
 ### Run-tested finisher
 
 SingleToneFreq、DualTonePower 與 BathPhase 使用該 Run 的完整
-`source.cfg.modules.tested_reset`。`module_writeback` 從 Run 的 module dump 建立隔離的
+`source.cfg.tested_reset`。`module_writeback` 從 Run 的 module dump 建立隔離的
 持久 Spec，adapter 只替換本次分析欄位，再提出 `ModuleWriteback(proposal=spec)`。
 這份來源已是 materialized runtime cfg，child pulse／waveform 因此成為 inline Spec。
 Adapter 不讀 ext、舊 module 或目前 point/alias 補欄位。手動修改後實際測過的頻率、gain、波形與其他 schema 欄位都保留。

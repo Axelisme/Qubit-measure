@@ -14,7 +14,8 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -39,7 +40,7 @@ pytestmark = pytest.mark.uses_wall_clock
 
 @contextmanager
 def native_save_rpc(
-    tmp_path: Path, qapp: QApplication
+    tmp_path: Path, qapp: QApplication, *, analysis_options_failure: bool = False
 ) -> Generator[tuple[NativeSaveSession, socket.socket]]:
     """Serve the native session over loopback with production dispatch and guards.
 
@@ -64,13 +65,34 @@ def native_save_rpc(
         session.state.swap_post_analysis_pane(
             "tab", replace(post, source_operation_id=301)
         )
+        adapter = AnalysisSavingAdapter
+        if analysis_options_failure:
+
+            def unavailable(source, env):
+                raise ValueError("analysis parameters unavailable")
+
+            adapter = Adapter(
+                spec=AnalysisSavingAdapter.spec,
+                make_form=AnalysisSavingAdapter.make_form,
+                run=AnalysisSavingAdapter.run,
+                guide=None,
+                analysis=Analysis(
+                    fn=AnalysisSavingAdapter.analyze,
+                    options=unavailable,
+                    writeback=AnalysisSavingAdapter.get_writeback_items,
+                ),
+                post_analysis=AnalysisSavingAdapter.post_analysis,
+            )
+        tab.adapter = adapter
         registry = Registry()
-        registry.register("saving", AnalysisSavingAdapter)
+        registry.register("saving", adapter)
         controller = Controller(
             session.state, registry, None, session.bus, project_root=str(tmp_path)
         )
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
+        board = white_noise()
+        controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler
         )
@@ -159,7 +181,10 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
     analysis_failure: bool,
     unbound_capture: bool,
 ) -> None:
-    with native_save_rpc(tmp_path, qapp) as (session, sock):
+    with native_save_rpc(tmp_path, qapp, analysis_options_failure=analysis_failure) as (
+        session,
+        sock,
+    ):
         session.save()
         path = session.native_data_path
         stored = load(path)
@@ -169,16 +194,6 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
             install_unbound_saved_capture(session)
             captured = session.state.session_env.parameters
             assert captured is not None and captured.storage is None
-        if analysis_failure:
-
-            def unavailable(
-                self: AnalysisSavingAdapter, result: object, ctx: SessionEnv
-            ) -> None:
-                raise ValueError("analysis parameters unavailable")
-
-            monkeypatch.setattr(
-                AnalysisSavingAdapter, "get_analyze_params", unavailable
-            )
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
 
         if not unbound_capture:
@@ -239,7 +254,10 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
     unbound_capture: bool,
     analysis_failure: bool,
 ) -> None:
-    with native_save_rpc(tmp_path, qapp) as (session, sock):
+    with native_save_rpc(tmp_path, qapp, analysis_options_failure=analysis_failure) as (
+        session,
+        sock,
+    ):
         session.save()
         path = session.native_data_path
         history = metadata_from_container(load(path))
@@ -247,16 +265,6 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         session.state.set_active_tab("tab")
         if unbound_capture:
             install_unbound_saved_capture(session)
-        if analysis_failure:
-
-            def unavailable(
-                self: AnalysisSavingAdapter, result: object, ctx: SessionEnv
-            ) -> None:
-                raise ValueError("analysis parameters unavailable")
-
-            monkeypatch.setattr(
-                AnalysisSavingAdapter, "get_analyze_params", unavailable
-            )
         request = {"adapter_name": "saving", "data_path": str(path)}
         assert call(sock, "context.snapshot", {})["ok"] is True
 

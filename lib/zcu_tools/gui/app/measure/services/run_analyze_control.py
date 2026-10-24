@@ -9,12 +9,14 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.gui.app.measure.adapter import AnalysisMode, AnalyzeRequest
+from zcu_tools.gui.app.measure.adapter.hooks import InteractiveFrontendEnv
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.context_types import CommandOrigin
 
@@ -27,10 +29,6 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.app.measure.ui.interactive_frontend import (
-        InteractiveFrontend,
-        InteractiveFrontendEnv,
-    )
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.ports import OwnerScheduler
@@ -69,7 +67,7 @@ class RunAnalyzeRenderHost(Protocol):
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        frontend_factory: Callable[[InteractiveFrontendEnv], InteractiveFrontend],
+        frontend_factory: Callable[[InteractiveFrontendEnv], object],
     ) -> None: ...
 
     def unmount_interactive_analysis(
@@ -98,7 +96,7 @@ class RunAnalyzeControlPort(Protocol):
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
     def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
-        """Read the captured result budget: 5 s + 5 s/tone, capped at 60 s."""
+        """Return the fixed 60-second budget for reading analysis results."""
         ...
 
     def start_run(
@@ -220,21 +218,9 @@ class RunAnalyzeControlFacet:
         return self._tab.get_snapshot(tab_id)
 
     def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
-        """Budget reading this tab’s captured result, without rerunning analysis.
-
-        Use the adapter’s declared measured tone count, never current Form input.
-        Missing results and non-mux adapters receive 5 s. Invalid adapter counts
-        raise ValueError before analysis start. Unknown tabs raise KeyError.
-        """
-        tab = self._state.get_tab(tab_id)
-        count = (
-            0
-            if tab.run.result is None
-            else tab.adapter.analysis_result_tone_count(tab.run.result)
-        )
-        if isinstance(count, bool) or count < 0:
-            raise ValueError("analysis_result_tone_count must be a nonnegative integer")
-        return float(min(60, 5 + 5 * count))
+        """Use the fixed MCP result-read budget; unknown tabs raise KeyError."""
+        self._state.get_tab(tab_id)
+        return 60.0
 
     def start_run(
         self,
@@ -373,8 +359,13 @@ class RunAnalyzeControlFacet:
         self, tab_id: str, analyze_params_instance: object
     ) -> int:
         tab = self._state.get_tab(tab_id)
+        source = tab.run.result
+        if source is None:
+            raise FailedPreconditionError(
+                f"Tab {tab_id!r} has no run result to analyze"
+            )
         req = AnalyzeRequest(
-            run_result=tab.run.result,
+            run_result=source,
             analyze_params=analyze_params_instance,
             parameters=tab.run.parameters,
         )
@@ -384,16 +375,26 @@ class RunAnalyzeControlFacet:
                 "interactive analysis requires an attached render host"
             )
         plots = self._new_plots(None)
-        try:
-            plugin = tab.adapter.make_interactive_plugin(req, plots=plots)
+        token: int | None = None
+
+        def create_session[S, A](plugin: PluginDefinition[S, A]) -> Session[S]:
+            nonlocal token
             if self._run_background is not None:
                 plugin.bind_background(self._run_background)
+            session = plugin.open(self._owner_scheduler)
             token = self._analyze.start_plugin(
                 tab_id,
                 plugin,
                 self._owner_scheduler,
                 analyze_params_instance=analyze_params_instance,
                 plots=plots,
+                session=session,
+            )
+            return session
+
+        try:
+            frontend = tab.adapter.make_interactive_frontend(
+                req, create_session, plots=plots
             )
         except Exception:
             try:
@@ -404,18 +405,12 @@ class RunAnalyzeControlFacet:
                 )
             raise
         try:
-            active = self._analyze.get_interactive(tab_id)
-            if active is None:
-                raise RuntimeError("interactive operation has no service-owned session")
             host.mount_interactive_analysis(
                 tab_id,
-                lambda env: tab.adapter.make_interactive_frontend(
-                    plugin,
-                    active.session,
+                lambda env: frontend(
                     env,
                     lambda: self.finish_interactive(tab_id),
                     lambda: self.cancel_analyze(tab_id),
-                    plots=active.plots,
                 ),
             )
         except Exception:
@@ -432,6 +427,8 @@ class RunAnalyzeControlFacet:
                     tab_id,
                 )
             raise
+        if token is None:
+            raise RuntimeError("interactive setup did not open a session")
         return token
 
     def start_post_analyze(

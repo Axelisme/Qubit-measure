@@ -4,13 +4,13 @@ import json
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QImage, QPixmap
 from qtpy.QtWidgets import QApplication, QLabel, QTreeWidget, QWidget
 from zcu_tools.datafile import JsonObject, load, save
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import ExperimentResolution, Registry
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
@@ -900,7 +900,7 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
 
 
 @pytest.mark.parametrize("load_browser", ["available"], indirect=True)
-@pytest.mark.parametrize("rejection", ["capability", "tag", "format"])
+@pytest.mark.parametrize("rejection", ["tag", "format"])
 def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
     load_browser: tuple[ComponentDriver, str],
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
@@ -910,9 +910,7 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
 ) -> None:
     ui, _variant = load_browser
     session, _ctrl, _window, _tab_id = live_ui
-    if rejection == "capability":
-        live_registry.register("test/saving", SavingAdapter)
-    elif rejection == "tag":
+    if rejection == "tag":
         live_registry.register("test/saving", WrongTagAdapter)
     ui.select_menu("More ▾", ("Results browser…",))
     if rejection == "format":
@@ -922,7 +920,6 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
     ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     expected = {
-        "capability": "does not support loading data",
         "tag": "Expected experiment tag",
         "format": "Could not read the data file",
     }[rejection]
@@ -931,7 +928,11 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
     ui.screenshot(tmp_path / f"load-rejected-{rejection}.png")
 
 
-class WrongTagAdapter(AnalysisSavingAdapter):
-    """Expose a distinct declared tag to exercise the existing Load admission."""
-
-    experiment_tag: ClassVar[str | None] = "different-tag"
+WrongTagAdapter = Adapter(
+    spec=replace(AnalysisSavingAdapter.spec, tag="different-tag"),
+    make_form=AnalysisSavingAdapter.make_form,
+    run=AnalysisSavingAdapter.run,
+    guide=None,
+    analysis=AnalysisSavingAdapter.analysis,
+    post_analysis=AnalysisSavingAdapter.post_analysis,
+)

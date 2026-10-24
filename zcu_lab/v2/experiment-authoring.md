@@ -35,6 +35,10 @@ GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 
 
 ### 1. 在 core 直接寫出 pulse 序列與分析政策
 
+core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
+擬合、逐 tone 迴圈、失敗隔離與分析結果型別都歸 core。GUI 為 writeback 做的有限值檢查與摘要整理不算分析計算。
+目前 mux/onetone 的既有逐 tone 計算仍在 gui.py，搬家另行處理。
+
 `core.py` 的 `run()` 直接列出 `Pulse`、`Delay`、`Join` 與 readout 的先後關係。
 共用 helper 只做驗證、資料整形、平均等機械工作，不用 mode 或旗標切換不同實驗。
 兩個實驗可以共用平均工具，但各自在 `run()` 寫出自己的序列。
@@ -44,8 +48,11 @@ GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 
 
 ```python
 builder = (
-    step.prog_builder(context.soc, context.soccfg)
-    .add_reset("reset", modules.reset)
+    step.prog_builder(
+        context.soc, context.soccfg,
+        reps=step.cfg.reps, relax_delay=step.cfg.relax_delay,
+    )
+    .add_reset("reset", reset)
     .add(
         Join(
             *[
@@ -236,7 +243,7 @@ CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。de
 
 ## 目錄佈局
 
-每個 leaf 的位置與附件見[套件 README](README.md)。量測核心不 import GUI。跨實驗的 singleshot numerical helpers 留在 `_support/singleshot/`，reset fit 與 JPA optimizer 留在各自的 leaf，通用 runtime 與量化工具留在框架。
+每個 leaf 的位置與附件見[套件 README](README.md)。量測核心不 import GUI。跨實驗的 singleshot numerical helpers 留在 `support/singleshot/`，reset fit 與 JPA optimizer 留在各自的 leaf，通用 runtime 與量化工具留在框架。
 
 
 ---
@@ -274,7 +281,7 @@ run使用resolved cfg snapshot中的GE centers/radius作live分類，analysis不
 Amp／Len Rabi、Check、ResetCheck 與 AC Stark 使用 explicit RunContext 執行，GUI 將同次 cfg／Result 配成 RunRecord。同步 analyze 接 source／typed options／Plots，允許 cfg=None，不保存跨次成功狀態。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitResult，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
 
 Amp與Len Rabi共同使用`zcu_tools.analysis.fitting.singleshot_rabi`的raw-IQ joint likelihood與
-`zcu_tools.plotting.singleshot_rabi`的population、histogram及confusion matrix診斷圖。
+`zcu_lab.v2.singleshot.plot_rabi`的population、histogram及confusion matrix診斷圖。
 Amp固定無衰減／零相位，Initial State描述zero-gain前的主要狀態，支援signed gain。
 Amp額外由joint frequency及其covariance推導pi/pi2 gain與誤差，保留原有scalar summary。
 兩者的GUI校準writeback共用backend validity及finite校準值檢查。
@@ -317,7 +324,7 @@ matrix的估計流程。
 一般核心實驗的入口是 `run(cfg, *, context: RunContext) -> Result`。硬體與具名 devices 由 context 傳入，cfg 只含這次操作的設定。Result 只含資料。NotebookAdapter 或 GUI adapter 將原始 cfg 與 Result 配成 RunRecord，不在核心快取上一輪結果。
 
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
-2. 從 `context.plots.liveplot_1d("measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
+2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_lab.v2.support` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
 3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
 4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
@@ -326,7 +333,7 @@ Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result �
 目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
-`SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator
+`SweepCfg` sweep；`homophasal` 保留同一個 `freq` 使用者介面，但由已擬合的 resonator
 circle 參數產生非等距 frequency array，再把 gen/readout raw frequency words 放進
 `TablePulseReadout` 的 dmem tables。每點沿用一般 `PulseReadout` 的 wmem-backed WPORT，
 並在 sweep loop 的 exec-after hook 更新下一點 generator/readout frequency words；最後一點
@@ -348,18 +355,22 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
-把 sweep 參數綁到 pulse（`modules.xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.sweep.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
 
 只有兩類「副本外操作」是有意保留的：
 
 - **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.scope.stop)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
-- **raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 另建 `ProgramV2Cfg(reps=cfg.shots, rounds=1, ...)`，保留原始 initial／relax delay，再交給 builder。Lookback 同樣另建 program cfg，固定 reps=1，rounds 沿用可編輯的實驗欄位。這些 runtime 固定值不出現在 Form。
+- **Raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 直接將 `reps=cfg.shots` 與 `relax_delay=cfg.relax_delay` 交給 builder，acquire 明確使用 `rounds=1`。有宣告 initial_delay 的實驗同樣明傳。Lookback 固定 `reps=1`，`run_program_decimated(rounds=cfg.rounds)` 沿用可編輯的軟體平均次數。這些 runtime 固定值不出現在 Form。
 
 ---
 
 ## v2 cfg 組合慣例
 
-具體實驗使用自己的 module／sweep cfg。需要 reps、rounds、initial_delay、relax_delay 的 cfg 從 `zcu_tools.experiment` import `ProgramExpCfg`，再以 `class XxxCfg(ProgramExpCfg)` 加上實驗欄位。不含 program 欄位的 cfg 仍繼承 `ExpCfgModel`；在 run 內另建設定時保留 `ProgramV2Cfg`。
+實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，不宣告 Modules／Sweep group。Form 依 `field_order` 平鋪，模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單。`FieldMeta` 仍可宣告 label、unit 等顯示提示。Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
+
+Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_lab.v2.support` 匯出。
+
+平鋪 cfg 使用 `cfg_schema_version="3.0"`。Load 不轉換舊巢狀 cfg。舊 major 的資料仍載入，record.cfg 為 None，cfg_issue 說明原因，資料陣列與 metadata 不變。
 
 Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型別寫 `Pulse.Cfg`、`Readout.Cfg`、`Reset.Cfg`。具體 readout／reset／waveform 也使用自己的 `.Cfg`，例如 `MuxReadout.Cfg` 與 `BathReset.Cfg`。`SweepCfg` 與硬體指令仍按需 import。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
@@ -376,7 +387,7 @@ Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型�
 
 ---
 
-父層 `experiment/utils/` 的 comment 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。儀器角色 helper 位於 `_support/device.py`，見 [lab v2 說明](README.md#實驗角色與-device-操作)。
+父層 `experiment/utils/` 的 comment 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。儀器角色 helper 位於 `support/device.py`，見 [lab v2 說明](README.md#實驗角色與-device-操作)。
 
 ## v2 工具與實驗輔助
 
@@ -432,7 +443,7 @@ distinct depths 時分析明確失敗。
 
 ## 寫新 Experiment 時的檢查清單
 
-1. 定義 `XxxModuleCfg` / `XxxSweepCfg`，通常繼承 `ConfigBase`。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別。需要 program 欄位時，`XxxCfg` 繼承 `ProgramExpCfg`，否則繼承 `ExpCfgModel`。
+1. 定義 `XxxCfg(ConfigBase)`，在頂層宣告 module、掃描與實際使用的 averaging／timing 欄位。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別，掃描欄位用 `SweepCfg`。不加 Modules／Sweep group，以 Form 的 `field_order` 排列模組、掃描與 controls。Pulse 的 Advanced group 維持既有行為。
 2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。

@@ -14,7 +14,10 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTabWidget,
 )
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     ParameterWriteback,
     WritebackRequest,
 )
@@ -39,7 +42,12 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleAnalysis, SampleRun
+from tests.gui.app.measure._synthetic import (
+    SampleAdapter,
+    SampleAnalysis,
+    SampleParams,
+    SampleRun,
+)
 from tests.gui.app.measure.ui._main_window_fakes import (
     apply_window_defaults,
     editor_wiring_ctrl,
@@ -89,9 +97,7 @@ def test_main_window_load_data_dialog_calls_controller(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", supports_load_data=True, has_figure=False
-    )
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_figure=False)
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
     database_root.mkdir(parents=True)
     ctrl.save_control.list_saved_runs.return_value = ()
@@ -185,15 +191,25 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
 def blocked_writeback_window(
     tmp_path: Path, qapp: QApplication
 ) -> Iterator[tuple[MainWindow, str]]:
-    class BlockedWritebackAdapter(SampleAdapter):
-        def get_writeback_items(
-            self, req: WritebackRequest[SampleRun, SampleAnalysis]
-        ) -> list[ParameterWriteback]:
-            return [
-                ParameterWriteback(
-                    "general.ext.blocked.sigma", "Nested calibration", 1.0
-                )
-            ]
+    def BlockedWritebackAdapter_get_writeback_items(
+        req: WritebackRequest[SampleRun, SampleAnalysis],
+    ) -> list[ParameterWriteback]:
+        return [
+            ParameterWriteback("general.ext.blocked.sigma", "Nested calibration", 1.0)
+        ]
+
+    BlockedWritebackAdapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=Analysis(
+            fn=SampleAdapter.analyze,
+            options=lambda source, env: SampleParams(),
+            writeback=BlockedWritebackAdapter_get_writeback_items,
+        ),
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     registry = Registry()
     registry.register("blocked-writeback", BlockedWritebackAdapter)
@@ -209,6 +225,8 @@ def blocked_writeback_window(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
     ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
+    board = white_noise()
+    ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     tab_id = ctrl.new_tab("blocked-writeback")
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
@@ -436,9 +454,7 @@ def test_main_window_load_data_dialog_cancel_is_noop(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", supports_load_data=True, has_figure=False
-    )
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_figure=False)
     ctrl.save_control.list_saved_runs.return_value = ()
     window = MainWindow(ctrl, templates=lambda: {})
     window.add_tab_widget("tab-1", "fake")
@@ -470,9 +486,7 @@ def test_main_window_load_data_dialog_shows_user_facing_error(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", supports_load_data=True, has_figure=False
-    )
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_figure=False)
     ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.load_tab_result.side_effect = LoadDataError(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",

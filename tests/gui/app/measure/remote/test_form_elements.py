@@ -1,9 +1,13 @@
 """Indexed module and fixed-element aggregate contracts through Form RPC."""
 
+from dataclasses import replace
 from typing import Annotated
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta, Range
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -20,26 +24,30 @@ class DiagnosticCfg(SampleCfg):
     participants: list[int]
 
 
-class DiagnosticAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
-        del ctx
-        return Form(
-            DiagnosticCfg,
-            {
-                "sweep": Range(1.0, 2.0, expts=3),
-                "tones": [
-                    {
-                        "name": f"Q{i + 1}",
-                        "frequency": Expr(f"Q{i + 1}.freq"),
-                        "gain": 0.1,
-                    }
-                    for i in range(6)
-                ],
-                "participants": [0],
-            },
-            fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
-        )
+def DiagnosticAdapter_make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
+    del ctx
+    return Form(
+        DiagnosticCfg,
+        {
+            "sweep": Range(1.0, 2.0, expts=3),
+            "tones": [
+                {"name": f"Q{i + 1}", "frequency": Expr(f"Q{i + 1}.freq"), "gain": 0.1}
+                for i in range(6)
+            ],
+            "participants": [0],
+        },
+        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+    )
+
+
+DiagnosticAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=DiagnosticCfg),
+    make_form=DiagnosticAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @pytest.mark.parametrize("method", ["tab.get_cfg", "tab.describe_cfg"])
@@ -96,30 +104,37 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
     initial = rpc.call("tab.get_cfg", {"tab_id": existing})
     assert "diagnostics" in initial["result"], "Cfg reads must expose seed diagnostics"
 
-    class SeedMetadataAdapter(SampleAdapter):
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
-            del ctx
-            return Form(
-                DiagnosticCfg,
-                {
-                    "sweep": Range(1.0, 2.0, expts=3),
-                    "tones": [
-                        {"name": "A", "frequency": Expr("6000 + 1"), "gain": 0.1},
-                        {"name": "B", "frequency": 6100.0, "gain": 0.2},
-                        {"name": "C", "frequency": Expr("missing.freq"), "gain": 0.3},
-                    ],
-                    "participants": [1],
-                },
-                fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
-            ).with_seed_metadata(
-                {
-                    ("tones", 0, "gain"): FieldMeta(
-                        description="Synthetic amplitude candidate",
-                        calibration="uncalibrated",
-                    ),
-                }
-            )
+    def SeedMetadataAdapter_make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
+        del ctx
+        return Form(
+            DiagnosticCfg,
+            {
+                "sweep": Range(1.0, 2.0, expts=3),
+                "tones": [
+                    {"name": "A", "frequency": Expr("6000 + 1"), "gain": 0.1},
+                    {"name": "B", "frequency": 6100.0, "gain": 0.2},
+                    {"name": "C", "frequency": Expr("missing.freq"), "gain": 0.3},
+                ],
+                "participants": [1],
+            },
+            fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+        ).with_seed_metadata(
+            {
+                ("tones", 0, "gain"): FieldMeta(
+                    description="Synthetic amplitude candidate",
+                    calibration="uncalibrated",
+                ),
+            }
+        )
+
+    SeedMetadataAdapter = Adapter(
+        spec=replace(SampleAdapter.spec, cfg_type=DiagnosticCfg),
+        make_form=SeedMetadataAdapter_make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     fixture.registry.register("seed-metadata", SeedMetadataAdapter)
     tab = fixture.ctrl.new_tab("seed-metadata")
@@ -279,15 +294,22 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
         participants=(model.model_fields["participants"].rebuild_annotation(), [1]),
     )
 
-    class FixedAdapter(SampleAdapter):
-        @staticmethod
-        def make_form(ctx: FormContext):
-            del ctx
-            return Form(
-                core,
-                {"sweep": Range(1.0, 2.0, expts=3)},
-                fixed_elements=model.fixed_elements,
-            )
+    def FixedAdapter_make_form(ctx: FormContext):
+        del ctx
+        return Form(
+            core,
+            {"sweep": Range(1.0, 2.0, expts=3)},
+            fixed_elements=model.fixed_elements,
+        )
+
+    FixedAdapter = Adapter(
+        spec=replace(SampleAdapter.spec, cfg_type=core),
+        make_form=FixedAdapter_make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     fixture, _, rpc = form_rpc
     fixture.registry.register("fixed-elements", FixedAdapter)

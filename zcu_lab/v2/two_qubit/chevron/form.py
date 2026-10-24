@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
@@ -44,7 +44,9 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
         ChevronCfg,
         field_order=(
             "roles",
-            "modules",
+            "x180_f1",
+            "x180_f2",
+            "readout",
             "drive",
             "f1_centers",
             "f2_centers",
@@ -59,11 +61,9 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": roles,
-            "modules": {
-                "x180_f1": Slot("$f1.module.x180", copy=True),
-                "x180_f2": Slot("$f2.module.x180", copy=True),
-                "readout": readout,
-            },
+            "x180_f1": Slot("$f1.module.x180", copy=True),
+            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "readout": readout,
             "drive": drive,
             "frequency": Range(None, None, expts=25),
             "duration": Range(None, None, expts=101),

@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import TypeVar
 
 import numpy as np
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
-    ExpCfgModel,
     GroupedAxesSpec,
     VariableAxisSpec,
     VariableZSpec,
@@ -118,7 +118,7 @@ from zcu_lab.v2.twotone.zigzag import core as twotone_zigzag
 from zcu_lab.v2.twotone.zigzag_sweep import core as twotone_zigzag_sweep
 
 ResultT = TypeVar("ResultT")
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 
 
 def _legacy_schema(

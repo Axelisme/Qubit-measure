@@ -23,6 +23,8 @@ from zcu_tools.program.v2 import (
     Reset,
 )
 
+from zcu_lab.v2.support import live_line
+
 from ..rb.core import RBCfg
 from ..rb.sequence import TargetGate, make_seed_tables
 from .analysis import IRBAnalysis, analyze_irb, project_arm_means
@@ -98,7 +100,8 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
             ],
             dtype=np.int64,
         )
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Random Clifford depth",
             "Signal (a.u.)",
@@ -125,7 +128,10 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             break
                         arm_step = seed_step.child(arm)
                         builder = arm_step.prog_builder(
-                            context.soc, context.soccfg, cfg=program_cfg
+                            context.soc,
+                            context.soccfg,
+                            reps=program_cfg.reps,
+                            relax_delay=program_cfg.relax_delay,
                         )
                         key = (seed_index, arm)
                         if key not in cache:
@@ -133,7 +139,6 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             tables = make_seed_tables(
                                 seed, depths, run_cfg.target_gate if arm else None
                             )
-                            modules = run_cfg.modules
                             (
                                 rand_gate_seq,
                                 prefix_len_by_depth,
@@ -142,9 +147,9 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             ) = tables
                             max_rand_len = max(prefix_len_by_depth, default=0)
 
-                            Id_pulse = modules.I_pulse
-                            X90_pulse = modules.X90_pulse
-                            X180_pulse = modules.X180_pulse
+                            Id_pulse = run_cfg.I_pulse
+                            X90_pulse = run_cfg.X90_pulse
+                            X180_pulse = run_cfg.X180_pulse
                             MX90_pulse = X90_pulse.with_updates(
                                 phase=X90_pulse.phase + 180.0
                             )
@@ -192,7 +197,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                         idx_reg="depth_idx",
                                         val_reg="recovery_gate_1",
                                     ),
-                                    Reset("reset", cfg=modules.reset),
+                                    Reset("reset", cfg=run_cfg.reset),
                                     Repeat(
                                         "rand_gate_idx",
                                         "rand_len",
@@ -224,7 +229,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                         val_reg="recovery_gate_1",
                                         pulses=gate_pulses,
                                     ),
-                                    Readout("readout", cfg=modules.readout),
+                                    Readout("readout", cfg=run_cfg.readout),
                                 )
                                 .declare_sweep("depth_idx", len(prefix_len_by_depth))
                                 .build()
@@ -232,7 +237,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
 
                             cache[key] = program
                         # 4. Store one round's mean IQ; reuse programs next round.
-                        _ = builder.run_program(cache[key])
+                        _ = builder.run_program(cache[key], rounds=1)
             sched.trigger_update(flush=True)
         return IRBResult(
             rounds=np.arange(run_cfg.rounds, dtype=np.int64),

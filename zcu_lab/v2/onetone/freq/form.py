@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
-from zcu_tools.cfg_model import Hidden
 from zcu_tools.gui.form import (
     Display,
     FormCommandContext,
@@ -19,11 +18,12 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.seed_metadata import (
+from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
+from zcu_lab.v2.onetone._shared import LinearFreqCfg
+from zcu_lab.v2.onetone.freq.core import HomophasalSamplingCfg
+from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
-from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
-from zcu_lab.v2.onetone.freq.core import FreqCfg, HomophasalSamplingCfg
 
 
 class LinearInput(FormModel):
@@ -88,43 +88,26 @@ class SamplingInput(FormModel):
         return {("sampling",): InputConverter(convert)}
 
 
-def lower_sampling(extras: SamplingInput, cfg: FreqCfg) -> FreqCfg:
-    """Translate the selected branch to the core's unchanged paired sampling fields.
+class FreqInput(LinearFreqCfg, SamplingInput):
+    """One-tone acquisition inputs with the selected sampling branch.
 
-    extras contains validated calibration values for Homophasal, or a parameter-free
-    Linear branch. cfg is the validated generated core configuration before lowering.
-    Return a detached cfg; the Form validates the complete pair again before Run.
+    Linear has no calibration fields. Homophasal requires resonance frequency
+    and linewidth in MHz and phase offset in radians. Run records the resulting
+    core cfg rather than this operator input.
     """
-    sampling = extras.sampling
-    if isinstance(sampling, LinearInput):
-        return cfg.model_copy(update={"sampling_mode": "linear", "homophasal": None})
-    return cfg.model_copy(
-        update={
-            "sampling_mode": "homophasal",
-            "homophasal": HomophasalSamplingCfg(
-                r_f=sampling.r_f, rf_w=sampling.rf_w, theta0=sampling.theta0
-            ),
-        }
-    )
 
 
-def make_form(ctx: FormContext) -> Form[FreqCfg]:
+def make_form(ctx: FormContext) -> Form[FreqInput]:
     """Build starting values and shape from the captured source availability."""
     return Form(
-        FreqCfg,
+        FreqInput,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "readout",
+            "freq",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
-        tree={
-            **initial_spectrum_tree(ctx),
-            "sampling_mode": Hidden(),
-            "homophasal": Hidden(),
-        },
-        extras=SamplingInput,
-        lower=lower_sampling,
+        tree=initial_spectrum_tree(ctx),
     ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))

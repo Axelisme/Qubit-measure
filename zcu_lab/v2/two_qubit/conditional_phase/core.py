@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -19,15 +19,48 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
+from zcu_lab.v2.support import live_line
+
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles, collect_joint_shots
 from ..joint_readout.core import GECenters
 from .analysis import ConditionalPhaseAnalysis, analyze_phase
 
 
-class PhaseModules(ConfigBase):
-    """Calibrated preparation, tomography and complete mux inputs."""
+class ConditionalPhaseCfg(ConfigBase):
+    """Spectator I/Xπ → target X90 → n parallel CZ pairs → X90/Y90 → mux.
 
+    Target selects F1/F2, never tone order. Projection Y changes target X90
+    phase by +90 degrees relative to preparation. Each projection is an independent
+    acquisition. Frequency is a common MHz host scan, gate_counts are positive
+    integer pulse-train lengths. Full tones and round-major shots are retained.
+    Optional GE centers are saved analysis inputs, not simulator truth.
+    """
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     x180_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -63,19 +96,6 @@ class PhaseModules(ConfigBase):
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
         ),
     ]
-
-
-class ConditionalPhaseCfg(ProgramExpCfg):
-    """Spectator I/Xπ → target X90 → n parallel CZ pairs → X90/Y90 → mux.
-
-    Target selects F1/F2, never tone order. Projection Y changes target X90
-    phase by +90 degrees relative to preparation. Each projection is an independent
-    acquisition. Frequency is a common MHz host scan, gate_counts are positive
-    integer pulse-train lengths. Full tones and round-major shots are retained.
-    Optional GE centers are saved analysis inputs, not simulator truth.
-    """
-
-    modules: PhaseModules
     roles: JointRoles
     drive: Annotated[
         DualLineCfg,
@@ -114,10 +134,10 @@ class ConditionalPhaseCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Reject mismatched role generators, nonfinite frequencies and repeated n."""
-        self.roles.validate_readout(self.modules.readout)
+        self.roles.validate_readout(self.readout)
         for drive, x180, x90 in (
-            (self.drive.f1, self.modules.x180_f1, self.modules.x90_f1),
-            (self.drive.f2, self.modules.x180_f2, self.modules.x90_f2),
+            (self.drive.f1, self.x180_f1, self.x90_f1),
+            (self.drive.f2, self.x180_f2, self.x90_f2),
         ):
             if drive.ch != x180.ch or drive.ch != x90.ch:
                 raise ValueError(
@@ -170,7 +190,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
             result_type=ConditionalPhaseResult,
             cfg_type=ConditionalPhaseCfg,
-            cfg_schema_version="1.0",
+            cfg_schema_version="3.0",
             tag="two_qubit/conditional_phase",
         )
     )
@@ -186,8 +206,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         """
         cfg = config.model_copy(deep=True, update={"rounds": 1})
         frequencies = sweep2array(cfg.frequency)
-        ntones = len(cfg.modules.readout.tones)
-        viewer = context.plots.liveplot_1d(
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Common CZ frequency (MHz)",
             "Completed shots (all branches/projections/n)",
@@ -211,7 +232,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             ),
             on_update=update_view,
         )
-        m = cfg.modules
+        m = cfg
         target = m.x90_f1 if cfg.target == "f1" else m.x90_f2
         spectator = m.x180_f2 if cfg.target == "f1" else m.x180_f1
         with Schedule(cfg, buffer, scope=context.scope) as sched:
@@ -225,7 +246,13 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                         for frequency, step in count_step.scan(
                             "frequency", frequencies.tolist()
                         ):
-                            builder = step.prog_builder(context.soc, context.soccfg)
+                            builder = step.prog_builder(
+                                context.soc,
+                                context.soccfg,
+                                reps=step.cfg.reps,
+                                initial_delay=step.cfg.initial_delay,
+                                relax_delay=step.cfg.relax_delay,
+                            )
                             if branch:
                                 builder.add_pulse("spectator", spectator)
                             builder.add_pulse("prepare_target", target)
@@ -247,10 +274,15 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                             prog = builder.build()
                             for _, round_step in step.repeat("round", config.rounds):
                                 _ = round_step.prog_builder(
-                                    context.soc, context.soccfg
+                                    context.soc,
+                                    context.soccfg,
+                                    reps=round_step.cfg.reps,
+                                    initial_delay=round_step.cfg.initial_delay,
+                                    relax_delay=round_step.cfg.relax_delay,
                                 ).run_program(
                                     prog,
                                     raw2signal_fn=partial(collect_joint_shots, prog),
+                                    rounds=round_step.cfg.rounds,
                                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseResult(

@@ -80,7 +80,6 @@ def make_snapshot(
     *,
     analysis=AnalysisMode.FIT,
     post=False,
-    load=False,
     is_analyzing=False,
     has_run_result=True,
     has_analyze_result=True,
@@ -146,7 +145,7 @@ def make_snapshot(
             has_post_analyze_result=has_post_result,
         ),
         capabilities=AdapterCapabilities(
-            analysis=analysis, post_analysis=post, load_data=load
+            analysis=analysis, post_analysis=post, load_data=True
         ),
         run=run_snap,
         analysis=analysis_snap,
@@ -242,9 +241,7 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    snap_none = make_snapshot(
-        "tab-1", analysis=AnalysisMode.NONE, post=False, load=False
-    )
+    snap_none = make_snapshot("tab-1", analysis=AnalysisMode.NONE, post=False)
     assert snap_none.capabilities is not None
     tab_none = exp_tab_widget("tab-1", ctrl, snap_none.capabilities)
     tab_none.attach(snap_none, MagicMock())
@@ -289,7 +286,6 @@ def test_no_analysis_capability_constructs_only_run_data_and_guide(
     with pytest.raises(RuntimeError, match="capability mismatch"):
         tab_none.attach(bad_snap, MagicMock())
 
-    assert center_none.load_button.isHidden()
     tab_none.detach()
 
 
@@ -297,9 +293,7 @@ def test_fit_capability_constructs_analysis_between_run_and_data(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    snap_analysis = make_snapshot(
-        "tab-2", analysis=AnalysisMode.FIT, post=False, load=True
-    )
+    snap_analysis = make_snapshot("tab-2", analysis=AnalysisMode.FIT, post=False)
     assert snap_analysis.capabilities is not None
     tab_analysis = exp_tab_widget("tab-2", ctrl, snap_analysis.capabilities)
     tab_analysis.attach(snap_analysis, MagicMock())
@@ -325,7 +319,6 @@ def test_fit_capability_constructs_analysis_between_run_and_data(
     with pytest.raises(RuntimeError, match="does not support post-analysis"):
         tab_analysis.get_post_container()
 
-    assert not center_analysis.load_button.isHidden()
     tab_analysis.detach()
 
 
@@ -333,7 +326,7 @@ def test_post_capability_constructs_post_analysis_after_analysis(
     qapp, exp_tab_widget, make_ctrl
 ):
     ctrl = make_ctrl()
-    snap_both = make_snapshot("tab-3", analysis=AnalysisMode.FIT, post=True, load=True)
+    snap_both = make_snapshot("tab-3", analysis=AnalysisMode.FIT, post=True)
     assert snap_both.capabilities is not None
     tab_both = exp_tab_widget("tab-3", ctrl, snap_both.capabilities)
     tab_both.attach(snap_both, MagicMock())
@@ -550,7 +543,7 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
 ):
     ctrl = make_ctrl()
     snap = make_snapshot(
-        "tab-1", analysis=AnalysisMode.FIT, post=True, load=True, has_post_result=True
+        "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
     )
     assert snap.capabilities is not None
     tab = exp_tab_widget("tab-1", ctrl, snap.capabilities)

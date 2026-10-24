@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
@@ -47,7 +47,7 @@ def jumping_settings(mux):
     return numeric.model_copy(update={"chip": chip, "readout": readout})
 
 
-def jumping_program(env, mux, *, rounds=1):
+def jumping_program(env, mux):
     """Real QICK single/mux readout, 64 shots, identical carrier and ADC windows."""
     if mux:
         readout = MuxReadoutCfg(
@@ -70,8 +70,8 @@ def jumping_program(env, mux, *, rounds=1):
         )
     return ModularProgramV2(
         env.soccfg,
-        ProgramV2Cfg(reps=64, rounds=rounds),
         modules=[readout.build("readout")],
+        reps=64,
     )
 
 
@@ -126,16 +126,44 @@ def test_deferred_getter_keeps_its_round_and_does_not_advance_mean_stream(mux):
     env = ftf(jumping_settings(mux), time_scale=0)
     repeat = ftf(jumping_settings(mux), time_scale=0)
     try:
-        held = jumping_program(env, mux, rounds=2)
-        reference = jumping_program(repeat, mux, rounds=2)
-        first_mean = held.acquire(env.soc, progress=False)
-        expected_mean = reference.acquire(repeat.soc, progress=False)
+        held = jumping_program(
+            env,
+            mux,
+        )
+        reference = jumping_program(
+            repeat,
+            mux,
+        )
+        first_mean = held.acquire(
+            env.soc,
+            progress=False,
+            rounds=2,
+        )
+        expected_mean = reference.acquire(
+            repeat.soc,
+            progress=False,
+            rounds=2,
+        )
         expected_raw = [shots.copy() for shots in raw_shots(reference)]
         # Only the reference materializes raw before the next acquire.
-        other = jumping_program(env, mux, rounds=2)
-        other_reference = jumping_program(repeat, mux, rounds=2)
-        next_mean = other.acquire(env.soc, progress=False)
-        expected_next = other_reference.acquire(repeat.soc, progress=False)
+        other = jumping_program(
+            env,
+            mux,
+        )
+        other_reference = jumping_program(
+            repeat,
+            mux,
+        )
+        next_mean = other.acquire(
+            env.soc,
+            progress=False,
+            rounds=2,
+        )
+        expected_next = other_reference.acquire(
+            repeat.soc,
+            progress=False,
+            rounds=2,
+        )
         captured_rounds = env.soc.binding.rounds
         for actual, expected in zip(raw_shots(held), expected_raw, strict=True):
             np.testing.assert_array_equal(actual, expected)
@@ -197,7 +225,9 @@ def test_one_environment_acquires_mux_then_pulse_without_reconfiguration(
         )
         for module, expected_channels in ((mux, channels), (pulse, (0,))):
             prog = ModularProgramV2(
-                env.soccfg, ProgramV2Cfg(reps=2), modules=[module.build("readout")]
+                env.soccfg,
+                modules=[module.build("readout")],
+                reps=2,
             )
             result = prog.acquire(env.soc, progress=False)
             assert tuple(prog.ro_chs) == expected_channels
@@ -231,7 +261,9 @@ def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
             ],
         )
         prog = ModularProgramV2(
-            env.soccfg, ProgramV2Cfg(reps=7), modules=[module.build("joint")]
+            env.soccfg,
+            modules=[module.build("joint")],
+            reps=7,
         )
         if mode == "integrated":
             prog.acquire(env.soc, progress=False)

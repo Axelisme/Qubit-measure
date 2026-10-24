@@ -17,12 +17,9 @@ from qtpy.QtWidgets import (
     QComboBox,
     QLabel,
     QLineEdit,
-    QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 from zcu_tools.gui.form import Display, FormEnv, FormInput, FormModel, FormState
-from zcu_tools.gui.form_adapter.sweep import CenterSpan, LinRange, SweepInput
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_converters import RebuildingForm
@@ -220,7 +217,7 @@ def test_refresh_keeps_user_fold_of_an_invalid_section(
     assert not driver.observe(object_name="form.input.invalid.value").visible
 
 
-def test_groups_fold_grouped_rows_after_ungrouped_rows(
+def test_groups_fold_rows_at_their_first_visible_member(
     build: Build, qapp: QApplication
 ) -> None:
     view, state = build(GroupForm, None)
@@ -255,26 +252,26 @@ def test_groups_fold_grouped_rows_after_ungrouped_rows(
         block = child(view, QWidget, f"form.group.{name}")
         assert all(block.isAncestorOf(row_of(view, path)) for path in paths), name
         assert all(row_of(view, path).isVisible() for path in paths), name
-    # Ungrouped rows first, then groups by first appearance, members in order.
+    # Each group occupies its first visible member's declaration position.
     order = [
         top(view, row_of(view, path))
         for path in (
-            "mode",
-            "after",
-            "drive.ch",
-            "drive.freq",
-            "drive.phase",
-            "drive.inner",
             "first",
             "second",
+            "mode",
             "window",
+            "after",
+            "drive.ch",
+            "drive.phase",
+            "drive.inner",
+            "drive.freq",
             "visible",
         )
     ]
     assert order == sorted(order), order
     assert len(set(order)) == len(order), order
-    assert top(view, child(view, QWidget, "form.group.Advanced")) > top(
-        view, child(view, QWidget, "form.input.drive.freq")
+    assert top(view, child(view, QWidget, "form.group.Advanced")) < top(
+        view, child(view, QWidget, "form.input.mode")
     )
     # A group title sits in its level's label column like a row's name label:
     # same left edge and width, so the level's controls still share one edge.
@@ -793,110 +790,6 @@ def test_a_fold_title_reached_by_tab_shows_an_outline(
         press(Qt.Key.Key_Tab)
         assert not title.hasFocus(), name
         assert title.grab().toImage() == unfocused, name
-
-
-class SingleSweep(FormModel):
-    freq: Annotated[SweepInput, Display(label="Frequency", unit="MHz")] = Field(
-        default_factory=lambda: LinRange(start=10.0, stop=20.0, n=11)
-    )
-
-
-class DualSweep(SingleSweep):
-    flux: Annotated[SweepInput, Display(unit="A")] = Field(
-        default_factory=lambda: CenterSpan(center=0.0, span=0.2, n=3)
-    )
-
-
-@pytest.fixture
-def sweep_host(build: Build, qapp: QApplication):
-    hosts: list[QWidget] = []
-
-    def make(model: type[FormModel]) -> ComponentDriver:
-        editor, _state = build(model, None)
-        host = QWidget()
-        hosts.append(host)
-        layout = QVBoxLayout(host)
-        layout.addWidget(editor)
-        refresh = QPushButton("Refresh", host)
-        refresh.clicked.connect(lambda: editor.refresh(FormEnv()))
-        layout.addWidget(refresh)
-        host.resize(800, 700)
-        host.show()
-        qapp.processEvents()
-        return ComponentDriver(host)
-
-    yield make
-    for host in hosts:
-        host.close()
-        host.deleteLater()
-    qapp.processEvents()
-
-
-def test_single_axis_sweep_has_one_title_and_keeps_paths_and_commands(
-    sweep_host, tmp_path: Path
-) -> None:
-    class Form(FormModel):
-        sweep: SingleSweep = Field(default_factory=SingleSweep)
-
-    driver = sweep_host(Form)
-    driver.screenshot(tmp_path / "single-axis.png")
-    assert EXPANDED + "Sweep · Frequency (MHz)" in [
-        widget.text for widget in driver.visible().widgets
-    ]
-    assert [
-        w.object_name
-        for w in driver.visible().widgets
-        if w.object_name.startswith("form.fold.")
-    ] == ["form.fold.sweep.freq"]
-    assert driver.observe(object_name="form.input.sweep.freq.start").text == "10.0"
-    driver.enter_text(object_name="form.input.sweep.freq.start", value="12")
-    driver.invoke_context_action(
-        object_name="form.fold.sweep.freq", action="Switch to Center / Span"
-    )
-    driver.screenshot(tmp_path / "single-axis-center.png")
-    assert driver.observe(object_name="form.input.sweep.freq.center").text == "16.0"
-    assert driver.observe(object_name="form.input.sweep.freq.span").text == "8.0"
-    assert driver.observe(object_name="form.fold.sweep.freq").text == (
-        EXPANDED + "Sweep · Frequency (MHz)"
-    )
-
-
-def test_two_axis_sweep_keeps_both_levels_open(sweep_host, tmp_path: Path) -> None:
-    class Form(FormModel):
-        sweep: DualSweep = Field(default_factory=DualSweep)
-
-    driver = sweep_host(Form)
-    driver.screenshot(tmp_path / "two-axes.png")
-    assert driver.observe(object_name="form.fold.sweep").text == EXPANDED + "Sweep"
-    assert (
-        driver.observe(object_name="form.fold.sweep.freq").text
-        == EXPANDED + "Frequency"
-    )
-    assert driver.observe(object_name="form.fold.sweep.flux").text == EXPANDED + "Flux"
-    assert driver.observe(object_name="form.input.sweep.freq.start").visible
-    assert driver.observe(object_name="form.input.sweep.flux.center").visible
-
-
-def test_modules_start_folded_and_refresh_keeps_user_folds(
-    sweep_host, tmp_path: Path
-) -> None:
-    class Form(FormModel):
-        sweep: SingleSweep = Field(default_factory=SingleSweep)
-        modules: Section = Field(default_factory=Section)
-
-    driver = sweep_host(Form)
-    driver.screenshot(tmp_path / "modules-folded.png")
-    assert driver.observe(object_name="form.fold.modules").text == FOLDED + "Modules"
-    driver.click(object_name="form.fold.sweep.freq")
-    driver.click(object_name="form.fold.modules")
-    driver.click("Refresh")
-    driver.screenshot(tmp_path / "refresh-user-folds.png")
-    assert driver.observe(object_name="form.fold.sweep.freq").text == (
-        FOLDED + "Sweep · Frequency (MHz)"
-    )
-    assert not driver.observe(object_name="form.input.sweep.freq.start").visible
-    assert driver.observe(object_name="form.fold.modules").text == EXPANDED + "Modules"
-    assert driver.observe(object_name="form.input.modules.level").visible
 
 
 class Span(BaseModel):

@@ -9,7 +9,6 @@ import pytest
 from zcu_tools import experiment
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.program.v2 import ProgramV2Cfg
 
 if TYPE_CHECKING:
     from zcu_tools.experiment import Scope
@@ -193,7 +192,6 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
     root = make_root()
 
     class Program:
-        cfg_model = ProgramV2Cfg()
         calls = 0
 
         def acquire(self, soc: object, **_kwargs: object) -> np.ndarray:
@@ -206,9 +204,7 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
         acquire_decimated = acquire
 
     program = Program()
-    with Schedule(
-        ProgramV2Cfg(), SignalBuffer(1), scope=root, name="readout"
-    ) as schedule:
+    with Schedule({}, SignalBuffer(1), scope=root, name="readout") as schedule:
         assert schedule.scope.active_path == "run/schedule:readout#1"
         builder = schedule.prog_builder(object(), object())
         builder.run_program(program, raw2signal_fn=lambda value: value)
@@ -222,7 +218,7 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
 
 def test_gui_run_root_receives_schedule_error_without_cancellation() -> None:
     root = make_root()
-    with Schedule(ProgramV2Cfg(), scope=root) as schedule:
+    with Schedule({}, scope=root) as schedule:
         schedule.mark_failed(OSError("readout failed"))
     assert not root.cancelled
     assert root.stop.partial_result

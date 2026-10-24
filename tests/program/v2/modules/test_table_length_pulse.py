@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    ProgramV2Cfg,
-    PulseCfg,
-    TableLengthPulse,
-)
+from zcu_tools.program.v2 import ModularProgramV2, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
@@ -28,7 +23,6 @@ def _pulse(waveform) -> PulseCfg:
 def _program(module: TableLengthPulse, count: int) -> ModularProgramV2:
     return ModularProgramV2(
         make_mock_soccfg(n_gens=1, n_readouts=1),
-        ProgramV2Cfg(),
         modules=[module],
         sweep=[("length", count)],
     )
@@ -94,7 +88,6 @@ def test_flat_top_preserves_int4_dummy_segment() -> None:
 
     prog = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(),
         modules=[module],
         sweep=[("length", 3)],
     )
@@ -137,7 +130,6 @@ def test_rejects_nonzero_length_below_hardware_minimum() -> None:
     with pytest.raises(ValueError, match="requires at least 3"):
         ModularProgramV2(
             soccfg,
-            ProgramV2Cfg(),
             modules=[module],
             sweep=[("length", 2)],
         )

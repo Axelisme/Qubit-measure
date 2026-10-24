@@ -2,18 +2,15 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .analysis import SpectroscopyAnalysis
@@ -58,33 +55,26 @@ class SpectroscopyAnalyzeResult:
         }
 
 
-class SpectroscopyAdapter(
-    BaseAdapter[SpectroscopyCfg, SpectroscopyRun, SpectroscopyAnalyzeResult]
-):
-    """Fixed-capture Form, full raw acquisition, diagnostic analysis and restore."""
-
-    exp_cls = SpectroscopyExp
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, load_data=True
+def _analyze(
+    req: AnalyzeRequest[SpectroscopyRun, None], *, plots: Plots
+) -> SpectroscopyAnalyzeResult:
+    """Use only source cfg/raw; never read current parameters or propose peaks."""
+    return SpectroscopyAnalyzeResult(
+        SpectroscopyExp().analyze(req.run_result, None, plots=plots)
     )
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
-        """Resolve role/tone identities and editable pulses from one Open/Reset capture."""
-        return make_form(ctx)
 
-    def run(
-        self, req: RunRequest, cfg: SpectroscopyCfg, *, context: RunContext
-    ) -> SpectroscopyRun:
-        """Keep original cfg with raw; caller checks cancel_signal.raise_if_error()."""
-        del req
-        return RunRecord(cfg=cfg, result=SpectroscopyExp().run(cfg, context=context))
+def run(
+    cfg: SpectroscopyCfg, *, context: RunContext
+) -> RunRecord[SpectroscopyCfg, SpectroscopyResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=SpectroscopyExp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[SpectroscopyRun, None], *, plots: Plots
-    ) -> SpectroscopyAnalyzeResult:
-        """Use only source cfg/raw; never read current parameters or propose peaks."""
-        return SpectroscopyAnalyzeResult(
-            SpectroscopyExp().analyze(req.run_result, None, plots=plots)
-        )
+
+DEFINITION = Adapter(
+    spec=SpectroscopyExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze),
+)

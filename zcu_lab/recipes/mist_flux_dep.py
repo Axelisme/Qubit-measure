@@ -100,14 +100,14 @@ async def mist_flux_dep(
     tab.set("flux_unit", unit)
     if inputs.flux_range[0] == inputs.flux_range[1]:
         raise ValueError("flux endpoints must be distinct")
-    tab.set("sweep.flux.start", inputs.flux_range[0])
-    tab.set("sweep.flux.stop", inputs.flux_range[1])
-    tab.set("sweep.flux.n", inputs.points)
+    tab.set("flux.start", inputs.flux_range[0])
+    tab.set("flux.stop", inputs.flux_range[1])
+    tab.set("flux.n", inputs.points)
     if inputs.gain_range[0] == inputs.gain_range[1]:
         raise ValueError("gain endpoints must be distinct")
-    tab.set("sweep.gain.start", inputs.gain_range[0])
-    tab.set("sweep.gain.stop", inputs.gain_range[1])
-    tab.set("sweep.gain.n", inputs.points)
+    tab.set("gain.start", inputs.gain_range[0])
+    tab.set("gain.stop", inputs.gain_range[1])
+    tab.set("gain.n", inputs.points)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()

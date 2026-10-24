@@ -20,6 +20,7 @@ from qtpy.QtWidgets import (
     QPushButton,
 )
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -265,6 +266,8 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
             ConstWaveformCfg(length=0.1),
         )
         context.set_parameter(context.read_context().target, "general.ext.gain", 0.4)
+        board = white_noise()
+        ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         tab_id = ctrl.new_tab("synthetic/module")
         ctrl.start_run(tab_id)
         # The admitted synthetic run returns; pump its terminal owner delivery.

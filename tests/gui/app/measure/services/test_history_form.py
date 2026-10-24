@@ -1,17 +1,15 @@
 """History Load survives a missing form without admitting a fake empty cfg."""
 
 from pathlib import Path
-from typing import ClassVar
 
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import PulseCfg, PulseSpec, Template
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
-from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.aliases import AliasRow
@@ -90,13 +88,7 @@ def test_unavailable_reset_updates_nonfactory_error_and_reraises_without_a_form(
             resource.accept()
 
 
-class UnsupportedHistoryAdapter(SourceDependentAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
-    )
-
-
-@pytest.mark.parametrize("failure", ["format", "tag", "capability"])
+@pytest.mark.parametrize("failure", ["format", "tag"])
 def test_rejected_history_load_removes_partial_tab_and_restores_focus(
     qapp: QApplication, tmp_path: Path, failure: str
 ) -> None:
@@ -107,16 +99,12 @@ def test_rejected_history_load_removes_partial_tab_and_restores_focus(
         bad.write_text("not native", encoding="utf-8")
     else:
         write_native_file(bad, tag="wrong/tag" if failure == "tag" else "test/saving")
-    registry = Registry()
-    registry.register("unsupported", UnsupportedHistoryAdapter)
-    with history_controller(tmp_path, registry=registry) as ctrl:
+    with history_controller(tmp_path) as ctrl:
         ctrl.tab_control.open_tab_from_file("history", str(valid))
         previous = ctrl.tab_control.get_active_tab_id()
         before = ctrl.tab_control.list_tab_ids()
-        adapter = "unsupported" if failure == "capability" else "history"
-        expected = GuardError if failure == "capability" else LoadDataError
-        with pytest.raises(expected):
-            ctrl.tab_control.open_tab_from_file(adapter, str(bad))
+        with pytest.raises(LoadDataError):
+            ctrl.tab_control.open_tab_from_file("history", str(bad))
         assert ctrl.tab_control.list_tab_ids() == before
         assert ctrl.tab_control.get_active_tab_id() == previous
 
@@ -134,11 +122,17 @@ class TemplateHistoryCfg(SavingCfg):
     pulse: PulseCfg | None = None
 
 
-class BrokenTemplateAdapter(SourceDependentAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TemplateHistoryCfg]:
-        del ctx
-        return Form(TemplateHistoryCfg, {"pulse": Template("missing")})
+def broken_template_form(ctx: FormContext) -> Form[TemplateHistoryCfg]:
+    del ctx
+    return Form(TemplateHistoryCfg, {"pulse": Template("missing")})
+
+
+BrokenTemplateAdapter = Adapter(
+    spec=SourceDependentAdapter.spec,
+    make_form=broken_template_form,
+    run=SourceDependentAdapter.run,
+    guide=None,
+)
 
 
 def test_history_creation_does_not_isolate_template_binding_errors(

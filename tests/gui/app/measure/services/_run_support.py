@@ -13,11 +13,11 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
-    ExpAdapterProtocol,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
@@ -33,7 +33,8 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import Module, ProgramV2Cfg
+from zcu_tools.program.v2 import Module
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -48,14 +49,14 @@ def make_state(
         SessionEnv(
             parameters=parameter_capture(),
             soc=MagicMock(),
-            soccfg=MagicMock(),
+            soccfg=make_mock_soccfg(),
             readiness=readiness,
         )
     )
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.run.return_value = RunRecord(None, object())
-    adapter.capabilities = AdapterCapabilities(requires_soc=True)
+    adapter.capabilities = AdapterCapabilities()
     state.add_tab(
         tab_id,
         Session(
@@ -71,7 +72,7 @@ def make_plots() -> Plots:
     return Plots(NonPresentingHost())
 
 
-def make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunInputs:
+def make_inputs(state: State, tab_id: str, adapter: RegisteredAdapter) -> RunInputs:
     ctx = state.session_env
     parameters = ctx.parameters
     return RunInputs(
@@ -136,15 +137,13 @@ class FakeBg:
 
 
 class ConstructorFailingProgram:
-    @property
-    def cfg_model(self) -> ProgramV2Cfg:
-        raise NotImplementedError
-
     def __init__(
         self,
         soccfg: Any,
-        cfg: ProgramV2Cfg,
         *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
         modules: list[Any],
         sweep: list[tuple[str, Any]] | None,
     ) -> None:

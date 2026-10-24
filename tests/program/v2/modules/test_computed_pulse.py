@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
@@ -50,8 +49,7 @@ def _flat_top_pulse(total=0.2, raise_length=0.04, gain=GEN_GAIN, pre_delay=0.0):
 
 def _make_prog(modules):
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-    cfg = ProgramV2Cfg()
-    return ModularProgramV2(soccfg, cfg, modules=modules, sweep=[("idx_loop", 2)])
+    return ModularProgramV2(soccfg, modules=modules, sweep=[("idx_loop", 2)])
 
 
 def _gate_modules(gate_pulses, val_reg="gate_idx"):
@@ -76,9 +74,7 @@ def test_dmem_table_populated_for_const_candidates():
     n_pulses = 3
     pulses = [_const_pulse(gain=(i + 1) * 0.2) for i in range(n_pulses)]
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-    from zcu_tools.program.v2.base import ProgramV2Cfg
 
-    cfg = ProgramV2Cfg()
     from zcu_tools.program.v2.modules.dmem import LoadValue
 
     modules = [
@@ -90,9 +86,7 @@ def test_dmem_table_populated_for_const_candidates():
         ),
         ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
     ]
-    prog = ModularProgramV2(
-        soccfg, cfg, modules=modules, sweep=[("idx_loop", n_pulses)]
-    )
+    prog = ModularProgramV2(soccfg, modules=modules, sweep=[("idx_loop", n_pulses)])
     assert prog.binprog is not None
 
     # ComputedPulse.dmem_offset is the start of its table in the shared dmem buffer.
@@ -124,12 +118,9 @@ def test_identical_candidates_dedup_table_points_to_same_index():
     the same waveform, and the program still compiles correctly."""
     same_pulse = _const_pulse(gain=0.5)
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-    from zcu_tools.program.v2.base import ProgramV2Cfg
 
     modules = _gate_modules([same_pulse, same_pulse])
-    prog = ModularProgramV2(
-        soccfg, ProgramV2Cfg(), modules=modules, sweep=[("idx_loop", 2)]
-    )
+    prog = ModularProgramV2(soccfg, modules=modules, sweep=[("idx_loop", 2)])
     assert prog.binprog is not None
 
     cp = modules[1]

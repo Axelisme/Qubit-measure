@@ -1,5 +1,7 @@
 """Native library mutations leave tab Form sources fixed until Reset."""
 
+from dataclasses import replace
+
 import pytest
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
@@ -7,6 +9,9 @@ from zcu_tools.cfg_model import (
     PulseSpec,
     Range,
     Slot,
+)
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import LibraryChange
@@ -21,32 +26,48 @@ class PulseReferenceCfg(SampleCfg):
     inline: PulseCfg | None = None
 
 
-class PulseReferenceAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
-        del ctx
-        return Form(
-            PulseReferenceCfg,
-            {
-                "sweep": Range(1.0, 2.0, expts=3),
-                "linked": Slot("Q1.pulses.seed"),
-                "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
-            },
-        )
+def PulseReferenceAdapter_make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+    del ctx
+    return Form(
+        PulseReferenceCfg,
+        {
+            "sweep": Range(1.0, 2.0, expts=3),
+            "linked": Slot("Q1.pulses.seed"),
+            "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
+        },
+    )
 
 
-class WaveformReferenceAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
-        del ctx
-        return Form(
-            PulseReferenceCfg,
-            {
-                "sweep": Range(1.0, 2.0, expts=3),
-                "linked": Slot("Q1.pulses.carrier", copy=True),
-                "inline": Slot("Q1.pulses.carrier", copy=True),
-            },
-        )
+PulseReferenceAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=PulseReferenceCfg),
+    make_form=PulseReferenceAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
+
+
+def WaveformReferenceAdapter_make_form(ctx: FormContext) -> Form[PulseReferenceCfg]:
+    del ctx
+    return Form(
+        PulseReferenceCfg,
+        {
+            "sweep": Range(1.0, 2.0, expts=3),
+            "linked": Slot("Q1.pulses.carrier", copy=True),
+            "inline": Slot("Q1.pulses.carrier", copy=True),
+        },
+    )
+
+
+WaveformReferenceAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=PulseReferenceCfg),
+    make_form=WaveformReferenceAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @pytest.fixture(params=["module", "waveform"])

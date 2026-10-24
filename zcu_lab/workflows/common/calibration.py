@@ -26,24 +26,18 @@ from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 from zcu_lab.v2.twotone.freq.core import (
     FreqCfg,
     FreqExp,
-    FreqModuleCfg,
     FreqResult,
-    FreqSweepCfg,
     qubfreq_signal2real,
 )
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiCfg,
     LenRabiExp,
-    LenRabiModuleCfg,
     LenRabiResult,
-    LenRabiSweepCfg,
     rabi_signal2real,
 )
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainCfg,
     FreqGainExp,
-    FreqGainModuleCfg,
-    FreqGainSweepCfg,
 )
 from zcu_lab.workflows.common.acquire import run_qubit_freq
 from zcu_lab.workflows.common.analysis import (
@@ -446,14 +440,13 @@ async def calibrate_frequency(
             reps=inputs.tun.qf_reps,
             rounds=inputs.tun.qf_rounds,
             relax_delay=1.0,
-            modules=FreqModuleCfg(qub_pulse=drive, readout=ro),
-            sweep=FreqSweepCfg(
-                freq=SweepCfg(
-                    start=hint - span / 2,
-                    stop=hint + span / 2,
-                    expts=101,
-                    step=span / 100,
-                )
+            qub_pulse=drive,
+            readout=ro,
+            freq=SweepCfg(
+                start=hint - span / 2,
+                stop=hint + span / 2,
+                expts=101,
+                step=span / 100,
             ),
         )
         outcome = await scope.run(run_qubit_freq, cfg, name="frequency")
@@ -579,10 +572,9 @@ async def calibrate_rabi(
         reps=inputs.tun.rabi_reps,
         rounds=inputs.tun.rabi_rounds,
         relax_delay=5 * t1_estimate_us,
-        modules=LenRabiModuleCfg(qub_pulse=drive, readout=ro),
-        sweep=LenRabiSweepCfg(
-            length=SweepCfg(start=start, stop=stop, expts=51, step=(stop - start) / 50)
-        ),
+        qub_pulse=drive,
+        readout=ro,
+        length=SweepCfg(start=start, stop=stop, expts=51, step=(stop - start) / 50),
     )
     outcome = await scope.run(LenRabiExp().run, cfg, name="Rabi")
     if isinstance(outcome, Failed):
@@ -707,16 +699,15 @@ async def calibrate_readout(
         reps=inputs.tun.ro_reps,
         rounds=inputs.tun.ro_rounds,
         relax_delay=5 * t1_estimate_us,
-        modules=FreqGainModuleCfg(qub_pulse=drive, readout=ro),
-        sweep=FreqGainSweepCfg(
-            freq=SweepCfg(
-                start=prior.readout_freq_mhz - 5.0,
-                stop=prior.readout_freq_mhz + 5.0,
-                expts=51,
-                step=10.0 / 50,
-            ),
-            gain=SweepCfg(start=0.0, stop=0.2, expts=31, step=0.2 / 30),
+        qub_pulse=drive,
+        readout=ro,
+        freq=SweepCfg(
+            start=prior.readout_freq_mhz - 5.0,
+            stop=prior.readout_freq_mhz + 5.0,
+            expts=51,
+            step=10.0 / 50,
         ),
+        gain=SweepCfg(start=0.0, stop=0.2, expts=31, step=0.2 / 30),
     )
     outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
     if isinstance(outcome, Failed):

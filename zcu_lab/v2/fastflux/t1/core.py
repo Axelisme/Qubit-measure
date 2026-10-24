@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -17,6 +17,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
+
+from zcu_lab.v2.support import live_heatmap
 
 
 @dataclass(frozen=True)
@@ -30,21 +32,29 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T1ModuleCfg(ConfigBase):
+class T1Cfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Reset.Cfg | None = None
     flux_pulse: Pulse.Cfg
     pi_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class T1SweepCfg(ConfigBase):
     gain: SweepCfg
     length: SweepCfg
-
-
-class T1Cfg(ProgramExpCfg):
-    modules: T1ModuleCfg
-    sweep: T1SweepCfg
 
 
 @dataclass(frozen=True)
@@ -64,7 +74,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="fastflux/t1",
     )
 
@@ -79,18 +89,17 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         # Resolve flux gain and duration coordinates on the hardware grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
-        gain_sweep = cfg.sweep.gain
-        length_sweep = cfg.sweep.length
+        gain_sweep = cfg.gain
+        length_sweep = cfg.length
 
-        lf_ch = modules.flux_pulse.ch
+        lf_ch = cfg.flux_pulse.ch
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
         # Keep the relaxation traces grouped by flux gain.
-        viewer = context.plots.liveplot_2d(
-            "measurement", "Flux Pulse Gain (a.u.)", "Time (us)"
+        viewer = live_heatmap(
+            context.plots, "measurement", "Flux Pulse Gain (a.u.)", "Time (us)"
         )
         signals_buffer = SignalBuffer(
             (len(gains), len(lengths)),
@@ -98,26 +107,25 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.flux_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
-            modules.flux_pulse.set_param(
-                "length", sweep2param("length", sched.cfg.sweep.length)
+            sched.cfg.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.flux_pulse.set_param(
+                "length", sweep2param("length", sched.cfg.length)
             )
 
             # Let the excited state evolve during the flux pulse before readout.
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Pulse("flux_pulse", modules.flux_pulse),
-                    Readout("readout", modules.readout),
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .declare_sweep("gain", sched.cfg.sweep.gain)
-                .declare_sweep("length", sched.cfg.sweep.length)
-                .build_and_acquire()
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("pi_pulse", sched.cfg.pi_pulse),
+                    Pulse("flux_pulse", sched.cfg.flux_pulse),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("gain", sched.cfg.gain)
+                .declare_sweep("length", sched.cfg.length)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return T1Result(gains, lengths, signals_buffer.array)

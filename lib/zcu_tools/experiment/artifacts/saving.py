@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from matplotlib.figure import Figure
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import encode_labber_comment, save, write_labber
 from zcu_tools.resources.entry import (
     ArtifactKey,
@@ -27,7 +28,6 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.ledger_models import validate_origin
 from zcu_tools.utils import atomic_replace
 
-from ..cfg_model import ExpCfgModel
 from ..metadata import RunMetadata
 from ..records import RunRecord
 from .analysis_document import encode_analysis_document
@@ -39,7 +39,7 @@ from .items import (
     SaveArtifact,
 )
 
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
 
 

@@ -11,7 +11,6 @@ from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     StoppedPartialAcquireError,
 )
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -24,7 +23,6 @@ def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -
     soc, soccfg = make_acquisition_soc()
     program = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=1, rounds=2),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -36,11 +34,17 @@ def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -
                 freq=100.0,
             ).build("readout")
         ],
+        reps=1,
     )
     options = dict(threshold=1.0, ge_radius=0.5, progress=False)
     call_lines: list[int] = []
     if stepped:
-        program.acquire(soc, step_rounds=True, **options)
+        program.acquire(
+            soc,
+            step_rounds=True,
+            **options,
+            rounds=2,
+        )
         with pytest.warns(
             UserWarning,
             match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
@@ -55,7 +59,11 @@ def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -
             match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
         ) as recorded:
             call_lines.extend([inspect.stack()[0].lineno + 1] * 2)
-            result = program.acquire(soc, **options)
+            result = program.acquire(
+                soc,
+                **options,
+                rounds=2,
+            )
     assert len(recorded) == 2
     assert all(warning.filename == __file__ for warning in recorded)
     assert [warning.lineno for warning in recorded] == call_lines
@@ -77,7 +85,6 @@ def test_acquire_population_matches_offline_classification(
     soccfg["readouts"][0]["iq_offset"] = offset
     program = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=1, rounds=1),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -90,6 +97,7 @@ def test_acquire_population_matches_offline_classification(
             ).build("readout")
         ],
         sweep=[("sample", len(signals))],
+        reps=1,
     )
     raw = np.rint(
         (np.stack((signals.real, signals.imag), axis=-1) + offset)
@@ -118,7 +126,7 @@ def test_acquire_population_matches_offline_classification(
     assert actual[0].dtype == np.float64
 
 
-def _make_chunk_acquisition(*, reps: int = 4, rounds: int = 1):
+def _make_chunk_acquisition(*, reps: int = 4):
     soc, soccfg = make_acquisition_soc()
     readouts = [
         PulseReadoutCfg(
@@ -134,8 +142,8 @@ def _make_chunk_acquisition(*, reps: int = 4, rounds: int = 1):
     ]
     program = ModularProgramV2(
         soccfg,
-        ProgramV2Cfg(reps=reps, rounds=rounds),
         modules=readouts,
+        reps=reps,
     )
     return soc, program
 
@@ -225,21 +233,21 @@ def test_acquire_rejects_shot_overrun_before_writing_chunk(
     )
     monkeypatch.setattr(soc, "poll_data", lambda: next(batches))
     completed_rounds: list[int] = []
-    options = dict(
-        progress=False,
-        round_hook=lambda count, data, stop: completed_rounds.append(count),
-    )
+
+    def record_round(count: int, _data: object, _stop: object) -> None:
+        completed_rounds.append(count)
+
     message = (
         r"expected_shots=3, received_shots=1, chunk_shots=3, "
         rf"chunk_rows=\[{rows}\], round_index=0"
     )
     if stepped:
-        program.acquire(soc, step_rounds=True, **options)
+        program.acquire(soc, step_rounds=True, progress=False, round_hook=record_round)
         with pytest.raises(AcquisitionContractError, match=message):
             program.finish_round()
     else:
         with pytest.raises(AcquisitionContractError, match=message):
-            program.acquire(soc, **options)
+            program.acquire(soc, progress=False, round_hook=record_round)
     captured = program.get_raw()
     assert captured is not None
     np.testing.assert_array_equal(
@@ -253,7 +261,7 @@ def test_acquire_rejects_shot_overrun_before_writing_chunk(
 def test_cancel_discards_partial_chunks_and_retains_only_completed_rounds(
     monkeypatch: pytest.MonkeyPatch, completed_round: bool
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3, rounds=2)
+    soc, program = _make_chunk_acquisition(reps=3)
     stop = Event()
     full = np.array([[10, -10], [20, -20]] * 3, dtype=np.int64)
     batches = iter(
@@ -276,7 +284,7 @@ def test_cancel_discards_partial_chunks_and_retains_only_completed_rounds(
         return [(2, ([np.full((4, 2), 99, dtype=np.int64)], {}))]
 
     monkeypatch.setattr(soc, "poll_data", poll_data)
-    program.acquire(soc, progress=False, step_rounds=True, cancel_flag=stop)
+    program.acquire(soc, rounds=2, progress=False, step_rounds=True, cancel_flag=stop)
     if completed_round:
         assert program.finish_round() is True
         program.prepare_round()

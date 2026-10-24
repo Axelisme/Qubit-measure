@@ -3,11 +3,11 @@
 from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2._support.measure.seed_metadata import (
+from zcu_lab.v2.singleshot.ge.core import GE_Cfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
-from zcu_lab.v2.singleshot.ge.core import GE_Cfg
 
 
 def make_form(ctx: FormContext) -> Form[GE_Cfg]:
@@ -15,22 +15,23 @@ def make_form(ctx: FormContext) -> Form[GE_Cfg]:
     return Form(
         GE_Cfg,
         field_order=(
-            "modules",
+            "reset",
+            "init_pulse",
+            "probe_pulse",
+            "readout",
             "shots",
             "relax_delay",
             "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Slot("$qubit.module.x180"),
-                "probe_pulse": Slot("$qubit.module.x180")
-                if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Slot("$qubit.module.x180"),
+            "probe_pulse": Slot("$qubit.module.x180")
+            if ctx.has("$qubit.module.x180")
+            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 100000,
             "initial_delay": Hidden(),

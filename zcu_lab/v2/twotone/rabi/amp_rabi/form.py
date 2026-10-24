@@ -5,9 +5,9 @@ from dataclasses import replace
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2._support.measure.rabi_initial_values import amp_rabi_initial_pulse
-from zcu_lab.v2._support.measure.seed_metadata import (
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.rabi_initial_values import amp_rabi_initial_pulse
+from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
 
@@ -22,25 +22,24 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
     return Form(
         AmpRabiCfg,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "init_pulse",
+            "qub_pulse",
+            "readout",
+            "gain",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "qub_pulse": pulse,
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-                "init_pulse": Hidden(),
-            },
-            "sweep": {"gain": Range(-0.3, 1.0, expts=51)},
+            "reset": Slot("$qubit.module.reset"),
+            "qub_pulse": pulse,
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "init_pulse": Hidden(),
+            "gain": Range(-0.3, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },

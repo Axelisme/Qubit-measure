@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
@@ -25,7 +25,9 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
         LocalZCfg,
         field_order=(
             "roles",
-            "modules",
+            "x90_f1",
+            "x90_f2",
+            "readout",
             "drive",
             "f1_centers",
             "f2_centers",
@@ -39,11 +41,9 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": roles,
-            "modules": {
-                "x90_f1": Slot("$f1.module.x90", copy=True),
-                "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": readout,
-            },
+            "x90_f1": Slot("$f1.module.x90", copy=True),
+            "x90_f2": Slot("$f2.module.x90", copy=True),
+            "readout": readout,
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),
                 "f2": Slot("$coupler.module.cz_f2", copy=True),

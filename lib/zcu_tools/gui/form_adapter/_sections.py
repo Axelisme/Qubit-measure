@@ -34,7 +34,6 @@ from zcu_tools.gui.form import (
     Option,
     static_defaults,
 )
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 
 from ._display import field_display
@@ -234,21 +233,26 @@ class SpecSection:
         }
 
 
-def _module_converters(
+def _section_converters(
     fields: Mapping[str, ModuleField],
+    core: type[BaseModel],
     _cls: type[FormModel],
     env: FormEnv,
 ) -> Mapping[tuple[str | int, ...], InputConverter]:
-    return {(name,): field.converter(env) for name, field in fields.items()}
+    converters: dict[tuple[str | int, ...], InputConverter] = {
+        (name,): field.converter(env) for name, field in fields.items()
+    }
+    if issubclass(core, FormModel):
+        converters.update(core.converters(env))
+    return converters
 
 
 def _core_field_names(core: type[BaseModel], field_order: tuple[str, ...]) -> list[str]:
-    """Keep core order, defer program base fields, then promote field_order stably."""
-    program_fields = ProgramV2Cfg.model_fields if issubclass(core, ProgramV2Cfg) else {}
-    names = [name for name in core.model_fields if name not in program_fields] + [
-        name for name in core.model_fields if name in program_fields
+    """Keep the declared core order, then promote field_order stably."""
+    return [
+        *field_order,
+        *(name for name in core.model_fields if name not in field_order),
     ]
-    return [*field_order, *(name for name in names if name not in field_order)]
 
 
 class Section:
@@ -352,7 +356,7 @@ class Section:
             return result
 
         namespace.update(
-            converters=classmethod(partial(_module_converters, section.modules)),
+            converters=classmethod(partial(_section_converters, section.modules, core)),
             __annotations__=annotations,
             defaults=classmethod(defaults),
             options=classmethod(options),

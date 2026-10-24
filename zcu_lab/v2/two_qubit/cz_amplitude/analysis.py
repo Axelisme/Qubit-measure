@@ -53,7 +53,7 @@ def classify_return(
             "CZ return analysis requires saved cfg and GE centers; current Form/library is not a substitute"
         )
     scales = sweep2array(cfg.scales)
-    ntones, nshots = len(cfg.modules.readout.tones), cfg.rounds * cfg.reps
+    ntones, nshots = len(cfg.readout.tones), cfg.rounds * cfg.reps
     if (
         not np.array_equal(data.scales, scales)
         or not np.array_equal(data.shot_indices, np.arange(nshots))
@@ -160,7 +160,7 @@ def _plot_return(
         bbox={"facecolor": "white", "alpha": 0.85},
     )
     ax.legend()
-    for tone, readout in enumerate(cfg.modules.readout.tones):
+    for tone, readout in enumerate(cfg.readout.tones):
         _, ax = plots.subplots(f"iq_tone_{tone}", figsize=(9, 5), layout="constrained")
         iq = answer.mean_iq[:, tone]
         ax.plot(scales, iq.real, ".-", label="I")

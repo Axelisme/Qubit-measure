@@ -34,6 +34,7 @@ from zcu_tools.resources.context.library import (
 )
 
 from tests.gui._form_converters import RebuildingForm
+from tests.gui.form_adapter._input_models import specialize_input
 
 
 def test_logical_container_edit_replaces_exact_raw_value_without_merging_defaults():
@@ -285,17 +286,15 @@ def test_spec_template_locks_and_handwritten_generated_fields_use_same_mapper() 
     extras = create_model(
         "Extras", __base__=CapturedExtras, reference=(field.annotation, ...)
     )
-    form = adapter.Form(LogicalCfg, {}, extras=extras, lower=lambda extras, cfg: cfg)
+    form = adapter.Form(LogicalCfg, {})
+    input_model = specialize_input(form, extras)
     env = captured()
     input = FormInput(
-        form.model, {"extras": {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}}
+        input_model, {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}
     )
-    assert (
-        form.read_logical_field(input, ("extras", "reference", "freq"), env).value
-        == 4100
-    )
-    copied = form.prepare_inline_copy(input, ("extras", "reference"), env)
-    assert object_at(copied.input.data, ("extras", "reference"))["kind"] == "inline"
+    assert form.read_logical_field(input, ("reference", "freq"), env).value == 4100
+    copied = form.prepare_inline_copy(input, ("reference",), env)
+    assert object_at(copied.input.data, ("reference",))["kind"] == "inline"
     spec = adapter.module_form(PulseSpec)
     template = spec.template_input(
         Template("pulse", set={"freq": 42.0}),
@@ -384,10 +383,16 @@ def test_parent_model_errors_are_relevant_but_unrelated_sibling_errors_are_not()
                 raise ValueError("Pair must differ")
             return self
 
-    form = adapter.Form(LogicalCfg, {}, extras=RootError, lower=lambda extras, cfg: cfg)
-    input = FormInput(form.model, {"extras": {"first": 2, "second": 2}})
-    observation = form.read_logical_field(input, ("extras", "first"), FormEnv())
-    assert observation.errors is not None and ("extras",) in observation.errors.messages
+    class Sections(FormModel):
+        details: RootError
+
+    form = adapter.Form(LogicalCfg, {})
+    input_model = specialize_input(form, Sections)
+    input = FormInput(input_model, {"details": {"first": 2, "second": 2}})
+    observation = form.read_logical_field(input, ("details", "first"), FormEnv())
+    assert (
+        observation.errors is not None and ("details",) in observation.errors.messages
+    )
 
 
 def test_ref_source_with_missing_child_key_does_not_block_scalar_or_fallback() -> None:
@@ -453,19 +458,20 @@ def test_source_admission_reports_consuming_edit_not_later_batch_item() -> None:
             if data.get("name") == "missing":
                 raise field_error(("name",), "Missing synthetic source")
 
-    form = adapter.Form(LogicalCfg, {}, extras=Consumer, lower=lambda extras, cfg: cfg)
-    input = form.default_input(FormEnv())
+    form = adapter.Form(LogicalCfg, {})
+    input_model = specialize_input(form, Consumer)
+    input = input_model.default_input(FormEnv())
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_logical_edits(
             input,
             [
-                adapter.LogicalEdit(("extras", "name"), "missing"),
+                adapter.LogicalEdit(("name",), "missing"),
                 adapter.LogicalEdit(("reps",), 12),
             ],
             FormEnv(),
         )
     assert failure.value.reason_code == "form_source"
-    assert failure.value.edit_index == 0 and failure.value.path == ("extras", "name")
+    assert failure.value.edit_index == 0 and failure.value.path == ("name",)
     assert input.data["reps"] == 1
 
 
@@ -475,19 +481,18 @@ def test_missing_null_and_failed_scalar_values_have_distinct_statuses() -> None:
         explicit: int | None = None
         invalid: int = 1
 
-    form = adapter.Form(LogicalCfg, {}, extras=Values, lower=lambda extras, cfg: cfg)
-    input = FormInput(
-        form.model, {"extras": {"explicit": None, "invalid": {"expr": "1 / 0"}}}
-    )
-    missing = form.read_logical_field(input, ("extras", "missing"), FormEnv())
+    form = adapter.Form(LogicalCfg, {})
+    input_model = specialize_input(form, Values)
+    input = FormInput(input_model, {"explicit": None, "invalid": {"expr": "1 / 0"}})
+    missing = form.read_logical_field(input, ("missing",), FormEnv())
     assert missing.value_status == "missing" and not missing.input_present
-    explicit = form.read_logical_field(input, ("extras", "explicit"), FormEnv())
+    explicit = form.read_logical_field(input, ("explicit",), FormEnv())
     assert (
         explicit.value_status == "available"
         and explicit.input_present
         and explicit.value is None
     )
-    failed = form.read_logical_field(input, ("extras", "invalid"), FormEnv())
+    failed = form.read_logical_field(input, ("invalid",), FormEnv())
     assert (
         failed.value_status == "unavailable"
         and failed.input_present
@@ -513,33 +518,34 @@ def test_ordinary_union_write_keeps_only_authored_raw_and_initial_active_structu
         branch_models = {("shape",): (Flat, Ramp)}
         shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
 
-    form = adapter.Form(LogicalCfg, {}, extras=Extras, lower=lambda extras, cfg: cfg)
+    form = adapter.Form(LogicalCfg, {})
+    input_model = specialize_input(form, Extras)
     input = FormInput(
-        form.model,
+        input_model,
         {
             "real": {"module": {"value": 2}},
-            "extras": {"shape": {"kind": "flat", "length": 9.0}},
+            "shape": {"kind": "flat", "length": 9.0},
         },
     )
     env = FormEnv()
     candidate = form.prepare_logical_edits(
         input,
-        [adapter.LogicalEdit(("extras", "shape"), {"kind": "ramp", "start": 3.0})],
+        [adapter.LogicalEdit(("shape",), {"kind": "ramp", "start": 3.0})],
         env,
     )
-    assert object_at(candidate.input.data, ("extras", "shape")) == {
+    assert object_at(candidate.input.data, ("shape",)) == {
         "kind": "ramp",
         "start": 3.0,
     }
     result = FormState(candidate.input).result(env)
     assert isinstance(result, FormModel)
-    assert result.model_dump()["extras"]["shape"]["stop"] == 1.0
+    assert result.model_dump()["shape"]["stop"] == 1.0
     with pytest.raises(adapter.LogicalEditError) as failure:
         form.prepare_logical_edits(
             input,
             [
                 adapter.LogicalEdit(("reps",), 8),
-                adapter.LogicalEdit(("extras", "shape", "start"), 3),
+                adapter.LogicalEdit(("shape", "start"), 3),
             ],
             env,
         )
@@ -560,12 +566,15 @@ def test_ref_selector_observation_keeps_affecting_ancestor_failure() -> None:
     extras = create_model(
         "InvalidParent", __base__=Parent, reference=(field.annotation, ...)
     )
-    form = adapter.Form(LogicalCfg, {}, extras=extras, lower=lambda extras, cfg: cfg)
+    sections = create_model("Sections", __base__=FormModel, details=(extras, ...))
+    form = adapter.Form(LogicalCfg, {})
+    input_model = specialize_input(form, sections)
     input = FormInput(
-        form.model, {"extras": {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}}
+        input_model,
+        {"details": {"reference": {"kind": "ref", "name": "Q.pulses.drive"}}},
     )
-    observed = form.read_logical_field(input, ("extras", "reference"), captured())
-    assert observed.errors is not None and ("extras",) in observed.errors.messages
+    observed = form.read_logical_field(input, ("details", "reference"), captured())
+    assert observed.errors is not None and ("details",) in observed.errors.messages
 
 
 def test_logical_metadata_keeps_structural_tags_distinct_from_real_names() -> None:
@@ -597,10 +606,11 @@ def test_logical_metadata_keeps_structural_tags_distinct_from_real_names() -> No
     form = adapter.Form(
         WithSweep,
         {"sweep": Range(1.0, 2.0, expts=3)},
-        extras=Extras,
-        lower=lambda _extras, cfg: cfg,
     )
-    input = form.default_input(env)
+    input_model = specialize_input(form, Extras)
+    input = FormInput(
+        input_model, {**form.default_input(env).data, **Extras.default_input(env).data}
+    )
     sweep = form.read_logical_field(input, ("sweep",), env)
     assert tuple(child.name for child in sweep.description.children) == (
         "start",
@@ -609,20 +619,20 @@ def test_logical_metadata_keeps_structural_tags_distinct_from_real_names() -> No
     )
     tag = form.read_logical_field(input, ("sweep", "kind"), env)
     assert tag.description.target is not None and tag.description.target.hidden
-    ordinary = form.read_logical_field(input, ("extras", "ordinary"), env)
+    ordinary = form.read_logical_field(input, ("ordinary",), env)
     assert tuple(child.name for child in ordinary.description.children) == (
         "kind",
         "module",
     )
-    kind = form.read_logical_field(input, ("extras", "ordinary", "kind"), env)
+    kind = form.read_logical_field(input, ("ordinary", "kind"), env)
     assert kind.value == "authored"
     assert kind.description.target is not None and not kind.description.target.hidden
-    shape = form.read_logical_field(input, ("extras", "shape"), env)
+    shape = form.read_logical_field(input, ("shape",), env)
     assert shape.description.target is not None
     assert shape.description.target.kind == "model"
     assert not shape.description.target.selection_fixed
     assert tuple(child.name for child in shape.description.children) == ("amount",)
-    branch_tag = form.read_logical_field(input, ("extras", "shape", "kind"), env)
+    branch_tag = form.read_logical_field(input, ("shape", "kind"), env)
     assert (
         branch_tag.description.target is not None
         and branch_tag.description.target.hidden

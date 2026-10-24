@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -32,15 +32,22 @@ def soc_app(
 ) -> Iterator[tuple[LaunchedMeasureApp, Event, Event]]:
     entered, release = Event(), Event()
 
-    class HeldAdapter(SavingAdapter):
-        def run(
-            self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
-        ) -> RunRecord[SavingCfg, SavingResult]:
-            entered.set()
-            # The scenario releases the synthetic worker; teardown also releases on failure.
-            if not release.wait(30):
-                raise RuntimeError("scenario did not release synthetic run")
-            return super().run(req, cfg, context=context)
+    def HeldAdapter_run(
+        cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        entered.set()
+        if not release.wait(30):
+            raise RuntimeError("scenario did not release synthetic run")
+        return SavingAdapter.run(cfg, context=context)
+
+    HeldAdapter = Adapter(
+        spec=SavingAdapter.spec,
+        make_form=SavingAdapter.make_form,
+        run=HeldAdapter_run,
+        guide=None,
+        analysis=SavingAdapter.analysis,
+        post_analysis=SavingAdapter.post_analysis,
+    )
 
     registry = Registry()
     registry.register("held", HeldAdapter)

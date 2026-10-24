@@ -7,15 +7,15 @@ from typing import TypeVar
 
 from matplotlib.figure import Figure
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.resources.entry import ArtifactKey
 
 from ..axes_spec import AxesSpec, GroupedAxesSpec
-from ..cfg_model import ExpCfgModel
 from ..native_persistence import PreparedRunData, prepare_run_data
 from ..records import RunRecord
 from .analysis_document import AnalysisDocument
 
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
 
 

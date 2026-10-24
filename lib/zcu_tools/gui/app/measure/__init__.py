@@ -7,9 +7,12 @@ from zcu_tools.gui.app.measure.writeback import (
 )
 
 from .adapter import (
+    Adapter,
     AdapterGuide,
-    ExpAdapterProtocol,
+    Analysis,
+    Interactive,
     ParamMeta,
+    PostAnalysis,
     PostWritebackRequest,
     SessionEnv,
     reconstruct_params,
@@ -29,7 +32,10 @@ from .state import (
 
 __all__ = [
     "AdapterGuide",
-    "ExpAdapterProtocol",
+    "Adapter",
+    "Analysis",
+    "Interactive",
+    "PostAnalysis",
     "SessionEnv",
     "RunPaneState",
     "AnalysisPaneState",

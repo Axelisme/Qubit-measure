@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -19,6 +19,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Reset, SweepCfg
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
+from zcu_lab.v2.support import live_line
+
 
 @dataclass(frozen=True)
 class LengthResult:
@@ -28,19 +30,27 @@ class LengthResult:
     signals: NDArray[np.float64]
 
 
-class LengthModuleCfg(ConfigBase):
+class LengthCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class LengthSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
-
-
-class LengthCfg(ProgramExpCfg):
-    modules: LengthModuleCfg
-    sweep: LengthSweepCfg
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
@@ -69,7 +79,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=LengthResult,
         cfg_type=LengthCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/ro_optimize/length",
     )
 
@@ -93,17 +103,17 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Quantize integration windows on the ADC clock, not the generator clock.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg.modules
 
-        readout_cfg = modules.readout
+        readout_cfg = cfg.readout
         lengths = sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
             {"soccfg": soccfg, "ro_ch": readout_cfg.ro_ch},
         )
 
         # Display the score for each integration window, not averaged state IQ.
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Readout Length (us)",
             "SNR",
@@ -117,17 +127,21 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
-                modules = step.cfg.modules
-                modules.readout.set_param("ro_length", step.value)
-                modules.readout.set_param("length", lengths.max() + 0.11)
+                step.cfg.readout.set_param("ro_length", step.value)
+                step.cfg.readout.set_param("length", lengths.max() + 0.11)
                 tracker = MomentTracker()
 
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", cfg=modules.reset),
-                        Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                        PulseReadout("readout", cfg=modules.readout),
+                        Reset("reset", cfg=step.cfg.reset),
+                        Branch("ge", [], Pulse("qub_pulse", cfg=step.cfg.qub_pulse)),
+                        PulseReadout("readout", cfg=step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .build_and_acquire(
@@ -140,6 +154,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                         ),
                         trackers=[tracker],
                         **(acquire_kwargs or {}),
+                        rounds=cfg.rounds,
                     )
                 )
 

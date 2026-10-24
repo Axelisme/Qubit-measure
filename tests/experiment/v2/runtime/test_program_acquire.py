@@ -13,7 +13,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
-from zcu_tools.program.v2 import ProgramV2Cfg
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -46,13 +45,13 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
             assert sched.stop is not ctx.scope.stop, "Schedule must own its stop"
 
             class Program:
-                cfg_model = ProgramV2Cfg(rounds=3)
                 calls = 0
 
                 def acquire(
                     self,
                     soc: object,
                     *,
+                    rounds: int,
                     progress: bool,
                     round_hook: Callable[
                         [int, NDArray[np.float64], CancelFlagProtocol], object
@@ -69,7 +68,7 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
                         assert host.cancel("acquire").cancelled
                         raise StoppedPartialAcquireError("no completed round")
                     raw = np.array([np.nan])
-                    for ir in range(1, 4):
+                    for ir in range(1, rounds + 1):
                         if cancel_flag.is_set():
                             break
                         raw = np.array([float(ir)])
@@ -88,6 +87,7 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
                 results.append(
                     runner(
                         program,
+                        rounds=3,
                         raw2signal_fn=identity_array,
                         options=AcquireOptions(retry=3),
                     ).copy()
@@ -128,6 +128,7 @@ def test_stop_condition_completes_without_partial_or_scope_cancellation() -> Non
                 "soc", "soccfg", program_cls=FakeProgram, marker="kw"
             ).add(FakeModule("readout"))
             builder.build_and_acquire(
+                rounds=2,
                 raw2signal_fn=identity_array,
                 options=AcquireOptions(stop_condition=lambda: True),
             )
@@ -155,10 +156,13 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
     )
     with Schedule(_cfg(reps=4, rounds=2), signals_buffer, scope=Scope("run")) as sched:
         result = (
-            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
+            sched.prog_builder(
+                "soc", "soccfg", reps=4, program_cls=FakeProgram, marker="kw"
+            )
             .add(module)
             .declare_sweep("loop", 3)
             .build_and_acquire(
+                rounds=2,
                 raw2signal_fn=identity_array,
                 tag="x",
                 options=AcquireOptions(stop_condition=lambda: False),
@@ -181,8 +185,7 @@ def test_build_and_acquire_builds_program_and_updates_buffer():
     assert instance.sweep == [("loop", 3)]
     assert instance.marker == "kw"
     assert instance.reps == 4
-    assert instance.rounds == 2
-    assert instance.acquire_kwargs == {"tag": "x"}
+    assert instance.acquire_kwargs == {"tag": "x", "rounds": 2}
     assert instance.cancel_flag_seen is True
 
 
@@ -200,9 +203,10 @@ def test_program_builder_progress_leave_defaults_root_and_can_be_overridden():
                 marker="kw",
             ).add(FakeModule("readout"))
             if progress_leave is None:
-                builder.build_and_acquire(raw2signal_fn=identity_array)
+                builder.build_and_acquire(rounds=2, raw2signal_fn=identity_array)
             else:
                 builder.build_and_acquire(
+                    rounds=2,
                     raw2signal_fn=identity_array,
                     options=AcquireOptions(progress_leave=progress_leave),
                 )
@@ -230,6 +234,7 @@ def test_step_program_progress_closes_with_default_or_explicit_leave(
             step.prog_builder(
                 "soc", "soccfg", program_cls=FakeProgram, marker="kw"
             ).add(FakeModule("readout")).build_and_acquire(
+                rounds=2,
                 raw2signal_fn=identity_array,
                 options=AcquireOptions(progress_leave=progress_leave),
             )
@@ -257,6 +262,7 @@ def test_run_program_reuses_caller_owned_program_cache():
                 "soc",
                 "soccfg",
                 program_cls=FakeCachedProgram,
+                value=step.cfg.value,
             ).add(FakeModule("readout"))
             if value not in programs:
                 program = builder.build()
@@ -289,6 +295,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
             sched.prog_builder("soc", "soccfg", program_cls=FakeDecimatedProgram)
             .add(FakeModule("readout"))
             .build_and_acquire_decimated(
+                rounds=2,
                 tag="trace",
                 options=AcquireOptions(stop_condition=lambda: False),
             )
@@ -302,7 +309,7 @@ def test_build_and_acquire_decimated_uses_decimated_method_and_default_conversio
 
     assert len(FakeDecimatedProgram.instances) == 1
     instance = FakeDecimatedProgram.instances[0]
-    assert instance.acquire_decimated_kwargs == {"tag": "trace"}
+    assert instance.acquire_decimated_kwargs == {"tag": "trace", "rounds": 2}
     assert instance.cancel_flag_seen is True
 
 
@@ -327,7 +334,7 @@ def test_schedule_registers_program_derived_buffer_before_decimated_run():
             update_interval=None,
         )
         sched.register_buffer(signals_buffer)
-        result = builder.run_program_decimated(program)
+        result = builder.run_program_decimated(program, rounds=2)
 
     assert result is not None
     assert np.allclose(result, [2.0 + 0.0j, 0.0 + 2.0j])

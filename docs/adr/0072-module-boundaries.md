@@ -24,7 +24,7 @@ status: accepted
 | `device` | 各 pyvisa 儀器的定義與控制介面 | 實驗流程 |
 | `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括模擬板 | 參數與資產的保存 |
 | `analysis` | 分析工具 | 檔案讀寫；畫圖 |
-| `plotting` | 畫圖 | 分析計算 |
+| `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
 | `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
 | `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
@@ -38,6 +38,33 @@ status: accepted
 | `zcu_lab`（repo 根目錄） | 具體實驗、recipes 與其 gui、notebook 附件 | 離線遷移的對照與宣告（放 `migrations/`） |
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
+
+### 實驗計算與 GUI 接線
+
+core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
+分析計算包含擬合、逐 tone 迴圈、失敗隔離與結果型別。
+GUI 為 writeback 決策做的有限值檢查與摘要整理不算分析計算。
+使用者於 2026-10-24 裁決：「怎麼會有分析寫在gui ,這是違規吧」「分析修正可以做」。
+目前 mux/onetone 的逐 tone 計算仍在 gui.py，搬入 core 由獨立的分析層清理工作處理。
+此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
+
+### 即時圖工具與機制
+
+使用者於 2026-10-24 裁定：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」
+
+Lib 保留 Plots、FigureCollection、PlotHost 與通用 LiveUpdate。它們管理具名圖、複製更新資料、
+在 host owner 執行作者 callback、refresh，以及 finish／release 後拒絕更新。
+LiveUpdate 不決定資料格式，不反向 import lab。
+
+四個 live helpers、typed 工具 handle 與線圖、熱圖、非均勻熱圖、scatter 格式放在 lab
+共用支援套件的直接層。實驗作者可以直接修改或擴充，不另建 plotting 子套件。
+Singleshot 分類圖與 joint-fit 診斷圖歸 lab 的 singleshot 家族，分析計算不隨圖搬移。
+獨立 liveplot plotter／backend、reference marker 與動畫錄影退休。
+Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 工具。
+
+這個分工讓四個既有工具共用資料隔離、owner 與 lifetime 機制，而實驗格式仍可在 lab 修改。
+依賴方向是 lab → plotting；framework 不 import lab 由 import-linter C16 保護，
+能力層與使用者層的方向沿用 C8，core 不依賴 GUI 沿用 C15。
 
 ### 分層
 

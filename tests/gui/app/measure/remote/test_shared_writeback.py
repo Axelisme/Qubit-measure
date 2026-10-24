@@ -1,7 +1,10 @@
 """Sample proposals and original cause projection through existing wire methods."""
 
+from datetime import datetime
 from pathlib import Path
 
+import pytest
+from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
 from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot, TabSnapshot
@@ -12,6 +15,7 @@ from zcu_tools.gui.app.measure.writeback import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
@@ -55,9 +59,6 @@ class WritebackHarness:
     def has_tab(self, tab_id: str) -> bool:
         return tab_id == "tab"
 
-    def get_context_version(self) -> int:
-        return 1
-
     def get_session_env(self) -> SessionEnv:
         return self.context.get_session_env()
 
@@ -83,24 +84,6 @@ class WritebackHarness:
         self, tab_id: str, pane: str, *, session_id: str | None = None
     ):
         return self.service.preview_values(self.draft, session_id=session_id)
-
-    def set_writeback_item_for_pane(
-        self,
-        tab_id: str,
-        pane: str,
-        session_id: str,
-        *,
-        selected: bool | None = None,
-        target_name: str | None = None,
-    ):
-        return self.service.edit_draft(
-            self.draft, session_id, selected=selected, target_name=target_name
-        )
-
-    def apply_writeback_for_pane(
-        self, tab_id: str, pane: str, *, item_ids: tuple[str, ...] | None = None
-    ):
-        return self.service.apply_draft(self.draft, item_ids=item_ids)
 
     def write_writeback_for_pane(
         self, tab_id: str, pane: str, changes: tuple[WritebackEdit, ...]
@@ -135,12 +118,18 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
         ContextControlFacet(context=context), arb_names=lambda: ()
     )
     draft = service.create_draft(
-        [proposals.SampleWriteback("Q1", "sample", proposed_value={"t1_us": 20.09})],
+        [
+            proposals.SampleWriteback(
+                "Q1",
+                "sample",
+                proposed_value={"t1_us": 20.09},
+                coordinate_device="$flux_dev",
+            )
+        ],
         parameters=context.read_context(),
         experiment_name="test/t1",
         run_id="run-fixed",
         device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
-        sample_device_alias="$flux_dev",
     )
     entry.new_point("b")
     context.use_point(PointUseRequest("b"))
@@ -194,3 +183,170 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
         entry_id=entry.entry_id, point="b"
     )
     assert service.get_all_applied(draft) == {"sample-1": True}
+
+
+def test_sample_preview_selection_and_apply_use_run_device_snapshot(
+    tmp_path: Path,
+) -> None:
+    entry, context = context_at(tmp_path)
+    context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
+    capture = context.read_context()
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
+    draft = service.create_draft(
+        [
+            proposals.ParameterWriteback(
+                "general.description", "skip", proposed_value="unselected"
+            ),
+            proposals.SampleWriteback(
+                "Q1",
+                "sample",
+                proposed_value={"t1_us": 20.09},
+                coordinate_device="$flux_dev",
+            ),
+        ],
+        parameters=capture,
+        experiment_name="test/t1",
+        run_id="run-fixed",
+        device_snapshot={"bias_at_run": {"value": 0.00125, "value_unit": "A"}},
+    )
+    context.set_alias_rows((AliasRow("flux_dev", "later_device"),))
+    entry.new_point("b")
+    context.use_point(PointUseRequest("b"))
+    harness = WritebackHarness(context, service, draft)
+    params = {"tab_id": "tab", "subtab_id": "analysis"}
+    preview = dispatch_handler(harness, "tab.writeback_preview", params)
+    expected = {"t1_us": 20.09, "dev_value": 0.00125, "dev_unit": "A"}
+    expected_preview = [
+        {
+            "id": "param-1",
+            "kind": "parameter",
+            "target_name": "general.description",
+            "description": "skip",
+            "selected": True,
+            "proposed_value": "unselected",
+            "actual_path": "general.description",
+            "stderr": None,
+            "current": None,
+            "proposed": "unselected",
+        },
+        {
+            "id": "sample-1",
+            "kind": "sample",
+            "target_name": "Q1",
+            "description": "sample",
+            "selected": True,
+            "proposed_value": expected,
+            "actual_path": "Q1",
+            "stderr": None,
+            "current": None,
+            "proposed": expected,
+        },
+    ]
+    expected_preview = [row | {"note": None} for row in expected_preview]
+    assert preview["items"] == expected_preview
+    service.edit_draft(draft, "param-1", selected=False)
+    receipt = dispatch_handler(
+        harness, "tab.writeback_write", params | {"write": [{"id": "sample-1"}]}
+    )
+    written = TypeAdapter(list[dict[str, object]]).validate_python(receipt["written"])
+    assert [item["id"] for item in written] == ["sample-1"]
+    assert entry.use_point("a").description is None
+    row = entry.samples("Q1").read().iloc[0].to_dict()
+    event = entry.ledger.events()[-1]
+    assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
+    assert row == expected | {
+        "run_id": "run-fixed",
+        "point": "a",
+        "at": row["at"],
+        "source": event.id,
+    }
+    assert context.read_context().target == SavedPoint(
+        entry_id=entry.entry_id, point="b"
+    )
+    assert service.get_all_applied(draft) == {"param-1": False, "sample-1": True}
+    assert dispatch_handler(harness, "tab.writeback_preview", params)["items"] == [
+        expected_preview[0] | {"selected": False},
+        expected_preview[1] | {"current": row},
+    ]
+
+
+def test_preview_displays_adapter_note_and_current_manual_selection(
+    tmp_path: Path,
+) -> None:
+    _entry, context = context_at(tmp_path)
+    original = proposals.ParameterWriteback("general.ext.fit", "fit", 5.0)
+    original.selected = False
+    original.note = "Fit needs manual review"
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
+    draft = service.create_draft(
+        [original],
+        parameters=context.read_context(),
+        experiment_name="test/review",
+    )
+    harness = WritebackHarness(context, service, draft)
+    params = {"tab_id": "tab", "subtab_id": "analysis"}
+    preview = dispatch_handler(harness, "tab.writeback_preview", params)
+    rows = TypeAdapter(list[dict[str, object]]).validate_python(preview["items"])
+    assert rows[0]["selected"] is False
+    assert rows[0]["note"] == "Fit needs manual review"
+    service.edit_draft(draft, "param-1", selected=True)
+    selected = dispatch_handler(harness, "tab.writeback_preview", params)
+    assert selected["items"] == [rows[0] | {"selected": True}]
+    dispatch_handler(
+        harness, "tab.writeback_write", params | {"write": [{"id": "param-1"}]}
+    )
+    applied = dispatch_handler(harness, "tab.writeback_preview", params)
+    assert applied["items"] == [rows[0] | {"selected": True, "current": 5.0}]
+    assert not original.selected
+
+
+def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) -> None:
+    entry, context = context_at(tmp_path, rejecting=True)
+    service = WritebackService(
+        ContextControlFacet(context=context), arb_names=lambda: ()
+    )
+    draft = service.create_draft(
+        [
+            proposals.ParameterWriteback(
+                "general.description", "first", proposed_value="retained"
+            ),
+            proposals.ParameterWriteback(
+                "general.ext.rejected", "invalid", proposed_value=1
+            ),
+            proposals.ParameterWriteback("general.ext.later", "last", proposed_value=2),
+        ],
+        parameters=context.read_context(),
+        experiment_name="test/expected",
+    )
+    harness = WritebackHarness(context, service, draft)
+    before_description = entry.use_point("a").description
+    with pytest.raises(RemoteError) as caught:
+        dispatch_handler(
+            harness,
+            "tab.writeback_write",
+            {
+                "tab_id": "tab",
+                "subtab_id": "analysis",
+                "write": [{"id": f"param-{i}"} for i in (1, 2, 3)],
+            },
+        )
+    error = caught.value
+    assert (error.code, error.message, error.reason, error.data) == (
+        ErrorCode.INVALID_PARAMS,
+        "rejected fit",
+        "fit_rejected",
+        None,
+    )
+    assert service.get_all_applied(draft) == {
+        "param-1": False,
+        "param-2": False,
+        "param-3": False,
+    }
+    assert entry.use_point("a").description == before_description
+    assert not context.read_context().lookup("general.ext.rejected").present
+    assert not context.read_context().lookup("general.ext.later").present
+    assert entry.ledger.events()[-1].kind == "accepted"

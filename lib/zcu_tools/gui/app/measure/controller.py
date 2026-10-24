@@ -58,6 +58,7 @@ from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import library_key_kind
 
 from .adapter import AdapterGuide, SessionEnv
+from .adapter.hooks import InteractiveFrontendEnv
 from .events.completion import (
     AnalyzeFailedPayload,
     SaveArtifactsFinishedPayload,
@@ -81,7 +82,6 @@ from .services import (
 )
 from .services.results_index import ResultsIndex, scan_results
 from .state import State
-from .ui.interactive_frontend import InteractiveFrontend, InteractiveFrontendEnv
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
@@ -195,7 +195,7 @@ class RenderHost(Protocol):
     def mount_interactive_analysis(
         self,
         tab_id: str,
-        frontend_factory: Callable[[InteractiveFrontendEnv], InteractiveFrontend],
+        frontend_factory: Callable[[InteractiveFrontendEnv], object],
     ) -> None:
         """Mount one plugin frontend; the service retains its committed session."""
         ...

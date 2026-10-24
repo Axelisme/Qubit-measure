@@ -11,13 +11,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import (
     round_zcu_time,
     sweep2array,
 )
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    make_mock_soccfg,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, PulseCfg, make_mock_soccfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
@@ -107,7 +101,7 @@ def test_frequency_preview_matches_compiled_absolute_rf(mixer: float, reverse: b
             waveform=ConstWaveformCfg(length=0.25),
         ),
     )
-    prog = ModularProgramV2(soccfg, ProgramV2Cfg(), [pulse], sweep=[("freq", 5)])
+    prog = ModularProgramV2(soccfg, [pulse], sweep=[("freq", 5)])
     actual = sweep2array(
         sweep, "freq", {"soccfg": soccfg, "gen_ch": 0, "mixer_freq": mixer}
     )
@@ -131,7 +125,7 @@ def test_scalar_frequency_matches_compiler_signed_and_matched(freq, ro_ch):
         ),
         ro_ch=ro_ch,
     )
-    prog = ModularProgramV2(soccfg, ProgramV2Cfg(), [pulse])
+    prog = ModularProgramV2(soccfg, [pulse])
     expected = prog.get_pulse_param(pulse.pulse_id, "freq", as_array=False)
     assert round_zcu_freq(freq, soccfg, 0, ro_ch) == pytest.approx(
         expected, rel=0, abs=1e-10

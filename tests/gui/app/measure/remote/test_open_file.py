@@ -1,18 +1,11 @@
 """New-tab loading through the public GUI socket contract."""
 
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import replace
 
+import numpy as np
 import pytest
-from pydantic import TypeAdapter
-from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.metadata import CfgSnapshot
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
 )
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -20,50 +13,31 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 
+from tests.experiment._saving_support import SavingCfg
 from tests.gui.app.measure._load_support import historical_metadata, write_native_file
-from tests.gui.app.measure._reload_fakes import OldAdapter
+from tests.gui.app.measure._native_save_support import SavingAdapter
+from tests.gui.app.measure._record_support import require_record
 
 from ._helpers import Fixture, call, open_client, reset_inbox
 
 pytestmark = pytest.mark.uses_wall_clock
 
 
-class LoadedCfg(ExpCfgModel):
-    knob: int = 42
-
-
-@dataclass
-class LoadedResult:
-    gain: object
-
-
-class FileAdapter(OldAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        load_data=True, analysis=AnalysisMode.NONE
-    )
-
-    experiment_tag: ClassVar[str | None] = "test/load"
-
-    def restore(self, stored: Container):
-        gain = (
-            TypeAdapter(CfgSnapshot).validate_python(stored.docs["cfg"]).values["gain"]
-        )
-        cfg = None if gain == 2.0 else LoadedCfg()
-        return RestoredRun(
-            RunRecord(
-                cfg=cfg,
-                result=LoadedResult(gain),
-                metadata=metadata_from_container(stored),
-            ),
-            "cfg unavailable" if cfg is None else None,
-        )
+FileAdapter = Adapter(
+    spec=replace(SavingAdapter.spec, tag="test/load"),
+    make_form=SavingAdapter.make_form,
+    run=SavingAdapter.run,
+    guide=None,
+    analysis=None,
+    post_analysis=None,
+)
 
 
 @pytest.fixture
 def app(qapp, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     write_native_file(tmp_path / "saved.h5")
-    write_native_file(tmp_path / "no-cfg.h5", gain=2.0)
+    write_native_file(tmp_path / "no-cfg.h5", gain=2.0, cfg_schema_version="2.0")
     write_native_file(tmp_path / "bad.h5", tag="wrong/experiment")
     fx = Fixture(empty_project=True, project_root=str(tmp_path))
     fx.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
@@ -92,11 +66,13 @@ def test_open_file_loads_without_soc_with_result(app, path):
     assert tab != previous
     assert fx.state.active_tab_id == tab
     assert fx.state.session_env.soc is None
-    assert fx.state.get_tab(tab).run.result == RunRecord(
-        cfg=None if path == "no-cfg.h5" else LoadedCfg(),
-        result=LoadedResult(2.0 if path == "no-cfg.h5" else 1.0),
-        metadata=historical_metadata(),
+    record = require_record(fx.state.get_tab(tab).run)
+    assert record.cfg == (None if path == "no-cfg.h5" else SavingCfg())
+    gain = 2.0 if path == "no-cfg.h5" else 1.0
+    np.testing.assert_array_equal(
+        record.result.signal, np.array([1 + 2j, 3 - 4j, 5 + 6j]) * gain
     )
+    assert record.metadata == historical_metadata()
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None
     assert snapshot["result_state"]["available"] is True

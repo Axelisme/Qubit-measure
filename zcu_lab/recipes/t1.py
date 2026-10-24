@@ -96,11 +96,11 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.pi_pulse", inputs.pi_ref)
-    tab.set("sweep.length.stop", inputs.max_delay_us)
-    tab.set("sweep.length.n", inputs.points)
+    tab.select("reset", inputs.use_reset)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("pi_pulse", inputs.pi_ref)
+    tab.set("length.stop", inputs.max_delay_us)
+    tab.set("length.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

@@ -13,6 +13,7 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
+from zcu_lab.v2.support import live_line
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 
 
@@ -29,30 +30,31 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
     occurs, and cfg remains unchanged.
     """
     cfg = deepcopy(cfg)
-    if cfg.modules.init_pulse is None:
+    if cfg.init_pulse is None:
         raise ValueError("MIST acquisition requires a calibrated pi preparation")
     soc, soccfg = context.soc, context.soccfg
     gains = sweep2array(
-        cfg.sweep.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.modules.probe_pulse.ch}
+        cfg.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch}
     )
-    plot = context.plots.liveplot_1d("mist/gain", "MIST gain (a.u.)", "MIST")
+    plot = live_line(context.plots, "mist/gain", "MIST gain (a.u.)", "MIST")
     buffer = SignalBuffer(
         (len(gains),),
         on_update=lambda samples: plot.update(gains, mist_signal2real(samples)),
     )
     with Schedule(cfg, buffer, scope=context.scope) as sched:
-        modules = sched.cfg.modules
-        gain_sweep = sched.cfg.sweep.gain
-        modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+        gain_sweep = sched.cfg.gain
+        sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
         (
-            sched.prog_builder(soc, soccfg)
+            sched.prog_builder(
+                soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+            )
             .add(
-                Reset("reset", modules.reset),
-                Pulse("pi_pulse", modules.init_pulse),
-                Pulse("mist_pulse", modules.probe_pulse),
-                Readout("readout", modules.readout),
+                Reset("reset", sched.cfg.reset),
+                Pulse("pi_pulse", sched.cfg.init_pulse),
+                Pulse("mist_pulse", sched.cfg.probe_pulse),
+                Readout("readout", sched.cfg.readout),
             )
             .declare_sweep("gain", gain_sweep)
-            .build_and_acquire()
+            .build_and_acquire(rounds=cfg.rounds)
         )
     return PowerDepResult(gains, buffer.array)

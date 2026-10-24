@@ -246,20 +246,32 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
 
     @overload
     def acquire(
-        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[False] = False,
+        **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
     @overload
     def acquire(
-        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[True],
+        **kwargs: object,
     ) -> None: ...
 
     @overload
     def acquire(
-        self, soc: object, *args, **kwargs
+        self, soc: object, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None: ...
 
-    def acquire(self, soc, *args, **kwargs) -> list[NDArray[np.float64]] | None:
+    def acquire(
+        self, soc, *args, rounds: int = 1, **kwargs
+    ) -> list[NDArray[np.float64]] | None:
         """Return averaged IQ for omitted/False step_rounds.
 
         True prepares hardware and returns None; SimulationSoc raises ValueError
@@ -268,27 +280,37 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):
-            return super().acquire(soc, *args, **kwargs)
+            return super().acquire(soc, *args, rounds=rounds, **kwargs)
         with self._simulation_call(soc, "integrated", kwargs):
-            return super().acquire(soc, *args, **kwargs)
+            return super().acquire(soc, *args, rounds=rounds, **kwargs)
 
     @overload
     def acquire_decimated(
-        self, soc: object, *, step_rounds: Literal[False] = False, **kwargs: object
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[False] = False,
+        **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
     @overload
     def acquire_decimated(
-        self, soc: object, *, step_rounds: Literal[True], **kwargs: object
+        self,
+        soc: object,
+        *,
+        rounds: int = 1,
+        step_rounds: Literal[True],
+        **kwargs: object,
     ) -> None: ...
 
     @overload
     def acquire_decimated(
-        self, soc: object, *args, **kwargs
+        self, soc: object, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None: ...
 
     def acquire_decimated(
-        self, soc, *args, **kwargs
+        self, soc, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None:
         """Return decimated IQ for omitted/False step_rounds.
 
@@ -298,10 +320,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):
-            return super().acquire_decimated(soc, *args, **kwargs)
+            return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
         with self._simulation_call(soc, "decimated", kwargs):
             self._simulation_raw = None
-            return super().acquire_decimated(soc, *args, **kwargs)
+            return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
 
     def _simulation_call(self, soc, mode, kwargs):
         from contextlib import contextmanager

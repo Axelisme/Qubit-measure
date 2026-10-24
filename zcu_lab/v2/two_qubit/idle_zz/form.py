@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Range, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
@@ -28,7 +28,11 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
         IdleZZCfg,
         field_order=(
             "roles",
-            "modules",
+            "x180_f1",
+            "x180_f2",
+            "x90_f1",
+            "x90_f2",
+            "readout",
             "target",
             "dc_device",
             "dc_unit",
@@ -44,13 +48,11 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": roles,
-            "modules": {
-                "x180_f1": Slot("$f1.module.x180", copy=True),
-                "x180_f2": Slot("$f2.module.x180", copy=True),
-                "x90_f1": Slot("$f1.module.x90", copy=True),
-                "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": readout,
-            },
+            "x180_f1": Slot("$f1.module.x180", copy=True),
+            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "x90_f1": Slot("$f1.module.x90", copy=True),
+            "x90_f2": Slot("$f2.module.x90", copy=True),
+            "readout": readout,
             "detune": None,
             "delay": Range(0, 10, expts=101),
             "dc_device": None,

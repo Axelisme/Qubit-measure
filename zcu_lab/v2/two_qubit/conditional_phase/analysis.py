@@ -123,7 +123,7 @@ def _source_quadratures(
     nf, nn, nt, ns = (
         len(frequencies),
         len(cfg.gate_counts),
-        len(cfg.modules.readout.tones),
+        len(cfg.readout.tones),
         cfg.rounds * cfg.reps,
     )
     if data.frequencies.shape != frequencies.shape or not np.allclose(
@@ -209,7 +209,7 @@ def _plot_phase(
         answer.frequency_reason
         or f"n=1 unique crossing: {answer.frequency_mhz:g} MHz; higher n diagnostic only"
     )
-    for tone, readout in enumerate(cfg.modules.readout.tones):
+    for tone, readout in enumerate(cfg.readout.tones):
         fig, _ = plots.subplots(
             f"quadratures_tone_{tone}",
             nrows=2,

@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import TypeAdapter
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import ModuleCfg, ModuleCfgFactory, readout
 from zcu_tools.program.v2.modules.base import Module
@@ -209,7 +208,7 @@ def test_collect_iq_uses_current_declarations_and_read_index(unrelated_first):
         if unrelated_first
         else [module, UnrelatedReadout()]
     )
-    prog = ModularProgramV2(mux_soccfg(), ProgramV2Cfg(), modules)
+    prog = ModularProgramV2(mux_soccfg(), modules)
     selected = {
         4: np.arange(24, dtype=np.float64).reshape(2, 2, 3, 2),
         1: 100 + np.arange(24, dtype=np.float64).reshape(2, 2, 3, 2),
@@ -308,9 +307,9 @@ def raw_buffer_program(preparations=4):
     repeated = Repeat("reads", 2).add_content(module)
     prog = RawBufferProgram(
         mux_soccfg(),
-        ProgramV2Cfg(reps=3),
         [UnrelatedReadout(), repeated],
         sweep=[("preparation", preparations), ("point", 2)],
+        reps=3,
     )
     # QICK counts a trigger macro once even when Repeat executes it twice.
     prog.set_reads_per_shot(2)

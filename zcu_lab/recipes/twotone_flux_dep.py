@@ -91,7 +91,7 @@ async def twotone_flux_dep(
     the user pick half- and integer-flux lines to estimate flux calibration.
     Ask before applying it, then save the raw map and analysis.
 
-    freq_points → sweep.freq.expts; flux_points → sweep.flux.expts.
+    freq_points → freq.expts; flux_points → flux.expts.
     Analysis uses the captured GUI parameters; no fit controls are added.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
@@ -100,12 +100,12 @@ async def twotone_flux_dep(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("readout", inputs.readout_ref)
     if not isinstance(inputs.gain, Keep):
-        tab.command("modules.qub_pulse", "to_inline")
-    tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
-    tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
-    tab.set("sweep.freq.n", inputs.freq_points)
+        tab.command("qub_pulse", "to_inline")
+    tab.set("freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+    tab.set("freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("freq.n", inputs.freq_points)
     unit = session.device_unit(inputs.flux_device)
     if not unit.strip() or unit == "none" or unit != inputs.flux_unit:
         raise GuiRpcError(
@@ -116,10 +116,10 @@ async def twotone_flux_dep(
     tab.set("flux_unit", unit)
     if inputs.flux_range[0] == inputs.flux_range[1]:
         raise ValueError("flux endpoints must be distinct")
-    tab.set("sweep.flux.start", inputs.flux_range[0])
-    tab.set("sweep.flux.stop", inputs.flux_range[1])
-    tab.set("sweep.flux.n", inputs.flux_points)
-    tab.set("modules.qub_pulse.gain", inputs.gain)
+    tab.set("flux.start", inputs.flux_range[0])
+    tab.set("flux.stop", inputs.flux_range[1])
+    tab.set("flux.n", inputs.flux_points)
+    tab.set("qub_pulse.gain", inputs.gain)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

@@ -16,12 +16,16 @@ from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter, Interactive
 from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
 from zcu_tools.gui.app.measure.flux_pick_plugin import (
     make_flux_pick_plugin,
     render_flux_pick,
 )
-from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
+from zcu_tools.gui.app.measure.interactive_flux_pick import (
+    FluxPickParams,
+    FluxPickResult,
+)
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -29,6 +33,9 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.sweep import SweepCfg
 
 from tests.gui.app.measure._flux_adapter import (
+    SpectrumAdapter,
+    SpectrumAdapter_make_interactive_frontend,
+    SpectrumAdapter_make_interactive_plugin,
     SpectrumCfg,
     SpectrumCore,
     SpectrumResult,
@@ -49,7 +56,25 @@ class DeferredBackground:
 class InteractiveFixture(Fixture):
     def __init__(self, *, project_root: str) -> None:
         super().__init__(active_label="interactive-test", project_root=project_root)
-        self.widgets: list[FluxPickFrontend] = []
+        self.widgets: list[FluxPickFrontend[FluxPickResult]] = []
+        self.registry.register(
+            "synthetic/interactive",
+            Adapter(
+                spec=SpectrumAdapter.spec,
+                make_form=SpectrumAdapter.make_form,
+                run=SpectrumAdapter.run,
+                guide=None,
+                analysis=Interactive(
+                    plugin=lambda req, *, plots: (
+                        SpectrumAdapter_make_interactive_plugin(
+                            replace(req, parameters=None), plots=plots
+                        )
+                    ),
+                    frontend=SpectrumAdapter_make_interactive_frontend,
+                    options=lambda source, env: FluxPickParams(),
+                ),
+            ),
+        )
 
 
 def load_native_spectrum(
@@ -134,12 +159,18 @@ def start_mounted(
 
 
 def start_interactive(fx, *, background=None):
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.new_tab("synthetic/interactive")
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
+    fx.state.update_tab_result(
+        tab_id,
+        RunRecord(
+            None, SpectrumResult(devs, freqs, np.asarray(signals, dtype=np.complex128))
+        ),
+        parameters=fx.ctrl.context_control.read_context(),
+    )
     plots = Plots(NonPresentingHost())
-    analyze_params = FluxPickParams()
     plugin = make_flux_pick_plugin(
         FluxPickInputs(np.asarray(signals, dtype=np.complex128), devs, freqs),
         force_magnitude=True,
@@ -147,13 +178,13 @@ def start_interactive(fx, *, background=None):
         result_builder=render_flux_pick,
     )
     plugin.bind_background(background or fx.ctrl.run_background)
-    # Set up a real AnalyzeService operation; RPC interactions below always go
-    # through the shipped socket and RunAnalyzeControlFacet, not a handler stub.
+    # Keep the public AnalyzeService seam for explicit background injection.
+    # Mounted host/facet pairing is exercised by start_mounted instead.
     token = fx.ctrl._analyze_svc.start_plugin(
         tab_id,
         plugin,
         QtOwnerScheduler(),
-        analyze_params_instance=analyze_params,
+        analyze_params_instance=FluxPickParams(),
         plots=plots,
     )
     fx.view.interactive_presentation.return_value = None
@@ -175,7 +206,7 @@ def interact(
     return rpc(sock, "tab.interact", args)
 
 
-def button(widget: FluxPickFrontend, name: str) -> QPushButton:
+def button(widget: FluxPickFrontend[FluxPickResult], name: str) -> QPushButton:
     return next(
         button for button in widget.findChildren(QPushButton) if button.text() == name
     )

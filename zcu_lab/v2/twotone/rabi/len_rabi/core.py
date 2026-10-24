@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -17,6 +17,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
+
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
@@ -46,20 +48,28 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class LenRabiSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
-
-
-class LenRabiModuleCfg(ConfigBase):
+class LenRabiCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class LenRabiCfg(ProgramExpCfg):
-    modules: LenRabiModuleCfg
-    sweep: LenRabiSweepCfg
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
 
 
 class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
@@ -71,7 +81,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/rabi_length",
     )
 
@@ -92,7 +102,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         Reject native arb with ValueError before preparing coordinates or plots:
         its asset-derived length cannot be swept by this experiment.
         """
-        if cfg.modules.qub_pulse.waveform.style == "arb":
+        if cfg.qub_pulse.waveform.style == "arb":
             raise ValueError(
                 "Len Rabi cannot sweep an arb waveform's asset-derived length. "
                 "Select a waveform with an editable length instead."
@@ -101,35 +111,38 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         # 1. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
         lengths = sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        if modules.qub_pulse.waveform.style in ["const", "flat_top"]:
-            viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Signal")
+        if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
+            viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
             signals_buffer = SignalBuffer(
                 (len(lengths),),
                 on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
             )
             with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                modules = sched.cfg.modules
-                length_sweep = sched.cfg.sweep.length
-                modules.qub_pulse.set_param(
+                length_sweep = sched.cfg.length
+                sched.cfg.qub_pulse.set_param(
                     "length", sweep2param("length", length_sweep)
                 )
 
                 # 2. Sweep length on the FPGA: reset -> init -> drive -> readout.
                 _ = (
-                    sched.prog_builder(soc, soccfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
+                    .add_reset("reset", sched.cfg.reset)
+                    .add_pulse("init_pulse", sched.cfg.init_pulse)
+                    .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
+                    .add_readout("readout", sched.cfg.readout)
                     .declare_sweep("length", length_sweep)
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
             # 3. The program acquisition supplies the completed-round mean IQ.
@@ -149,7 +162,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
             return mean_signals
 
-        viewer = context.plots.liveplot_1d("measurement", "Length (us)", "Signal")
+        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
         length_values = lengths.tolist()
         signals_buffer = SignalBuffer(
             (rounds, len(lengths)),
@@ -160,21 +173,25 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for length, step in rep.scan("length", length_values):
-                    modules = step.cfg.modules
-                    modules.qub_pulse.set_param("length", length)
+                    step.cfg.qub_pulse.set_param("length", length)
 
                     # 3. Reset -> init -> shaped drive -> readout at this length.
                     builder = (
-                        step.prog_builder(soc, soccfg)
-                        .add_reset("reset", modules.reset)
-                        .add_pulse("init_pulse", modules.init_pulse)
-                        .add_pulse("qubit_pulse", modules.qub_pulse)
-                        .add_readout("readout", modules.readout)
+                        step.prog_builder(
+                            soc,
+                            soccfg,
+                            reps=step.cfg.reps,
+                            relax_delay=step.cfg.relax_delay,
+                        )
+                        .add_reset("reset", step.cfg.reset)
+                        .add_pulse("init_pulse", step.cfg.init_pulse)
+                        .add_pulse("qubit_pulse", step.cfg.qub_pulse)
+                        .add_readout("readout", step.cfg.readout)
                     )
                     length_key = float(length)
                     if length_key not in programs:
                         programs[length_key] = builder.build()
-                    _ = builder.run_program(programs[length_key])
+                    _ = builder.run_program(programs[length_key], rounds=cfg.rounds)
 
         # 4. Average available rounds per length, keeping partial scans and NaNs.
         return LenRabiResult(

@@ -8,6 +8,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import sweep2param
 
+from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
 
 
@@ -24,11 +25,12 @@ def run_qubit_freq(cfg: FreqCfg, *, context: RunContext) -> FreqResult:
     cfg = deepcopy(cfg)
     soc, soccfg = context.soc, context.soccfg
     freqs = sweep2array(
-        cfg.sweep.freq,
+        cfg.freq,
         "freq",
-        {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
+        {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
     )
-    plot = context.plots.liveplot_1d(
+    plot = live_line(
+        context.plots,
         "measurement",
         "Frequency (MHz)",
         "Signal",
@@ -42,17 +44,18 @@ def run_qubit_freq(cfg: FreqCfg, *, context: RunContext) -> FreqResult:
     )
     # Keep initialization: the standard core frequency sequence omits it.
     with Schedule(cfg, buffer, scope=context.scope) as sched:
-        modules = sched.cfg.modules
-        freq_sweep = sched.cfg.sweep.freq
-        modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+        freq_sweep = sched.cfg.freq
+        sched.cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
         (
-            sched.prog_builder(soc, soccfg)
-            .add_reset("reset", modules.reset)
-            .add_pulse("init_pulse", modules.init_pulse)
-            .add_pulse("qub_pulse", modules.qub_pulse)
-            .add_readout("readout", modules.readout)
+            sched.prog_builder(
+                soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+            )
+            .add_reset("reset", sched.cfg.reset)
+            .add_pulse("init_pulse", sched.cfg.init_pulse)
+            .add_pulse("qub_pulse", sched.cfg.qub_pulse)
+            .add_readout("readout", sched.cfg.readout)
             .declare_sweep("freq", freq_sweep)
-            .build_and_acquire()
+            .build_and_acquire(rounds=cfg.rounds)
         )
 
     return FreqResult(freqs=freqs, signals=buffer.array)

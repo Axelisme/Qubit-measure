@@ -14,8 +14,8 @@ all active qubits in the same two programs. It does not simulate each qubit
 separately or assemble unrelated shots. This core has no Form, catalog entry,
 recipe or calibration proposals.
 
-`MuxGECfg.modules` contains the common optional reset and the complete ordered
-mux readout. `tones: list[MuxGEToneCfg]` has one element per full readout tone.
+`MuxGECfg.reset` is the common optional reset. `MuxGECfg.readout` is the
+complete ordered mux readout. `tones: list[MuxGEToneCfg]` has one element per full readout tone.
 Each element contains fixed `name`, required probe `drive`, and optional `init_pulse`.
 All drives must be valid. All generators must be independent and
 must differ from the readout generator. An initial pulse uses its tone's drive
@@ -30,13 +30,11 @@ modules own MHz/us/degree/gain conversion and hardware quantization. The initial
 pulse runs in both preparations; it is not an analysis initial-state option.
 
 `shots` is the number of raw shots in each preparation. As in single-qubit GE,
-run copies cfg and forces `rounds=1` and `reps=shots`. It warns when requested
-rounds differs from one or requested reps differs from one. Caller cfg is not
-changed. `RunRecord.cfg` retains the original requested controls, including those
-warnings' inputs. The acquired result always represents one round per
-preparation, with its actual shot count on `shot_indices`. It does not claim to
-retain multiple requested rounds. The underlying raw getter retains only its
-last round; forcing one round here avoids silently dropping earlier rounds.
+run copies cfg and explicitly passes `reps=shots` to the builder and `rounds=1`
+to acquisition. These derived counts are not experiment inputs. Caller cfg is
+not changed. The acquired result represents one round per preparation, with its
+actual shot count on `shot_indices`. The underlying raw getter retains only its
+last round; using one round avoids silently dropping earlier rounds.
 
 The program-owned `MuxReadout.collect_raw_iq(prog, read_index=0)` reads the
 initialized module of that same acquire. It selects the same read on every tone,
@@ -180,29 +178,28 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
-from zcu_tools.cfg_model import FieldMeta
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveform,
     FlatTopWaveform,
     Join,
     MuxReadout,
+    MuxReadoutCfg,
     Pulse,
 )
 
-from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import (
-    MuxDriveModuleCfg,
+from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     require_tone_value,
     validate_participants,
 )
-from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
+from zcu_lab.v2.support.singleshot.plot import draw_ge_scatter
 
 from .analysis import (
     MuxGEAnalysis,
@@ -248,10 +245,10 @@ class MuxGEToneCfg(MuxDriveToneCfg):
         return self
 
 
-class MuxGECfg(ExpCfgModel):
+class MuxGECfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules holds optional reset and complete mux readout. tones contains one
+    reset and readout hold the common modules. tones contains one
     MuxGEToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
@@ -277,7 +274,8 @@ class MuxGECfg(ExpCfgModel):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    modules: MuxDriveModuleCfg
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
     shots: StrictInt
@@ -294,7 +292,7 @@ class MuxGECfg(ExpCfgModel):
             raise ValueError(
                 "initial_delay and relax_delay must be finite nonnegative us"
             )
-        if len(self.tones) != len(self.modules.readout.tones):
+        if len(self.tones) != len(self.readout.tones):
             raise ValueError("tones must match the complete readout tone count")
         validate_participants([tone.name for tone in self.tones], self.participants)
         channels: set[int] = set()
@@ -304,7 +302,7 @@ class MuxGECfg(ExpCfgModel):
             tone.validate_pulses()
             if (
                 tone.require_drive().ch in channels
-                or tone.require_drive().ch == self.modules.readout.gen_ch
+                or tone.require_drive().ch == self.readout.gen_ch
             ):
                 raise ValueError(
                     f"tones[{index}].drive requires an independent generator"
@@ -448,7 +446,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=MuxGEResult,
         cfg_type=MuxGECfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="mux/singleshot/ge",
     )
 
@@ -467,16 +465,10 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         """
         # 1. Use one raw-shot round and preserve the requested participant order.
         cfg = MuxGECfg.model_validate(config.model_dump())
-        program_cfg = ProgramV2Cfg(
-            reps=cfg.shots,
-            rounds=1,
-            initial_delay=cfg.initial_delay,
-            relax_delay=cfg.relax_delay,
-        )
 
         indices = list(cfg.participants)
-        readout = cfg.modules.readout.with_updates(
-            tones=[cfg.modules.readout.tones[i] for i in indices]
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
         )
         shots = np.arange(cfg.shots, dtype=np.int64)
 
@@ -506,13 +498,21 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                     for i in indices
                 ]
                 builder = (
-                    step.prog_builder(context.soc, context.soccfg, cfg=program_cfg)
-                    .add_reset("reset", cfg.modules.reset)
+                    step.prog_builder(
+                        context.soc,
+                        context.soccfg,
+                        reps=cfg.shots,
+                        initial_delay=cfg.initial_delay,
+                        relax_delay=cfg.relax_delay,
+                    )
+                    .add_reset("reset", cfg.reset)
                     .add(Join(*branches), MuxReadout("readout", readout))
                 )
                 prog = builder.build()
                 # Read normalized shots from this program's initialized readout.
-                _ = builder.run_program(prog, raw2signal_fn=partial(_raw_signal, prog))
+                _ = builder.run_program(
+                    prog, raw2signal_fn=partial(_raw_signal, prog), rounds=1
+                )
 
         # 4. Keep completed preparations in participant/preparation/shot order.
         buffer.trigger_update(flush=True)

@@ -18,13 +18,13 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
-from zcu_tools.plotting.plots import LinePlot, Plots
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
@@ -36,6 +36,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+
+from zcu_lab.v2.support import LinePlot, live_line
 
 
 def _default_initial_states() -> NDArray[np.int64]:
@@ -56,20 +58,28 @@ class T1Result:
     )
 
 
-class T1ModuleCfg(ConfigBase):
+class T1Cfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class T1SweepCfg(ConfigBase):
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
-
-
-class T1Cfg(ProgramExpCfg):
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
-    modules: T1ModuleCfg
-    sweep: T1SweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -99,7 +109,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=T1Result,
         cfg_type=T1Cfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/t1",
     )
 
@@ -115,7 +125,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         figure, _ = plots.subplots("measurement", ncols=2, figsize=(12, 5))
         ax_g, ax_e = figure.axes
         return (
-            plots.liveplot_1d(
+            live_line(
+                plots,
                 "measurement",
                 "Time (us)",
                 "Amplitude",
@@ -123,7 +134,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 configure_axes=configure_axes,
                 axes=ax_g,
             ),
-            plots.liveplot_1d(
+            live_line(
+                plots,
                 "measurement",
                 "Time (us)",
                 "Amplitude",
@@ -147,12 +159,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         soc, soccfg = context.soc, context.soccfg
         delay_table = None
         if cfg.uniform:
-            length_sweep = cfg.sweep.length
+            length_sweep = cfg.length
             assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
             lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         else:
             delay_table = materialize_nonuniform_t1_delays(
-                cfg.sweep.length,
+                cfg.length,
                 soccfg=soccfg,
             )
             lengths = delay_table.times_us
@@ -172,22 +184,26 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
-            modules = run_cfg.modules
 
             # 3. Sweep delay outside the I/pi branch, then read out each state.
             if delay_table is None:
-                inner_length_sweep = run_cfg.sweep.length
+                inner_length_sweep = run_cfg.length
                 assert isinstance(inner_length_sweep, SweepCfg), (
                     "uniform mode requires SweepCfg"
                 )
                 length_param = sweep2param("length", inner_length_sweep)
                 builder = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Reset("reset", run_cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
                         Delay("t1_delay", delay=length_param),
-                        Readout("readout", modules.readout),
+                        Readout("readout", run_cfg.readout),
                     )
                     .declare_sweep("length", inner_length_sweep)
                     .declare_sweep("ge", 2)
@@ -195,7 +211,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             else:
                 length_cycles = delay_table.cycles
                 builder = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add(
                         LoadValue(
                             "load_t1_delay",
@@ -204,10 +225,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                             val_reg="t1_delay_cycle",
                             auto_compress=False,
                         ),
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Reset("reset", run_cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
                         DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", modules.readout),
+                        Readout("readout", run_cfg.readout),
                     )
                     .declare_sweep("length_idx", len(length_cycles))
                     .declare_sweep("ge", 2)
@@ -219,6 +240,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 g_center=cfg.g_center,
                 e_center=cfg.e_center,
                 ge_radius=cfg.radius,
+                rounds=cfg.rounds,
             )
 
         return T1Result(lengths=lengths, signals=buffer.array)

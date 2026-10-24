@@ -9,13 +9,15 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg
+
+from zcu_lab.v2.support import live_line
 
 
 def _default_phase_values() -> NDArray[np.float64]:
@@ -39,20 +41,28 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     )  # (lengths, )
 
 
-class LengthModuleCfg(ConfigBase):
+class LengthCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class LengthSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
-
-
-class LengthCfg(ProgramExpCfg):
-    modules: LengthModuleCfg
-    sweep: LengthSweepCfg
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
@@ -64,7 +74,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=LengthResult,
         cfg_type=LengthCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/reset/bath/length",
     )
 
@@ -87,12 +97,11 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Prepare qubit-tone lengths while preserving the cavity-tone duration offset.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
         rounds = cfg.rounds  # round loop is driven by Schedule.repeat below
 
-        length_sweep = cfg.sweep.length
-        tested_reset = modules.tested_reset
+        length_sweep = cfg.length
+        tested_reset = cfg.tested_reset
         qub_lengths = sweep2array(
             length_sweep,
             "time",
@@ -117,9 +126,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             return mean_signals  # (lengths, 4)
 
         # Show tomography contrast, but retain phase-resolved IQ for round averaging.
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Length (us)", "Signal (a.u.)"
-        )
+        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal (a.u.)")
         buffer = SignalBuffer(
             (rounds, len(lengths), 4),
             on_update=lambda data: viewer.update(
@@ -133,8 +140,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             for _, rep in sched.repeat("rounds", rounds):
                 for length, step in rep.scan("length", length_values):
                     step.cfg.rounds = 1
-                    modules = step.cfg.modules
-                    tested_reset = modules.tested_reset
+                    tested_reset = step.cfg.tested_reset
                     tested_reset.set_param("qub_length", length)
                     tested_reset.set_param("res_length", length + length_diff)
                     tested_reset.set_param(
@@ -142,22 +148,27 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     )
 
                     cache_key = float(tested_reset.qubit_tone_cfg.waveform.length)
-                    builder = step.prog_builder(soc, soccfg)
+                    builder = step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     program = prog_cache.get(cache_key)
                     if program is None:
                         program = (
                             builder.add(
-                                Reset("reset", modules.reset),
-                                Pulse("init_pulse", modules.init_pulse),
+                                Reset("reset", step.cfg.reset),
+                                Pulse("init_pulse", step.cfg.init_pulse),
                                 BathReset("tested_reset", tested_reset),
-                                Readout("readout", modules.readout),
+                                Readout("readout", step.cfg.readout),
                             )
                             .declare_sweep("phase", 4)
                             .build()
                         )
                         prog_cache[cache_key] = program
 
-                    _ = builder.run_program(program)
+                    _ = builder.run_program(program, rounds=cfg.rounds)
         signals = average_signals(buffer.array)
 
         return LengthResult(

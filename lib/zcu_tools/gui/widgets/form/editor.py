@@ -65,6 +65,23 @@ def _shape(field: FieldView) -> tuple[object, ...]:
     )
 
 
+def _order_widgets(level: _Level, fields: tuple[FormFieldDescription, ...]) -> None:
+    """Place retained rows and groups at their visible declaration positions."""
+    placed_groups: set[str] = set()
+    index = 0
+    for item in fields:
+        if item.group is None:
+            widget = level.rows[item.path].widget
+        else:
+            if item.group in placed_groups:
+                continue
+            placed_groups.add(item.group)
+            widget = level.groups[item.group][0].widget
+        # A presentation change can move a retained row into or out of a group.
+        level.layout.insertWidget(index, widget)
+        index += 1
+
+
 def _completion_candidates(env: FormEnv) -> tuple[str, ...]:
     """Project sorted alias names and one component-field level once per capture.
 
@@ -193,15 +210,15 @@ class FormEditor[F: FormModel](QWidget):
     block of one Display group of the model level at <path>. It holds the
     level's fields of that group, in declaration order, under a header whose
     fold title form.fold.group.<path>.<group> (form.fold.group.<group> at the
-    root) shows the group name in the level's label column. Each level shows
-    its ungrouped rows first, then its group blocks in the order of each
-    group's first field. A group whose fields are all hidden has no block.
+    root) shows the group name in the level's label column. Rows retain their
+    declaration order, with each group block at its first visible member's
+    position. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
     shows a "Contains errors" note; a folded group stays folded.
-    Groups start folded. Sweep containers and their axes start open; a single
-    axis replaces its container row with a combined title and unchanged paths.
-    Modules start folded. Other model rows start folded unless their subtree
-    has errors on the editor's first publication. Saved user
+    Groups start folded except Sweep, whose member axes also start open. A
+    sole nonnullable expandable Sweep member uses a combined title and keeps
+    its canonical path, selector and commands. These hints use Display.group,
+    not field names. Model rows start folded unless their subtree has errors on the editor's first publication. Saved user
     folds take precedence, and later refreshes keep the established folds.
     Folds the user sets on groups and model rows survive rebuilds of this
     editor (option or activation changes), remembered by path.
@@ -345,7 +362,7 @@ class FormEditor[F: FormModel](QWidget):
         self._root_error.hide()
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
-        self._layout.addWidget(self._content)
+        self._layout.addWidget(self._content, stretch=1)
         content_layout = QVBoxLayout(self._content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(ROW_SPACING)
@@ -534,7 +551,7 @@ class FormEditor[F: FormModel](QWidget):
         *,
         redraw: bool,
     ) -> None:
-        shown = tuple(item for item in metadata if not item.hidden)
+        shown = present_fields(tuple(item for item in metadata if not item.hidden))
         ungrouped = tuple(item for item in shown if item.group is None)
         self._sync_rows(level, ungrouped, data, preview, redraw=redraw)
         grouped: dict[str, list[FormFieldDescription]] = {}
@@ -547,6 +564,7 @@ class FormEditor[F: FormModel](QWidget):
                 self._clear_level(body)
                 self._retire(block.widget)
         for name, members in grouped.items():
+            self._group_expanded.setdefault((level.path, name), name == "Sweep")
             if name not in level.groups:
                 block = GroupBlock(
                     level.path,
@@ -566,6 +584,7 @@ class FormEditor[F: FormModel](QWidget):
                 # Group membership is already in this layer's metadata. No
                 # model description is queried until its own body is expanded.
                 self._sync_rows(body, tuple(members), data, preview, redraw=redraw)
+        _order_widgets(level, shown)
         _align_labels(
             [row.label for row in level.rows.values()]
             + [block.label for block, _ in level.groups.values()]
@@ -580,10 +599,6 @@ class FormEditor[F: FormModel](QWidget):
         *,
         redraw: bool,
     ) -> None:
-        state = self._require_state()
-        metadata = present_fields(
-            metadata, lambda path: state.describe(path, self._require_env()).children
-        )
         wanted = {item.path for item in metadata}
         for path in tuple(level.rows):
             if path not in wanted:
@@ -616,10 +631,10 @@ class FormEditor[F: FormModel](QWidget):
                 row.connect_fold(self._fold_changed)
                 row.connect_pick(self._pick_changed)
                 level.rows[field.path] = row
-                level.layout.insertWidget(index, row.widget)
                 row.widget.show()
             # The new-row branch always assigns row.
             assert row is not None
+            level.layout.insertWidget(index, row.widget)
             if row.field.branch != field.branch:
                 child = level.children.pop(field.path, None)
                 if child is not None:
@@ -648,7 +663,6 @@ class FormEditor[F: FormModel](QWidget):
             not field.collapsed
             or (
                 self._publication_count == 0
-                and field.path[-1] != "modules"
                 and errors is not None
                 and any(
                     path[: len(field.path)] == field.path for path in errors.messages

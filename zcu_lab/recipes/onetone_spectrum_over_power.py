@@ -1,6 +1,6 @@
 """Resonator frequency/gain map with raw save and Run preview only.
 
-Recipe freq_points → sweep.freq.expts; gain_points → sweep.gain.expts.
+Recipe freq_points → freq.expts; gain_points → gain.expts.
 Both scan counts appear as Expts in the GUI.
 """
 
@@ -83,7 +83,7 @@ async def onetone_spectrum_over_power(
     resonance changes with drive amplitude. Save the raw map and capture its Run
     preview only; this survey performs no analysis or writeback.
 
-    freq_points → sweep.freq.expts; gain_points → sweep.gain.expts.
+    freq_points → freq.expts; gain_points → gain.expts.
     Analysis uses the captured GUI parameters; no fit controls are added.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
@@ -92,28 +92,28 @@ async def onetone_spectrum_over_power(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("readout", inputs.readout_ref)
     if isinstance(inputs.center_mhz, Keep) != isinstance(inputs.span_mhz, Keep):
         missing = "span_mhz" if isinstance(inputs.span_mhz, Keep) else "center_mhz"
         raise RecipeNeedsParameters(
             (MissingParameter(missing, "Supply center_mhz and span_mhz together"),)
         )
     if inputs.center_mhz is None or inputs.span_mhz is None:
-        tab.set("sweep.freq.start", None)
-        tab.set("sweep.freq.stop", None)
+        tab.set("freq.start", None)
+        tab.set("freq.stop", None)
     elif not isinstance(inputs.center_mhz, Keep) and not isinstance(
         inputs.span_mhz, Keep
     ):
-        tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
-        tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
-    tab.set("sweep.freq.n", inputs.freq_points)
+        tab.set("freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+        tab.set("freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("freq.n", inputs.freq_points)
     if inputs.gain_range is None:
-        tab.set("sweep.gain.start", None)
-        tab.set("sweep.gain.stop", None)
+        tab.set("gain.start", None)
+        tab.set("gain.stop", None)
     elif not isinstance(inputs.gain_range, Keep):
-        tab.set("sweep.gain.start", inputs.gain_range[0])
-        tab.set("sweep.gain.stop", inputs.gain_range[1])
-    tab.set("sweep.gain.n", inputs.gain_points)
+        tab.set("gain.start", inputs.gain_range[0])
+        tab.set("gain.stop", inputs.gain_range[1])
+    tab.set("gain.n", inputs.gain_points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

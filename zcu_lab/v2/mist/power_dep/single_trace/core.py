@@ -2,18 +2,20 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
@@ -39,20 +41,28 @@ class PowerDepAnalyzeOptions:
     ac_coeff: float | None = None
 
 
-class PowerDepModuleCfg(ConfigBase):
+class PowerDepCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Reset.Cfg | None = None
     init_pulse: Pulse.Cfg | None = None
     probe_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class PowerDepSweepCfg(ConfigBase):
     gain: SweepCfg
-
-
-class PowerDepCfg(ProgramExpCfg):
-    modules: PowerDepModuleCfg
-    sweep: PowerDepSweepCfg
 
 
 class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
@@ -63,7 +73,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="mist/gain",
     )
 
@@ -85,15 +95,14 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         # 1. Prepare gain coordinates for the probe's generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_1d("measurement", "Pulse gain", "MIST")
+        viewer = live_line(context.plots, "measurement", "Pulse gain", "MIST")
         signals_buffer = SignalBuffer(
             (len(gains),),
             on_update=lambda data: viewer.update(gains, mist_signal2real(data)),
@@ -101,22 +110,21 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         # 2. Bind the board gain sweep without changing the other probe settings.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.probe_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
+            sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
 
             # 3. Reset and initialize before each probe/readout sequence.
             _ = (
-                sched.prog_builder(soc, soccfg)
-                .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
-                .declare_sweep("gain", sched.cfg.sweep.gain)
-                .build_and_acquire()
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Pulse("probe_pulse", sched.cfg.probe_pulse),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("gain", sched.cfg.gain)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         # 4. Preserve complex IQ so analysis can choose its own reference.

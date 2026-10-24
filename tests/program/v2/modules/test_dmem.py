@@ -3,7 +3,6 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.ir.instructions import RegWriteInst
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -103,7 +102,10 @@ def test_compiled_lookup_recovers_every_slot_with_hardware_shift_width(
     modules = [LoadValue("padding", [31, 17, 9], "idx", "unused")] if padding else []
     modules.append(lookup)
     program = ModularProgramV2(
-        make_mock_soccfg(), ProgramV2Cfg(reps=1), modules, sweep=[("idx", len(values))]
+        make_mock_soccfg(),
+        modules,
+        sweep=[("idx", len(values))],
+        reps=1,
     )
     assert lookup.is_compressed
     assert [_execute_lookup_body(program, i) for i in range(len(values))] == values

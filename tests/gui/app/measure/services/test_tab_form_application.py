@@ -1,20 +1,16 @@
 """Measure composition uses one fixed form authority through Run and restoration."""
 
-from typing import ClassVar
+from dataclasses import dataclass
 
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
-    ExpAdapterProtocol,
-    RunRequest,
+    Adapter,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -24,32 +20,42 @@ from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
-class TraceCfg(ExpCfgModel):
+class TraceCfg(ConfigBase):
     """One concrete cfg field is both displayed and executed."""
 
     amount: float = 1.0
 
 
-class TraceAdapter(BaseAdapter[TraceCfg, RunRecord[TraceCfg, TraceCfg]]):
-    """Return accepted cfg without devices, acquisition or result persistence."""
+@dataclass
+class TraceResult:
+    value: TraceCfg
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TraceCfg]:
-        del ctx
-        return Form(TraceCfg, {"amount": Expr("general.ext.amount")})
 
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
-    )
+def TraceAdapter_make_form(ctx: FormContext) -> Form[TraceCfg]:
+    del ctx
+    return Form(TraceCfg, {"amount": Expr("general.ext.amount")})
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: TraceCfg,
-        *,
-        context: RunContext,
-    ) -> RunRecord[TraceCfg, TraceCfg]:
-        return RunRecord(cfg, cfg)
+
+def TraceAdapter_run(
+    cfg: TraceCfg, *, context: RunContext
+) -> RunRecord[TraceCfg, TraceResult]:
+    return RunRecord(cfg=cfg, result=TraceResult(cfg))
+
+
+TraceAdapter = Adapter(
+    spec=AxesSpec(
+        axes=(),
+        z=ZSpec("value", "data", ""),
+        result_type=TraceResult,
+        cfg_type=TraceCfg,
+        tag="test/TraceAdapter",
+    ),
+    make_form=TraceAdapter_make_form,
+    run=TraceAdapter_run,
+    guide=None,
+    analysis=None,
+    post_analysis=None,
+)
 
 
 class FactoryCfg(ConfigBase):
@@ -69,24 +75,34 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
     failure: str,
     command: str,
 ) -> None:
-    assert hasattr(ExpAdapterProtocol, "make_form"), (
-        "Missing adapter factory contract for Open/Reset"
-    )
     broken = True
 
-    class FactoryAdapter(BaseAdapter[FactoryCfg, FactoryCfg]):
-        capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-            analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
-        )
+    @dataclass
+    class FactoryResult:
+        value: float = 0.0
 
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[FactoryCfg]:
-            del ctx
-            if broken:
-                if failure == "factory":
-                    raise RuntimeError("factory source failed")
-                return Form(FactoryCfg, {"pulse": Template("missing")})
-            return Form(FactoryCfg, {"amount": 3.0})
+    def FactoryAdapter_make_form(ctx: FormContext) -> Form[FactoryCfg]:
+        del ctx
+        if broken:
+            if failure == "factory":
+                raise RuntimeError("factory source failed")
+            return Form(FactoryCfg, {"pulse": Template("missing")})
+        return Form(FactoryCfg, {"amount": 3.0})
+
+    FactoryAdapter = Adapter(
+        spec=AxesSpec(
+            axes=(),
+            z=ZSpec("value", "data", ""),
+            result_type=FactoryResult,
+            cfg_type=FactoryCfg,
+            tag="test/FactoryAdapter",
+        ),
+        make_form=FactoryAdapter_make_form,
+        run=lambda cfg, *, context: RunRecord(cfg=cfg, result=FactoryResult()),
+        guide=None,
+        analysis=None,
+        post_analysis=None,
+    )
 
     application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("factory", FactoryAdapter)
@@ -160,9 +176,9 @@ def test_open_edit_run_and_reset_use_public_form_authority(
             subscription.unsubscribe()
         assert finished, "Run must reach a terminal notification before timeout"
         assert not application.state.is_run_active()
-        assert require_record(application.state.get_tab(tab_id).run).result == TraceCfg(
-            amount=6.0
-        )
+        assert require_record(
+            application.state.get_tab(tab_id).run
+        ).result == TraceResult(TraceCfg(amount=6.0))
         resource.reset()
         assert resource.result() == TraceCfg(amount=5.0)
         resource.write({("amount",): {"expr": "unfinished +"}})

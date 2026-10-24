@@ -10,6 +10,7 @@ from typing import ClassVar, Literal
 import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     Axis as DiskAxis,
 )
@@ -26,7 +27,6 @@ from zcu_tools.experiment import (
     AxesSpec,
     Axis,
     CfgUnavailableWarning,
-    ExpCfgModel,
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
@@ -58,7 +58,7 @@ class NestedCfg(BaseModel):
         return data
 
 
-class NativeCfg(ExpCfgModel):
+class NativeCfg(ConfigBase):
     model_config = ConfigDict(extra="forbid")
     nested: NestedCfg = NestedCfg()
     name: str = "historical"
@@ -350,7 +350,7 @@ def test_prepare_rejects_invalid_record(defect: str) -> None:
         prepare_run_data(record, spec=SINGLE, comment="")
 
 
-@pytest.mark.parametrize("cfg", [ExpCfgModel()])
+@pytest.mark.parametrize("cfg", [ConfigBase()])
 def test_prepare_rejects_wrong_cfg_type(cfg: NativeCfg) -> None:
     with pytest.raises(TypeError, match="cfg"):
         prepare_run_data(replace(single_record(), cfg=cfg), spec=SINGLE, comment="")
@@ -527,7 +527,7 @@ def test_typed_load_selects_declared_variables_and_ignores_extra_variable(
         load_run(path, spec=SINGLE)
 
 
-class UnexpectedValidatorCfg(ExpCfgModel):
+class UnexpectedValidatorCfg(ConfigBase):
     @model_validator(mode="before")
     @classmethod
     def fail_unexpectedly(cls, _data: object) -> object:

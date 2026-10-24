@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -15,7 +15,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
-from zcu_lab.v2._support.device import set_output
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.device import set_output
 
 
 @dataclass(frozen=True)
@@ -31,17 +32,25 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class CheckModuleCfg(ConfigBase):
+class CheckCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class CheckSweepCfg(ConfigBase):
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
-
-
-class CheckCfg(ProgramExpCfg):
-    modules: CheckModuleCfg
     jpa_rf_dev: Annotated[
         str,
         FieldMeta(
@@ -49,7 +58,7 @@ class CheckCfg(ProgramExpCfg):
             description="Connected RF device whose output is toggled off then on.",
         ),
     ] = ""
-    sweep: CheckSweepCfg
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class CheckExp(Experiment[CheckResult, CheckCfg]):
@@ -83,17 +92,16 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         # 1. Prepare a shared hardware frequency grid for both pump states.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
         outputs = np.array([0, 1])
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Frequency (MHz)", "Magnitude", num_lines=2
+        viewer = live_line(
+            context.plots, "measurement", "Frequency (MHz)", "Magnitude", num_lines=2
         )
         signals_buffer = SignalBuffer(
             (len(outputs), len(freqs)),
@@ -108,18 +116,20 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                 )
 
                 # 3. Reset before each frequency-swept readout pulse.
-                modules = step.cfg.modules
-                modules.readout.set_param(
-                    "freq", sweep2param("freq", step.cfg.sweep.freq)
-                )
+                step.cfg.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
                 _ = (
-                    step.prog_builder(soc, soccfg)
-                    .add(
-                        Reset("reset", modules.reset),
-                        PulseReadout("readout", modules.readout),
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
                     )
-                    .declare_sweep("freq", step.cfg.sweep.freq)
-                    .build_and_acquire()
+                    .add(
+                        Reset("reset", step.cfg.reset),
+                        PulseReadout("readout", step.cfg.readout),
+                    )
+                    .declare_sweep("freq", step.cfg.freq)
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         # 4. Retain complex spectra; magnitude is only a display transform.

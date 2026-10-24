@@ -107,10 +107,10 @@ async def singleshot_ge(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.init_pulse", inputs.init_pulse_ref)
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.probe_pulse", inputs.pi_ref)
+    tab.select("reset", inputs.use_reset)
+    tab.select("init_pulse", inputs.init_pulse_ref)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("probe_pulse", inputs.pi_ref)
     tab.set("shots", inputs.shots)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)

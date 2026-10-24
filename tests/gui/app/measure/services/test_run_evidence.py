@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from qtpy.QtWidgets import QApplication
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
@@ -22,6 +22,7 @@ from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.services.guard import RunInputs
@@ -77,7 +78,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     monkeypatch: pytest.MonkeyPatch, stopped: bool
 ) -> None:
     state, tab_id, adapter = make_state()
-    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
     adapter.run.return_value = record
     provenance = _provenance()
     capture = MagicMock(return_value=provenance)
@@ -162,7 +163,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
         snapshot=_run_snapshot(),
         experiment_tag="test/native",
     )
-    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
     acquisitions = []
 
     def acquire(*_args: object, context: RunContext) -> object:
@@ -218,7 +219,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
 def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
-    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
 
     def partial(*_args: object, context: RunContext) -> object:
         child = context.scope.branch("acquire")
@@ -248,7 +249,7 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
 ) -> None:
     state, tab_id, adapter = make_state()
     adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=SampleResult(np.array([1.0]))
+        cfg=ConfigBase(), result=SampleResult(np.array([1.0]))
     )
     capture = MagicMock(return_value=_provenance())
     monkeypatch.setattr(
@@ -280,7 +281,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     monkeypatch: pytest.MonkeyPatch, has_snapshot: bool
 ) -> None:
     state, tab_id, adapter = make_state()
-    adapter.run.return_value = RunRecord(ExpCfgModel(), SampleResult(np.array([1.0])))
+    adapter.run.return_value = RunRecord(ConfigBase(), SampleResult(np.array([1.0])))
     capture = MagicMock(side_effect=RuntimeError("must not capture"))
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
@@ -303,27 +304,21 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     # This producer seam substitutes the public cfg assembly/acquisition
     # collaborators. It does not claim the pending assembler/core integration.
     state, tab_id, _mock_adapter = make_state()
-    adapter = SavingAdapter()
     cfg = SavingCfg(gain=2.0)
     result = SavingResult(
         frequency=np.array([0.0, 1.0]), signal=np.array([1.0 + 0j, 0.5 + 0j])
     )
 
-    def acquire(
-        self: SavingCore, config: SavingCfg, *, context: RunContext
-    ) -> SavingResult:
-        assert config is cfg
+    def acquire(raw_cfg, *, context: RunContext) -> RunRecord[SavingCfg, SavingResult]:
         assert not context.scope.stop.is_set()
-        return result
+        return RunRecord(cfg, result)
 
-    monkeypatch.setattr(
-        SavingAdapter,
-        "run",
-        lambda self, req, raw_cfg, *, context: RunRecord(
-            cfg, acquire(SavingCore(), cfg, context=context)
-        ),
+    adapter = Adapter(
+        spec=SavingAdapter.spec,
+        make_form=SavingAdapter.make_form,
+        run=acquire,
+        guide=None,
     )
-    monkeypatch.setattr(SavingCore, "run", acquire)
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
         MagicMock(return_value=_provenance()),
@@ -334,7 +329,9 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
         tab_id=tab_id,
         adapter_name="test/saving",
         adapter=adapter,
-        request=RunRequest(soc=None, soccfg=None, cfg_context=None),
+        request=RunRequest(
+            soc=state.session_env.soc, soccfg=state.session_env.soccfg, cfg_context=None
+        ),
         accepted_cfg=tab.cfg.accept(),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
@@ -360,7 +357,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
 ) -> None:
     state, tab_id, adapter = make_state()
     adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=SampleResult(np.array([1.0]))
+        cfg=ConfigBase(), result=SampleResult(np.array([1.0]))
     )
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance",
@@ -386,7 +383,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
 
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     state, tab_id, _ = make_state()
-    adapter = SnapshotAdapter()
+    adapter = SnapshotAdapter
     state.get_tab(tab_id).cfg = make_form(
         adapter.make_form(FormContext(state.session_env.parameters)), state=state
     )
@@ -406,7 +403,6 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     inputs = make_inputs(state, tab_id, adapter)
     inputs = replace(
         inputs,
-        request=replace(inputs.request, soc=None, soccfg=None),
         snapshot=_run_snapshot(),
         experiment_tag=adapter.experiment_tag,
     )
@@ -428,7 +424,7 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
 
 def test_device_read_failure_rejects_run_before_core() -> None:
     state, tab_id, _ = make_state()
-    adapter = SnapshotAdapter()
+    adapter = SnapshotAdapter
     flux, unused = SnapshotDevice(), SnapshotDevice()
     unused.read_failure = OSError("snapshot read failed")
     service, gate, background, handles = make_run_service(
@@ -454,7 +450,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
         captured = session.context.read_context()
         state = session.state
-        adapter = SnapshotAdapter()
+        adapter = SnapshotAdapter
         state.get_tab("tab").adapter = adapter
         resource = TabFormResource(
             lambda _ctx: Form(SavingCfg, {}),
@@ -506,7 +502,7 @@ def test_gui_save_uses_fixed_run_device_snapshot(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         state = session.state
-        adapter = SnapshotAdapter()
+        adapter = SnapshotAdapter
         state.get_tab("tab").adapter = adapter
         flux = SnapshotDevice()
         flux.set_value(0.25)

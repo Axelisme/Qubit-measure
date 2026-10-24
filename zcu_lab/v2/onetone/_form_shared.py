@@ -65,23 +65,18 @@ def initial_spectrum_tree(ctx: FormContext) -> dict[str, FormNode]:
     Timing source failures propagate from initial_readout_timing.
     """
     return {
-        "modules": {
-            "reset": Hidden(),
-            "readout": Template(
-                "readout",
-                bindings={"resonator": "$resonator"},
-                set={
-                    "freq": Hidden(0.0),
-                    "gain": 0.05,
-                    **initial_readout_timing(ctx),
-                },
-            ),
-        },
-        "sweep": {
-            "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=301)
-        },
+        "reset": Hidden(),
+        "readout": Template(
+            "readout",
+            bindings={"resonator": "$resonator"},
+            set={
+                "freq": Hidden(0.0),
+                "gain": 0.05,
+                **initial_readout_timing(ctx),
+            },
+        ),
+        "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=301),
         "relax_delay": 1.0,
         "reps": 1000,
         "rounds": 10,
-        "initial_delay": Hidden(),
     }

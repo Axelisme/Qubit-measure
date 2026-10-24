@@ -3,9 +3,10 @@
 from pathlib import Path
 
 import numpy as np
-import pytest
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Live, WorkflowEnv
+
+from tests._plotting import create_trace
 
 from ._engine_fakes import Plan, Point, Rig, Tunables, completed
 
@@ -18,12 +19,12 @@ def test_engine_reuses_plots_across_commits_and_saves_figure(tmp_path: Path) -> 
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            viewer = env.plots.liveplot_1d("trace", "Time", "Signal")
+            viewer = create_trace(env.plots, "trace", "Time", "Signal")
             for index in range(plan.count):
                 seen.append(env.plots)
 
                 def acquire(ctx: CallContext, index: int = index) -> int:
-                    viewer.update(np.array([0.0, 1.0]), np.array([1.0, 3.0]) + index)
+                    viewer.update((np.array([0.0, 1.0]), np.array([1.0, 3.0]) + index))
                     return index
 
                 result = completed(await iteration.call(acquire))
@@ -50,10 +51,7 @@ def test_engine_reuses_plots_across_commits_and_saves_figure(tmp_path: Path) -> 
         rig.close()
 
 
-@pytest.mark.parametrize("dimensions", [1, 2])
-def test_projection_error_is_not_a_recoverable_acquire_failure(
-    tmp_path: Path, dimensions: int
-) -> None:
+def test_projection_error_is_not_a_recoverable_acquire_failure(tmp_path: Path) -> None:
     rig = Rig(tmp_path)
     cause = ValueError("plot callback failed")
     delivered: list[object] = []
@@ -62,20 +60,11 @@ def test_projection_error_is_not_a_recoverable_acquire_failure(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            if dimensions == 1:
-                viewer = env.plots.liveplot_1d("trace", "x", "y")
+            viewer = create_trace(env.plots, "trace", "x", "y")
 
-                def project(ctx: CallContext) -> None:
-                    viewer.update(np.array([0.0]), np.array([2.0]))
-                    raise cause
-            else:
-                grid = env.plots.liveplot_2d("trace", "x", "y")
-
-                def project(ctx: CallContext) -> None:
-                    grid.update(
-                        np.array([0.0, 1.0]), np.array([1.0, 2.0]), np.full((2, 2), 2.0)
-                    )
-                    raise cause
+            def project(ctx: CallContext) -> None:
+                viewer.update((np.array([0.0]), np.array([2.0])))
+                raise cause
 
             delivered.append(await iteration.call(project))
             iteration.commit(Point(value=1))

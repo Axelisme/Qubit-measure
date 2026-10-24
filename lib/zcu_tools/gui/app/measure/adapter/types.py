@@ -5,7 +5,6 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
-    Any,
     Generic,
     Protocol,
     runtime_checkable,
@@ -21,22 +20,12 @@ if TYPE_CHECKING:
 # ``SocProtocol``/``SocCfgProtocol`` + the ``SocHandle``/``SocCfgHandle`` aliases,
 # ``ContextReadiness``, and ``SessionEnv`` are session-core value types — they live
 # in ``gui/session/types`` (no experiment cfg-tree coupling). They are re-exported
-# from the adapter package because ``ExpAdapterProtocol``'s signatures speak in
+# from the adapter package because callback signatures speak in
 # them (``RunRequest.soc: SocHandle``, ``RunRequest.soccfg: SocCfgHandle``).
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle, SocHandle
 
 T_Result = TypeVar("T_Result")
 T_Cfg = TypeVar("T_Cfg", bound="ConfigBase")
-T_Cfg_contra = TypeVar("T_Cfg_contra", bound="ConfigBase", contravariant=True)
-T_Result_co = TypeVar("T_Result_co")
-
-
-class ExperimentProtocol(Protocol, Generic[T_Cfg_contra, T_Result_co]):
-    """Structural contract for experiment classes referenced by adapters."""
-
-    def run(self, soc: Any, soccfg: Any, cfg: T_Cfg_contra) -> T_Result_co: ...
-
-    def save(self, filepath: str, result: T_Result_co) -> None: ...
 
 
 class AnalysisMode(Enum):
@@ -57,19 +46,15 @@ class AnalysisMode(Enum):
 
 @dataclass(frozen=True)
 class AdapterCapabilities:
-    """Declared capability flags an adapter exposes to the framework."""
+    """Read-only capability projection from an Adapter value.
+
+    requires_soc and load_data are True for every Adapter. analysis selects
+    its primary stage mode; post_analysis records a PostAnalysis declaration.
+    """
 
     requires_soc: bool = True
     analysis: AnalysisMode = AnalysisMode.FIT
-    # ``post_analysis``: the adapter offers a *second* analysis layer that runs on
-    # top of the primary ``analyze`` result (e.g. single-shot multi-backend
-    # discrimination). Opt-in: an adapter declaring it must override
-    # ``post_analyze_spec`` / ``post_analyze``; the framework only routes
-    # post-analysis to a tab whose adapter sets this True AND whose primary
-    # analyze result exists.
     post_analysis: bool = False
-    # Canonical result-file loading is an explicit capability. False is the safe
-    # default; adapters that inherit BaseAdapter's canonical loader must opt in.
     load_data: bool = False
 
 

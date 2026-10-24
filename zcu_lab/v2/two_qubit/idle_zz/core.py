@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -19,15 +19,52 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Delay, Pulse, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.device import set_flux
 
 from .._readout import JointRoles, collect_joint_shots
 from ._analysis import IdleZZAnalysis, fit_branch, plot_analysis
 
 
-class IdleModules(ConfigBase):
-    """Calibrated π and π/2 pulses on each role's charge generator; full mux."""
+class IdleZZCfg(ConfigBase):
+    """Thermal spectator branches, target Ramsey, then exactly one full mux read.
 
+    target selects the role doing π/2→delay→phase projection. The other role
+    receives I (branch 0) or Xπ (branch 1), without heralding/post-selection.
+    roles are fixed capture names and original tone positions. Delay is µs,
+    pulse frequency MHz, phase degrees. detune (MHz) is a required operator input:
+    second π/2 phase = first.phase + 360*detune*actual_delay. Its magnitude must
+    comfortably exceed expected |ζ| plus qubit frequency error so both nominal
+    branches remain on its sign-selected side. No automatic detune adjustment
+    occurs. dc_device=None leaves all sources untouched;
+    otherwise only the named source is swept, with no compensation. Host rounds
+    retain original shot order; the program copy alone uses rounds=1.
+    """
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     x180_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -63,24 +100,6 @@ class IdleModules(ConfigBase):
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
         ),
     ]
-
-
-class IdleZZCfg(ProgramExpCfg):
-    """Thermal spectator branches, target Ramsey, then exactly one full mux read.
-
-    target selects the role doing π/2→delay→phase projection. The other role
-    receives I (branch 0) or Xπ (branch 1), without heralding/post-selection.
-    roles are fixed capture names and original tone positions. Delay is µs,
-    pulse frequency MHz, phase degrees. detune (MHz) is a required operator input:
-    second π/2 phase = first.phase + 360*detune*actual_delay. Its magnitude must
-    comfortably exceed expected |ζ| plus qubit frequency error so both nominal
-    branches remain on its sign-selected side. No automatic detune adjustment
-    occurs. dc_device=None leaves all sources untouched;
-    otherwise only the named source is swept, with no compensation. Host rounds
-    retain original shot order; the program copy alone uses rounds=1.
-    """
-
-    modules: IdleModules
     roles: JointRoles
     target: Literal["F1", "F2"] = "F1"
     detune: Annotated[
@@ -114,7 +133,7 @@ class IdleZZCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Require complete tones and consistent independent calibrated drive lines."""
-        m = self.modules
+        m = self
         if m.x180_f1.ch == m.x180_f2.ch:
             raise ValueError("F1/F2 require independent charge generators")
         if m.x90_f1.ch != m.x180_f1.ch or m.x90_f2.ch != m.x180_f2.ch:
@@ -160,7 +179,7 @@ def _source_rounds(
         raise ValueError(
             "Idle ZZ analysis requires saved cfg; current Form/library is not a substitute"
         )
-    ntones, nshots = len(cfg.modules.readout.tones), cfg.rounds * cfg.reps
+    ntones, nshots = len(cfg.readout.tones), cfg.rounds * cfg.reps
     dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
     ndelay = cfg.delay.expts
     if (
@@ -208,7 +227,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=IdleZZResult,
         cfg_type=IdleZZCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/idle_zz",
     )
 
@@ -233,8 +252,9 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         dc_values = (
             np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
         )
-        ntones = len(cfg.modules.readout.tones)
-        viewer = context.plots.liveplot_1d(
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Delay (us)",
             "Completed shots (all DC/branches)",
@@ -262,8 +282,14 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     )
                 for branch, branch_step in dc_step.scan("branch", [0, 1]):
                     for delay, step in branch_step.scan("delay", delays.tolist()):
-                        builder = step.prog_builder(context.soc, context.soccfg)
-                        m = cfg.modules
+                        builder = step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=step.cfg.reps,
+                            initial_delay=step.cfg.initial_delay,
+                            relax_delay=step.cfg.relax_delay,
+                        )
+                        m = cfg
                         spectator = m.x180_f2 if cfg.target == "F1" else m.x180_f1
                         pi2 = m.x90_f1 if cfg.target == "F1" else m.x90_f2
 
@@ -286,9 +312,15 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                         prog = builder.build()
                         for _, round_step in step.repeat("round", config.rounds):
                             _ = round_step.prog_builder(
-                                context.soc, context.soccfg
+                                context.soc,
+                                context.soccfg,
+                                reps=round_step.cfg.reps,
+                                initial_delay=round_step.cfg.initial_delay,
+                                relax_delay=round_step.cfg.relax_delay,
                             ).run_program(
-                                prog, raw2signal_fn=partial(collect_joint_shots, prog)
+                                prog,
+                                raw2signal_fn=partial(collect_joint_shots, prog),
+                                rounds=round_step.cfg.rounds,
                             )
 
         # Flatten rounds into the shot axis without changing tone or shot order.

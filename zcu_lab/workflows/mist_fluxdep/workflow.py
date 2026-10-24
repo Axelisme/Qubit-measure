@@ -22,12 +22,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 
-from zcu_lab.v2.mist.power_dep.single_trace.core import (
-    PowerDepCfg,
-    PowerDepModuleCfg,
-    PowerDepResult,
-    PowerDepSweepCfg,
-)
+from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
 from zcu_lab.workflows.common.calibration import (
     CalCarry,
     Calibrated,
@@ -143,19 +138,15 @@ def mist_cfg(plan: MISTPlan, tun: MISTTunables, cal: CalibratedPi2) -> PowerDepC
         reps=tun.reps,
         rounds=tun.rounds,
         relax_delay=tun.relax_factor * tun.guess_us,
-        modules=PowerDepModuleCfg(
-            reset=None if plan.reset is None else plan.reset.model_copy(deep=True),
-            init_pulse=pi,
-            probe_pulse=plan.mist_pulse.model_copy(deep=True),
-            readout=readout,
-        ),
-        sweep=PowerDepSweepCfg(
-            gain=SweepCfg(
-                start=plan.gain_start,
-                stop=plan.gain_stop,
-                expts=plan.gain_points,
-                step=(plan.gain_stop - plan.gain_start) / (plan.gain_points - 1),
-            )
+        reset=None if plan.reset is None else plan.reset.model_copy(deep=True),
+        init_pulse=pi,
+        probe_pulse=plan.mist_pulse.model_copy(deep=True),
+        readout=readout,
+        gain=SweepCfg(
+            start=plan.gain_start,
+            stop=plan.gain_stop,
+            expts=plan.gain_points,
+            step=(plan.gain_stop - plan.gain_start) / (plan.gain_points - 1),
         ),
     )
 

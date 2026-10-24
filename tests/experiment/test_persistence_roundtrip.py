@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -21,7 +22,6 @@ from zcu_tools.experiment.axes_spec import (
     ZSpec,
 )
 from zcu_tools.experiment.base import Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import save_labber
 from zcu_tools.experiment.records import RunRecord
 
@@ -30,7 +30,7 @@ from zcu_tools.experiment.records import RunRecord
 # --------------------------------------------------------------------------- #
 
 
-class _TinyCfg(ExpCfgModel):
+class _TinyCfg(ConfigBase):
     """Minimal cfg the spec references as ``cfg_type`` (round-trips via comment)."""
 
     name: str = "roundtrip"

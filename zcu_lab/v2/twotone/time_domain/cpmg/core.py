@@ -15,7 +15,6 @@ from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -43,6 +42,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.support import live_heatmap_with_line
+
 
 def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     real_signals = rotate2real(signals).real
@@ -64,27 +65,33 @@ class CPMG_Result:
     signals: NDArray[np.complex128]
 
 
-class CPMG_ModuleCfg(ConfigBase):
+class CPMG_Cfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Reset.Cfg | None = None
     pi2_pulse: Pulse.Cfg
     pi_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class CPMG_SweepCfg(ConfigBase):
-    """Explicit nonempty positive pi-pulse counts, plus the runtime time sweep."""
-
     times: Annotated[
         list[Annotated[int, Field(strict=True, ge=1)]],
         Field(min_length=1),
         FieldMeta(label="Pi pulse counts"),
     ]
     length: SweepCfg | None = None
-
-
-class CPMG_Cfg(ProgramExpCfg):
-    modules: CPMG_ModuleCfg
-    sweep: CPMG_SweepCfg
     length_range: list[tuple[float, float]] | tuple[float, float]
     length_expts: int
     detune_ratio: Annotated[
@@ -191,7 +198,7 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
     ),
     result_type=CPMG_Result,
     cfg_type=CPMG_Cfg,
-    cfg_schema_version="2.0",
+    cfg_schema_version="3.0",
     tag="twotone/ge/cpmg",
     result_builder=_build_cpmg_result,
     result_validator=_validate_cpmg_result,
@@ -217,7 +224,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         the finite pi and pi/2 pulse-width correction. detune_ratio advances the
         final projection phase by 360 * detune_ratio degrees per time index.
 
-        cfg.sweep.times supplies positive integer pi-pulse counts. length_range
+        cfg.times supplies positive integer pi-pulse counts. length_range
         gives total-time bounds in us, shared or one pair per count, sampled at
         length_expts points. Too-short intervals or invalid counts raise
         ValueError. acquire_kwargs forwards optional acquisition settings.
@@ -229,12 +236,10 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         soc, soccfg = context.soc, context.soccfg
         detune_ratio, earlystop_snr = cfg.detune_ratio, cfg.earlystop_snr
 
-        modules = cfg.modules
+        pi2_pulse = cfg.pi2_pulse
+        pi_pulse = cfg.pi_pulse
 
-        pi2_pulse = modules.pi2_pulse
-        pi_pulse = modules.pi_pulse
-
-        times = np.array(cfg.sweep.times, dtype=np.int64)
+        times = np.array(cfg.times, dtype=np.int64)
 
         length_ranges = cfg.length_range
         if isinstance(length_ranges, tuple):
@@ -280,8 +285,13 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             nonlocal current_snr
             current_snr = snr
 
-        viewer = context.plots.liveplot_2d_with_line(
-            "measurement", "Number of Pi", "Time idxs", line_axis=1, num_lines=2
+        viewer = live_heatmap_with_line(
+            context.plots,
+            "measurement",
+            "Number of Pi",
+            "Time idxs",
+            line_axis=1,
+            num_lines=2,
         )
         current_length_idx = 0
         signals_buffer = SignalBuffer(
@@ -302,11 +312,10 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             for idx, (time_value, step) in enumerate(sched.scan("times", times)):
                 current_length_idx = idx
                 cfg = step.cfg
-                modules = cfg.modules
 
                 time = int(time_value)
-                pi2_pulse = modules.pi2_pulse
-                pi_pulse = modules.pi_pulse
+                pi2_pulse = cfg.pi2_pulse
+                pi_pulse = cfg.pi_pulse
                 dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
 
                 length_sweep = make_sweep(
@@ -314,7 +323,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                     stop=length_ranges[idx, 1],
                     expts=cfg.length_expts,
                 )
-                cfg.sweep.length = length_sweep
+                cfg.length = length_sweep
                 length_param = sweep2param("length", length_sweep)
                 detune_param = (
                     360
@@ -330,9 +339,14 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
                 # 3. Refocus n times, project with the phase ramp, then read out.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
+                        Reset("reset", cfg.reset),
                         Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
                         Delay("first_delay", interval - 0.5 * dpulse_len),
                         Repeat("pi_loop", time - 1).add_content(
@@ -349,7 +363,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                                 phase=pi2_pulse.phase + detune_param
                             ),
                         ),
-                        Readout("readout", modules.readout),
+                        Readout("readout", cfg.readout),
                     )
                     .declare_sweep("length", length_sweep)
                     .build_and_acquire(
@@ -362,6 +376,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                             )
                         ),
                         **(acquire_kwargs or {}),
+                        rounds=cfg.rounds,
                     )
                 )
 

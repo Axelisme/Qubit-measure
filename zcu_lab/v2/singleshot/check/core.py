@@ -9,16 +9,15 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.plotting.singleshot import plot_with_classified
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import ProgramV2Cfg, Pulse, Readout, Reset
+from zcu_tools.program.v2 import Pulse, Readout, Reset
 
-from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2.singleshot.plot import plot_with_classified
+from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
 @dataclass(frozen=True)
@@ -27,14 +26,7 @@ class CheckResult:
     signals: NDArray[np.complex128]
 
 
-class CheckModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class CheckCfg(ExpCfgModel):
+class CheckCfg(ConfigBase):
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -50,7 +42,10 @@ class CheckCfg(ExpCfgModel):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    modules: CheckModuleCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots")]
 
 
@@ -89,25 +84,23 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         # Keep individual shots with a separate raw-shot program configuration.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        program_cfg = ProgramV2Cfg(
-            reps=cfg.shots,
-            rounds=1,
-            initial_delay=cfg.initial_delay,
-            relax_delay=cfg.relax_delay,
-        )
 
         signals_buffer = SignalBuffer((cfg.shots,))
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-
             # Prepare the same state for every shot before probing and readout.
             program = (
-                sched.prog_builder(soc, soccfg, cfg=program_cfg)
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
+                )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Pulse("probe_pulse", sched.cfg.probe_pulse),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .build()
             )

@@ -71,7 +71,7 @@ class SampleWriteback(WritebackItem):
     """Propose producer-defined JSON fields for target_name, a concrete component.
 
     Only adapters whose Run keeps the coordinate device fixed provide this proposal.
-    The adapter declares sample_device_alias; None disables Sample writeback.
+    coordinate_device declares the captured device alias; None omits this Sample.
     WritebackService adds dev_value/dev_unit from that alias in the Run's fixed
     parameters and device snapshot, replacing those fields if supplied here. Missing captured
     device facts omit this item with a public reason. The sample can be selected
@@ -79,3 +79,4 @@ class SampleWriteback(WritebackItem):
     """
 
     proposed_value: JsonObject
+    coordinate_device: str | None = field(default=None, kw_only=True)

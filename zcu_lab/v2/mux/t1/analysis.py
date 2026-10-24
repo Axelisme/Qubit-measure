@@ -15,7 +15,7 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
     T1AnalyzeOptions,

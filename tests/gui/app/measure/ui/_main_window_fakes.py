@@ -93,7 +93,6 @@ def make_tab_snapshot(
     has_post_analyze_result: bool = False,
     supports_analysis: bool = True,
     supports_post_analysis: bool = False,
-    supports_load_data: bool = False,
     analyze_params: object = _DEFAULT_PARAMS,
     post_analyze_params: object | None = None,
     writeback_items: tuple[WritebackItem, ...] = (),
@@ -105,8 +104,8 @@ def make_tab_snapshot(
 
     tab_id identifies the tab. The global_run_active, is_running, is_analyzing,
     has_context, has_active_context, has_soc and result/figure booleans set the
-    interaction gates. supports_analysis, supports_post_analysis and
-    supports_load_data select capabilities. Run and analysis result flags also
+    interaction gates. supports_analysis and supports_post_analysis select
+    analysis capabilities. Load is available to every adapter. Run and analysis result flags also
     create distinct opaque pane results; no live acquisition is performed.
 
     Omitted analyze_params creates a mock; explicit None remains None.
@@ -153,7 +152,7 @@ def make_tab_snapshot(
     caps = AdapterCapabilities(
         analysis=AnalysisMode.FIT if supports_analysis else AnalysisMode.NONE,
         post_analysis=supports_post_analysis,
-        load_data=supports_load_data,
+        load_data=True,
     )
 
     # Pane snapshots

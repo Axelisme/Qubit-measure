@@ -4,24 +4,16 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any, cast
 
 from zcu_tools.cfg_model import TemplateDef
 
-from .adapter import AdapterCapabilities, ExpAdapterProtocol
+from .adapter import Adapter
+
+# Host payload types are erased only at entry to this registry.
+RegisteredAdapter = Adapter[Any, Any, Any, Any, Any, Any, Any]
 
 logger = logging.getLogger(__name__)
-
-
-def _validate_capabilities(capabilities: object, name: str) -> None:
-    if not isinstance(capabilities, AdapterCapabilities):
-        raise TypeError(f"Adapter {name!r} has invalid capabilities")
-
-
-def _validate_contract(adapter: object, name: str) -> None:
-    # Registered plugins can violate annotations at runtime.
-    if not isinstance(adapter, ExpAdapterProtocol):
-        raise TypeError(f"Adapter {name!r} does not satisfy ExpAdapterProtocol")
-    _validate_capabilities(adapter.capabilities, name)
 
 
 @dataclass(frozen=True)
@@ -46,7 +38,7 @@ class Registry:
     """
 
     def __init__(self, *, templates: Mapping[str, TemplateDef] | None = None) -> None:
-        self._mapping: dict[str, type[ExpAdapterProtocol]] = {}
+        self._mapping: dict[str, RegisteredAdapter] = {}
         self._templates = MappingProxyType(dict(templates or {}))
 
     @property
@@ -57,25 +49,32 @@ class Registry:
     def register(
         self,
         name: str,
-        adapter_cls: type[ExpAdapterProtocol],
+        adapter: object,
     ) -> None:
-        """Register an adapter class without executing its form factory.
+        """Store adapter under name; return None without invoking factories.
 
-        name is the public experiment ID; adapter_cls is constructed by create.
-        Duplicate names raise ValueError without publishing the adapter. Form
-        creation and template validation belong to Open/Reset, not registration.
+        name must be nonempty, have no surrounding whitespace and be unique in
+        this registry. adapter must be an Adapter value, not an adapter class.
+        Invalid or duplicate names raise ValueError; a non-Adapter raises
+        TypeError. Rejection leaves the mapping unchanged. Registration performs
+        no I/O, form construction or capability callback checks. create(name)
+        returns this same immutable value.
         """
-        logger.debug("register: name=%r adapter=%s", name, adapter_cls.__name__)
+        if not name or name.strip() != name:
+            raise ValueError(f"Invalid adapter name: {name!r}")
         if name in self._mapping:
             raise ValueError(f"Adapter {name!r} is already registered")
-        self._mapping[name] = adapter_cls
+        if not isinstance(adapter, Adapter):
+            raise TypeError(f"Adapter {name!r} must be an Adapter value")
+        # tolerated(cast): heterogeneous adapter registry; per-adapter generics are checked at each DEFINITION
+        self._mapping[name] = cast(RegisteredAdapter, adapter)
 
-    def create(self, name: str) -> ExpAdapterProtocol:
+    def create(self, name: str) -> RegisteredAdapter:
         if name not in self._mapping:
             raise KeyError(
                 f"Adapter {name!r} not found; available: {list(self._mapping)}"
             )
-        return self._mapping[name]()
+        return self._mapping[name]
 
     def list_names(self) -> list[str]:
         return list(self._mapping)
@@ -86,10 +85,9 @@ class Registry:
     def resolve_experiment(self, experiment: str | None) -> ExperimentResolution:
         """Resolve a historical name/tag without creating a tab or reading files.
 
-        Exact registered names win, even without Load capability. Otherwise only
-        load-capable adapters with the matching experiment_tag are candidates.
+        Exact registered names win. Otherwise adapters with the matching
+        experiment_tag are candidates; every adapter may attempt Load.
         Missing, unknown and ambiguous identities return a reason, never a guess.
-        Adapter construction failures propagate.
         """
         if not experiment:
             return ExperimentResolution(None, "Missing experiment identity")
@@ -98,7 +96,7 @@ class Registry:
         candidates: list[str] = []
         for name in self.list_names():
             adapter = self.create(name)
-            if adapter.capabilities.load_data and adapter.experiment_tag == experiment:
+            if adapter.experiment_tag == experiment:
                 candidates.append(name)
         if len(candidates) == 1:
             return ExperimentResolution(candidates[0], None)
@@ -113,11 +111,10 @@ class Registry:
         )
 
     def validate(self) -> None:
-        """Check constructibility and the framework contract before publication."""
+        """Recheck names before publishing the registration-validated catalog."""
         for name in self.list_names():
             if not name or name.strip() != name:
                 raise ValueError(f"Invalid adapter name: {name!r}")
-            _validate_contract(self.create(name), name)
 
     def replace_from(self, candidate: Registry) -> None:
         """Publish a detached candidate while preserving this registry's identity.

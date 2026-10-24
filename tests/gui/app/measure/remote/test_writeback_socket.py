@@ -13,6 +13,8 @@ from zcu_tools.datafile import load, save
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     ModuleWriteback,
     ParameterWriteback,
     WritebackItem,
@@ -30,6 +32,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
+    PaneParams,
     PaneSummary,
 )
 from tests.gui.app.measure._synthetic import (
@@ -37,6 +40,7 @@ from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_WAVEFORM,
     ModuleProposalAdapter,
     SampleAdapter,
+    SampleAnalysis,
     SampleParams,
 )
 
@@ -122,16 +126,25 @@ def test_complete_md_values_survive_preview_and_write_socket(
     wire_before,
     wire_after,
 ):
-    monkeypatch.setattr(
-        SampleAdapter,
-        "get_writeback_items",
-        lambda self, request: [
-            ParameterWriteback(
-                target_name="general.ext.value", description="V", proposed_value=after
-            ),
-        ],
+    definition = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=Analysis(
+            fn=SampleAdapter.analyze,
+            options=lambda source, env: SampleParams(),
+            writeback=lambda request: [
+                ParameterWriteback(
+                    target_name="general.ext.value",
+                    description="V",
+                    proposed_value=after,
+                ),
+            ],
+        ),
     )
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
+    fx.registry.register("proposals", definition)
     context = fx.ctrl.context_control
     target = context.read_context().target
     if isinstance(before, complex):
@@ -145,7 +158,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
     fx.start()
     sock = open_client(fx.service.port)
     try:
-        tab = fx.ctrl.new_tab("fake")
+        tab = fx.ctrl.new_tab("proposals")
         for operation in (
             lambda: fx.ctrl.start_run(tab),
             lambda: fx.ctrl.analyze(tab, SampleParams()),
@@ -269,6 +282,111 @@ def test_apply_writeback_tool_writes_module_proposal_by_id(
     assert library.module_spec(MODULE_PROPOSAL_TARGET) == _stored_pulse(gain=0.3)
 
 
+def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
+    tmp_path, qapp, monkeypatch
+):
+    definition = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=Analysis(
+            fn=SampleAdapter.analyze,
+            options=lambda source, env: SampleParams(),
+            writeback=lambda request: [
+                ParameterWriteback(
+                    target_name="general.ext.a", description="A", proposed_value=11.0
+                ),
+                ParameterWriteback(
+                    target_name="general.ext.b", description="B", proposed_value=22.0
+                ),
+            ],
+        ),
+    )
+    fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
+    fx.registry.register("proposals", definition)
+    context = fx.ctrl.context_control
+    context.set_parameter(context.read_context().target, "general.ext.a", 1.0)
+    context.set_parameter(context.read_context().target, "general.ext.b", 2.0)
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        tab = fx.ctrl.new_tab("proposals")
+        run = fx.ctrl.start_run(tab)
+        assert_terminal_finished(fx, sock, run)
+        analyze = fx.ctrl.analyze(tab, SampleParams())
+        assert_terminal_finished(fx, sock, analyze)
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+        assert call(sock, "context.snapshot", {})["ok"]
+        params = {"tab_id": tab, "subtab_id": "analysis"}
+        before = call(sock, "tab.writeback_preview", params)
+        assert before["ok"]
+        assert [
+            (item["current"], item["proposed"]) for item in before["result"]["items"]
+        ] == [(1.0, 11.0), (2.0, 22.0)]
+        applied = call(
+            sock, "tab.writeback_write", {**params, "write": [{"id": "param-1"}]}
+        )
+        assert applied["ok"]
+        assert [item["id"] for item in applied["result"]["written"]] == ["param-1"]
+        assert (
+            context.read_context().lookup("general.ext.a").value == 11.0
+            and context.read_context().lookup("general.ext.b").value == 2.0
+        )
+        after = call(sock, "tab.writeback_preview", params)["result"]
+        assert [item["current"] for item in after["items"]] == [11.0, 2.0]
+        assert all(item["selected"] for item in after["items"])
+        assert fx.ctrl.get_writeback_applied_for_pane(tab, "analysis") == {
+            "param-1": True,
+            "param-2": False,
+        }
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+        assert call(sock, "context.snapshot", {})["ok"]
+        failed = call(
+            sock,
+            "tab.writeback_write",
+            {
+                **params,
+                "write": [{"id": "param-2", "value": 33.0}, {"id": "missing"}],
+            },
+        )
+        assert failed["ok"] is False
+        assert failed["error"]["code"] == "invalid_params"
+        assert context.read_context().lookup("general.ext.b").value == 2.0
+        retained = call(sock, "tab.writeback_preview", params)["result"]
+        assert retained["items"][1]["proposed"] == 33.0
+        assert all(item["selected"] for item in retained["items"])
+        assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
+        assert call(sock, "context.snapshot", {})["ok"]
+        written = call(
+            sock,
+            "tab.writeback_write",
+            {
+                **params,
+                "write": [{"id": "param-2"}],
+            },
+        )
+        assert written["ok"], written
+        assert written["result"] == {
+            "written": [
+                {
+                    "id": "param-2",
+                    "kind": "parameter",
+                    "target": "general.ext.b",
+                    "before": 2.0,
+                    "after": 33.0,
+                }
+            ]
+        }
+        assert (
+            context.read_context().lookup("general.ext.a").value == 11.0
+            and context.read_context().lookup("general.ext.b").value == 33.0
+        )
+    finally:
+        sock.close()
+        fx.stop()
+
+
 def terminal_result(
     application: PointApplication, operation_id: int
 ) -> dict[str, object]:
@@ -290,16 +408,21 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
 
     # Only the domain fit is replaced. The real analysis owner creates its WB
     # draft, so State/facet/preview use the same opaque-draft lifetime owner.
-    monkeypatch.setattr(PointAdapter, "analyze", lambda self, req, *, plots: 1.0)
-    monkeypatch.setattr(
-        PointAdapter,
-        "get_writeback_items",
-        lambda self, req: [
-            ParameterWriteback(
-                "$driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
-            ),
-            ParameterWriteback("$driver.ext.other", "Other", proposed_value=23.0),
-        ],
+    definition = Adapter(
+        spec=PointAdapter.spec,
+        make_form=PointAdapter.make_form,
+        run=PointAdapter.run,
+        guide=None,
+        analysis=Analysis(
+            fn=lambda req, *, plots: SampleAnalysis(peak=1.0),
+            options=lambda source, env: SampleParams(),
+            writeback=lambda req: [
+                ParameterWriteback(
+                    "$driver.ext.value", "Value", proposed_value=20.09, stderr=0.18
+                ),
+                ParameterWriteback("$driver.ext.other", "Other", proposed_value=23.0),
+            ],
+        ),
     )
     application.open_entry()
     controller = application.controller
@@ -322,6 +445,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
     tab = controller.new_tab("pointed")
+    application.state.get_tab(tab).adapter = definition
     application.state.replace_run_pane(
         tab, RunPaneState(result=RunRecord(None, 1.0), parameters=captured)
     )
@@ -365,28 +489,36 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         qapp.processEvents()
 
 
-class CapturedCouplerAdapter(AnalysisSavingAdapter):
-    """Produce a concrete library destination and an explicit captured alias."""
+def CapturedCouplerAdapter_get_writeback_items(
+    req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
+) -> list[WritebackItem]:
+    parameters = req.ctx.parameters
+    if parameters is None or req.run_result.cfg is None:
+        raise ValueError("This proposal needs a captured source and native cfg")
+    return [
+        ModuleWriteback(
+            parameters.library_key("coupler.pulses.cz_f2"),
+            "Pulse",
+            _stored_pulse(gain=req.run_result.cfg.gain),
+        ),
+        ParameterWriteback(
+            "$coupler.rate", "Rate", proposed_value=parameters.value("$coupler.rate")
+        ),
+    ]
 
-    def get_writeback_items(
-        self,
-        req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
-    ) -> list[WritebackItem]:
-        parameters = req.ctx.parameters
-        if parameters is None or req.run_result.cfg is None:
-            raise ValueError("This proposal needs a captured source and native cfg")
-        return [
-            ModuleWriteback(
-                parameters.library_key("coupler.pulses.cz_f2"),
-                "Pulse",
-                _stored_pulse(gain=req.run_result.cfg.gain),
-            ),
-            ParameterWriteback(
-                "$coupler.rate",
-                "Rate",
-                proposed_value=parameters.value("$coupler.rate"),
-            ),
-        ]
+
+CapturedCouplerAdapter = Adapter(
+    spec=AnalysisSavingAdapter.spec,
+    make_form=AnalysisSavingAdapter.make_form,
+    run=AnalysisSavingAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=AnalysisSavingAdapter.analyze,
+        options=lambda source, env: PaneParams(),
+        writeback=CapturedCouplerAdapter_get_writeback_items,
+    ),
+    post_analysis=AnalysisSavingAdapter.post_analysis,
+)
 
 
 @pytest.fixture

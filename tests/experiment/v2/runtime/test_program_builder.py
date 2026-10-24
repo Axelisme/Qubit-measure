@@ -1,140 +1,108 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
-from zcu_tools.program.v2 import ProgramV2Cfg
+from zcu_tools.progress_bar import use_pbar_factory
 
-from tests.experiment.v2.runtime._flow_cfg import FlowCfg
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
-from tests.experiment.v2.runtime._flow_fakes import FakeModule, FakeProgram
+from tests.experiment.v2.runtime._flow_fakes import (
+    FakeModule,
+    FakeProgram,
+    RecordingProgressBar,
+    identity_array,
+    recording_pbar_factory,
+)
 
 
-def test_program_builder_build_returns_program_with_isolated_cfg():
-    program = None
-    fresh_program = None
-    FakeProgram.instances.clear()
+@pytest.mark.parametrize("step_owner", [False, True])
+def test_builder_passes_controls_and_isolates_modules_sweeps_and_schedule_cfg(
+    step_owner,
+):
+    from zcu_tools.program.v2 import SweepCfg
+
+    cfg = _cfg(reps=99)
     module = FakeModule("readout")
-    init_cfg = _cfg(reps=5, rounds=7)
-
-    with Schedule(
-        init_cfg, SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
-    ) as sched:
+    sweep = SweepCfg(start=1.0, stop=2.0, step=0.5, expts=3)
+    with Schedule(cfg, SignalBuffer(1), scope=Scope("run")) as sched:
+        repeat = sched.repeat("host", 1)
+        owner = list(repeat)[0][1] if step_owner else sched
         builder = (
-            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
+            owner.prog_builder(
+                "soc",
+                "soccfg",
+                reps=5,
+                initial_delay=0.25,
+                relax_delay=12.5,
+                program_cls=FakeProgram,
+                marker="kw",
+            )
             .add(module)
-            .declare_sweep("loop", 3)
+            .declare_sweep("freq", sweep)
         )
-        program = builder.build()
-        assert isinstance(program, FakeProgram)
-        assert type(program.cfg_model) is FlowCfg
-        program.cfg_model.reps = 99
-        assert sched.cfg.reps == 5
-
-    assert init_cfg.reps == 5
-    assert program is not None
-    assert program.soccfg == "soccfg"
-    assert program.modules[0] is not module
-    assert program.modules[0].name == "readout"
-    assert program.sweep == [("loop", 3)]
-    assert program.marker == "kw"
-    assert program.reps == 5
-    assert program.rounds == 7
-
-    with Schedule(
-        init_cfg, SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
-    ) as sched:
-        fresh_program = (
-            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
-            .add(module)
-            .build()
-        )
-
-    assert isinstance(fresh_program, FakeProgram)
-    assert fresh_program.reps == 5
+        first = builder.build()
+        first.modules[0].name = "changed"
+        first.sweep.clear()
+        sched.cfg.reps = 8
+        second = builder.build()
+        assert second.modules[0].name == "readout"
+        assert second.sweep[0][1].start == 1.0
+        assert second.reps == 5
+        assert second.initial_delay == 0.25
+        assert second.relax_delay == 12.5
+    assert cfg.reps == 99
+    assert module.name == "readout"
+    assert sweep.start == 1.0
 
 
 def test_program_builder_skips_absent_modules_and_preserves_order() -> None:
-    program = None
-    with Schedule(
-        _cfg(), SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
-    ) as sched:
+    with Schedule(_cfg(), SignalBuffer(1), scope=Scope("run")) as sched:
         program = (
             sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
             .add(None, FakeModule("drive"), [None, FakeModule("readout"), None])
             .add_reset("reset", None)
             .build()
         )
-
-    assert program is not None
-    assert [module.name for module in program.modules] == ["drive", "readout"]
+        assert [module.name for module in program.modules] == ["drive", "readout"]
 
 
-def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
-    program = None
-    FakeProgram.instances.clear()
-    init_cfg = {"reps": 3, "rounds": 4, "experiment_only": "ignored"}
+@pytest.mark.parametrize("decimated", [False, True])
+def test_run_program_passes_explicit_rounds_to_producer_and_retry_progress(decimated):
+    calls = []
+    bars: list[RecordingProgressBar] = []
 
-    with Schedule(
-        init_cfg, SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
-    ) as sched:
-        program = (
-            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
-            .add(FakeModule("readout"))
-            .build()
+    class Program:
+        def acquire(self, soc, *, rounds=1, round_hook, cancel_flag, **kwargs):
+            calls.append(rounds)
+            if len(calls) == 1:
+                raise RuntimeError("retry")
+            for count in range(1, rounds + 1):
+                round_hook(count, np.array([float(count)]), cancel_flag)
+            return np.array([float(rounds)])
+
+        acquire_decimated = acquire
+
+    with (
+        Schedule({}, SignalBuffer(1, dtype=np.float64), scope=Scope("run")) as sched,
+        use_pbar_factory(recording_pbar_factory(bars)),
+    ):
+        builder = sched.prog_builder("soc", "soccfg")
+        runner = builder.run_program_decimated if decimated else builder.run_program
+        from zcu_tools.experiment.v2.runtime import AcquireOptions
+
+        result = runner(
+            Program(),
+            rounds=3,
+            options=AcquireOptions(retry=1),
+            raw2signal_fn=identity_array,
         )
-
-    assert program is not None
-    assert isinstance(program.cfg_model, ProgramV2Cfg)
-    assert type(program.cfg_model) is ProgramV2Cfg
-    assert program.reps == 3
-    assert program.rounds == 4
-    assert not hasattr(program.cfg_model, "experiment_only")
-
-
-def test_program_builder_rejects_cfg_without_program_fields() -> None:
-    with Schedule(
-        {"experiment_only": "ignored"},
-        SignalBuffer((1,), dtype=np.float64),
-        scope=Scope("run"),
-    ) as sched:
-        builder = sched.prog_builder(
-            "soc", "soccfg", program_cls=FakeProgram, marker="kw"
-        ).add(FakeModule("readout"))
-        try:
-            builder.build()
-        except TypeError as exc:
-            assert "ProgramV2Cfg" in str(exc)
-        else:
-            raise AssertionError(
-                "ProgramBuilder should reject cfg without runtime fields"
-            )
-
-
-def test_program_builder_accepts_cfg_override() -> None:
-    program = None
-    FakeProgram.instances.clear()
-
-    with Schedule(
-        {"reps": 1, "rounds": 1},
-        SignalBuffer((1,), dtype=np.float64),
-        scope=Scope("run"),
-    ) as sched:
-        program = (
-            sched.prog_builder(
-                "soc",
-                "soccfg",
-                cfg=_cfg(reps=8, rounds=9),
-                program_cls=FakeProgram,
-                marker="kw",
-            )
-            .add(FakeModule("readout"))
-            .build()
-        )
-
-    assert program is not None
-    assert program.reps == 8
-    assert program.rounds == 9
+        np.testing.assert_array_equal(result, [3.0])
+        assert sched.outcome.status == "completed"
+    assert calls == [3, 3]
+    assert bars[0].total == 3
+    assert bars[0].n == 3
+    assert bars[0].closed
 
 
 def test_schedule_requires_explicit_modules():

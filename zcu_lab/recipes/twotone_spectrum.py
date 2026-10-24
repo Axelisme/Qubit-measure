@@ -110,20 +110,20 @@ async def twotone_spectrum(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.qub_pulse", inputs.drive_ref)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("reset", inputs.use_reset)
+    tab.select("qub_pulse", inputs.drive_ref)
     if not isinstance(inputs.gain, Keep) or not isinstance(
         inputs.pulse_length_us, Keep
     ):
-        tab.command("modules.qub_pulse", "to_inline")
+        tab.command("qub_pulse", "to_inline")
     if not isinstance(inputs.pulse_length_us, Keep):
-        tab.command("modules.qub_pulse.waveform", "to_inline")
-    tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
-    tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
-    tab.set("sweep.freq.n", inputs.points)
-    tab.set("modules.qub_pulse.gain", inputs.gain)
-    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+        tab.command("qub_pulse.waveform", "to_inline")
+    tab.set("freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+    tab.set("freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("freq.n", inputs.points)
+    tab.set("qub_pulse.gain", inputs.gain)
+    tab.set("qub_pulse.waveform.length", inputs.pulse_length_us)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

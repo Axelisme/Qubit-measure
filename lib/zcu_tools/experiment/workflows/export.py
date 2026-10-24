@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     LabberPayload,
     encode_labber_comment,
@@ -14,7 +15,6 @@ from zcu_tools.datafile import (
     write_labber,
 )
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
@@ -44,7 +44,7 @@ class FluxdepExportOutput:
     error: str | None
 
 
-def load_trace[R, C: ExpCfgModel](
+def load_trace[R, C: ConfigBase](
     directory: Path,
     filename: str,
     spec: AxesSpec[R, C] | GroupedAxesSpec[R, C],

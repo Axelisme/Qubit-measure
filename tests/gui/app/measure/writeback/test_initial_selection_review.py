@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment import RunRecord
-from zcu_tools.gui.app.measure.adapter import WritebackRequest
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, WritebackRequest
 from zcu_tools.gui.app.measure.writeback import (
     WritebackItem,
     WritebackService,
@@ -29,21 +29,33 @@ from tests.gui.app.measure._synthetic import (
     SampleAdapter,
     SampleAnalysis,
     SampleCfg,
+    SampleParams,
     SampleResult,
     SampleRun,
 )
 
 
-class ReviewAdapter(SampleAdapter):
-    """Supply an unselected synthetic fit without a laboratory dependency."""
+def ReviewAdapter_get_writeback_items(
+    req: WritebackRequest[SampleRun, SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    item = SampleAdapter.get_writeback_items(req)[0]
+    item.selected = False
+    item.note = "Fit needs manual review"
+    return [item]
 
-    def get_writeback_items(
-        self, req: WritebackRequest[SampleRun, SampleAnalysis]
-    ) -> Sequence[WritebackItem]:
-        item = super().get_writeback_items(req)[0]
-        item.selected = False
-        item.note = "Fit needs manual review"
-        return [item]
+
+ReviewAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=SampleAdapter.analyze,
+        options=lambda source, env: SampleParams(),
+        writeback=ReviewAdapter_get_writeback_items,
+    ),
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @pytest.fixture
@@ -62,7 +74,7 @@ def review(qapp: QApplication, tmp_path: Path) -> Generator[ComponentDriver]:
     service = WritebackService(
         ContextControlFacet(context=context), arb_names=lambda: ()
     )
-    adapter = ReviewAdapter()
+    adapter = ReviewAdapter
     run = RunRecord(
         SampleCfg(sweep=SweepCfg(start=0.0, stop=1.0, expts=2, step=1.0)),
         SampleResult(np.array([1.0])),

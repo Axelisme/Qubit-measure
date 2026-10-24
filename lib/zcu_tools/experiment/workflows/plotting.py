@@ -41,7 +41,7 @@ class WorkflowPlots(Plots):
         propagate without replacing the old group, so cleanup can be retried.
         Operation names do not inherit the workflow namespace restriction.
         """
-        self._ensure_active()
+        self.ensure_active()
         if self._operation is not None:
             self._operation.release()
         operation = self.fork()

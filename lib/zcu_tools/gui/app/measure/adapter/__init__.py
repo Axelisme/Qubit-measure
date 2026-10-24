@@ -1,8 +1,7 @@
 """Measure GUI adapter contracts, request/result types, and lowering helpers."""
 
-# Session-core value types live in ``gui/session/types``; re-exported here because
-# ``ExpAdapterProtocol``'s signatures speak in them (the adapter contract's
-# vocabulary), so adapter authors import them from the adapter package.
+# Session-core value types are part of the adapter callback vocabulary, so
+# authors can import them alongside the value declarations.
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
@@ -19,8 +18,7 @@ from zcu_tools.gui.session.types import (
 )
 
 from .analyze_params import ParamMeta, describe_analyze_params, reconstruct_params
-from .interactive import InteractivePluginProvider
-from .protocol import ExpAdapterProtocol
+from .hooks import InteractiveFrontendEnv
 from .types import (
     AdapterCapabilities,
     AdapterGuide,
@@ -28,7 +26,6 @@ from .types import (
     AnalyzeRequest,
     AnalyzeResult,
     AnalyzeResultBase,
-    ExperimentProtocol,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     PostWritebackRequest,
@@ -42,3 +39,4 @@ from .types import (
     WritebackRequest,
 )
 from .validation import require_soc_handles
+from .value import Adapter, Analysis, Interactive, PostAnalysis

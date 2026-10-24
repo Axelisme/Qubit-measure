@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, WritebackRequest
 from zcu_tools.gui.app.measure.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -24,7 +26,7 @@ from .staged_analyze import StagedAnalyzeService
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
+    from zcu_tools.gui.app.measure.registry import RegisteredAdapter
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import OwnerScheduler
     from zcu_tools.gui.session.types import SessionEnv
@@ -36,12 +38,12 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class _AnalyzeCapture:
-    run_result: object | None
+    run_result: RunRecord[ConfigBase, object]
     run_id: str | None
     experiment_name: str
     device_snapshot: Mapping[str, JsonObject] | None
     context: SessionEnv
-    adapter: ExpAdapterProtocol
+    adapter: RegisteredAdapter
     params: object | None
     plots: Plots
 
@@ -108,10 +110,15 @@ class AnalyzeService(StagedAnalyzeService):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
-        metadata = None if tab.run.result is None else tab.run.result.metadata
+        source = tab.run.result
+        if source is None:
+            raise FailedPreconditionError(
+                f"Tab {tab_id!r} has no run result to analyze"
+            )
+        metadata = source.metadata
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = AnalyzeRequest(
-            run_result=tab.run.result,
+            run_result=source,
             analyze_params=analyze_params_instance,
             parameters=ctx.parameters,
         )
@@ -161,31 +168,40 @@ class AnalyzeService(StagedAnalyzeService):
                 logger.exception("Unpublished analysis plot cleanup failed")
             raise
 
-    def start_plugin(
+    def start_plugin[S, A](
         self,
         tab_id: str,
-        plugin: PluginDefinition[Any, Any],
+        plugin: PluginDefinition[S, A],
         owner: OwnerScheduler,
         *,
         analyze_params_instance: object,
         plots: Plots,
+        session: Session[S] | None = None,
     ) -> int:
         """Open plugin and return its service-owned interactive operation token.
 
         tab_id identifies an existing tab checked by GuardService.check_analyze
         in the same owner-thread command. plugin is its adapter's definition;
         owner schedules commits, analyze_params_instance supplies parameters and
-        plots is its owned host. Capture the historical Run source once. Busy,
-        plugin opening or handle admission failures raise without a live session.
-        The owning service disposes the session on terminal paths.
+        plots is its owned host. session may supply the already-opened, paired
+        Session from the host's generic factory; otherwise open it here. After
+        admission this service owns its disposal on every terminal path.
+        Capture the historical Run source once. Busy or missing Run rejects
+        before adopting a supplied session. Opening or handle admission failures
+        raise without a live service-owned session.
         """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
         tab = self._state.get_tab(tab_id)
-        metadata = None if tab.run.result is None else tab.run.result.metadata
+        source = tab.run.result
+        if source is None:
+            raise FailedPreconditionError(
+                f"Tab {tab_id!r} has no run result to analyze"
+            )
+        metadata = source.metadata
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
-            run_result=tab.run.result,
+            run_result=source,
             run_id=metadata.run_id if metadata is not None else None,
             experiment_name=metadata.experiment
             if metadata is not None
@@ -198,7 +214,7 @@ class AnalyzeService(StagedAnalyzeService):
             params=analyze_params_instance,
             plots=plots,
         )
-        session = plugin.open(owner)
+        session = plugin.open(owner) if session is None else session
 
         def cancel() -> None:
             self.cancel_interactive(tab_id)
@@ -410,7 +426,7 @@ class AnalyzeService(StagedAnalyzeService):
         plots = captured_inputs.plots
 
         proposal_items: list[Any] = []
-        if run_result is not None and analyze_result is not None:
+        if analyze_result is not None:
             proposal_items = list(
                 adapter.get_writeback_items(
                     WritebackRequest(
@@ -429,7 +445,6 @@ class AnalyzeService(StagedAnalyzeService):
                 run_id=captured_inputs.run_id,
                 experiment_name=captured_inputs.experiment_name,
                 device_snapshot=captured_inputs.device_snapshot,
-                sample_device_alias=adapter.sample_device_alias,
             )
             plots.finish()
             retired = self._state.update_tab_analyze(

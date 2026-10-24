@@ -11,7 +11,7 @@ from qtpy.QtWidgets import (
     QApplication,
     QLineEdit,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.services.tab_form import (
     AcceptedFormConfig,
     TabFormResource,
@@ -33,7 +33,7 @@ from tests.gui.app.measure.ui._main_window_fakes import (
 from tests.gui.widgets.form._text_input import commit_text
 
 
-class ValueCfg(ExpCfgModel):
+class ValueCfg(ConfigBase):
     """One float the Run panel edits and Run accepts."""
 
     value: float = 2.0

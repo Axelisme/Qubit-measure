@@ -63,8 +63,8 @@ class TabFormSources:
 class AcceptedFormConfig:
     """Detached accepted execution values and the fixed sources that produced them.
 
-    cfg is the validated concrete core cfg. values is its ordinary Python field
-    tree for the adapter Run interface. source_basis is capture provenance, not
+    cfg is the validated adapter input, not necessarily the experiment cfg.
+    values is its ordinary Python field tree for the adapter Run interface. source_basis is capture provenance, not
     a revision precondition. None of these containers alias editable input.
     """
 

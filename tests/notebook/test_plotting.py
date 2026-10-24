@@ -13,6 +13,7 @@ from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.plots import Plots
 
+from tests._plotting import create_trace
 from tests.notebook._adapter_fakes import Cfg, Options, RecordingCore
 
 
@@ -110,10 +111,10 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     axes.plot([1, 2], [3, 4])
     assert published == []
 
-    live = plots.liveplot_1d("live", "x", "y")
+    live = create_trace(plots, "live", "x", "y")
     assert published == [plots["live"].canvas]
     rendered.clear()
-    live.update(np.array([1.0, 2.0]), np.array([5.0, 6.0]))
+    live.update((np.array([1.0, 2.0]), np.array([5.0, 6.0])))
     assert rendered
     assert rendered[-1] == (plots["live"].canvas, [5.0, 6.0])
     plots.finish()
@@ -270,7 +271,7 @@ def test_failed_display_propagates_and_diagnostic_release_closes_widgets(
     monkeypatch.setattr(IPython.display, "display", fail_display)
     plots = create()
     with pytest.raises(RuntimeError, match="publisher unavailable"):
-        plots.liveplot_1d("live", "x", "y")
+        create_trace(plots, "live", "x", "y")
     canvas = published[0]
     toolbar = canvas.toolbar
     assert isinstance(toolbar, Toolbar)
@@ -306,7 +307,7 @@ def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
     monkeypatch.setattr("ipympl.backend_nbagg.FigureManager", fail_manager)
     plots = create()
     with pytest.raises(RuntimeError, match="manager construction failed") as exc:
-        plots.liveplot_1d("live", "x", "y")
+        create_trace(plots, "live", "x", "y")
     assert exc.value is error
     canvas = acquired[0]
     assert canvas.comm is None

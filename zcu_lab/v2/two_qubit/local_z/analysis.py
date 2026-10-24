@@ -114,7 +114,7 @@ def _source_quadratures(
 ) -> tuple[NDArray[np.complex128], NDArray[np.int64], NDArray[np.bool_]]:
     nn, nt, ns = (
         len(cfg.gate_counts),
-        len(cfg.modules.readout.tones),
+        len(cfg.readout.tones),
         cfg.rounds * cfg.reps,
     )
     for actual, expected in (
@@ -246,7 +246,7 @@ def _plot_analysis(cfg: LocalZCfg, answer: LocalZAnalysis, *, plots: Plots) -> N
         ax.set_xlim(answer.gate_counts[0], answer.gate_counts[-1])
         if ax.get_legend_handles_labels()[0]:
             ax.legend()
-    for tone, readout in enumerate(cfg.modules.readout.tones):
+    for tone, readout in enumerate(cfg.readout.tones):
         fig, _ = plots.subplots(
             f"quadratures_tone_{tone}",
             nrows=2,

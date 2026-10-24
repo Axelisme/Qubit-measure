@@ -80,16 +80,16 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("readout", inputs.readout_ref)
     if (
         not isinstance(inputs.frequency_mhz, Keep)
         or not isinstance(inputs.readout_length_us, Keep)
         or not isinstance(inputs.trigger_offset_us, Keep)
     ):
-        tab.command("modules.readout", "to_inline")
-    tab.set("modules.readout.freq", inputs.frequency_mhz)
-    tab.set("modules.readout.ro_length", inputs.readout_length_us)
-    tab.set("modules.readout.trig_offset", inputs.trigger_offset_us)
+        tab.command("readout", "to_inline")
+    tab.set("readout.freq", inputs.frequency_mhz)
+    tab.set("readout.ro_length", inputs.readout_length_us)
+    tab.set("readout.trig_offset", inputs.trigger_offset_us)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)

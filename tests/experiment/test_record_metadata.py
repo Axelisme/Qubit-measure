@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import zcu_tools.experiment as experiment
 from pydantic import TypeAdapter
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import DataVariable, load, save
 
 
@@ -49,13 +50,13 @@ class Signal:
     values: np.ndarray
 
 
-def declaration() -> experiment.AxesSpec[Signal, experiment.ExpCfgModel]:
+def declaration() -> experiment.AxesSpec[Signal, ConfigBase]:
     """Map a scaled frequency coordinate and complex voltage signal."""
     return experiment.AxesSpec(
         axes=(experiment.Axis("frequency", "Frequency", "Hz", scale=1e6),),
         z=experiment.ZSpec("values", "Signal", "V", scale=1e-3),
         result_type=Signal,
-        cfg_type=experiment.ExpCfgModel,
+        cfg_type=ConfigBase,
         tag="test/metadata",
         data_variable=DataVariable("signal"),
     )
@@ -149,7 +150,7 @@ def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
 
 def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     metadata = historical_metadata()
-    cfg = experiment.ExpCfgModel()
+    cfg = ConfigBase()
     result = Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j]))
     record = experiment.RunRecord(cfg, result, metadata=metadata)
     assert record.metadata == metadata
@@ -173,7 +174,7 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
 ) -> None:
     metadata = historical_metadata(run_id)
     record = experiment.RunRecord(
-        experiment.ExpCfgModel(),
+        ConfigBase(),
         Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j])),
         metadata=metadata,
     )
@@ -182,7 +183,7 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
     container = load(path)
     assert container.docs["cfg"] == {
         "values": {},
-        "cfg_type": "ExpCfgModel",
+        "cfg_type": "ConfigBase",
         "schema_version": "1.0",
     }
     assert container.docs["metadata"] == metadata.model_dump(mode="json")
@@ -200,7 +201,7 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
 
 def test_native_save_requires_record_metadata(tmp_path: Path) -> None:
     record = experiment.RunRecord(
-        experiment.ExpCfgModel(),
+        ConfigBase(),
         Signal(np.array([4000.0]), np.array([1j])),
     )
     assert record.metadata is None
@@ -215,7 +216,7 @@ def test_native_load_rejects_invalid_metadata_with_source_path(
 ) -> None:
     metadata = historical_metadata()
     record = experiment.RunRecord(
-        experiment.ExpCfgModel(),
+        ConfigBase(),
         Signal(np.array([4000.0]), np.array([1j])),
         metadata=metadata,
     )
@@ -244,7 +245,7 @@ def test_native_save_validates_unchecked_metadata_updates(
 ) -> None:
     metadata = historical_metadata().model_copy(update={field: value})
     record = experiment.RunRecord(
-        experiment.ExpCfgModel(),
+        ConfigBase(),
         Signal(np.array([4000.0]), np.array([1j])),
         metadata=metadata,
     )

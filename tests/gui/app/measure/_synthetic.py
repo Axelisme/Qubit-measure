@@ -2,28 +2,25 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import PulseSpec, Range
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase, PulseSpec, Range
+from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
-    RunRequest,
-    T_PostAnalyzeParams,
-    T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.plotting.plots import Plots
@@ -41,7 +38,7 @@ class SampleResult:
     data: NDArray[np.float64]
 
 
-class SampleCfg(ExpCfgModel):
+class SampleCfg(ConfigBase):
     reps: int = 100
     rounds: int = 10
     gain: float = 0.1
@@ -62,78 +59,89 @@ class SampleAnalysis(AnalyzeResultBase):
     peak: float
 
 
-class SampleAdapter(
-    BaseAdapter[
-        SampleCfg,
-        SampleRun,
-        SampleAnalysis,
-        SampleParams,
-        T_PostAnalyzeResult,
-        T_PostAnalyzeParams,
+def SampleAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+    del ctx
+    return Form(SampleCfg, {"sweep": Range(5.0, 6.0, expts=11)})
+
+
+def SampleAdapter_run[C: ConfigBase](
+    cfg: C, *, context: RunContext
+) -> RunRecord[C, SampleResult]:
+    return RunRecord(cfg=cfg, result=SampleResult(np.array([0.1, 0.2, 0.3])))
+
+
+def SampleAdapter_analyze[C: ConfigBase](
+    req: AnalyzeRequest[RunRecord[C, SampleResult], SampleParams], *, plots: Plots
+) -> SampleAnalysis:
+    _, ax = plots.subplots("fit")
+    ax.plot(req.run_result.result.data)
+    return SampleAnalysis(peak=float(np.max(req.run_result.result.data)))
+
+
+def SampleAdapter_get_writeback_items[C: ConfigBase](
+    req: WritebackRequest[RunRecord[C, SampleResult], SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback(
+            "general.ext.fake_peak", "Sample peak", req.analyze_result.peak
+        )
     ]
-):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(SampleCfg, {"sweep": Range(5.0, 6.0, expts=11)})
 
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False, load_data=False
-    )
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: SampleCfg,
-        *,
-        context: RunContext,
-    ) -> SampleRun:
-        return RunRecord(cfg, SampleResult(np.array([0.1, 0.2, 0.3])))
-
-    def analyze(
-        self, req: AnalyzeRequest[SampleRun, SampleParams], *, plots: Plots
-    ) -> SampleAnalysis:
-        _, ax = plots.subplots("fit")
-        ax.plot(req.run_result.result.data)
-        return SampleAnalysis(peak=float(np.max(req.run_result.result.data)))
-
-    def get_writeback_items(
-        self, req: WritebackRequest[SampleRun, SampleAnalysis]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback(
-                "general.ext.fake_peak", "Sample peak", req.analyze_result.peak
-            )
-        ]
+SampleAdapter = Adapter(
+    spec=AxesSpec(
+        axes=(),
+        z=ZSpec("data", "data", ""),
+        result_type=SampleResult,
+        cfg_type=SampleCfg,
+        tag="test/sample",
+    ),
+    make_form=SampleAdapter_make_form,
+    run=SampleAdapter_run,
+    guide=None,
+    analysis=Analysis(
+        fn=SampleAdapter_analyze,
+        options=lambda source, env: SampleParams(),
+        writeback=SampleAdapter_get_writeback_items,
+    ),
+    post_analysis=None,
+)
 
 
 MODULE_PROPOSAL_TARGET = "Q1.pulses.tuned"
 MODULE_PROPOSAL_WAVEFORM = "Q1.waveforms.flat"
 
 
-class ModuleProposalAdapter(SampleAdapter):
-    """Propose a pulse at MODULE_PROPOSAL_TARGET whose gain is the fitted peak.
+def ModuleProposalAdapter_get_writeback_items[C: ConfigBase](
+    req: WritebackRequest[RunRecord[C, SampleResult], SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    return [
+        ModuleWriteback(
+            MODULE_PROPOSAL_TARGET,
+            "Tuned pulse",
+            PulseSpec(
+                ch=0,
+                nqz=1,
+                freq=5000.0,
+                gain=req.analyze_result.peak,
+                waveform=MODULE_PROPOSAL_WAVEFORM,
+            ),
+        )
+    ]
 
-    The pulse waveform is the library key MODULE_PROPOSAL_WAVEFORM, so callers
-    install that waveform and a Q1 component before applying the proposal.
-    """
 
-    def get_writeback_items(
-        self, req: WritebackRequest[SampleRun, SampleAnalysis]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ModuleWriteback(
-                MODULE_PROPOSAL_TARGET,
-                "Tuned pulse",
-                PulseSpec(
-                    ch=0,
-                    nqz=1,
-                    freq=5000.0,
-                    gain=req.analyze_result.peak,
-                    waveform=MODULE_PROPOSAL_WAVEFORM,
-                ),
-            )
-        ]
+ModuleProposalAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=SampleAdapter.analyze,
+        options=lambda source, env: SampleParams(),
+        writeback=ModuleProposalAdapter_get_writeback_items,
+    ),
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @dataclass
@@ -151,16 +159,27 @@ class EmptyParams:
     pass
 
 
-class PairAdapter(SampleAdapter):
-    """Config reference and two scalar proposals; no scientific fit involved."""
+def PairAdapter_get_writeback_items[C: ConfigBase](
+    req: WritebackRequest[RunRecord[C, SampleResult], SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback("r_f", "First", 6100.0),
+        ParameterWriteback("rf_w", "Second", 2.0),
+    ]
 
-    def get_writeback_items(
-        self, req: WritebackRequest[SampleRun, SampleAnalysis]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback("r_f", "First", 6100.0),
-            ParameterWriteback("rf_w", "Second", 2.0),
-        ]
+
+PairAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=SampleAdapter.analyze,
+        options=lambda source, env: SampleParams(),
+        writeback=PairAdapter_get_writeback_items,
+    ),
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 def register_all(registry) -> None:

@@ -8,7 +8,7 @@ from zcu_tools.core.simulation import (
     PulseEvent,
     ReadoutWindow,
 )
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -149,8 +149,8 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
         )
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=2, rounds=2),
             modules=[pulse.build("charge"), _readout().build("ro")],
+            reps=2,
         )
         driver = env.devices.get_device("bias")
         from zcu_tools.device.fake import FakeDevice
@@ -162,7 +162,10 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
             driver.set_value(0.4)
 
         result = program.acquire_decimated(
-            env.soc, progress=False, round_hook=change_bias
+            env.soc,
+            progress=False,
+            round_hook=change_bias,
+            rounds=2,
         )
         assert result is not None
         rounds = env.soc.binding.rounds
@@ -174,8 +177,8 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
         # Companion raw uses the last round trace, not a fresh realization.
         program2 = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=2, rounds=1),
             modules=[pulse.build("charge2"), _readout().build("ro2")],
+            reps=2,
         )
         acquired = program2.acquire_decimated(env.soc, progress=False)
         assert acquired is not None

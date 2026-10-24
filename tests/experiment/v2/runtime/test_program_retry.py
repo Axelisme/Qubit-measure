@@ -14,9 +14,8 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.program.acquisition import CancelFlagProtocol
-from zcu_tools.program.v2 import Module, ProgramV2Cfg
+from zcu_tools.program.v2 import Module
 
-from tests.experiment.v2.runtime._flow_cfg import FlowCfg
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 from tests.experiment.v2.runtime._flow_fakes import (
     AlwaysFailingProgram,
@@ -66,12 +65,11 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
     run_stop = StopSignal()
 
     class CooperativeProgram:
-        cfg_model = ProgramV2Cfg(rounds=3)
-
         def acquire(
             self,
             soc: object,
             *,
+            rounds: int,
             progress: bool,
             round_hook: Callable[
                 [int, NDArray[np.float64], CancelFlagProtocol], object
@@ -80,7 +78,7 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
             **_kwargs: object,
         ) -> NDArray[np.float64]:
             raw = np.array([np.nan])
-            for ir in range(1, self.cfg_model.rounds + 1):
+            for ir in range(1, rounds + 1):
                 if cancel_flag.is_set():
                     break
                 produced_rounds.append(ir)
@@ -92,6 +90,7 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
             self,
             soc: object,
             *,
+            rounds: int,
             progress: bool,
             round_hook: Callable[
                 [int, NDArray[np.float64], CancelFlagProtocol], object
@@ -101,6 +100,7 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
         ) -> NDArray[np.float64]:
             return self.acquire(
                 soc,
+                rounds=rounds,
                 progress=progress,
                 round_hook=round_hook,
                 cancel_flag=cancel_flag,
@@ -118,6 +118,7 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
         runner = builder.run_program_decimated if decimated else builder.run_program
         result = runner(
             CooperativeProgram(),
+            rounds=3,
             raw2signal_fn=identity_array,
             options=AcquireOptions(stop_condition=stop_after_written_round),
         )
@@ -297,12 +298,13 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
         def __init__(
             self,
             soccfg: Any,
-            cfg: FlowCfg,
             *,
             modules: list[Module],
+            reps: int = 1,
+            initial_delay: float = 1.0,
+            relax_delay: float = 1.0,
             sweep: list[tuple[str, Any]] | None,
         ) -> None:
-            self.cfg_model = cfg
             self.modules = modules
             self.sweep = sweep
 

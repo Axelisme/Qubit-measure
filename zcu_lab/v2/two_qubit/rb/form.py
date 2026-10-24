@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import mux_readout_seed_metadata
+from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
 from .core import RBCfg
@@ -31,7 +31,9 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
         RBCfg,
         field_order=(
             "roles",
-            "modules",
+            "x90_f1",
+            "x90_f2",
+            "readout",
             "drive",
             "phase_pair",
             "f1_centers",
@@ -47,11 +49,9 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": captured_roles(ctx),
-            "modules": {
-                "x90_f1": Slot("$f1.module.x90", copy=True),
-                "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": readout,
-            },
+            "x90_f1": Slot("$f1.module.x90", copy=True),
+            "x90_f2": Slot("$f2.module.x90", copy=True),
+            "readout": readout,
             "drive": {
                 "f1": Slot("$coupler.module.cz_f1", copy=True),
                 "f2": Slot("$coupler.module.cz_f2", copy=True),

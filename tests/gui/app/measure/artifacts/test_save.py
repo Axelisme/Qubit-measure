@@ -819,7 +819,7 @@ def test_tab_snapshot_reads_committed_sections_without_payload_or_path_planning(
 
     monkeypatch.setattr(SaveLayout, "outputs", forbidden)
     monkeypatch.setattr(
-        session.state.get_tab("tab").adapter, "analysis_item", forbidden
+        type(session.state.get_tab("tab").adapter), "analysis_item", forbidden
     )
     tab_service = TabService(
         session.state,

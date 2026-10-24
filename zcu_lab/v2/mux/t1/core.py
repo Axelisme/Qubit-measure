@@ -34,7 +34,7 @@ T1 with a probe tone or singleshot T1.
 Import the leaf without loading a GUI:
 
 ```python
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveModuleCfg
 from zcu_lab.v2.mux.t1 import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -47,7 +47,7 @@ from zcu_tools.program.v2 import SweepCfg
 # full_readout is MuxReadoutCfg; pi_0/pi_1/pi_2 are fixed PulseCfg values.
 # Their generators must be independent of each other and readout.gen_ch.
 cfg = MuxT1Cfg(
-    modules=MuxDriveModuleCfg(readout=full_readout),
+    readout=full_readout,
     tones=[
         MuxT1ToneCfg(name="Q1", drive=pi_0),
         MuxT1ToneCfg(name="Q2", drive=pi_1),
@@ -137,26 +137,30 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
-from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Delay, ModularProgramV2, SweepCfg, sweep2param
+from zcu_tools.program.v2 import (
+    Delay,
+    ModularProgramV2,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
 from zcu_tools.program.v2.modules import (
     Join,
     MuxReadout,
+    MuxReadoutCfg,
     Pulse,
 )
 
-from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import (
-    MuxDriveModuleCfg,
-    MuxDriveToneCfg,
-    validate_mux_tones,
-)
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 from .analysis import MuxT1Fit, analyze_t1
@@ -166,10 +170,10 @@ class MuxT1ToneCfg(MuxDriveToneCfg):
     """One original qubit's nullable fixed pi pulse, required only when active."""
 
 
-class MuxT1Cfg(ProgramExpCfg):
+class MuxT1Cfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
-    modules holds optional reset and complete mux readout. tones contains one
+    reset and readout hold the common modules. tones contains one
     MuxT1ToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
@@ -177,11 +181,36 @@ class MuxT1Cfg(ProgramExpCfg):
     generators distinct from readout. delays is one common linear SweepCfg of
     strictly increasing, finite, nonnegative requested us. Only equally spaced
     hardware sweeps are supported. Fits retain requested times, not compiled delays.
-    Inherited reps/rounds are positive; initial_delay/relax_delay are finite
+    Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
-    modules: MuxDriveModuleCfg
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
     delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
@@ -189,7 +218,7 @@ class MuxT1Cfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
         """Reject invalid counts, channels and requested delay coordinates."""
-        validate_mux_tones(self, self.modules, self.tones, self.participants)
+        validate_mux_tones(self, self.tones, self.participants)
         times = sweep2array(self.delays, "none")
         if (
             times.ndim != 1
@@ -246,7 +275,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=MuxT1Result,
         cfg_type=MuxT1Cfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="mux/t1",
     )
 
@@ -267,13 +296,14 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         cfg = MuxT1Cfg.model_validate(config.model_dump())
         indices = list(cfg.participants)
         times = sweep2array(cfg.delays, "none")
-        readout = cfg.modules.readout.with_updates(
-            tones=[cfg.modules.readout.tones[i] for i in indices]
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
         )
 
         # 2. Show each decay in its own figure on the requested delay axis.
         viewers = [
-            context.plots.liveplot_1d(
+            live_line(
+                context.plots,
                 f"measurement_{i}",
                 "Requested delay (us)",
                 "Magnitude (a.u.)",
@@ -294,8 +324,14 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 for index in indices
             ]
             builder = (
-                sched.prog_builder(context.soc, context.soccfg)
-                .add_reset("reset", cfg.modules.reset)
+                sched.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=sched.cfg.reps,
+                    initial_delay=sched.cfg.initial_delay,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add_reset("reset", cfg.reset)
                 .add(
                     Join(*pulses),
                     Delay("t1_delay", sweep2param("delay", cfg.delays)),
@@ -305,7 +341,9 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             )
             prog = builder.build()
             # Each completed round supplies the full delay/participant IQ matrix.
-            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
+            _ = builder.run_program(
+                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+            )
 
         # 4. Flush live plots and return one IQ row per original selected tone.
         signals.trigger_update(flush=True)

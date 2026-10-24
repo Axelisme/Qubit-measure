@@ -8,7 +8,7 @@ import pytest
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, ftf, replay_round
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
@@ -106,7 +106,6 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
     try:
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=1, rounds=1),
             modules=[
                 PulseReadoutCfg(
                     gen_ch=0,
@@ -118,6 +117,7 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
                     ro_length=0.016,
                 ).build("ro")
             ],
+            reps=1,
         )
         program.acquire(env.soc, progress=False)
     finally:

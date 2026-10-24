@@ -5,7 +5,7 @@ from dataclasses import replace
 from zcu_tools.cfg_model import FormNode, Hidden, Slot
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     captured_mux_participants,
@@ -14,7 +14,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_relax_delay,
     mux_tone_initials,
 )
-from zcu_lab.v2._support.measure.rabi_initial_values import amp_rabi_initial_pulse
+from zcu_lab.v2.support.measure.rabi_initial_values import amp_rabi_initial_pulse
 
 from .core import MuxAmpRabiCfg
 
@@ -36,20 +36,14 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
         # Run supplies each gain; retain independent shape admission.
         drive = replace(drive, set={**drive.set, "gain": Hidden(0.0)})
         tones.append(
-            {
-                "name": name,
-                "drive": drive,
-                "sweep": {"start": -0.3, "stop": 1.0},
-            }
+            {"name": name, "drive": drive, "sweep": {"start": -0.3, "stop": 1.0}}
         )
     readout = mux_readout_initial(ctx)
     return Form(
         MuxAmpRabiCfg,
         tree={
-            "modules": {
-                "reset": Slot("$mux.module.reset"),
-                "readout": readout,
-            },
+            "reset": Slot("$mux.module.reset"),
+            "readout": readout,
             "tones": mux_tone_initials(
                 tones,
                 participants,
@@ -72,7 +66,8 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
         field_order=(
             "participants",
             "tones",
-            "modules",
+            "reset",
+            "readout",
             "expts",
             "reps",
             "rounds",

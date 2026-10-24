@@ -1,11 +1,15 @@
 """Form RPC observations and atomic writes on an in-process app connection."""
 
 import typing
+from dataclasses import replace
 from typing import ClassVar
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from zcu_tools.cfg_model import Range
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -23,31 +27,45 @@ class TupleCfg(SampleCfg):
     samples: tuple[complex, ...] = (1 + 2j, 3 - 4j)
 
 
-class TupleAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TupleCfg]:
-        del ctx
-        return Form(TupleCfg, {"sweep": Range(1.0, 2.0, expts=3)})
+def TupleAdapter_make_form(ctx: FormContext) -> Form[TupleCfg]:
+    del ctx
+    return Form(TupleCfg, {"sweep": Range(1.0, 2.0, expts=3)})
+
+
+TupleAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=TupleCfg),
+    make_form=TupleAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 class ExtraInputs(BaseModel):
     scale: float = Field(default=1.0, ge=0)
 
 
-def retain_cfg(extras: ExtraInputs, cfg: SampleCfg) -> SampleCfg:
-    return cfg
+class ExtraInput(SampleCfg):
+    extras: ExtraInputs = Field(default_factory=ExtraInputs)
 
 
-class ExtrasAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(
-            SampleCfg,
-            {"sweep": Range(1.0, 2.0, expts=3)},
-            extras=ExtraInputs,
-            lower=retain_cfg,
-        )
+def ExtrasAdapter_make_form(ctx: FormContext) -> Form[ExtraInput]:
+    del ctx
+    return Form(
+        ExtraInput,
+        {"sweep": Range(1.0, 2.0, expts=3)},
+    )
+
+
+ExtrasAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+    make_form=ExtrasAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 def test_dangling_module_rejects_unrelated_rpc_write_without_publication(
@@ -156,20 +174,36 @@ class FailingOptionsExtras(FormModel):
         return {}
 
 
-def retain_failing_cfg(extras: FailingOptionsExtras, cfg: SampleCfg) -> SampleCfg:
-    return cfg
+class FailingOptionsInput(SampleCfg):
+    extras: FailingOptionsExtras = Field(default_factory=FailingOptionsExtras)
 
 
-class FailingOptionsAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(
-            SampleCfg,
-            {"sweep": Range(1.0, 2.0, expts=3)},
-            extras=FailingOptionsExtras,
-            lower=retain_failing_cfg,
-        )
+class FailingOptionsObserver(FormModel):
+    @classmethod
+    def options(cls, env):
+        return FailingOptionsExtras.options(env)
+
+
+def FailingOptionsAdapter_make_form(ctx: FormContext) -> Form[FailingOptionsInput]:
+    del ctx
+    form = Form(
+        FailingOptionsInput,
+        {"sweep": Range(1.0, 2.0, expts=3)},
+    )
+    form.model = create_model(
+        "FailingOptionsForm", __base__=(FailingOptionsObserver, form.model)
+    )
+    return form
+
+
+FailingOptionsAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+    make_form=FailingOptionsAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 def test_describe_cfg_does_not_classify_author_valueerror_as_bad_path(form_rpc) -> None:
@@ -191,11 +225,19 @@ class MissingValuesCfg(SampleCfg):
     nullable_value: float | None = None
 
 
-class MissingValuesAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[MissingValuesCfg]:
-        del ctx
-        return Form(MissingValuesCfg, {"sweep": Range(1.0, 2.0, expts=3)})
+def MissingValuesAdapter_make_form(ctx: FormContext) -> Form[MissingValuesCfg]:
+    del ctx
+    return Form(MissingValuesCfg, {"sweep": Range(1.0, 2.0, expts=3)})
+
+
+MissingValuesAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=MissingValuesCfg),
+    make_form=MissingValuesAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 def test_describe_cfg_distinguishes_missing_from_null(form_rpc) -> None:
@@ -516,20 +558,26 @@ class TaggedExtraInputs(BaseModel):
     kind: typing.Literal["inline"] = "inline"
 
 
-def retain_tagged_cfg(extras: TaggedExtraInputs, cfg: ModuleRpcCfg) -> ModuleRpcCfg:
-    return cfg
+class TaggedInput(ModuleRpcCfg):
+    extras: TaggedExtraInputs = Field(default_factory=TaggedExtraInputs)
 
 
-class TaggedExtrasAdapter(ModuleRpcAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
-        del ctx
-        return Form(
-            ModuleRpcCfg,
-            {"sweep": Range(1.0, 2.0, expts=3)},
-            extras=TaggedExtraInputs,
-            lower=retain_tagged_cfg,
-        )
+def TaggedExtrasAdapter_make_form(ctx: FormContext) -> Form[TaggedInput]:
+    del ctx
+    return Form(
+        TaggedInput,
+        {"sweep": Range(1.0, 2.0, expts=3)},
+    )
+
+
+TaggedExtrasAdapter = Adapter(
+    spec=replace(ModuleRpcAdapter.spec, cfg_type=ModuleRpcCfg),
+    make_form=TaggedExtrasAdapter_make_form,
+    run=ModuleRpcAdapter.run,
+    guide=None,
+    analysis=ModuleRpcAdapter.analysis,
+    post_analysis=ModuleRpcAdapter.post_analysis,
+)
 
 
 def test_headless_sampling_commands_project_actual_values_and_reset(form_rpc):

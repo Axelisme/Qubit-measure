@@ -13,14 +13,21 @@ from tests.experiment._saving_support import SavingCfg, SavingCore
 
 
 def write_native_file(
-    path: Path, *, tag: str = "test/load", gain: float = 1.0
+    path: Path,
+    *,
+    tag: str = "test/load",
+    gain: float = 1.0,
+    cfg_schema_version: str | None = None,
 ) -> RunMetadata:
     """Write offline three-point native data with fixed history at an exact path."""
     core = SavingCore()
     cfg = SavingCfg(gain=gain)
+    spec = replace(core.AXES_SPEC, tag=tag)
+    if cfg_schema_version is not None:
+        spec = replace(spec, cfg_schema_version=cfg_schema_version)
     prepared = prepare_run_data(
         RunRecord(cfg, core.run(cfg, context=None)),
-        spec=replace(core.AXES_SPEC, tag=tag),
+        spec=spec,
         comment="history",
     )
     metadata = historical_metadata().model_copy(update={"experiment": tag})

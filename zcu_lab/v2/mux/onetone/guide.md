@@ -152,7 +152,7 @@ Run 固定捕捉 module alias 與 resonator 資料，其後修改全域 aliases�
 `reps`、`rounds` 可覆寫 acquisition 次數。省略保留表單值，null 清空欄位。
 省略分析輸入保留設定，明填 null 交分析 owner 處理。
 Form 在 Open／Reset 選來源，recipe 不再提供通用 `library` 或 `inline` 輸入。
-`overrides` 最後逐筆執行。Path 用點分字串，例如 `"sweep.df.start"`。
+`overrides` 最後逐筆執行。Path 用點分字串，例如 `"df.start"`。
 十進位索引指完整 tone 清單的原始位置，不依 participants 重編。
 Run 前呼叫 `check_ready()`，缺值列出欄位路徑與原因，不回滾先前編輯。
 Run 後 Analyze，回覆每 tone 的 index、name、label、freq、kappa、fit_quality 與失敗原因，以及 `resonators_diagnostic`。

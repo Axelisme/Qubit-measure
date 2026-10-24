@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.singleshot_shared import read_confusion_matrix
 from zcu_lab.v2.singleshot.mist.pre_freq.core import (
     PreFreqAnalyzeOptions,
     PreFreqCfg,
@@ -25,44 +21,34 @@ from zcu_lab.v2.singleshot.mist.pre_freq.core import (
     PreFreqResult,
 )
 from zcu_lab.v2.singleshot.mist.pre_freq.form import make_form
+from zcu_lab.v2.support.measure.singleshot_shared import read_confusion_matrix
 
 MistPreFreqRunResult: TypeAlias = RunRecord[PreFreqCfg, PreFreqResult]
 
 
-class MistPreFreqAdapter(BaseAdapter[PreFreqCfg, MistPreFreqRunResult]):
-    """Expose preparation-frequency acquisition and population analysis in Measure."""
-
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, load_data=True
+def _analyze(
+    req: AnalyzeRequest[MistPreFreqRunResult, None],
+    *,
+    plots: Plots,
+) -> None:
+    """Plot G/E/Other, using optional confusion correction from the run capture."""
+    options = PreFreqAnalyzeOptions(
+        confusion_matrix=read_confusion_matrix(req.parameters)
     )
-    exp_cls = PreFreqExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+    PreFreqExp().analyze(req.run_result, options, plots=plots)
+    return
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[PreFreqCfg]:
-        """Build this adapter's form from the captured Open/Reset sources."""
-        return make_form(ctx)
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: PreFreqCfg,
-        *,
-        context: RunContext,
-    ) -> MistPreFreqRunResult:
-        """Sweep preparation frequency and pair G/E fractions with their source cfg."""
-        del req
-        return RunRecord(cfg, PreFreqExp().run(cfg, context=context))
+def _run(
+    cfg: PreFreqCfg, *, context: RunContext
+) -> RunRecord[PreFreqCfg, PreFreqResult]:
+    return RunRecord(cfg=cfg, result=PreFreqExp().run(cfg, context=context))
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[MistPreFreqRunResult, None],
-        *,
-        plots: Plots,
-    ) -> None:
-        """Plot G/E/Other, using optional confusion correction from the run capture."""
-        options = PreFreqAnalyzeOptions(
-            confusion_matrix=read_confusion_matrix(req.parameters)
-        )
-        PreFreqExp().analyze(req.run_result, options, plots=plots)
-        return
+
+DEFINITION = Adapter(
+    spec=PreFreqExp.AXES_SPEC,
+    make_form=make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze),
+)

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -56,15 +56,18 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
         )
         program = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=2, rounds=2),
             modules=[pulse.build("charge"), ro.build("readout")],
+            reps=2,
         )
 
         def change_bias(*_args, **_kwargs) -> None:
             driver.set_value(0.4)
 
         result = program.acquire_decimated(
-            env.soc, progress=False, round_hook=change_bias
+            env.soc,
+            progress=False,
+            round_hook=change_bias,
+            rounds=2,
         )
         assert result is not None
         assert np.isfinite(result[0]).all()
@@ -75,8 +78,8 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
         ]
         unbound = ModularProgramV2(
             env.soccfg,
-            ProgramV2Cfg(reps=1),
             modules=[pulse.with_updates(ch=1).build("unbound"), ro.build("readout")],
+            reps=1,
         )
         with pytest.raises(ValueError, match="unbound|route"):
             unbound.acquire(env.soc, progress=False)

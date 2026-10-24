@@ -35,6 +35,10 @@ Target 省略／KEEP／null 沿用 Reset 的全域 aliases。
 GUI adapters 的 cfg 與 Run 使用該 tab 的固定 capture，後續全域 alias 變動不追改既有 Run。
 
 Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
+`gui.py` 宣告 Adapter／Analysis／Interactive／PostAnalysis 值，不繼承 adapter class。
+Form 輸出 adapter 的輸入型別，adapter.run 轉成實際實驗 cfg 並回傳 RunRecord。
+Module 與掃描欄位平鋪於頂層，只有 pulse Advanced 保留既有分組與摺疊。
+Load 不轉換舊 2.0 cfg，也不反填目前 Form；資料與 metadata 保留，record.cfg 為 None 並附原因。
 `onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
 JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
 `$qubit.flux_source`、`$mux.flux_source` 或 JPA 的 `$jpa.flux_source`／`$jpa.rf_source`，

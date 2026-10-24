@@ -12,7 +12,46 @@ from zcu_tools.gui.app.measure.remote.handlers.analysis import (
 )
 from zcu_tools.gui.remote.errors import RemoteError
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import ChoiceParams
+
+from ._helpers import Fixture, call, open_client
+
+
+def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
+    fx = Fixture(project_root=str(tmp_path / "project"))
+    fx.start()
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        fx.ctrl.start_run(tab_id)
+        qt_until(
+            lambda: fx.ctrl.active_operation_count() == 0, label="sample Run terminal"
+        )
+        assert fx.state.get_tab(tab_id).run.result is not None
+        rejected = call(
+            sock, "tab.analyze", {"tab_id": tab_id, "updates": {"unknown": 1}}
+        )
+        assert rejected["ok"] is False
+        assert rejected["error"]["data"]["definitions"] == [
+            {
+                "name": "threshold",
+                "type": "float",
+                "label": "Threshold",
+                "decimals": 2,
+                "default": 0.5,
+            }
+        ]
+        started = call(sock, "tab.analyze", {"tab_id": tab_id})
+        assert started["ok"] is True
+        assert started["result"]["params"] == {"threshold": 0.5}
+        qt_until(
+            lambda: fx.ctrl.active_operation_count() == 0,
+            label="sample analysis terminal",
+        )
+    finally:
+        sock.close()
+        fx.stop()
 
 
 def _adapter_with_params(params: ChoiceParams) -> MagicMock:

@@ -16,7 +16,7 @@ from zcu_tools.analysis.fitting import (
     fit_dual_decay,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -35,6 +35,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
+from zcu_lab.v2.support import live_heatmap_with_line, live_line
+
 
 @dataclass(frozen=True)
 class T1Result:
@@ -46,19 +48,27 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (times, signals)
 
 
-class T1ModuleCfg(ConfigBase):
+class T1Cfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class T1SweepCfg(ConfigBase):
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
-
-
-class T1Cfg(ProgramExpCfg):
-    modules: T1ModuleCfg
-    sweep: T1SweepCfg
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
 
@@ -92,7 +102,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/t1",
     )
 
@@ -107,14 +117,14 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         """
         # 1. Prepare the delay axis without changing the caller's configuration.
         cfg = deepcopy(config)
-        if cfg.uniform and not isinstance(cfg.sweep.length, SweepCfg):
+        if cfg.uniform and not isinstance(cfg.length, SweepCfg):
             raise ValueError("uniform mode requires SweepCfg")
         soc, soccfg, plots = context.soc, context.soccfg, context.plots
 
         if cfg.uniform:
-            lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
-            viewer = plots.liveplot_1d(
-                "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+            lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
+            viewer = live_line(
+                plots, "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
             )
             signals_buffer = SignalBuffer(
                 (len(lengths),),
@@ -122,43 +132,51 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             )
             with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 cfg = sched.cfg
-                modules = cfg.modules
-                length_sweep = cfg.sweep.length
+                length_sweep = cfg.length
                 if not isinstance(length_sweep, SweepCfg):
                     raise TypeError("uniform mode requires SweepCfg")
                 length_param = sweep2param("length", length_sweep)
 
                 # 2a. Excite, wait a linearly swept delay, then acquire readout IQ.
                 _ = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
-                        Pulse("pi_pulse", modules.pi_pulse),
+                        Reset("reset", cfg.reset),
+                        Pulse("pi_pulse", cfg.pi_pulse),
                         Delay("t1_delay", length_param),
-                        Readout("readout", modules.readout),
+                        Readout("readout", cfg.readout),
                     )
                     .declare_sweep("length", length_sweep)
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
         else:
             delay_table = materialize_nonuniform_t1_delays(
-                cfg.sweep.length,
+                cfg.length,
                 soccfg=soccfg,
             )
             length_cycles = delay_table.cycles
             lengths = delay_table.times_us
-            viewer = plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
+            viewer = live_line(plots, "measurement", "Time (us)", "Amplitude")
             signals_buffer = SignalBuffer(
                 (len(lengths),),
                 on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
             )
             with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 cfg = sched.cfg
-                modules = cfg.modules
 
                 # 2b. Load each nonuniform delay in cycles before reset and excitation.
                 _ = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add(
                         LoadValue(
                             "load_t1_delay",
@@ -167,13 +185,13 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                             val_reg="t1_delay_cycle",
                             auto_compress=False,
                         ),
-                        Reset("reset", modules.reset),
-                        Pulse("pi_pulse", modules.pi_pulse),
+                        Reset("reset", cfg.reset),
+                        Pulse("pi_pulse", cfg.pi_pulse),
                         DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", modules.readout),
+                        Readout("readout", cfg.readout),
                     )
                     .declare_sweep("length_idx", len(length_cycles))
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         # 3. Keep acquired averages and any NaN partial-data slots on the same axis.
@@ -238,20 +256,28 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
 
 
-class T1WithToneModuleCfg(ConfigBase):
+class T1WithToneCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     reset: Reset.Cfg | None = None
     pi_pulse: Pulse.Cfg
     test_pulse: Pulse.Cfg
     readout: Readout.Cfg
-
-
-class T1WithToneSweepAxisCfg(ConfigBase):
     length: SweepCfg
-
-
-class T1WithToneCfg(ProgramExpCfg):
-    modules: T1WithToneModuleCfg
-    sweep: T1WithToneSweepAxisCfg
 
 
 @dataclass(frozen=True)
@@ -268,7 +294,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1WithToneCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/t1_with_tone",
     )
 
@@ -285,16 +311,19 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         # 1. Prepare tone durations on the test generator's grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
         lengths = sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Time (us)",
+            "Amplitude",
+            title="T1 relaxation",
         )
         signals_buffer = SignalBuffer(
             (len(lengths),),
@@ -302,23 +331,24 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg.modules
 
             # 2. Sweep the tone after excitation, then acquire the readout IQ.
-            length_sweep = cfg.sweep.length
+            length_sweep = cfg.length
             length_param = sweep2param("length", length_sweep)
-            modules.test_pulse.set_param("length", length_param)
+            cfg.test_pulse.set_param("length", length_param)
 
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse(name="pi_pulse", cfg=modules.pi_pulse),
-                    Pulse(name="test_pulse", cfg=modules.test_pulse),
-                    Readout("readout", modules.readout),
+                    Reset("reset", cfg.reset),
+                    Pulse(name="pi_pulse", cfg=cfg.pi_pulse),
+                    Pulse(name="test_pulse", cfg=cfg.test_pulse),
+                    Readout("readout", cfg.readout),
                 )
                 .declare_sweep("length", length_sweep)
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         # 3. Return acquired averages without filling unfinished points.
@@ -383,14 +413,29 @@ def t1_with_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
     return rotate2real(signals).real
 
 
-class ScanT1WithToneSweepCfg(ConfigBase):
+class ScanT1WithToneCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    test_pulse: Pulse.Cfg
+    readout: Readout.Cfg
     gain: SweepCfg | list[float]
     length: SweepCfg
-
-
-class ScanT1WithToneCfg(ProgramExpCfg):
-    modules: T1WithToneModuleCfg
-    sweep: ScanT1WithToneSweepCfg
 
 
 @dataclass(frozen=True)
@@ -410,7 +455,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ScanT1WithToneResult,
         cfg_type=ScanT1WithToneCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/t1_with_tone_sweep",
     )
 
@@ -429,22 +474,21 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         # 1. Prepare the host gain axis and the generator's tone-duration axis.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
 
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
             allow_array=True,
         )
         lengths = sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_2d_with_line(
-            "measurement", "gain", "Time (us)", line_axis=1, num_lines=5
+        viewer = live_heatmap_with_line(
+            context.plots, "measurement", "gain", "Time (us)", line_axis=1, num_lines=5
         )
         signals_buffer = SignalBuffer(
             (len(gains), len(lengths)),
@@ -457,23 +501,27 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
-                modules = cfg.modules
 
-                modules.test_pulse.set_param("gain", step.value)
-                length_sweep = cfg.sweep.length
+                cfg.test_pulse.set_param("gain", step.value)
+                length_sweep = cfg.length
                 length_param = sweep2param("length", length_sweep)
-                modules.test_pulse.set_param("length", length_param)
+                cfg.test_pulse.set_param("length", length_param)
 
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
-                        Reset("reset", modules.reset),
-                        Pulse("pi_pulse", modules.pi_pulse),
-                        Pulse("test_pulse", modules.test_pulse),
-                        Readout("readout", modules.readout),
+                        Reset("reset", cfg.reset),
+                        Pulse("pi_pulse", cfg.pi_pulse),
+                        Pulse("test_pulse", cfg.test_pulse),
+                        Readout("readout", cfg.readout),
                     )
                     .declare_sweep("length", length_sweep)
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         # 3. Preserve gain-major IQ averages and unfinished NaN slots.

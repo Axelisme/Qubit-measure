@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.simulation.timeline import TimelineInterpreter
 
@@ -14,7 +14,11 @@ from tests.program.v2._mux_support import mux_soccfg, native_mux
 def test_mux_frontend_agrees_with_scalar_timing_and_declared_tone_order(placement):
     mux = native_mux().build("mux_probe")
     module = Repeat("container", 1).add_content(mux) if placement == "repeat" else mux
-    prog = ModularProgramV2(mux_soccfg(), ProgramV2Cfg(reps=2), modules=[module])
+    prog = ModularProgramV2(
+        mux_soccfg(),
+        modules=[module],
+        reps=2,
+    )
     env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
     try:
         try:
@@ -57,7 +61,9 @@ def test_fixed_mux_compile_profile_runs_real_mux_with_every_adc(channels):
     assert factory is not None, "offline mux acquisition needs a fixed compile profile"
     soccfg = factory(3, 5, gen_ch=0, ro_chs=channels)
     prog = ModularProgramV2(
-        soccfg, ProgramV2Cfg(reps=3), modules=[native_mux(channels).build("mux")]
+        soccfg,
+        modules=[native_mux(channels).build("mux")],
+        reps=3,
     )
     env = white_noise(n_gens=3, n_readouts=5, routes=tuple((0, ch) for ch in channels))
     try:

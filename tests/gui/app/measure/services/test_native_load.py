@@ -13,6 +13,8 @@ from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     ParameterWriteback,
     WritebackItem,
@@ -56,6 +58,7 @@ from zcu_tools.resources.entry import (
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
     NativeSaveSession,
     PaneParams,
     PaneSummary,
@@ -209,23 +212,31 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     assert tab.run.storage is not None and tab.run.storage.point == "other"
     assert control.read_context().target == other
     control.set_parameter(target, "Q1.rate", 10.0)
-    seen: list[AnalyzeRequest[object, object]] = []
+    seen: list[AnalyzeRequest[RunRecord[SavingCfg, SavingResult], object]] = []
 
     def analyze(
-        request: AnalyzeRequest[object, object], *, plots: Plots
+        request: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], object],
+        *,
+        plots: Plots,
     ) -> PaneSummary:
         del plots
         seen.append(request)
         return PaneSummary()
 
     def proposals(
-        request: WritebackRequest[object, PaneSummary],
+        request: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
     ) -> list[WritebackItem]:
         assert request.ctx.parameters is loaded
         return [ParameterWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
 
-    monkeypatch.setattr(tab.adapter, "analyze", analyze)
-    monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
+    tab.adapter = Adapter(
+        spec=AnalysisSavingAdapter.spec,
+        make_form=AnalysisSavingAdapter.make_form,
+        run=AnalysisSavingAdapter.run,
+        guide=None,
+        analysis=Analysis(fn=analyze, writeback=proposals),
+        post_analysis=AnalysisSavingAdapter.post_analysis,
+    )
     writeback = WritebackService(control, arb_names=lambda: ())
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
@@ -696,10 +707,6 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
             if p.is_file()
         }
 
-        def reject_mapping(key: object, result: object, *, comment: str) -> None:
-            raise AssertionError("Origin rejection must precede data mapping")
-
-        monkeypatch.setattr(tab.adapter, "data_item", reject_mapping)
         save = session.save_artifacts if save_all else session.save
         with pytest.raises(FailedPreconditionError) as error:
             save()

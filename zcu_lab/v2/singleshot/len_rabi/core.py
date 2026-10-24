@@ -16,17 +16,17 @@ from zcu_tools.analysis.fitting.singleshot_rabi import (
 from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.plotting.singleshot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import ProgramV2Cfg, Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
 
-from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
 @dataclass(frozen=True)
@@ -36,17 +36,7 @@ class LenRabiResult:
     signals: NDArray[np.complex128]
 
 
-class LenRabiSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
-
-
-class LenRabiModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class LenRabiCfg(ExpCfgModel):
+class LenRabiCfg(ConfigBase):
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -62,8 +52,10 @@ class LenRabiCfg(ExpCfgModel):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    modules: LenRabiModuleCfg
-    sweep: LenRabiSweepCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
     shots: Annotated[int, FieldMeta(label="Shots")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
@@ -120,21 +112,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         # Set up one raw-shot cloud per length without changing the caller cfg.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        program_cfg = ProgramV2Cfg(
-            reps=cfg.shots,
-            rounds=1,
-            initial_delay=cfg.initial_delay,
-            relax_delay=cfg.relax_delay,
-        )
 
-        modules = cfg.modules
-        assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
+        assert cfg.qub_pulse.waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
         lengths = sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
         expected_shape = (len(lengths), cfg.shots)
 
@@ -147,7 +132,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Length (us)",
             "Signal",
@@ -171,15 +157,20 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             for length, step in sched.scan("length", lengths.tolist()):
-                modules = step.cfg.modules
-                modules.qub_pulse.set_param("length", length)
+                step.cfg.qub_pulse.set_param("length", length)
 
                 # Acquire one length at a time to bound the board raw-buffer size.
                 program = (
-                    step.prog_builder(soc, soccfg, cfg=program_cfg)
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=cfg.shots,
+                        initial_delay=cfg.initial_delay,
+                        relax_delay=cfg.relax_delay,
+                    )
+                    .add_reset("reset", step.cfg.reset)
+                    .add_pulse("qubit_pulse", step.cfg.qub_pulse)
+                    .add_readout("readout", step.cfg.readout)
                     .build()
                 )
                 try:
@@ -225,7 +216,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             max_calls=options.max_calls,
             initial_state=options.initial_state,
         )
-        readout = source.cfg.modules.readout if source.cfg is not None else None
+        readout = source.cfg.readout if source.cfg is not None else None
         ro_length = readout.ro_length if readout is not None else None
         ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None
         plot_rabi_joint(

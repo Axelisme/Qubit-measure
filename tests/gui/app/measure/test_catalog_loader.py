@@ -22,14 +22,13 @@ def test_measure_adapter_keeps_registration_and_validation_contract(
     root.mkdir()
     (root / "__init__.py").write_text("")
     path = root / "catalog.py"
-    source = """from zcu_tools.gui.app.measure.adapter import (
-    ExpAdapterProtocol, AdapterCapabilities, AdapterGuide,
-)
-class Adapter(ExpAdapterProtocol):
-    capabilities = AdapterCapabilities()
-    @classmethod
-    def guide(cls):
-        return AdapterGuide(markdown="VERSION", resource_dir=None)
+    source = """from pathlib import Path
+from zcu_tools.gui.app.measure.adapter import Adapter as Definition
+from tests.gui._adapter_fakes import DummyAdapter
+guide = Path(__file__).with_name("guide-VERSION.md")
+guide.write_text("VERSION")
+Adapter = Definition(spec=DummyAdapter.spec, make_form=DummyAdapter.make_form,
+                     run=DummyAdapter.run, guide=guide)
 def register_all(registry):
     registry.register("demo", Adapter)
 """
@@ -65,16 +64,18 @@ def test_reload_keeps_templates_for_open_and_reset(tmp_path: Path, qapp) -> None
     (root / "__init__.py").write_text("")
     (root / "catalog.py").write_text(
         """from zcu_tools.cfg_model import ConfigBase, Template, PulseCfg
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.experiment import AxesSpec, ZSpec
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter as Definition
 from zcu_tools.gui.form_adapter import Form, FormContext
+from tests.gui._adapter_fakes import DummyResult
 class Cfg(ConfigBase):
     probe: PulseCfg
-class Adapter(BaseAdapter[Cfg, float]):
-    capabilities = AdapterCapabilities(requires_soc=False, load_data=False, analysis=AnalysisMode.NONE)
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[Cfg]:
-        return Form(Cfg, {"probe": Template("probe")})
+def make_form(ctx: FormContext) -> Form[Cfg]:
+    return Form(Cfg, {"probe": Template("probe")})
+Adapter = Definition(spec=AxesSpec(axes=(), z=ZSpec("value", "value", ""),
+    result_type=DummyResult, cfg_type=Cfg, tag="test/template"),
+    make_form=make_form, run=lambda cfg, *, context: RunRecord(cfg=cfg, result=DummyResult()), guide=None)
 def register_all(registry):
     registry.register("demo", Adapter)
 """

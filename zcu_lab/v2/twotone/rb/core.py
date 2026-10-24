@@ -8,16 +8,26 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import fit_decay
-from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ComputedPulse, LoadValue, Readout, Repeat, Reset
+from zcu_tools.program.v2 import (
+    ComputedPulse,
+    LoadValue,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Repeat,
+    Reset,
+    ResetCfg,
+)
 from zcu_tools.utils.process import rotate2real
 
-from .program import RBModuleCfg
+from zcu_lab.v2.support import live_line
+
 from .sequence import make_seed_tables
 
 
@@ -37,8 +47,28 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(mean_signals).real
 
 
-class RBCfg(ProgramExpCfg):
-    modules: RBModuleCfg
+class RBCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
     depths: Annotated[
         list[Annotated[int, Field(ge=0, strict=True)]],
         FieldMeta(label="Clifford depths"),
@@ -98,7 +128,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
             dtype=np.int64,
         )
 
-        viewer = context.plots.liveplot_1d("measurement", "Depth", "Signal")
+        viewer = live_line(context.plots, "measurement", "Depth", "Signal")
 
         signals_buffer = SignalBuffer(
             (len(entropys), len(depths)),
@@ -110,10 +140,11 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
-                builder = step.prog_builder(soc, soccfg)
+                builder = step.prog_builder(
+                    soc, soccfg, reps=step.cfg.reps, relax_delay=step.cfg.relax_delay
+                )
 
                 # 2. Map the seed's physical gate IDs to calibrated pulses.
-                modules = step.cfg.modules
                 (
                     rand_gate_seq,
                     prefix_len_by_depth,
@@ -122,9 +153,9 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 ) = tables
                 max_rand_len = max(prefix_len_by_depth, default=0)
 
-                Id_pulse = modules.I_pulse
-                X90_pulse = modules.X90_pulse
-                X180_pulse = modules.X180_pulse
+                Id_pulse = step.cfg.I_pulse
+                X90_pulse = step.cfg.X90_pulse
+                X180_pulse = step.cfg.X180_pulse
                 MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
                 Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
                 Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
@@ -164,7 +195,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                             idx_reg="depth_idx",
                             val_reg="recovery_gate_1",
                         ),
-                        Reset("reset", cfg=modules.reset),
+                        Reset("reset", cfg=step.cfg.reset),
                         Repeat(
                             "rand_gate_idx",
                             "rand_len",
@@ -196,14 +227,14 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                             val_reg="recovery_gate_1",
                             pulses=gate_pulses,
                         ),
-                        Readout("readout", cfg=modules.readout),
+                        Readout("readout", cfg=step.cfg.readout),
                     )
                     .declare_sweep("depth_idx", len(prefix_len_by_depth))
                     .build()
                 )
 
                 # 4. Average reps/rounds into this seed's depth trace.
-                _ = builder.run_program(program)
+                _ = builder.run_program(program, rounds=cfg.rounds)
 
         return RB_Result(
             sub_seeds=entropys,

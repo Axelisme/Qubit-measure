@@ -19,7 +19,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     analyze_flux_pick,
     fold_initial_lines,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.notebook.plotting import NotebookPlotHost
 from zcu_tools.plotting.fluxdep.pick import make_flux_pick_figure
@@ -41,7 +41,7 @@ class FluxDepPickerOptions:
     magnitude_only: bool = False
 
 
-CfgT = TypeVar("CfgT", bound=ExpCfgModel, default=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase, default=ConfigBase)
 ResultT = TypeVar("ResultT", default=object)
 
 FluxDepAnalysisRecord = AnalysisRecord[CfgT, ResultT, FluxPickState, FluxPickAnalysis]
