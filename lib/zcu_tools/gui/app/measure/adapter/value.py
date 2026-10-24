@@ -20,6 +20,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ArtifactKey
 
+from ..summary import summarize_analysis
 from ..writeback import WritebackItem
 from .hooks import (
     AnalyzeHook,
@@ -436,15 +437,14 @@ class Adapter(
     ) -> AnalysisItem:
         """Hand over one pane's historical inputs and summary under its assigned key.
 
-        result is None for figures-only analysis, producing an empty summary,
-        or implements AnalyzeResult.to_summary_dict. parameters is the
-        dataclass instance used for that result, or None for no inputs, never
-        the next edited draft. Unsupported input/result types raise TypeError;
-        invalid/non-finite JSON raises ValueError. The datafile model isolates
-        containers once; this projection neither reads live context nor writes files.
+        result is the committed native result, or None for figures-only output.
+        The framework converter retains declared fields and replaces non-finite
+        numbers with null. Invalid-number paths belong to live RPC, not this
+        historical document. parameters is the dataclass used for that result,
+        or None for no inputs, never the next edited draft. Unsupported inputs
+        or result fields raise TypeError with the converter's field path.
+        This projection neither reads live context nor writes files.
         """
-        if result is not None and not isinstance(result, AnalyzeResult):
-            raise TypeError("Analysis result must implement to_summary_dict")
         if parameters is None:
             inputs: dict[str, object] = {}
         elif dataclasses.is_dataclass(parameters) and not isinstance(parameters, type):
@@ -460,7 +460,7 @@ class Adapter(
             {
                 "pane": pane,
                 "parameters": inputs,
-                "summary": {} if result is None else result.to_summary_dict(),
+                "summary": summarize_analysis({} if result is None else result).summary,
             }
         )
         return AnalysisItem(key, document)
