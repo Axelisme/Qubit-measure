@@ -3,20 +3,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -48,66 +48,62 @@ class RoOptPowerAnalyzeResult(AnalyzeResultBase):
     best_gain: float
 
 
-class RoOptPowerAdapter(
-    BaseAdapter[
-        PowerCfg,
-        RoOptPowerRunResult,
-        RoOptPowerAnalyzeResult,
-        RoOptPowerAnalyzeParams,
+def _RoOptPower_make_form(ctx: FormContext) -> Form[PowerCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
+
+
+def _RoOptPower_analyze(
+    req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams],
+    *,
+    plots: Plots,
+) -> RoOptPowerAnalyzeResult:
+    params = req.analyze_params
+    options = PowerAnalyzeOptions(
+        penalty_ratio=params.penalty_ratio,
+        smooth=params.smooth,
+        smooth_method=params.smooth_method,
+    )
+    result = PowerExp().analyze(req.run_result, options, plots=plots)
+    return RoOptPowerAnalyzeResult(
+        best_gain=result.best_gain,
+    )
+
+
+def _RoOptPower_get_writeback_items(
+    req: WritebackRequest[RoOptPowerRunResult, RoOptPowerAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    result = req.analyze_result
+    items: list[WritebackItem] = [
+        ParameterWriteback(
+            target_name="$qubit.ext.best_ro_gain",
+            description="Optimal readout gain (a.u.)",
+            proposed_value=result.best_gain,
+        ),
     ]
-):
-    exp_cls = PowerExp
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[PowerCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
-
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: PowerCfg,
-        *,
-        context: RunContext,
-    ) -> RoOptPowerRunResult:
-        del req
-        return RunRecord(cfg, PowerExp().run(cfg, context=context))
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> RoOptPowerAnalyzeResult:
-        params = req.analyze_params
-        options = PowerAnalyzeOptions(
-            penalty_ratio=params.penalty_ratio,
-            smooth=params.smooth,
-            smooth_method=params.smooth_method,
+    items.extend(
+        readout_dpm_writeback_items(
+            req.ctx,
+            req.run_result.cfg,
+            proposed={"best_ro_gain": result.best_gain},
         )
-        result = PowerExp().analyze(req.run_result, options, plots=plots)
-        return RoOptPowerAnalyzeResult(
-            best_gain=result.best_gain,
-        )
+    )
+    return items
 
-    def get_writeback_items(
-        self, req: WritebackRequest[RoOptPowerRunResult, RoOptPowerAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        result = req.analyze_result
-        items: list[WritebackItem] = [
-            ParameterWriteback(
-                target_name="$qubit.ext.best_ro_gain",
-                description="Optimal readout gain (a.u.)",
-                proposed_value=result.best_gain,
-            ),
-        ]
-        items.extend(
-            readout_dpm_writeback_items(
-                req.ctx,
-                req.run_result.cfg,
-                proposed={"best_ro_gain": result.best_gain},
-            )
-        )
-        return items
+
+def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=PowerExp.AXES_SPEC,
+    make_form=_RoOptPower_make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_RoOptPower_analyze,
+        options=lambda source, env: RoOptPowerAnalyzeParams(),
+        writeback=_RoOptPower_get_writeback_items,
+    ),
+)

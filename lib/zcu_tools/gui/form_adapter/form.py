@@ -1,13 +1,12 @@
-"""Translate core cfg declarations into Qt-free input models and typed cfgs."""
+"""Generate Qt-free form models and validated adapter-owned inputs."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from copy import copy
 from dataclasses import replace
 from types import MappingProxyType, new_class
 from typing import Literal
 
-from pydantic import BaseModel, JsonValue, ValidationError
-from pydantic.fields import FieldInfo
+from pydantic import JsonValue, ValidationError
 
 from zcu_tools.cfg_model import (
     ConfigBase,
@@ -49,10 +48,10 @@ from .logical import LogicalEdit, LogicalEditCandidate, LogicalFieldObservation
 
 
 class Form[C: ConfigBase]:
-    """Generate an input model from a core cfg and its authored starting tree.
+    """Generate a form model from an input type and its authored starting tree.
 
-    core_cfg is the validated result type; tree keys follow its nested field
-    names. Unspecified fields derive shape and defaults from core declarations.
+    core_cfg is the validated output type, which may differ from experiment cfg.
+    tree keys follow its nested field names. Unspecified fields derive shape and defaults from core declarations.
     Hidden(value) omits input and supplies a core-validated literal at conversion.
     Hidden() requires a core default; unknown keys fail with ValueError at creation.
     model is a generated FormModel class, used only through the public form API.
@@ -68,8 +67,6 @@ class Form[C: ConfigBase]:
     remove static defaults in this form only; failed evaluation requires input
     instead of falling back to core defaults. Range endpoints authored as None
     are also blank required input, never inherited 0/1 defaults.
-    Optional extras adds an 'extras' section and requires
-    a named lower(extras, cfg) callable returning the concrete core cfg type.
     Generated module input omits optional desc; conversion restores its
     Spec default, and copying a library entry inline discards its description.
     Templates cannot seed desc (see bind_templates); there is no override.
@@ -89,7 +86,7 @@ class Form[C: ConfigBase]:
     unlisted fields retain their relative order, and nested fields are unchanged.
     Empty order preserves the default. Unknown or duplicate names raise ValueError.
     Nonempty order on a persistent Spec raises ValueError: Spec forms retain
-    their inherited field order and validators. Extras, if supplied, remains last.
+    their inherited field order and validators.
     fixed_elements is a tuple of root-relative FixedElements declarations for
     core cfg Forms. Named mode supplies identity admission and participants
     validation, rejecting duplicate default names with indices. Slot mode fixes
@@ -99,18 +96,14 @@ class Form[C: ConfigBase]:
     a host preserving input across Refresh must also preserve this mapping.
     """
 
-    def __init__[E: BaseModel](
+    def __init__(
         self,
         core_cfg: type[C],
         tree: Mapping[str, FormNode],
         *,
-        extras: type[E] | None = None,
-        lower: Callable[[E, C], C] | None = None,
         fixed_elements: tuple[FixedElements, ...] = (),
         field_order: tuple[str, ...] = (),
     ) -> None:
-        if (extras is None) != (lower is None):
-            raise ValueError("extras and lower must be provided together")
         if len(set(field_order)) != len(field_order):
             raise ValueError("field_order contains duplicate fields")
         if unknown := set(field_order) - core_cfg.model_fields.keys():
@@ -126,33 +119,6 @@ class Form[C: ConfigBase]:
             else Section(core_cfg, tree, (), field_order=field_order)
         )
         self.model: type[FormModel] = self._section.model
-        self._lower: Callable[[BaseModel, ConfigBase], C] | None = None
-        if extras is not None and lower is not None:
-            if "extras" in core_cfg.model_fields:
-                raise ValueError("Core cfg already declares extras")
-
-            def lower_model(value: BaseModel, cfg: ConfigBase) -> C:
-                return lower(
-                    extras.model_validate(value.model_dump()["extras"]),
-                    core_cfg.model_validate(cfg),
-                )
-
-            self._lower = lower_model
-            parent = self.model
-            namespace: dict[str, object] = {
-                "__module__": __name__,
-                "__annotations__": {"extras": extras},
-            }
-            namespace["extras"] = FieldInfo(annotation=extras, default_factory=extras)
-            model = new_class(
-                f"{core_cfg.__name__}WithExtrasForm",
-                (parent,),
-                exec_body=lambda ns: ns.update(namespace),
-            )
-            if not issubclass(model, FormModel):
-                raise TypeError("Generated extras model must implement FormModel")
-            self.model = model
-            self._section.model = model
         if fixed_elements:
             if not issubclass(self.model, FixedElementsForm):
                 raise ValueError("Fixed elements require a core cfg Form")
@@ -175,7 +141,7 @@ class Form[C: ConfigBase]:
 
     @property
     def core_cfg(self) -> type[C]:
-        """Return the fixed validated cfg result type; the definition cannot retarget it."""
+        """Return the fixed validated input type; the definition cannot retarget it."""
         return self._core_cfg
 
     def bind_templates(
@@ -524,7 +490,7 @@ class Form[C: ConfigBase]:
 
         input must belong to this Form; another model raises TypeError. path
         contains nonempty core field names and int original model-list indexes,
-        not inline descendants or extras.
+        not inline descendants.
         Unknown/nonmodule paths raise ValueError, even if their input has a
         kind tag. Return ref or inline from the public tagged input, including
         partial modules and invalid expressions. Disabled, missing or untagged
@@ -555,7 +521,7 @@ class Form[C: ConfigBase]:
         its captured library Spec; inline mode evaluates this field's input.
         Other invalid draft fields do not block this read. Only this module's
         validation/source failures return FormErrors at the consuming path.
-        Values exclude full-cfg validation and extras lowering: this is not the
+        Values exclude full-input validation: this is not the
         native cfg after to_cfg. Unexpected source exceptions propagate.
         """
         if input.model is not self.model:
@@ -651,20 +617,19 @@ class Form[C: ConfigBase]:
         return state.input
 
     def to_cfg(self, value: FormModel, env: FormEnv) -> C | FormErrors:
-        """Convert this form's ordinary result into a validated concrete core cfg.
+        """Convert this form's ordinary result into validated adapter input.
 
         value must be a result of this generated model or its template_input
         subclass; another model raises TypeError. env is the same captured
         source used by result. Core validation
         failures return FormErrors at their cfg field paths. Conversion does not
-        mutate input or sources. Exceptions from the author-provided lower hook
-        propagate; its result is validated again against core_cfg.
+        mutate input or sources. The result type is adapter-owned input, which
+        may differ from the experiment cfg built by adapter.run.
         """
         if not isinstance(value, self.model):
             raise TypeError("to_cfg requires this form's generated model result")
         errors: dict[tuple[str | int, ...], str] = {}
         raw = self._section.to_raw(value, env, errors)
-        raw.pop("extras", None)
         if errors:
             return FormErrors(errors)
         try:
@@ -673,8 +638,6 @@ class Form[C: ConfigBase]:
             return FormErrors(
                 {tuple(error["loc"]): error["msg"] for error in exc.errors()}
             )
-        if self._lower is not None:
-            cfg = self.core_cfg.model_validate(self._lower(value, cfg).model_dump())
         return cfg
 
 

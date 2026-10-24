@@ -205,17 +205,21 @@ T_Options = TypeVar("T_Options", default=None)
 T_Analysis = TypeVar("T_Analysis", bound=AnalyzeResult | None, default=None)
 T_PostOptions = TypeVar("T_PostOptions", default=None)
 T_PostAnalysis = TypeVar("T_PostAnalysis", bound=AnalyzeResult | None, default=None)
+T_Input = TypeVar("T_Input", bound=ConfigBase, default=T_Cfg)
 
 
 @dataclass(frozen=True, kw_only=True, init=False)
 class Adapter(
-    Generic[T_Cfg, T_Result, T_Options, T_Analysis, T_PostOptions, T_PostAnalysis]
+    Generic[
+        T_Cfg, T_Result, T_Options, T_Analysis, T_PostOptions, T_PostAnalysis, T_Input
+    ]
 ):
     """Frozen caller-owned wiring, without per-tab state or construction I/O.
 
     spec declares native persistence and experiment identity. make_form accepts
-    FormContext and builds a fresh captured Form. run(cfg, *, context) returns
-    raw data; the operation host wraps admitted cfg and evidence in RunRecord.
+    FormContext and builds a fresh Form of adapter-owned input. run(inp, *,
+    context) adapts that input and returns RunRecord with the actual experiment
+    cfg and result. The host attaches evidence without replacing cfg or result.
     Form/run callback failures propagate to the calling owner.
 
     guide is a required Markdown Path or None, read only by guide(). analysis
@@ -226,8 +230,8 @@ class Adapter(
     """
 
     spec: AxesSpec[T_Result, T_Cfg] | GroupedAxesSpec[T_Result, T_Cfg]
-    make_form: Callable[[FormContext], Form[T_Cfg]]
-    run: RunHook[T_Cfg, T_Result]
+    make_form: Callable[[FormContext], Form[T_Input]]
+    run: RunHook[T_Input, T_Cfg, T_Result]
     _guide: Path | None
     analysis: _PrimaryStage[T_Cfg, T_Result, T_Options, T_Analysis] | None
     post_analysis: (
@@ -238,8 +242,8 @@ class Adapter(
         self,
         *,
         spec: AxesSpec[T_Result, T_Cfg] | GroupedAxesSpec[T_Result, T_Cfg],
-        make_form: Callable[[FormContext], Form[T_Cfg]],
-        run: RunHook[T_Cfg, T_Result],
+        make_form: Callable[[FormContext], Form[T_Input]],
+        run: RunHook[T_Input, T_Cfg, T_Result],
         guide: Path | None,
         analysis: _PrimaryStage[T_Cfg, T_Result, T_Options, T_Analysis] | None = None,
         post_analysis: PostAnalysis[

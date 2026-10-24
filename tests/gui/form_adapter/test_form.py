@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from typing import Annotated
 
 import pytest
-from pydantic import BaseModel, Field, JsonValue, create_model
+from pydantic import Field, JsonValue, create_model
 from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
@@ -354,12 +354,6 @@ class DeviceCfg(ConfigBase):
     optional_dev: str | None = None
 
 
-class Extras(BaseModel):
-    """A GUI-only value is lowered without changing the core declaration."""
-
-    multiplier: int = 2
-
-
 def require_result(state: FormState[FormModel], env: FormEnv) -> FormModel:
     """Return an ordinary successful form result, with useful failure output."""
     result = state.result(env)
@@ -465,25 +459,6 @@ def test_alias_name_resolves_direct_name_and_missing_required_is_invalid() -> No
     result = state.result(env)
     assert isinstance(result, FormErrors)
     assert ("flux_dev",) in result.messages
-
-
-def lower_extras(extras: Extras, cfg: ScalarCfg) -> ScalarCfg:
-    """Multiply a typed core value using a GUI-only input."""
-    return cfg.model_copy(update={"amount": cfg.amount * extras.multiplier})
-
-
-def test_extras_lower_receives_validated_named_models() -> None:
-    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
-    form = form_adapter.Form(
-        ScalarCfg,
-        {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
-        extras=Extras,
-        lower=lower_extras,
-    )
-    env = FormEnv()
-    cfg = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
-    assert isinstance(cfg, ScalarCfg)
-    assert cfg.amount == 4
 
 
 class NullableDeviceNames(ConfigBase):
