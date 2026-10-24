@@ -41,7 +41,7 @@ Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `
 
 `readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 使用一般 model-list 的 indexed editing，每筆 tone 的 freq、gain、phase、ro_ch 與 label 都是獨立欄位。它沒有 waveform 或逐 tone 引用。生成器不推導 mux group 或 resonator 校準初值。
 
-Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。Extras 若有宣告，仍在最後。
+Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。
 
 `Template.set`／`Slot.set` 的 model-list seed 使用原 Spec 欄位名，例如 `set={"tones": [{"freq": Expr("6000 + 2"), "gain": 0.1, "ro_ch": 0}]}`。生成器先按原 Spec 補各位置的結構預設，再以共享元素宣告保留 expression 的 requiredness 與原 schema 驗證。某位置的 expression 算不出時留空，不使用該欄位的靜態預設；其他位置仍有自己的初值。未知元素欄位在建立 input 時以含 list index 的路徑報錯。實驗自行提供清單，生成器不推導來源關係或通道。
 
