@@ -249,11 +249,19 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
-        """Build and run integrated acquisition with options and producer kwargs.
+        """Build once and run integrated acquisition, returning the live slot.
+
+        rounds is the software average count, default one, independent of cfg.
+        It must be a positive integer, excluding bool; invalid values raise
+        ValueError before factory invocation or acquisition. The same value is
+        passed to the producer and used as the rounds progress total. Retry
+        reuses both this value and the built program.
 
         raw2signal_fn overrides the builder converter and must return a value
-        compatible with the owner's slot. None uses the builder/default converter.
-        See the class contract for retry, stop and partial-result behavior.
+        compatible with the owner's slot. None uses the builder converter or
+        default_raw2signal_fn. options controls retry, progress and stop;
+        acquire_kwargs pass to the producer's acquire method.
+        See the class contract for scope, modules, failures and partial results.
         """
         self._schedule.ensure_active()
         self._ensure_modules()
@@ -273,11 +281,19 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
-        """Build and run decimated acquisition under the same policy as integrated.
+        """Build once and run decimated acquisition, returning the live slot.
+
+        rounds is the software average count, default one, independent of cfg.
+        It must be a positive integer, excluding bool; invalid values raise
+        ValueError before factory invocation or acquisition. The same value is
+        passed to the producer and used as the rounds progress total. Retry
+        reuses both this value and the built program.
 
         raw2signal_fn maps decimated raw data to the owner's slot shape; None
         uses the builder converter or default_decimated_raw2signal_fn. options
-        controls retry/progress/stop; acquire_kwargs pass to the producer.
+        controls retry, progress and stop; acquire_kwargs pass to the producer's
+        acquire_decimated method. See the class contract for scope, modules,
+        failures and partial results.
         """
         self._schedule.ensure_active()
         self._ensure_modules()

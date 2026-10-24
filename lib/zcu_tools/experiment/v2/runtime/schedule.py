@@ -314,6 +314,35 @@ class Schedule(Generic[T_Cfg, T_Env]):
         program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
     ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
+        """Return a root-owned builder without compiling or acquiring.
+
+        soc is the acquisition transport; soccfg is the compilation profile.
+        Both are borrowed. reps controls hardware repetitions and must be a
+        positive integer, excluding bool, for the default program.
+        initial_delay and relax_delay are in us. These explicit controls default
+        to 1, 1.0 and 1.0; neither this method nor the builder reads or overrides
+        cfg to obtain program controls.
+
+        Each build calls program_cls, or ModularProgramV2 when omitted, with
+        soccfg positional and reps, initial_delay, relax_delay, modules and
+        sweep as keywords. Modules and sweep specs are deep-copied per build;
+        an empty sweep list becomes None. program_kwargs supplies additional
+        constructor/compilation keywords unchanged, not cfg overrides or acquire
+        options. Do not supply modules or sweep there; use the builder's add
+        and declare_sweep methods.
+
+        The builder uses this Schedule's active scope for stop and outcome
+        handling. Acquisition targets its root-local buffer if registered,
+        otherwise the entire sole root SignalBuffer, with no step indexing.
+        Default rounds progress is retained on close for this root owner.
+
+        An inactive Schedule raises RuntimeError here and on later build/run.
+        Creation does not validate program controls, modules or the target slot.
+        Build requires explicit modules and raises ValueError if none were added.
+        The default program rejects invalid reps with ValueError before compile;
+        other factory/keyword errors propagate at build without retry.
+        Acquisition resolves the target slot and raises ValueError if unavailable.
+        """
         self.ensure_active()
         if program_cls is None:
             return ProgramBuilder(
@@ -860,6 +889,27 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
         program_cls: ProgramFactory[ProgramT] | None = None,
         **program_kwargs: object,
     ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
+        """Return a step-owned builder without compiling or acquiring.
+
+        soc, soccfg, reps, initial_delay, relax_delay, program_cls and
+        program_kwargs follow Schedule.prog_builder's factory contract.
+        In particular, controls are explicit, delays are in us, and cfg is
+        neither projected nor overridden. Each build isolates modules and
+        sweep specs with deep copies.
+
+        This step owns the builder's target, but its Schedule supplies the
+        active scope, stop signal and outcome handling. Acquisition uses the
+        local buffer registered at this step's path, or indexes the sole root
+        SignalBuffer by the full path. Without a local buffer, non-integer path
+        entries or a missing/unsupported root target raise ValueError at acquire.
+        Default rounds progress is removed on close for this step owner.
+
+        An inactive Schedule raises RuntimeError here and on later build/run.
+        As in Schedule.prog_builder, creation does not validate controls or
+        modules. Missing modules raise ValueError at build; the default program
+        rejects invalid reps, including bool, before compile. Factory/keyword
+        errors propagate at build without retry.
+        """
         self.schedule.ensure_active()
         if program_cls is None:
             return ProgramBuilder(

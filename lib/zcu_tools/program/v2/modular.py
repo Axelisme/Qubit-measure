@@ -203,5 +203,11 @@ class BaseCustomProgramV2(ModularProgramV2, ABC):
 
     @abstractmethod
     def make_modules(self) -> Sequence[Module]:
-        """Return the modules to compile; constructor keywords control timing."""
+        """Return the ordered modules to compile, without receiving a cfg.
+
+        The constructor calls this before program initialization. Subclasses
+        must save any module-assembly inputs on self before calling super().
+        Pass reps and timing controls through the program constructor instead.
+        Module construction errors propagate from the constructor.
+        """
         ...

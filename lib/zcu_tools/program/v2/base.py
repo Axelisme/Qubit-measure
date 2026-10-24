@@ -120,12 +120,25 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     def acquire(
         self, soc, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None:
-        """Acquire averaged IQ over positive integer rounds (default one).
+        """Acquire integrated IQ from soc over software-averaged rounds.
 
-        bool is not a round count. Invalid rounds raises ValueError before
-        transport/admission. Other options follow QICK; pass them by keyword.
-        step_rounds=True prepares hardware and returns None; simulation rejects
-        stepped ownership. Cancellation, hooks and partial results are unchanged.
+        rounds defaults to one and must be a positive integer, excluding bool.
+        Invalid rounds raises ValueError before transport or simulation admission.
+        Other options follow QICK and the acquisition mixins; pass them by keyword.
+
+        Omitted or False step_rounds runs to completion and returns one float64
+        array per ADC in a list. Arrays contain averaged IQ with a final I/Q
+        axis of length two, retaining readout and sweep axes. True prepares the
+        first hardware round and returns None. The caller then owns stepping
+        through finish_round/prepare_round and collecting finish_acquire.
+        SimulationSoc rejects step_rounds=True with ValueError before admission.
+        With only soc positional, overloads distinguish False from True;
+        extra positional options or a dynamic bool retain the list-or-None type.
+
+        cancel_flag stops further rounds while retaining completed-round data.
+        Cancellation before any completed round raises StoppedPartialAcquireError.
+        round_hook receives each completed round and may request cancellation.
+        QICK argument/transport errors and hook errors propagate.
         """
         _require_positive_integer(rounds, "rounds")
         return super().acquire(soc, *args, rounds=rounds, **kwargs)
@@ -158,10 +171,15 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
     def acquire_decimated(
         self, soc, *args, rounds: int = 1, **kwargs
     ) -> list[NDArray[np.float64]] | None:
-        """Acquire decimated IQ over positive integer rounds (default one).
+        """Acquire decimated IQ traces from soc, averaged over software rounds.
 
-        Validation, options, stepped ownership and failures follow acquire().
-        Software rounds average traces; they do not concatenate repetitions.
+        rounds validation, keyword options, step_rounds ownership, cancellation,
+        hooks and errors follow acquire(). Omitted or False step_rounds returns
+        a list of float64 trace arrays, one per ADC, with a final length-two I/Q
+        axis and a time-sample axis. Hardware step_rounds=True prepares only and
+        returns None; SimulationSoc rejects it before admission.
+        Software rounds average matching traces rather than concatenate them;
+        repetitions and readouts retain QICK's trace layout.
         """
         _require_positive_integer(rounds, "rounds")
         return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
