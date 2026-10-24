@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
+from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QMenu,
@@ -54,6 +55,7 @@ class MainWindowToolbarHost(Protocol):
     def reload_experiments(self) -> None: ...
     def retry_skipped_experiment_tabs(self) -> None: ...
     def open_results_browser(self) -> None: ...
+    def toggle_workflows(self) -> None: ...
 
 
 class MainWindowToolbar:
@@ -68,25 +70,16 @@ class MainWindowToolbar:
         self._new_tab_btn = QPushButton("New Tab ▾")
         self._new_tab_btn.clicked.connect(self.show_new_tab_menu)
         self._layout.addWidget(self._new_tab_btn)
-        self._reload_btn = QPushButton("Reload experiments")
-        self._reload_btn.clicked.connect(lambda: self._host.reload_experiments())
-        self._layout.addWidget(self._reload_btn)
-        self._retry_tabs_btn = QPushButton("Retry skipped tabs")
-        self._retry_tabs_btn.clicked.connect(
-            lambda: self._host.retry_skipped_experiment_tabs()
-        )
-        self._retry_tabs_btn.setVisible(False)
-        self._layout.addWidget(self._retry_tabs_btn)
-        results = QPushButton("Results ▾")
-        results.clicked.connect(self._show_results_menu)
-        self._results_button = results
-        self._layout.addWidget(results)
         self._layout.addStretch()
         self._add_dialog_button("Setup…", DialogName.SETUP)
         self._add_dialog_button("SoC…", DialogName.SOC)
         self._add_dialog_button("Devices…", DialogName.DEVICE)
-        self._add_dialog_button("Predictor…", DialogName.PREDICTOR)
         self._add_dialog_button("Inspect…", DialogName.INSPECT)
+        self._more_btn = QPushButton("More ▾")
+        self._more_btn.setObjectName("main.more")
+        self._more_btn.clicked.connect(self._show_more_menu)
+        self._layout.addWidget(self._more_btn)
+        self._build_more_menu()
 
     @property
     def layout(self) -> QHBoxLayout:
@@ -104,8 +97,8 @@ class MainWindowToolbar:
         """Gate commands, not buttons that merely open inspection dialogs."""
         self._writable = writable
         self.set_new_tab_enabled(enabled=True)
-        self._reload_btn.setEnabled(writable)
-        self._retry_tabs_btn.setEnabled(writable)
+        self._reload_action.setEnabled(writable)
+        self._retry_tabs_action.setEnabled(writable)
         if not writable:
             for menu in reversed(self._new_tab_menus):
                 for action in menu.actions():
@@ -113,30 +106,57 @@ class MainWindowToolbar:
                 menu.close()
 
     def set_reload_recovery(self, *, retry_catalog: bool, skipped_count: int) -> None:
-        self._reload_btn.setText(
+        self._reload_action.setText(
             "Retry reload" if retry_catalog else "Reload experiments"
         )
-        self._retry_tabs_btn.setText(f"Retry skipped tabs ({skipped_count})")
-        self._retry_tabs_btn.setVisible(skipped_count > 0)
+        self._retry_tabs_action.setText(f"Retry skipped tabs ({skipped_count})")
+        self._retry_tabs_action.setVisible(skipped_count > 0)
+
+    def set_workflow_mode(self, *, workflow: bool) -> None:
+        """Label the switch with the tab family it will reveal next."""
+        self._workflow_action.setText(
+            "Experiment tabs" if workflow else "Workflow tabs"
+        )
 
     def _add_dialog_button(self, label: str, name: DialogName) -> None:
         button = QPushButton(label)
         button.clicked.connect(lambda _checked=False, n=name: self._host.open_dialog(n))
         self._layout.addWidget(button)
 
-    def _show_results_menu(self) -> None:
-        menu = QMenu(self._parent)
-        action = menu.addAction("Results browser…")
-        try:
-            selected = menu.exec(
-                self._results_button.mapToGlobal(
-                    self._results_button.rect().bottomLeft()
-                )
-            )
-        finally:
-            menu.deleteLater()
-        if selected is not None and selected is action:
-            self._host.open_results_browser()
+    def _build_more_menu(self) -> None:
+        self._more_menu = QMenu(self._parent)
+        self._reload_action = self._add_more_action(
+            "Reload experiments", "reload", self._host.reload_experiments
+        )
+        self._retry_tabs_action = self._add_more_action(
+            "Retry skipped tabs", "retry", self._host.retry_skipped_experiment_tabs
+        )
+        self._retry_tabs_action.setVisible(False)
+        self._workflow_action = self._add_more_action(
+            "Workflow tabs", "workflow", self._host.toggle_workflows
+        )
+        self._add_more_action(
+            "Predictor…",
+            "predictor",
+            lambda: self._host.open_dialog(DialogName.PREDICTOR),
+        )
+        self._add_more_action(
+            "Results browser…", "results", self._host.open_results_browser
+        )
+
+    def _add_more_action(
+        self, label: str, name: str, callback: Callable[[], None]
+    ) -> QAction:
+        action = QAction(label, self._more_menu)
+        action.setObjectName(f"main.more.{name}")
+        action.triggered.connect(callback)
+        self._more_menu.addAction(action)
+        return action
+
+    def _show_more_menu(self) -> None:
+        self._more_menu.exec(
+            self._more_btn.mapToGlobal(self._more_btn.rect().bottomLeft())
+        )
 
     def show_new_tab_menu(self) -> None:
         """Open the adapter menu and create the selected tab."""

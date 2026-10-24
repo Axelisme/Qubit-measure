@@ -8,7 +8,6 @@ from queue import Queue
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtWidgets import QPushButton
 from zcu_tools.gui.app.measure.catalog import CatalogReloadError
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -25,6 +24,7 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._reload_fakes import Loader, NewAdapter, OldAdapter
 from tests.gui.app.measure.remote._helpers import (
     open_client,
@@ -74,17 +74,13 @@ def test_reload_button_cancellation_and_successful_restore(
     first = app.ctrl.new_tab("demo")
     app.ctrl.new_tab("demo")
     app.ctrl.set_active_tab(first)
-    button = next(
-        button
-        for button in app.window.findChildren(QPushButton)
-        if button.text() == "Reload experiments"
-    )
+    driver = ComponentDriver(app.window)
     app.dialogs.queue_destructive_confirm(False)
-    button.click()
+    driver.select_menu("More ▾", ("Reload experiments",))
     assert app.ctrl.list_tab_ids()[0] == first
     assert app.loader.loads == 0
     app.dialogs.queue_destructive_confirm(True)
-    button.click()
+    driver.select_menu("More ▾", ("Reload experiments",))
     assert app.loader.loads == 1
     assert len(app.ctrl.list_tab_ids()) == 2
     assert first not in app.ctrl.list_tab_ids()
@@ -103,13 +99,9 @@ def test_catalog_failure_retry_button_reuses_original_snapshot(
     app.window.reload_experiments()
     assert app.ctrl.list_tab_ids() == []
     app.dialogs.consume_message_containing("critical", "broken import")
-    retry = next(
-        button
-        for button in app.window.findChildren(QPushButton)
-        if button.text() == "Retry reload"
-    )
+    driver = ComponentDriver(app.window)
     app.loader.failure = None
-    retry.click()
+    driver.select_menu("More ▾", ("Retry reload",))
     assert len(app.ctrl.list_tab_ids()) == 1
     app.dialogs.assert_no_unexpected_messages()
 

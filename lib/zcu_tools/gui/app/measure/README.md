@@ -77,6 +77,14 @@ subscriptions, editors and timers before deleting children; they never drain
 or disconnect the shared session. Native Ask answers and cancellation drain
 continue on the retained operation worker and lease, never on the UI loop.
 
+The toolbar keeps New Tab ▾ on the left and Setup…, SoC…, Devices…, Inspect…,
+and More ▾ on the right. More lists Reload experiments, Retry skipped tabs
+(only when recovery has skipped tabs), Workflow tabs / Experiment tabs,
+Predictor…, and Results browser… in that order. The tab switch names the family
+it will reveal. Catalog recovery changes Reload experiments to Retry reload.
+Remote control disables reload and retry while leaving the inspection and tab
+navigation entries available.
+
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
 through `Controller.soc_control`. The named `soc` window supports remote screenshots.

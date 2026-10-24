@@ -37,6 +37,7 @@ from tests.gui.app.measure._workflow_window import (
     Plan,
     Tunables,
     host_window,
+    toggle_tab_family,
 )
 
 
@@ -187,9 +188,9 @@ def test_full_window_dispose_retries_cleanup_then_destroys_tree(cleanup_window):
 
 
 def _ready(driver: ComponentDriver) -> None:
-    assert any(w.object_name == "workflow.toggle" for w in driver.visible().widgets), (
-        "MainWindow must expose the single Experiment/Workflow toggle"
-    )
+    assert any(
+        a.object_name == "main.more.workflow" for a in driver.menu_actions("More ▾")
+    ), "MainWindow must expose the Experiment/Workflow switch in More"
 
 
 def _shot(driver: ComponentDriver, root: Path, step: str) -> None:
@@ -221,26 +222,29 @@ def _controls(driver: ComponentDriver) -> set[str]:
     }
 
 
-def test_toggle_follows_reload_with_compact_unclipped_captions(
-    workflow_window, tmp_path
-):
+def test_more_switch_labels_the_other_tab_family(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
     for step, caption in (
         ("01-experiment-toolbar", "Workflow tabs"),
         ("02-workflow-toolbar", "Experiment tabs"),
     ):
-        _ask_shot(driver, tmp_path, step)
-        reload = driver.observe("Reload experiments")
-        toggle = driver.observe(object_name="workflow.toggle")
-        assert toggle.text == caption
-        assert reload.bounds is not None and toggle.bounds is not None
-        x, y, width, height = reload.bounds
-        tx, ty, _tw, th = toggle.bounds
-        assert tx > x + width, "Toggle must follow Reload, not New Tab"
-        assert (ty, th) == (y, height)
-        assert toggle.caption_fits and toggle.fully_visible
-        driver.click(object_name="workflow.toggle")
+        actions = driver.menu_actions("More ▾", evidence=tmp_path / f"{step}.png")
+        assert tuple(a.text for a in actions) == (
+            "Reload experiments",
+            caption,
+            "Predictor…",
+            "Results browser…",
+        )
+        more = driver.observe(object_name="main.more")
+        inspect = driver.observe("Inspect…")
+        assert more.bounds is not None and inspect.bounds is not None
+        x, y, width, height = inspect.bounds
+        mx, my, _mw, mh = more.bounds
+        assert mx > x + width
+        assert (my, mh) == (y, height)
+        assert more.caption_fits and more.fully_visible
+        driver.select_menu("More ▾", (caption,))
 
 
 def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
@@ -248,7 +252,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     driver = ComponentDriver(window)
     _ready(driver)
     _shot(driver, tmp_path, "01-experiments")
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _shot(driver, tmp_path, "02-empty-workflows")
     _open(driver, tmp_path / "03-first-tab.png")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
@@ -271,7 +275,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     _shot(driver, tmp_path, "10-last-closed")
     _open(driver, tmp_path / "11-reopened.png")
     assert driver.observe("Start").enabled
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _shot(driver, tmp_path, "12-experiments-again")
     assert driver.observe(object_name="empty_tabs_hint").visible
 
@@ -279,7 +283,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
 def test_workflow_pane_shows_single_active_leaf_once(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _open(driver, tmp_path / "scope-01-open.png")
     driver.click("Start")
     qt_until(lambda: _status(driver, "running"), label="workflow accepted")
@@ -322,7 +326,7 @@ def test_workflow_pane_keeps_active_chain_and_two_live_leaves(
         )
     )
     driver = ComponentDriver(window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     driver.select_menu("New Tab ▾", ("forked",))
     _shot(driver, tmp_path, "fork-opened")
     driver.click("Start")
@@ -346,7 +350,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     _ready(driver)
     driver.select_menu("New Tab ▾", ("experiment",))
     _shot(driver, tmp_path, "01-experiment")
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _shot(driver, tmp_path, "01a-workflows")
     _open(driver, tmp_path / "01b-first-tab.png")
     _open(driver, tmp_path / "01c-second-tab.png")
@@ -361,7 +365,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     driver.select_tab("synthetic (2)")
     _shot(driver, tmp_path, "04-other-locked")
     assert not driver.observe("Start").enabled
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _shot(driver, tmp_path, "05-experiment-locked")
     assert not driver.observe("Run").enabled
     driver.click(object_name="workflow.badge")
@@ -408,7 +412,7 @@ def test_run_state_shows_only_meaningful_controls(
     if state == "waiting":
         ctrl.workflow_control().configure((AskAuthor().attachment(),))
     driver = ComponentDriver(window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     driver.select_menu("New Tab ▾", ("asking" if state == "waiting" else "synthetic",))
     _ask_shot(driver, tmp_path, "controls-01-idle")
     if state != "idle":
@@ -453,7 +457,7 @@ def test_idle_ask_content_is_hidden_after_open_and_reopen(
     asking_window, tmp_path, reopen
 ):
     driver = ComponentDriver(asking_window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "idle-ask-01-opened")
     if reopen:
@@ -475,7 +479,7 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
 ):
     driver = ComponentDriver(asking_window)
     _ask_shot(driver, tmp_path, "ask-01-experiments")
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _ask_shot(driver, tmp_path, "ask-02-workflows")
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "ask-03-opened")
@@ -505,7 +509,7 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     assert _controls(driver) == {"Stop"}
     driver.select_tab("Tunables")
     _ask_shot(driver, tmp_path, "ask-05-tunables")
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _ask_shot(driver, tmp_path, "ask-06-experiments")
     driver.click(object_name="workflow.badge")
     _ask_shot(driver, tmp_path, "ask-07-badge-question")
@@ -587,7 +591,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     restart_questions_window, tmp_path
 ):
     driver = ComponentDriver(restart_questions_window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _ask_shot(driver, tmp_path, "restart-01-workflows")
     driver.select_menu("New Tab ▾", ("restart-questions",))
     _ask_shot(driver, tmp_path, "restart-02-opened")
@@ -678,7 +682,7 @@ def two_questions_window(workflow_window):
 def test_next_question_replaces_answer_and_selects_ask(two_questions_window, tmp_path):
     window, release = two_questions_window
     driver = ComponentDriver(window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     driver.select_menu("New Tab ▾", ("two-questions",))
     _ask_shot(driver, tmp_path, "next-01-opened")
     driver.click("Start")
@@ -717,7 +721,7 @@ def test_external_answer_projects_accepted_exchange_to_window(
     ctrl, _window = workflow_window
     control = ctrl.workflow_control()
     driver = ComponentDriver(asking_window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "external-01-opened")
     driver.click("Start")
@@ -814,7 +818,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
     control.configure((author.attachment(),))
     driver = ComponentDriver(window)
     _ask_shot(driver, tmp_path, "remote-01-experiments")
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _ask_shot(driver, tmp_path, "remote-02-workflows")
     driver.select_menu("New Tab ▾", ("asking",))
     _ask_shot(driver, tmp_path, "remote-03-opened")
