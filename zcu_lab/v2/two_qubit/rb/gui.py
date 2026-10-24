@@ -2,18 +2,14 @@
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .analysis import RBAnalysis, RBOptions
@@ -51,32 +47,15 @@ class RBAnalyzeResult:
         }
 
 
-class TwoQubitRBAdapter(BaseAdapter[RBCfg, RBRun, RBAnalyzeResult]):
-    """Fixed-capture paired RB, saved-source analysis and canonical native IO.
+def _analyze(req: AnalyzeRequest[RBRun, None], *, plots: Plots) -> RBAnalyzeResult:
+    """Count joint00 and fit only the saved source, never the current Form."""
+    return RBAnalyzeResult(RBExp().analyze(req.run_result, RBOptions(), plots=plots))
 
-    No calibration writeback or automatic acceptance is offered.
-    """
 
-    exp_cls = RBExp
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, load_data=True
-    )
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[RBCfg]:
-        """Create editable pulse/correction inputs from one fixed Open/Reset capture."""
-        return make_form(ctx)
-
-    def run(self, req: RunRequest, cfg: RBCfg, *, context: RunContext) -> RBRun:
-        """Keep cfg/raw paired; caller checks cancel_signal.raise_if_error()."""
-        del req
-        return RunRecord(cfg=cfg, result=RBExp().run(cfg, context=context))
-
-    def analyze(
-        self, req: AnalyzeRequest[RBRun, None], *, plots: Plots
-    ) -> RBAnalyzeResult:
-        """Count joint00 and fit only the saved source, never the current Form."""
-        return RBAnalyzeResult(
-            RBExp().analyze(req.run_result, RBOptions(), plots=plots)
-        )
+DEFINITION = Adapter(
+    spec=RBExp.AXES_SPEC,
+    make_form=make_form,
+    run=RBExp().run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze),
+)
