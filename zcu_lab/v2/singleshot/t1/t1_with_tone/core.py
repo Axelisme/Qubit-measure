@@ -26,8 +26,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import (
     materialize_nonuniform_t1_pulse_lengths,
 )
-from zcu_tools.plotting import live_line
-from zcu_tools.plotting.plots import LinePlot, Plots
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
@@ -37,6 +36,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+
+from zcu_lab.v2._support import LinePlot, live_line
 
 
 def _default_initial_states() -> NDArray[np.int64]:

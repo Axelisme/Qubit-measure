@@ -35,7 +35,7 @@ def render_flux_pick(
     )
 
 
-class FluxPickPlugin(SharedFluxPickPlugin[FluxPickResult]):
+class FluxPickPlugin[R: FluxPickResult](SharedFluxPickPlugin[R]):
     """Measure result binding; shared actions and worker lifecycle live in lib."""
 
     def __init__(
@@ -44,9 +44,7 @@ class FluxPickPlugin(SharedFluxPickPlugin[FluxPickResult]):
         seed: FluxPickState,
         *,
         plots: Plots,
-        result_builder: Callable[
-            [FluxPickInputs, FluxPickState, Plots], FluxPickResult
-        ],
+        result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], R],
     ) -> None:
         """Capture inputs and build the measure result/figure after accepted Finish.
 
@@ -60,15 +58,15 @@ class FluxPickPlugin(SharedFluxPickPlugin[FluxPickResult]):
         )
 
 
-def make_flux_pick_plugin(
+def make_flux_pick_plugin[R: FluxPickResult](
     inputs: FluxPickInputs,
     *,
     flux_half: float | None = None,
     flux_int: float | None = None,
     force_magnitude: bool,
     plots: Plots,
-    result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], FluxPickResult],
-) -> FluxPickPlugin:
+    result_builder: Callable[[FluxPickInputs, FluxPickState, Plots], R],
+) -> FluxPickPlugin[R]:
     """Capture a spectrum and initial device-axis positions for measure picking.
 
     inputs holds complex spectra with device/frequency axes. flux_half and

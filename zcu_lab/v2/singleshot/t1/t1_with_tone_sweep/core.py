@@ -24,7 +24,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import (
     materialize_nonuniform_t1_pulse_lengths,
 )
-from zcu_tools.plotting import live_heatmap, live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
@@ -35,6 +34,8 @@ from zcu_tools.program.v2 import (
     TableLengthPulse,
 )
 from zcu_tools.progress_bar import make_pbar
+
+from zcu_lab.v2._support import live_heatmap, live_line
 
 
 def _fit_transition_rates(

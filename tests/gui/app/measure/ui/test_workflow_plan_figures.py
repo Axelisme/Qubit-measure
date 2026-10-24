@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 from qtpy.QtWidgets import QApplication
-from zcu_tools import plotting
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
@@ -28,6 +27,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.types import SessionEnv
 
+from tests._plotting import create_trace
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
@@ -55,10 +55,10 @@ class RequiredSweepPlan(FormModel):
 class FluxAdapter(SampleAdapter):
     def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> SampleRun:
         values = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
-        viewer = plotting.live_line(
+        viewer = create_trace(
             context.plots, "flux trace", "Flux", f"fluxes={values.tolist()}"
         )
-        viewer.update(values, values)
+        viewer.update((values, values))
         return super().run(req, cfg, context=context)
 
 
@@ -88,11 +88,9 @@ async def _plot_fluxes(
     env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
 ) -> None:
     if plan.fluxes:
-        viewer = plotting.live_line(
-            env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}"
-        )
+        viewer = create_trace(env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}")
         values = np.asarray(plan.fluxes)
-        viewer.update(values, values * tun.current.gain)
+        viewer.update((values, values * tun.current.gain))
     await env.wait_until(env.started_at)
 
 
@@ -101,10 +99,8 @@ async def _plot_sweep(
     env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
 ) -> None:
     values = np.asarray(plan.fluxes)
-    viewer = plotting.live_line(
-        env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}"
-    )
-    viewer.update(values, values * tun.current.gain)
+    viewer = create_trace(env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}")
+    viewer.update((values, values * tun.current.gain))
     await env.wait_until(env.started_at)
 
 

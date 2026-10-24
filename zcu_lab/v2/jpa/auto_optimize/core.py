@@ -25,10 +25,10 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
-from zcu_tools.plotting import live_scatter
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
+from zcu_lab.v2._support import live_scatter
 from zcu_lab.v2._support.device import set_flux, set_rf_frequency, set_rf_power
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
 

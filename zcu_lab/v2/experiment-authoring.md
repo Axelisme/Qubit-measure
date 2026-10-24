@@ -277,7 +277,7 @@ run使用resolved cfg snapshot中的GE centers/radius作live分類，analysis不
 Amp／Len Rabi、Check、ResetCheck 與 AC Stark 使用 explicit RunContext 執行，GUI 將同次 cfg／Result 配成 RunRecord。同步 analyze 接 source／typed options／Plots，允許 cfg=None，不保存跨次成功狀態。Amp 回傳 AmpRabiFit，Len 回傳 RabiJointFitResult，兩者的 readout 診斷只讀 source.cfg。Check 只發布分類 scatter，無數值結果。AC Stark 回傳 AcStarkAnalysis，另提供 explicit source／AcStarkPlotOptions 的 population 圖入口；即時 Ground／Excited／Other 熱圖及 current trace 各自具名。
 
 Amp與Len Rabi共同使用`zcu_tools.analysis.fitting.singleshot_rabi`的raw-IQ joint likelihood與
-`zcu_tools.plotting.singleshot_rabi`的population、histogram及confusion matrix診斷圖。
+`zcu_lab.v2.singleshot.plot_rabi`的population、histogram及confusion matrix診斷圖。
 Amp固定無衰減／零相位，Initial State描述zero-gain前的主要狀態，支援signed gain。
 Amp額外由joint frequency及其covariance推導pi/pi2 gain與誤差，保留原有scalar summary。
 兩者的GUI校準writeback共用backend validity及finite校準值檢查。
@@ -320,7 +320,7 @@ matrix的估計流程。
 一般核心實驗的入口是 `run(cfg, *, context: RunContext) -> Result`。硬體與具名 devices 由 context 傳入，cfg 只含這次操作的設定。Result 只含資料。NotebookAdapter 或 GUI adapter 將原始 cfg 與 Result 配成 RunRecord，不在核心快取上一輪結果。
 
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
-2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_tools.plotting` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
+2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_lab.v2._support` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
 3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
 4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
@@ -364,7 +364,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，不宣告 Modules／Sweep group。Form 依 `field_order` 平鋪，模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單。`FieldMeta` 仍可宣告 label、unit 等顯示提示。Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
 
-Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_tools.plotting` 匯出。
+Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_lab.v2._support` 匯出。
 
 平鋪 cfg 使用 `cfg_schema_version="3.0"`。Load 不轉換舊巢狀 cfg。舊 major 的資料仍載入，record.cfg 為 None，cfg_issue 說明原因，資料陣列與 metadata 不變。
 

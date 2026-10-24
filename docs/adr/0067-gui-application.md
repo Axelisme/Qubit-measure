@@ -178,7 +178,7 @@ Domain 模組定義事件 enum、payload 和已提交的 fact。Producer 不傳 
 
 ## 繪圖與限制
 
-GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Qt frontend 擁有 canvas、container 與 presentation 的生命週期；release 不銷毀 caller 保留的 Figure。通用 [liveplot](../../lib/zcu_tools/plotting/liveplot/README.md) 的 standalone backend 契約仍服務其 public plotters，GUI 不透過該契約註冊自訂 pyplot routing。
+GUI 透過 operation-owned Plots 與明確的 QtPlotHost 使用原生 Figure。Qt frontend 擁有 canvas、container 與 presentation 的生命週期；release 不銷毀 caller 保留的 Figure。通用 [LiveUpdate](../../lib/zcu_tools/plotting/README.md#通用即時更新) 複製 caller 資料，再透過 host owner 執行作者 callback 與 refresh。線圖、熱圖與 scatter 工具歸 lab，見 [[0072]]；GUI 不依賴其格式，也不註冊自訂 pyplot routing。
 
 Worker 可回傳資料，由主執行緒繪圖，也可透過 explicit host 的 owner scheduler 更新 live artists。兩者都不依賴 ambient pyplot routing。Mathtext parsing 保留 lock／prewarm；這不保證任意 Matplotlib 計算 thread-safe。Queued signal 也不會把共用的可變 Result 變成不可變 snapshot。各 app 仍決定資料的讀寫時機與所有權，具體 presentation 契約見 [GUI plotting](../../lib/zcu_tools/gui/plotting/README.md)。
 

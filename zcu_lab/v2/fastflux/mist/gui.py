@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     ParamMeta,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.fastflux.mist.core import (
@@ -35,32 +34,29 @@ class MistAnalyzeParams:
     ] = None
 
 
-class MistAdapter(BaseAdapter[MistCfg, MistRunResult, None, MistAnalyzeParams]):
-    exp_cls = MistExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _analyze(
+    req: AnalyzeRequest[MistRunResult, MistAnalyzeParams],
+    *,
+    plots: Plots,
+) -> None:
+    """Plot the stored map, optionally scaling gain squared to photons."""
+    MistExp().analyze(
+        req.run_result,
+        MistAnalyzeOptions(ac_coeff=req.analyze_params.ac_coeff),
+        plots=plots,
+    )
+    return
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[MistCfg]:
-        """Build editable settings from the captured Open/Reset sources."""
-        return make_form(ctx)
 
-    def run(
-        self, req: RunRequest, cfg: MistCfg, *, context: RunContext
-    ) -> MistRunResult:
-        """Acquire the gain map and retain its exact source settings."""
-        del req
-        return RunRecord(cfg, MistExp().run(cfg, context=context))
+def run(cfg: MistCfg, *, context: RunContext) -> RunRecord[MistCfg, MistResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=MistExp().run(cfg, context=context))
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[MistRunResult, MistAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> None:
-        """Plot the stored map, optionally scaling gain squared to photons."""
-        MistExp().analyze(
-            req.run_result,
-            MistAnalyzeOptions(ac_coeff=req.analyze_params.ac_coeff),
-            plots=plots,
-        )
-        return
+
+DEFINITION = Adapter(
+    spec=MistExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, options=lambda source, env: MistAnalyzeParams()),
+)

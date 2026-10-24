@@ -5,7 +5,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.gui.app.measure.adapter import PostAnalyzeRequest, PostWritebackRequest
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import (
+    AnalyzeResult,
+    PostAnalyzeRequest,
+    PostWritebackRequest,
+)
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -20,7 +26,7 @@ from .staged_analyze import StagedAnalyzeService
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol
+    from zcu_tools.gui.app.measure.registry import RegisteredAdapter
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.plots import Plots
 
@@ -30,13 +36,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class _PostAnalyzeCapture:
-    run_result: object | None
-    analyze_result: object
+    run_result: RunRecord[ConfigBase, object]
+    analyze_result: AnalyzeResult | None
     run_id: str | None
     experiment_name: str
     device_snapshot: Mapping[str, JsonObject] | None
     context: SessionEnv
-    adapter: ExpAdapterProtocol
+    adapter: RegisteredAdapter
     params: object
     plots: Plots
 
@@ -95,6 +101,11 @@ class PostAnalyzeService(StagedAnalyzeService):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         tab = self._state.get_tab(tab_id)
+        source = tab.run.result
+        if source is None:
+            raise FailedPreconditionError(
+                f"Tab {tab_id!r} has no run result to post-analyze"
+            )
         analyze_result = tab.analysis.result
         if not tab.has_analyze_result():
             raise FailedPreconditionError(
@@ -108,7 +119,7 @@ class PostAnalyzeService(StagedAnalyzeService):
 
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = PostAnalyzeRequest(
-            run_result=tab.run.result,
+            run_result=source,
             analyze_result=analyze_result,
             post_analyze_params=post_analyze_params_instance,
             parameters=ctx.parameters,
@@ -204,7 +215,6 @@ class PostAnalyzeService(StagedAnalyzeService):
                 run_id=captured_inputs.run_id,
                 experiment_name=captured_inputs.experiment_name,
                 device_snapshot=captured_inputs.device_snapshot,
-                sample_device_alias=adapter.sample_device_alias,
             )
             plots.finish()
             retired = self._state.update_tab_post_analyze(
