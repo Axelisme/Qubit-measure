@@ -245,12 +245,18 @@ class SpecSection:
         }
 
 
-def _module_converters(
+def _section_converters(
     fields: Mapping[str, ModuleField],
+    core: type[BaseModel],
     _cls: type[FormModel],
     env: FormEnv,
 ) -> Mapping[tuple[str | int, ...], InputConverter]:
-    return {(name,): field.converter(env) for name, field in fields.items()}
+    converters: dict[tuple[str | int, ...], InputConverter] = {
+        (name,): field.converter(env) for name, field in fields.items()
+    }
+    if issubclass(core, FormModel):
+        converters.update(core.converters(env))
+    return converters
 
 
 def _core_field_names(core: type[BaseModel], field_order: tuple[str, ...]) -> list[str]:
@@ -375,7 +381,7 @@ class Section:
             return result
 
         namespace.update(
-            converters=classmethod(partial(_module_converters, section.modules)),
+            converters=classmethod(partial(_section_converters, section.modules, core)),
             __annotations__=annotations,
             defaults=classmethod(defaults),
             choices=classmethod(choices),

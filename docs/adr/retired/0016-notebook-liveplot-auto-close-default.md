@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。現行局部契約見 [`plotting/liveplot/README.md`](../../../lib/zcu_tools/plotting/liveplot/README.md)；以下保留歷史正文。
+> 狀態：retired（2026-09-27）。獨立 liveplot 已退休；現行圖管理與更新契約見 [`plotting/README.md`](../../../lib/zcu_tools/plotting/README.md)。以下保留歷史正文。
 
 # 0016 — notebook liveplot 用 auto_close=True 預設（不 hack ipympl 避免二次渲染）
 

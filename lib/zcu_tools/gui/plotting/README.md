@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。Matplotlib／Qt 圖形呈現、更新與釋放契約。
 
@@ -30,7 +30,9 @@ Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thre
 ## Thread 與 rendering 邊界
 
 Host 必須先在 GUI thread 初始化。Runtime 與 FigureContainer 建構都確保此條件。
-Qt widget 操作與 liveplot update 都透過 host owner 在 GUI thread 執行。
+Qt widget 操作與通用 LiveUpdate callback 都透過 host owner 在 GUI thread 執行。
+LiveUpdate 在送入 owner 前複製 caller 的資料，host 不選擇線圖、熱圖或其他格式。
+Lab 的繪圖工具提供格式與 callback，lib 只管理具名圖、更新與呈現。
 Shared mathtext lock／prewarm 保護字型解析，不代表任意 Matplotlib 操作都 thread-safe。
 
 各 app 的互動 widget 也可以在主執行緒自持 FigureCanvasQTAgg。
