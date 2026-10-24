@@ -23,17 +23,6 @@ class ScalarParams:
 class ScalarResult:
     value: float
 
-    def to_summary_dict(self) -> dict[str, float]:
-        return {"value": self.value}
-
-
-@dataclass
-class SummaryResult:
-    summary: dict[str, object]
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return self.summary
-
 
 def _install_result(
     fx,
@@ -44,7 +33,7 @@ def _install_result(
     *,
     summary: dict[str, object] | None = None,
 ) -> None:
-    result = ScalarResult(value) if summary is None else SummaryResult(summary)
+    result = ScalarResult(value) if summary is None else summary
     plots = Plots(NonPresentingHost())
     plots.adopt("fit", Figure())
     plots.finish()

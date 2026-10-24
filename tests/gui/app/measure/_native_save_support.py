@@ -18,10 +18,6 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeRequest,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.adapter.types import (
-    AnalyzeResultBase,
-    PostAnalyzeResultBase,
-)
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
@@ -53,12 +49,12 @@ class PaneParams:
 
 
 @dataclass
-class PaneSummary(AnalyzeResultBase):
+class PaneSummary:
     mean: float = 3.0
 
 
 @dataclass
-class PostSummary(PostAnalyzeResultBase):
+class PostSummary:
     correction: float = 0.5
 
 
