@@ -97,7 +97,8 @@ class CoherenceTunables(BaseModel):
     none contains another calibration policy. Ramsey detune_ratio is a finite
     fringes/step value whether enabled or not, with native default .05.
     Rabi/readout use five times latest accepted T1, or t1.guess_us initially
-    and when T1 is disabled. T2's own relax and history policies do not change.
+    and when T1 is disabled. T2 auto relaxation uses this point's accepted T1,
+    then T1 history EWMA, then t1.guess_us; T2 delay histories stay independent.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -591,6 +592,17 @@ async def coherence_fluxdep(
                     _append(t1_by_flux, flux, point_record.measurements[-1])
                     if skip:
                         continue
+                # Prefer current accepted T1; failed/disabled T1 uses its EWMA/seed.
+                t1_estimate = next(
+                    (
+                        item.lifetime_us
+                        for item in point_record.measurements
+                        if item.kind == "t1"
+                        and item.status == "accepted"
+                        and item.lifetime_us is not None
+                    ),
+                    history_guess(tun.current.t1.guess_us, t1_by_flux),
+                )
                 # Measure Ramsey dephasing with its own grid and detuning policy.
                 if plan.measure_t2ramsey:
                     skip = await run_ramsey_stage(
@@ -602,6 +614,7 @@ async def coherence_fluxdep(
                             history_guess(
                                 tun.current.t2ramsey.guess_us, t2ramsey_by_flux
                             ),
+                            t1_estimate_us=t1_estimate,
                         ),
                         point_record,
                         env.plots,
@@ -619,6 +632,7 @@ async def coherence_fluxdep(
                             tun.current.t2echo,
                             cal,
                             history_guess(tun.current.t2echo.guess_us, t2echo_by_flux),
+                            t1_estimate_us=t1_estimate,
                         ),
                         point_record,
                         env.plots,
