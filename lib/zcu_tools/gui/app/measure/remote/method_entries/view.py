@@ -54,21 +54,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "dialog.screenshot",
-        "view:h_dialog_screenshot",
-        MethodSpec(
-            10.0,
-            "Capture a named dialog as base64 PNG, or write PNG to out_path and return its path/byte count.",
-            (
-                required_string("name", "Dialog name"),
-                optional_string(
-                    "out_path", "Write PNG here instead of returning base64"
-                ),
-            ),
-            readonly=True,
-        ),
-    ),
-    method_entry(
         "view.snapshot",
         "view:h_view_snapshot",
         MethodSpec(
@@ -77,23 +62,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
-        "view.screenshot",
-        "view:h_view_screenshot",
-        MethodSpec(
-            10.0,
-            "Capture the WHOLE main window (client area + floating widgets) as base64 "
-            "PNG. Runs MainWindow.grab() on the main thread (auto-marshalled, like "
-            "dialog.screenshot). Optional out_path writes a PNG file instead of "
-            "returning base64 bytes.",
-            (
-                optional_string(
-                    "out_path", "Write PNG here instead of returning base64"
-                ),
-            ),
-            readonly=True,
-        ),
     ),
     method_entry(
         "tab.get_figure",

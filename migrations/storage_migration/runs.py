@@ -9,12 +9,8 @@ from uuid import UUID
 from zcu_tools.datafile import (
     Container,
     JsonObject,
-    LabberMetadata,
-    LabberSnapshotError,
-    decode_labber_comment,
     json_values_equal,
     load,
-    load_labber_device_snapshot,
     save,
 )
 from zcu_tools.experiment.metadata import CfgSnapshot, RunMetadata, RunSnapshot
@@ -29,6 +25,8 @@ from migrations.legacy_labber import load_legacy_labber_payload
 
 from .errors import MigrationInputError
 from .evidence import has_legacy_expression, parse_utc_time
+from .labber_comment import decode_labber_comment
+from .labber_snapshot import LabberSnapshotError, load_labber_device_snapshot
 from .models import (
     KeyMappingItem,
     LegacyRunEvidence,
@@ -68,7 +66,6 @@ def _run_metadata(
     entry_id: UUID,
     native_tag: str,
     device_snapshot: dict[str, JsonObject] | None,
-    labber: LabberMetadata | None,
 ) -> RunMetadata:
     snapshot = legacy.snapshot
     return RunMetadata(
@@ -78,15 +75,10 @@ def _run_metadata(
         finished_at=None if legacy.started_at is None else legacy.finished_at,
         completion="unknown" if legacy.started_at is None else legacy.completion,
         snapshot=RunSnapshot(
-            entry_id=entry_id,
-            entry_name=snapshot.entry_name,
-            point=snapshot.point,
-            description=snapshot.description,
-            roles=snapshot.roles,
+            entry_id=entry_id, point=snapshot.point, roles=snapshot.roles
         ),
         provenance=legacy.provenance,
         device_snapshot=device_snapshot,
-        labber=labber,
     )
 
 
@@ -96,7 +88,7 @@ def _load_payload(
     session: MigrationSession,
     entry: ResultEntry | None,
     mapping: MigrationMapping,
-) -> tuple[Container, LabberMetadata]:
+) -> Container:
     if legacy.cfg is None:
         raise ValueError("cfg.cfg_type: missing explicit historical identity")
     identity = (legacy.experiment, legacy.cfg.cfg_type)
@@ -119,7 +111,7 @@ def _load_payload(
         comment.cfg, legacy.cfg.values
     ):
         raise ValueError("cfg: evidence disagrees with file comment.cfg")
-    return payload, metadata
+    return payload
 
 
 def _assignment(
@@ -192,11 +184,10 @@ def _convert_run(
         return
     native = session.state(source, "native")
     payload = None
-    labber = None
     device_snapshot = None
     if native is None or native.phase == "planned":
         try:
-            payload, labber = _load_payload(source, legacy, session, entry, mapping)
+            payload = _load_payload(source, legacy, session, entry, mapping)
             validate_cfg(legacy.experiment, cfg)
         except MigrationInputError:
             raise
@@ -277,7 +268,6 @@ def _convert_run(
         session.manifest.identity.entry_id,
         mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
         device_snapshot,
-        labber,
     ).model_dump(mode="json")
 
     def build(path: Path) -> None:

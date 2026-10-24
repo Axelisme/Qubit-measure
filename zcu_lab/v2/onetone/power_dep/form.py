@@ -34,7 +34,7 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                     **timing,
                 },
             ),
-            "gain": Range.between(0.001, 1.0, expts=101),
+            "gain": Range(0.001, 1.0, expts=101),
             "freq": Range.around(
                 "$resonator.freq", "1.5 * $resonator.kappa", expts=201
             ),

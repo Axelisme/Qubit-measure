@@ -33,6 +33,7 @@ from zcu_tools.gui.session.context_types import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.fluxdep.remote._route_harness import (
     ImmediateOwnerScheduler,
     RouteReply,
@@ -70,6 +71,7 @@ def test_adapter_menu_items_preserve_input_order() -> None:
 class _RecordingToolbarHost:
     def __init__(self) -> None:
         self.opened: list[DialogName] = []
+        self.commands: list[str] = []
 
     def list_adapter_names(self) -> list[str]:
         return []
@@ -81,37 +83,103 @@ class _RecordingToolbarHost:
         self.opened.append(name)
 
     def reload_experiments(self) -> None:
-        pass
+        self.commands.append("reload")
 
     def retry_skipped_experiment_tabs(self) -> None:
-        pass
+        self.commands.append("retry")
+
+    def toggle_workflows(self) -> None:
+        self.commands.append("workflow")
+
+    def open_results_browser(self) -> None:
+        self.commands.append("results")
 
 
-def test_toolbar_dialog_buttons_open_expected_dialogs(qapp) -> None:
+@pytest.fixture
+def toolbar_ui(qapp):
     parent = QWidget()
     host = _RecordingToolbarHost()
     toolbar = MainWindowToolbar(host, parent=parent)
+    parent.setLayout(toolbar.layout)
+    parent.show()
+    try:
+        yield toolbar, host, ComponentDriver(parent)
+    finally:
+        parent.deleteLater()
+        qapp.processEvents()
 
-    buttons: dict[str, QPushButton] = {}
-    for index in range(toolbar.layout.count()):
-        item = toolbar.layout.itemAt(index)
-        if item is None:
-            continue
-        widget = item.widget()
-        if isinstance(widget, QPushButton):
-            buttons[widget.text()] = widget
 
-    buttons["Setup…"].click()
-    buttons["Devices…"].click()
-    buttons["Predictor…"].click()
-    buttons["Inspect…"].click()
-
+def test_toolbar_dialog_buttons_and_more_menu_route_commands(
+    toolbar_ui, tmp_path
+) -> None:
+    _, host, driver = toolbar_ui
+    for caption in ("Setup…", "SoC…", "Devices…", "Inspect…"):
+        driver.click(caption)
+    for caption in (
+        "Reload experiments",
+        "Workflow tabs",
+        "Predictor…",
+        "Results browser…",
+    ):
+        driver.select_menu("More ▾", (caption,))
+    driver.screenshot(tmp_path / "toolbar.png")
     assert host.opened == [
         DialogName.SETUP,
+        DialogName.SOC,
         DialogName.DEVICE,
-        DialogName.PREDICTOR,
         DialogName.INSPECT,
+        DialogName.PREDICTOR,
     ]
+    assert host.commands == ["reload", "workflow", "results"]
+
+
+@pytest.mark.parametrize("writable", [True, False])
+@pytest.mark.parametrize("retry_catalog, skipped_count", [(False, 0), (True, 2)])
+def test_more_menu_projects_recovery_and_write_gates(
+    toolbar_ui, tmp_path, writable, retry_catalog, skipped_count
+):
+    toolbar, host, driver = toolbar_ui
+    toolbar.set_reload_recovery(
+        retry_catalog=retry_catalog, skipped_count=skipped_count
+    )
+    toolbar.set_writable(writable=writable)
+    driver.screenshot(tmp_path / "toolbar.png")
+    assert tuple(
+        w.text for w in driver.visible().widgets if w.kind == "QPushButton"
+    ) == ("New Tab ▾", "Setup…", "SoC…", "Devices…", "Inspect…", "More ▾")
+    actions = driver.menu_actions("More ▾", evidence=tmp_path / "more-expanded.png")
+    reload = "Retry reload" if retry_catalog else "Reload experiments"
+    expected = [reload]
+    if skipped_count:
+        expected.append("Retry skipped tabs (2)")
+    expected.extend(("Workflow tabs", "Predictor…", "Results browser…"))
+    assert [a.text for a in actions] == expected
+    assert [a.enabled for a in actions] == (
+        [writable] * (2 if skipped_count else 1) + [True, True, True]
+    )
+    assert driver.observe(object_name="main.more").enabled
+    assert driver.observe("New Tab ▾").enabled == writable
+    driver.select_menu("More ▾", (reload,))
+    if skipped_count:
+        driver.select_menu("More ▾", ("Retry skipped tabs (2)",))
+    driver.select_menu("More ▾", ("Predictor…",))
+    driver.select_menu("More ▾", ("Workflow tabs",))
+    driver.select_menu("More ▾", ("Results browser…",))
+    expected_commands = (
+        (["reload", "retry"] if skipped_count else ["reload"]) if writable else []
+    )
+    assert host.commands == [*expected_commands, "workflow", "results"]
+    assert host.opened == [DialogName.PREDICTOR]
+    toolbar.set_reload_recovery(retry_catalog=False, skipped_count=0)
+    toolbar.set_writable(writable=True)
+    restored = driver.menu_actions("More ▾", evidence=tmp_path / "restored.png")
+    assert tuple(a.text for a in restored) == (
+        "Reload experiments",
+        "Workflow tabs",
+        "Predictor…",
+        "Results browser…",
+    )
+    assert all(a.enabled for a in restored)
 
 
 @dataclass

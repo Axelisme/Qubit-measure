@@ -114,9 +114,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             completion=acquisition.completion,
             snapshot=RunSnapshot(
                 entry_id=self._storage.entry_id,
-                entry_name=self._storage.entry_name,
                 point=self._storage.point,
-                description=self._storage.description,
                 roles=dict(self._storage.roles),
             ),
             provenance=deepcopy(acquisition.provenance),
@@ -191,7 +189,6 @@ class SavedRun(Generic[CfgT, ResultT]):
                     origin="notebook",
                     payload=AcquiredPayload(
                         run_id=self.run_id,
-                        tab=self._metadata.experiment,
                         experiment=self._metadata.experiment,
                         point=self._metadata.snapshot.point,
                         roles=dict(self._metadata.snapshot.roles),

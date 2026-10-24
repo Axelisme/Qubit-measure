@@ -35,7 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.progress_bar import make_pbar
 
-from zcu_lab.v2._support import live_heatmap, live_line
+from zcu_lab.v2.support import live_heatmap, live_line
 
 
 def _fit_transition_rates(

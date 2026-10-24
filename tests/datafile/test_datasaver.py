@@ -2,8 +2,7 @@
 
 The dict save/load layer (save_data / load_data / save_local_data /
 load_local_data) is gone (see ADR-0063 and lib/zcu_tools/datafile/README.md); persistence is native labber_io. These
-tests cover the surviving path helpers: reserve_labber_filepath / format_ext /
-remove_ext.
+tests cover reserve_labber_filepath and format_ext.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 import zcu_tools.datafile as datafile
 from zcu_tools.datafile import (
     format_ext,
-    remove_ext,
     reserve_labber_filepath,
 )
 
@@ -29,17 +27,6 @@ def test_format_ext_normalizes_to_hdf5():
 def test_format_ext_only_rewrites_suffix():
     assert format_ext("run.h5_backup/data.h5") == "run.h5_backup/data.hdf5"
     assert format_ext("run.h5_backup/data") == "run.h5_backup/data.hdf5"
-
-
-def test_remove_ext_strips_known_extensions():
-    assert remove_ext("data.h5") == "data"
-    assert remove_ext("data.hdf5") == "data"
-    assert remove_ext("data") == "data"
-
-
-def test_remove_ext_only_strips_suffix():
-    assert remove_ext("run.h5_backup/data.hdf5") == "run.h5_backup/data"
-    assert remove_ext("run.h5_backup/data.h5") == "run.h5_backup/data"
 
 
 # ---------------------------------------------------------------------------

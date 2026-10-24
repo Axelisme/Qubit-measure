@@ -37,7 +37,7 @@ Notebook 是使用者在 L1 的入口，agent 目前不經 Notebook 操作。
 
 L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在任兩步之間停下、讀取或修改。L2 由 recipe 決定，只在明確需要 agent 的位置交還控制權，其餘步驟自動執行。交接可以落在輸入端（缺少必要參數）、中途（互動分析交接 tab，agent 以 `tab_interact` 完成選取）或輸出端（寫回確認）。Agent 需要在 recipe 沒有交接的位置調整步驟時，改用 L1。
 
-Recipe 作者以 `await tab.run()` 與 `await tab.analyze(stage, result=T)` 等待工作結果，不表示每一步都要 agent 回答。互動分析以 `interactive=True` 明確交接 GUI tab。`await tab.ask_writeback()` 或 `await session.ask(question)` 才是等待 agent 或使用者回答的提問。回答本身不寫入資料，作者接受寫回時另呼叫同步 `tab.accept_writeback(items)`。取消不回傳 cancelled 分支給作者，作者以 `finally` 保存已有的 Run，終態與 runs 由 runtime 回報。
+Recipe 作者以 `await tab.run()` 與 `await tab.analyze(stage, result=T)` 等待工作結果，不表示每一步都要 agent 回答。互動分析以 `interactive=True` 明確交接 GUI tab。`await tab.ask_writeback()` 是 recipe 等待 agent 或使用者回答的提問。回答本身不寫入資料，作者接受寫回時另呼叫同步 `tab.accept_writeback(items)`。取消不回傳 cancelled 分支給作者，作者以 `finally` 保存已有的 Run，終態與 runs 由 runtime 回報。
 
 L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。`await env.run(...)` 等待 Engine 執行工作，`await env.ask(question)` 才是交給 agent 的提問。
 
@@ -134,7 +134,7 @@ Preview 不回 revision，`tab.writeback_accept` 不帶 `expected_revision`，�
 Recipe 將全部 Primary／Post 選定 IDs 一次交給這個 RPC。GUI owner 在同一次提交檢查全部 IDs，
 unknown／duplicate 在第一筆寫入前拒絕。通過後按 Primary、Post、各 pane 的候選順序寫入，
 首錯停止，收據保留成功前綴與診斷，不 retry／rollback。
-單 pane L1 `writeback_set`／`writeback_write` 繼續編輯並寫入當前 draft。
+單 pane L1 `writeback_write` 繼續編輯並寫入當前 draft。
 
 收據用 owner item ID 關聯確認項目，不將 authored alias 名稱與 concrete target 比較。
 `WritebackReceipt.items` 是成功 ID 對應的原捕捉候選，不是實際寫入值快照。

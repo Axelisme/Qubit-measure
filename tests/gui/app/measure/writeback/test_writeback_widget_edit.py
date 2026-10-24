@@ -267,7 +267,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         )
         context.set_parameter(context.read_context().target, "general.ext.gain", 0.4)
         board = white_noise()
-        ctrl.install_soc(board.soc, board.soccfg)
+        ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         tab_id = ctrl.new_tab("synthetic/module")
         ctrl.start_run(tab_id)
         # The admitted synthetic run returns; pump its terminal owner delivery.

@@ -57,9 +57,7 @@ from ._run_support import (
 def _run_snapshot() -> RunSnapshot:
     return RunSnapshot(
         entry_id=UUID("00000000-0000-0000-0000-000000000001"),
-        entry_name="original-entry",
         point="original-point",
-        description="original description",
         roles={"qubit": "Q1", "resonator": "R1"},
     )
 

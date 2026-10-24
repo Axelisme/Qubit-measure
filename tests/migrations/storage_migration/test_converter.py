@@ -111,7 +111,6 @@ def test_native_is_readable_and_validated_before_source_removal(
         assert stored.cfg.cfg_type == cfg_type
         assert stored.metadata.completion == "stopped"
         assert stored.metadata.snapshot.point == "point_at_acquisition"
-        assert stored.metadata.snapshot.entry_name == "historical"
         assert stored.cfg.values == {"frequency": 12.5}
         np.testing.assert_array_equal(
             stored.container.vars["signal"].values, [1 + 2j, 3 + 4j]

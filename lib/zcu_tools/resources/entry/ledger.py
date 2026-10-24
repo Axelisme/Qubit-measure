@@ -160,6 +160,21 @@ class RecordsLedger:
                 item.event.model_copy(deep=True) for item in self._read().values()
             )
 
+    def read_events_snapshot(self) -> tuple[LedgerEvent, ...]:
+        """Read isolated validated events without acquiring or creating a lock.
+
+        Use for read-only browsing, not read-modify-write transactions. Read the
+        complete current ledger; missing ledger returns (). Validation matches
+        events(), including entry identity, duplicates and complete LF tails.
+        A concurrent append may expose an incomplete tail and raise ValueError;
+        callers may refresh later. Attachments are not opened and no files are
+        created. I/O errors propagate. This does not update the incremental index.
+        """
+        return tuple(
+            item.event.model_copy(deep=True)
+            for item in self._read(force_reload=True, publish_state=False).values()
+        )
+
     def reload(self) -> tuple[LedgerEvent, ...]:
         """Fully validate history from byte zero and replace this handle's index.
 
@@ -260,7 +275,9 @@ class RecordsLedger:
                 raise ValueError(f"{path}: invalid record: {exc}") from exc
         return LedgerEntry(item.event.model_copy(deep=True), record, item.event_json)
 
-    def _read(self, *, force_reload: bool = False) -> dict[str, LedgerEntry]:
+    def _read(
+        self, *, force_reload: bool = False, publish_state: bool = True
+    ) -> dict[str, LedgerEntry]:
         try:
             stream = self._path.open("rb")
         except FileNotFoundError:
@@ -268,7 +285,8 @@ class RecordsLedger:
             self._records.stat()
             if self._path.is_symlink():
                 raise
-            self._state = None
+            if publish_state:
+                self._state = None
             return {}
         with stream:
             status = os.fstat(stream.fileno())
@@ -309,7 +327,10 @@ class RecordsLedger:
             head = stream.read(min(offset, 4096))
         # Do not publish any prefix of a malformed tail or a failed I/O operation.
         entries.update(added)
-        self._state = _LedgerState(identity, modified, offset, head, last_line, entries)
+        if publish_state:
+            self._state = _LedgerState(
+                identity, modified, offset, head, last_line, entries
+            )
         return entries
 
     def _parse_entry(self, encoded_line: bytes) -> LedgerEntry:

@@ -9,53 +9,12 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.services.run_analyze_control import (
-        ActiveTabOperation,
+        RunAnalyzeControlFacet,
     )
-    from zcu_tools.gui.session.operation_handles import AwaitResult, OperationOutcome
+    from zcu_tools.gui.session.device_control import DeviceControlPort
+    from zcu_tools.gui.session.operation_handles import AwaitResult, OperationHandles
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
-
-
-class OperationAwaitPort(Protocol):
-    """Thread-safe await surface consumed by operation control."""
-
-    def await_known_outcome(
-        self, operation_id: int, timeout: float, /
-    ) -> AwaitResult: ...
-    def known_outcome(self, operation_id: int, /) -> OperationOutcome | None: ...
-    def has_cancel_hook(self, operation_id: int, /) -> bool: ...
-    def elapsed_seconds(self, operation_id: int, /) -> float | None: ...
-
-
-class OperationProgressPort(Protocol):
-    """Operation-scoped progress read surface consumed by operation control."""
-
-    def bars_for_operation(
-        self, operation_id: int, /
-    ) -> tuple[tuple[int, ProgressBarModel], ...]: ...
-
-
-class TabOperationOwnerPort(Protocol):
-    """Run/analyze owner whose live operations operation control lists and cancels."""
-
-    def active_tab_operations(self) -> tuple[ActiveTabOperation, ...]: ...
-    def cancel_run(self) -> bool: ...
-    def cancel_analyze(self, tab_id: str) -> bool: ...
-
-
-class DeviceOperationRef(Protocol):
-    """The fields operation control reads from one live device operation."""
-
-    @property
-    def token(self) -> int: ...
-    @property
-    def device_name(self) -> str: ...
-
-
-class DeviceOperationOwnerPort(Protocol):
-    """Device owner whose live operations operation control lists and cancels."""
-
-    def get_active_device_operations(self) -> tuple[DeviceOperationRef, ...]: ...
-    def cancel_device_operation(self, name: str) -> None: ...
+    from zcu_tools.gui.session.services.progress import ProgressService
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,10 +58,10 @@ class OperationControlFacet:
     def __init__(
         self,
         *,
-        handles: OperationAwaitPort,
-        progress: OperationProgressPort,
-        run_analyze: TabOperationOwnerPort,
-        device: DeviceOperationOwnerPort,
+        handles: OperationHandles,
+        progress: ProgressService,
+        run_analyze: RunAnalyzeControlFacet,
+        device: DeviceControlPort,
     ) -> None:
         self._handles = handles
         self._progress = progress

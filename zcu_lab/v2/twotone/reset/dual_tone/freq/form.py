@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.twotone.reset.dual_tone.freq.core import FreqCfg
 
 

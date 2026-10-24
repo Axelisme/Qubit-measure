@@ -71,19 +71,6 @@ def _presentation(
     )
 
 
-def h_analyze_cancel(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    # Graceful by contract (no interactive analyze in flight is not an error): the
-    # cancelled flag tells the agent whether anything was actually settled.
-    cancelled = control.cancel_analyze(tab_id)
-    return {"ok": True, "cancelled": cancelled}
-
-
 def h_tab_get_analyze_result(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -112,19 +99,6 @@ def h_tab_get_analyze_result(
             operation_state=tab_operation_state(adapter, tab_id),
         )
     return reply
-
-
-def h_tab_get_analyze_params(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = control.get_tab_snapshot(tab_id)
-    definitions = adapter.tab_control.analyze_param_definitions(tab_id, stage="primary")
-    ap = None if snap.analysis is None else snap.analysis.params
-    return {"analyze_params": _params_to_wire(ap), "definitions": definitions}
 
 
 def h_tab_analyze(
@@ -214,19 +188,6 @@ def h_tab_get_post_analyze_result(
             operation_state=tab_operation_state(adapter, tab_id),
         )
     return reply
-
-
-def h_tab_get_post_analyze_params(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    tab_id = str(params["tab_id"])
-    control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    snap = control.get_tab_snapshot(tab_id)
-    definitions = adapter.tab_control.analyze_param_definitions(tab_id, stage="post")
-    pp = None if snap.post_analysis is None else snap.post_analysis.params
-    return {"post_analyze_params": _params_to_wire(pp), "definitions": definitions}
 
 
 def h_tab_post_analyze(

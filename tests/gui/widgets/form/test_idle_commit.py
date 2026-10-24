@@ -8,13 +8,13 @@ import os
 import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 import pytest
 from pydantic import Field, JsonValue
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QLineEdit, QSpinBox, QVBoxLayout, QWidget
-from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState, FormWritePath
+from zcu_tools.gui.form import FormEnv, FormModel, FormState, FormWritePath
 from zcu_tools.gui.widgets.form import FormEditor, value_widgets
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
@@ -32,10 +32,8 @@ class IdleForm(FormModel):
     name: str = Field(default="aa", min_length=2)
     expression: float = 2.0
     amplitude: complex = 1 + 0j
-    child: Annotated[Child, Display(collapsed=False)] = Field(default_factory=Child)
-    optional: Annotated[Child | None, Display(collapsed=False)] = Field(
-        default_factory=Child
-    )
+    child: Child = Field(default_factory=Child)
+    optional: Child | None = Field(default_factory=Child)
     choice: Literal["first", "second"] = "first"
 
 
@@ -67,6 +65,9 @@ def form(
     editor.show()
     editor.activateWindow()
     qapp.processEvents()
+    driver = ComponentDriver(editor)
+    driver.click(object_name="form.fold.child")
+    driver.click(object_name="form.fold.optional")
     yield editor, state, batches
     editor.close()
     editor.deleteLater()

@@ -87,6 +87,19 @@ def write_yaml(source: Path, document: object) -> None:
         YAML(typ="rt").dump(document, stream)
 
 
+@pytest.mark.parametrize("missing", ["point.yaml", "module_cfg.yaml"])
+def test_use_point_classifies_required_document_absence(
+    entry: ResultEntry,
+    missing: str,
+) -> None:
+    entry.new_point("incomplete")
+    (entry.result_path / "points" / "incomplete" / missing).unlink()
+    with pytest.raises(FileNotFoundError) as caught:
+        entry.use_point("incomplete")
+    assert type(caught.value).__name__ == "MissingPointError"
+    assert missing in str(caught.value)
+
+
 def test_new_point_copies_complete_components_and_keeps_independent_values(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:

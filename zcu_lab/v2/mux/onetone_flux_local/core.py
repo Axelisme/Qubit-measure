@@ -6,13 +6,13 @@ from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 
-from zcu_lab.v2._support.mux_flux import (
+from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
+from zcu_lab.v2.support.mux_flux import (
     LocalFluxCfg,
     MuxFluxResult,
     mux_flux_spec,
     run_flux_scan,
 )
-from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
 
 
 class OnetoneFluxLocalCfg(LocalFluxCfg[MuxFrequencyOffsetCfg]):

@@ -3,7 +3,6 @@
 from threading import Event
 
 from pydantic import BaseModel, Field
-from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
 
@@ -20,14 +19,6 @@ class Report(BaseModel):
 
 class Fit(BaseModel):
     estimate: float
-
-
-class ConfirmAnswer(Answer):
-    accepted: bool
-
-
-class ConfirmQuestion(Question[ConfirmAnswer]):
-    evidence: str
 
 
 class SyntheticGui:
@@ -64,7 +55,6 @@ class SyntheticGui:
         if method in {
             "tab.reset_cfg",
             "tab.edit_recipe_fields",
-            "tab.select_recipe_module",
             "tab.select_recipe_option",
             "tab.run_recipe_command",
         }:

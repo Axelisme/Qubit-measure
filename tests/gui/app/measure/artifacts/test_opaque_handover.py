@@ -143,7 +143,9 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     controller.run_analyze_control.analyze(tab_id, PaneParams())
     # The admitted fit returns and commits its pane on the owner thread.
     qt_until(lambda: not state.is_tab_busy(tab_id), label="opaque analysis terminal")
-    assert controller.get_tab_analyze_result(tab_id) == PaneSummary(17.0)
+    assert controller.run_analyze_control.get_tab_analyze_result(tab_id) == PaneSummary(
+        17.0
+    )
     assert tab.run.result is handle
     controller.context_control.new_point(
         PointCreateRequest("q", "later", CommandOrigin("gui"))

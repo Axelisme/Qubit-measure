@@ -11,13 +11,15 @@ import pytest
 from zcu_tools.datafile import (
     Axis,
     DataVariable,
+    GroupedLabberData,
     LabberData,
     LabberMetadata,
     LabberPayload,
+    format_ext,
     load_grouped_labber_data,
     load_labber_data,
-    save_grouped_labber_data,
 )
+from zcu_tools.datafile.grouped import write_grouped_labber_data_file
 
 
 def _payload_2d() -> LabberPayload:
@@ -53,10 +55,11 @@ def test_grouped_roundtrip_with_metadata_and_attrs(tmp_path):
 
     signal = _payload_2d()
     reference = LabberPayload(("Reference", "arb", signal.z + 1.0), axes=signal.axes)
-    written = save_grouped_labber_data(
-        str(path),
-        {"signal": signal, "reference": reference},
-        metadata=metadata,
+    written = write_grouped_labber_data_file(
+        format_ext(str(path)),
+        GroupedLabberData(
+            {"signal": signal, "reference": reference}, metadata=metadata
+        ),
     )
 
     assert written == str(path) + ".hdf5"
@@ -99,8 +102,9 @@ def test_grouped_v2_rejects_heterogeneous_axes_before_creating_file(tmp_path):
     path = tmp_path / "heterogeneous"
 
     with pytest.raises(ValueError, match="common grid"):
-        save_grouped_labber_data(
-            str(path), {"signal": _payload_2d(), "reference": _payload_1d()}
+        write_grouped_labber_data_file(
+            format_ext(str(path)),
+            GroupedLabberData({"signal": _payload_2d(), "reference": _payload_1d()}),
         )
 
     assert not (tmp_path / "heterogeneous.hdf5").exists()
@@ -215,7 +219,9 @@ def test_grouped_v2_validates_complete_contract_before_file_creation(
 
     path = tmp_path / case
     with pytest.raises(ValueError, match=match):
-        save_grouped_labber_data(str(path), variables_by_case[case])
+        write_grouped_labber_data_file(
+            format_ext(str(path)), GroupedLabberData(variables_by_case[case])
+        )
     assert not path.with_suffix(".hdf5").exists()
 
 
@@ -251,20 +257,23 @@ def test_grouped_v2_reports_first_error_before_creating_file(tmp_path, case, mat
     path = tmp_path / "invalid.hdf5"
 
     with pytest.raises(ValueError, match=match):
-        save_grouped_labber_data(str(path), cases[case])
+        write_grouped_labber_data_file(
+            format_ext(str(path)), GroupedLabberData(cases[case])
+        )
 
     assert not path.exists()
 
 
 def test_grouped_v2_accepts_flat_numeric_list_values(tmp_path):
-    path = save_grouped_labber_data(
-        str(tmp_path / "flat_list"),
-        {
-            "signal": LabberPayload(
-                ("Signal", "a.u.", [1.0, 2.0, 3.0]),
-                [("X", "s", [0.0, 1.0, 2.0])],
-            )
-        },
+    path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "flat_list")),
+        GroupedLabberData(
+            {
+                "signal": LabberPayload(
+                    ("Signal", "a.u.", [1.0, 2.0, 3.0]), [("X", "s", [0.0, 1.0, 2.0])]
+                )
+            }
+        ),
     )
 
     loaded = load_grouped_labber_data(path, required_variables=("signal",))
@@ -274,8 +283,9 @@ def test_grouped_v2_accepts_flat_numeric_list_values(tmp_path):
 
 
 def test_grouped_v2_rejects_unmarked_v1_with_canonical_requirement(tmp_path):
-    path = save_grouped_labber_data(
-        str(tmp_path / "legacy_v1"), {"signal": _payload_2d()}
+    path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "legacy_v1")),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
     with h5py.File(path, "a") as f:
         f.attrs["zcu_tools.grouped_dataset_version"] = 1
@@ -298,9 +308,11 @@ def test_grouped_v2_rejects_unmarked_v1_with_canonical_requirement(tmp_path):
 def test_grouped_loader_rejects_fractional_version_markers(
     tmp_path, grouped_version: float, streaming_version: float | None, match: str
 ) -> None:
-    path = save_grouped_labber_data(
-        str(tmp_path / f"bad_version_{grouped_version}_{streaming_version}"),
-        {"signal": _payload_2d()},
+    path = write_grouped_labber_data_file(
+        format_ext(
+            str(tmp_path / f"bad_version_{grouped_version}_{streaming_version}")
+        ),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
     with h5py.File(path, "a") as f:
         f.attrs["zcu_tools.grouped_dataset_version"] = grouped_version
@@ -313,7 +325,9 @@ def test_grouped_loader_rejects_fractional_version_markers(
 
 def test_grouped_v2_loader_validates_explicit_variable_channel_mapping(tmp_path):
     variables = {"signal": _payload_2d(), "reference": _payload_2d_reference()}
-    short_path = save_grouped_labber_data(str(tmp_path / "short_mapping"), variables)
+    short_path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "short_mapping")), GroupedLabberData(variables)
+    )
     with h5py.File(short_path, "a") as f:
         f.attrs["zcu_tools.dataset_role_channels"] = np.array(
             ["Signal"], dtype=h5py.string_dtype("utf-8")
@@ -321,7 +335,9 @@ def test_grouped_v2_loader_validates_explicit_variable_channel_mapping(tmp_path)
     with pytest.raises(ValueError, match="mapping lengths"):
         load_grouped_labber_data(short_path)
 
-    wrong_path = save_grouped_labber_data(str(tmp_path / "wrong_mapping"), variables)
+    wrong_path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "wrong_mapping")), GroupedLabberData(variables)
+    )
     with h5py.File(wrong_path, "a") as f:
         f.attrs["zcu_tools.dataset_role_channels"] = np.array(
             ["Signal", "Not Reference"], dtype=h5py.string_dtype("utf-8")
@@ -331,16 +347,18 @@ def test_grouped_v2_loader_validates_explicit_variable_channel_mapping(tmp_path)
 
 
 def test_grouped_v2_loader_rejects_corrupt_step_bookkeeping(tmp_path):
-    dimensions_path = save_grouped_labber_data(
-        str(tmp_path / "bad_dimensions"), {"signal": _payload_2d()}
+    dimensions_path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "bad_dimensions")),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
     with h5py.File(dimensions_path, "a") as f:
         f["Data"].attrs["Step dimensions"] = np.array([4, 4], dtype=np.int64)
     with pytest.raises(ValueError, match="Step dimensions"):
         load_grouped_labber_data(dimensions_path)
 
-    coordinates_path = save_grouped_labber_data(
-        str(tmp_path / "bad_coordinates"), {"signal": _payload_2d()}
+    coordinates_path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "bad_coordinates")),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
     with h5py.File(coordinates_path, "a") as f:
         data_group = f.get("Data")
@@ -351,8 +369,9 @@ def test_grouped_v2_loader_rejects_corrupt_step_bookkeeping(tmp_path):
     with pytest.raises(ValueError, match="step-coordinate"):
         load_grouped_labber_data(coordinates_path)
 
-    step_list_path = save_grouped_labber_data(
-        str(tmp_path / "bad_step_list"), {"signal": _payload_2d()}
+    step_list_path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "bad_step_list")),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
     with h5py.File(step_list_path, "a") as f:
         step_list_dataset = f.get("Step list")
@@ -383,8 +402,9 @@ def test_grouped_v2_loader_rejects_corrupt_step_bookkeeping(tmp_path):
     ],
 )
 def test_grouped_loader_rejects_missing_bookkeeping(tmp_path, entry, match):
-    path = save_grouped_labber_data(
-        str(tmp_path / "incomplete"), {"signal": _payload_2d()}
+    path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "incomplete")),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
     with h5py.File(path, "a") as file:
         del file[entry]
@@ -413,7 +433,9 @@ def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape)
             ("Reference", "V", values + 2), axes, timestamps=timestamps.copy()
         ),
     }
-    path = save_grouped_labber_data(str(tmp_path / "grid"), variables)
+    path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "grid")), GroupedLabberData(variables)
+    )
 
     loaded = load_grouped_labber_data(path, required_variables=tuple(variables))
 
@@ -432,8 +454,11 @@ def test_grouped_roundtrip_preserves_grid_and_common_timestamps(tmp_path, shape)
 
 def test_grouped_strict_required_variables_missing_and_unknown_raise(tmp_path):
     path = tmp_path / "strict"
-    save_grouped_labber_data(
-        str(path), {"signal": _payload_2d(), "reference": _payload_2d_reference()}
+    write_grouped_labber_data_file(
+        format_ext(str(path)),
+        GroupedLabberData(
+            {"signal": _payload_2d(), "reference": _payload_2d_reference()}
+        ),
     )
 
     with pytest.raises(ValueError, match="missing required data variable"):
@@ -447,8 +472,11 @@ def test_grouped_strict_required_variables_missing_and_unknown_raise(tmp_path):
 
 def test_grouped_diagnostic_load_returns_all_variables(tmp_path):
     path = tmp_path / "diagnostic"
-    save_grouped_labber_data(
-        str(path), {"signal": _payload_2d(), "reference": _payload_2d_reference()}
+    write_grouped_labber_data_file(
+        format_ext(str(path)),
+        GroupedLabberData(
+            {"signal": _payload_2d(), "reference": _payload_2d_reference()}
+        ),
     )
 
     loaded = load_grouped_labber_data(str(path))
@@ -458,11 +486,16 @@ def test_grouped_diagnostic_load_returns_all_variables(tmp_path):
 
 def test_grouped_invalid_and_duplicate_variables_raise(tmp_path):
     with pytest.raises(ValueError, match="lowercase snake_case"):
-        save_grouped_labber_data(str(tmp_path / "invalid"), {"BadRole": _payload_2d()})
+        write_grouped_labber_data_file(
+            format_ext(str(tmp_path / "invalid")),
+            GroupedLabberData({"BadRole": _payload_2d()}),
+        )
 
-    path = save_grouped_labber_data(
-        str(tmp_path / "duplicate"),
-        {"signal": _payload_2d(), "reference": _payload_2d_reference()},
+    path = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "duplicate")),
+        GroupedLabberData(
+            {"signal": _payload_2d(), "reference": _payload_2d_reference()}
+        ),
     )
     with h5py.File(path, "a") as f:
         f.attrs["zcu_tools.dataset_roles"] = np.array(
@@ -475,7 +508,9 @@ def test_grouped_invalid_and_duplicate_variables_raise(tmp_path):
 
 def test_single_labber_loader_fast_fails_on_grouped_file(tmp_path):
     path = tmp_path / "grouped_fast_fail"
-    save_grouped_labber_data(str(path), {"signal": _payload_2d()})
+    write_grouped_labber_data_file(
+        format_ext(str(path)), GroupedLabberData({"signal": _payload_2d()})
+    )
 
     with pytest.raises(ValueError, match="load_grouped_labber_data"):
         load_labber_data(str(path))
@@ -485,8 +520,9 @@ def test_grouped_save_uses_exact_formatted_path_without_suffixing(tmp_path):
     existing_suffix = tmp_path / "run_1.hdf5"
     existing_suffix.write_bytes(b"existing")
 
-    written = save_grouped_labber_data(
-        str(tmp_path / "run.h5"), {"signal": _payload_2d()}
+    written = write_grouped_labber_data_file(
+        format_ext(str(tmp_path / "run.h5")),
+        GroupedLabberData({"signal": _payload_2d()}),
     )
 
     assert written == str(tmp_path / "run.hdf5")
@@ -500,7 +536,9 @@ def test_grouped_save_rejects_existing_formatted_path(tmp_path):
     path.write_bytes(b"existing")
 
     with pytest.raises(FileExistsError):
-        save_grouped_labber_data(str(path), {"signal": _payload_2d()})
+        write_grouped_labber_data_file(
+            format_ext(str(path)), GroupedLabberData({"signal": _payload_2d()})
+        )
 
     assert path.read_bytes() == b"existing"
     assert not (tmp_path / "grouped_1.hdf5").exists()
@@ -517,4 +555,7 @@ def test_grouped_variable_value_cannot_be_labber_data(tmp_path):
         Mapping[str | DataVariable, LabberPayload], {"signal": data}
     )
     with pytest.raises(TypeError, match="LabberPayload"):
-        save_grouped_labber_data(str(tmp_path / "bad_value"), invalid_variables)
+        write_grouped_labber_data_file(
+            format_ext(str(tmp_path / "bad_value")),
+            GroupedLabberData(invalid_variables),
+        )

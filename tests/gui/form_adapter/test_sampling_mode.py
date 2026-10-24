@@ -29,7 +29,7 @@ def convert(state: FormState[FormModel], _field: str, label: str) -> None:
 
 
 def step_state(start: float = 0, stop: float = 1, n: int = 5):
-    form = Form(SamplingCfg, {"sweep": Range.between(start, stop, n)})
+    form = Form(SamplingCfg, {"sweep": Range(start, stop, n)})
     state = FormState(form.default_input(FormEnv()))
     convert(state, "n", "Switch to Step")
     return form, state
@@ -139,7 +139,7 @@ def test_invalid_step_draft_rejects_result_and_atomic_conversion(step: JsonValue
 
 @pytest.mark.parametrize(("start", "stop", "n"), [(2, 2, 3), (0, 1, 1)])
 def test_inconsistent_expts_cannot_be_repaired_by_sampling_switch(start, stop, n):
-    form = Form(SamplingCfg, {"sweep": Range.between(0, 1, 3)})
+    form = Form(SamplingCfg, {"sweep": Range(0, 1, 3)})
     state = FormState(form.default_input(FormEnv()))
     state.write(
         {("sweep", "start"): start, ("sweep", "stop"): stop, ("sweep", "n"): n},
@@ -183,7 +183,7 @@ def test_sampling_switch_evaluates_participants_only_and_roundtrips_single_point
 
 @pytest.mark.parametrize("field", ["start", "stop", "n"])
 def test_sampling_failure_keeps_all_expression_sources(field):
-    form = Form(SamplingCfg, {"sweep": Range.between(0, 1, 3)})
+    form = Form(SamplingCfg, {"sweep": Range(0, 1, 3)})
     state = FormState(form.default_input(FormEnv()))
     state.write(
         {
@@ -215,7 +215,7 @@ def test_valid_step_preview_still_projects_when_unrelated_field_is_invalid():
 
 
 def test_sampling_success_discards_all_participating_expressions():
-    form = Form(SamplingCfg, {"sweep": Range.between(0, 1, 3)})
+    form = Form(SamplingCfg, {"sweep": Range(0, 1, 3)})
     state = FormState(form.default_input(FormEnv()))
     state.write(
         {

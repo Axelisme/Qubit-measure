@@ -12,9 +12,10 @@ from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.program.v2 import LoadValue, Module, Pulse, Readout, Repeat, Reset
+from zcu_tools.program.v2.modules.base import as_modules
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
@@ -79,20 +80,22 @@ def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
     counts = [
         n * (2 if cfg.repeat_on == "X90_pulse" else 1) for n in range(cfg.n_times + 1)
     ]
-    return [
-        LoadValue(
-            "load_repeat_count",
-            values=counts,
-            idx_reg="times",
-            val_reg="repeat_count",
-        ),
-        Reset("reset", cfg.reset),
-        Pulse("X90_pulse", cfg.X90_pulse),
-        Repeat(
-            "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
-        ).add_content(Pulse(f"loop_{cfg.repeat_on}", repeat_pulse)),
-        Readout("readout", cfg.readout),
-    ]
+    return as_modules(
+        [
+            LoadValue(
+                "load_repeat_count",
+                values=counts,
+                idx_reg="times",
+                val_reg="repeat_count",
+            ),
+            Reset("reset", cfg.reset),
+            Pulse("X90_pulse", cfg.X90_pulse),
+            Repeat(
+                "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
+            ).add_content(Pulse(f"loop_{cfg.repeat_on}", repeat_pulse)),
+            Readout("readout", cfg.readout),
+        ]
+    )
 
 
 class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):

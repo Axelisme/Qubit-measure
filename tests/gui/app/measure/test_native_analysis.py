@@ -235,7 +235,6 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
     window = (
         MainWindow(
             controller,
-            templates=lambda: {},
             dialog_presenter=RecordingDialogPresenter(),
         )
         if interactive

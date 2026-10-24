@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。逐條核對 zcu_lab 的程式碼規則、檢查方式與契約來源。
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 修改 `zcu_lab` 時逐條核對本頁。每條列出檢查方式與來源，細節以連結的文件為準。
 新增 component、實驗與 recipe 的步驟見 [tutorial](tutorial/README.md)。
@@ -44,8 +44,8 @@ Core 不直接或間接 import GUI，GUI adapter 在同目錄的 `gui.py` 接上
 
 ## 6. 共用 mechanics 不接管 caller 的選擇
 
-`_support/` 放共用 mechanics，實驗序列、分析選擇與 writeback 政策留在 caller，具名共用初值 helper 沿用既有例外。
-檢查：核對 helper 的 callers 與參數，Form 仍明選倍率或場景，不讓 core 經 `_support/measure/` 載入 GUI。
+`support/` 放共用 mechanics，實驗序列、分析選擇與 writeback 政策留在 caller，具名共用初值 helper 沿用既有例外。
+檢查：核對 helper 的 callers 與參數，Form 仍明選倍率或場景，不讓 core 經 `support/measure/` 載入 GUI。
 來源：[support ownership 與初值例外](v2/gui-contracts.md#ownership)。
 
 ## 7. Guide 寫給 operator

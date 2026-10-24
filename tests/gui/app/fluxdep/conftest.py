@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs
 from zcu_tools.analysis.fluxdep.twotone import TwoToneInputs
-from zcu_tools.datafile import save_labber_data
+from zcu_tools.datafile import LabberData
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
 from zcu_tools.resources.entry import ResultEntry, component_registry
@@ -58,7 +58,7 @@ def spectrum_hdf5(tmp_path):
 
     Returns (filepath, dev_values, freqs_GHz, signals) so a test can check the
     loaded arrays round-trip. The canonical layout is x=device values,
-    y=frequency (Hz); ``save_labber_data`` stores z as native (Ny, Nx) with axes
+    y=frequency (Hz); ``LabberData.save`` stores z as native (Ny, Nx) with axes
     listed inner-first [inner=x=dev, outer=y=freq], so z = signals.T (the loader
     re-transposes with .T to recover device-major (Ndev, Nfreq)).
     """
@@ -73,15 +73,14 @@ def spectrum_hdf5(tmp_path):
     filepath = str(tmp_path / "Q1_flux_1")
     # native (Ny, Nx) z, axes inner-first [inner=x=dev, outer=y=freq];
     # z = signals.T so the loader's .T recovers device-major signals.
-    save_labber_data(
-        filepath,
-        z=("Signal", "a.u.", signals.T),
-        axes=[
-            ("Flux device value", "a.u.", dev_values),  # inner axis (x)
-            ("Frequency", "Hz", freqs_ghz * 1e9),  # outer axis (y)
+    LabberData(
+        ("Signal", "a.u.", signals.T),
+        [
+            ("Flux device value", "a.u.", dev_values),
+            ("Frequency", "Hz", freqs_ghz * 1000000000.0),
         ],
-    )
-    # save_labber_data forces the .hdf5 extension; return the resolved path.
+    ).save(filepath)
+    # LabberData.save forces the .hdf5 extension; return the resolved path.
     return filepath + ".hdf5", dev_values, freqs_ghz, signals
 
 
@@ -105,14 +104,13 @@ def transposed_spectrum_hdf5(tmp_path):
     # legacy layout: inner=x=freq, outer=y=flux. native z is (Ny, Nx) =
     # (Nflux, Nfreq) == signals; the loader's .T then transpose_axes recovers
     # the canonical (flux, freq) == signals.
-    save_labber_data(
-        filepath,
-        z=("Signal", "a.u.", signals),
-        axes=[
-            ("Frequency", "Hz", freqs_ghz * 1e9),  # inner axis (x)
-            ("Flux device value", "a.u.", flux),  # outer axis (y)
+    LabberData(
+        ("Signal", "a.u.", signals),
+        [
+            ("Frequency", "Hz", freqs_ghz * 1000000000.0),
+            ("Flux device value", "a.u.", flux),
         ],
-    )
+    ).save(filepath)
     return filepath + ".hdf5", flux, freqs_ghz, signals
 
 

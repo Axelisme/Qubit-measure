@@ -82,24 +82,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Remove a literal spectrum.",
         params=(ParamSpec("name", JsonType.STRING),),
     ),
-    "spectrum.set_active": MethodSpec(
-        5.0,
-        "Select a spectrum for display. Null or "
-        "omitted name clears display selection without changing source versions.",
-        readonly=True,
-        params=(ParamSpec("name", JsonType.STRING, required=False),),
-    ),
-    "spectrum.reset_alignment": MethodSpec(
-        5.0,
-        "Reopen alignment. Preserve "
-        "native points, completion and the last calibration.",
-        params=(ParamSpec("name", JsonType.STRING),),
-    ),
-    "spectrum.reset_points": MethodSpec(
-        5.0,
-        "Clear committed points and completion on an aligned spectrum. Preserve alignment.",
-        params=(ParamSpec("name", JsonType.STRING),),
-    ),
     # Cross-spectrum selection
     "selection.snapshot": MethodSpec(
         5.0,
@@ -112,12 +94,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         30.0,
         "Render the published joint cloud and per-spectrum Filter masks as PNG. "
         "Never opens a Session or reads a draft.",
-        readonly=True,
-    ),
-    "selection.pointcloud": MethodSpec(
-        5.0,
-        "Derive the joint (flux, freq) point cloud assembled from every "
-        "spectrum's selected points. Returns {fluxs:[...], freqs:[...]}.",
         readonly=True,
     ),
     "interactive.read": MethodSpec(
@@ -226,14 +202,6 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         "Start the app's single-flight database search. Returns the "
         "app token; after completion explicitly reread fit.result.",
     ),
-    "operation.status": MethodSpec(
-        5.0,
-        "Read a retained search token's pending or terminal activity. Null or "
-        "omitted token reads the latest GUI/agent activity, or null before "
-        "any search. Unknown tokens are rejected.",
-        params=(ParamSpec("token", JsonType.INTEGER, required=False),),
-        readonly=True,
-    ),
     "operation.cancel": MethodSpec(
         5.0,
         "Request cooperative cancellation of a known search token. The receipt "
@@ -273,9 +241,4 @@ METHOD_SPECS: dict[str, MethodSpec] = {
         5.0, "Snapshot of all resource versions", readonly=True
     ),
     # State readiness (fan-out at MCP into one fluxdep_state_check reply).
-    "state.check": MethodSpec(
-        5.0,
-        "Read readiness flags at once: {has_project, spectrum_count, has_active}.",
-        readonly=True,
-    ),
 }

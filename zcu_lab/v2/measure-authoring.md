@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -28,7 +28,7 @@
 ## 目錄佈局
 
 實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列 adapter catalog，
-`../templates.py` 提供注入 Registry 的持久範本目錄。Private `_support/measure/` 提供跨 adapter
+`../templates.py` 提供注入 Registry 的持久範本目錄。公開支援套件 `support/measure/` 提供跨 adapter
 共用的 analysis、writeback 與 context mechanics，也可集中已定案且供多個 Form 共用的具名初值政策。
 
 每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 提供 Qt-free `make_form(ctx)`。
@@ -40,7 +40,7 @@ Form 從 core 型別推導形狀；tree 只宣告初值、Slot／Template、鎖�
 
 新增 adapter 必須明列於 `../definitions.py`，不靠 class 掃描註冊。組合根重載
 `zcu_lab.v2` 與 `zcu_lab.definitions`，包含 package exports 與引用 core 型別的 Notebook flux picker。
-`zcu_lab.templates`、`_support` 下的 measure／singleshot 支援家族，以及框架 identity 保留。
+`zcu_lab.templates`、`support` 下的 measure／singleshot 支援家族，以及框架 identity 保留。
 修改這些固定依賴後要重啟 GUI。
 
 Reload 會先確認關閉全部 tabs 並排除進行中操作，不重啟硬體，也不保留舊 tabs 執行舊版本。
@@ -56,7 +56,7 @@ RAM snapshot、retry 與 tab 恢復由 [framework reload owner](../../lib/zcu_to
 
 ## Form 與固定來源
 
-每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 或已定案初值政策才放進 private `_support/measure/`。單一實驗的初值政策留在 `form.py`。
+每個實驗的 `gui.py` 是其 GUI policy 的修改入口。至少被兩個 adapter 共用的 mechanics 或已定案初值政策才放進公開支援套件 `support/measure/`。單一實驗的初值政策留在 `form.py`。
 
 Adapter 以 `guide_path: ClassVar[Path | None]` 宣告同目錄的 operator-facing Markdown。
 BaseAdapter 每次 `guide()` 讀 UTF-8 檔案，回 `AdapterGuide(markdown, resource_dir)`。
@@ -447,7 +447,7 @@ GUI 的 maximum search radius 預設為 `100.0`（MHz 軸時單位為 us）；�
 Open／Reset 從固定 capture 產生可覆寫的 direct 初值，既有 Form 不隨來源變動重填。
 初值不寫回校準。Notebook 歷史常數不是相容契約。
 單一實驗的政策留在 `form.py`；多個 Form 共用的 T1／Rabi 政策由
-[`_support/measure/`](_support/measure/README.md) 的具名 helper 擁有。
+[`support/measure/`](support/measure/README.md) 的具名 helper 擁有。
 Form 明確選擇倍率或場景並組結構，不把校準政策放進 generic framework。
 
 ### T1 與等待
@@ -563,7 +563,7 @@ JPA 表單從 `$jpa.rf_source` 與 `$jpa.flux_source` 取得 `jpa_rf_dev` 與
 
 四個 qubit SNR adapter（`freq` / `flux` / `power` / `auto_optimize`）的
 `relax_delay` 初值為 `1*T1`，不是 Notebook 固定常數。Form 透過
-`_support/measure/ctx_helpers.py` 的 `t1_initial_time`，從 Open／Reset 的固定
+`support/measure/ctx_helpers.py` 的 `t1_initial_time`，從 Open／Reset 的固定
 capture 取得 `$qubit.t1`。有效 T1 是非 bool 的有限正實數。T1 leaf 缺失／null
 或沒有 capture 時，使用 `30 us` 公允時間尺度，等待初值為 `30 us`。
 已存但無效的 T1 讓等待欄位留空，不回落公允值。Alias、path、namespace 或來源

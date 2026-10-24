@@ -100,8 +100,15 @@ def test_load_retains_history_without_foreign_analysis_fallback(
 
     adapter.restore.side_effect = restore_and_rebind
     service, _emit, _writeback = _service(state)
-    service.load_result(tab_id, native_path)
+    outcome = service.load_result(tab_id, native_path)
 
+    expected_issue = (
+        "No active context is available"
+        if context_free
+        else "Historical entry differs from the opened entry"
+    )
+    assert outcome.analysis_source_issue == expected_issue
+    assert tab.run.analysis_source_issue == expected_issue
     assert tab.run.result is loaded
     assert tab.run.parameters is None
     assert tab.run.storage is None

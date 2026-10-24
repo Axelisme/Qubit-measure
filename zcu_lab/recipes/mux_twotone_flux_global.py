@@ -16,7 +16,7 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     RecipeNeedsParameters,
 )
 
-from zcu_lab.v2._support.measure.mux_flux_adapter import MuxFluxPickSummary
+from zcu_lab.v2.support.measure.mux_flux_adapter import MuxFluxPickSummary
 
 from .mux_flux_helpers import (
     MuxFluxReport,

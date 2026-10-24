@@ -45,9 +45,7 @@ def historical_metadata() -> RunMetadata:
         completion="complete",
         snapshot=RunSnapshot(
             entry_id=UUID("00000000-0000-4000-8000-000000000001"),
-            entry_name="historical",
             point="original-point",
-            description="",
             roles={},
         ),
         provenance=SoftwareProvenance(

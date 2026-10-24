@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Self, TypeAlias
+from typing import TYPE_CHECKING, Self
 
 from qick.asm_v2 import QickParam
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
 
-from .base import Module
+from .base import Module, ModuleGroup
 from .control import Repeat
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,6 @@ _COMPRESS_MIN_VALUES = 30
 # recovers the correct value in either arithmetic or logical shift mode.
 _INT32_MAX = (1 << 31) - 1
 _UINT32_MAX = (1 << 32) - 1
-
-SubModule: TypeAlias = Module | list[Module]
 
 
 def _encode_uint32_as_int32(value: int) -> int:
@@ -301,7 +299,8 @@ class ScanWith(Module):
 
         self.repeat_mod = repeat_mod
 
-    def add_content(self, mod: SubModule) -> Self:
+    def add_content(self, mod: ModuleGroup) -> Self:
+        """Append a module or ordered group; skip None entries (no module)."""
         self.repeat_mod.add_content(mod)
         return self
 

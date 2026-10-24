@@ -61,12 +61,11 @@ class Variable:
 
 @dataclass(frozen=True)
 class VariableSchema:
-    """A full-shape declaration for append, or the schema returned by inspect.
+    """The variable schema returned by inspect.
 
     shape lists nonnegative NumPy dimension sizes. axes describes each dimension
     in that order. dtype must be integer, floating or complex. unit is the value
-    unit, or empty for unitless values. fill_value initializes unwritten values
-    and must be representable in dtype. Default NaN requires floating/complex.
+    unit, or empty for unitless values.
     Inspect returns axes with empty values: it does not read coordinate arrays.
     """
 
@@ -74,7 +73,6 @@ class VariableSchema:
     axes: tuple[Axis, ...]
     dtype: np.dtype[np.generic]
     unit: str
-    fill_value: int | float | complex = np.nan
 
 
 @dataclass(frozen=True)

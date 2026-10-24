@@ -162,14 +162,12 @@ class SourceReference(_LedgerModel):
 class AcquiredPayload(_LedgerModel):
     """Acquired run evidence supplied by the acquisition producer.
 
-    run_id identifies the run, tab its display name, tab_id its optional stable
-    ID, experiment the spec tag, point the optional point label, and roles maps
+    run_id identifies the run, experiment the spec tag, point the optional
+    point label, and roles maps
     aliases to scalar names or ordered name lists. Configuration lives with run data.
     """
 
     run_id: StrictStr
-    tab: StrictStr
-    tab_id: StrictStr | None = None
     experiment: StrictStr
     point: StrictStr | None = None
     roles: dict[StrictStr, AliasValue]

@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, FieldMeta, FormNode, Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     captured_mux_participants,

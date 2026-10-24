@@ -558,7 +558,7 @@ def is_scalar_value(value: object) -> bool:
 
 
 def _require_target_name(text: str) -> str:
-    """Validate an apply-destination name (mirrors the tab.writeback_set guard)."""
+    """Validate an apply-destination name before editing the draft."""
     name = text.strip()
     if not name:
         raise ValueError("Apply-as name must not be empty")

@@ -77,7 +77,7 @@ def RefusalAdapter_make_form(ctx: FormContext) -> Form[RefusalCfg]:
     return Form(
         RefusalCfg,
         {
-            "sweep": Range.between(1, 2, expts=3),
+            "sweep": Range(1, 2, expts=3),
             "tones": [{"name": "A", "gain": 0.1}, {"name": "B", "gain": 0.2}],
             "slots": [{"gain": 0.1}],
         },

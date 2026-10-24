@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import mux_readout_seed_metadata
+from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
 from .core import ConstructivePhaseCfg
@@ -65,8 +65,8 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
             "x180_f2": Slot("$f2.module.x180", copy=True),
             "readout": readout,
             "drive": drive,
-            "relative_phase": Range.between(None, None, expts=25),
-            "duration": Range.between(None, None, expts=101),
+            "relative_phase": Range(None, None, expts=25),
+            "duration": Range(None, None, expts=101),
             "f1_centers": {
                 "g": Expr("$f1.ext.readout_cal.g_center"),
                 "e": Expr("$f1.ext.readout_cal.e_center"),

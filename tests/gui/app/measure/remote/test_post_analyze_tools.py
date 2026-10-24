@@ -1,15 +1,12 @@
 """Post-analysis dispatch handlers (Phase 4 dual-end RPC).
 
-Drives the tab.post_analyze / tab.get_post_analyze_params /
-tab.get_post_analyze_result handlers against a mock Controller, mirroring the
-analyze trio. The success path spies start_post_analyze without a full
+Drives tab.post_analyze and tab.get_post_analyze_result against a mock Controller. The success path spies start_post_analyze without a full
 run+analyze pipeline; the gate path asserts the same fast-fail the carrier layer
 enforces (no primary analyze result -> precondition_failed).
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -103,14 +100,8 @@ def test_start_invalid_update_field_rejected():
 
 
 # ---------------------------------------------------------------------------
-# tab.get_post_analyze_params
+# Post-analysis result
 # ---------------------------------------------------------------------------
-
-
-def test_get_params_serializes_dataclass():
-    ctrl = _ctrl()
-    res = _dispatch(ctrl, "tab.get_post_analyze_params", {"tab_id": "t"})
-    assert res["post_analyze_params"] == asdict(EmptyParams())
 
 
 # ---------------------------------------------------------------------------

@@ -3,8 +3,8 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.singleshot.mist.power_freq.core import FreqPowerCfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[FreqPowerCfg]:
@@ -24,7 +24,7 @@ def make_form(ctx: FormContext) -> Form[FreqPowerCfg]:
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=51),
-            "gain": Range.between(0.0, 1.0, expts=51),
+            "gain": Range(0.0, 1.0, expts=51),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),
             "radius": Expr("$qubit.ext.readout_cal.radius"),

@@ -2,7 +2,7 @@
 
 from zcu_tools.experiment.scope import Scope
 
-from zcu_lab.v2._support.device import check_flux_unit
+from zcu_lab.v2.support.device import check_flux_unit
 
 
 async def set_flux(scope: Scope, name: str, value: float, *, unit: str) -> None:

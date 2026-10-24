@@ -14,7 +14,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyResult
 

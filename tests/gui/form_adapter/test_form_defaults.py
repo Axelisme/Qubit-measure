@@ -3,7 +3,6 @@
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import (
-    AliasName,
     BathResetSpec,
     ConfigBase,
     ConstWaveformCfg,
@@ -18,7 +17,6 @@ from zcu_tools.cfg_model import (
     TemplateDef,
     WaveformSpec,
 )
-from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.gui.form import (
     FormEnv,
     FormErrors,
@@ -289,7 +287,7 @@ def test_seed_metadata_returns_new_form_and_later_call_replaces_metadata() -> No
     )
     second = first.with_seed_metadata(
         {
-            ("probe", "module", "gain"): FieldMeta(calibration="measured"),
+            ("probe", "module", "gain"): FieldMeta(description="Replacement hint"),
         }
     )
     assert first is not original and second is not first
@@ -303,7 +301,7 @@ def test_seed_metadata_returns_new_form_and_later_call_replaces_metadata() -> No
     assert original_rows[("probe", "module", "gain")].uncalibrated is None
     assert first_rows[("probe", "module", "gain")].uncalibrated is True
     assert first_rows[("probe", "module", "freq")].uncalibrated is True
-    assert second_rows[("probe", "module", "gain")].uncalibrated is False
+    assert second_rows[("probe", "module", "gain")].uncalibrated is None
     assert second_rows[("probe", "module", "freq")].uncalibrated is None
     assert original.default_input(env).data == original_input.data
 
@@ -648,9 +646,9 @@ def test_template_binding_error_names_adapter_and_field_path(fault: str) -> None
     node = Template("missing") if fault == "unknown" else Template("pulse")
     catalog = templates()
     if fault == "family":
-        from zcu_tools.cfg_model import NoneResetCfg
+        from zcu_tools.cfg_model import PulseResetSpec
 
-        catalog["pulse"] = TemplateDef(NoneResetCfg, "Wrong family", {})
+        catalog["pulse"] = TemplateDef(PulseResetSpec, "Wrong family", {})
     elif fault == "tag":
         catalog["pulse"] = TemplateDef(
             PulseSpec, "Bad tag", {"waveform.style": "unknown"}
@@ -688,73 +686,6 @@ def test_unsupported_template_seed_names_template_and_seed_path(nested: bool) ->
         form.bind_templates({"noisy": definition}, adapter="synthetic")
 
     assert path in str(caught.value), caught.value
-
-
-class DefaultedDeviceNames(ConfigBase):
-    """Device aliases retain their own static defaults, including nonempty ones."""
-
-    device: str = ""
-    nullable_device: str | None = "standby"
-
-
-@pytest.mark.parametrize("binding", [None, "", "rf_source"])
-def test_alias_static_default_is_valid_and_selectable(binding: str | None) -> None:
-    captured = environment()
-    parameters = captured.parameters
-    assert parameters is not None
-    env = FormEnv(
-        parameters=(
-            None
-            if binding is None
-            else parameters.bind_aliases((AliasRow("rf_dev", binding),), {})
-        ),
-        devices={
-            name: BaseDeviceInfo(address=name, type="synthetic")
-            for name in (
-                () if binding is None else ("rf_source", "other_source", "standby")
-            )
-        },
-    )
-    form = Form(
-        DefaultedDeviceNames,
-        {"device": AliasName("rf_dev"), "nullable_device": AliasName("rf_dev")},
-    )
-    state = FormState(form.default_input(env))
-    assert state.input.data == (
-        {"device": binding, "nullable_device": binding} if binding else {}
-    )
-    result = state.result(env)
-    assert not isinstance(result, FormErrors), result
-    expected = (
-        DefaultedDeviceNames(device=binding, nullable_device=binding)
-        if binding
-        else DefaultedDeviceNames()
-    )
-    assert form.to_cfg(result, env) == expected
-
-    for name, default in (("device", ""), ("nullable_device", "standby")):
-        field = state.describe((name,), env).target
-        assert field is not None and field.options is not None
-        values = [option.value for option in field.options]
-        assert default in values, "The core static default must be selectable"
-        assert values.count(default) == 1
-        assert all(device in values for device in env.devices)
-        assert (None in values) == (name == "nullable_device")
-        assert tuple(values) == form.model.choices(env)[(name,)]
-        for value in values:
-            state.write({(name,): value}, env)
-            result = state.result(env)
-            if isinstance(result, FormErrors):
-                pytest.fail(str(result.messages))
-            cfg = form.to_cfg(result, env)
-            if isinstance(cfg, FormErrors):
-                pytest.fail(str(cfg.messages))
-            assert getattr(cfg, name) == value
-        state.write({(name,): "unknown_device"}, env)
-        rejected = state.result(env)
-        assert isinstance(rejected, FormErrors)
-        assert rejected.messages == {(name,): "Value is not among current choices"}
-        state.write({(name,): default}, env)
 
 
 def nested_copy_env(*, inline: bool = False) -> FormEnv:

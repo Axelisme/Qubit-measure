@@ -333,7 +333,6 @@ def test_all_event_kinds_round_trip_in_append_order(
         origin="gui",
         payload=AcquiredPayload(
             run_id="run-1",
-            tab="Spectroscopy",
             experiment="test/spectroscopy",
             roles={"qubit": "Q1"},
             point="a",

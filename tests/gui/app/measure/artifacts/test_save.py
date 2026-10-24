@@ -350,8 +350,11 @@ def test_save_commands_reject_before_annotation_or_output_mutation(
         session.state.clear_tab_results("tab")
     before = session.state.get_artifact_snapshots("tab")
     command = session.control.save_artifacts if batch else session.control.save_data
-    with pytest.raises(FailedPreconditionError, match="busy|No run result"):
+    with pytest.raises(FailedPreconditionError, match="busy|No run result") as caught:
         command("tab", comment="rejected note", origin=GUI_ORIGIN)
+    if rejection == "no_run_result":
+        assert str(caught.value) == "No run result available to save."
+        assert caught.value.reason_code == "no_run_result"
     assert session.state.get_tab("tab").save.comment == "retained note"
     assert session.state.get_artifact_snapshots("tab") == before
     assert session.state.is_tab_busy("tab") is (rejection == "busy")
@@ -359,6 +362,21 @@ def test_save_commands_reject_before_annotation_or_output_mutation(
     assert session.entry.ledger.events() == ()
     assert not (session.entry.database_path / "runs").exists()
     assert not (session.entry.database_path / "Labber").exists()
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_save_unknown_tab_preserves_precondition_error(
+    native_session: NativeSaveSession, batch: bool
+) -> None:
+    command = (
+        native_session.control.save_artifacts
+        if batch
+        else native_session.control.save_data
+    )
+    with pytest.raises(FailedPreconditionError) as caught:
+        command("missing", origin=GUI_ORIGIN)
+    assert str(caught.value) == "Unknown tab: 'missing'"
+    assert caught.value.reason_code == "unknown_tab"
 
 
 def test_saved_analysis_selection_resaves_without_writing_other_sections(
@@ -432,13 +450,6 @@ def test_first_analysis_save_all_failed_preserves_run_and_post_sections(
     assert session.state.get_tab("tab").run.confirmed_run_id == report.run_id
     assert session.artifact_completions[-1].report == report
     assert session.artifact_completions[-1].error
-
-
-def test_save_control_has_tab_observes_existing_and_missing_resources(
-    native_session: NativeSaveSession,
-) -> None:
-    assert native_session.control.has_tab("tab") is True
-    assert native_session.control.has_tab("missing") is False
 
 
 def test_save_uses_tab_storage_after_live_entry_switch(
@@ -816,7 +827,6 @@ def test_tab_snapshot_reads_committed_sections_without_payload_or_path_planning(
         writeback=MagicMock(),
         cfg_resources=MagicMock(),
         form_sources=MagicMock(),
-        captured_parameters=MagicMock(),
     )
     actual = tab_service.get_snapshot("tab")
     assert actual.artifacts == expected

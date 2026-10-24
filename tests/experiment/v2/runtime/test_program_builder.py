@@ -56,6 +56,17 @@ def test_builder_passes_controls_and_isolates_modules_sweeps_and_schedule_cfg(
     assert sweep.start == 1.0
 
 
+def test_program_builder_skips_absent_modules_and_preserves_order() -> None:
+    with Schedule(_cfg(), SignalBuffer(1), scope=Scope("run")) as sched:
+        program = (
+            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
+            .add(None, FakeModule("drive"), [None, FakeModule("readout"), None])
+            .add_reset("reset", None)
+            .build()
+        )
+        assert [module.name for module in program.modules] == ["drive", "readout"]
+
+
 @pytest.mark.parametrize("decimated", [False, True])
 def test_run_program_passes_explicit_rounds_to_producer_and_retry_progress(decimated):
     calls = []

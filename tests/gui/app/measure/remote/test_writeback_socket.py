@@ -266,92 +266,6 @@ def test_module_preview_proposes_the_current_shape(module_fixture):
         sock.close()
 
 
-def test_module_edits_by_path_reply_with_form_and_write_the_edited_spec(
-    module_fixture,
-):
-    sock = open_client(module_fixture.service.port)
-    try:
-        tab = _analyzed_module_tab(module_fixture, sock)
-        params = {"tab_id": tab, "subtab_id": "analysis"}
-        edited = call(
-            sock,
-            "tab.writeback_set",
-            {**params, "id": "ml-1", "edits": [{"path": ["freq"], "value": 5100.0}]},
-        )
-        assert edited["ok"], edited
-        reply = edited["result"]
-        assert reply["item"]["id"] == "ml-1"
-        assert reply["errors"] == []
-        assert reply["input"]["freq"] == 5100.0
-        assert reply["input"]["waveform"] == {
-            "kind": "ref",
-            "name": MODULE_PROPOSAL_WAVEFORM,
-        }
-        assert {"path": ["freq"], "value": 5100.0} in reply["values"]
-        assert set(reply) == {"item", "input", "values", "errors"}
-        written = call(
-            sock,
-            "tab.writeback_write",
-            {
-                **params,
-                "write": [
-                    {
-                        "id": "ml-1",
-                        "edits": [{"path": ["post_delay"], "value": 0.05}],
-                    }
-                ],
-            },
-        )
-        assert written["ok"], written
-        expected = _stored_pulse(gain=0.3, freq=5100.0, post_delay=0.05)
-        assert written["result"]["written"] == [
-            {
-                "id": "ml-1",
-                "kind": "module",
-                "target": MODULE_PROPOSAL_TARGET,
-                "before": _stored_pulse().model_dump(mode="json"),
-                "after": expected.model_dump(mode="json"),
-            }
-        ]
-        library = module_fixture.ctrl.read_context().library
-        assert library.module_spec(MODULE_PROPOSAL_TARGET) == expected
-    finally:
-        sock.close()
-
-
-def test_invalid_module_edit_rejects_write_with_field_path(module_fixture):
-    sock = open_client(module_fixture.service.port)
-    try:
-        tab = _analyzed_module_tab(module_fixture, sock)
-        params = {"tab_id": tab, "subtab_id": "analysis"}
-        edited = call(
-            sock,
-            "tab.writeback_set",
-            {**params, "id": "ml-1", "edits": [{"path": ["gain"], "value": "bad"}]},
-        )
-        assert edited["ok"], edited
-        assert [error["path"] for error in edited["result"]["errors"]] == [["gain"]]
-        before = module_fixture.ctrl.read_context().library.document()
-        rejected = call(
-            sock, "tab.writeback_write", {**params, "write": [{"id": "ml-1"}]}
-        )
-        assert rejected["ok"] is False
-        assert rejected["error"]["code"] == "invalid_params"
-        assert [error["path"] for error in rejected["error"]["data"]["errors"]] == [
-            ["gain"]
-        ]
-        assert module_fixture.ctrl.read_context().library.document() == before
-        unknown = call(
-            sock,
-            "tab.writeback_set",
-            {**params, "id": "ml-1", "edits": [{"path": ["unknown"], "value": 1}]},
-        )
-        assert unknown["ok"] is False
-        assert unknown["error"]["code"] == "invalid_params"
-    finally:
-        sock.close()
-
-
 def test_apply_writeback_tool_writes_module_proposal_by_id(
     module_fixture, tmp_path, request
 ):
@@ -410,9 +324,11 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         assert [
             (item["current"], item["proposed"]) for item in before["result"]["items"]
         ] == [(1.0, 11.0), (2.0, 22.0)]
-        applied = call(sock, "tab.writeback_apply", {**params, "ids": ["param-1"]})
+        applied = call(
+            sock, "tab.writeback_write", {**params, "write": [{"id": "param-1"}]}
+        )
         assert applied["ok"]
-        assert applied["result"]["applied_ids"] == ["param-1"]
+        assert [item["id"] for item in applied["result"]["written"]] == ["param-1"]
         assert (
             context.read_context().lookup("general.ext.a").value == 11.0
             and context.read_context().lookup("general.ext.b").value == 2.0

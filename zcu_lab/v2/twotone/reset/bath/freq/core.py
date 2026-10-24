@@ -17,7 +17,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
-from zcu_lab.v2._support import live_heatmap
+from zcu_lab.v2.support import live_heatmap
 
 
 def _default_phase_values() -> NDArray[np.float64]:

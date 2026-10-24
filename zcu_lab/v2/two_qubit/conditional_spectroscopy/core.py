@@ -19,8 +19,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.device import set_flux
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles, collect_joint_shots

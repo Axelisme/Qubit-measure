@@ -340,7 +340,7 @@ class WritebackAnswer(Answer):
     accepted distinguishes acceptance from skip. items selects unchanged
     candidates from that question; skip requires an empty tuple. The host
     rejects unknown/modified/duplicate choices before resuming the author.
-    Script cancellation returns None, never a fabricated decision model.
+    Script cancellation raises ScriptCancelled, never a fabricated decision model.
     """
 
     accepted: bool
@@ -351,8 +351,8 @@ class WritebackQuestion(Question[WritebackAnswer]):
     """Ask whether to accept selected existing candidates from proposal.
 
     proposal contains the destinations, values and recorded quality to show.
-    Construct with WritebackQuestion(proposal=proposal). Authors may filter
-    proposal.items before asking. The answer tool returns WritebackAnswer.
+    RecipeTab.ask_writeback captures the proposal and constructs this question.
+    The answer tool returns WritebackAnswer with the selected candidates.
     Neither the question nor its answer performs a write.
     """
 
@@ -433,36 +433,12 @@ class RecipeOutcome[R: BaseModel]:
     runs: tuple[RecipeRun, ...]
 
 
-class RecipeContext:
-    """Read-only registered session sources, independent of tab Form captures."""
-
-    def __init__(self, runtime: RecipeRuntime) -> None:
-        """Bind the execution runtime; authors obtain this from session.context."""
-        self._runtime = runtime
-
-    def read(self, source_path: str, *, missing_ok: bool = False) -> YamlValue:
-        """Read one registered value.read key, such as device.flux.value.
-
-        With missing_ok=True, an unregistered source returns None. Otherwise
-        unregistered sources raise GuiRpcError. Other source/transport errors
-        always propagate. No tab needs to be open. This reads the session-global
-        source, not a tab's fixed Reset capture. It never refreshes the separate
-        sources observed by tab.read.
-        """
-        return self._runtime.read_source(source_path, missing_ok=missing_ok)
-
-
 class RecipeSession:
     """One execution's GUI binding; authors receive this from the host."""
 
     def __init__(self, runtime: RecipeRuntime) -> None:
         """Bind a runtime owning the connection, async host and acquisition history."""
         self._runtime = runtime
-
-    @property
-    def context(self) -> RecipeContext:
-        """Return a read-only entry/session source reader."""
-        return RecipeContext(self._runtime)
 
     def open_tab(
         self,
@@ -497,14 +473,6 @@ class RecipeSession:
         This never polls hardware or refreshes the device cache.
         """
         return self._runtime.device_unit(name)
-
-    async def ask[A: Answer](self, question: Question[A]) -> A:
-        """Wait for a validated answer; raise ScriptCancelled on script cancel.
-
-        Only asked evidence is exposed. Invalid answers leave the request pending.
-        Asking does not write, supply a timeout, or synthesize acceptance.
-        """
-        return await self._runtime.host.ask(question)
 
 
 class RecipeTab:

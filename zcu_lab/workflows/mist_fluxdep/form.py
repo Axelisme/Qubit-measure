@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
-from zcu_tools.cfg_model import ModuleCfgFactory
+from zcu_tools.cfg_model import ModuleCfgFactory, ModuleSpec
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.gui.form import (
     Display,
@@ -18,12 +18,11 @@ from zcu_tools.gui.form import (
     Option,
     field_error,
 )
-from zcu_tools.gui.form_adapter import SweepInput
+from zcu_tools.gui.form_adapter import ModuleInput, ModuleInputField, SweepInput
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
-    NoneResetCfg,
     PulseResetCfg,
     TwoPulseResetCfg,
 )
@@ -31,19 +30,26 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_lab.workflows.common.calibration_form import CalibrationTunablesForm
 from zcu_lab.workflows.common.calibration_modules import (
     DRIVE_MODULE_FIELD,
-    MIST_MODULE_FIELD,
     READOUT_MODULE_FIELD,
-    RESET_MODULE_FIELD,
     DriveModuleInput,
-    MistModuleInput,
     ReadoutModuleInput,
-    ResetModuleInput,
     calibration_choices,
     calibration_defaults,
     expand_fluxes,
     resolve_calibration_modules,
 )
 from zcu_lab.workflows.mist_fluxdep.workflow import MISTPlan, MISTTunables
+
+MIST_MODULE_FIELD = ModuleInputField(ModuleSpec)
+RESET_MODULE_FIELD = ModuleInputField(ModuleSpec, nullable=True)
+
+# Runtime schemas come from field.annotation; static aliases view nominal values.
+if TYPE_CHECKING:
+    type MistModuleInput = ModuleInput
+    type ResetModuleInput = ModuleInput | None
+else:
+    MistModuleInput = MIST_MODULE_FIELD.annotation
+    ResetModuleInput = RESET_MODULE_FIELD.annotation
 
 
 class MISTPlanForm(FormModel):
@@ -167,7 +173,7 @@ class MISTPlanForm(FormModel):
                 native_reset = NativeModuleCfgFactory.from_core(core, context=context)
                 if not isinstance(
                     native_reset,
-                    (NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg),
+                    (PulseResetCfg, TwoPulseResetCfg, BathResetCfg),
                 ):
                     raise ValueError("MIST reset selection must be a native reset")
                 reset = native_reset

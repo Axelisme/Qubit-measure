@@ -106,7 +106,7 @@ def ftf_window(qapp, tmp_path):
     sock = None
     env = ftf(tmp_path / "ftf.yaml", workers=1, warmup=False)
     try:
-        ctrl.install_soc(env.soc, env.soccfg)
+        ctrl.session_services.soc_connection.install_soc(env.soc, env.soccfg)
         sock = open_client(remote.start())
         yield ctrl, sock
     finally:

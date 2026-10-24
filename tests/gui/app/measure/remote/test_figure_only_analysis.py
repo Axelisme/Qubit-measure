@@ -77,7 +77,9 @@ def figures_rpc(tmp_path, qapp, post):
         )
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
-        controller.install_soc(MagicMock(), make_mock_soccfg())
+        controller.session_services.soc_connection.install_soc(
+            MagicMock(), make_mock_soccfg()
+        )
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), ImmediateScheduler()
         )

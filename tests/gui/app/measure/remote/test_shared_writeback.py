@@ -59,9 +59,6 @@ class WritebackHarness:
     def has_tab(self, tab_id: str) -> bool:
         return tab_id == "tab"
 
-    def get_context_version(self) -> int:
-        return 1
-
     def get_session_env(self) -> SessionEnv:
         return self.context.get_session_env()
 
@@ -87,24 +84,6 @@ class WritebackHarness:
         self, tab_id: str, pane: str, *, session_id: str | None = None
     ):
         return self.service.preview_values(self.draft, session_id=session_id)
-
-    def set_writeback_item_for_pane(
-        self,
-        tab_id: str,
-        pane: str,
-        session_id: str,
-        *,
-        selected: bool | None = None,
-        target_name: str | None = None,
-    ):
-        return self.service.edit_draft(
-            self.draft, session_id, selected=selected, target_name=target_name
-        )
-
-    def apply_writeback_for_pane(
-        self, tab_id: str, pane: str, *, item_ids: tuple[str, ...] | None = None
-    ):
-        return self.service.apply_draft(self.draft, item_ids=item_ids)
 
     def write_writeback_for_pane(
         self, tab_id: str, pane: str, changes: tuple[WritebackEdit, ...]
@@ -267,17 +246,12 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
     ]
     expected_preview = [row | {"note": None} for row in expected_preview]
     assert preview["items"] == expected_preview
-    assert preview["unavailable_reasons"] == []
-    dispatch_handler(
-        harness, "tab.writeback_set", params | {"id": "param-1", "selected": False}
+    service.edit_draft(draft, "param-1", selected=False)
+    receipt = dispatch_handler(
+        harness, "tab.writeback_write", params | {"write": [{"id": "sample-1"}]}
     )
-    receipt = dispatch_handler(harness, "tab.writeback_apply", params)
-    assert receipt["applied_ids"] == ["sample-1"]
-    assert receipt["written"] == {
-        "parameter": [],
-        "ml_modules": [],
-        "samples": ["Q1"],
-    }
+    written = TypeAdapter(list[dict[str, object]]).validate_python(receipt["written"])
+    assert [item["id"] for item in written] == ["sample-1"]
     assert entry.use_point("a").description is None
     row = entry.samples("Q1").read().iloc[0].to_dict()
     event = entry.ledger.events()[-1]
@@ -296,52 +270,6 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
         expected_preview[0] | {"selected": False},
         expected_preview[1] | {"current": row},
     ]
-
-
-@pytest.mark.parametrize(
-    "bound,snapshot,reason",
-    [
-        (False, {"bias_at_run": {"value": 1.0, "value_unit": "V"}}, "$flux_dev"),
-        (True, {}, "bias_at_run"),
-        (True, {"bias_at_run": {"value_unit": "V"}}, "value"),
-        (True, {"bias_at_run": {"value": 1.0}}, "value_unit"),
-    ],
-)
-def test_sample_omission_reason_is_projected_without_a_sample(
-    tmp_path: Path, bound, snapshot, reason
-) -> None:
-    _entry, context = context_at(tmp_path)
-    if bound:
-        context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
-    service = WritebackService(
-        ContextControlFacet(context=context), arb_names=lambda: ()
-    )
-    draft = service.create_draft(
-        [
-            proposals.SampleWriteback(
-                "Q1",
-                "sample",
-                proposed_value={"freq_mhz": 1250.0},
-                coordinate_device="$flux_dev",
-            )
-        ],
-        parameters=context.read_context(),
-        experiment_name="test/freq",
-        run_id="run-fixed",
-        device_snapshot=snapshot,
-    )
-    assert draft.items == ()
-    preview = dispatch_handler(
-        WritebackHarness(context, service, draft),
-        "tab.writeback_preview",
-        {"tab_id": "tab", "subtab_id": "analysis"},
-    )
-    assert preview["items"] == []
-    reasons = TypeAdapter(list[str]).validate_python(
-        preview["unavailable_reasons"], strict=True
-    )
-    assert len(reasons) == 1
-    assert reason in reasons[0]
 
 
 def test_preview_displays_adapter_note_and_current_manual_selection(
@@ -365,12 +293,12 @@ def test_preview_displays_adapter_note_and_current_manual_selection(
     rows = TypeAdapter(list[dict[str, object]]).validate_python(preview["items"])
     assert rows[0]["selected"] is False
     assert rows[0]["note"] == "Fit needs manual review"
-    dispatch_handler(
-        harness, "tab.writeback_set", params | {"id": "param-1", "selected": True}
-    )
+    service.edit_draft(draft, "param-1", selected=True)
     selected = dispatch_handler(harness, "tab.writeback_preview", params)
     assert selected["items"] == [rows[0] | {"selected": True}]
-    dispatch_handler(harness, "tab.writeback_apply", params)
+    dispatch_handler(
+        harness, "tab.writeback_write", params | {"write": [{"id": "param-1"}]}
+    )
     applied = dispatch_handler(harness, "tab.writeback_preview", params)
     assert applied["items"] == [rows[0] | {"selected": True, "current": 5.0}]
     assert not original.selected
@@ -398,7 +326,13 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
     before_description = entry.use_point("a").description
     with pytest.raises(RemoteError) as caught:
         dispatch_handler(
-            harness, "tab.writeback_apply", {"tab_id": "tab", "subtab_id": "analysis"}
+            harness,
+            "tab.writeback_write",
+            {
+                "tab_id": "tab",
+                "subtab_id": "analysis",
+                "write": [{"id": f"param-{i}"} for i in (1, 2, 3)],
+            },
         )
     error = caught.value
     assert (error.code, error.message, error.reason, error.data) == (

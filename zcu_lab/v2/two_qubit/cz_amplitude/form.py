@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
@@ -72,6 +72,6 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
                 "g": Expr("$f2.ext.readout_cal.g_center"),
                 "e": Expr("$f2.ext.readout_cal.e_center"),
             },
-            "scales": Range.between(None, None, expts=101),
+            "scales": Range(None, None, expts=101),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

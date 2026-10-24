@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, override
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, overload
 
 from pydantic import BeforeValidator, Field
 from qick.asm_v2 import QickParam
@@ -21,17 +21,6 @@ PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
 class AbsResetCfg(AbsModuleCfg):
     @abstractmethod
     def build(self, name: str) -> AbsReset: ...
-
-
-class NoneResetCfg(AbsResetCfg):
-    type: Literal["reset/none"] = "reset/none"
-
-    def build(self, name: str) -> NoneReset:
-        return NoneReset(name, self)
-
-    @override
-    def set_param(self, name: str, value: float | QickParam) -> None:
-        raise ValueError("NoneReset does not support set_param")
 
 
 class PulseResetCfg(AbsResetCfg):
@@ -90,7 +79,7 @@ class BathResetCfg(AbsResetCfg):
 
 
 ResetCfg: TypeAlias = Annotated[
-    NoneResetCfg | PulseResetCfg | TwoPulseResetCfg | BathResetCfg,
+    PulseResetCfg | TwoPulseResetCfg | BathResetCfg,
     Field(discriminator="type"),
 ]
 
@@ -107,37 +96,19 @@ class Reset:
     """Dispatch cfg to its reset module; zcu_lab uses ``Reset.Cfg`` fields.
 
     Calling Reset(name, cfg) returns cfg.build(name), not a Reset instance.
-    name labels the module. None selects NoneReset with an automatic description.
+    name labels the module. None means no reset and returns None.
     """
 
     Cfg: TypeAlias = ResetCfg
 
-    def __new__(cls, name: str, cfg: AbsResetCfg | None) -> AbsReset:
-        if cfg is None:
-            cfg = NoneResetCfg(desc="Auto derived from None")
-        return cfg.build(name)
+    @overload
+    def __new__(cls, name: str, cfg: AbsResetCfg) -> AbsReset: ...
 
+    @overload
+    def __new__(cls, name: str, cfg: None) -> None: ...
 
-class NoneReset(AbsReset):
-    """Build this reset variant with settings declared as ``NoneReset.Cfg``."""
-
-    Cfg: TypeAlias = NoneResetCfg
-
-    def __init__(self, name: str, cfg: NoneResetCfg) -> None:
-        self.name = name
-        self.cfg = deepcopy(cfg)
-
-    def init(self, prog: ModularProgramV2) -> None: ...
-
-    @override
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
-        return 0.0
-
-    @override
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        return t
+    def __new__(cls, name: str, cfg: AbsResetCfg | None) -> AbsReset | None:
+        return None if cfg is None else cfg.build(name)
 
 
 class PulseReset(AbsReset):

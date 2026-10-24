@@ -28,7 +28,7 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickResult,
 )
 
-from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
 from .form import make_form

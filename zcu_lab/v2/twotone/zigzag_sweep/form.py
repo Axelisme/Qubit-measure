@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 from .core import ZigZagScanCfg
 
@@ -28,7 +28,7 @@ def make_gain_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
             "repeat_on": "X180_pulse",
             "reps": 1000,
             "rounds": 10,
-            "gain": Range.between(
+            "gain": Range(
                 "0.8 * $qubit.module.x180.gain",
                 "1.2 * $qubit.module.x180.gain",
                 expts=101,

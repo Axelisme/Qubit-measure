@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
-from ._script_recipe_support import ConfirmQuestion, Fit, Inputs, Report, SyntheticGui
+from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui
 from ._support import make_client
 
 
@@ -19,10 +19,12 @@ def test_terminal_recipe_reply_keeps_queryable_execution_id(
         if terminal == "failed":
             raise ValueError("synthetic failure")
         if terminal == "cancelled":
-            await session.ask(ConfirmQuestion(evidence="cancel here"))
+            tab = session.open_tab("synthetic")
+            await tab.run()
+            await tab.ask_writeback()
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, recipes=(synthetic,))
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         reply = client.call("synthetic", {"count": "12"})
         if terminal == "cancelled":
@@ -34,7 +36,7 @@ def test_terminal_recipe_reply_keeps_queryable_execution_id(
         assert reply.data["report"] == (
             {"count": 12} if terminal == "completed" else None
         )
-        assert reply.data["runs"] == []
+        assert len(reply.data["runs"]) == (1 if terminal == "cancelled" else 0)
         if terminal == "failed":
             assert reply.data["failure"] == {
                 "phase": "operation",
@@ -63,10 +65,12 @@ def test_global_status_discovers_latest_terminal_recipes_and_retains_older_ids(
     @recipe("synthetic", "Complete a recipe or ask a question")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
         if inputs.count == 0:
-            await session.ask(ConfirmQuestion(evidence="still active"))
+            tab = session.open_tab("synthetic")
+            await tab.run()
+            await tab.ask_writeback()
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, recipes=(synthetic,))
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     client.transport.replies.update(
         {
             "state.has_project": {"ok": True, "result": {"value": False}},
@@ -74,7 +78,6 @@ def test_global_status_discovers_latest_terminal_recipes_and_retains_older_ids(
             "state.has_soc": {"ok": True, "result": {"value": False}},
             "context.active": {"ok": True, "result": {"label": None}},
             "device.list": {"ok": True, "result": {"devices": []}},
-            "tab.snapshot": {"ok": True, "result": {"tabs": []}},
             "operation.active": {"ok": True, "result": {"operations": []}},
         }
     )

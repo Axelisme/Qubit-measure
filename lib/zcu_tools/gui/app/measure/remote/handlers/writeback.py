@@ -23,7 +23,7 @@ from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
-from ..form_observation import entry_invalid_to_remote, form_writes, observe_entry
+from ..form_observation import entry_invalid_to_remote, form_writes
 from ._common import follow_tab
 from ._wire_values import coerce_wire_value, context_wire_value
 
@@ -137,7 +137,6 @@ def h_tab_writeback_preview(
         raise entry_invalid_to_remote(exc) from exc
     return {
         "has_draft": pane.has_writeback_draft,
-        "unavailable_reasons": list(pane.unavailable_reasons),
         "items": [
             {
                 **_writeback_item_wire(item),
@@ -151,84 +150,6 @@ def h_tab_writeback_preview(
         ],
         "destination_context": _destination_context(adapter),
     }
-
-
-def h_tab_writeback_set(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Edit a pane's persistent writeback item by id — the single writeback editing
-    surface (ADR-0008). Requires (tab_id, subtab_id).
-
-    Module edits are one Form write batch of {path: [field, ...], value}; the
-    reply adds the item's Form observation (input, values, errors)."""
-    tab_id = str(params["tab_id"])
-    subtab_id = str(params["subtab_id"])
-    if subtab_id not in _VALID_WRITEBACK_SUBTABS:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"invalid subtab_id {subtab_id!r}; expected one of {sorted(_VALID_WRITEBACK_SUBTABS)}",
-        )
-    if not adapter.writeback_control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    session_id = str(params["id"])
-    # The wire collapses "omitted optional" and "explicit JSON null" to the same
-    # thing (a null-valued key), so a null here means "not provided" — never a
-    # value to write. ``selected``/``target_name`` can never legitimately be null.
-    # ``proposed_value`` is only forwarded when present *and* non-null; a parameter
-    # item that genuinely needs a null value is out of scope for this surface.
-    changes: dict[str, object] = {}
-    if params.get("selected") is not None:
-        changes["selected"] = bool(params["selected"])
-    if params.get("target_name") is not None:
-        name = params["target_name"]
-        if not isinstance(name, str) or not name:
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "target_name must be a non-empty string"
-            )
-        changes["target_name"] = name
-    has_proposed = params.get("proposed_value") is not None
-    has_edits = params.get("edits") is not None
-    if has_proposed and has_edits:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            "'proposed_value' (parameter) and 'edits' (module) are mutually exclusive",
-        )
-    if has_proposed:
-        # Structured tags (e.g. {"__complex__": [re, im]}) coerce back to their
-        # Python type so the applied md value matches what preview serialized.
-        changes["proposed_value"] = coerce_wire_value(params["proposed_value"])
-    if has_edits:
-        changes["edits"] = form_writes(params["edits"])
-    pane = "analysis" if subtab_id == "analysis" else "post_analysis"
-    adapter.writeback_control.set_writeback_item_for_pane(
-        tab_id, pane, session_id, **changes
-    )
-    # Echo the edited item so the agent sees the post-edit state in one round-trip.
-    item = _find_writeback_item_for_pane(adapter, tab_id, pane, session_id)
-    reply: dict[str, object] = {"item": _writeback_item_wire(item)}
-    if has_edits:
-        form = adapter.writeback_control.get_writeback_item_form_for_pane(
-            tab_id, pane, session_id
-        )
-        reply.update(observe_entry(form))
-    return reply
-
-
-def _find_writeback_item_for_pane(
-    adapter: RemoteControlAdapter, tab_id: str, pane: str, session_id: str
-) -> WritebackItem:
-    snap = adapter.tab_control.get_tab_snapshot(tab_id)
-    items: list[WritebackItem] = []
-    if pane == "analysis" and snap.analysis is not None:
-        items = list(snap.analysis.writeback_items)
-    elif pane == "post_analysis" and snap.post_analysis is not None:
-        items = list(snap.post_analysis.writeback_items)
-    for item in items:
-        if item.session_id == session_id:
-            return item
-    raise RemoteError(
-        ErrorCode.INVALID_PARAMS, f"unknown writeback item id: {session_id!r}"
-    )
 
 
 def _batch_change(raw: object) -> WritebackEdit:
@@ -358,46 +279,4 @@ def h_tab_writeback_receipt(
             for row in receipt.completed
         ],
         "error": receipt.error,
-    }
-
-
-def h_tab_writeback_apply(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Apply a pane's persistent draft after rpc_call on tab.writeback_set.
-    Projects destination context at reply time."""
-    tab_id = str(params["tab_id"])
-    subtab_id = str(params["subtab_id"])
-    if subtab_id not in _VALID_WRITEBACK_SUBTABS:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"invalid subtab_id {subtab_id!r}; expected one of {sorted(_VALID_WRITEBACK_SUBTABS)}",
-        )
-    if not adapter.writeback_control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
-    pane = "analysis" if subtab_id == "analysis" else "post_analysis"
-    item_ids = None
-    ids = params.get("ids")
-    if ids is not None:
-        if not isinstance(ids, list) or any(
-            not isinstance(item, str) or not item for item in ids
-        ):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "ids must be a list of nonempty strings"
-            )
-        item_ids = tuple(ids)
-    try:
-        result = adapter.writeback_control.apply_writeback_for_pane(
-            tab_id,
-            pane,
-            item_ids=item_ids,
-        )
-    except LibraryEntryInvalid as exc:
-        raise entry_invalid_to_remote(exc) from exc
-    context_version = adapter.writeback_control.get_context_version()
-    return {
-        "applied_ids": list(result["applied_ids"]),
-        "written": result["written"],
-        "context_version": context_version,
-        "destination_context": _destination_context(adapter),
     }

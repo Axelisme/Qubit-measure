@@ -60,7 +60,7 @@ class SampleAnalysis:
 
 def SampleAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
     del ctx
-    return Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+    return Form(SampleCfg, {"sweep": Range(5.0, 6.0, expts=11)})
 
 
 def SampleAdapter_run[C: ConfigBase](

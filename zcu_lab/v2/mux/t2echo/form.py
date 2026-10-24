@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     captured_mux_participants,
@@ -55,7 +55,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
                 ),
             ),
             "participants": [index for index in participants],
-            "delay": Range.between(0.0, 30.0, expts=101),
+            "delay": Range(0.0, 30.0, expts=101),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
             "reps": 1000,

@@ -5,18 +5,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from zcu_tools.gui.app.measure.services.run_analyze_control import ActiveTabOperation
+from zcu_tools.gui.app.measure.services.run_analyze_control import (
+    ActiveTabOperation,
+    RunAnalyzeControlFacet,
+)
+from zcu_tools.gui.session.device_control import DeviceControlFacet
+from zcu_tools.gui.session.device_models import ActiveDeviceOperation
 from zcu_tools.gui.session.pbar_host import ProgressBarModel
-
-
-@dataclass(frozen=True)
-class DeviceOperation:
-    token: int
-    device_name: str = "device"
+from zcu_tools.gui.session.services.progress import ProgressService
 
 
 @dataclass
-class TabOperationOwner:
+class TabOperationOwner(RunAnalyzeControlFacet):
     """Lists fixed tab operations; cancelling is an error unless a hook is given."""
 
     operations: tuple[ActiveTabOperation, ...] = ()
@@ -35,13 +35,13 @@ class TabOperationOwner:
 
 
 @dataclass
-class DeviceOperationOwner:
+class DeviceOperationOwner(DeviceControlFacet):
     """Lists fixed device operations; cancelling is an error unless a hook is given."""
 
-    operations: tuple[DeviceOperation, ...] = ()
+    operations: tuple[ActiveDeviceOperation, ...] = ()
     on_cancel: Callable[[str], None] | None = None
 
-    def get_active_device_operations(self) -> tuple[DeviceOperation, ...]:
+    def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
         return self.operations
 
     def cancel_device_operation(self, name: str) -> None:
@@ -50,7 +50,10 @@ class DeviceOperationOwner:
         self.on_cancel(name)
 
 
-class UnusedProgress:
+class UnusedProgress(ProgressService):
+    def __init__(self) -> None:
+        pass
+
     def bars_for_operation(
         self, operation_id: int
     ) -> tuple[tuple[int, ProgressBarModel], ...]:

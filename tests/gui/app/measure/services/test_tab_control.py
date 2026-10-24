@@ -55,7 +55,13 @@ class RecordingWorkspace:
     def __init__(self, log: CallLog) -> None:
         self._log = log
 
-    def new_tab(self, adapter_name: str, *, input: TabInput | None = None) -> str:
+    def new_tab(
+        self,
+        adapter_name: str,
+        *,
+        input: TabInput | None = None,
+        allow_factory_failure: bool = False,
+    ) -> str:
         self._log.add("workspace", "new_tab", adapter_name)
         return "new-tab"
 

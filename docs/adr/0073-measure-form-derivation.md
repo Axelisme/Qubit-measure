@@ -75,13 +75,13 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。
 
 Tree 對齊 model 的欄位。字串是 literal，`Expr` 才是 expression。
-`Range.around`／`Range.between` 宣告掃描，`AliasName` 產生 direct 名稱，
-`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
+`Range(start, stop, expts)`／`Range.around` 宣告掃描。Range 的字串端點轉成 `Expr`，
+數字與 None 保留原樣。`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
 生成器把中立 metadata 翻成 Display，由 Form core 強制唯讀，不生成單值 Literal。
 
 `LogPoints(max, points, include_zero=True)` 為指定的整數清單欄位宣告 Log 初值，`cfg_model` 不計算清單。
 `form_adapter` 擁有 Log／List 分支、換算與清單產生。Core 只接收 `list[int]`，普通 list 與 SweepCfg 不變。
-LogPoints 與 Range.between 使用相同的樹上初值邊界，依 advisor 2026-10-19 裁決。
+LogPoints 與 Range 使用相同的樹上初值邊界，依 advisor 2026-10-19 裁決。
 預設 Log 必含 0 與 max，含 0 的 points 至少為 2，geometric samples 的末點固定為 max。
 依 advisor 同日的正值分支裁決，include_zero=False 使用 `geomspace(1, max, points)`，首尾固定為 1 與 max，再四捨五入去重。
 此時 max 至少為 1；max>1 的 points 至少為 2，max=1 接受 points≥1 並產生 `[1]`。List 只接受正整數，保留順序與單點。
@@ -166,6 +166,8 @@ Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 sel
 由可信宣告重建，還原不執行 converter。唯讀欄位保留存檔值，不從宣告重算。型別或來源 identity 不匹配明確報錯，不靜默丟葉，
 不加舊版雙讀或 native cfg 反向回填，見 [[0079]]。
 Load 只載分析／writeback 所需結果，不覆蓋表單。
+
+使用者於 2026-10-24 裁定：「只在 open_tab_from_file 路徑隔離 make_form 失敗，tab 照常建立並 Load，表單區與 Run 顯示 factory 原文錯誤，Reset 走一般 fail-fast；一般 new-tab／Reset 不變」。歷史結果不應依賴目前來源能否建立量測表單。這條建立路徑因此允許明確的無 Form 狀態，不建立空 Form、不補來源，也不從 native cfg 反填。隔離只包 adapter.make_form，範本綁定、defaults 與 Load 錯誤仍傳出。無 Form 時表單區顯示原文，Run 停用並顯示同一原因。Reset 仍重新捕捉來源並呼叫 factory，成功才安裝正常 Form。同日補充裁定，無 Form 的 Reset preparation 中，capture、make_form、範本綁定或 defaults 任一步失敗，都更新表單區與 Run 的本次錯誤，並原樣 re-raise。這只更新診斷，不把失敗轉成成功。一般 new-tab 的失敗及既有 Form 的 Reset 保舊契約不變。Load 的清理邊界見 [[0067]]。
 
 資源擁有 mutation guard、通知與撤銷。Editor 只讀借用的 state，write 與 run_command
 成對交回資源。Subscriber 故障記 log 後繼續，不回滾已提交 input。

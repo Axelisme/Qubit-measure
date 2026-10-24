@@ -73,7 +73,6 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
         writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     snapshot = service.get_snapshot("tab")
@@ -110,7 +109,6 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
         writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     ).get_snapshot("tab")
 
     assert snapshot.analysis is not None
@@ -140,7 +138,6 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
             writeback,
             form_resources(state),
             form_sources=lambda aliases: form_sources(state, aliases),
-            captured_parameters=lambda _aliases: state.session_env.parameters,
         ).get_snapshot("tab")
 
 
@@ -164,7 +161,6 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
         writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     running = service.get_snapshot("running").interaction
@@ -219,7 +215,6 @@ def test_snapshot_carries_post_analyze_fields() -> None:
         writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     snapshot = service.get_snapshot("tab")
@@ -254,7 +249,6 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     out = service.initialize_tab_post_analyze_params("tab")
@@ -283,7 +277,6 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
@@ -297,7 +290,6 @@ def _native_snapshot(session: NativeSaveSession) -> TabSnapshot:
         writeback=MagicMock(),
         cfg_resources=MagicMock(),
         form_sources=MagicMock(),
-        captured_parameters=MagicMock(),
     ).get_snapshot("tab")
 
 

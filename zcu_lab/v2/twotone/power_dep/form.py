@@ -21,7 +21,7 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "gain": Range.between(0.001, 1.0, expts=101),
+            "gain": Range(0.001, 1.0, expts=101),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=201),
             "relax_delay": 1.0,
             "reps": 1000,

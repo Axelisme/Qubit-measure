@@ -160,7 +160,9 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
         board = white_noise()
-        app.controller.install_soc(board.soc, board.soccfg)
+        app.controller.session_services.soc_connection.install_soc(
+            board.soc, board.soccfg
+        )
         app.controller.new_tab("presentation")
         app.window.resize(1280, 800)
         yield app.window
@@ -208,7 +210,9 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
             PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
         )
         board = white_noise()
-        app.controller.install_soc(board.soc, board.soccfg)
+        app.controller.session_services.soc_connection.install_soc(
+            board.soc, board.soccfg
+        )
         app.controller.new_tab("layout")
         app.window.resize(1440, 900)
         yield app.window

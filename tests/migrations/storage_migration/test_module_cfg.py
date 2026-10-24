@@ -469,7 +469,7 @@ def test_unconvertible_entries_stay_located_pending_beside_successful_file(
                 "missing_child": _pulse("not_mapped"),
                 "expression": _pulse("=ml.wave"),
                 "unsupported": {"type": "unknown"},
-                "no_rule": {"type": "reset/none"},
+                "no_rule": {"type": "pulse", "waveform": "unmapped"},
             },
             "waveforms": {
                 "same": {"style": "const", "length": 0.125},
@@ -520,7 +520,7 @@ def test_unconvertible_entries_stay_located_pending_beside_successful_file(
             "missing_child": _pulse("not_mapped"),
             "expression": _pulse("=ml.wave"),
             "unsupported": {"type": "unknown"},
-            "no_rule": {"type": "reset/none"},
+            "no_rule": {"type": "pulse", "waveform": "unmapped"},
         },
         "waveforms": {"expression": {"style": "const", "length": "=md.duration"}},
         "future_root": {"keep": True},

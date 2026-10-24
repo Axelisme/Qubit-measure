@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.gui.app.measure.remote.handlers.analysis import h_tab_analyze
 from zcu_tools.gui.app.measure.remote.handlers.connection_device import (
-    h_device_connect,
     h_soc_connect,
 )
 from zcu_tools.gui.app.measure.remote.handlers.context import h_value_read
@@ -19,10 +18,6 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
 )
 from zcu_tools.gui.app.measure.remote.handlers.view import (
     h_tab_get_figure,
-)
-from zcu_tools.gui.app.measure.remote.handlers.writeback import (
-    h_tab_writeback_apply,
-    h_tab_writeback_set,
 )
 from zcu_tools.gui.session.value_lookup import ProviderError
 
@@ -76,25 +71,6 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
             {"tab_id": "t1", "updates": {}},
         ),
         analyze_error,
-    )
-
-
-def test_device_runtime_error_escapes_handler_unchanged() -> None:
-    error = RuntimeError("device programmer bug")
-    control = MagicMock()
-    control.start_connect_device.side_effect = error
-    _assert_escapes_unchanged(
-        lambda: h_device_connect(
-            # tolerated(cast): Device connect requires RemoteControlAdapter but this failure uses only device_control.
-            cast(Any, SimpleNamespace(device_control=control)),
-            {
-                "type_name": "fake",
-                "name": "flux",
-                "address": "mock",
-                "remember": True,
-            },
-        ),
-        error,
     )
 
 
@@ -160,43 +136,6 @@ def test_figure_runtime_error_escapes_handler_unchanged() -> None:
         ),
         error,
     )
-
-
-@pytest.mark.parametrize("handler_name", ["set", "apply"])
-def test_writeback_runtime_errors_escape_handlers_unchanged(
-    handler_name: str,
-) -> None:
-    error = RuntimeError(f"writeback {handler_name} programmer bug")
-    control = MagicMock()
-    control.has_tab.return_value = True
-    if handler_name == "set":
-        control.set_writeback_item_for_pane.side_effect = error
-
-        def call() -> object:
-            return h_tab_writeback_set(
-                # tolerated(cast): Writeback set requires RemoteControlAdapter but this failure uses only writeback_control.
-                cast(Any, SimpleNamespace(writeback_control=control)),
-                {
-                    "tab_id": "t1",
-                    "subtab_id": "analysis",
-                    "id": "item-1",
-                    "selected": True,
-                    "target_name": None,
-                    "proposed_value": None,
-                    "edits": None,
-                },
-            )
-    else:
-        control.apply_writeback_for_pane.side_effect = error
-
-        def call() -> object:
-            return h_tab_writeback_apply(
-                # tolerated(cast): Writeback apply requires RemoteControlAdapter but this failure uses only writeback_control.
-                cast(Any, SimpleNamespace(writeback_control=control)),
-                {"tab_id": "t1", "subtab_id": "analysis"},
-            )
-
-    _assert_escapes_unchanged(call, error)
 
 
 def test_soc_connect_runtime_error_escapes_handler_unchanged() -> None:

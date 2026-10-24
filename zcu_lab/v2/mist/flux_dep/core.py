@@ -16,8 +16,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.simulate import value2flux
 
-from zcu_lab.v2._support import live_heatmap_with_line
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support.device import set_flux
 
 
 @dataclass(frozen=True)

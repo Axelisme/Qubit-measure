@@ -7,7 +7,6 @@ from zcu_tools.cfg_model import (
     CfgInputMap,
     FlatTopWaveformSpec,
     ModuleSpec,
-    NoneResetCfg,
     PulseReadoutSpec,
     PulseResetSpec,
     PulseSpec,
@@ -121,13 +120,6 @@ def test_arb_asset_key_is_kept_through_inline_module_rewriting() -> None:
     assert isinstance(mapped, PulseSpec)
     assert isinstance(mapped.waveform, ArbWaveformCfg)
     assert mapped.waveform.data == "asset"
-
-
-@pytest.mark.parametrize("spec", [NoneResetCfg()])
-def test_reference_free_modules_are_isolated(spec: ModuleSpec) -> None:
-    mapped = remap_module_references(spec, modules={}, waveforms={})
-    assert mapped == spec
-    assert mapped is not spec
 
 
 @pytest.mark.parametrize("reference", ["wave", "Q1.waveforms.already_canonical"])

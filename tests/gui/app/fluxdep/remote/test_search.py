@@ -167,9 +167,6 @@ def test_search_observation_is_per_client_and_operation_reads_do_not_unlock(
     h = search_case.harness
     first, second = h.client(), h.client()
     token = _start(search_case, first)
-    assert _result(h.request(second, "operation.status")) == {
-        "activity": {"token": token, "status": "pending", "error": None}
-    }
     assert _result(h.request(second, "operation.await", token=token, timeout=0)) == {
         "token": token,
         "reason": "timeout",
@@ -204,9 +201,6 @@ def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
     try:
         token = _start(search_case, client)
         assert h.ctrl.state.fit.params is None
-        assert _result(h.request(client, "operation.status", token=token)) == {
-            "activity": {"token": token, "status": "pending", "error": None}
-        }
         awaiting = h.request_async(client, "operation.await", token=token)
         search_case.release.set()
         assert _result(h.wait(awaiting)) == {
@@ -218,9 +212,6 @@ def test_search_commits_native_result_before_await_and_does_not_refresh_fit(
         assert h.ctrl.state.fit.params == (5.0, 1.0, 0.5)
         assert h.ctrl.search.outcome(token) == OperationOutcome("finished")
         assert h.ctrl.search.result is not None
-        assert _result(h.request(client, "operation.status", token=None)) == {
-            "activity": {"token": token, "status": "finished", "error": None}
-        }
         assert [type(payload) for payload, _ in facts] == [
             SearchChangedPayload,
             FitChangedPayload,
@@ -263,9 +254,6 @@ def test_cancel_receipt_is_not_outcome_and_terminal_cancel_is_noop(
         "cancel_requested": True,
     }
     assert h.ctrl.search.outcome(token) is None
-    assert _result(h.request(canceller, "operation.status", token=token))[
-        "activity"
-    ] == {"token": token, "status": "pending", "error": None}
     assert not waiting.done()
     search_case.release.set()
     error = "database read failed" if terminal == "failed" else None
@@ -284,9 +272,6 @@ def test_cancel_receipt_is_not_outcome_and_terminal_cancel_is_noop(
         _result(h.request(client, "operation.await", token=token, timeout=0))
         == expected
     )
-    assert _result(h.request(client, "operation.status", token=token)) == {
-        "activity": {"token": token, "status": terminal, "error": error}
-    }
     assert h.ctrl.state.fit.has_result is (terminal == "finished")
 
 
@@ -313,44 +298,7 @@ def test_wait_timeout_does_not_cancel_and_stale_delivery_is_failed_outcome(
     assert h.ctrl.state.fit.params is None
 
 
-def test_reconnect_status_finds_gui_latest_and_explicit_old_handle(
-    search_case: SearchCase,
-) -> None:
-    h = search_case.harness
-    first = h.client()
-    assert _result(h.request(first, "operation.status")) == {"activity": None}
-    token = h.ctrl.search.start()
-    h.disconnect(first)
-    client = h.client()
-    assert _result(h.request(client, "operation.status")) == {
-        "activity": {"token": token, "status": "pending", "error": None}
-    }
-    search_case.release.set()
-    assert (
-        _result(h.request(client, "operation.await", token=token))["reason"]
-        == "completed"
-    )
-    search_case.release.clear()
-    search_case.entered.clear()
-    new_token = h.ctrl.search.start()
-    # The accepted GUI search submitted the same gated runtime completion.
-    assert search_case.entered.wait(30)
-    assert new_token != token
-    assert _result(h.request(client, "operation.status"))["activity"] == {
-        "token": new_token,
-        "status": "pending",
-        "error": None,
-    }
-    assert _result(h.request(client, "operation.status", token=token))["activity"] == {
-        "token": token,
-        "status": "finished",
-        "error": None,
-    }
-
-
-@pytest.mark.parametrize(
-    "method", ["operation.status", "operation.cancel", "operation.await"]
-)
+@pytest.mark.parametrize("method", ["operation.cancel", "operation.await"])
 @pytest.mark.parametrize("token", [-1, 0, 9999])
 def test_unknown_explicit_tokens_are_nominal_errors(
     search_case: SearchCase, method: str, token: int
@@ -361,9 +309,7 @@ def test_unknown_explicit_tokens_are_nominal_errors(
     assert h.ctrl.search.current is None
 
 
-@pytest.mark.parametrize(
-    "method", ["operation.status", "operation.cancel", "operation.await"]
-)
+@pytest.mark.parametrize("method", ["operation.cancel", "operation.await"])
 @pytest.mark.parametrize("token", [True, "1", 1.0])
 def test_operation_token_json_admission(
     search_case: SearchCase, method: str, token: object
@@ -438,7 +384,7 @@ def test_evicted_token_is_rejected_instead_of_fabricating_completion(
         assert _result(h.request(client, "operation.await", token=token))[
             "outcome"
         ] == {"status": "finished", "error": None}
-    for method in ["operation.status", "operation.cancel", "operation.await"]:
+    for method in ["operation.cancel", "operation.await"]:
         _error(
             h.request(client, method, token=first),
             "invalid_params",
@@ -446,11 +392,6 @@ def test_evicted_token_is_rejected_instead_of_fabricating_completion(
         )
     latest = h.ctrl.search.current
     assert latest is not None
-    assert _result(h.request(client, "operation.status"))["activity"] == {
-        "token": latest.token,
-        "status": "finished",
-        "error": None,
-    }
 
 
 def test_missing_search_runtime_stays_unexpected(route_harness: RouteHarness) -> None:

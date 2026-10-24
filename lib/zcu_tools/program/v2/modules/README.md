@@ -26,7 +26,9 @@ The standalone `*Cfg` names remain available to framework code and tests.
 
 `Readout(name, cfg)` and `Reset(name, cfg)` are factory classes. Their `__new__`
 returns the concrete module from `cfg.build(name)`, not an instance of the
-factory class. `Reset(name, None)` still returns `NoneReset`.
+factory class. `Reset(name, None)` returns `None` (no reset). Module sequences
+in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
+`ScanWith` skip `None` entries without emitting setup or timed operations.
 
 ## Dmem Tables
 

@@ -225,18 +225,6 @@ WRITERS: tuple[tuple[str, Document, dict[str, object]], ...] = (
             "edits": [{"path": ["length"], "value": 30.0}],
         },
     ),
-    ("context.ml_del_module", "library", {"name": "Q1.pulses.seed"}),
-    ("context.ml_del_waveform", "library", {"name": "Q1.waveforms.seed"}),
-    (
-        "context.ml_rename_module",
-        "library",
-        {"old": "Q1.pulses.seed", "new": "Q1.pulses.moved"},
-    ),
-    (
-        "context.ml_rename_waveform",
-        "library",
-        {"old": "Q1.waveforms.seed", "new": "Q1.waveforms.moved"},
-    ),
 )
 
 

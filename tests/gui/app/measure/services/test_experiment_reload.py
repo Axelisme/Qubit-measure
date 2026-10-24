@@ -60,7 +60,6 @@ def app() -> App:
         writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: None,
     )
     workspace = WorkspaceService(state, tabs, bus)
     loader = Loader()

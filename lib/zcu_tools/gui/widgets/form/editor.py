@@ -218,8 +218,7 @@ class FormEditor[F: FormModel](QWidget):
     Groups start folded except Sweep, whose member axes also start open. A
     sole nonnullable expandable Sweep member uses a combined title and keeps
     its canonical path, selector and commands. These hints use Display.group,
-    not field names. Model rows start folded unless collapsed=False
-    or their subtree has errors on the editor's first publication. Saved user
+    not field names. Model rows start folded unless their subtree has errors on the editor's first publication. Saved user
     folds take precedence, and later refreshes keep the established folds.
     Folds the user sets on groups and model rows survive rebuilds of this
     editor (option or activation changes), remembered by path.

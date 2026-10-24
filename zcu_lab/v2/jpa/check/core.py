@@ -15,8 +15,8 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.device import set_output
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.device import set_output
 
 
 @dataclass(frozen=True)

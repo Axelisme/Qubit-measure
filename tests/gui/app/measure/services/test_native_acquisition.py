@@ -182,7 +182,6 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     assert event.at == metadata.finished_at
     assert isinstance(event.payload, AcquiredPayload)
     assert event.payload.run_id == metadata.run_id
-    assert event.payload.tab == "saving" and event.payload.tab_id == "tab"
     assert event.payload.experiment == metadata.experiment
     assert event.payload.point == "q"
     assert event.payload.roles == dict(metadata.snapshot.roles)

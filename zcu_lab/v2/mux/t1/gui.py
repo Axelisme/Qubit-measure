@@ -25,12 +25,12 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.mux_results import (
+from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
     captured_qubits,
 )
-from zcu_lab.v2._support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 from .analysis import MuxT1Fit

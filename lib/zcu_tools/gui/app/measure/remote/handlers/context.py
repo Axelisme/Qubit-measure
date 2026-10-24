@@ -12,7 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import LibraryChange, SavedPoint
+from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.value_lookup import MissingValue, ValueInfo
 from zcu_tools.resources.entry import document_value
@@ -382,59 +382,3 @@ def h_context_ml_create_from_role(
     except KeyError as exc:
         raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
     return {"created": name}
-
-
-def h_context_ml_del_module(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Delete a concrete module; optional expected_revision guards its disk file."""
-    check_writer_revision(adapter, "library", params)
-    name = str(params["name"])
-    parameters = adapter.context_control.read_context()
-    adapter.ctrl.apply_library_change(
-        parameters, LibraryChange(kind="module", action="delete", path=name)
-    )
-    return {"deleted": name}
-
-
-def h_context_ml_rename_module(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Rename a concrete module; optional expected_revision guards its disk file."""
-    check_writer_revision(adapter, "library", params)
-    old = str(params["old"])
-    new = str(params["new"])
-    parameters = adapter.context_control.read_context()
-    adapter.ctrl.apply_library_change(
-        parameters,
-        LibraryChange(kind="module", action="rename", path=old, new_path=new),
-    )
-    return {"renamed": new}
-
-
-def h_context_ml_rename_waveform(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Rename a concrete waveform; optional expected_revision guards its disk file."""
-    check_writer_revision(adapter, "library", params)
-    old = str(params["old"])
-    new = str(params["new"])
-    parameters = adapter.context_control.read_context()
-    adapter.ctrl.apply_library_change(
-        parameters,
-        LibraryChange(kind="waveform", action="rename", path=old, new_path=new),
-    )
-    return {"renamed": new}
-
-
-def h_context_ml_del_waveform(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Delete a concrete waveform; optional expected_revision guards its disk file."""
-    check_writer_revision(adapter, "library", params)
-    name = str(params["name"])
-    parameters = adapter.context_control.read_context()
-    adapter.ctrl.apply_library_change(
-        parameters, LibraryChange(kind="waveform", action="delete", path=name)
-    )
-    return {"deleted": name}

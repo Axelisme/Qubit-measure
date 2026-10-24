@@ -3,7 +3,7 @@
 from zcu_tools.gui.form_adapter import FormContext
 
 from zcu_lab.components.mux import MuxGroupSchema
-from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
+from zcu_lab.v2.support.measure.mux_bindings import validate_mux_bindings
 
 
 def captured_roles(ctx: FormContext) -> dict[str, str | int]:

@@ -220,15 +220,6 @@ def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
     assert exc.value.reason_code == "no_active_context"
 
 
-def test_check_save_reason_code_no_run_result():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
-    guard = _make_guard(state)
-
-    with pytest.raises(GuardError) as exc:
-        guard.check_save(tab_id)
-    assert exc.value.reason_code == "no_run_result"
-
-
 def test_run_inputs_rejected_on_invalid_cfg():
     adapter = MagicMock()
     state, tab_id = _make_state(
@@ -264,24 +255,6 @@ def test_run_inputs_rejected_for_unknown_tab():
 # ---------------------------------------------------------------------------
 # Save check
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("readiness", list(ContextReadiness))
-def test_check_save_issued_with_result_without_live_context_dependency(
-    readiness: ContextReadiness,
-):
-    state, tab_id = _make_state(readiness=readiness)
-    guard = _make_guard(state)
-
-    assert guard.check_save(tab_id) is None
-
-
-def test_check_save_rejected_without_run_result():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
-    guard = _make_guard(state)
-
-    with pytest.raises(GuardError, match="No run result"):
-        guard.check_save(tab_id)
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +329,7 @@ def test_check_writeback_rejected_without_analyze_result():
 
 
 @pytest.mark.parametrize(
-    "operation", ["check_save", "check_load", "check_analyze", "check_writeback"]
+    "operation", ["check_load", "check_analyze", "check_writeback"]
 )
 def test_check_rejects_unknown_tab_with_original_reason(operation: str) -> None:
     state, _ = _make_state(readiness=ContextReadiness.ACTIVE)

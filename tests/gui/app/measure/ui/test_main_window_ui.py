@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import field_validator
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtWidgets import (
     QApplication,
@@ -16,9 +14,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTabWidget,
 )
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, ZSpec
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -32,7 +27,6 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -232,7 +226,7 @@ def blocked_writeback_window(
     )
     ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
     board = white_noise()
-    ctrl.install_soc(board.soc, board.soccfg)
+    ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     tab_id = ctrl.new_tab("blocked-writeback")
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
@@ -358,126 +352,6 @@ def test_long_status_message_stays_within_window_with_full_tooltip(
     assert labels[0].width() <= window.width()
     assert labels[0].toolTip() == message
     assert window.get_view_snapshot()["status"] == message
-
-
-@pytest.fixture
-def footer_form_window(tmp_path: Path, qapp: QApplication) -> Iterator[MainWindow]:
-    """Show a synthetic form whose input selects a short or long diagnostic."""
-
-    class DiagnosticCfg(ConfigBase):
-        message: str = ""
-
-        @field_validator("message")
-        @classmethod
-        def validate_message(cls, value: str) -> str:
-            if value == "wrapped":
-                raise ValueError("Fill in frequency, gain and duration. " * 40)
-            if value == "multiline":
-                raise ValueError("\n".join(["Fill in frequency."] * 6))
-            if value:
-                raise ValueError("Fill in frequency.")
-            return value
-
-    @dataclass
-    class DiagnosticResult:
-        value: float = 0.0
-
-    def DiagnosticAdapter_make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
-        del ctx
-        return Form(DiagnosticCfg, {})
-
-    DiagnosticAdapter = Adapter(
-        spec=AxesSpec(
-            axes=(),
-            z=ZSpec("value", "data", ""),
-            result_type=DiagnosticResult,
-            cfg_type=DiagnosticCfg,
-            tag="test/DiagnosticAdapter",
-        ),
-        make_form=DiagnosticAdapter_make_form,
-        run=lambda cfg, *, context: RunRecord(cfg=cfg, result=DiagnosticResult()),
-        guide=None,
-        analysis=None,
-        post_analysis=None,
-    )
-
-    registry = Registry()
-    registry.register("diagnostic", DiagnosticAdapter)
-    ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
-        registry,
-        None,
-        EventBus(),
-        project_root=str(tmp_path),
-    )
-    window = MainWindow(
-        ctrl,
-        templates=lambda: {},
-        dialog_presenter=RecordingDialogPresenter(confirm_answers=[True]),
-    )
-    ctrl.add_view(window)
-    tab_id = ctrl.new_tab("diagnostic")
-    window.resize(1700, 900)
-    window.show()
-    qapp.processEvents()
-    try:
-        yield window
-    finally:
-        ctrl.close()
-        ctrl.close_tab(tab_id)
-        window.dispose()
-
-
-@pytest.mark.parametrize("message", ["wrapped", "multiline"])
-def test_footer_tracks_current_error_lines_after_edits_and_resize(
-    footer_form_window: MainWindow, tmp_path: Path, message: str
-) -> None:
-    driver = ComponentDriver(footer_form_window)
-
-    def footer_height() -> int:
-        bounds = driver.observe(driver.status().text).bounds
-        assert bounds is not None
-        return bounds[3]
-
-    driver.screenshot(tmp_path / "01-ready.png")
-    single_line_height = footer_height()
-    driver.enter_text(object_name="form.input.message", value=message)
-    driver.screenshot(tmp_path / "02-long.png")
-    assert "Config invalid:" in driver.status().text
-    assert footer_height() > single_line_height
-
-    driver.enter_text(object_name="form.input.message", value="short")
-    driver.screenshot(tmp_path / "03-short.png")
-    assert "Fill in frequency." in driver.status().text
-    assert footer_height() <= single_line_height
-
-    for width in (1100, 2000, 1700):
-        driver.resize_window(width, 900)
-        driver.screenshot(tmp_path / f"04-short-{width}.png")
-        assert footer_height() <= single_line_height
-
-    driver.enter_text(object_name="form.input.message", value=message)
-    driver.resize_window(1100, 900)
-    driver.screenshot(tmp_path / "05-long-narrow.png")
-    narrow_height = footer_height()
-    driver.resize_window(2000, 900)
-    driver.screenshot(tmp_path / "06-long-wide.png")
-    if message == "wrapped":
-        assert single_line_height < footer_height() < narrow_height
-    else:
-        assert footer_height() == narrow_height
-
-    driver.enter_text(object_name="form.input.message", value="short")
-    driver.click("Refresh")
-    driver.screenshot(tmp_path / "07-refreshed.png")
-    assert footer_height() <= single_line_height
-    driver.select_tab("Guide")
-    driver.select_tab("Run")
-    driver.screenshot(tmp_path / "08-tab-return.png")
-    assert footer_height() <= single_line_height
-    driver.click("Reset")
-    driver.screenshot(tmp_path / "09-reset.png")
-    assert "Config invalid:" not in driver.status().text
 
 
 def test_main_window_toolbar_does_not_show_arb_waveforms(

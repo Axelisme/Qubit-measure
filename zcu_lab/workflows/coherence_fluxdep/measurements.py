@@ -12,7 +12,7 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support import LinePlot, live_line
+from zcu_lab.v2.support import LinePlot, live_line
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg
@@ -25,7 +25,7 @@ from zcu_lab.workflows.coherence_fluxdep.saving import save_t2ramsey
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
 from zcu_lab.workflows.common.calibration import StageStatus
-from zcu_lab.workflows.common.saving import save_t1, save_t2echo
+from zcu_lab.workflows.common.saving import save_native
 
 type LifetimeKind = Literal["t1", "t2ramsey", "t2echo"]
 
@@ -153,7 +153,13 @@ async def measure_t1(
     if isinstance(outcome, Failed):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
-    save_t1(outcome, directory / "t1.h5", snapshot=snapshot, identity=scope.identity)
+    save_native(
+        outcome,
+        directory / "t1.h5",
+        spec=T1Exp.AXES_SPEC,
+        snapshot=snapshot,
+        identity=scope.identity,
+    )
     if outcome.partial_result:
         return LifetimeResult("t1", "rejected", "stopped", None, None, "t1.h5")
     plot.update(outcome.value.result.times, outcome.value.result.signals.real)
@@ -253,9 +259,10 @@ async def measure_echo(
     if isinstance(outcome, Failed):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
-    save_t2echo(
+    save_native(
         outcome,
         directory / "t2echo.h5",
+        spec=T2EchoExp.AXES_SPEC,
         snapshot=snapshot,
         identity=scope.identity,
     )

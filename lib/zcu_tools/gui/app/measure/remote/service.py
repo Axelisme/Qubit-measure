@@ -3,7 +3,7 @@
 The RPC face onto the Controller, peer to the Qt ``MainWindow`` (ADR-0067 /
 ADR-0068): the second user-facing client (user = an automation agent / another
 server). The shared dispatch scaffolding (the EndpointRouter seam, the
-main-thread marshal, the EventBus push fan-out) lives in
+main-thread marshal) lives in
 :class:`RemoteControlServiceBase`; this is the *richest* of the three apps and
 layers measure-gui's own dispatch policy on top by overriding the base seams:
 ``_extra_start`` / ``_extra_stop`` wire the out-of-band diagnostic channel
@@ -41,7 +41,7 @@ from zcu_tools.gui.remote.rpc_endpoint import ReplyDelivery
 
 if TYPE_CHECKING:
     # Type-only: importing Controller at runtime would form a cycle
-    # (controller.py imports remote.dialogs). String annotation keeps pyright
+    # while the adapter also references Controller. String annotation keeps pyright
     # checking handler/ctrl method names while the runtime import never happens.
     from zcu_tools.gui.app.measure.artifacts import SaveControlPort
     from zcu_tools.gui.app.measure.controller import Controller, RenderView, Severity
@@ -62,7 +62,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
 from .dispatch import METHOD_REGISTRY
-from .events import EVENT_SERIALIZERS, wire_event_name
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -82,7 +81,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
     context commands through ``adapter.context_control``, device commands through
     ``adapter.device_control``, predictor commands through ``adapter.predictor_control``,
     and the canvas-bearing View's pure-read surface through ``adapter.render_view``
-    (screenshot / snapshot / dialog).
+    (figures / snapshot).
     ``render_view`` is None in a headless process; render handlers fail-fast then.
     """
 
@@ -115,8 +114,6 @@ class RemoteControlAdapter(RemoteControlServiceBase):
                 gui_version=GUI_VERSION,
                 server_name="RemoteControlServer",
                 method_registry=METHOD_REGISTRY,
-                event_serializers=EVENT_SERIALIZERS,
-                wire_event_name=wire_event_name,
                 reply_continuations={"app.shutdown": self._shutdown_after_reply},
             ),
             owner_scheduler=owner_scheduler,

@@ -23,6 +23,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 
 from tests.gui._form_converters import RebuildingForm
 from tests.gui._user_input import mouse_click, type_text
+from tests.gui.widgets.form._sections import expand_sections
 
 
 class Inner(FormModel):
@@ -43,14 +44,12 @@ class LazyForm(RebuildingForm):
     branch_models = {("branch",): (First, Second)}
 
     stable: float = 5.0
-    folded: Annotated[Inner, Display(collapsed=True)] = Field(default_factory=Inner)
+    folded: Inner = Field(default_factory=Inner)
     advanced: Annotated[float, Display(group="Advanced")] = 3.0
-    branch: Annotated[
-        First | Second, Field(discriminator="kind"), Display(collapsed=False)
-    ] = Field(default_factory=First)
-    optional: Annotated[Inner | None, Display(collapsed=False)] = Field(
-        default_factory=Inner
+    branch: Annotated[First | Second, Field(discriminator="kind")] = Field(
+        default_factory=First
     )
+    optional: Inner | None = Field(default_factory=Inner)
 
 
 @pytest.fixture
@@ -71,6 +70,7 @@ def view(
         )
     )
     editor = FormEditor(state, env)
+    expand_sections(editor, "branch", "optional")
     yield editor, state
     editor.detach()
     editor.deleteLater()
@@ -84,7 +84,7 @@ def test_expanding_an_empty_selected_layer_removes_the_fold_title(
         kind: Literal["empty"] = "empty"
 
     class FixedBranch(FormModel):
-        branch: Annotated[Empty, Display(collapsed=True)] = Field(default_factory=Empty)
+        branch: Empty = Field(default_factory=Empty)
 
         @classmethod
         def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
@@ -299,6 +299,7 @@ def test_replacing_a_focused_branch_does_not_commit_retired_text(
     try:
         editor.show()
         qapp.processEvents()
+        expand_sections(editor, "branch")
         field = text(editor, "branch.one")
         field.setFocus()
         assert field.hasFocus()

@@ -12,9 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.singleshot_shared import (
-    read_confusion_matrix,
-)
 from zcu_lab.v2.singleshot.mist.power_freq.core import (
     FreqPowerAnalyzeOptions,
     FreqPowerCfg,
@@ -22,6 +19,9 @@ from zcu_lab.v2.singleshot.mist.power_freq.core import (
     FreqPowerResult,
 )
 from zcu_lab.v2.singleshot.mist.power_freq.form import make_form
+from zcu_lab.v2.support.measure.singleshot_shared import (
+    read_confusion_matrix,
+)
 
 MistPowerFreqRunResult: TypeAlias = RunRecord[FreqPowerCfg, FreqPowerResult]
 
