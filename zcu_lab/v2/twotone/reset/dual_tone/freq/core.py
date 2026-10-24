@@ -29,7 +29,7 @@ from zcu_tools.utils.process import (
     smooth_signal_nd,
 )
 
-from zcu_lab.v2._support import live_heatmap, live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_heatmap_with_line
 
 
 def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

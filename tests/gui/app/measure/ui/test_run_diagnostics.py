@@ -1,7 +1,8 @@
-"""Immediate cfg diagnostics through real measure owners and visible Qt inputs."""
+"""Form-local cfg diagnostics through real measure owners and visible inputs."""
 
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit
@@ -18,8 +19,10 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.program.v2 import make_mock_soccfg
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.widgets.form._text_input import commit_text
 
@@ -32,7 +35,7 @@ def diagnostic_window(
     registry = Registry()
     registry.register("sample", SampleAdapter)
     ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
         registry,
         None,
         BaseEventBus(),
@@ -77,15 +80,20 @@ def visible_status(window: MainWindow) -> str:
     )
 
 
-def test_invalid_edit_shows_bottom_reason_without_click_and_repair_clears_it(
+def test_invalid_edit_disables_run_and_repair_restores_it(
     diagnostic_window: tuple[Controller, MainWindow],
 ) -> None:
     ctrl, window = diagnostic_window
     tab = open_tab(ctrl, window)
     assert tab.run_btn.isEnabled()
-    commit_text(reps_input(tab), "not-an-integer")
-    assert not tab.run_btn.isEnabled()
-    assert "Config invalid: reps:" in visible_status(window)
+    ui = ComponentDriver(window)
+    initial_status = ui.status().text
+    ui.enter_text(object_name="form.input.reps", value="not-an-integer")
+    assert not ui.observe("Run").enabled
+    notice = ui.observe(object_name="run.cfg_error")
+    assert notice.visible and "reps:" in notice.text
+    assert ui.status().text == initial_status
+    assert "Config invalid: reps:" in tab.run_btn.toolTip()
     started: list[RunStartedPayload] = []
     subscription = ctrl.get_bus().subscribe(RunStartedPayload, started.append)
     tab.run_btn.click()
@@ -94,16 +102,15 @@ def test_invalid_edit_shows_bottom_reason_without_click_and_repair_clears_it(
     assert ctrl.get_running_tab_id() is None
     commit_text(reps_input(tab), "12")
     assert tab.run_btn.isEnabled()
-    assert "Config invalid:" not in visible_status(window)
 
 
-def test_valid_refresh_preserves_status_that_replaced_cfg_diagnostic(
+def test_valid_refresh_preserves_unrelated_status(
     diagnostic_window: tuple[Controller, MainWindow],
 ) -> None:
     ctrl, window = diagnostic_window
     tab = open_tab(ctrl, window)
     commit_text(reps_input(tab), "not-an-integer")
-    assert "Config invalid: reps:" in visible_status(window)
+    assert "Config invalid: reps:" in tab.run_btn.toolTip()
     window.show_status_message("Save completed")
     commit_text(reps_input(tab), "12")
     assert "Save completed" in visible_status(window)
@@ -112,7 +119,7 @@ def test_valid_refresh_preserves_status_that_replaced_cfg_diagnostic(
     assert "Device setup completed" in visible_status(window)
 
 
-def test_background_cfg_does_not_replace_active_status_and_switch_projects_current_tab(
+def test_cfg_changes_and_tab_switches_preserve_unrelated_status(
     diagnostic_window: tuple[Controller, MainWindow],
 ) -> None:
     ctrl, window = diagnostic_window
@@ -122,13 +129,11 @@ def test_background_cfg_does_not_replace_active_status_and_switch_projects_curre
     commit_text(reps_input(first), "not-an-integer")
     assert "Device setup completed" in visible_status(window)
     window.select_tab_widget(first.tab_id)
-    assert "Config invalid: reps:" in visible_status(window)
+    assert "Config invalid: reps:" in first.run_btn.toolTip()
     window.select_tab_widget(second.tab_id)
-    assert "Config invalid:" not in visible_status(window)
+    assert "Device setup completed" in visible_status(window)
     commit_text(reps_input(second), "also-invalid")
-    second_reason = visible_status(window)
-    assert "Config invalid: reps:" in second_reason
+    assert "Config invalid: reps:" in second.run_btn.toolTip()
     commit_text(reps_input(first), "12")
-    assert visible_status(window) == second_reason
     window.select_tab_widget(first.tab_id)
-    assert "Config invalid:" not in visible_status(window)
+    assert "Device setup completed" in visible_status(window)

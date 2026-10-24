@@ -40,7 +40,7 @@ class ModuleInputField:
     """Generate a tagged module field for a handwritten FormModel.
 
     family is a public Python/Pydantic type declaration: a concrete member of
-    persistent ModuleSpec (for example PulseSpec, PulseReadoutSpec or NoneResetCfg)
+    persistent ModuleSpec (for example PulseSpec, PulseReadoutSpec or PulseResetSpec)
     or a union of those classes, including the tagged ModuleSpec/ReadoutSpec/
     ResetSpec aliases. Waveform, materialized/native cfgs, other classes and
     collections are not accepted. A nonempty family is required. nullable alone

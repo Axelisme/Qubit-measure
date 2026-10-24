@@ -63,8 +63,6 @@ def _service(
             gui_version=1,
             server_name="DispatchTest",
             method_registry=registry,
-            event_serializers={},
-            wire_event_name=str,
         ),
         owner_scheduler=_ImmediateOwnerScheduler(),
     )

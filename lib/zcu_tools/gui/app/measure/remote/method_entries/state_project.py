@@ -21,16 +21,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         agent=AgentMethodPolicy(exposure="internal"),
     ),
     method_entry(
-        "state.has_context",
-        "state_project:h_state_has_context",
-        MethodSpec(
-            5.0,
-            "",
-            readonly=True,
-        ),
-        agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
         "state.has_active_context",
         "state_project:h_state_has_active_context",
         MethodSpec(
@@ -46,16 +36,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "",
-            readonly=True,
-        ),
-        agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
-        "state.hardware_gate",
-        "state_project:h_state_hardware_gate",
-        MethodSpec(
-            5.0,
-            "Read active hardware exclusion leases with kind, origin, note, and age.",
             readonly=True,
         ),
         agent=AgentMethodPolicy(exposure="internal"),

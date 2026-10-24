@@ -145,21 +145,21 @@ from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
 )
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_coherence import (
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
     MuxCoherenceToneCfg,
     validate_coherence_result,
     validate_coherence_scan,
 )
-from zcu_lab.v2._support.mux_coherence_analysis import (
+from zcu_lab.v2.support.mux_coherence_analysis import (
     MuxCoherenceFit,
     fit_coherence_trace,
     prepare_coherence_trace,
     project_coherence_trace,
 )
-from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
+from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 

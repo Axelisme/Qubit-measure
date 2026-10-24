@@ -96,10 +96,10 @@ from zcu_tools.program.v2.modules import (
     Pulse,
 )
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
-from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
+from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
 from .analysis import MuxFreqFit, analyze_frequency

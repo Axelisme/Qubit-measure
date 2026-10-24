@@ -1,14 +1,14 @@
 # `zcu_tools.gui.remote` — shared remote adapter
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。共用 NDJSON RPC 傳輸、排程與連線契約。
 
 This package owns NDJSON framing, typed envelopes, authentication, socket queues,
-owner-scheduler dispatch and lazy event delivery. Apps supply methods, serializers
+owner-scheduler dispatch and diagnostic delivery. Apps supply methods
 and application authority; transport does not own experiment policy.
-`RemoteAppSpec` groups each app's handshake metadata, method registry and event
-projection declarations. Socket options, owner scheduler and optional control
+`RemoteAppSpec` groups each app's handshake metadata, method registry and reply
+continuations. Socket options, owner scheduler and optional control
 authority remain separate constructor inputs.
 
 Measure and Fluxdep inject the same `ControlIdentity` used by their Qt frontend.
@@ -39,8 +39,8 @@ Shared dispatch posts these actions after terminal send, including failure;
 handler rejection does not run an action. No new timeout or wire message is added.
 
 Response failure or timeout can follow a committed command. Transport neither
-rolls back domain effects nor retries requests. Event subscriptions keep their
-connection-local lifecycle and lazy serialization/backpressure behavior.
+rolls back domain effects nor retries requests. Controller diagnostics retain
+their independent broadcast and queue/backpressure behavior.
 
 `ParamSpec.minimum` / `maximum` project inclusive numeric JSON-schema limits.
 These declarations do not add generic range admission: domain owners validate

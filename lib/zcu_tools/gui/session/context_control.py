@@ -104,7 +104,7 @@ class ContextControlPort(Protocol):
         """Read current values at a fixed target without selecting it.
 
         SavedPoint may read point/library files in the opened entry. Supplied roles stay fixed;
-        cross-entry, missing point, schema and I/O errors propagate.
+        cross-entry, missing point (MissingPointError), schema and I/O errors propagate.
         No versions or events are published.
         """
         ...

@@ -236,17 +236,7 @@ class MuxReadoutCfg(_MuxReadoutFields, AbsReadoutCfg):
 
 
 class AbsResetCfg(AbsModuleCfg):
-    """Materialized reset family, with zero, one, two, or bath pulse content."""
-
-
-class NoneResetCfg(AbsResetCfg):
-    """Empty reset; type is reset/none and no sweep knobs are supported."""
-
-    type: Literal["reset/none"] = "reset/none"
-
-    def set_param(self, name: str, value: float | QickParam) -> None:
-        """Raise ValueError for every name; this reset has no parameters."""
-        raise ValueError(f"NoneReset does not support set_param: {name}={value}")
+    """Materialized reset family, with one, two, or bath pulse content."""
 
 
 class _PulseResetFields(_ModuleFields):
@@ -351,11 +341,11 @@ type ReadoutCfg = Annotated[
     PulseReadoutCfg | MuxReadoutCfg, Field(discriminator="type")
 ]
 type ResetSpec = Annotated[
-    NoneResetCfg | PulseResetSpec | TwoPulseResetSpec | BathResetSpec,
+    PulseResetSpec | TwoPulseResetSpec | BathResetSpec,
     Field(discriminator="type"),
 ]
 type ResetCfg = Annotated[
-    NoneResetCfg | PulseResetCfg | TwoPulseResetCfg | BathResetCfg,
+    PulseResetCfg | TwoPulseResetCfg | BathResetCfg,
     Field(discriminator="type"),
 ]
 type ModuleSpec = Annotated[

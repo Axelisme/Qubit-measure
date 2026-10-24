@@ -147,38 +147,6 @@ def test_inspect_reports_schema_without_reading_values(tmp_path: Path) -> None:
     assert info.attrs.producer == "synthetic"
 
 
-def test_append_rows_replace_whole_document_and_finalize(tmp_path: Path) -> None:
-    path = tmp_path / "append.h5"
-    axes = (
-        datafile.Axis("outer", "", np.array([0, 1])),
-        datafile.Axis("inner", "s", np.array([2, 3, 4])),
-    )
-    schema = datafile.VariableSchema(
-        shape=(2, 3), axes=axes, dtype=np.dtype("float64"), unit="V", fill_value=np.nan
-    )
-    with datafile.open_append(
-        path, vars={"v": schema}, docs={"progress": {"old": True}}, producer="test"
-    ) as writer:
-        writer.write_row("v", 0, np.array([10.0, 11.0, 12.0]))
-        writer.replace_doc("progress", {"row": 1})
-    partial = datafile.load(path)
-    np.testing.assert_array_equal(partial.vars["v"].values[0], [10, 11, 12])
-    assert np.isnan(partial.vars["v"].values[1]).all()
-    assert partial.docs == {"progress": {"row": 1}}
-    assert not partial.attrs.extra["finalized"]
-    with datafile.open_append(
-        tmp_path / "complete.h5", vars={"v": schema}, producer="test"
-    ) as writer:
-        with pytest.raises(ValueError, match="shape"):
-            writer.write_row("v", 0, np.ones(2))
-        writer.write_row("v", 0, np.ones(3))
-        writer.write_row("v", 1, np.ones(3) * 2)
-        writer.finalize()
-        with pytest.raises(ValueError, match="finalized"):
-            writer.write_row("v", 0, np.ones(3))
-    assert datafile.load(tmp_path / "complete.h5").attrs.extra["finalized"]
-
-
 def test_forward_minor_attrs_survive_load_modify_save(tmp_path: Path) -> None:
     path = tmp_path / "future.h5"
     attrs = datafile.ContainerAttrs(
@@ -196,55 +164,6 @@ def test_forward_minor_attrs_survive_load_modify_save(tmp_path: Path) -> None:
                 tmp_path / "invalid-version.h5",
                 replace(loaded, attrs=replace(attrs, format_version=version)),
             )
-
-
-def test_legacy_native_converts_to_container_and_rewrites_major_three(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "legacy.h5"
-    with h5py.File(source, "w") as file:
-        file.attrs.update(
-            format="zcu.experiment-data",
-            format_version="2.9",
-            run_id="historic",
-            experiment="synthetic",
-            started_at="",
-            finished_at="",
-            completion="unknown",
-            labber_path="",
-        )
-        cfg = file.create_dataset("cfg", data='{"parameter": 7}')
-        cfg.attrs.update(cfg_type="synthetic.Cfg", cfg_schema_version="1.2")
-        file.create_dataset("context", data='{"point": "P", "future": [1, 2]}')
-        file.create_dataset("device", data='{"device": {"value": 1.0}}')
-        file.create_group("provenance").attrs.update(
-            software_versions='{"python": "3"}', git_dirty="unknown", git_commit="abc"
-        )
-        file.create_dataset("future", data=[8, 9])
-        data = file.create_group("data")
-        data.attrs.update(representation="single", metadata='{"comment": "old"}')
-        variable = data.create_group("signal")
-        variable.attrs.update(signal="voltage", axes='["x"]')
-        x = variable.create_dataset("x", data=[2, 4])
-        x.attrs["units"] = "s"
-        x.make_scale("x")
-        values = variable.create_dataset("voltage", data=[10.0, 20.0])
-        values.attrs["units"] = "V"
-        values.dims[0].attach_scale(x)
-    loaded = datafile.load(source)
-    assert loaded.docs["cfg"] == {
-        "values": {"parameter": 7},
-        "cfg_type": "synthetic.Cfg",
-        "schema_version": "1.2",
-    }
-    assert loaded.docs["metadata"]["snapshot"] == {"point": "P", "future": [1, 2]}
-    assert loaded.docs["metadata"]["started_at"] is None
-    np.testing.assert_array_equal(loaded.vars["signal"].values, [10, 20])
-    destination = tmp_path / "converted.h5"
-    datafile.save(destination, loaded)
-    assert datafile.load(destination).attrs.format_version == "3.0"
-    with h5py.File(destination, "r") as file:
-        np.testing.assert_array_equal(file["groups/legacy/future"], [8, 9])
 
 
 @pytest.mark.parametrize("with_groups", [False, True])

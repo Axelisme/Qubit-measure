@@ -244,7 +244,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
         del ctx
         return Form(
             SampleCfg,
-            {"gain": Expr("general.ext.gain"), "sweep": Range.between(5, 6, expts=11)},
+            {"gain": Expr("general.ext.gain"), "sweep": Range(5, 6, expts=11)},
         )
 
     def RecordingSnapshotAdapter_run(

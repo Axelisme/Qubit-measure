@@ -12,7 +12,7 @@ from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
 from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
 from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
-from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
+from ..modules.reset import BathReset, PulseReset, TwoPulseReset
 
 
 def validate_modules(
@@ -41,7 +41,6 @@ def validate_modules(
         Repeat,
         Branch,
         ScanWith,
-        NoneReset,
         PulseReset,
         TwoPulseReset,
         BathReset,

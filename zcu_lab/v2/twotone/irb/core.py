@@ -23,7 +23,7 @@ from zcu_tools.program.v2 import (
     Reset,
 )
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 from ..rb.core import RBCfg
 from ..rb.sequence import TargetGate, make_seed_tables

@@ -1,9 +1,9 @@
 """Round-trip and fast-fail tests for labber_io.
 
 Tests are grouped by public API surface:
-  - save_labber_data / load_labber_data  (uniform-grid, 1-D / 2-D / 3-D)
+  - LabberData.save / load_labber_data  (uniform-grid, 1-D / 2-D / 3-D)
   - metadata round-trip (comment, tags, project, user, timestamps)
-  - save_labber_trace_data               (variable-length / ragged traces)
+  - LabberData.save               (variable-length / ragged traces)
   - file-extension handling
   - LabberData.save / LabberData.load    (class-level wrappers)
   - error paths (fast-fail validation)
@@ -18,8 +18,6 @@ from zcu_tools.datafile import (
     LabberData,
     LabberMetadata,
     load_labber_data,
-    save_labber_data,
-    save_labber_trace_data,
 )
 
 # ---------------------------------------------------------------------------
@@ -33,7 +31,7 @@ def test_1d_roundtrip(tmp_path):
     z = np.exp(1j * np.linspace(0, np.pi, 51)) * 0.7
 
     path = str(tmp_path / "scan_1d")
-    save_labber_data(path, z=("S21", "arb", z), axes=[("Frequency", "Hz", freq)])
+    LabberData(("S21", "arb", z), [("Frequency", "Hz", freq)]).save(path)
 
     d = load_labber_data(path)
 
@@ -58,11 +56,9 @@ def test_2d_roundtrip(tmp_path):
     )
 
     path = str(tmp_path / "scan_2d")
-    save_labber_data(
-        path,
-        z=("S21", "arb", z2d),
-        axes=[("Frequency", "Hz", freq), ("Power", "dBm", power)],
-    )
+    LabberData(
+        ("S21", "arb", z2d), [("Frequency", "Hz", freq), ("Power", "dBm", power)]
+    ).save(path)
 
     d = load_labber_data(path)
 
@@ -104,15 +100,10 @@ def test_3d_roundtrip(tmp_path):
     ) + 1j * rng.standard_normal((len(flux), len(power), len(freq)))
 
     path = str(tmp_path / "scan_3d")
-    save_labber_data(
-        path,
-        z=("S21", "", z3d),
-        axes=[
-            ("Frequency", "Hz", freq),
-            ("Power", "dBm", power),
-            ("Flux", "Phi0", flux),
-        ],
-    )
+    LabberData(
+        ("S21", "", z3d),
+        [("Frequency", "Hz", freq), ("Power", "dBm", power), ("Flux", "Phi0", flux)],
+    ).save(path)
 
     d = load_labber_data(path)
 
@@ -136,17 +127,13 @@ def test_metadata_roundtrip_str_tags(tmp_path):
     z = np.ones(11, dtype=complex)
 
     path = str(tmp_path / "meta_str")
-    save_labber_data(
-        path,
-        z=("S21", "", z),
-        axes=[("Freq", "Hz", freq)],
+    LabberData(
+        ("S21", "", z),
+        [("Freq", "Hz", freq)],
         metadata=LabberMetadata(
-            comment="my comment",
-            tags="tagA",
-            project="proj1",
-            user="alice",
+            comment="my comment", tags="tagA", project="proj1", user="alice"
         ),
-    )
+    ).save(path)
 
     d = load_labber_data(path)
     assert d.comment == "my comment"
@@ -161,12 +148,11 @@ def test_metadata_roundtrip_list_tags(tmp_path):
     z = np.ones(11, dtype=complex)
 
     path = str(tmp_path / "meta_list")
-    save_labber_data(
-        path,
-        z=("S21", "", z),
-        axes=[("Freq", "Hz", freq)],
+    LabberData(
+        ("S21", "", z),
+        [("Freq", "Hz", freq)],
         metadata=LabberMetadata(tags=["tagA", "tagB"]),
-    )
+    ).save(path)
 
     d = load_labber_data(path)
     assert set(d.tags) == {"tagA", "tagB"}
@@ -182,12 +168,9 @@ def test_metadata_timestamps(tmp_path):
     ts = np.array([1_700_000_000.0 + i * 10.0 for i in range(len(power))])
 
     path = str(tmp_path / "meta_ts")
-    save_labber_data(
-        path,
-        z=("S21", "", z2d),
-        axes=[("Freq", "Hz", freq), ("Power", "dBm", power)],
-        timestamps=ts,
-    )
+    LabberData(
+        ("S21", "", z2d), [("Freq", "Hz", freq), ("Power", "dBm", power)], timestamps=ts
+    ).save(path)
 
     d = load_labber_data(path)
     assert d.timestamps is not None
@@ -208,11 +191,8 @@ def test_ragged_trace_roundtrip_with_y(tmp_path):
     power = np.array([-20.0, -10.0, 0.0])
 
     path = str(tmp_path / "ragged_with_y")
-    save_labber_trace_data(
-        path,
-        z=("S21", "", traces),
-        x=("Freq", "Hz", xs),
-        y=("Power", "dBm", power),
+    LabberData(("S21", "", traces), [("Freq", "Hz", xs), ("Power", "dBm", power)]).save(
+        path
     )
 
     d = load_labber_data(path)
@@ -233,11 +213,7 @@ def test_ragged_trace_roundtrip_no_y(tmp_path):
     xs = [np.linspace(4e9, 5e9, n) for n in lengths]
 
     path = str(tmp_path / "ragged_no_y")
-    save_labber_trace_data(
-        path,
-        z=("S21", "", traces),
-        x=("Freq", "Hz", xs),
-    )
+    LabberData(("S21", "", traces), [("Freq", "Hz", xs)]).save(path)
 
     d = load_labber_data(path)
     assert isinstance(d.z, list)
@@ -253,11 +229,7 @@ def test_equal_length_traces_stacked_no_outer(tmp_path):
     x_shared = np.linspace(4e9, 5e9, n)
 
     path = str(tmp_path / "equal_traces_no_outer")
-    save_labber_trace_data(
-        path,
-        z=("S21", "", traces),
-        x=("Freq", "Hz", x_shared),
-    )
+    LabberData(("S21", "", traces), [("Freq", "Hz", x_shared)]).save(path)
 
     d = load_labber_data(path)
     assert isinstance(d.z, np.ndarray)
@@ -275,12 +247,9 @@ def test_equal_length_traces_stacked_with_outer(tmp_path):
     power = np.array([-30.0, -20.0, -10.0, 0.0])
 
     path = str(tmp_path / "equal_traces_outer")
-    save_labber_trace_data(
-        path,
-        z=("S21", "", traces),
-        x=("Freq", "Hz", x_shared),
-        y=("Power", "dBm", power),
-    )
+    LabberData(
+        ("S21", "", traces), [("Freq", "Hz", x_shared), ("Power", "dBm", power)]
+    ).save(path)
 
     d = load_labber_data(path)
     # equal-length with outer axis -> stacked ndarray shape (Ny, n)
@@ -301,7 +270,7 @@ def test_extension_no_suffix(tmp_path):
     z = np.ones(11, dtype=complex)
 
     path_no_ext = str(tmp_path / "nosuffix")
-    save_labber_data(path_no_ext, z=("S21", "", z), axes=[("Freq", "Hz", freq)])
+    LabberData(("S21", "", z), [("Freq", "Hz", freq)]).save(path_no_ext)
 
     # file must be written with .hdf5 extension
     import os
@@ -319,7 +288,7 @@ def test_extension_h5_becomes_hdf5(tmp_path):
     z = np.ones(11, dtype=complex)
 
     path_h5 = str(tmp_path / "file.h5")
-    save_labber_data(path_h5, z=("S21", "", z), axes=[("Freq", "Hz", freq)])
+    LabberData(("S21", "", z), [("Freq", "Hz", freq)]).save(path_h5)
 
     import os
 
@@ -327,32 +296,29 @@ def test_extension_h5_becomes_hdf5(tmp_path):
     assert not os.path.exists(path_h5)
 
 
-def test_save_labber_data_rejects_existing_formatted_path(tmp_path):
+def test_labberdata_save_rejects_existing_formatted_path(tmp_path):
     """Low-level persistence must not overwrite or suffix an existing target."""
     path = tmp_path / "existing.hdf5"
     path.write_bytes(b"existing")
 
     with pytest.raises(FileExistsError):
-        save_labber_data(
-            str(path),
-            z=("S21", "", np.ones(1, dtype=complex)),
-            axes=[("Freq", "Hz", np.array([1.0]))],
-        )
+        LabberData(
+            ("S21", "", np.ones(1, dtype=complex)), [("Freq", "Hz", np.array([1.0]))]
+        ).save(str(path))
 
     assert path.read_bytes() == b"existing"
     assert not (tmp_path / "existing_1.hdf5").exists()
 
 
-def test_save_labber_trace_data_rejects_existing_formatted_path(tmp_path):
+def test_labberdata_trace_save_rejects_existing_formatted_path(tmp_path):
     path = tmp_path / "existing_trace.hdf5"
     path.write_bytes(b"existing")
 
     with pytest.raises(FileExistsError):
-        save_labber_trace_data(
-            str(path),
-            z=("S21", "", [np.ones(2, dtype=complex)]),
-            x=("Time", "s", [np.array([0.0, 1.0])]),
-        )
+        LabberData(
+            ("S21", "", [np.ones(2, dtype=complex)]),
+            [("Time", "s", [np.array([0.0, 1.0])])],
+        ).save(str(path))
 
     assert path.read_bytes() == b"existing"
     assert not (tmp_path / "existing_trace_1.hdf5").exists()
@@ -404,10 +370,8 @@ def test_axes_count_mismatch_raises(tmp_path):
 
     with pytest.raises(ValueError, match="ndim"):
         # only one axis for 2-D data
-        save_labber_data(
-            str(tmp_path / "bad_axes"),
-            z=("S21", "", z2d),
-            axes=[("Freq", "Hz", freq)],
+        LabberData(("S21", "", z2d), [("Freq", "Hz", freq)]).save(
+            str(tmp_path / "bad_axes")
         )
 
 
@@ -418,11 +382,9 @@ def test_axis_length_mismatch_raises(tmp_path):
     power = np.linspace(-30.0, 0.0, 5)
 
     with pytest.raises(ValueError, match="axis 'Freq' length 8 != z dim 10"):
-        save_labber_data(
-            str(tmp_path / "bad_len"),
-            z=("S21", "", z2d),
-            axes=[("Freq", "Hz", freq_wrong), ("Power", "dBm", power)],
-        )
+        LabberData(
+            ("S21", "", z2d), [("Freq", "Hz", freq_wrong), ("Power", "dBm", power)]
+        ).save(str(tmp_path / "bad_len"))
 
 
 def test_timestamps_length_mismatch_raises(tmp_path):
@@ -433,9 +395,8 @@ def test_timestamps_length_mismatch_raises(tmp_path):
     ts_wrong = np.arange(3, dtype=float)  # 3 != 5 entries
 
     with pytest.raises(ValueError, match="timestamps"):
-        save_labber_data(
-            str(tmp_path / "bad_ts"),
-            z=("S21", "", z2d),
-            axes=[("Freq", "Hz", freq), ("Power", "dBm", power)],
+        LabberData(
+            ("S21", "", z2d),
+            [("Freq", "Hz", freq), ("Power", "dBm", power)],
             timestamps=ts_wrong,
-        )
+        ).save(str(tmp_path / "bad_ts"))

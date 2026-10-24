@@ -13,7 +13,6 @@ from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.services.context import ContextService
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.services.guard import GuardService
     from zcu_tools.gui.app.measure.state import State
 
     from .save import SaveService
@@ -56,8 +55,6 @@ class SaveControlPort(Protocol):
         directories yield no rows. This query never creates folders or writes events.
         """
         ...
-
-    def has_tab(self, tab_id: str) -> bool: ...
 
     def set_comment(self, tab_id: str, comment: str) -> None: ...
 
@@ -116,19 +113,17 @@ def _saved_run_info(path: Path) -> SavedRunInfo:
 
 
 class SaveControlFacet:
-    """Compose existing guards and synchronous native Save commands."""
+    """Compose synchronous native Save commands and their owning service checks."""
 
     def __init__(
         self,
         *,
         state: State,
-        guard: GuardService,
         save: SaveService,
         context: ContextService,
     ) -> None:
         """Inject State, Save owners and the current opened-entry context owner."""
         self._state = state
-        self._guard = guard
         self._save = save
         self._context = context
 
@@ -140,10 +135,6 @@ class SaveControlFacet:
         paths = sorted((entry.database_path / "runs").glob("*/data.h5"))
         runs = (_saved_run_info(path) for path in paths if path.is_file())
         return tuple(run for run in runs if point is None or run.point == point)
-
-    def has_tab(self, tab_id: str) -> bool:
-        """Return whether tab_id is a current State resource."""
-        return self._state.has_tab(tab_id)
 
     def set_comment(self, tab_id: str, comment: str) -> None:
         """Update an idle tab's annotation and mark saved Run evidence dirty.
@@ -165,8 +156,6 @@ class SaveControlFacet:
         """Execute SaveControlPort.save_data's synchronous command contract."""
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
-        self._guard.check_save(tab_id)
-        self._save.require_save_available(tab_id)
         return self._save.save_data(tab_id, comment=comment, origin=origin)
 
     def save_artifacts(
@@ -178,8 +167,6 @@ class SaveControlFacet:
         origin: CommandOrigin,
     ) -> SaveReport:
         """Execute SaveControlPort.save_artifacts's whole-artifact contract."""
-        self._guard.check_save(tab_id)
-        self._save.require_save_available(tab_id)
         return self._save.save_artifacts(
             tab_id, artifacts, comment=comment, origin=origin
         )

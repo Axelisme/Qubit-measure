@@ -198,7 +198,7 @@ def _metadata(
         decimals=display.decimals,
         hidden=display.hidden or hidden_tag or target.pinned,
         group=display.group,
-        collapsed=display.collapsed,
+        collapsed=True,
         can_expand=target.active_model is not None,
         nullable=type(None) in alternatives(info.annotation),
         expression=expression_allowed(info, target.path) and target.choices is None,

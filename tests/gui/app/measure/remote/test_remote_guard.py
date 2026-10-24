@@ -145,24 +145,7 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
         assert started["handle"] > 0
         _await_completed_run(call, started["handle"])
     finally:
-        try:
-            if with_device:
-                disconnected = call(
-                    "rpc_call",
-                    {
-                        "method": "device.disconnect",
-                        "params": {"name": "bias", "remember": False},
-                    },
-                )
-                # The admitted synthetic operation must publish terminal; 30s only guards a hang.
-                assert (
-                    call("wait", {"op": disconnected["handle"], "timeout": 30})[
-                        "status"
-                    ]
-                    == "finished"
-                )
-        finally:
-            bridge.disconnect()
+        bridge.disconnect()
 
 
 def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> None:

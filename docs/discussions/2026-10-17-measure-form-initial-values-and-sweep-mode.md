@@ -8,7 +8,7 @@ related:
   - docs/adr/0073-measure-form-derivation.md
   - docs/discussions/2026-10-13-measure-form-redesign.md
   - zcu_lab/v2/gui-contracts.md
-  - zcu_lab/v2/_support/measure/README.md
+  - zcu_lab/v2/support/measure/README.md
 basis:
   - "repo@4b5385843：Measure Form UX 與校準初值政策落地"
   - "repo@72fd2f458：sweep 欄位 range／center 與 expts／step 切換落地"
@@ -123,4 +123,4 @@ Recipe 端的取捨：`RecipeTab.set_sweep` 與高階 recipe 仍用 start／stop
 
 ## 依據
 
-本快照依據 2026-10-16～17 的 advisor 代裁與使用者審閱。原始問答與決策檔在本機工作目錄，未入庫。上表的數值與規則已寫在 `zcu_lab/v2/_support/measure/README.md`、`zcu_lab/v2/gui-contracts.md`、`zcu_lab/v2/measure-authoring.md`、`lib/zcu_tools/cfg_model/README.md` 與 ADR-0065／0068／0073；兩者不同時以這些文件為準。
+本快照依據 2026-10-16～17 的 advisor 代裁與使用者審閱。原始問答與決策檔在本機工作目錄，未入庫。上表的數值與規則已寫在 `zcu_lab/v2/support/measure/README.md`、`zcu_lab/v2/gui-contracts.md`、`zcu_lab/v2/measure-authoring.md`、`lib/zcu_tools/cfg_model/README.md` 與 ADR-0065／0068／0073；兩者不同時以這些文件為準。

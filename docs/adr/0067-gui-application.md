@@ -46,7 +46,7 @@ Measure framework 只保存 Qt 外觀，不保存或還原 SoC、devices、entry
 
 RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。使用者套件 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 
-`zcu_lab.v2._support.device.check_flux_unit(cfg, unit)` 只比對有效 Info 的 `value_unit`，不讀寫硬體或 cache。YOKO Info 擁有 mode／unit validator，Fake 的單位為 native；其他 Info 類型報 TypeError。`set_flux` 委派同一檢查，保既有 mode 查詢、driver safety、stop 與 progress，不新增 get_info 查詢。
+`zcu_lab.v2.support.device.check_flux_unit(cfg, unit)` 只比對有效 Info 的 `value_unit`，不讀寫硬體或 cache。YOKO Info 擁有 mode／unit validator，Fake 的單位為 native；其他 Info 類型報 TypeError。`set_flux` 委派同一檢查，保既有 mode 查詢、driver safety、stop 與 progress，不新增 get_info 查詢。
 
 Workflow 宿主提供同步 `get_device_cfg` 與完整 cfg 的 `setup_device`，zcu_lab 工具組合讀取、單位檢查與修改。框架不新增 value＋unit effect 或部分 cfg 合併。
 
@@ -147,6 +147,16 @@ Root 保留左側表單與 ledger、動作、訂閱、progress、splitter 寬度
 
 `ExperimentFigureArea` 是具體控件 owner，不引入 Protocol、factory、mixin、registry 或額外轉接層。原公開行為、同步例外、外觀與時序保持不變。Run、Analyze、Load、admission 與持久化規則仍由既有 owner 負責。MainWindow close-flow 不變。這個分工不改依賴、設定或跨 package 邊界。
 
+## Results browser 唯讀檢視
+
+Measure 的 Results browser 是選單開啟的獨立頂層視窗，不是 dialog。它唯讀索引 Database 的 run 與 Result ledger，呈現保存的圖、metadata、cfg 與 analysis 文件。Cfg 另列 cfg_type 與 schema_version，values 內的欄位使用相對路徑。Analysis summary 使用相對路徑，parameters 另列。瀏覽器不回填表單、不重新分析，也不寫入結果資料；開到新 tab 仍由既有 Load owner 決定 admission。這是 [[0063]] 原先不新增 cfg 檢視入口的例外，不讓 GUI 探測 adapter 持有的 live cfg／result。
+
+Results browser 的分組、filter、圖庫、細節與比較只讀保存內容，不查 catalog。樹使用保存的 experiment 字串。Metadata 經 datafile.read_doc 讀為有限 JSON，再由 app 投影所需的可缺欄位；單 run 的錯誤留在 issues，不影響其他 runs。這是唯讀歷史展示，不取代 experiment 對 Load／Save 的 RunMetadata 驗證，也不做 cfg schema 遷移。只有按 Open 才由 catalog owner 解析 adapter，沿原 Load admission 開 tab，成功後選中新 tab 並 raise 主視窗。依賴沿用 C8、C9；沒有 framework → 使用者實驗定義的依賴。
+
+使用者於 2026-10-24 裁定：「result browser應該與目前的實驗定義解耦，只是單純的解析cfg與顯示圖就好，就算cfg已經是舊版本version，或是實驗已經刪掉了，應該也不會影響使用。」
+
+使用者於 2026-10-23 裁定：「我傾向與可以在measure-gui中開啟，我考慮的是一個獨立視窗而不是dialog，因為這樣空間比較充足。」同次裁定納入原型的 cfg 身分、版本與相對欄位檢視回饋。GUI → experiment／resources 的依賴沿用 C8、C9 contracts；Result entry owner 提供不解析 component、不建立檔案或 lock 的歷史事件讀取。
+
 ## Adapter capability 與事件
 
 Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveControl、保存中心與 ArtifactHandover。Run 與 restore 的公開契約使用 RunRecord envelope。RunService 只將 acquisition metadata 裝進 record，持有並轉交它。cfg 與 Result 仍由 adapter 擁有，GUI 不探測其欄位或 shape。Acquired 沿 record.metadata 寫入，不保存 cfg。分析結果與 writeback draft 仍是 opaque handle，不收窄 workflow 的任意回傳值。
@@ -155,7 +165,9 @@ Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveContr
 
 Adapter 的 data_item 與 analysis_item 只交框架固定內容，不選格式、路徑或寫檔。Figure 取已提交 pane 的具名原生圖。框架在 owner thread 同步編碼，資料準備失敗交共用 experiment.artifacts 報出對應 data outputs，其他圖與分析仍嘗試保存。
 
-LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 RunRecord envelope、record.metadata 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單。原始 cfg 保存在 native 資料檔，透過公開 datafile.load 離線讀取為 Container，GUI 不提供檢視入口。使用者裁定、metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
+LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(stored)。BaseAdapter 委派核心 from_stored；框架只讀 RestoredRun 的 RunRecord envelope、record.metadata 與 cfg_issue，不探測歷史 cfg。cfg 不可用仍是成功 Load，reply 的 cfg_issue 是原因字串或 null，不再提供 has_cfg_snapshot。讀檔、restore 或歷史來源建立失敗時保留舊成果。Load 不回填表單。原始 cfg 保存在 native 資料檔，可透過公開 datafile.load 離線讀取為 Container，也可在 Results browser 唯讀檢視。這不改變 Load 與 adapter 的 opaque cfg 邊界。使用者裁定、metadata、分析來源與 storage 分界見 [[0063]]，typed restore 見 [[0069]]。
+
+使用者於 2026-10-24 裁定：「只在 open_tab_from_file 路徑隔離 make_form 失敗，tab 照常建立並 Load，表單區與 Run 顯示 factory 原文錯誤，Reset 走一般 fail-fast；一般 new-tab／Reset 不變」。歷史結果的 Load admission 不要求目前來源能建立量測表單。Framework tab owner 只在這條建立路徑隔離 adapter.make_form，保留明確無 Form 狀態，不改 lab adapter，也不偽造空 Form 或反填 cfg。範本綁定、defaults 與 Load 失敗仍傳出。Load 失敗清除新 tab 並恢復原焦點，不留下 partial tab。無 Form 的 Reset preparation 任一步失敗，表單區與 Run 改顯示本次錯誤，原 exception 仍傳出。已有 Form 的 Reset 失敗保舊。Factory 原因與 Reset 恢復契約見 [[0073]]。
 
 使用者於 2026-10-14 裁定：「擴充空間，那這兩個功能的定位應該是gui框架下的一個子模塊，對外解耦，對內可擴充。」並釐清：「Artifact目前，一個Artifact是一個寫入單位，但內部支援多個不同的項目。」對 adapter 只交內容、框架決定格式回答：「好，同意做法一」。
 

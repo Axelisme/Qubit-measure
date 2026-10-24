@@ -64,29 +64,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "tab.run_cancel",
-        "run_save:h_tab_run_cancel",
-        MethodSpec(
-            5.0,
-            "Request cancellation of the current run. Returns {ok, cancelled}: ok is always "
-            "true (the call succeeded); cancelled is BEST-EFFORT — true when a live run "
-            "was signalled to stop, false (a graceful no-op) when no run was in flight. "
-            "It does NOT mean the worker has stopped: the run's true terminal "
-            "('cancelled') is observed by wait(op) on the run handle.",
-        ),
-        agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
-        "run.running_tab",
-        "run_save:h_run_running_tab",
-        MethodSpec(
-            5.0,
-            "Current running tab",
-            readonly=True,
-        ),
-        agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
         "tab.save_data",
         "run_save:h_tab_save_data",
         MethodSpec(

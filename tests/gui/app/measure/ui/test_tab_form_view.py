@@ -364,7 +364,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
         del ctx
         return Form(
             SampleCfg,
-            {"gain": Expr("general.ext.amount"), "sweep": Range.between(1, 2, expts=3)},
+            {"gain": Expr("general.ext.amount"), "sweep": Range(1, 2, expts=3)},
         )
 
     SourceAdapter = Adapter(

@@ -399,20 +399,20 @@ def test_binding_survives_noop_connect_but_not_a_new_connection(
     client, second = make_restartable_client(tmp_path, monkeypatch)
     session = client.context.session
     first = session.bind()
-    client.transport.replies["device.connect"] = {
+    client.transport.replies["device.setup"] = {
         "ok": True,
         "result": {"operation_id": 1},
     }
-    second.replies["device.connect"] = client.transport.replies["device.connect"]
-    old_handle = first.send_gui_rpc("device.connect", {"name": "flux"})["handle"]
+    second.replies["device.setup"] = client.transport.replies["device.setup"]
+    old_handle = first.send_gui_rpc("device.setup", {"name": "flux"})["handle"]
     session.connect_to_gui(port=None, launch="never", clean=False)
     assert first.expose_operation(1) == old_handle
-    assert first.catalog["device.connect"]["method"] == "device.connect"
+    assert first.catalog["device.setup"]["method"] == "device.setup"
 
     session.connect_to_gui(port=9912, launch="never", clean=False)
     sent = list(second.sent)
     for call in (
-        lambda: first.send_gui_rpc("device.connect", {"name": "flux"}),
+        lambda: first.send_gui_rpc("device.setup", {"name": "flux"}),
         lambda: first.read_internal("operation.active", {}),
         lambda: first.expose_operation(1),
         lambda: first.catalog,
@@ -422,7 +422,7 @@ def test_binding_survives_noop_connect_but_not_a_new_connection(
         assert error.value.reason == "connection_lost"
     assert second.sent == sent
     current = session.bind()
-    new_handle = current.send_gui_rpc("device.connect", {"name": "flux"})["handle"]
+    new_handle = current.send_gui_rpc("device.setup", {"name": "flux"})["handle"]
     assert new_handle != old_handle
     with pytest.raises(GuiRpcError) as error:
         current.read_internal("operation.cancel", {}, operation_handle=old_handle)
@@ -494,15 +494,15 @@ def test_catalog_and_operation_snapshots_cannot_modify_session_state(
     client = make_client(tmp_path)
     session = client.context.session
     bound = session.bind()
-    client.transport.replies["device.connect"] = {
+    client.transport.replies["device.setup"] = {
         "ok": True,
         "result": {"operation_id": 7},
     }
-    handle = bound.send_gui_rpc("device.connect", {"name": "flux"})["handle"]
+    handle = bound.send_gui_rpc("device.setup", {"name": "flux"})["handle"]
     expected = bound.catalog
     for catalog in (session.catalog, bound.catalog):
-        catalog["device.connect"]["tool_names"].append("test-alias")
-        catalog["device.connect"]["params"]["test-alias"] = True
+        catalog["device.setup"]["tool_names"].append("test-alias")
+        catalog["device.setup"]["params"]["test-alias"] = True
         assert bound.catalog == expected
     handles = session.operation_handles
     assert handle in handles.values()

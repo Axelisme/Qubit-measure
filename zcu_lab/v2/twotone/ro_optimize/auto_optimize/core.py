@@ -29,7 +29,7 @@ from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Readout, Reset, SweepCfg
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
@@ -152,21 +152,6 @@ def auto_opt_result_to_grouped_payloads(
     result: AutoOptResult,
 ) -> dict[str, LabberPayload]:
     return RO_AUTO_GROUPED_AXES_SPEC.payloads_from_result(result)
-
-
-def save_auto_opt_grouped_result(
-    filepath: str,
-    result: AutoOptResult,
-    *,
-    comment: str = "",
-    tag: str = "twotone/ge/ro_optimize/auto",
-) -> str:
-    return RO_AUTO_GROUPED_AXES_SPEC.save_grouped_result(
-        filepath,
-        result,
-        comment=comment,
-        tag=tag,
-    )
 
 
 def _validate_auto_opt_arrays(

@@ -66,7 +66,7 @@ def host(qapp: QApplication) -> Iterator[Host]:
 def test_single_sweep_group_merges_title_and_preserves_commands_and_paths(
     host: Host, tmp_path: Path
 ) -> None:
-    form = Form(FlatCfg, {"scan_window": Range.between(10.0, 20.0, expts=11)})
+    form = Form(FlatCfg, {"scan_window": Range(10.0, 20.0, expts=11)})
     driver = host(form.default_input(FormEnv()))
     driver.screenshot(tmp_path / "01-flat-single-axis.png")
     assert driver.observe(object_name="form.fold.scan_window").text == (
@@ -115,8 +115,8 @@ def test_multiple_sweep_axes_start_open_and_keep_user_folds_on_refresh(
     form = Form(
         DualCfg,
         {
-            "scan_window": Range.between(10.0, 20.0, expts=11),
-            "bias_window": Range.between(0.0, 0.2, expts=3),
+            "scan_window": Range(10.0, 20.0, expts=11),
+            "bias_window": Range(0.0, 0.2, expts=3),
         },
     )
     driver = host(form.default_input(FormEnv()))
@@ -161,7 +161,7 @@ def test_groups_and_merged_axis_keep_declared_visible_order_after_publications(
 
     form = Form(
         OrderedCfg,
-        {"scan_window": Range.between(10.0, 20.0, expts=11)},
+        {"scan_window": Range(10.0, 20.0, expts=11)},
         field_order=("sample", "plain", "diagnostic", "scan_window", "tail"),
     )
     driver = host(form.default_input(FormEnv()))

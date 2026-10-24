@@ -11,10 +11,8 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.app.measure.writeback import WritebackItem
-from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormPath, FormPreview
+from zcu_tools.gui.form import FormPath
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AdapterGuide, AnalysisMode
 from ..writeback import WritebackDraft
@@ -26,6 +24,7 @@ from .ports import (
     SavePaneSnapshot,
     TabSnapshot,
 )
+from .tab_form import FormFactoryFailure
 from .tab_input import StartupTab, TabInput
 from .workspace_types import WorkspaceTab
 
@@ -72,16 +71,12 @@ class TabService:
         writeback: WritebackLifecyclePort,
         cfg_resources: TabFormResources,
         form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
-        captured_parameters: Callable[
-            [Mapping[str, str] | None], ParameterContext | None
-        ],
     ) -> None:
         """Inject one owner-sequence form source capture for Open and Reset only.
 
         form_sources captures parameters/library/devices/value cache with optional
-        named aliases overrides. It performs no hardware I/O. captured_parameters
-        serves explicit consumer queries, not cfg preview or Run; EMPTY returns
-        None without overrides. Errors propagate before registering a new tab.
+        named aliases overrides. It performs no hardware I/O.
+        Errors propagate before registering a new tab.
         """
         self._state = state
         self._registry = registry
@@ -90,32 +85,6 @@ class TabService:
         self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
-        self._captured_parameters = captured_parameters
-
-    def capture_parameters(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext | None:
-        """Freeze current point/library/aliases for an existing tab's consumer.
-
-        aliases maps alias names to concrete components for this capture only.
-        None and {} use global rows. EMPTY yields None without overrides.
-        Unknown tab and source or alias failures propagate; no observation guard is refreshed.
-        """
-        self._state.get_tab(tab_id)
-        return self._captured_parameters(aliases)
-
-    def preview_cfg(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> FormPreview:
-        """Preview current input leaves using the tab's fixed source snapshot.
-
-        None and empty aliases leave the snapshot unchanged. Nonempty aliases
-        raise FailedPreconditionError; use resource.reset(aliases=...) to replace
-        defaults with a one-shot source capture. No input or source is mutated.
-        """
-        if aliases:
-            raise FailedPreconditionError("Reset with aliases before previewing cfg")
-        return self._state.get_tab(tab_id).cfg.preview()
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
@@ -150,7 +119,9 @@ class TabService:
         metadata = None if tab.run.result is None else tab.run.result.metadata
         return TabSnapshot(
             adapter_name=tab.adapter_name,
-            cfg_input=tab.cfg.input.data,
+            cfg_input={}
+            if tab.cfg.unavailable_reason is not None
+            else tab.cfg.input.data,
             tab_id=tab_id,
             interaction=interaction,
             capabilities=tab.adapter.capabilities,
@@ -158,6 +129,7 @@ class TabService:
                 result=tab.run.result,
                 partial_result=tab.run.partial_result,
                 source_path=tab.run.source_path,
+                analysis_source_issue=tab.run.analysis_source_issue,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
                 acquisition_run_id=(metadata.run_id if metadata is not None else None),
@@ -206,6 +178,7 @@ class TabService:
         from_dict: WorkspaceTab | None = None,
         *,
         input: TabInput | None = None,
+        allow_factory_failure: bool = False,
     ) -> str:
         """Create a tab form with one fixed source snapshot and fresh defaults.
 
@@ -217,7 +190,9 @@ class TabService:
         Compatible restoration logs discarded paths, also available through
         dropped_input_paths. Source captures and pane results are not restored.
         Owner-only; GUI owns the created tab, caller retains its input copy.
-        Failed preparation publishes no partial tab.
+        Failed preparation publishes no partial tab. Only open_tab_from_file
+        sets allow_factory_failure: adapter.make_form failure then retains an
+        unavailable resource. Template binding and defaults remain fail-fast.
         """
         if from_dict is not None and input is not None:
             raise ValueError("Specify either reload input or authored input, not both")
@@ -230,8 +205,13 @@ class TabService:
             from_dict is not None,
         )
 
-        def make_form(ctx: FormContext) -> Form[ConfigBase]:
-            form = adapter.make_form(ctx)
+        def make_form(ctx: FormContext) -> Form[ConfigBase] | FormFactoryFailure:
+            try:
+                form = adapter.make_form(ctx)
+            except Exception as exc:
+                if not allow_factory_failure:
+                    raise
+                return FormFactoryFailure(exc)
             form.bind_templates(self._registry.templates, adapter=adapter_name)
             return form
 

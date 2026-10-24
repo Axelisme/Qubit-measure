@@ -16,7 +16,7 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     TablePulseReadout,
 )
-from zcu_tools.program.v2.modules.reset import NoneResetCfg, TwoPulseResetCfg
+from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -159,7 +159,10 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
         TableLengthPulse("first", first, lengths=[0.1, 0.3], idx_reg="length"),
         TableLengthPulse("second", second, lengths=[0.2, 0.1], idx_reg="length"),
     ]
-    modules: list[Module] = [Join(*pulses[:branches]), receiver().build("readout")]
+    modules: list[Module] = [
+        Join(None, [None], *[[None, pulse, None] for pulse in pulses[:branches]]),
+        receiver().build("readout"),
+    ]
     if preceding_pulse:
         modules.insert(0, drive(length=0.04).build("reset"))
     try:
@@ -258,9 +261,7 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
             ch=0, nqz=1, freq=60, gain=0.2, waveform=ConstWaveformCfg(length=0.2)
         ),
     ).build("reset")
-    request, _, _ = acquire(
-        [NoneResetCfg().build("none"), reset, receiver().build("readout")]
-    )
+    request, _, _ = acquire([None, reset, receiver().build("readout")])
     assert len(request.materialize_point(0).events) == 3
     assert [e.start_us for e in request.materialize_point(0).events[:2]] == [0, 0]
     assert request.materialize_point(0).events[-1].start_us == pytest.approx(

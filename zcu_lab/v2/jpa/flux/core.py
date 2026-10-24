@@ -19,8 +19,8 @@ from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.device import set_flux
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.device import set_flux
 
 
 @dataclass(frozen=True)

@@ -1,10 +1,9 @@
 """Real input events switch logarithmic integer-list representations."""
 
 from pathlib import Path
-from typing import Annotated
 
 from zcu_tools import cfg_model
-from zcu_tools.gui.form import Display, FormEnv, FormState
+from zcu_tools.gui.form import FormEnv, FormState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -12,7 +11,7 @@ from tests.gui._user_input import ComponentDriver
 
 
 class IntegerPlan(cfg_model.ConfigBase):
-    depths: Annotated[list[int], Display(collapsed=False)]
+    depths: list[int]
 
 
 def test_log_list_real_input_and_actual_point_count(qapp, tmp_path: Path):
@@ -24,6 +23,7 @@ def test_log_list_real_input_and_actual_point_count(qapp, tmp_path: Path):
     qapp.processEvents()
     driver = ComponentDriver(editor)
     try:
+        driver.click(object_name="form.fold.depths")
         driver.screenshot(tmp_path / "01-log.png")
         driver.enter_text(object_name="form.input.depths.max", value="3")
         driver.screenshot(tmp_path / "02-deduplicated.png")

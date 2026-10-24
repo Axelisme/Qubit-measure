@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Self, TypeAlias
+from typing import Self
 
 from qick.asm_v2 import AsmInst, QickParam, WriteLabel
 
@@ -9,11 +9,9 @@ from zcu_tools.program.v2.modular import ModularProgramV2
 
 from ..ir.hw_semantics import ADDR_REG, needs_big_jump
 from ..ir.operands import parse_register
-from .base import Module
+from .base import Module, ModuleGroup, as_modules
 
 logger = logging.getLogger(__name__)
-
-SubModule: TypeAlias = Module | list[Module]
 
 
 def _emit_jump_s15(prog) -> None:
@@ -66,10 +64,9 @@ class Repeat(Module):
                 f"(named after Repeat name {name!r})"
             )
 
-    def add_content(self, mod: SubModule) -> Self:
-        if isinstance(mod, Module):
-            mod = [mod]
-        self.sub_modules.extend(mod)
+    def add_content(self, mod: ModuleGroup) -> Self:
+        """Append a module or ordered group; skip None entries (no module)."""
+        self.sub_modules.extend(as_modules(mod))
         return self
 
     def init(self, prog: ModularProgramV2) -> None:
@@ -124,6 +121,9 @@ class Branch(Module):
     iteration of that outer loop the counter selects the corresponding branch,
     so branch *i* runs exactly once (at iteration *i*).
 
+    Branches accept modules or sequences; None entries mean no module and are
+    skipped. A None branch remains an empty selectable case.
+
     Branch selection uses a dispatch-table island:
 
     1. compute ``s15 = &table_0 + compare_reg * entry_words``
@@ -137,7 +137,7 @@ class Branch(Module):
     """
 
     def __init__(
-        self, name: str, *branches: SubModule, compare_by: str | None = None
+        self, name: str, *branches: ModuleGroup, compare_by: str | None = None
     ) -> None:
         self.name = name
         self.compare_reg = compare_by if compare_by is not None else name
@@ -146,9 +146,7 @@ class Branch(Module):
         if len(branches) < 2:
             raise ValueError("Branch requires at least 2 branches")
 
-        self.branches: list[list[Module]] = [
-            [b] if isinstance(b, Module) else list(b) for b in branches
-        ]
+        self.branches: list[list[Module]] = [as_modules(branch) for branch in branches]
 
     def init(self, prog: ModularProgramV2) -> None:
         for branch in self.branches:

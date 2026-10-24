@@ -27,6 +27,15 @@ class WidgetObservation:
 
 
 @dataclass(frozen=True)
+class MenuActionObservation:
+    """One visible popup entry, in displayed order, without exposing QAction."""
+
+    text: str  # Exact visible caption, including counts and ellipsis.
+    enabled: bool  # Effective action availability in the open menu.
+    object_name: str  # Stable action identity if supplied by the UI.
+
+
+@dataclass(frozen=True)
 class TextInputObservation:
     """Visible line-edit text, focus, editing policy and accessible description."""
 

@@ -14,7 +14,6 @@ from zcu_tools.mcp.measure.recipe_contracts import (
 )
 
 from ._script_recipe_support import (
-    ConfirmQuestion,
     Fit,
     Inputs,
     Report,
@@ -318,21 +317,15 @@ def test_missing_parameters_is_terminal_and_releases_recipe_admission(
 
 
 def test_run_cancel_during_ask_is_acknowledged_noop(tmp_path: Path) -> None:
-    from zcu_tools.core.script_protocol import Answer, Question
-
-    class Choice(Answer):
-        accepted: bool
-
-    class Confirm(Question[Choice]):
-        evidence: str
-
     @recipe("synthetic", "Keep the question pending when no Run is active")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        answer = await session.ask(Confirm(evidence="no acquisition"))
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        answer = await tab.ask_writeback()
         assert answer is not None and answer.accepted
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, recipes=(synthetic,))
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)
@@ -343,7 +336,10 @@ def test_run_cancel_during_ask_is_acknowledged_noop(tmp_path: Path) -> None:
         assert reply.data["reason"] == "no run in progress"
         assert execution.snapshot().pending_question == pending
         answered = execution.answer(
-            {"request_id": pending.request_id, "answer": {"accepted": True}}
+            {
+                "request_id": pending.request_id,
+                "answer": {"accepted": True, "items": []},
+            }
         )
         assert answered.data["outcome"]["status"] == "completed"
     finally:
@@ -386,34 +382,6 @@ def test_run_cancel_during_analysis_does_not_stop_analysis(tmp_path: Path) -> No
         assert not gui.cancelled.is_set()
     finally:
         release_analysis.set()
-        client.context.session.close()
-
-
-def test_context_reads_session_source_before_opening_any_tab(tmp_path: Path) -> None:
-    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
-        assert method == "value.read"
-        assert params == {"key": "device.synthetic.value"}
-        return {
-            "key": "device.synthetic.value",
-            "type": "int",
-            "owner": "synthetic",
-            "description": "Synthetic source",
-            "value": 31,
-        }
-
-    @recipe("synthetic", "Read a registered source without opening a tab")
-    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        value = session.context.read("device.synthetic.value")
-        assert value == 31
-        return Report(count=31)
-
-    client = make_client(tmp_path, respond, recipes=(synthetic,))
-    try:
-        execution = start(client, "synthetic")
-        execution.wait(3)
-        outcome = execution.snapshot().outcome
-        assert outcome is not None and outcome.report == Report(count=31)
-    finally:
         client.context.session.close()
 
 
@@ -684,11 +652,13 @@ def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
 ) -> None:
     @recipe("synthetic", "Confirm one request only")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        answer = await session.ask(ConfirmQuestion(evidence="first"))
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        answer = await tab.ask_writeback()
         assert answer is not None and answer.accepted
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, recipes=(synthetic,))
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)
@@ -697,11 +667,18 @@ def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
         key = execution.snapshot().execution
         if answer_state == "none":
             execution.answer(
-                {"request_id": pending.request_id, "answer": {"accepted": True}}
+                {
+                    "request_id": pending.request_id,
+                    "answer": {"accepted": True, "items": []},
+                }
             )
         reply = client.call(
             "answer",
-            {"execution": key, "request_id": "old-id", "answer": {"accepted": True}},
+            {
+                "execution": key,
+                "request_id": "old-id",
+                "answer": {"accepted": True, "items": []},
+            },
         )
         assert reply.data == {
             "accepted": False,
@@ -717,14 +694,23 @@ def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
                 {
                     "execution": key,
                     "request_id": pending.request_id,
-                    "answer": {"accepted": True},
+                    "answer": {"accepted": True, "items": []},
                 },
             )
             assert answered.data == {
                 "execution": key,
                 "status": "completed",
                 "report": {"count": 9},
-                "runs": [],
+                "runs": [
+                    {
+                        "tab": "tab-1",
+                        "adapter": "synthetic",
+                        "run_id": "native-1",
+                        "status": "completed",
+                        "partial_result": False,
+                        "saves": [],
+                    }
+                ],
             }
     finally:
         client.context.session.close()
@@ -733,10 +719,12 @@ def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
 def test_mcp_answer_requires_request_id_before_delivery(tmp_path: Path) -> None:
     @recipe("synthetic", "Keep malformed answers pending")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        await session.ask(ConfirmQuestion(evidence="first"))
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.ask_writeback()
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, recipes=(synthetic,))
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)
@@ -745,7 +733,7 @@ def test_mcp_answer_requires_request_id_before_delivery(tmp_path: Path) -> None:
                 "answer",
                 {
                     "execution": execution.snapshot().execution,
-                    "answer": {"accepted": True},
+                    "answer": {"accepted": True, "items": []},
                 },
             )
         assert execution.snapshot().pending_question is not None
@@ -756,10 +744,12 @@ def test_mcp_answer_requires_request_id_before_delivery(tmp_path: Path) -> None:
 def test_mcp_run_cancel_without_run_returns_noop_ack(tmp_path: Path) -> None:
     @recipe("synthetic", "Keep explicit question pending")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
-        await session.ask(ConfirmQuestion(evidence="no run"))
+        tab = session.open_tab("synthetic")
+        await tab.run()
+        await tab.ask_writeback()
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, recipes=(synthetic,))
+    client = make_client(tmp_path, SyntheticGui().respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)

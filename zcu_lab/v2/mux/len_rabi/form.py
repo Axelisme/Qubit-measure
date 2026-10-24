@@ -5,7 +5,7 @@ from dataclasses import replace
 from zcu_tools.cfg_model import FormNode, Hidden, Slot
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
     captured_mux_participants,
@@ -14,7 +14,7 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_relax_delay,
     mux_tone_initials,
 )
-from zcu_lab.v2._support.measure.rabi_initial_values import len_rabi_initial_values
+from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_initial_values
 
 from .core import MuxLenRabiCfg
 

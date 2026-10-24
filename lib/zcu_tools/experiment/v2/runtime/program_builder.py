@@ -24,6 +24,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SweepCfg,
 )
+from zcu_tools.program.v2.modules.base import ModuleGroup, as_modules
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 if TYPE_CHECKING:
@@ -125,8 +126,8 @@ class ModuleFacade(ABC):
     """Fluent module assembly shared by the program builder's typed helpers."""
 
     @abstractmethod
-    def add(self, *modules: Module | Sequence[Module]) -> Self:
-        """Append modules or ordered module groups and return this builder."""
+    def add(self, *modules: ModuleGroup) -> Self:
+        """Append modules or ordered groups; skip None (no module), return self."""
         ...
 
     def add_reset(self, name: str, cfg: ResetCfg | None) -> Self:
@@ -216,13 +217,10 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self._sweeps: list[tuple[str, SweepCfg | int]] = []
         self._raw2signal_fn: Callable[[Any], SignalArray] | None = None
 
-    def add(self, *modules: Module | Sequence[Module]) -> Self:
-        """Append modules or ordered module groups without copying until build."""
+    def add(self, *modules: ModuleGroup) -> Self:
+        """Append modules/groups, skipping None (no module); copy only at build."""
         for module_or_group in modules:
-            if isinstance(module_or_group, Module):
-                self._modules.append(module_or_group)
-            else:
-                self._modules.extend(module_or_group)
+            self._modules.extend(as_modules(module_or_group))
         return self
 
     def declare_sweep(self, name: str, spec: SweepCfg | int) -> Self:

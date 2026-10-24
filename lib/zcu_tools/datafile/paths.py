@@ -2,32 +2,12 @@
 
 The dict-based ``save_data`` / ``load_data`` / ``save_local_data`` /
 ``load_local_data`` layer is gone (ADR-0063). This module retains the
-filesystem-path helpers: datafolder layout, extension normalization, and caller
-path reservation.
+filesystem-path helpers: extension normalization and caller path reservation.
 """
 
 from __future__ import annotations
 
 import os
-from datetime import datetime
-
-
-def get_datafolder_path(
-    database_dir: str,
-    name: str = "",
-    now: datetime | None = None,
-) -> str:
-    """Return today's data-folder path without creating it."""
-    database_dir = os.path.abspath(database_dir)
-    timestamp = datetime.today() if now is None else now
-    yy, mm, dd = timestamp.strftime("%Y-%m-%d").split("-")
-    return os.path.join(database_dir, name, os.path.join(yy, mm, f"Data_{mm}{dd}"))
-
-
-def create_datafolder(database_dir: str, name: str = "") -> str:
-    save_dir = get_datafolder_path(database_dir, name)
-    os.makedirs(save_dir, exist_ok=True)
-    return save_dir
 
 
 def format_ext(filepath: str) -> str:
@@ -45,23 +25,6 @@ def format_ext(filepath: str) -> str:
     if filepath.endswith(".hdf5"):
         return filepath
     return filepath + ".hdf5"
-
-
-def remove_ext(filepath: str) -> str:
-    """
-    Remove the file extension from a file path.
-
-    Args:
-        filepath (str): The file path to format.
-
-    Returns:
-        str: The file path without the extension.
-    """
-    if filepath.endswith(".hdf5"):
-        return filepath[: -len(".hdf5")]
-    if filepath.endswith(".h5"):
-        return filepath[: -len(".h5")]
-    return filepath
 
 
 def reserve_labber_filepath(filepath: str) -> str:

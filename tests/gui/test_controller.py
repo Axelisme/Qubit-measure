@@ -275,7 +275,7 @@ def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
     with pytest.raises(RuntimeError, match="busy"):
         cf.ctrl.close_tab(tab_id)
 
-    cancelled = cf.ctrl.cancel_analyze(tab_id)
+    cancelled = cf.ctrl.run_analyze_control.cancel_analyze(tab_id)
 
     assert cancelled is True
     # The View's interactive host is torn down (dual of mount_interactive_analysis).
@@ -291,7 +291,7 @@ def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
 def test_cancel_analyze_without_interactive_is_graceful(cf):
     tab_id = cf.ctrl.new_tab("fake")
     # No interactive analyze in flight -> graceful no-op (still unmounts defensively).
-    assert cf.ctrl.cancel_analyze(tab_id) is False
+    assert cf.ctrl.run_analyze_control.cancel_analyze(tab_id) is False
     cf.view.unmount_interactive_analysis.assert_called_once_with(
         tab_id, restore_result=True
     )

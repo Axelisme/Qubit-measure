@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
+from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
 from .analysis import CZAmplitudeAnalysis
 from .core import CZAmplitudeCfg, CZAmplitudeExp, CZAmplitudeResult

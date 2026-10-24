@@ -16,7 +16,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Join, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2._support import live_heatmap
+from zcu_lab.v2.support import live_heatmap
 
 
 @dataclass(frozen=True)

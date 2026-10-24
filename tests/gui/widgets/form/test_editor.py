@@ -17,7 +17,6 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.gui.form import (
-    Display,
     FormEnv,
     FormErrors,
     FormInput,
@@ -31,6 +30,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 from tests.gui._form_context import captured_ext_env
 from tests.gui._form_converters import RebuildingForm
 from tests.gui.widgets.form._field_errors import field_error as row_error
+from tests.gui.widgets.form._sections import expand_sections
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -91,9 +91,8 @@ class SampleForm(RebuildingForm):
     branch: Annotated[
         StaticBranch | AlternateBranch,
         Field(discriminator="kind"),
-        Display(collapsed=False),
     ] = Field(default_factory=StaticBranch)
-    section: Annotated[Section | None, Display(collapsed=False)] = None
+    section: Section | None = None
     mode: Literal["alpha", "beta"] = "alpha"
 
     @classmethod
@@ -287,6 +286,7 @@ def test_branch_dropdown_switches_to_fresh_core_defaults(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
+    expand_sections(editor, "branch")
     commit_text(line(editor, "branch.shared"), "6")
     selector = combo(editor, "form.input.branch")
     selector.setCurrentIndex(selector.findText("alternate"))
@@ -312,6 +312,7 @@ def test_nullable_section_activation_child_edit_and_deactivation(
     assert isinstance(enabled, QCheckBox)
     enabled.setChecked(True)
     qapp.processEvents()
+    expand_sections(editor, "section")
     commit_text(line(editor, "section.stop"), "5")
     result = state.result(env)
     assert isinstance(result, SampleForm)
@@ -565,6 +566,7 @@ def test_inactive_branch_discards_only_its_local_unparsed_text(
     state = FormState(SampleForm.default_input(env))
     editor = FormEditor(state, env)
     views.append(editor)
+    expand_sections(editor, "branch")
     commit_text(line(editor, "branch.old_only"), "-")
     commit_text(line(editor, "amount"), "-")
     selector = combo(editor, "form.input.branch")

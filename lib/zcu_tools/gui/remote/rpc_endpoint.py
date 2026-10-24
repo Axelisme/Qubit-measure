@@ -46,7 +46,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from zcu_tools.gui.remote.errors import ErrorCode, ErrorEnvelope, RemoteError
 from zcu_tools.gui.remote.framing import (
@@ -70,8 +70,6 @@ _OUTBOUND_BYTES_MAX = 16 << 20
 _QUEUE_DROP_BUDGET = 8
 
 _SHUTDOWN_SENTINEL: bytes = b""
-
-_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -365,20 +363,6 @@ class NdjsonRpcEndpoint:
         """
         with self._clients_lock:
             return bool(self._clients)
-
-    def client_state_transaction(
-        self, link: ClientLink, operation: Callable[[], _T]
-    ) -> _T:
-        """Run one app-owned per-client state operation under the registry lock.
-
-        The endpoint does not inspect ``link.app_ctx``.  Routers use this narrow
-        transaction to linearize subscription mutation/listing with lazy push
-        recipient selection.  ``operation`` must be non-blocking and must not
-        call back into the endpoint.
-        """
-        del link  # The router owns the app state; this seam only serializes access.
-        with self._clients_lock:
-            return operation()
 
     # ------------------------------------------------------------------
     # Outbound: reply (to one link) + broadcast (push fan-out)

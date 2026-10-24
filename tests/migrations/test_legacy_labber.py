@@ -6,12 +6,14 @@ import h5py as h5
 import numpy as np
 import pytest
 from zcu_tools.datafile import (
+    GroupedLabberData,
+    LabberData,
     LabberMetadata,
     LabberPayload,
+    format_ext,
     load_labber_logs,
-    save_grouped_labber_data,
-    save_labber_data,
 )
+from zcu_tools.datafile.grouped import write_grouped_labber_data_file
 
 from migrations.legacy_labber import (
     LegacyAxisSchema,
@@ -49,11 +51,12 @@ def test_explicit_variable_identity_and_reader_metadata_are_preserved(
     )
     metadata = LabberMetadata(tags=["synthetic"], project="test_project")
     if representation == "single":
-        save_labber_data(
-            str(source), z=payload.data, axes=payload.axes, metadata=metadata
-        )
+        LabberData(payload.data, payload.axes, metadata=metadata).save(str(source))
     else:
-        save_grouped_labber_data(str(source), {"measured": payload}, metadata=metadata)
+        write_grouped_labber_data_file(
+            format_ext(str(source)),
+            GroupedLabberData({"measured": payload}, metadata=metadata),
+        )
     before = source.read_bytes()
     loaded, actual_metadata = load_legacy_labber_payload(
         source, schema=(_schema("measured"),)
@@ -70,11 +73,9 @@ def test_unmarked_file_does_not_guess_multiple_variable_identities(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "signal.hdf5"
-    save_labber_data(
-        str(source),
-        z=("voltage", "V", np.array([1.0])),
-        axes=[("time", "s", np.array([0.0]))],
-    )
+    LabberData(
+        ("voltage", "V", np.array([1.0])), [("time", "s", np.array([0.0]))]
+    ).save(str(source))
     with pytest.raises(ValueError, match="cannot identify multiple"):
         load_legacy_labber_payload(source, schema=(_schema("one"), _schema("two")))
 
@@ -90,13 +91,12 @@ def unmarked_logs(tmp_path: Path) -> tuple[Path, tuple[LegacyVariableSchema, ...
         ]
     ):
         path = source if index == 0 else tmp_path / "additional.hdf5"
-        save_labber_data(
-            str(path),
-            z=(name, "V", np.asarray(signal)),
-            axes=[(axis, "s", np.asarray(values))],
+        LabberData(
+            (name, "V", np.asarray(signal)),
+            [(axis, "s", np.asarray(values))],
             timestamps=np.array([1759276800.0 + index]),
             metadata=LabberMetadata(tags=["offline"], creation_time=1759276800.0),
-        )
+        ).save(str(path))
         if index:
             with h5.File(source, "r+") as root, h5.File(path, "r") as extra:
                 group = root.create_group("Log_2")
@@ -162,10 +162,8 @@ def test_unmarked_log_schema_mismatch_is_located(
 
 def test_declared_units_are_not_guessed_or_converted(tmp_path: Path) -> None:
     source = tmp_path / "signal.hdf5"
-    save_labber_data(
-        str(source),
-        z=("voltage", "mV", np.array([1.0])),
-        axes=[("time", "s", np.array([0.0]))],
-    )
+    LabberData(
+        ("voltage", "mV", np.array([1.0])), [("time", "s", np.array([0.0]))]
+    ).save(str(source))
     with pytest.raises(ValueError, match="unit"):
         load_legacy_labber_payload(source, schema=(_schema("one"),))

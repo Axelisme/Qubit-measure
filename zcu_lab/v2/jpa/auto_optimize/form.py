@@ -3,8 +3,8 @@
 from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.jpa.auto_optimize.core import JPAOptCfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
@@ -37,7 +37,7 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
             "jpa_flux_dev": flux_source,
             "flux_unit": "A",
             "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
-            "jpa_freq": Range.between(
+            "jpa_freq": Range(
                 "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
             ),
             "jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101),

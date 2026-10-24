@@ -72,6 +72,8 @@ results browser yet. Those consumers still use `to_summary_dict`.
   `spec.tag` 提供 experiment tag。`restore` 將已讀 Container 與 spec 交給 `restore_run`，不建構 core。
   Writeback 型別由 `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久 ModuleSpec。
 - [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
+  `services.results_index.scan_results(project_root)` 供結果瀏覽器與 RPC 共用唯讀 `ResultsIndex`。它掃描各 Database entry 的 run 目錄，從 datafile.read_doc 讀保存 metadata，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
+  `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
@@ -84,8 +86,6 @@ results browser yet. Those consumers still use `to_summary_dict`.
 - [`remote/`](remote/README.md)：與 `ui/` 平級的 GUI-process driving adapter，將 RPC 意圖交給
   application commands/queries。`remote.method_specs` public import path 不載入
   Qt-bound service code；MCP bridge 不在本 package。
-- `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
-  framework contract 分開命名。
 
 resources.entry executor 與 remote handler／wire types 留在各自 owner。
 App composition 協調 Artifact 與 Writeback。
@@ -125,6 +125,14 @@ subscriptions, editors and timers before deleting children; they never drain
 or disconnect the shared session. Native Ask answers and cancellation drain
 continue on the retained operation worker and lease, never on the UI loop.
 
+The toolbar keeps New Tab ▾ on the left and Setup…, SoC…, Devices…, Inspect…,
+and More ▾ on the right. More lists Reload experiments, Retry skipped tabs
+(only when recovery has skipped tabs), Workflow tabs / Experiment tabs,
+Predictor…, and Results browser… in that order. The tab switch names the family
+it will reveal. Catalog recovery changes Reload experiments to Retry reload.
+Remote control disables reload and retry while leaving the inspection and tab
+navigation entries available.
+
 The toolbar opens Setup… and SoC… as separate non-modal windows. Setup manages
 result entries and working points; SoC connects the board and displays soccfg
 through `Controller.soc_control`. The named `soc` window supports remote screenshots.
@@ -133,8 +141,8 @@ Run disables Setup and SoC submissions. Inspect, Devices and ARB retain their
 existing Run policy. Remote control makes all five shared dialogs read-only;
 Local restores editing subject to each dialog's Run and validation gates.
 
-`Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
-owner thread. `register_device` adopts a built driver through DeviceService.
+`Controller.session_services.soc_connection.install_soc` / `uninstall_soc` publish
+a caller-built board on the owner thread. `register_device` adopts a built driver through DeviceService.
 `close()` only drains work, leaving resources available for caller callbacks.
 `finish_close()` drains, runs startup callbacks in reverse order, then calls
 `close_hardware()` to close registered drivers and unpublish the board.
@@ -193,6 +201,9 @@ User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
 
 ## Figure presentation
+
+`services/run_analyze_control.py` 的 `MeasurePlotHost` 在 Qt canvas 掛載後通知 pane，
+沿用 `QtPlotHost` 的 owner-thread 繪圖與 release 契約。
 
 Run、Analysis、Post-analysis、Workflow 與 Data 的具名圖預覽，四張以內在同一頁平鋪，
 超過四張時每頁最多四張。上一頁／下一頁按鈕與 `i / N` 顯示目前頁次。
@@ -276,6 +287,13 @@ Hosting decisions and their reasons are in ADR-0067 and ADR-0068.
 
 `Session.cfg` owns one `TabFormResource`. The resource owns one `FormState`
 and captures parameters, library and cached device infos on Open, Refresh and Reset. Preview, result and Run use that capture until the next explicit source action. Refresh preserves all authored data and explicit selections, including expression drafts and previously resolved direct defaults. Reset recaptures sources and computes fresh defaults. Capture and factory failures preserve the previous form.
+Only `open_tab_from_file` isolates adapter `make_form` failure so native history
+can still load without a Form. Template binding and default construction still
+fail before publication. The form area and disabled Run show the factory reason.
+Reset uses the normal source capture and factory: success installs a real Form;
+any preparation failure propagates unchanged, leaving no Form and updating the
+visible reason, including capture, template binding and defaults failures. Native cfg
+never supplies form input. See ADR-0073 and ADR-0067.
 Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Setup and each point own independent alias files. Open/Refresh/Reset capture the selected point's table. Inspect Apply, RPC and startup Apply save only that point; without a selected point they fail with no_context. Missing files are empty, without setup or preset fallback. Inspect alias drafts capture entry/point identity. Clean drafts follow selection; dirty drafts reject Apply to another target until Revert loads the current point.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.

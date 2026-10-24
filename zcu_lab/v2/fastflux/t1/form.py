@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 from .core import T1Cfg
 
@@ -27,8 +27,8 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "gain": Range.between(0.0, 0.0, expts=1),
-            "length": Range.between(0.1, relax_delay, expts=101),
+            "gain": Range(0.0, 0.0, expts=1),
+            "length": Range(0.1, relax_delay, expts=101),
             "relax_delay": relax_delay,
             "reps": 1000,
             "rounds": 10,

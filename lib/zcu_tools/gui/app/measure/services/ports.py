@@ -21,7 +21,6 @@ from typing import (
 from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormPath
-from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.types import ParameterContext
 
 if TYPE_CHECKING:
@@ -63,6 +62,8 @@ class RunPaneSnapshot:
     run_id: str | None = None
     acquisition_run_id: str | None = None
     partial_result: bool = False
+    # Fixed Load source diagnostic, or None for a readable source/non-Load.
+    analysis_source_issue: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,22 +168,6 @@ class RestoreReport:
 
 
 @runtime_checkable
-class ContextWritePort(Protocol):
-    """App library structure commands carrying persistent Specs.
-
-    ParameterContext fixes the destination and expression/reference data.
-    ContextService owns the resource transaction and publication; no live
-    library handle, batch writeback or implicit target is exposed here.
-    """
-
-    def apply_library_change(
-        self, parameters: ParameterContext, change: LibraryChange
-    ) -> None:
-        """Apply one typed structure command; target/Spec/write errors propagate."""
-        ...
-
-
-@runtime_checkable
 class TabLifecyclePort(Protocol):
     """Tab create/restore/close + cfg as commanded by ``WorkspaceService``.
 
@@ -198,8 +183,14 @@ class TabLifecyclePort(Protocol):
         from_dict: WorkspaceTab | None = None,
         *,
         input: TabInput | None = None,
+        allow_factory_failure: bool = False,
     ) -> str:
-        """Create or restore a tab using the current session sources."""
+        """Create or restore a tab using the current session sources.
+
+        allow_factory_failure is reserved for open_tab_from_file: keep an
+        unavailable form resource if adapter.make_form fails. Other preparation
+        errors propagate before publication; no empty Form or cfg is supplied.
+        """
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
@@ -241,10 +232,18 @@ class WritebackLifecyclePort(Protocol):
 
 
 @runtime_checkable
-class TabAnalyzeWritePort(Protocol):
-    """The narrow State-write contract an analyze / post-analyze policy depends
-    on (ADR-0066). Result replacement methods return detached resources for
-    post-commit draft cleanup."""
+class AnalyzeStatePort(Protocol):
+    """State reads and writes consumed by analyze and post-analyze services.
+
+    Result replacement returns detached resources for post-commit cleanup.
+    """
+
+    def is_tab_busy(self, tab_id: str) -> bool: ...
+
+    @property
+    def session_env(self) -> SessionEnv: ...
+
+    def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
 
     def set_tab_analyzing(self, tab_id: str, *, analyzing: bool) -> None: ...
     def update_tab_analyze(
@@ -267,35 +266,3 @@ class TabAnalyzeWritePort(Protocol):
         writeback_draft: object | None = None,
         source_operation_id: int | None = None,
     ) -> RetiredPaneResources: ...
-
-
-@runtime_checkable
-class TabBusyQueryPort(Protocol):
-    """Dynamic per-tab busy query shared by run/analyze operation boundaries."""
-
-    def is_tab_busy(self, tab_id: str) -> bool: ...
-
-
-@runtime_checkable
-class TabAnalyzeReadPort(Protocol):
-    """The narrow State-read contract an analyze / post-analyze policy needs.
-
-    Analyze services need the immutable facts required to build request objects
-    at the operation boundary: the current tab and the active experiment context.
-    They do not get the rest of ``State`` through their type contract.
-    """
-
-    @property
-    def session_env(self) -> SessionEnv: ...
-
-    def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
-
-
-@runtime_checkable
-class AnalyzeStatePort(
-    TabBusyQueryPort,
-    TabAnalyzeReadPort,
-    TabAnalyzeWritePort,
-    Protocol,
-):
-    """Complete State surface consumed by analyze and post-analyze services."""

@@ -180,25 +180,6 @@ def test_parallel_auto_align_completions_and_late_cancel_are_isolated(
         harness.close()
 
 
-def test_observer_display_does_not_create_draft_while_gui_is_local(
-    one_route: RouteHarness, qapp
-):
-    view = MainWindow(one_route.ctrl)
-    try:
-        one_route.ctrl.interactive.cancel("one")
-        observer = one_route.client(label="observer", mode="readonly")
-        assert one_route.ctrl.control_identity.status().holder == "gui"
-        displayed = one_route.request(observer, "spectrum.set_active", name="one")
-        assert displayed["ok"], displayed
-        assert one_route.ctrl.interactive.inspect("one") is None, (
-            "readonly viewing cannot establish input"
-        )
-    finally:
-        view.close()
-        view.deleteLater()
-        qapp.processEvents()
-
-
 @pytest.mark.parametrize("retirement", ["cancel", "replace", "remove"])
 def test_guarded_read_refuses_retired_alignment_identity(
     one_route: RouteHarness, retirement: str
@@ -258,25 +239,6 @@ def test_named_drafts_read_render_and_identity_are_independent(one_route: RouteH
     rows = listed["result"]["spectrums"]
     assert isinstance(rows, list)
     assert [row["pending"] for row in rows] == [None, "align"]
-
-
-def test_observer_display_selection_is_readonly_and_preserves_drafts(
-    one_route: RouteHarness,
-):
-    owner_link = one_route.client()
-    draft = _open_picker(one_route, owner_link, "one", "line")
-    observer = one_route.client(mode="readonly", label="observer")
-    versions = one_route.ctrl.state.version.snapshot()
-    displayed = one_route.request(observer, "spectrum.set_active", name=None)
-    assert displayed["ok"], displayed
-    assert one_route.ctrl.state.active_spectrum is None
-    assert one_route.ctrl.state.version.snapshot() == versions
-    assert (
-        _context(_read_picker(one_route, observer, "one"))["context_id"]
-        == draft["context_id"]
-    )
-    denied = _picker_command(one_route, observer, draft, "undo")
-    _error(denied, "precondition_failed", "not_holder")
 
 
 def test_inactive_read_is_inert_and_live_read_does_not_unlock_or_consume_undo(

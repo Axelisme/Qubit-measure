@@ -22,7 +22,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 def _default_population_states() -> NDArray[np.int64]:

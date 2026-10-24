@@ -17,6 +17,7 @@ from zcu_tools.experiment import (
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
+    save_labber,
 )
 from zcu_tools.experiment.records import RunRecord
 
@@ -127,7 +128,7 @@ def test_grouped_axes_spec_exports_typed_result(tmp_path: Path) -> None:
         result=_GroupedResult(params=params, scores=scores),
     )
     written = tmp_path / "grouped.hdf5"
-    _GROUPED_SPEC.save(source, written, comment="note")
+    save_labber(source, written, comment="note", spec=_GROUPED_SPEC)
 
     grouped = load_grouped_labber_data(
         str(written), required_variables=_GROUPED_SPEC.required_variables
@@ -163,11 +164,11 @@ def test_grouped_save_keeps_explicit_source_and_refuses_overwrite(
     )
     second_path = tmp_path / "second.hdf5"
     first_path = tmp_path / "first.hdf5"
-    _GROUPED_SPEC.save(second, second_path)
-    _GROUPED_SPEC.save(first, first_path)
+    save_labber(second, second_path, spec=_GROUPED_SPEC)
+    save_labber(first, first_path, spec=_GROUPED_SPEC)
 
     with pytest.raises(FileExistsError):
-        _GROUPED_SPEC.save(second, first_path)
+        save_labber(second, first_path, spec=_GROUPED_SPEC)
 
     grouped = load_grouped_labber_data(str(first_path))
     np.testing.assert_array_equal(
@@ -192,17 +193,17 @@ def test_grouped_save_obeys_declared_layout_for_mixed_rank_variables(
     source = mixed_record()
     if not independent:
         with pytest.raises(ValueError, match="common grid"):
-            spec.save(source, destination)
+            save_labber(source, destination, spec=spec)
         assert not destination.exists()
         return
 
-    spec.save(source, destination, comment="mixed rank export")
+    save_labber(source, destination, comment="mixed rank export", spec=spec)
     loaded = load_grouped_labber_data(
         str(destination), required_variables=spec.required_variables
     )
     assert_mixed_disk_values(loaded.variables)
     with pytest.raises(FileExistsError):
-        spec.save(source, destination)
+        save_labber(source, destination, spec=spec)
 
 
 def test_grouped_save_requires_cfg(tmp_path: Path) -> None:
@@ -214,8 +215,8 @@ def test_grouped_save_requires_cfg(tmp_path: Path) -> None:
         ),
     )
     destination = tmp_path / "missing-cfg.hdf5"
-    with pytest.raises(ValueError, match="without cfg"):
-        _GROUPED_SPEC.save(source, destination)
+    with pytest.raises(ValueError, match="without configuration"):
+        save_labber(source, destination, spec=_GROUPED_SPEC)
     assert not destination.exists()
 
 

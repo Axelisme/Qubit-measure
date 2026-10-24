@@ -3,11 +3,11 @@
 from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+from zcu_lab.v2.singleshot.ge.core import GE_Cfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
-from zcu_lab.v2.singleshot.ge.core import GE_Cfg
 
 
 def make_form(ctx: FormContext) -> Form[GE_Cfg]:

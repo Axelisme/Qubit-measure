@@ -1,5 +1,6 @@
 """Notebook native restore through synthetic cores, without hardware or widgets."""
 
+import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import ClassVar
@@ -9,7 +10,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import decode_labber_comment, load, load_labber_data, save
+from zcu_tools.datafile import load, load_labber_data, save
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import (
     AxesSpec,
@@ -238,7 +239,7 @@ def test_labber_save_selects_explicit_or_latest_source_and_exact_or_unique_path(
     assert unique == tmp_path / "data_1.hdf5"
     exported = load_labber_data(str(unique))
     np.testing.assert_allclose(exported.z, [0.004 + 0.006j, 0.008 - 0.010j])
-    assert decode_labber_comment(exported.comment).comment == "measurement A"
+    assert json.loads(exported.comment)["comment"] == "measurement A"
     assert exported.tags == ["trial"]
 
     exact = adapter.save(tmp_path / "exact.h5")

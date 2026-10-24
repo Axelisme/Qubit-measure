@@ -37,7 +37,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
-from zcu_lab.v2._support import LinePlot, live_line
+from zcu_lab.v2.support import LinePlot, live_line
 
 
 def _default_initial_states() -> NDArray[np.int64]:

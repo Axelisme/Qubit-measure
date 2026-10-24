@@ -24,6 +24,7 @@ __all__ = [
     "ImproveAcquireMixin",
     "CancelFlagProtocol",
     "StoppedPartialAcquireError",
+    "AcquisitionContractError",
     "TrackerProtocol",
 ]
 
@@ -56,6 +57,14 @@ class _LocalCancelFlag:
 RoundHookType: TypeAlias = Callable[
     [int, list[NDArray[np.float64]], CancelFlagProtocol], None
 ]
+
+
+class AcquisitionContractError(RuntimeError):
+    """The transport returned more shots than the acquisition requested.
+
+    The offending chunk is not written or truncated. Earlier raw chunks remain
+    available through get_raw(); the incomplete round is not published.
+    """
 
 
 class StoppedPartialAcquireError(RuntimeError):
@@ -305,22 +314,24 @@ class EarlyStopMixin(TypedAcquireMixin):
         new_points: int,
         total_count: int,
     ) -> None:
-        """Write each channel at its shot offset, logging sizes before NumPy assignment.
+        """Reject excess shots before writing any channel at its shot offset.
 
-        Keep QICK's channel order and slice/broadcast failures; size diagnostics
-        do not reject or normalize the transport's data.
+        Within the requested shot count, preserve QICK's channel order and
+        NumPy broadcasting; row-count mismatches still produce diagnostics.
         """
         assert self.acc_buf is not None
+        if count + new_points > total_count:
+            raise AcquisitionContractError(
+                "Accumulated acquisition shot overrun: "
+                f"expected_shots={total_count}, received_shots={count}, "
+                f"chunk_shots={new_points}, chunk_rows={[len(rows) for rows in data]}, "
+                f"round_index={self._completed_round_count()}"
+            )
         for ii, nreads in enumerate(reads_per_shot):
             if new_points * nreads != data[ii].shape[0]:
                 logger.error(
                     "data size mismatch: new_points=%d, nreads=%d, data shape %s"
                     % (new_points, nreads, data[ii].shape)
-                )
-            if count + new_points > total_count:
-                logger.error(
-                    "got too much data: count=%d, new_points=%d, total_count=%d"
-                    % (count, new_points, total_count)
                 )
             self.acc_buf[ii].reshape((-1, 2))[
                 count * nreads : (count + new_points) * nreads

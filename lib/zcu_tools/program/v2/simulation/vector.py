@@ -26,7 +26,7 @@ from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
 from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
 from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
-from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
+from ..modules.reset import BathReset, PulseReset, TwoPulseReset
 from ..modules.util import merge_max_length, round_timestamp
 from ..modules.waveform import FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freqs_from_words
@@ -375,8 +375,6 @@ class VectorInterpreter:
         )
 
     def _reset(self, module: Module, t: Time) -> Time:
-        if type(module) is NoneReset:
-            return t
         if type(module) is PulseReset:
             return self._pulse(module.reset_pulse, t)
         if type(module) is TwoPulseReset:

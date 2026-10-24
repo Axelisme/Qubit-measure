@@ -6,12 +6,12 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Interactive
 from zcu_tools.gui.app.measure.flux_pick_frontend import make_flux_pick_frontend
 
-from zcu_lab.v2._support.measure.mux_flux_adapter import (
+from zcu_lab.v2.support.measure.mux_flux_adapter import (
     get_analyze_params,
     get_writeback_items,
     make_interactive_plugin,
 )
-from zcu_lab.v2._support.mux_flux import MuxFluxResult
+from zcu_lab.v2.support.mux_flux import MuxFluxResult
 
 from .core import TwotoneFluxLocalCfg, TwotoneFluxLocalExp
 from .form import make_form

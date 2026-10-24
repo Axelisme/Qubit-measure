@@ -3,8 +3,8 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.fastflux.mist.core import MistCfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[MistCfg]:
@@ -28,8 +28,8 @@ def make_form(ctx: FormContext) -> Form[MistCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "flux_gain": Range.between(0.0, 0.1, expts=101),
-            "mist_gain": Range.between(0.0, 0.1, expts=101),
+            "flux_gain": Range(0.0, 0.1, expts=101),
+            "mist_gain": Range(0.0, 0.1, expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5.0),
             "reps": 1000,
             "rounds": 10,

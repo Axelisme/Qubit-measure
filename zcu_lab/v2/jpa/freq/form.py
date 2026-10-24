@@ -3,8 +3,8 @@
 from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.jpa.freq.core import FreqCfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
@@ -27,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "jpa_rf_dev": rf_source,
-            "jpa_freq": Range.between(
+            "jpa_freq": Range(
                 "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
             ),
             "skew_penalty": 0.0,

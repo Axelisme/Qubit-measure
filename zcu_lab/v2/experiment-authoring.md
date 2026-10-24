@@ -239,7 +239,7 @@ CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。de
 
 ## 目錄佈局
 
-每個 leaf 的位置與附件見[套件 README](README.md)。量測核心不 import GUI。跨實驗的 singleshot numerical helpers 留在 `_support/singleshot/`，reset fit 與 JPA optimizer 留在各自的 leaf，通用 runtime 與量化工具留在框架。
+每個 leaf 的位置與附件見[套件 README](README.md)。量測核心不 import GUI。跨實驗的 singleshot numerical helpers 留在 `support/singleshot/`，reset fit 與 JPA optimizer 留在各自的 leaf，通用 runtime 與量化工具留在框架。
 
 
 ---
@@ -320,7 +320,7 @@ matrix的估計流程。
 一般核心實驗的入口是 `run(cfg, *, context: RunContext) -> Result`。硬體與具名 devices 由 context 傳入，cfg 只含這次操作的設定。Result 只含資料。NotebookAdapter 或 GUI adapter 將原始 cfg 與 Result 配成 RunRecord，不在核心快取上一輪結果。
 
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
-2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_lab.v2._support` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
+2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_lab.v2.support` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
 3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
 4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
@@ -364,7 +364,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，不宣告 Modules／Sweep group。Form 依 `field_order` 平鋪，模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單。`FieldMeta` 仍可宣告 label、unit 等顯示提示。Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
 
-Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_lab.v2._support` 匯出。
+Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_lab.v2.support` 匯出。
 
 平鋪 cfg 使用 `cfg_schema_version="3.0"`。Load 不轉換舊巢狀 cfg。舊 major 的資料仍載入，record.cfg 為 None，cfg_issue 說明原因，資料陣列與 metadata 不變。
 
@@ -383,7 +383,7 @@ Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型�
 
 ---
 
-父層 `experiment/utils/` 的 comment 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。儀器角色 helper 位於 `_support/device.py`，見 [lab v2 說明](README.md#實驗角色與-device-操作)。
+父層 `experiment/utils/` 的 comment 與 sweep helper 見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。儀器角色 helper 位於 `support/device.py`，見 [lab v2 說明](README.md#實驗角色與-device-操作)。
 
 ## v2 工具與實驗輔助
 

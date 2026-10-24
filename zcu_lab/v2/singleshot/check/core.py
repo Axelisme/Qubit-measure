@@ -16,8 +16,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, Readout, Reset
 
-from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 from zcu_lab.v2.singleshot.plot import plot_with_classified
+from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
 @dataclass(frozen=True)

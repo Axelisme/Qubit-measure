@@ -5,8 +5,6 @@ from zcu_tools.program.v2.modules.reset import (
     AbsResetCfg,
     BathReset,
     BathResetCfg,
-    NoneReset,
-    NoneResetCfg,
     PulseReset,
     PulseResetCfg,
     Reset,
@@ -45,18 +43,16 @@ def _make_pi2_cfg():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["none", "pulse", "two_pulse", "bath"])
+@pytest.mark.parametrize("kind", ["pulse", "two_pulse", "bath"])
 def test_reset_cfg_namespace_validates_and_dispatches(kind):
     class Modules(BaseModel):
         reset: Reset.Cfg
-        none: NoneReset.Cfg = NoneReset.Cfg()
         pulse: PulseReset.Cfg | None = None
         two_pulse: TwoPulseReset.Cfg | None = None
         bath: BathReset.Cfg | None = None
 
     pulse = _make_pulse_cfg().to_dict()
     raw = {
-        "none": {"type": "reset/none"},
         "pulse": {"type": "reset/pulse", "pulse_cfg": pulse},
         "two_pulse": {
             "type": "reset/two_pulse",
@@ -72,19 +68,14 @@ def test_reset_cfg_namespace_validates_and_dispatches(kind):
     }[kind]
     modules = Modules.model_validate({"reset": raw, kind: raw})
     module = Reset("reset", modules.reset)
-    assert isinstance(module, (NoneReset, PulseReset, TwoPulseReset, BathReset))
+    assert isinstance(module, (PulseReset, TwoPulseReset, BathReset))
     assert module.cfg.type == f"reset/{kind}"
     assert module.cfg == getattr(modules, kind)
 
 
 class TestResetFactory:
-    def test_dispatch_none(self):
-        r = Reset("r", NoneResetCfg())
-        assert isinstance(r, NoneReset)
-
     def test_dispatch_none_from_none_arg(self):
-        r = Reset("r", None)
-        assert isinstance(r, NoneReset)
+        assert Reset("r", None) is None
 
     def test_dispatch_pulse(self):
         r = Reset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
@@ -124,11 +115,8 @@ class TestResetFactory:
             Reset("r", UnknownCfg())
 
     def test_name_set(self):
-        r = Reset("myname", NoneResetCfg())
+        r = Reset("myname", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
         assert r.name == "myname"
-
-    def test_allow_rerun_none(self):
-        assert Reset("r", NoneResetCfg()).allow_rerun() is True
 
     def test_allow_rerun_pulse(self):
         assert (
@@ -163,19 +151,6 @@ class TestResetFactory:
 # ---------------------------------------------------------------------------
 # Cfg → Module construction + runtime via mock prog
 # ---------------------------------------------------------------------------
-
-
-class TestNoneResetRuntime:
-    def test_init_is_noop(self, mock_prog):
-        NoneReset("r", NoneResetCfg()).init(mock_prog)
-        assert mock_prog.has_no_events()
-
-    def test_run_returns_t(self, mock_prog):
-        r = NoneReset("r", NoneResetCfg())
-        assert r.run(mock_prog, t=1.5) == 1.5
-
-    def test_total_length_zero(self, mock_prog):
-        assert NoneReset("r", NoneResetCfg()).total_length(mock_prog) == 0.0
 
 
 class TestPulseResetRuntime:

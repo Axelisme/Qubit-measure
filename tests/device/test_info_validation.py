@@ -54,7 +54,7 @@ def test_yoko_missing_rampstep_uses_mode_default(
     )
     assert info.rampstep == pytest.approx(expected)
     assert saved.rampstep == pytest.approx(expected)
-    assert YOKOGS200Info.model_validate_json(info.to_json()) == info
+    assert YOKOGS200Info.model_validate_json(info.model_dump_json()) == info
 
 
 @pytest.mark.parametrize("mode", ["current", "voltage"])
@@ -84,7 +84,7 @@ def test_yoko_enforces_fixed_output_limits(
     info = YOKOGS200Info(address="GPIB::1", mode=mode, value=sign * limit)
     with pytest.raises(ValidationError, match="output limit"):
         info.with_updates(value=sign * limit * 1.01)
-    assert YOKOGS200Info.model_validate_json(info.to_json()) == info
+    assert YOKOGS200Info.model_validate_json(info.model_dump_json()) == info
 
 
 @pytest.mark.parametrize("mode", ["voltage", "current"])
@@ -102,7 +102,7 @@ def test_yoko_fixed_rampstep_limit_boundary(
 ) -> None:
     info = YOKOGS200Info(address="GPIB::1", mode=mode, rampstep=limit)
     assert info.rampstep == pytest.approx(limit)
-    assert YOKOGS200Info.model_validate_json(info.to_json()) == info
+    assert YOKOGS200Info.model_validate_json(info.model_dump_json()) == info
     with pytest.raises(ValidationError, match="rampstep limit"):
         YOKOGS200Info(address="GPIB::1", mode=mode, rampstep=limit * 1.01)
     with pytest.raises(ValidationError, match="rampstep limit"):

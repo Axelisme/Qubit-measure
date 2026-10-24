@@ -16,7 +16,7 @@ class SweepPlan(ConfigBase):
 @pytest.mark.parametrize("sampling", [None, {"expr": "1 / 0"}, {"expr": "2 + 2"}])
 def test_sweep_row_command_preserves_missing_or_invalid_sampling(sampling):
     env = FormEnv()
-    form = Form(SweepPlan, {"sweep": Range.between(10, 4, 4)})
+    form = Form(SweepPlan, {"sweep": Range(10, 4, 4)})
     raw: dict[str, JsonValue] = {"kind": "linrange", "start": 10, "stop": 4}
     if sampling is not None:
         raw["n"] = sampling
@@ -38,7 +38,7 @@ def test_sweep_row_command_preserves_missing_or_invalid_sampling(sampling):
 
 def test_sweep_leaf_cannot_replace_parent():
     env = FormEnv()
-    form = Form(SweepPlan, {"sweep": Range.between(10, 4, 4)})
+    form = Form(SweepPlan, {"sweep": Range(10, 4, 4)})
     state = FormState(form.default_input(env))
     before = state.input.to_json()
     with pytest.raises(FormCommandError):

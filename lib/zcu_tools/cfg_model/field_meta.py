@@ -40,7 +40,7 @@ class FieldMeta:
         Name of a string field used to label model-list elements, or None to
         display their original indexes. Does not change identity or ordering.
     calibration:
-        Author-declared seed status: measured, uncalibrated, or None for unknown.
+        Author-declared seed status: uncalibrated, or None for unknown.
         Does not infer calibration from field values or missing input.
     """
 
@@ -51,14 +51,14 @@ class FieldMeta:
     group: str | None = None
     readonly: bool = False
     element_label: str | None = None
-    calibration: Literal["measured", "uncalibrated"] | None = None
+    calibration: Literal["uncalibrated"] | None = None
 
     def __post_init__(self) -> None:
         """Reject an empty group or unknown calibration declaration with ValueError."""
         if self.group == "":
             raise ValueError("group must be non-empty or None")
-        if self.calibration not in (None, "measured", "uncalibrated"):
-            raise ValueError("calibration must be measured, uncalibrated or None")
+        if self.calibration not in (None, "uncalibrated"):
+            raise ValueError("calibration must be uncalibrated or None")
 
 
 def get_field_meta(field: FieldInfo) -> FieldMeta | None:

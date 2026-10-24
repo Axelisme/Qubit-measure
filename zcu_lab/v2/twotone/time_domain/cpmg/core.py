@@ -42,7 +42,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2._support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap_with_line
 
 
 def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -125,21 +125,6 @@ CPMG_GROUPED_VARIABLES = (CPMG_LENGTHS_VARIABLE, CPMG_SIGNALS_VARIABLE)
 
 def cpmg_result_to_grouped_payloads(result: CPMG_Result) -> dict[str, LabberPayload]:
     return CPMG_GROUPED_AXES_SPEC.payloads_from_result(result)
-
-
-def save_cpmg_grouped_result(
-    filepath: str,
-    result: CPMG_Result,
-    *,
-    comment: str = "",
-    tag: str = "twotone/ge/cpmg",
-) -> str:
-    return CPMG_GROUPED_AXES_SPEC.save_grouped_result(
-        filepath,
-        result,
-        comment=comment,
-        tag=tag,
-    )
 
 
 def _validate_cpmg_arrays(

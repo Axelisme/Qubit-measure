@@ -123,7 +123,9 @@ def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
         app.controller.context_control.add_component(
             "calibration", "synthetic/calibration", {}
         )
-        app.controller.install_soc(MagicMock(), make_mock_soccfg())
+        app.controller.session_services.soc_connection.install_soc(
+            MagicMock(), make_mock_soccfg()
+        )
         app.controller.new_tab("synthetic")
         # Load's File chooser starts at the opened entry's database directory.
         # Keep both relative-path validation and real chooser input rooted there.
@@ -208,18 +210,26 @@ def test_invalid_cfg_enter_explains_run_block_and_repair_clears_reason(
     flow.screenshot(shots / "01-setup.png")
     flow.click("Close")
     flow.screenshot(shots / "02-ready.png")
-    assert flow.observe("Run").enabled
+    ready_run = flow.observe("Run")
+    assert ready_run.enabled
+    initial_status = flow.status()
+    assert initial_status.text == "Ready"
     flow.enter_text(object_name="form.input.gain", value="not-a-number")
     flow.screenshot(shots / "03-invalid.png")
-    assert not flow.observe("Run").enabled
-    reason = flow.status().text
-    assert "gain" in reason.lower()
-    assert reason.strip()
+    blocked_run = flow.observe("Run")
+    assert not blocked_run.enabled
+    notice = flow.observe(object_name="run.cfg_error")
+    assert notice.visible
+    assert "gain" in notice.text.lower()
+    assert notice.text == blocked_run.tooltip
+    assert flow.status() == initial_status
     flow.enter_text(object_name="form.input.gain", value="2.0")
     flow.screenshot(shots / "04-repaired.png")
-    assert flow.observe("Run").enabled
-    assert flow.status().text != reason
-    assert "gain" not in flow.status().text.lower()
+    repaired_run = flow.observe("Run")
+    assert repaired_run.enabled
+    assert repaired_run.tooltip == ready_run.tooltip
+    assert not flow.observe(object_name="run.cfg_error").visible
+    assert flow.status() == initial_status
     assert flow.dialogs() == ()
 
 

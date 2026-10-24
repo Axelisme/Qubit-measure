@@ -193,13 +193,13 @@ from zcu_tools.program.v2.modules import (
     Pulse,
 )
 
-from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import (
+from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux_sweep_cfg import (
     MuxDriveToneCfg,
     require_tone_value,
     validate_participants,
 )
-from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
+from zcu_lab.v2.support.singleshot.plot import draw_ge_scatter
 
 from .analysis import (
     MuxGEAnalysis,

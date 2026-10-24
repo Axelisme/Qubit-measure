@@ -20,7 +20,7 @@ class SamplingPlan(ConfigBase):
 @pytest.fixture
 def sampling_editor(qapp):
     env = FormEnv()
-    form = Form(SamplingPlan, {"sweep": Range.between(0, 1, 5)})
+    form = Form(SamplingPlan, {"sweep": Range(0, 1, 5)})
     editor = FormEditor(FormState(form.default_input(env)), env)
     editor.resize(800, 600)
     editor.show()

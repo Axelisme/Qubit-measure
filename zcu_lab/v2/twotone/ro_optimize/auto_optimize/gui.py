@@ -17,7 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
+from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import (
     AutoOptAnalysis,
     AutoOptCfg,

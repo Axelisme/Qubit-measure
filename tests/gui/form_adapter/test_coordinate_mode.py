@@ -30,7 +30,7 @@ def switch(state: FormState[FormModel], env: FormEnv, _field: str, label: str) -
 
 def test_descending_coordinate_roundtrip_and_lowering():
     env = FormEnv()
-    form = Form(CoordinateCfg, {"sweep": Range.between(10, 4, 4)})
+    form = Form(CoordinateCfg, {"sweep": Range(10, 4, 4)})
     state = FormState(form.default_input(env))
     initial = state.result(env)
     assert not isinstance(initial, FormErrors)
@@ -68,7 +68,7 @@ def test_descending_coordinate_roundtrip_and_lowering():
 @pytest.mark.parametrize("sampling", [None, {"expr": "1 / 0"}, {"expr": "2 + 2"}])
 def test_coordinate_command_ignores_unrelated_and_sampling_errors(sampling: JsonValue):
     env = FormEnv()
-    form = Form(CoordinateCfg, {"sweep": Range.between(0, 10, 4)})
+    form = Form(CoordinateCfg, {"sweep": Range(0, 10, 4)})
     raw: dict[str, JsonValue] = {"kind": "linrange", "start": 0, "stop": 10}
     if sampling is not None:
         raw["n"] = sampling
@@ -83,7 +83,7 @@ def test_coordinate_command_ignores_unrelated_and_sampling_errors(sampling: Json
 @pytest.mark.parametrize("endpoint", [None, {"expr": "1 / 0"}])
 def test_failed_coordinate_command_is_atomic(endpoint: JsonValue):
     env = FormEnv()
-    form = Form(CoordinateCfg, {"sweep": Range.between(0, 10, 4)})
+    form = Form(CoordinateCfg, {"sweep": Range(0, 10, 4)})
     raw: dict[str, JsonValue] = {"kind": "linrange", "stop": 10, "n": {"expr": "2 + 2"}}
     if endpoint is not None:
         raw["start"] = endpoint
@@ -99,7 +99,7 @@ def test_failed_coordinate_command_is_atomic(endpoint: JsonValue):
 
 def test_center_expression_restore_reset_and_single_point_contract():
     env = FormEnv()
-    form = Form(CoordinateCfg, {"sweep": Range.between(3, 3, 1)})
+    form = Form(CoordinateCfg, {"sweep": Range(3, 3, 1)})
     state = FormState(form.default_input(env))
     switch(state, env, "stop", "Switch to Center / Span")
     state.write({("sweep", "center"): {"expr": "1 + 2"}}, env)
