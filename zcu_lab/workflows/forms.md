@@ -16,10 +16,13 @@ MCP 以 `workflow_open(name)` 明填名稱，再以回傳的 tab_id 呼叫 `work
 
 `CoherencePlanForm` 編輯 absolute flux range/list、必填 flux_unit、delay points、初始 pi_length_us 與共用 drive/readout ModuleInput。
 `measure_t1`、`measure_t2ramsey`、`measure_t2echo` 是固定 plan bool，預設 true，至少開啟一項。
+`measure_singleshot` 也是固定 plan bool，預設 false。開啟後在校準之後、lifetimes 之前保存合格點的 GE 原始資料，不擬合。
 All false 回 consuming-field error，不提交 acquisition。Disabled lifetime 不量、不保存、不產生 record 元素。
 共用 FormEditor 顯示 owner 的 Plan draft 與 Form preview。Start 經 headless owner 驗 Form，再呼附件 converter；remote preview 不執行 native lowering。
 
-`CoherenceTunablesForm` 含共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 tunables。
+`CoherenceTunablesForm` 含共用 `cal` 與獨立 `singleshot`、`t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 tunables。
+`SingleshotTunablesForm` 提供 `min_spacing`、`shots`。間距是 plan flux 單位，從上次實際 GE 擷取起算；shots 是每種 probe-off/on preparation 的數量。
+預設間距 0、shots 100000 是暫定模擬值。GE 要求本點 Rabi 已接受，不另加 residual 或對比門檻。它們可在 run 中更新，已開始的 GE operation 保留當次 cfg。
 `T1TunablesForm` 是 t1 子表單，不再含重複 calibration。Echo／Ramsey 子表單各有自己的 guess、averaging 與 timing。
 Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Plan/tunables 仍分開驗證，不新增聯合 admission。
 `defaults(env)` 不接收 previous，只宣告新表單初值。Module 切換使用 `ModuleInputField.converter(env)` 的共用繼承政策。T1 guess 以 captured general.ext.guess_us 的 expression 宣告，開表單時算成值，位於 t1.guess_us；沒有 capture／leaf 時 defaults 明確給 20 µs。

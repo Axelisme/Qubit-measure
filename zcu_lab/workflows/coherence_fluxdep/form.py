@@ -19,6 +19,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form_adapter import SweepInput
 
+from zcu_lab.workflows.coherence_fluxdep.singleshot_form import SingleshotTunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t2_form import (
     T2EchoTunablesForm,
@@ -44,8 +45,9 @@ from zcu_lab.workflows.common.calibration_modules import (
 class CoherenceTunablesForm(FormModel):
     """Ordinary captured policies; expressions remain in the host FormInput.
 
-    cal controls shared calibration. t1, t2ramsey and t2echo each supply their
-    own averaging/initial guess/timing/acceptance inputs. t1 has no static
+    cal controls shared calibration. singleshot supplies raw GE flux spacing
+    and shots with provisional simulation defaults. t1, t2ramsey and t2echo each
+    supply their own averaging/initial guess/timing/acceptance inputs. t1 has no static
     default because T1's guess_us has none; defaults supplies it, so direct
     construction must pass t1. Ramsey detune_ratio defaults to .05
     fringes/step and is validated even when Ramsey is disabled. Defaults use
@@ -55,6 +57,9 @@ class CoherenceTunablesForm(FormModel):
 
     cal: Annotated[CalibrationTunablesForm, Display(label="Calibration")] = Field(
         default_factory=CalibrationTunablesForm
+    )
+    singleshot: Annotated[SingleshotTunablesForm, Display(label="Singleshot GE")] = (
+        Field(default_factory=SingleshotTunablesForm)
     )
     t1: Annotated[T1TunablesForm, Display(label="T1")]
     t2ramsey: Annotated[T2RamseyTunablesForm, Display(label="Ramsey")] = Field(
@@ -82,6 +87,7 @@ class CoherenceTunablesForm(FormModel):
         """Convert only validated ordinary values, without recapture or submission."""
         return CoherenceTunables(
             cal=self.cal.to_cfg(),
+            singleshot=self.singleshot.to_cfg(),
             t1=self.t1.to_cfg(),
             t2ramsey=self.t2ramsey.to_cfg(),
             t2echo=self.t2echo.to_cfg(),
@@ -124,6 +130,10 @@ class CoherencePlanForm(FormModel):
         description="Shared pulse-backed readout"
     )
 
+    measure_singleshot: Annotated[bool, Display(label="Measure singleshot GE")] = Field(
+        default=False,
+        description="Save raw GE shots at eligible flux points, without fitting",
+    )
     measure_t1: bool = Field(default=True, description="Measure T1 at each flux point")
     measure_t2ramsey: Annotated[bool, Display(label="Measure Ramsey")] = Field(
         default=True, description="Measure Ramsey at each flux point"
@@ -203,6 +213,7 @@ class CoherencePlanForm(FormModel):
         if isinstance(modules, FormErrors):
             return modules
         return CoherencePlan(
+            measure_singleshot=self.measure_singleshot,
             measure_t1=self.measure_t1,
             measure_t2ramsey=self.measure_t2ramsey,
             measure_t2echo=self.measure_t2echo,
