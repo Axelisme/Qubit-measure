@@ -109,7 +109,7 @@ def describe_analyze_params(params_cls: type) -> list[dict[str, Any]]:
 
     Each entry: ``{name, type, label, choices?, decimals?, default?}``. Reuses
     ``resolve_field_info`` so the description matches the runtime contract.
-    Returns ``[]`` for non-dataclass types (e.g. ``NoAnalyzeParams``).
+    Returns ``[]`` for NoneType (no inputs) or other non-dataclass types.
     """
     if not dataclasses.is_dataclass(params_cls):
         return []
@@ -136,6 +136,13 @@ def describe_analyze_params(params_cls: type) -> list[dict[str, Any]]:
 
 
 def reconstruct_params(params_cls: type[T], form_values: dict[str, Any]) -> T:
+    """Build declared inputs; NoneType accepts only an empty field mapping."""
+    if params_cls is type(None):
+        if form_values:
+            raise RuntimeError(
+                f"Unknown analyze params: {', '.join(sorted(form_values))}"
+            )
+        return params_cls()
     if not dataclasses.is_dataclass(params_cls):
         raise TypeError(f"Analyze params must be a dataclass type: {params_cls!r}")
 

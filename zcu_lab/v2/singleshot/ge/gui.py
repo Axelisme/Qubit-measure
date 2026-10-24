@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -105,11 +104,6 @@ class GEAnalyzeResult(GEAnalysis, AnalyzeResultBase):
             "init_pops": self.init_pops.tolist(),
             "fit_quality": fit_quality_summary(self.fit_quality),
         }
-
-
-@dataclass
-class GEPostAnalyzeParams:
-    """The GE confusion diagnostic has no independent operator parameters."""
 
 
 @dataclass(frozen=True)
@@ -240,15 +234,9 @@ class GEAdapter(
             fit_quality=analysis.fit_quality,
         )
 
-    def get_post_analyze_params(
-        self, analyze_result: GEAnalyzeResult, ctx: SessionEnv
-    ) -> GEPostAnalyzeParams:
-        del analyze_result, ctx
-        return GEPostAnalyzeParams()
-
     def post_analyze(
         self,
-        req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
+        req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, None],
         *,
         plots: Plots,
     ) -> GEPostAnalyzeResult:

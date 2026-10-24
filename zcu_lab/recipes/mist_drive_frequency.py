@@ -12,8 +12,6 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
 )
 
-from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAnalyzeResult
-
 
 class MistDriveFrequencyInputs(RecipeInputs):
     """Inputs for mist drive frequency; all units and null policies are declared
@@ -72,7 +70,7 @@ async def mist_drive_frequency(
 
     await tab.run()
     try:
-        analysis = await tab.analyze("primary", result=DriveFreqAnalyzeResult)
+        analysis = await tab.analyze("primary", result=dict)
         if analysis.result is None:
             return MistDriveFrequencyReport(
                 analysis_completed=False, analysis_failure=analysis.reason

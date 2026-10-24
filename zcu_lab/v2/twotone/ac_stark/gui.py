@@ -12,7 +12,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalysisResult,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -126,7 +125,7 @@ class AcStarkRamseyAdapter(
     BaseAdapter[
         AcStarkRamseyCfg,
         AcStarkRamseyRunResult,
-        NoAnalysisResult,
+        None,
         AcStarkRamseyAnalyzeParams,
     ]
 ):
@@ -162,7 +161,7 @@ class AcStarkRamseyAdapter(
         req: AnalyzeRequest[AcStarkRamseyRunResult, AcStarkRamseyAnalyzeParams],
         *,
         plots: Plots,
-    ) -> NoAnalysisResult:
+    ) -> None:
         """Publish contrast/FFT maps, without fitting or proposing calibration."""
         params = req.analyze_params
         self.exp_cls().analyze(
@@ -170,4 +169,4 @@ class AcStarkRamseyAdapter(
             AcStarkRamseyAnalyzeOptions(detune=params.detune, cutoff=params.cutoff),
             plots=plots,
         )
-        return NoAnalysisResult()
+        return

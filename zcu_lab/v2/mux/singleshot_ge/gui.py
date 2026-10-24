@@ -23,7 +23,6 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
-    SessionEnv,
     T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
@@ -42,7 +41,6 @@ from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions, GEPostAnalyzeOptions
 from zcu_lab.v2.singleshot.ge.gui import (
     GEAnalyzeParams,
-    GEPostAnalyzeParams,
     ge_calibration_review_note,
     ge_post_review_note,
 )
@@ -183,7 +181,13 @@ class MuxGEPostAnalyzeResult(PostAnalyzeResultBase):
 
 
 class MuxGEAdapter(
-    BaseAdapter[MuxGECfg, MuxGERunResult, MuxGEAnalyzeResult, GEAnalyzeParams]
+    BaseAdapter[
+        MuxGECfg,
+        MuxGERunResult,
+        MuxGEAnalyzeResult,
+        GEAnalyzeParams,
+        MuxGEPostAnalyzeResult,
+    ]
 ):
     """Acquire paired mux shots, analyze via GE owner and propose without Apply."""
 
@@ -235,18 +239,9 @@ class MuxGEAdapter(
         """Budget Post result reads for the measured original tone positions."""
         return len(result.result.tone_indices)
 
-    def get_post_analyze_params(
-        self, analyze_result: MuxGEAnalyzeResult, ctx: SessionEnv
-    ) -> GEPostAnalyzeParams:
-        """Return the existing parameter-free GE post policy for the adopted fit."""
-        del analyze_result, ctx
-        return GEPostAnalyzeParams()
-
     def post_analyze(
         self,
-        req: PostAnalyzeRequest[
-            MuxGERunResult, MuxGEAnalyzeResult, GEPostAnalyzeParams
-        ],
+        req: PostAnalyzeRequest[MuxGERunResult, MuxGEAnalyzeResult, None],
         *,
         plots: Plots,
     ) -> MuxGEPostAnalyzeResult:

@@ -125,22 +125,9 @@ class AnalyzeResult(Protocol):
     def to_summary_dict(self) -> dict[str, object]: ...
 
 
-@dataclass
-class NoAnalyzeParams:
-    """Default analyze-params type for adapters without analysis."""
-
-
-@dataclass
-class NoAnalysisResult(AnalyzeResultBase):
-    """Default analyze-result type for adapters without analysis."""
-
-
-# PEP 696 defaults: adapters without analysis omit the last two generic args
-# (BaseAdapter[Cfg, Result]) and these No* types fill in automatically.
-T_AnalyzeResult = TypeVar(
-    "T_AnalyzeResult", bound=AnalyzeResult, default=NoAnalysisResult
-)
-T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=NoAnalyzeParams)
+# None means no numeric result or no parameters; omitted slots use it too.
+T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResult | None, default=None)
+T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=None)
 
 
 @dataclass(frozen=True)
@@ -192,10 +179,10 @@ class PostAnalyzeResultBase(AnalyzeResultBase):
 # default-bearing T_AnalyzeResult in PostAnalyzeRequest's parameter list.
 T_PostAnalyzeResult = TypeVar(
     "T_PostAnalyzeResult",
-    bound=AnalyzeResult,
-    default=NoAnalysisResult,
+    bound=AnalyzeResult | None,
+    default=None,
 )
-T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=NoAnalyzeParams)
+T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=None)
 
 
 @dataclass(frozen=True)

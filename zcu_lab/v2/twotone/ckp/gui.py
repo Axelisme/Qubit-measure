@@ -12,7 +12,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -36,7 +35,7 @@ class CKPAnalyzeResult(AnalyzeResultBase):
     res_freq: float
 
 
-class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeParams]):
+class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -59,7 +58,7 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult, NoAnalyzeP
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[CKPRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[CKPRunResult, None], *, plots: Plots
     ) -> CKPAnalyzeResult:
         analysis = CKP_Exp().analyze(req.run_result, None, plots=plots)
         return CKPAnalyzeResult(

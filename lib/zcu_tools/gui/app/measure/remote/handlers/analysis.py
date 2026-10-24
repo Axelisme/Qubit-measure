@@ -60,6 +60,24 @@ def _params_to_wire(params: object) -> dict[str, object] | None:
     return asdict(params)
 
 
+def _updated_params(
+    current: object, updates: dict[str, object], *, label: str
+) -> object:
+    """Validate named wire edits against dataclass inputs or the no-input schema."""
+    if current is not None and (not is_dataclass(current) or isinstance(current, type)):
+        raise RemoteError(ErrorCode.INTERNAL, f"{label} is not a dataclass instance")
+    values = {} if current is None else asdict(current)
+    try:
+        return reconstruct_params(type(current), {**values, **updates})
+    except (RuntimeError, ValueError) as exc:
+        definitions = describe_analyze_params(type(current))
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            f"{exc}. Legal parameters: {definitions}",
+            data={"definitions": definitions},
+        ) from exc
+
+
 def _presentation(
     snapshot: TabSnapshot, stage: Literal["primary", "post"]
 ) -> AnalysisPresentation:
@@ -97,15 +115,21 @@ def h_tab_get_analyze_result(
     if operation_id is not None:
         control.require_analysis_operation(tab_id, "analysis", operation_id)
     result = control.get_tab_analyze_result(tab_id)
-    if result is None:
+    snap = control.get_tab_snapshot(tab_id)
+    if result is None and (
+        snap.interaction is None or not snap.interaction.has_analyze_result
+    ):
         return {"summary": None, "invalid": []}
-    to_summary = getattr(result, "to_summary_dict", None)
-    if not callable(to_summary):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            "analyze result does not implement to_summary_dict()",
-        )
-    reply = _summary_to_wire(to_summary())
+    if result is None:
+        reply = _summary_to_wire({})
+    else:
+        to_summary = getattr(result, "to_summary_dict", None)
+        if not callable(to_summary):
+            raise RemoteError(
+                ErrorCode.INTERNAL,
+                "analyze result does not implement to_summary_dict()",
+            )
+        reply = _summary_to_wire(to_summary())
     if operation_id is not None:
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.analysis
@@ -136,8 +160,6 @@ def h_tab_get_analyze_params(
 def h_tab_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    import dataclasses
-
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -160,32 +182,22 @@ def h_tab_analyze(
             reason="no_run_result",
         )
     ap = None if snap.analysis is None else snap.analysis.params
-    if ap is None:
+    if ap is None and adapter.tab_control.analyze_param_definitions(
+        adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
+    ):
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
     # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
     raw_updates = cast(dict[str, object], params["updates"])
-    if not dataclasses.is_dataclass(ap) or isinstance(ap, type):
-        raise RemoteError(
-            ErrorCode.INTERNAL, "analyze_params is not a dataclass instance"
-        )
-    try:
-        updated = reconstruct_params(
-            type(ap), {**dataclasses.asdict(ap), **raw_updates}
-        )
-    except (RuntimeError, ValueError) as exc:
-        definitions = describe_analyze_params(type(ap))
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"{exc}. Legal parameters: {definitions}",
-            data={"definitions": definitions},
-        ) from exc
+    updated = _updated_params(ap, raw_updates, label="analyze_params")
     if snap.capabilities is None:
         raise RemoteError(ErrorCode.INTERNAL, "snapshot has no capabilities")
     invalidated = []
     if snap.analysis is not None and snap.analysis.has_writeback_draft:
         invalidated.append("analysis.writeback")
     if snap.post_analysis is not None:
-        if snap.post_analysis.result is not None:
+        if snap.post_analysis.result is not None or (
+            snap.interaction is not None and snap.interaction.has_post_analyze_result
+        ):
             invalidated.append("post.result")
         if snap.post_analysis.has_writeback_draft:
             invalidated.append("post.writeback")
@@ -199,7 +211,7 @@ def h_tab_analyze(
         "raw_data": raw_data.model_dump(mode="json"),
         "operation_id": operation_id,
         "interactive": snap.capabilities.analysis is AnalysisMode.INTERACTIVE,
-        "params": dataclasses.asdict(updated),
+        "params": _params_to_wire(updated),
         "invalidated_on_success": invalidated,
     }
 
@@ -216,15 +228,21 @@ def h_tab_get_post_analyze_result(
     if operation_id is not None:
         control.require_analysis_operation(tab_id, "post_analysis", operation_id)
     result = control.get_post_analyze_result(tab_id)
-    if result is None:
+    snap = control.get_tab_snapshot(tab_id)
+    if result is None and (
+        snap.interaction is None or not snap.interaction.has_post_analyze_result
+    ):
         return {"summary": None, "invalid": []}
-    to_summary = getattr(result, "to_summary_dict", None)
-    if not callable(to_summary):
-        raise RemoteError(
-            ErrorCode.INTERNAL,
-            "post-analysis result does not implement to_summary_dict()",
-        )
-    reply = _summary_to_wire(to_summary())
+    if result is None:
+        reply = _summary_to_wire({})
+    else:
+        to_summary = getattr(result, "to_summary_dict", None)
+        if not callable(to_summary):
+            raise RemoteError(
+                ErrorCode.INTERNAL,
+                "post-analysis result does not implement to_summary_dict()",
+            )
+        reply = _summary_to_wire(to_summary())
     if operation_id is not None:
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.post_analysis
@@ -255,8 +273,6 @@ def h_tab_get_post_analyze_params(
 def h_tab_post_analyze(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    import dataclasses
-
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
     if not control.has_tab(tab_id):
@@ -282,27 +298,15 @@ def h_tab_post_analyze(
             reason="no_analyze_result",
         )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
-    if pp is None:
+    if pp is None and adapter.tab_control.analyze_param_definitions(
+        adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
+    ):
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED, "no post-analysis params available"
         )
     # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
     raw_updates = cast(dict[str, object], params["updates"])
-    if not dataclasses.is_dataclass(pp) or isinstance(pp, type):
-        raise RemoteError(
-            ErrorCode.INTERNAL, "post_analyze_params is not a dataclass instance"
-        )
-    try:
-        updated = reconstruct_params(
-            type(pp), {**dataclasses.asdict(pp), **raw_updates}
-        )
-    except (RuntimeError, ValueError) as exc:
-        definitions = describe_analyze_params(type(pp))
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"{exc}. Legal parameters: {definitions}",
-            data={"definitions": definitions},
-        ) from exc
+    updated = _updated_params(pp, raw_updates, label="post_analyze_params")
     invalidated = (
         ["post.writeback"]
         if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
@@ -325,6 +329,6 @@ def h_tab_post_analyze(
             "stage": "post",
         },
         "interactive": False,
-        "params": dataclasses.asdict(updated),
+        "params": _params_to_wire(updated),
         "invalidated_on_success": invalidated,
     }

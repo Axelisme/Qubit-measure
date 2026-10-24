@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -73,9 +72,7 @@ class LocalZAnalyzeResult:
         }
 
 
-class LocalZAdapter(
-    BaseAdapter[LocalZCfg, LocalZRun, LocalZAnalyzeResult, NoAnalyzeParams]
-):
+class LocalZAdapter(BaseAdapter[LocalZCfg, LocalZRun, LocalZAnalyzeResult]):
     """Fixed-capture Form, both-target Run, saved-source analysis and native restore."""
 
     exp_cls = LocalZExp
@@ -96,7 +93,7 @@ class LocalZAdapter(
         return RunRecord(cfg=cfg, result=LocalZExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[LocalZRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[LocalZRun, None], *, plots: Plots
     ) -> LocalZAnalyzeResult:
         """Fit only saved cfg/raw, never current Form, aliases or library."""
         return LocalZAnalyzeResult(

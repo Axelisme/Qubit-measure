@@ -10,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -34,12 +33,7 @@ class BathPhaseAnalyzeResult(AnalyzeResultBase):
 
 
 class BathPhaseAdapter(
-    BaseAdapter[
-        PhaseCfg,
-        BathPhaseRunResult,
-        BathPhaseAnalyzeResult,
-        NoAnalyzeParams,
-    ]
+    BaseAdapter[PhaseCfg, BathPhaseRunResult, BathPhaseAnalyzeResult]
 ):
     experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
@@ -51,7 +45,7 @@ class BathPhaseAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # No get_analyze_params override: None (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
     def run(
@@ -67,7 +61,7 @@ class BathPhaseAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[BathPhaseRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[BathPhaseRunResult, None],
         *,
         plots: Plots,
     ) -> BathPhaseAnalyzeResult:

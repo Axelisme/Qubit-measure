@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -12,8 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -32,16 +29,7 @@ from zcu_lab.v2.singleshot.mist.pre_freq.form import make_form
 MistPreFreqRunResult: TypeAlias = RunRecord[PreFreqCfg, PreFreqResult]
 
 
-@dataclass
-class MistPreFreqAnalyzeResult(AnalyzeResultBase):
-    """Population curves are published as a fit figure, without scalar estimates."""
-
-
-class MistPreFreqAdapter(
-    BaseAdapter[
-        PreFreqCfg, MistPreFreqRunResult, MistPreFreqAnalyzeResult, NoAnalyzeParams
-    ]
-):
+class MistPreFreqAdapter(BaseAdapter[PreFreqCfg, MistPreFreqRunResult]):
     """Expose preparation-frequency acquisition and population analysis in Measure."""
 
     experiment_tag: ClassVar[str | None] = PreFreqExp.persistence_tag()
@@ -69,13 +57,13 @@ class MistPreFreqAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[MistPreFreqRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[MistPreFreqRunResult, None],
         *,
         plots: Plots,
-    ) -> MistPreFreqAnalyzeResult:
+    ) -> None:
         """Plot G/E/Other, using optional confusion correction from the run capture."""
         options = PreFreqAnalyzeOptions(
             confusion_matrix=read_confusion_matrix(req.parameters)
         )
         PreFreqExp().analyze(req.run_result, options, plots=plots)
-        return MistPreFreqAnalyzeResult()
+        return

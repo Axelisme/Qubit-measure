@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -10,8 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -24,14 +21,7 @@ from .form import make_form
 AccPhaseRunResult: TypeAlias = RunRecord[AccPhaseCfg, AccPhaseResult]
 
 
-@dataclass
-class AccPhaseAnalyzeResult(AnalyzeResultBase):
-    """Phase and detuning diagnostics are presented in the fit figure."""
-
-
-class AccPhaseAdapter(
-    BaseAdapter[AccPhaseCfg, AccPhaseRunResult, AccPhaseAnalyzeResult, NoAnalyzeParams]
-):
+class AccPhaseAdapter(BaseAdapter[AccPhaseCfg, AccPhaseRunResult]):
     experiment_tag: ClassVar[str | None] = AccPhaseExp.persistence_tag()
     exp_cls = AccPhaseExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
@@ -50,10 +40,10 @@ class AccPhaseAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[AccPhaseRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[AccPhaseRunResult, None],
         *,
         plots: Plots,
-    ) -> AccPhaseAnalyzeResult:
+    ) -> None:
         """Plot phase projections and derived detuning from the source record."""
         AccPhaseExp().analyze(req.run_result, None, plots=plots)
-        return AccPhaseAnalyzeResult()
+        return

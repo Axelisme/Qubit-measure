@@ -11,7 +11,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -33,7 +32,7 @@ class RBAnalyzeResult(AnalyzeResultBase):
     fidelity: float
 
 
-class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams]):
+class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[RBCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -58,7 +57,7 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult, NoAnalyzeParams
         return RunRecord(cfg=cfg, result=RB_Exp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[RBRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[RBRunResult, None], *, plots: Plots
     ) -> RBAnalyzeResult:
         """Fit the saved run's mean IQ decay and publish its fit figure."""
         result = RB_Exp().analyze(req.run_result, None, plots=plots)

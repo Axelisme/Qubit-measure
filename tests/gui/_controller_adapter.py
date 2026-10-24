@@ -11,8 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalysisResult,
-    NoAnalyzeParams,
     RunRequest,
     SessionEnv,
 )
@@ -32,9 +30,7 @@ class RecordingCfg(ExpCfgModel):
 
 
 class RecordingAdapter(
-    BaseAdapter[
-        RecordingCfg, RunRecord[RecordingCfg, object], NoAnalysisResult, AnalyzeParams
-    ]
+    BaseAdapter[RecordingCfg, RunRecord[RecordingCfg, object], None, AnalyzeParams]
 ):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False
@@ -64,13 +60,11 @@ class RecordingAdapter(
         req: AnalyzeRequest[RunRecord[RecordingCfg, object], AnalyzeParams],
         *,
         plots: Plots,
-    ) -> NoAnalysisResult:
-        return NoAnalysisResult()
+    ) -> None:
+        return None
 
 
-class InteractiveAdapter(
-    BaseAdapter[ExpCfgModel, object, NoAnalysisResult, NoAnalyzeParams]
-):
+class InteractiveAdapter(BaseAdapter[ExpCfgModel, object, None, None]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False, analysis=AnalysisMode.INTERACTIVE
     )
@@ -81,9 +75,7 @@ class InteractiveAdapter(
         return Form(RecordingCfg, {})
 
     def make_interactive_plugin(self, req, *, plots):
-        return PluginDefinition(
-            "sample", 0, (), lambda state: None, lambda state: NoAnalysisResult()
-        )
+        return PluginDefinition("sample", 0, (), lambda state: None, lambda state: None)
 
     def make_interactive_frontend(
         self, plugin, session, env, request_finish, request_cancel, *, plots

@@ -11,7 +11,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -32,9 +31,7 @@ class PhaseAnalyzeResult(AnalyzeResultBase):
     phases_deg: NDArray[np.float64]
 
 
-class PhaseAdapter(
-    BaseAdapter[PhaseCfg, PhaseRunResult, PhaseAnalyzeResult, NoAnalyzeParams]
-):
+class PhaseAdapter(BaseAdapter[PhaseCfg, PhaseRunResult, PhaseAnalyzeResult]):
     experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
@@ -53,7 +50,7 @@ class PhaseAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[PhaseRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[PhaseRunResult, None],
         *,
         plots: Plots,
     ) -> PhaseAnalyzeResult:

@@ -12,11 +12,7 @@ import pytest
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    ContextReadiness,
-    NoAnalyzeParams,
-    SessionEnv,
-)
+from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -133,7 +129,7 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
 def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
     tab_id = cf.ctrl.new_tab("interactive")
     cf.state.update_tab_result(tab_id, RunRecord(cfg=None, result=object()))
-    token = cf.ctrl.analyze(tab_id, NoAnalyzeParams())
+    token = cf.ctrl.analyze(tab_id, None)
     cf.view.mount_interactive_analysis.assert_called_once()
     assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
     return tab_id, token

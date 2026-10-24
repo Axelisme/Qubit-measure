@@ -65,7 +65,14 @@ class PostSummary(PostAnalyzeResultBase):
 
 
 class SavingAdapter(
-    BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams]
+    BaseAdapter[
+        SavingCfg,
+        RunRecord[SavingCfg, SavingResult],
+        PaneSummary,
+        PaneParams,
+        PostSummary,
+        PaneParams,
+    ]
 ):
     """Real BaseAdapter mapping with an offline typed experiment declaration."""
 

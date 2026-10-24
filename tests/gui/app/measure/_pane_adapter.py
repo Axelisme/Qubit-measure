@@ -48,7 +48,9 @@ class PostResult(PostAnalyzeResultBase):
 SavingRun = RunRecord[SavingCfg, SavingResult]
 
 
-class PaneAdapter(BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams]):
+class PaneAdapter(
+    BaseAdapter[SavingCfg, SavingRun, PaneResult, PaneParams, PostResult, EmptyParams]
+):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         post_analysis=True, requires_soc=False, load_data=True
     )

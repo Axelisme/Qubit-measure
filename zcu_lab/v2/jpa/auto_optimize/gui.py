@@ -17,7 +17,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -59,7 +58,7 @@ class JpaAutoAnalyzeResult(AnalyzeResultBase):
 
 
 class JpaAutoOptimizeAdapter(
-    BaseAdapter[JPAOptCfg, JpaAutoRunResult, JpaAutoAnalyzeResult, NoAnalyzeParams]
+    BaseAdapter[JPAOptCfg, JpaAutoRunResult, JpaAutoAnalyzeResult]
 ):
     experiment_tag: ClassVar[str | None] = AutoOptimizeExp.persistence_tag()
     exp_cls = AutoOptimizeExp
@@ -82,7 +81,7 @@ class JpaAutoOptimizeAdapter(
         return RunRecord(cfg, AutoOptimizeExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JpaAutoRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[JpaAutoRunResult, None], *, plots: Plots
     ) -> JpaAutoAnalyzeResult:
         analysis = AutoOptimizeExp().analyze(req.run_result, None, plots=plots)
         _relabel_auto_figure(plots["fit"])

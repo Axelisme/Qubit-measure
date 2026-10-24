@@ -9,7 +9,11 @@ editing、context/SoC/device/session wiring、run/analyze/save/writeback workflo
 view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
 framework 只看 `ExpAdapterProtocol`。
 Adapter 的 `analysis_result_tone_count` 從 captured Run／Load 宣告 measured tone 數，非 mux 預設為零。
-RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 Form 或猜 opaque result 結構。共用 `BaseAdapter` 住在 `adapter/base.py`。它宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
+RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 Form 或猜 opaque result 結構。
+共用 `BaseAdapter` 住在 `adapter/base.py`。Adapter 宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
+分析與 Post 的結果／參數槽位預設 None，表示沒有數值或輸入。
+Figures-only 的完成事實由 pane plots 保留，不靠 numeric payload 判斷。
+None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有保存格式。
 
 ## Owners
 
