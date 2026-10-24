@@ -21,8 +21,10 @@ from pydantic import (
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.entry.aliases import AliasValue
 
+_WORKFLOW_RUN_ID_PATTERN = r"[0-9a-f]{32}"
 _RUN_ID_PATTERN = (
-    r"^(?:[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}|[0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*)$"
+    rf"^(?:[0-9]{{8}}T[0-9]{{6}}Z-[a-z0-9]{{6}}|"
+    rf"{_WORKFLOW_RUN_ID_PATTERN}-[0-9]{{6}}-[1-9][0-9]*)$"
 )
 
 
@@ -147,6 +149,20 @@ def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:
         raise ValueError("/cfg: schema_version must be major.minor")
     if not cfg.cfg_type:
         raise ValueError("/cfg: cfg_type must not be empty")
+
+
+def validate_workflow_run_id(run_id: str) -> None:
+    """Validate a workflow root before admission or acquisition.
+
+    run_id must fully match [0-9a-f]{32}, for example uuid4().hex. This root
+    excludes the iteration and attempt suffix used by operation metadata.
+    Return None without changing valid strings. Invalid strings raise ValueError
+    naming the required format; nonstrings raise TypeError.
+    """
+    if re.fullmatch(_WORKFLOW_RUN_ID_PATTERN, run_id) is None:
+        raise ValueError(
+            "run_id must be 32 lowercase hexadecimal characters ([0-9a-f]{32})"
+        )
 
 
 def validate_run_id(run_id: str) -> None:

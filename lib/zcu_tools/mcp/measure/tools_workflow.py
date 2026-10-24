@@ -109,7 +109,7 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
         "workflow_start": _tool(
             ctx,
             "workflow.start",
-            "Submit workflow under the shared RUN lease. Omit/null plan/tunables to use shared GUI drafts. Explicit batches, including [], use fresh captured defaults. Returns pending handle, not acceptance; wait(op=handle) observes terminal delivery.",
+            "Submit workflow under the shared RUN lease. run_id is required and must be 32 lowercase hexadecimal characters (e.g. uuid4().hex); local GUI Start generates it. Invalid IDs are rejected before operation admission or hardware access. Omit/null plan/tunables to use shared GUI drafts. Explicit batches, including [], use fresh captured defaults. Returns pending handle, not acceptance; wait(op=handle) observes terminal delivery.",
             {
                 "tab_id": _STRING,
                 "run_id": _STRING,

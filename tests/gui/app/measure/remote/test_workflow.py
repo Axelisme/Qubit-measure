@@ -30,6 +30,8 @@ from tests.mcp.measure._support import make_client
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 
+RUN_ID = "21ed5156dc9b441a8b5cda3cf26633f7"
+
 
 class Values(FormModel):
     value: int = 3
@@ -131,15 +133,13 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
     client = make_client(tmp_path, respond)
     try:
         tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
-        started = client.call("workflow_start", {"tab_id": tab, "run_id": "ask-mcp"})
+        started = client.call("workflow_start", {"tab_id": tab, "run_id": RUN_ID})
         # Pending Ask is read-only status, not a terminal owner notification.
         qt_until(
-            lambda: (
-                controller.workflow_control().pending_question("ask-mcp") is not None
-            ),
+            lambda: controller.workflow_control().pending_question(RUN_ID) is not None,
             label="MCP pending Ask",
         )
-        status = client.call("workflow_status", {"run_id": "ask-mcp"})
+        status = client.call("workflow_status", {"run_id": RUN_ID})
         question = status.get("pending_question")
         assert question is not None, "Status must expose the native question envelope"
         assert question["question_type"] == "Choose"
@@ -154,20 +154,20 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
             client.call(
                 "workflow_answer",
                 {
-                    "run_id": "ask-mcp",
+                    "run_id": RUN_ID,
                     "request_id": question["request_id"],
                     "answer": {"value": "bad"},
                 },
             )
         assert invalid.value.code == "invalid_params"
         assert (
-            client.call("workflow_status", {"run_id": "ask-mcp"})["pending_question"]
+            client.call("workflow_status", {"run_id": RUN_ID})["pending_question"]
             == question
         )
         answered = client.call(
             "workflow_answer",
             {
-                "run_id": "ask-mcp",
+                "run_id": RUN_ID,
                 "request_id": question["request_id"],
                 "answer": {"value": 29},
             },
@@ -184,7 +184,7 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         )
         assert author.deliveries[0][0] == Decision(value=29)
         assert (
-            client.call("workflow_status", {"run_id": "ask-mcp"})["pending_question"]
+            client.call("workflow_status", {"run_id": RUN_ID})["pending_question"]
             is None
         )
     finally:
@@ -196,25 +196,25 @@ def test_workflow_scoped_cancel_uses_native_host_and_preserves_stop(workflow_rpc
     facet = controller.workflow_control()
     facet.configure((AskAuthor().attachment(),))
     tab = result(rpc, "workflow.open", name="asking")["tab_id"]
-    result(rpc, "workflow.start", tab_id=tab, run_id="scoped")
+    result(rpc, "workflow.start", tab_id=tab, run_id=RUN_ID)
     qt_until(
-        lambda: facet.pending_question("scoped") is not None,
+        lambda: facet.pending_question(RUN_ID) is not None,
         label="native Ask for scoped control",
     )
     rejected = result(
-        rpc, "workflow.cancel", run_id="scoped", scope="workflow", expected=1
+        rpc, "workflow.cancel", run_id=RUN_ID, scope="workflow", expected=1
     )
     assert rejected["cancelled"] is False
     assert rejected["reason"] == "sequence mismatch"
     assert rejected["active_path"] == "workflow:asking"
-    status = result(rpc, "workflow.status", run_id="scoped")
+    status = result(rpc, "workflow.status", run_id=RUN_ID)
     assert status["status"]["active_path"] == "workflow:asking"
-    accepted = result(rpc, "workflow.cancel", run_id="scoped", scope="workflow:asking")
+    accepted = result(rpc, "workflow.cancel", run_id=RUN_ID, scope="workflow:asking")
     assert accepted["cancelled"] is True
-    result(rpc, "workflow.stop", run_id="scoped")
+    result(rpc, "workflow.stop", run_id=RUN_ID)
     qt_until(lambda: not facet.tabs()[0].busy, label="script Stop terminal delivery")
     assert (
-        result(rpc, "workflow.status", run_id="scoped")["status"]["lifecycle"]
+        result(rpc, "workflow.status", run_id=RUN_ID)["status"]["lifecycle"]
         == "cancelled"
     )
 
@@ -226,26 +226,26 @@ def test_mcp_status_retains_accepted_exchange_after_answer(workflow_rpc, tmp_pat
     client = make_client(tmp_path, lambda method, params: result(rpc, method, **params))
     try:
         tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
-        client.call("workflow_start", {"tab_id": tab, "run_id": "exchange"})
+        client.call("workflow_start", {"tab_id": tab, "run_id": RUN_ID})
         # The retained invocation must publish its answerable Ask on-owner.
         qt_until(
-            lambda: control.pending_question("exchange") is not None,
+            lambda: control.pending_question(RUN_ID) is not None,
             label="exchange Ask",
         )
-        question = client.call("workflow_status", {"run_id": "exchange"})[
+        question = client.call("workflow_status", {"run_id": RUN_ID})[
             "pending_question"
         ]
         client.call(
             "workflow_answer",
             {
-                "run_id": "exchange",
+                "run_id": RUN_ID,
                 "request_id": question["request_id"],
                 "answer": {"value": 31},
             },
         )
         # The answered coroutine must reach terminal owner delivery.
         qt_until(lambda: not control.tabs()[0].busy, label="exchange answer delivery")
-        status = client.call("workflow_status", {"run_id": "exchange"})
+        status = client.call("workflow_status", {"run_id": RUN_ID})
         assert status.get("last_exchange") == {
             "question": question,
             "answer": {"value": 31},
@@ -263,47 +263,44 @@ def test_mcp_operation_projection_replaces_the_whole_set(workflow_rpc, tmp_path)
     client = make_client(tmp_path, lambda method, params: result(rpc, method, **params))
     try:
         tab = client.call("workflow_open", {"name": "operation-plots"})["tab_id"]
-        client.call("workflow_start", {"tab_id": tab, "run_id": "plots"})
+        client.call("workflow_start", {"tab_id": tab, "run_id": RUN_ID})
         for stage, expected in (
             (1, ["trend", "operation/measurement", "operation/diagnostic"]),
             (2, ["trend", "operation/measurement"]),
         ):
             qt_until(
                 lambda: (
-                    control.pending_question("plots") is not None
+                    control.pending_question(RUN_ID) is not None
                     or not control.tabs()[0].busy
                 ),
                 label=f"operation {stage} question or terminal delivery",
             )
-            status = client.call("workflow_status", {"run_id": "plots"})
+            status = client.call("workflow_status", {"run_id": RUN_ID})
             assert status["pending_question"] is not None, status
             assert status["pending_question"]["question"]["point"] == stage
             assert (
-                client.call("workflow_figures", {"run_id": "plots"})["names"]
-                == expected
+                client.call("workflow_figures", {"run_id": RUN_ID})["names"] == expected
             )
             for name in expected:
-                reply = client.call(
-                    "workflow_figure", {"run_id": "plots", "name": name}
-                )
+                reply = client.call("workflow_figure", {"run_id": RUN_ID, "name": name})
                 assert reply.images[0].data.startswith(b"\x89PNG\r\n\x1a\n")
             client.call(
                 "workflow_answer",
                 {
-                    "run_id": "plots",
+                    "run_id": RUN_ID,
                     "request_id": status["pending_question"]["request_id"],
                     "answer": {"value": stage},
                 },
             )
             qt_until(
                 lambda stage=stage: (
-                    (question := control.pending_question("plots")) is None
+                    (question := control.pending_question(RUN_ID)) is None
                     or question["question"]["point"] != stage
                 ),
                 label=f"operation {stage} answer consumed",
             )
         qt_until(lambda: not control.tabs()[0].busy, label="plot terminal delivery")
-        assert client.call("workflow_figures", {"run_id": "plots"})["names"] == [
+        assert client.call("workflow_figures", {"run_id": RUN_ID})["names"] == [
             "trend",
             "operation/measurement",
         ]
@@ -366,8 +363,8 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
         batch=[{"path": ["value"], "value": 9}],
     )
     args = {"plan": [], "tunables": []} if explicit else {}
-    receipt = result(rpc, "workflow.start", tab_id=tab, run_id="native", **args)
-    assert receipt["run_id"] == "native"
+    receipt = result(rpc, "workflow.start", tab_id=tab, run_id=RUN_ID, **args)
+    assert receipt["run_id"] == RUN_ID
     assert receipt["operation_id"] > 0
     assert not result(rpc, "workflow.close", tab_id=tab)["closed"]
     # Submitted worker and queued delivery must settle; the timer is only a watchdog.
@@ -375,10 +372,10 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
         lambda: not controller.workflow_control().tabs()[0].busy,
         label="workflow terminal delivery",
     )
-    status = result(rpc, "workflow.status", run_id="native")
+    status = result(rpc, "workflow.status", run_id=RUN_ID)
     assert status["tab_id"] == tab
     assert status["status"]["lifecycle"] == "done"
-    records = result(rpc, "workflow.records", run_id="native")["records"]
+    records = result(rpc, "workflow.records", run_id=RUN_ID)["records"]
     assert records[0]["encoded_record"]["value"] == {"value": 3 if explicit else 9}
     operation = records[0]["operations"][0]
     assert (operation["kind"], operation["iteration"], operation["attempt"]) == (
@@ -390,12 +387,12 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
     assert operation["outcome"] == "completed"
     assert operation["reason"] is None
     assert operation["device_snapshot"] is None
-    native = controller.workflow_control().records("native")[0].operations[0]
+    native = controller.workflow_control().records(RUN_ID)[0].operations[0]
     assert operation["started_at"] == native.started_at.isoformat()
     assert operation["finished_at"] == native.finished_at.isoformat()
-    assert result(rpc, "workflow.records", run_id="native", since=1)["records"] == []
-    assert result(rpc, "workflow.figures", run_id="native")["names"] == ["trend"]
-    png = result(rpc, "workflow.figure", run_id="native", name="trend")
+    assert result(rpc, "workflow.records", run_id=RUN_ID, since=1)["records"] == []
+    assert result(rpc, "workflow.figures", run_id=RUN_ID)["names"] == ["trend"]
+    png = result(rpc, "workflow.figure", run_id=RUN_ID, name="trend")
     assert base64.b64decode(png["png_b64"]).startswith(b"\x89PNG")
 
 
