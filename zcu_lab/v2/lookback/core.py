@@ -9,19 +9,12 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    ProgramV2Cfg,
-    Pulse,
-    PulseReadout,
-    Readout,
-    Reset,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, PulseReadout, Readout, Reset
 
 
 @dataclass(frozen=True)
@@ -42,13 +35,7 @@ class LookbackAnalysis:
     predict_offset: float
 
 
-class LookbackModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class LookbackCfg(ExpCfgModel):
+class LookbackCfg(ConfigBase):
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -68,7 +55,11 @@ class LookbackCfg(ExpCfgModel):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    modules: LookbackModuleCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Init pulse", group="Modules")
+    ] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
 
 
 def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -98,27 +89,23 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         """
         # Decimated acquisition uses one repetition per round, not an IQ-shot loop.
         run_cfg = deepcopy(config)
-        program_cfg = ProgramV2Cfg(
-            reps=1,
-            rounds=run_cfg.rounds,
-            initial_delay=run_cfg.initial_delay,
-            relax_delay=run_cfg.relax_delay,
-        )
 
-        viewer = context.plots.liveplot_1d("measurement", "Time (us)", "Amplitude")
+        viewer = live_line(context.plots, "measurement", "Time (us)", "Amplitude")
         # Compile reset→optional preparation→readout before acquisition so an
         # interrupted trace still has its fixed sample-time axis and buffer.
-        modules = deepcopy(run_cfg.modules)
+        modules = deepcopy(run_cfg)
         program = ModularProgramV2(
             context.soccfg,
-            program_cfg,
+            reps=1,
+            initial_delay=run_cfg.initial_delay,
+            relax_delay=run_cfg.relax_delay,
             modules=[
                 Reset("reset", cfg=modules.reset),
                 Pulse("init_pulse", cfg=modules.init_pulse),
                 Readout("readout", cfg=modules.readout),
             ],
         )
-        times = program.get_time_axis(ro_index=0) + run_cfg.modules.readout.trig_offset
+        times = program.get_time_axis(ro_index=0) + run_cfg.readout.trig_offset
         assert isinstance(times, np.ndarray)
 
         # Acquire the time-resolved trace for arrival-time analysis.
@@ -127,9 +114,13 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             on_update=lambda data: viewer.update(times, lookback_signal2real(data)),
         )
         with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
-            _ = sched.prog_builder(context.soc, context.soccfg).run_program_decimated(
-                program
-            )
+            _ = sched.prog_builder(
+                context.soc,
+                context.soccfg,
+                reps=1,
+                initial_delay=sched.cfg.initial_delay,
+                relax_delay=sched.cfg.relax_delay,
+            ).run_program_decimated(program, rounds=run_cfg.rounds)
         return LookbackResult(times=times, signals=signals_buffer.array)
 
     def analyze(
@@ -151,7 +142,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         Ts = result.times
         signals = result.signals
         cfg = source.cfg
-        readout_cfg = cfg.modules.readout if cfg is not None else None
+        readout_cfg = cfg.readout if cfg is not None else None
 
         if options.smooth is not None:
             signals = gaussian_filter1d(signals, options.smooth)

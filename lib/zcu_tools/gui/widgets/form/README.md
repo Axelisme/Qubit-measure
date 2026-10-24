@@ -6,7 +6,7 @@
 
 `FormEditor` 借用 caller-owned `FormState` 與 host 捕捉的 `FormEnv`。Editor 讀取 `state.describe(path, env)` 與完整 `preview`，由 Core 解析 annotation、union 與選項匹配。Core 擁有 choices、active option、固定欄位與 lone ordinary wrapper 攤平規則。攤平只改版面，controls 的完整 path 仍含 wrapper。
 
-Editor 初次只建立可見層與初始展開的 model rows。分組依 `FieldMeta.group` 翻譯的 `Display.group`，不依欄位名稱。Modules 與其他一般 group 預設折疊。Sweep group 與其軸預設展開。Sweep group 只有一個可展開且非 nullable 的欄位時，Qt 將軸直接畫成「Sweep · 軸名 (單位)」，不再畫 group 標題。沒有單位時省略括號。多軸保留「Sweep → 軸」兩層。合併保留軸的 commands、selector 與 canonical path，例如 `scan_window.start`。合併標題的 objectName 是 `form.fold.scan_window`。
+Editor 初次只建立可見層與初始展開的 model rows。每層依宣告順序交錯排列普通欄位與 group，group 位於首個可見成員的位置。Refresh、state publication 與 Reset 保持這個順序，不將保留的 group 附加到末尾。分組依 `FieldMeta.group` 翻譯的 `Display.group`，不依欄位名稱。Modules 與其他一般 group 預設折疊。Sweep group 與其軸預設展開。Sweep group 只有一個可展開且非 nullable 的欄位時，Qt 將軸直接畫成「Sweep · 軸名 (單位)」，不再畫 group 標題。沒有單位時省略括號。多軸保留「Sweep → 軸」兩層。合併保留軸的 commands、selector 與 canonical path，例如 `scan_window.start`。合併標題的 objectName 是 `form.fold.scan_window`。
 
 其他 Model 節起始折疊，`Display(collapsed=False)` 讓節起始展開；首次建立 editor 時，子樹有錯誤（含尚未建立或 hidden 的後代）的節也展開，欄位名為 modules 時使用相同規則。已記錄的使用者 fold 優先，之後輸入、驗證、選項或 nullable 重建都保留節的展開狀態。折起的錯誤仍標在可見祖先，group 標題仍顯示 Contains errors。Core 的 `can_expand` 只提供結構上的展開能力，首次展開才查下一層；實際沒有可畫 children 時，該列回到普通標題，不留空白區塊。收起已建區塊會保留 QWidget 與未提交文字，state 維持原狀。實際 branch 改變或啟停普通 nullable model 時只替換該子樹，無關 rows 與使用者設定的 folds 保持不變。沒有 converter 的選項切換只更新 selector，不清除仍相同的 children 與 local parse text。Editor 以 description.branch 判斷子結構，不用 selected 猜 branch。Editor 以已建立的 Qt 子層記錄展開情況，不另持 writable draft。
 

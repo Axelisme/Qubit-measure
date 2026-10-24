@@ -44,8 +44,11 @@ GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 
 
 ```python
 builder = (
-    step.prog_builder(context.soc, context.soccfg)
-    .add_reset("reset", modules.reset)
+    step.prog_builder(
+        context.soc, context.soccfg,
+        reps=step.cfg.reps, relax_delay=step.cfg.relax_delay,
+    )
+    .add_reset("reset", reset)
     .add(
         Join(
             *[
@@ -317,7 +320,7 @@ matrix的估計流程。
 一般核心實驗的入口是 `run(cfg, *, context: RunContext) -> Result`。硬體與具名 devices 由 context 傳入，cfg 只含這次操作的設定。Result 只含資料。NotebookAdapter 或 GUI adapter 將原始 cfg 與 Result 配成 RunRecord，不在核心快取上一輪結果。
 
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
-2. 從 `context.plots.liveplot_1d("measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
+2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_tools.plotting` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
 3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
 4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
@@ -326,7 +329,7 @@ Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result �
 目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
-`SweepCfg` sweep；`homophasal` 保留同一個 `sweep.freq` 使用者介面，但由已擬合的 resonator
+`SweepCfg` sweep；`homophasal` 保留同一個 `freq` 使用者介面，但由已擬合的 resonator
 circle 參數產生非等距 frequency array，再把 gen/readout raw frequency words 放進
 `TablePulseReadout` 的 dmem tables。每點沿用一般 `PulseReadout` 的 wmem-backed WPORT，
 並在 sweep loop 的 exec-after hook 更新下一點 generator/readout frequency words；最後一點
@@ -348,18 +351,22 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
-把 sweep 參數綁到 pulse（`modules.xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.sweep.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
 
 只有兩類「副本外操作」是有意保留的：
 
 - **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.scope.stop)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
-- **raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 另建 `ProgramV2Cfg(reps=cfg.shots, rounds=1, ...)`，保留原始 initial／relax delay，再交給 builder。Lookback 同樣另建 program cfg，固定 reps=1，rounds 沿用可編輯的實驗欄位。這些 runtime 固定值不出現在 Form。
+- **Raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 直接將 `reps=cfg.shots` 與 `relax_delay=cfg.relax_delay` 交給 builder，acquire 明確使用 `rounds=1`。有宣告 initial_delay 的實驗同樣明傳。Lookback 固定 `reps=1`，`run_program_decimated(rounds=cfg.rounds)` 沿用可編輯的軟體平均次數。這些 runtime 固定值不出現在 Form。
 
 ---
 
 ## v2 cfg 組合慣例
 
-具體實驗使用自己的 module／sweep cfg。需要 reps、rounds、initial_delay、relax_delay 的 cfg 從 `zcu_tools.experiment` import `ProgramExpCfg`，再以 `class XxxCfg(ProgramExpCfg)` 加上實驗欄位。不含 program 欄位的 cfg 仍繼承 `ExpCfgModel`；在 run 內另建設定時保留 `ProgramV2Cfg`。
+實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，分別以 `FieldMeta(group="Modules")` 與 `FieldMeta(group="Sweep")` 分組。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
+
+Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_tools.plotting` 匯出。
+
+平鋪 cfg 使用 `cfg_schema_version="3.0"`。Load 不轉換舊巢狀 cfg。舊 major 的資料仍載入，record.cfg 為 None，cfg_issue 說明原因，資料陣列與 metadata 不變。
 
 Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型別寫 `Pulse.Cfg`、`Readout.Cfg`、`Reset.Cfg`。具體 readout／reset／waveform 也使用自己的 `.Cfg`，例如 `MuxReadout.Cfg` 與 `BathReset.Cfg`。`SweepCfg` 與硬體指令仍按需 import。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
@@ -432,7 +439,7 @@ distinct depths 時分析明確失敗。
 
 ## 寫新 Experiment 時的檢查清單
 
-1. 定義 `XxxModuleCfg` / `XxxSweepCfg`，通常繼承 `ConfigBase`。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別。需要 program 欄位時，`XxxCfg` 繼承 `ProgramExpCfg`，否則繼承 `ExpCfgModel`。
+1. 定義 `XxxCfg(ConfigBase)`，在頂層宣告 module、掃描與實際使用的 averaging／timing 欄位。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別，group 設為 Modules；掃描欄位的 group 設為 Sweep。
 2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。

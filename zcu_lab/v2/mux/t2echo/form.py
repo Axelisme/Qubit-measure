@@ -44,10 +44,8 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
     return Form(
         MuxT2EchoCfg,
         tree={
-            "modules": {
-                "reset": Slot("$mux.module.reset"),
-                "readout": readout,
-            },
+            "reset": Slot("$mux.module.reset"),
+            "readout": readout,
             "tones": mux_tone_initials(
                 tones,
                 participants,
@@ -70,7 +68,8 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
         field_order=(
             "participants",
             "tones",
-            "modules",
+            "reset",
+            "readout",
             "delay",
             "reps",
             "rounds",

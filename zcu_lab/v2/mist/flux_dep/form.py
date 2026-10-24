@@ -24,28 +24,23 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     return Form(
         FluxDepCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Slot("$qubit.module.x180"),
-                "probe_pulse": Template(
-                    "res_probe",
-                    bindings={"resonator": "$resonator"},
-                    # Run supplies these probe scan coordinates.
-                    set={"gain": Hidden(0.0)},
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Slot("$qubit.module.x180"),
+            "probe_pulse": Template(
+                "res_probe",
+                bindings={"resonator": "$resonator"},
+                # Run supplies these probe scan coordinates.
+                set={"gain": Hidden(0.0)},
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
             "flux_dev": flux_source,
             "flux_unit": "A",
-            "sweep": {
-                "flux": Range.between("$qubit.flux_int", "$qubit.flux_half", expts=101),
-                "gain": Range.between(0.0, 0.5, expts=101),
-            },
+            "flux": Range.between("$qubit.flux_int", "$qubit.flux_half", expts=101),
+            "gain": Range.between(0.0, 0.5, expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

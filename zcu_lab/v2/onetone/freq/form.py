@@ -113,12 +113,12 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(
         FreqCfg,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "readout",
+            "freq",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
             **initial_spectrum_tree(ctx),

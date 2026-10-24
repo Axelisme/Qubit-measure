@@ -94,9 +94,9 @@ Editing participants preserves every tone value. Fill any newly selected tone's
 missing settings at the indicated tone path. Removing a tone keeps its values.
 All readout identities and local flux_dev names stay required. Local driver
 uniqueness is checked only for selected tones.
-`modules.reset` is optional; `modules.readout` is the complete numeric mux
+`reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
-`modules.readout.module`; this selector wrapper is not part of Python cfg.
+`readout.module`; this selector wrapper is not part of Python cfg.
 `frequency.tones[i]` contains the fixed name, numeric drive pulse and `sweep.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
 `tones[i]` contains its fixed name, `flux_dev`, and `sweep.start/stop` in native DC units. `flux_expts` is their shared positive count.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.

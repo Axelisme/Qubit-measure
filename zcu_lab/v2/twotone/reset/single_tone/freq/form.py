@@ -12,34 +12,29 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(
         FreqCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Slot("$qubit.module.x180"),
-                "tested_reset": Template(
-                    "reset",
-                    bindings={"qubit": "$qubit"},
-                    set={
-                        # Run replaces these scan coordinates; other reset inputs remain.
-                        "pulse_cfg.freq": Hidden(0.0),
-                        "pulse_cfg.gain": 0.3,
-                        "pulse_cfg.waveform.length": 5.0,
-                        "pulse_cfg.post_delay": Expr(
-                            "5.0 / (2 * 3.141592653589793 * $resonator.kappa)"
-                        ),
-                    },
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {
-                "freq": Range.around(
-                    "$qubit.ext.reset_f", "1.5 * $qubit.ext.reset_fwhm", expts=201
-                )
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Slot("$qubit.module.x180"),
+            "tested_reset": Template(
+                "reset",
+                bindings={"qubit": "$qubit"},
+                set={
+                    # Run replaces these scan coordinates; other reset inputs remain.
+                    "pulse_cfg.freq": Hidden(0.0),
+                    "pulse_cfg.gain": 0.3,
+                    "pulse_cfg.waveform.length": 5.0,
+                    "pulse_cfg.post_delay": Expr(
+                        "5.0 / (2 * 3.141592653589793 * $resonator.kappa)"
+                    ),
+                },
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "freq": Range.around(
+                "$qubit.ext.reset_f", "1.5 * $qubit.ext.reset_fwhm", expts=201
+            ),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

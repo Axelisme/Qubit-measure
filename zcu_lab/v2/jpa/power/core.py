@@ -9,13 +9,14 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
@@ -35,18 +36,26 @@ class PowerAnalysis:
     best_power: float
 
 
-class PowerModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class PowerSweepCfg(ConfigBase):
-    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
-
-
-class PowerCfg(ProgramExpCfg):
-    modules: PowerModuleCfg
+class PowerCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
     jpa_rf_dev: Annotated[
         str,
         FieldMeta(
@@ -54,7 +63,9 @@ class PowerCfg(ProgramExpCfg):
             description="Connected RF device driven by the pump-power sweep.",
         ),
     ] = ""
-    sweep: PowerSweepCfg
+    jpa_power: Annotated[
+        SweepCfg, FieldMeta(label="JPA pump power", unit="dBm", group="Sweep")
+    ]
     skew_penalty: Annotated[
         float,
         FieldMeta(
@@ -90,7 +101,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # 1. Prepare pump powers without imposing a monotonic acquisition order.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        jpa_powers = sweep2array(cfg.sweep.jpa_power, allow_array=True)
+        jpa_powers = sweep2array(cfg.jpa_power, allow_array=True)
         np.random.shuffle(jpa_powers[1:-1])
 
         def configure_axes(ax: Axes) -> None:
@@ -98,7 +109,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ax.lines[0].set_marker("o")
 
         # Show independent points rather than connecting randomized settings.
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Power (dBm)",
             "Signal Difference",
@@ -116,10 +128,15 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 set_rf_power(context.devices[step.cfg.jpa_rf_dev], jpa_power)
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
-                modules = step.cfg.modules
+                modules = step.cfg
                 tracker = MomentTracker()
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
@@ -135,6 +152,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                             )
                         ),
                         trackers=[tracker],
+                        rounds=cfg.rounds,
                     )
                 )
 

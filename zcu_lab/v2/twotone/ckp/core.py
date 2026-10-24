@@ -15,11 +15,12 @@ from zcu_tools.analysis.fitting import (
     lorfunc,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
@@ -238,22 +239,38 @@ def _plot_resonance_maps(
     fig.tight_layout()
 
 
-class CKPModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    res_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse")]
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class CKPSweepCfg(ConfigBase):
-    res_freq: Annotated[SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz")]
-    qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
-
-
-class CKP_Cfg(ProgramExpCfg):
-    modules: CKPModuleCfg
-    sweep: CKPSweepCfg
+class CKP_Cfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse", group="Modules")]
+    res_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse", group="Modules")
+    ]
+    qub_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse", group="Modules")
+    ]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    res_freq: Annotated[
+        SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz", group="Sweep")
+    ]
+    qub_freq: Annotated[
+        SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz", group="Sweep")
+    ]
 
 
 class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
@@ -274,7 +291,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=CKP_Result,
         cfg_type=CKP_Cfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/ckp",
     )
 
@@ -296,10 +313,10 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg.modules
+        modules = cfg
 
-        res_freq_sweep = cfg.sweep.res_freq
-        qub_freq_sweep = cfg.sweep.qub_freq
+        res_freq_sweep = cfg.res_freq
+        qub_freq_sweep = cfg.qub_freq
 
         res_freqs = sweep2array(
             res_freq_sweep,
@@ -314,14 +331,16 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
 
         figure, _ = context.plots.subplots("measurement", ncols=2, figsize=(10, 4))
         ax_ground, ax_excited = figure.axes
-        ground = context.plots.liveplot_2d(
+        ground = live_heatmap(
+            context.plots,
             "measurement",
             "Resonator Drive Frequency (MHz)",
             "Qubit Probe Frequency (MHz)",
             title="Ground State",
             axes=ax_ground,
         )
-        excited = context.plots.liveplot_2d(
+        excited = live_heatmap(
+            context.plots,
             "measurement",
             "Resonator Drive Frequency (MHz)",
             "Qubit Probe Frequency (MHz)",
@@ -341,15 +360,17 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
 
         # Acquire both preparations and the full frequency grid in one program.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            res_freq_param = sweep2param("res_freq", sched.cfg.sweep.res_freq)
-            qub_freq_param = sweep2param("qub_freq", sched.cfg.sweep.qub_freq)
+            modules = sched.cfg
+            res_freq_param = sweep2param("res_freq", sched.cfg.res_freq)
+            qub_freq_param = sweep2param("qub_freq", sched.cfg.qub_freq)
             modules.res_pulse.set_param("freq", res_freq_param)
             modules.qub_pulse.set_param("freq", qub_freq_param)
 
             # State preparation precedes the parallel probes and common readout.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", cfg=modules.reset),
                     Branch("ge", [], Pulse("pi_pulse", cfg=modules.pi_pulse)),
@@ -360,9 +381,9 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
                     Readout("readout", cfg=modules.readout),
                 )
                 .declare_sweep("ge", 2)
-                .declare_sweep("res_freq", sched.cfg.sweep.res_freq)
-                .declare_sweep("qub_freq", sched.cfg.sweep.qub_freq)
-                .build_and_acquire()
+                .declare_sweep("res_freq", sched.cfg.res_freq)
+                .declare_sweep("qub_freq", sched.cfg.qub_freq)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return CKP_Result(

@@ -22,7 +22,7 @@ from .ctx_helpers import t1_initial_time
 from .mux_bindings import require_mux_group, require_mux_qubits
 from .seed_metadata import seed_metadata
 
-READOUT_ELEMENTS = FixedElements(("modules", "readout", "module", "tones"))
+READOUT_ELEMENTS = FixedElements(("readout", "module", "tones"))
 
 
 def mux_tone_initials(
@@ -166,7 +166,7 @@ def mux_readout_seed_metadata(
     """
     if isinstance(initial, Slot) and not initial.copy:
         return {}
-    prefix = ("modules", "readout", "module")
+    prefix = ("readout", "module")
     result: dict[tuple[str | int, ...], FieldMeta] = {}
     tones = initial.set.get("tones")
     if isinstance(tones, list):

@@ -18,13 +18,8 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1ModuleCfg, T1SweepCfg
-from zcu_lab.v2.twotone.time_domain.t2echo.core import (
-    T2EchoCfg,
-    T2EchoExp,
-    T2EchoModuleCfg,
-    T2EchoSweepCfg,
-)
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.saving import save_t1, save_t2echo
@@ -283,14 +278,13 @@ async def overnight[C](
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
                 relax_delay=tun.current.relax_factor * tun.current.t1_guess_us,
-                modules=T1ModuleCfg(pi_pulse=plan.qub_pulse, readout=plan.readout),
-                sweep=T1SweepCfg(
-                    length=SweepCfg(
-                        start=0.0,
-                        stop=t1_stop,
-                        expts=plan.points,
-                        step=t1_stop / (plan.points - 1),
-                    )
+                pi_pulse=plan.qub_pulse,
+                readout=plan.readout,
+                length=SweepCfg(
+                    start=0.0,
+                    stop=t1_stop,
+                    expts=plan.points,
+                    step=t1_stop / (plan.points - 1),
                 ),
             )
             if await run_t1_stage(
@@ -303,18 +297,14 @@ async def overnight[C](
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
                 relax_delay=tun.current.relax_factor * tun.current.t2_guess_us,
-                modules=T2EchoModuleCfg(
-                    pi_pulse=plan.qub_pulse,
-                    pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),
-                    readout=plan.readout,
-                ),
-                sweep=T2EchoSweepCfg(
-                    length=SweepCfg(
-                        start=0.0,
-                        stop=t2_stop,
-                        expts=plan.points,
-                        step=t2_stop / (plan.points - 1),
-                    )
+                pi_pulse=plan.qub_pulse,
+                pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),
+                readout=plan.readout,
+                length=SweepCfg(
+                    start=0.0,
+                    stop=t2_stop,
+                    expts=plan.points,
+                    step=t2_stop / (plan.points - 1),
                 ),
             )
             await run_echo_stage(

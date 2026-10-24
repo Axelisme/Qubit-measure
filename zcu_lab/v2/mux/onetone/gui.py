@@ -232,7 +232,7 @@ def _fit_tone(
     if cfg is None:
         raise ValueError("Mux FIT requires saved cfg")
     index = int(source.result.tone_indices[column])
-    tone = cfg.modules.readout.tones[index]
+    tone = cfg.readout.tones[index]
     freqs = tone.freq + source.result.dfs
     fig, _ = plots.subplots(f"fit_{index}", figsize=(9, 8))
     try:
@@ -327,9 +327,7 @@ class MuxOnetoneAdapter(
         cfg = _validate_source(req.run_result)
         params = req.analyze_params
         _validate_options(params)
-        resonators, diagnostic = _resonators(
-            req.parameters, len(cfg.modules.readout.tones)
-        )
+        resonators, diagnostic = _resonators(req.parameters, len(cfg.readout.tones))
 
         # 2. Fit independently, using only a delay prior for the same generator/ADC.
         outcomes: list[ToneFitSuccess | ToneFitFailure] = []
@@ -340,11 +338,11 @@ class MuxOnetoneAdapter(
                 and req.parameters is not None
                 and params.edelay is None
             ):
-                tone = cfg.modules.readout.tones[index]
+                tone = cfg.readout.tones[index]
                 raw = req.parameters.lookup(f"{resonators[index]}.ext.edelay")
                 if raw.present:
                     prior = route_matched_delay(
-                        raw.value, (cfg.modules.readout.gen_ch, tone.ro_ch)
+                        raw.value, (cfg.readout.gen_ch, tone.ro_ch)
                     )
             outcomes.append(_fit_tone(req.run_result, params, column, prior, plots))
         return MuxOnetoneAnalyzeResult(tuple(outcomes), resonators, diagnostic)
@@ -373,7 +371,7 @@ class MuxOnetoneAdapter(
             return []
 
         # 2. Replace successful frequencies in the complete readout, not a subset.
-        readout = cfg.modules.readout
+        readout = cfg.readout
         tones = list(readout.tones)
         changes: list[str] = []
         for outcome in answer.outcomes:

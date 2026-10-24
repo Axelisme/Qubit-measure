@@ -2,13 +2,13 @@
 
 import math
 from collections.abc import Sequence
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from pydantic import Field, ValidationError
 from pydantic_core import PydanticCustomError
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, ResetCfg
+from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
@@ -16,15 +16,27 @@ from zcu_tools.program.v2.modules import (
 )
 
 
-class MuxDriveModuleCfg(ConfigBase):
-    """Shared numeric modules: optional reset and full ordered mux readout.
+class MuxAcquisition(Protocol):
+    """Read shared numeric acquisition settings without a program cfg wrapper.
 
-    reset defaults to None; readout is a fixed native MuxReadoutCfg. Both use
-    microsecond timing and leave hardware validation to the program owner.
+    Counts are positive averaging controls. Delays use finite nonnegative us.
+    readout contains the complete original mux tone list, not the active subset.
     """
 
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
+    @property
+    def reps(self) -> int: ...
+
+    @property
+    def rounds(self) -> int: ...
+
+    @property
+    def initial_delay(self) -> float: ...
+
+    @property
+    def relax_delay(self) -> float: ...
+
+    @property
+    def readout(self) -> MuxReadoutCfg: ...
 
 
 class ToneRangeCfg(ConfigBase):
@@ -115,8 +127,7 @@ def require_tone_value(value: object, path: tuple[str | int, ...]) -> None:
 
 
 def validate_mux_tones(
-    cfg: ProgramV2Cfg,
-    modules: MuxDriveModuleCfg,
+    cfg: MuxAcquisition,
     tones: Sequence[MuxDriveToneCfg],
     participants: Sequence[int],
 ) -> None:
@@ -132,9 +143,9 @@ def validate_mux_tones(
         raise ValueError("reps and rounds must be positive")
     if any(not math.isfinite(v) or v < 0 for v in (cfg.initial_delay, cfg.relax_delay)):
         raise ValueError("initial_delay and relax_delay must be finite nonnegative us")
-    if len(tones) != len(modules.readout.tones):
+    if len(tones) != len(cfg.readout.tones):
         raise ValueError(
-            f"tones length={len(tones)}; full readout count={len(modules.readout.tones)}"
+            f"tones length={len(tones)}; full readout count={len(cfg.readout.tones)}"
         )
     validate_participants([tone.name for tone in tones], participants)
 
@@ -145,16 +156,15 @@ def validate_mux_tones(
         require_tone_value(tone.drive, ("tones", i, "drive"))
         tone.validate_tone()
         drive = tone.require_drive()
-        if drive.ch == modules.readout.gen_ch or drive.ch in channels:
+        if drive.ch == cfg.readout.gen_ch or drive.ch in channels:
             raise ValueError(
-                f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={modules.readout.gen_ch}"
+                f"tones[{i}].drive.ch={drive.ch}: requires independent generator; prior tone={channels.get(drive.ch)}; readout.gen_ch={cfg.readout.gen_ch}"
             )
         channels[drive.ch] = i
 
 
 def validate_mux_scan(
-    cfg: ProgramV2Cfg,
-    modules: MuxDriveModuleCfg,
+    cfg: MuxAcquisition,
     tones: Sequence[MuxToneCfg],
     participants: Sequence[int],
     expts: int,
@@ -165,7 +175,7 @@ def validate_mux_scan(
     finite sweep start/stop in experiment units. expts is a positive integer
     shared by all tones. Raise ValueError without changing inputs.
     """
-    validate_mux_tones(cfg, modules, tones, participants)
+    validate_mux_tones(cfg, tones, participants)
     if type(expts) is not int or expts <= 0:
         raise ValueError("expts must be a positive integer")
     for i in participants:

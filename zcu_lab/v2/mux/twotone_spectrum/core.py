@@ -34,7 +34,7 @@ whole sweep. Before the first completed round, signals remain NaN.
 
 Frequency scan and analysis
 --------------------------
-MuxFreqCfg.modules contains optional common reset and full mux readout.
+MuxFreqCfg.reset is optional; MuxFreqCfg.readout is the full mux readout.
 Sweep bounds and returned coordinates are in MHz. prepare_frequency_scan
 validates cfg and constructs independent rounded drive-frequency axes in
 participant order. Run resolves original positions from names, not a MuxGroup.
@@ -79,31 +79,33 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
-from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, sweep2param
-from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
+from zcu_tools.program.v2 import ModularProgramV2, ResetCfg, sweep2param
+from zcu_tools.program.v2.modules import (
+    Join,
+    MuxReadout,
+    MuxReadoutCfg,
+    Pulse,
+)
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2._support.mux_sweep_cfg import (
-    MuxDriveModuleCfg,
-    MuxToneCfg,
-    validate_mux_scan,
-)
+from zcu_lab.v2._support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
 from .analysis import MuxFreqFit, analyze_frequency
 
 
-class MuxFreqCfg(ProgramExpCfg):
+class MuxFreqCfg(ConfigBase):
     """Settings for simultaneous qubit frequency sweeps and mux readout.
 
     modules supplies optional reset and the full readout tone list. tones gives
@@ -115,7 +117,32 @@ class MuxFreqCfg(ProgramExpCfg):
     initial_delay/relax_delay are finite nonnegative waits in us.
     """
 
-    modules: MuxDriveModuleCfg
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
+    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
     expts: int = Field(
         strict=True,
@@ -128,7 +155,7 @@ class MuxFreqCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
         """Reject mismatched tones, shared drive channels or an invalid point count."""
-        validate_mux_scan(self, self.modules, self.tones, self.participants, self.expts)
+        validate_mux_scan(self, self.tones, self.participants, self.expts)
         return self
 
 
@@ -222,13 +249,14 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         # 1. Prepare zipped frequencies and readout channels in participant order.
         cfg = MuxFreqCfg.model_validate(config.model_dump())
         scan = prepare_frequency_scan(cfg, soccfg=context.soccfg)
-        readout = cfg.modules.readout.with_updates(
-            tones=[cfg.modules.readout.tones[index] for index in scan.indices]
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[index] for index in scan.indices]
         )
 
         # 2. Keep each spectrum on its own hardware-rounded frequency axis.
         viewers = [
-            context.plots.liveplot_1d(
+            live_line(
+                context.plots,
                 f"measurement_{index}",
                 "Drive frequency (MHz)",
                 "Magnitude (a.u.)",
@@ -263,15 +291,23 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
 
             # Reset -> simultaneous drives -> fixed mux readout after the longest drive.
             builder = (
-                sched.prog_builder(context.soc, context.soccfg)
-                .add_reset("reset", cfg.modules.reset)
+                sched.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=sched.cfg.reps,
+                    initial_delay=sched.cfg.initial_delay,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add_reset("reset", cfg.reset)
                 .add(Join(*drives), MuxReadout("readout", readout))
                 .declare_sweep("point", scan.coordinates.shape[1])
             )
 
             # 4. Each completed round supplies the full point/tone IQ matrix.
             prog = builder.build()
-            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
+            _ = builder.run_program(
+                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+            )
 
         # Publish the final spectra and restore tone-major result storage.
         signals.trigger_update(flush=True)

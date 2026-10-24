@@ -14,11 +14,12 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
@@ -36,21 +37,37 @@ class PreFreqResult:
     )
 
 
-class PreFreqModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Preparation pulse")]
-    pi_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Pi pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="MIST probe pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class PreFreqSweepCfg(ConfigBase):
-    freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
-
-
-class PreFreqCfg(ProgramExpCfg):
-    modules: PreFreqModuleCfg
-    sweep: PreFreqSweepCfg
+class PreFreqCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="Preparation pulse", group="Modules")
+    ]
+    pi_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Pi pulse", group="Modules")
+    ] = None
+    probe_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="MIST probe pulse", group="Modules")
+    ]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    freq: Annotated[
+        SweepCfg, FieldMeta(label="Preparation freq", unit="MHz", group="Sweep")
+    ]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -82,7 +99,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=PreFreqResult,
         cfg_type=PreFreqCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/mist/pre_freq",
     )
 
@@ -102,10 +119,10 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         # Sweep the preparation tone, not the later MIST probe.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg.modules
+        modules = cfg
 
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules.init_pulse.ch},
         )
@@ -119,7 +136,8 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Pre Pulse Frequency",
             "MIST",
@@ -133,13 +151,15 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
-            modules = run_cfg.modules
-            freq_sweep = run_cfg.sweep.freq
+            modules = run_cfg
+            freq_sweep = run_cfg.freq
             modules.init_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
             # Vary initialization before the optional pi pulse and fixed probe.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add_reset("reset", modules.reset)
                 .add_pulse("init_pulse", modules.init_pulse)
                 .add_pulse("pi_pulse", modules.pi_pulse)
@@ -152,6 +172,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                     g_center=cfg.g_center,
                     e_center=cfg.e_center,
                     ge_radius=cfg.radius,
+                    rounds=cfg.rounds,
                 )
             )
 

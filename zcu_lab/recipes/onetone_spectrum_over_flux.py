@@ -1,6 +1,6 @@
 """Resonator frequency/flux map and interactive flux calibration.
 
-Recipe freq_points → sweep.freq.expts; flux_points → sweep.flux.expts.
+Recipe freq_points → freq.expts; flux_points → flux.expts.
 Both scan counts appear as Expts in the GUI.
 """
 
@@ -99,7 +99,7 @@ async def onetone_spectrum_over_flux(
     the user pick half- and integer-flux lines to estimate flux calibration.
     Ask before applying it, then save the raw map and analysis.
 
-    freq_points → sweep.freq.expts; flux_points → sweep.flux.expts.
+    freq_points → freq.expts; flux_points → flux.expts.
     Analysis uses the captured GUI parameters; no fit controls are added.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
@@ -108,23 +108,23 @@ async def onetone_spectrum_over_flux(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("readout", inputs.readout_ref)
     if not isinstance(inputs.gain, Keep):
-        tab.command("modules.readout", "to_inline")
+        tab.command("readout", "to_inline")
     if isinstance(inputs.center_mhz, Keep) != isinstance(inputs.span_mhz, Keep):
         missing = "span_mhz" if isinstance(inputs.span_mhz, Keep) else "center_mhz"
         raise RecipeNeedsParameters(
             (MissingParameter(missing, "Supply center_mhz and span_mhz together"),)
         )
     if inputs.center_mhz is None or inputs.span_mhz is None:
-        tab.set("sweep.freq.start", None)
-        tab.set("sweep.freq.stop", None)
+        tab.set("freq.start", None)
+        tab.set("freq.stop", None)
     elif not isinstance(inputs.center_mhz, Keep) and not isinstance(
         inputs.span_mhz, Keep
     ):
-        tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
-        tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
-    tab.set("sweep.freq.n", inputs.freq_points)
+        tab.set("freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+        tab.set("freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("freq.n", inputs.freq_points)
     unit = session.device_unit(inputs.flux_device)
     if not unit.strip() or unit == "none" or unit != inputs.flux_unit:
         raise GuiRpcError(
@@ -135,10 +135,10 @@ async def onetone_spectrum_over_flux(
     tab.set("flux_unit", unit)
     if inputs.flux_range[0] == inputs.flux_range[1]:
         raise ValueError("flux endpoints must be distinct")
-    tab.set("sweep.flux.start", inputs.flux_range[0])
-    tab.set("sweep.flux.stop", inputs.flux_range[1])
-    tab.set("sweep.flux.n", inputs.flux_points)
-    tab.set("modules.readout.gain", inputs.gain)
+    tab.set("flux.start", inputs.flux_range[0])
+    tab.set("flux.stop", inputs.flux_range[1])
+    tab.set("flux.n", inputs.flux_points)
+    tab.set("readout.gain", inputs.gain)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

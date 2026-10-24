@@ -50,7 +50,7 @@ def analyze_spectra(
         )
     dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
     frequencies = sweep2array(cfg.frequency)
-    ntones, nshots = len(cfg.modules.readout.tones), cfg.rounds * cfg.reps
+    ntones, nshots = len(cfg.readout.tones), cfg.rounds * cfg.reps
     if (
         not np.array_equal(data.dc_values, dc)
         or data.frequencies.shape != frequencies.shape
@@ -102,7 +102,7 @@ def _plot_spectra(
     dc_label = (
         "DC not swept" if cfg.dc_device is None else f"{cfg.dc_device} ({cfg.dc_unit})"
     )
-    for tone, readout in enumerate(cfg.modules.readout.tones):
+    for tone, readout in enumerate(cfg.readout.tones):
         roles = ", ".join(
             role
             for role, index in (("F1", cfg.roles.f1_tone), ("F2", cfg.roles.f2_tone))

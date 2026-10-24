@@ -99,12 +99,12 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.pi_pulse", inputs.pi_ref)
-    tab.select("modules.pi2_pulse", inputs.pi2_ref)
-    tab.set("sweep.length.stop", inputs.max_delay_us)
-    tab.set("sweep.length.n", inputs.points)
+    tab.select("reset", inputs.use_reset)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("pi_pulse", inputs.pi_ref)
+    tab.select("pi2_pulse", inputs.pi2_ref)
+    tab.set("length.stop", inputs.max_delay_us)
+    tab.set("length.n", inputs.points)
     tab.set("extras.detune_ratio", inputs.detune_ratio)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)

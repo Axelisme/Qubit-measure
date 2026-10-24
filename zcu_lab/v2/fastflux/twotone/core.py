@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Join, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
@@ -28,21 +29,29 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class TwoToneModuleCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    qub_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-
-
-class TwoToneSweepCfg(ConfigBase):
-    gain: SweepCfg
-    freq: SweepCfg
-
-
-class TwotoneCfg(ProgramExpCfg):
-    modules: TwoToneModuleCfg
-    sweep: TwoToneSweepCfg
+class TwotoneCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
+    flux_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    freq: Annotated[SweepCfg, FieldMeta(group="Sweep")]
 
 
 class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
@@ -55,7 +64,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=TwoToneResult,
         cfg_type=TwotoneCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="fastflux/twotone",
     )
 
@@ -71,22 +80,22 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         # Quantize flux gain and probe frequency for their own generators.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": modules.flux_pulse.ch},
         )
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         # Keep one averaged spectrum per flux gain.
-        viewer = context.plots.liveplot_2d(
-            "measurement", "Flux Pulse Gain (a.u.)", "Frequency (MHz)"
+        viewer = live_heatmap(
+            context.plots, "measurement", "Flux Pulse Gain (a.u.)", "Frequency (MHz)"
         )
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),
@@ -96,17 +105,15 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.flux_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
-            modules.qub_pulse.set_param(
-                "freq", sweep2param("freq", sched.cfg.sweep.freq)
-            )
+            modules = sched.cfg
+            modules.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            modules.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
 
             # Schedule flux and spectroscopy in parallel, then acquire mean IQ.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Join(
@@ -115,9 +122,9 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
                     ),
                     Readout("readout", modules.readout),
                 )
-                .declare_sweep("gain", sched.cfg.sweep.gain)
-                .declare_sweep("freq", sched.cfg.sweep.freq)
-                .build_and_acquire()
+                .declare_sweep("gain", sched.cfg.gain)
+                .declare_sweep("freq", sched.cfg.freq)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return TwoToneResult(gains, freqs, signals_buffer.array)

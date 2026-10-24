@@ -12,14 +12,14 @@ from zcu_lab.v2._support.measure.mux_forms import (
     mux_tone_initials,
 )
 from zcu_lab.v2._support.mux_flux import FluxFrequencyCfg, GlobalFluxCfg, LocalFluxCfg
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
+from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
 
 from .seed_metadata import seed_metadata
 
 
 def make_flux_form[
-    C: GlobalFluxCfg[MuxOnetoneSweepCfg]
-    | LocalFluxCfg[MuxOnetoneSweepCfg]
+    C: GlobalFluxCfg[MuxFrequencyOffsetCfg]
+    | LocalFluxCfg[MuxFrequencyOffsetCfg]
     | GlobalFluxCfg[FluxFrequencyCfg]
     | LocalFluxCfg[FluxFrequencyCfg]
 ](
@@ -45,10 +45,8 @@ def make_flux_form[
     readout = mux_readout_initial(ctx, wait_for_ringup=not twotone)
     tree: dict[str, FormNode] = {
         "participants": list[FormNode](participants),
-        "modules": {
-            "reset": Slot("$mux.module.reset") if twotone else Hidden(),
-            "readout": readout,
-        },
+        "reset": Slot("$mux.module.reset") if twotone else Hidden(),
+        "readout": readout,
         "reps": 1000,
         "rounds": 10,
         "relax_delay": 1.0,
@@ -57,7 +55,7 @@ def make_flux_form[
         "settle": 0.1,
     }
     fixed = [
-        FixedElements(("modules", "readout", "module", "tones")),
+        FixedElements(("readout", "module", "tones")),
     ]
     metadata = mux_readout_seed_metadata(readout)
     for field, description in (
@@ -69,7 +67,7 @@ def make_flux_form[
         ("flux_unit", "Initial A native-unit selection; must match connected drivers"),
     ):
         metadata[(field,)] = seed_metadata(description, fallback=True)
-    metadata[("modules", "readout")] = FieldMeta(
+    metadata[("readout",)] = FieldMeta(
         description="Captured $mux.module.readout slot, or readout/mux:blank from group wiring; confirm calibration"
     )
     if twotone:
@@ -184,7 +182,8 @@ def make_flux_form[
         field_order=(
             "participants",
             "tones",
-            "modules",
+            "reset",
+            "readout",
             "frequency",
             *(("flux_dev", "flux") if not local else ("flux_expts",)),
             "flux_unit",

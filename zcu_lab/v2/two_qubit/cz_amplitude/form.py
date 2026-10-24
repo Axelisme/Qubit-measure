@@ -44,7 +44,9 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
         CZAmplitudeCfg,
         field_order=(
             "roles",
-            "modules",
+            "x180_f1",
+            "x180_f2",
+            "readout",
             "drive",
             "f1_centers",
             "f2_centers",
@@ -59,11 +61,9 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
             "rounds": 10,
             "roles": roles,
             "drive": drive,
-            "modules": {
-                "x180_f1": Slot("$f1.module.x180", copy=True),
-                "x180_f2": Slot("$f2.module.x180", copy=True),
-                "readout": readout,
-            },
+            "x180_f1": Slot("$f1.module.x180", copy=True),
+            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "readout": readout,
             "f1_centers": {
                 "g": Expr("$f1.ext.readout_cal.g_center"),
                 "e": Expr("$f1.ext.readout_cal.e_center"),

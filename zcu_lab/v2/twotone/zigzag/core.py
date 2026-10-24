@@ -8,9 +8,10 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting import live_line
 from zcu_tools.program.v2 import LoadValue, Module, Pulse, Readout, Repeat, Reset
 from zcu_tools.utils.process import rotate2real
 
@@ -25,15 +26,29 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class ZigZagModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
-    X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class ZigZagCfg(ProgramExpCfg):
-    modules: ZigZagModuleCfg
+class ZigZagCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse", group="Modules")]
+    X180_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="X180 Pulse", group="Modules")
+    ] = None
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
     n_times: Annotated[
         int,
         FieldMeta(
@@ -59,7 +74,7 @@ def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
     Raise ValueError if the selected repeat pulse is absent.
     The cfg must satisfy ZigZagCfg validation.
     """
-    repeat_pulse = getattr(cfg.modules, cfg.repeat_on)
+    repeat_pulse = getattr(cfg, cfg.repeat_on)
     if repeat_pulse is None:
         raise ValueError(f"Repeat on pulse {cfg.repeat_on} not found")
     counts = [
@@ -72,12 +87,12 @@ def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
             idx_reg="times",
             val_reg="repeat_count",
         ),
-        Reset("reset", cfg.modules.reset),
-        Pulse("X90_pulse", cfg.modules.X90_pulse),
+        Reset("reset", cfg.reset),
+        Pulse("X90_pulse", cfg.X90_pulse),
         Repeat(
             "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
         ).add_content(Pulse(f"loop_{cfg.repeat_on}", repeat_pulse)),
-        Readout("readout", cfg.modules.readout),
+        Readout("readout", cfg.readout),
     ]
 
 
@@ -88,7 +103,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ZigZagResult,
         cfg_type=ZigZagCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/zigzag",
     )
 
@@ -107,7 +122,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         times = np.arange(0, cfg.n_times + 1)
 
-        viewer = context.plots.liveplot_1d("measurement", "Times", "Signal")
+        viewer = live_line(context.plots, "measurement", "Times", "Signal")
         signals_buffer = SignalBuffer(
             (len(times),),
             on_update=lambda data: viewer.update(
@@ -117,7 +132,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             # 2. Count X90 gates in pairs so each step adds a nominal pi rotation.
-            modules = sched.cfg.modules
+            modules = sched.cfg
             repeat_pulse = getattr(modules, sched.cfg.repeat_on)
             if repeat_pulse is None:
                 raise ValueError(f"Repeat on pulse {sched.cfg.repeat_on} not found")
@@ -128,7 +143,9 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
             # 3. Load the count, prepare with X90, repeat gates, then read out.
             builder = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     LoadValue(
                         "load_repeat_count",
@@ -147,6 +164,6 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
             )
 
             # 4. Average acquisition rounds and keep partial data on cancellation.
-            _ = builder.build_and_acquire()
+            _ = builder.build_and_acquire(rounds=cfg.rounds)
 
         return ZigZagResult(times=times, signals=signals_buffer.array)

@@ -12,23 +12,20 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
     return Form(
         PowerDepCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Slot("$qubit.module.x180"),
-                "probe_pulse": Template(
-                    "res_probe",
-                    bindings={"resonator": "$resonator"},
-                    # Run supplies these probe scan coordinates.
-                    set={"gain": Hidden(0.0)},
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {"gain": Range.between(0.0, 1.0, expts=151)},
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Slot("$qubit.module.x180"),
+            "probe_pulse": Template(
+                "res_probe",
+                bindings={"resonator": "$resonator"},
+                # Run supplies these probe scan coordinates.
+                set={"gain": Hidden(0.0)},
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "gain": Range.between(0.0, 1.0, expts=151),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

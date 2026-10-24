@@ -15,11 +15,12 @@ from zcu_tools.analysis.fitting.singleshot_rabi import (
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq, classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.plotting.singleshot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
@@ -46,19 +47,27 @@ class AmpRabiFit:
     joint_fit: RabiJointFitResult
 
 
-class AmpRabiSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-
-
-class AmpRabiModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class AmpRabiCfg(ProgramExpCfg):
-    modules: AmpRabiModuleCfg
-    sweep: AmpRabiSweepCfg
+class AmpRabiCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -110,7 +119,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/amp_rabi",
     )
 
@@ -142,9 +151,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         cfg = deepcopy(cfg)
         rounds, cfg.rounds = cfg.rounds, 1
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         # Preview populations from complete shot columns without losing raw IQ.
@@ -165,7 +174,8 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 line.set(**kwargs)
             ax.legend()
 
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Pulse gain (a.u.)",
             "Classified population",
@@ -191,18 +201,18 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             on_update=update_view,
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.qub_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
+            modules = sched.cfg
+            modules.qub_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
 
             # The board sweeps gain within each reset/drive/readout acquisition.
             program = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add_reset("reset", modules.reset)
                 .add_pulse("qubit_pulse", modules.qub_pulse)
                 .add_readout("readout", modules.readout)
-                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .declare_sweep("gain", sched.cfg.gain)
                 .build()
             )
 
@@ -254,7 +264,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             initial_state=options.initial_state,
             max_calls=options.max_calls,
         )
-        readout = source.cfg.modules.readout if source.cfg is not None else None
+        readout = source.cfg.readout if source.cfg is not None else None
         ro_length = readout.ro_length if readout is not None else None
         ro_length_us = float(ro_length) if isinstance(ro_length, Real) else None
         plot_rabi_joint(

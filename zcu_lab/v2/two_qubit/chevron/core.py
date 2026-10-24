@@ -39,6 +39,7 @@ class ChevronCfg(DurationScanCfg):
             unit="MHz",
             label="Frequency",
             description="填入 common drive frequency 起訖值，單位 MHz。先用 conditional spectroscopy 選定掃描範圍。",
+            group="Sweep",
         ),
     ]
 
@@ -63,7 +64,7 @@ class ChevronExp(Experiment[RabiScanResult, ChevronCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=RabiScanResult,
         cfg_type=ChevronCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/chevron",
     )
 

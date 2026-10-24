@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
@@ -33,21 +34,29 @@ def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return np.abs(mist_signals)
 
 
-class DriveFreqModuleCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    probe_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-
-
-class DriveFreqSweepCfg(ConfigBase):
-    freq: SweepCfg
-    gain: SweepCfg
-
-
-class DriveFreqCfg(ProgramExpCfg):
-    modules: DriveFreqModuleCfg
-    sweep: DriveFreqSweepCfg
+class DriveFreqCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(group="Modules")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    freq: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    gain: Annotated[SweepCfg, FieldMeta(group="Sweep")]
 
 
 class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
@@ -60,7 +69,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=DriveFreqResult,
         cfg_type=DriveFreqCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="mist/",
     )
 
@@ -83,10 +92,10 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         # 1. Prepare both hardware axes using the probe's generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
-        freq_sweep = cfg.sweep.freq
-        gain_sweep = cfg.sweep.gain
+        freq_sweep = cfg.freq
+        gain_sweep = cfg.gain
 
         probe_pulse = modules.probe_pulse
         freqs = sweep2array(
@@ -96,8 +105,8 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
             gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
 
-        viewer = context.plots.liveplot_2d(
-            "measurement", "Pulse frequency (MHz)", "Pulse gain (a.u.)"
+        viewer = live_heatmap(
+            context.plots, "measurement", "Pulse frequency (MHz)", "Pulse gain (a.u.)"
         )
         signals_buffer = SignalBuffer(
             (len(freqs), len(gains)),
@@ -108,26 +117,24 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            modules.probe_pulse.set_param(
-                "freq", sweep2param("freq", sched.cfg.sweep.freq)
-            )
-            modules.probe_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
+            modules = sched.cfg
+            modules.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
+            modules.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
 
             # 3. Reset and initialize before each probe/readout sequence.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Pulse("init_pulse", modules.init_pulse),
                     Pulse("probe_pulse", modules.probe_pulse),
                     Readout("readout", modules.readout),
                 )
-                .declare_sweep("freq", sched.cfg.sweep.freq)
-                .declare_sweep("gain", sched.cfg.sweep.gain)
-                .build_and_acquire()
+                .declare_sweep("freq", sched.cfg.freq)
+                .declare_sweep("gain", sched.cfg.gain)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         # 4. Preserve complex IQ; the baseline-subtracted magnitude is a view.

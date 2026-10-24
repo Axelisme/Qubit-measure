@@ -30,13 +30,13 @@ def lower_detune(extras: DetuneInput, cfg: T2EchoCfg) -> T2EchoCfg:
     """
     if extras.detune_ratio == 0.0:
         cfg.detune = 0.0
-    elif cfg.sweep.length.step == 0.0:
+    elif cfg.length.step == 0.0:
         raise ValueError(
             "cannot apply a nonzero detune_ratio on a degenerate "
             "length sweep (expts < 2, step == 0)"
         )
     else:
-        cfg.detune = extras.detune_ratio / cfg.sweep.length.step
+        cfg.detune = extras.detune_ratio / cfg.length.step
     return cfg
 
 
@@ -45,29 +45,28 @@ def make_form(ctx: FormContext) -> Form[T2EchoCfg]:
     return Form(
         T2EchoCfg,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "pi2_pulse",
+            "pi_pulse",
+            "readout",
+            "length",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "pi_pulse": Slot("$qubit.module.x180")
-                if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                "pi2_pulse": Slot("$qubit.module.x90")
-                if ctx.has("$qubit.module.x90")
-                else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {"length": Range.between(0.0, "1.5 * $qubit.t2e", expts=101)},
+            "reset": Slot("$qubit.module.reset"),
+            "pi_pulse": Slot("$qubit.module.x180")
+            if ctx.has("$qubit.module.x180")
+            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "pi2_pulse": Slot("$qubit.module.x90")
+            if ctx.has("$qubit.module.x90")
+            else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "length": Range.between(0.0, "1.5 * $qubit.t2e", expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
             "detune": Hidden(),

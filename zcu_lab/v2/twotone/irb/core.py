@@ -13,6 +13,7 @@ from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
@@ -98,7 +99,8 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
             ],
             dtype=np.int64,
         )
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Random Clifford depth",
             "Signal (a.u.)",
@@ -125,7 +127,10 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             break
                         arm_step = seed_step.child(arm)
                         builder = arm_step.prog_builder(
-                            context.soc, context.soccfg, cfg=program_cfg
+                            context.soc,
+                            context.soccfg,
+                            reps=program_cfg.reps,
+                            relax_delay=program_cfg.relax_delay,
                         )
                         key = (seed_index, arm)
                         if key not in cache:
@@ -133,7 +138,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             tables = make_seed_tables(
                                 seed, depths, run_cfg.target_gate if arm else None
                             )
-                            modules = run_cfg.modules
+                            modules = run_cfg
                             (
                                 rand_gate_seq,
                                 prefix_len_by_depth,
@@ -232,7 +237,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
 
                             cache[key] = program
                         # 4. Store one round's mean IQ; reuse programs next round.
-                        _ = builder.run_program(cache[key])
+                        _ = builder.run_program(cache[key], rounds=1)
             sched.trigger_update(flush=True)
         return IRBResult(
             rounds=np.arange(run_cfg.rounds, dtype=np.int64),

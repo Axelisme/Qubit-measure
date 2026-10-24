@@ -9,13 +9,14 @@ from numpy.typing import NDArray
 from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
@@ -35,23 +36,23 @@ class FluxAnalysis:
     best_flux: float
 
 
-class FluxModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FluxSweepCfg(ConfigBase):
-    jpa_flux: Annotated[
-        SweepCfg,
+class FluxCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
         FieldMeta(
-            label="JPA flux device value",
-            description="Flux bounds in flux_unit coordinates.",
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
         ),
-    ]
-
-
-class FluxCfg(ProgramExpCfg):
+    ] = 1.0
     jpa_flux_dev: Annotated[
         str | None,
         FieldMeta(
@@ -66,8 +67,17 @@ class FluxCfg(ProgramExpCfg):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
-    modules: FluxModuleCfg
-    sweep: FluxSweepCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    jpa_flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA flux device value",
+            description="Flux bounds in flux_unit coordinates.",
+            group="Sweep",
+        ),
+    ]
     skew_penalty: Annotated[
         float,
         FieldMeta(
@@ -104,10 +114,10 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         # 1. Prepare the flux coordinates and an SNR trace for the bias scan.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        jpa_fluxs = sweep2array(cfg.sweep.jpa_flux, allow_array=True)
+        jpa_fluxs = sweep2array(cfg.jpa_flux, allow_array=True)
 
-        viewer = context.plots.liveplot_1d(
-            "measurement", "JPA Flux value (a.u.)", "Signal Difference"
+        viewer = live_line(
+            context.plots, "measurement", "JPA Flux value (a.u.)", "Signal Difference"
         )
         signals_buffer = SignalBuffer(
             (len(jpa_fluxs),),
@@ -128,10 +138,15 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
                     )
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
-                modules = step.cfg.modules
+                modules = step.cfg
                 tracker = MomentTracker()
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
@@ -147,6 +162,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
                             )
                         ),
                         trackers=[tracker],
+                        rounds=cfg.rounds,
                     )
                 )
 

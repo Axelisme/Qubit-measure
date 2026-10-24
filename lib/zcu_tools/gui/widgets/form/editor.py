@@ -65,6 +65,23 @@ def _shape(field: FieldView) -> tuple[object, ...]:
     )
 
 
+def _order_widgets(level: _Level, fields: tuple[FormFieldDescription, ...]) -> None:
+    """Place retained rows and groups at their visible declaration positions."""
+    placed_groups: set[str] = set()
+    index = 0
+    for item in fields:
+        if item.group is None:
+            widget = level.rows[item.path].widget
+        else:
+            if item.group in placed_groups:
+                continue
+            placed_groups.add(item.group)
+            widget = level.groups[item.group][0].widget
+        # A presentation change can move a retained row into or out of a group.
+        level.layout.insertWidget(index, widget)
+        index += 1
+
+
 def _completion_candidates(env: FormEnv) -> tuple[str, ...]:
     """Project sorted alias names and one component-field level once per capture.
 
@@ -193,9 +210,9 @@ class FormEditor[F: FormModel](QWidget):
     block of one Display group of the model level at <path>. It holds the
     level's fields of that group, in declaration order, under a header whose
     fold title form.fold.group.<path>.<group> (form.fold.group.<group> at the
-    root) shows the group name in the level's label column. Each level shows
-    its ungrouped rows first, then its group blocks in the order of each
-    group's first field. A group whose fields are all hidden has no block.
+    root) shows the group name in the level's label column. Rows retain their
+    declaration order, with each group block at its first visible member's
+    position. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
     shows a "Contains errors" note; a folded group stays folded.
     Groups start folded except Sweep, whose member axes also start open. A
@@ -568,6 +585,7 @@ class FormEditor[F: FormModel](QWidget):
                 # Group membership is already in this layer's metadata. No
                 # model description is queried until its own body is expanded.
                 self._sync_rows(body, tuple(members), data, preview, redraw=redraw)
+        _order_widgets(level, shown)
         _align_labels(
             [row.label for row in level.rows.values()]
             + [block.label for block, _ in level.groups.values()]
@@ -614,10 +632,10 @@ class FormEditor[F: FormModel](QWidget):
                 row.connect_fold(self._fold_changed)
                 row.connect_pick(self._pick_changed)
                 level.rows[field.path] = row
-                level.layout.insertWidget(index, row.widget)
                 row.widget.show()
             # The new-row branch always assigns row.
             assert row is not None
+            level.layout.insertWidget(index, row.widget)
             if row.field.branch != field.branch:
                 child = level.children.pop(field.path, None)
                 if child is not None:

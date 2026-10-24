@@ -9,7 +9,7 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
+from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
@@ -113,21 +114,35 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class AcStarkModuleCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
-    readout: Readout.Cfg
-
-
-class AcStarkSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
-
-
-class AcStarkCfg(ProgramExpCfg):
-    modules: AcStarkModuleCfg
-    sweep: AcStarkSweepCfg
+class AcStarkCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
+    stark_pulse1: Annotated[
+        Pulse.Cfg, FieldMeta(label="Stark resonator tone", group="Modules")
+    ]
+    stark_pulse2: Annotated[
+        Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe", group="Modules")
+    ]
+    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.", group="Sweep")]
+    freq: Annotated[
+        SweepCfg, FieldMeta(label="Probe frequency", unit="MHz", group="Sweep")
+    ]
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
@@ -143,7 +158,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/ac_stark",
     )
 
@@ -165,10 +180,10 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Prepare probe frequencies and gain points spaced by nominal drive power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
-        gain_sweep = cfg.sweep.gain
-        freq_sweep = cfg.sweep.freq
+        gain_sweep = cfg.gain
+        freq_sweep = cfg.freq
 
         freqs = sweep2array(
             freq_sweep,
@@ -186,7 +201,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "Stark Pulse Gain (a.u.)",
             "Frequency (MHz)",
@@ -208,14 +224,19 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
-                modules = step_cfg.modules
+                modules = step_cfg
 
                 modules.stark_pulse1.set_param("gain", step.value)
-                freq_sweep = step_cfg.sweep.freq
+                freq_sweep = step_cfg.freq
                 modules.stark_pulse2.set_param("freq", sweep2param("freq", freq_sweep))
 
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         # Launch the Stark tone without waiting before the probe.
@@ -233,6 +254,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                                 after_check=update_snr,
                             )
                         ),
+                        rounds=cfg.rounds,
                     )
                 )
 
@@ -343,22 +365,36 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return rotate2real(signals).real
 
 
-class AcStarkRamseyModuleCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
-    stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    readout: Readout.Cfg
-
-
-class AcStarkRamseySweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
-    length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
-
-
-class AcStarkRamseyCfg(ProgramExpCfg):
-    modules: AcStarkRamseyModuleCfg
+class AcStarkRamseyCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
+    pi2_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse", group="Modules")
+    ]
+    stark_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="Stark resonator tone", group="Modules")
+    ]
+    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
     wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
-    sweep: AcStarkRamseySweepCfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.", group="Sweep")]
+    length: Annotated[
+        SweepCfg, FieldMeta(label="Ramsey delay", unit="us", group="Sweep")
+    ]
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 
@@ -374,7 +410,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AcStarkRamseyResult,
         cfg_type=AcStarkRamseyCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/ac_stark_ramsey",
     )
 
@@ -397,12 +433,12 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         # Prepare Ramsey delays and gain points spaced by nominal Stark power.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
-        gain_sweep = cfg.sweep.gain
+        gain_sweep = cfg.gain
 
         lengths = sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
             {"soccfg": soccfg, "gen_ch": modules.stark_pulse.ch},
         )
@@ -411,7 +447,8 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, modules.stark_pulse.ch)
 
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "Stark Pulse Gain (a.u.)",
             "Time (us)",
@@ -432,14 +469,19 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("resonator gain", gains.tolist()):
                 step_cfg = step.cfg
-                modules = step_cfg.modules
+                modules = step_cfg
 
                 modules.stark_pulse.set_param("gain", step.value)
-                length_sweep = step_cfg.sweep.length
+                length_sweep = step_cfg.length
                 length_param = sweep2param("length", length_sweep)
 
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         # Join waits for both the tone and the Ramsey branch.
@@ -461,7 +503,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                         Readout("readout", modules.readout),
                     )
                     .declare_sweep("length", length_sweep)
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         return AcStarkRamseyResult(gains, lengths, signals_buffer.array)

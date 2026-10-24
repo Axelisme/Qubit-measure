@@ -7,10 +7,11 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
 from zcu_lab.v2._support.device import set_flux
@@ -25,23 +26,23 @@ class OneToneFluxResult:
     signals: NDArray[np.complex128]
 
 
-class OneToneFluxModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class OneToneFluxSweepCfg(ConfigBase):
-    jpa_flux: Annotated[
-        SweepCfg,
+class OneToneFluxCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
         FieldMeta(
-            label="JPA flux device value",
-            description="Flux bounds in flux_unit coordinates.",
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
         ),
-    ]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
-
-
-class OneToneFluxCfg(ProgramExpCfg):
+    ] = 1.0
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
@@ -49,7 +50,8 @@ class OneToneFluxCfg(ProgramExpCfg):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
-    modules: OneToneFluxModuleCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
     jpa_flux_dev: Annotated[
         str,
         FieldMeta(
@@ -57,7 +59,15 @@ class OneToneFluxCfg(ProgramExpCfg):
             description="Connected flux device driven by the survey.",
         ),
     ]
-    sweep: OneToneFluxSweepCfg
+    jpa_flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA flux device value",
+            description="Flux bounds in flux_unit coordinates.",
+            group="Sweep",
+        ),
+    ]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz", group="Sweep")]
 
 
 class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
@@ -91,18 +101,19 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
         # 1. Prepare host flux values and the board's readout-frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
-        jpa_flux_sweep = cfg.sweep.jpa_flux
+        modules = cfg
+        jpa_flux_sweep = cfg.jpa_flux
 
         jpa_fluxs = sweep2array(jpa_flux_sweep, allow_array=True)
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
             allow_array=True,
         )
 
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "JPA Flux value (a.u.)",
             "Readout frequency (MHz)",
@@ -126,18 +137,21 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
                 )
 
                 # 3. Reset, then read out at each board-swept frequency.
-                modules = step.cfg.modules
-                modules.readout.set_param(
-                    "freq", sweep2param("freq", step.cfg.sweep.freq)
-                )
+                modules = step.cfg
+                modules.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         PulseReadout("readout", modules.readout),
                     )
-                    .declare_sweep("freq", step.cfg.sweep.freq)
-                    .build_and_acquire()
+                    .declare_sweep("freq", step.cfg.freq)
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         # 4. Preserve complex IQ in flux-major order for the reflection map.

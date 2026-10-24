@@ -107,24 +107,24 @@ async def amplitude_rabi(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.qub_pulse", inputs.drive_ref)
+    tab.select("reset", inputs.use_reset)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("qub_pulse", inputs.drive_ref)
     if not isinstance(inputs.frequency_mhz, Keep) or not isinstance(
         inputs.pulse_length_us, Keep
     ):
-        tab.command("modules.qub_pulse", "to_inline")
+        tab.command("qub_pulse", "to_inline")
     if not isinstance(inputs.pulse_length_us, Keep):
-        tab.command("modules.qub_pulse.waveform", "to_inline")
-    tab.set("modules.qub_pulse.freq", inputs.frequency_mhz)
-    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+        tab.command("qub_pulse.waveform", "to_inline")
+    tab.set("qub_pulse.freq", inputs.frequency_mhz)
+    tab.set("qub_pulse.waveform.length", inputs.pulse_length_us)
     if inputs.gain_range is None:
-        tab.set("sweep.gain.start", None)
-        tab.set("sweep.gain.stop", None)
+        tab.set("gain.start", None)
+        tab.set("gain.stop", None)
     elif not isinstance(inputs.gain_range, Keep):
-        tab.set("sweep.gain.start", inputs.gain_range[0])
-        tab.set("sweep.gain.stop", inputs.gain_range[1])
-    tab.set("sweep.gain.n", inputs.points)
+        tab.set("gain.start", inputs.gain_range[0])
+        tab.set("gain.stop", inputs.gain_range[1])
+    tab.set("gain.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

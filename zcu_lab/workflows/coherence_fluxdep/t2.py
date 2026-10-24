@@ -9,16 +9,8 @@ from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t2echo.core import (
-    T2EchoCfg,
-    T2EchoModuleCfg,
-    T2EchoSweepCfg,
-)
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
-    T2RamseyCfg,
-    T2RamseyModuleCfg,
-    T2RamseySweepCfg,
-)
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg
 from zcu_lab.workflows.coherence_fluxdep.calibration import (
     CalibrationFailed,
     CalibrationFiles,
@@ -129,8 +121,10 @@ def t2echo_cfg(
         rounds=tun.rounds,
         relax_delay=tun.relax_factor * tun.guess_us,
         detune=0.0,
-        modules=T2EchoModuleCfg(pi_pulse=pi, pi2_pulse=pi2, readout=ro),
-        sweep=T2EchoSweepCfg(length=sweep),
+        pi_pulse=pi,
+        pi2_pulse=pi2,
+        readout=ro,
+        length=sweep,
     )
 
 
@@ -154,8 +148,9 @@ def t2ramsey_cfg(
         rounds=tun.rounds,
         relax_delay=tun.relax_factor * tun.guess_us,
         detune=tun.detune_ratio / sweep.step,
-        modules=T2RamseyModuleCfg(pi2_pulse=pi2, readout=ro),
-        sweep=T2RamseySweepCfg(length=sweep),
+        pi2_pulse=pi2,
+        readout=ro,
+        length=sweep,
     )
 
 

@@ -7,11 +7,12 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import find_rotate_angle
@@ -39,20 +40,28 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return (signals * np.exp(-1j * angle)).real
 
 
-class RabiCheckModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class RabiCheckSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-
-
-class RabiCheckCfg(ProgramExpCfg):
-    modules: RabiCheckModuleCfg
-    sweep: RabiCheckSweepCfg
+class RabiCheckCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse", group="Modules")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
 
 
 class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
@@ -64,7 +73,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=RabiCheckResult,
         cfg_type=RabiCheckCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/reset/rabi_check",
     )
 
@@ -80,17 +89,17 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         # 1. Prepare the quantized gain axis without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": modules.rabi_pulse.ch},
         )
 
         # 2. Project all three mean-IQ curves onto the before-reset IQ axis.
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Pulse gain", "Amplitude", num_lines=3
+        viewer = live_line(
+            context.plots, "measurement", "Pulse gain", "Amplitude", num_lines=3
         )
         signals_buffer = SignalBuffer(
             (3, len(gains)),
@@ -98,12 +107,12 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             # 3. Both drives use the same gain sweep but distinct module names.
-            modules = sched.cfg.modules
-            modules.rabi_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
+            modules = sched.cfg
+            modules.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
             builder = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Pulse("rabi_pulse", modules.rabi_pulse),
@@ -119,11 +128,11 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                     Readout("readout", modules.readout),
                 )
                 .declare_sweep("reset_sel", 3)
-                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .declare_sweep("gain", sched.cfg.gain)
             )
 
             # 4. Acquire all branches and average using the existing reps/rounds.
-            _ = builder.build_and_acquire()
+            _ = builder.build_and_acquire(rounds=cfg.rounds)
 
         return RabiCheckResult(gains, signals_buffer.array)
 

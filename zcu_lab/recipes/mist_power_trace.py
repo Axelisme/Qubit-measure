@@ -66,8 +66,8 @@ async def mist_power_trace(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.probe_pulse", inputs.probe_ref)
-    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("probe_pulse", inputs.probe_ref)
+    tab.select("readout", inputs.readout_ref)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()

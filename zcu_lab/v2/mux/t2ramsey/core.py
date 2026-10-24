@@ -123,16 +123,28 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Delay, ModularProgramV2, Pulse, SweepCfg, sweep2param
-from zcu_tools.program.v2.modules import Join, MuxReadout
+from zcu_tools.program.v2 import (
+    Delay,
+    ModularProgramV2,
+    Pulse,
+    ResetCfg,
+    SweepCfg,
+    sweep2param,
+)
+from zcu_tools.program.v2.modules import (
+    Join,
+    MuxReadout,
+    MuxReadoutCfg,
+)
 
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import (
@@ -148,12 +160,11 @@ from zcu_lab.v2._support.mux_coherence_analysis import (
     project_coherence_trace,
 )
 from zcu_lab.v2._support.mux_coherence_persistence import coherence_spec
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 
-class MuxT2RamseyCfg(ProgramExpCfg):
+class MuxT2RamseyCfg(ConfigBase):
     """Named x90 drives and a shared delay sweep for mux Ramsey fringes.
 
     modules holds the optional reset and full mux readout. tones follows the
@@ -162,22 +173,45 @@ class MuxT2RamseyCfg(ProgramExpCfg):
     require drives on independent generators. Selected drives cannot share
     the readout generator. participants is a nonempty list of unique original indices
     in result-row order (Q3/Q1 selects original positions 2/0).
-    delay is the common finite, nonnegative requested-us sweep. Inherited reps
+    delay is the common finite, nonnegative requested-us sweep. Explicit reps
     and rounds are positive; initial_delay and relax_delay are finite,
     nonnegative us before acquisition and between repetitions respectively.
     """
 
-    modules: MuxDriveModuleCfg
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
+    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
     tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us", group="Sweep")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:
         """Reject invalid full tones, fixed drives, channels and delay bounds."""
-        validate_coherence_scan(
-            self, self.modules, self.tones, self.delay, self.participants
-        )
+        validate_coherence_scan(self, self.tones, self.delay, self.participants)
         return self
 
 
@@ -223,13 +257,14 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         frequencies = np.asarray(
             [float(drive.freq) for drive in drives], dtype=np.float64
         )
-        readout = cfg.modules.readout.with_updates(
-            tones=[cfg.modules.readout.tones[index] for index in indices]
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[index] for index in indices]
         )
 
         # 2. Plot requested delay for each original tone, including partial data.
         viewers = [
-            context.plots.liveplot_1d(
+            live_line(
+                context.plots,
                 f"measurement_{index}",
                 "Requested delay (us)",
                 "Magnitude (a.u.)",
@@ -247,8 +282,14 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             # 3. Join each x90 stage so the common wait follows its longest pulse.
             length = sweep2param("length", cfg.delay)
             builder = (
-                sched.prog_builder(context.soc, context.soccfg)
-                .add_reset("reset", cfg.modules.reset)
+                sched.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=sched.cfg.reps,
+                    initial_delay=sched.cfg.initial_delay,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add_reset("reset", cfg.reset)
                 .add(
                     Join(
                         *[
@@ -277,7 +318,9 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
 
             # 4. Average rounds into tone-major IQ without filling missing points.
             prog = builder.build()
-            _ = builder.run_program(prog, raw2signal_fn=partial(_averaged_signal, prog))
+            _ = builder.run_program(
+                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+            )
         signals.trigger_update(flush=True)
         return MuxCoherenceResult(
             np.asarray(indices, dtype=np.int64),

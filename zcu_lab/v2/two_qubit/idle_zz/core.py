@@ -10,11 +10,12 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Delay, Pulse, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
@@ -25,47 +26,7 @@ from .._readout import JointRoles, collect_joint_shots
 from ._analysis import IdleZZAnalysis, fit_branch, plot_analysis
 
 
-class IdleModules(ConfigBase):
-    """Calibrated π and π/2 pulses on each role's charge generator; full mux."""
-
-    x180_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-        ),
-    ]
-    x180_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-        ),
-    ]
-    x90_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-        ),
-    ]
-    x90_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
-        ),
-    ]
-
-
-class IdleZZCfg(ProgramExpCfg):
+class IdleZZCfg(ConfigBase):
     """Thermal spectator branches, target Ramsey, then exactly one full mux read.
 
     target selects the role doing π/2→delay→phase projection. The other role
@@ -80,7 +41,70 @@ class IdleZZCfg(ProgramExpCfg):
     retain original shot order; the program copy alone uses rounds=1.
     """
 
-    modules: IdleModules
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+            group="Modules",
+        ),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+            group="Modules",
+        ),
+    ]
+    x90_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+            group="Modules",
+        ),
+    ]
+    x90_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+            group="Modules",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+            group="Modules",
+        ),
+    ]
     roles: JointRoles
     target: Literal["F1", "F2"] = "F1"
     detune: Annotated[
@@ -92,7 +116,7 @@ class IdleZZCfg(ProgramExpCfg):
             description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
         ),
     ]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us", group="Sweep")]
     dc_device: Annotated[
         str | None,
         FieldMeta(
@@ -108,13 +132,14 @@ class IdleZZCfg(ProgramExpCfg):
         FieldMeta(
             label="DC source values",
             description="Inactive when source is None; no conversion or F1/F2 compensation.",
+            group="Sweep",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Require complete tones and consistent independent calibrated drive lines."""
-        m = self.modules
+        m = self
         if m.x180_f1.ch == m.x180_f2.ch:
             raise ValueError("F1/F2 require independent charge generators")
         if m.x90_f1.ch != m.x180_f1.ch or m.x90_f2.ch != m.x180_f2.ch:
@@ -160,7 +185,7 @@ def _source_rounds(
         raise ValueError(
             "Idle ZZ analysis requires saved cfg; current Form/library is not a substitute"
         )
-    ntones, nshots = len(cfg.modules.readout.tones), cfg.rounds * cfg.reps
+    ntones, nshots = len(cfg.readout.tones), cfg.rounds * cfg.reps
     dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
     ndelay = cfg.delay.expts
     if (
@@ -208,7 +233,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=IdleZZResult,
         cfg_type=IdleZZCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/idle_zz",
     )
 
@@ -233,8 +258,9 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         dc_values = (
             np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
         )
-        ntones = len(cfg.modules.readout.tones)
-        viewer = context.plots.liveplot_1d(
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Delay (us)",
             "Completed shots (all DC/branches)",
@@ -262,8 +288,14 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     )
                 for branch, branch_step in dc_step.scan("branch", [0, 1]):
                     for delay, step in branch_step.scan("delay", delays.tolist()):
-                        builder = step.prog_builder(context.soc, context.soccfg)
-                        m = cfg.modules
+                        builder = step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=step.cfg.reps,
+                            initial_delay=step.cfg.initial_delay,
+                            relax_delay=step.cfg.relax_delay,
+                        )
+                        m = cfg
                         spectator = m.x180_f2 if cfg.target == "F1" else m.x180_f1
                         pi2 = m.x90_f1 if cfg.target == "F1" else m.x90_f2
 
@@ -286,9 +318,15 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                         prog = builder.build()
                         for _, round_step in step.repeat("round", config.rounds):
                             _ = round_step.prog_builder(
-                                context.soc, context.soccfg
+                                context.soc,
+                                context.soccfg,
+                                reps=round_step.cfg.reps,
+                                initial_delay=round_step.cfg.initial_delay,
+                                relax_delay=round_step.cfg.relax_delay,
                             ).run_program(
-                                prog, raw2signal_fn=partial(collect_joint_shots, prog)
+                                prog,
+                                raw2signal_fn=partial(collect_joint_shots, prog),
+                                rounds=round_step.cfg.rounds,
                             )
 
         # Flatten rounds into the shot axis without changing tone or shot order.

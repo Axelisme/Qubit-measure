@@ -7,10 +7,11 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
@@ -28,21 +29,31 @@ def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
-
-
-class PowerModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class PowerCfg(ProgramExpCfg):
-    modules: PowerModuleCfg
-    sweep: PowerSweepCfg
+class PowerCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
+    ] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz", group="Sweep")]
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
@@ -55,7 +66,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/power_dep",
     )
 
@@ -75,10 +86,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # Prepare drive-gain rows and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
-        gain_sweep = cfg.sweep.gain
-        freq_sweep = cfg.sweep.freq
+        gain_sweep = cfg.gain
+        freq_sweep = cfg.freq
 
         gains = sweep2array(
             gain_sweep,
@@ -92,7 +103,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "Pulse Gain (a.u.)",
             "Frequency (MHz)",
@@ -108,21 +120,26 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
-                modules = cfg.modules
+                modules = cfg
 
                 modules.qub_pulse.set_param("gain", step.value)
-                freq_sweep = cfg.sweep.freq
+                freq_sweep = cfg.freq
                 modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
                 # Reset and initialize before each probe; read out its response.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add_pulse("init_pulse", modules.init_pulse)
                     .add_pulse("qubit_pulse", modules.qub_pulse)
                     .add_readout("readout", modules.readout)
                     .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
 
         return PowerResult(

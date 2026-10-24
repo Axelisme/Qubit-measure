@@ -48,7 +48,7 @@ from zcu_lab.v2._support.mux_flux import (
     run_flux_scan,
     validate_flux_result,
 )
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
+from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
 
 
 @dataclass
@@ -115,8 +115,8 @@ class MuxFluxPickResult(FluxPickResult):
 
 
 class MuxFluxAdapter[
-    C: GlobalFluxCfg[MuxOnetoneSweepCfg]
-    | LocalFluxCfg[MuxOnetoneSweepCfg]
+    C: GlobalFluxCfg[MuxFrequencyOffsetCfg]
+    | LocalFluxCfg[MuxFrequencyOffsetCfg]
     | GlobalFluxCfg[FluxFrequencyCfg]
     | LocalFluxCfg[FluxFrequencyCfg]
 ](BaseAdapter[C, RunRecord[C, MuxFluxResult], MuxFluxPickResult, MuxFluxPickParams]):

@@ -1,13 +1,12 @@
 """Core-only mux length Rabi exports; no GUI registration or imports."""
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg, MuxToneCfg
+from zcu_lab.v2._support.mux_sweep_cfg import MuxToneCfg
 
 from .analysis import MuxLenRabiFit
 from .core import MuxLenRabiCfg, MuxLenRabiExp, prepare_length_scan
 
 __all__ = [
-    "MuxDriveModuleCfg",
     "MuxFitFailure",
     "MuxLenRabiCfg",
     "MuxLenRabiExp",

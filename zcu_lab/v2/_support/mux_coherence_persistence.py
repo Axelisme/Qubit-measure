@@ -1,6 +1,7 @@
 """Native mapping for common requested delay and per-tone coherence metadata."""
 
 import numpy as np
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -10,12 +11,11 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 from .mux_coherence import MuxCoherenceResult, validate_coherence_result
 
 
-def coherence_spec[T: ExpCfgModel](
+def coherence_spec[T: ConfigBase](
     cfg_type: type[T], *, tag: str
 ) -> GroupedAxesSpec[MuxCoherenceResult, T]:
     """Map Ramsey/Echo IQ versus delay and per-tone frequencies to saved grids.
@@ -92,6 +92,6 @@ def coherence_spec[T: ExpCfgModel](
         tag=tag,
         result_builder=build,
         result_validator=validate_coherence_result,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         labber_layout="independent",
     )

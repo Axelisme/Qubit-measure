@@ -97,7 +97,7 @@ class SingleToneFreqAdapter(
         root = parameters.resolve_path("$qubit.reset.reset_10")
         items.append(
             module_writeback(
-                cfg.modules.tested_reset,
+                cfg.tested_reset,
                 target="$qubit.reset.reset_10",
                 description="Reset with one pulse from 1 to 0",
                 field_updates=(("pulse_cfg.freq", result.freq),),

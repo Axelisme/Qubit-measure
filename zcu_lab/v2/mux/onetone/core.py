@@ -13,10 +13,11 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, ValidationInfo, field_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.program.v2 import ModularProgramV2, Reset, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
@@ -27,7 +28,7 @@ class MuxOnetoneResult:
 
     dfs is float64 (Ndf,) of nominal common offsets in MHz, not actual DDS
     frequencies. tone_indices is int64 (K,) of original indices in 0..N-1;
-    each index i refers to saved cfg.modules.readout.tones[i], not its ADC
+    each index i refers to saved cfg.readout.tones[i], not its ADC
     channel. K is the active count and N the full cfg tone count.
     signals is complex128 (Ndf, K) of averaged I+jQ in a.u., retaining the
     program's ADC-length normalization. Unwritten entries remain NaN; acquired
@@ -39,37 +40,7 @@ class MuxOnetoneResult:
     signals: NDArray[np.complex128]
 
 
-class MuxOnetoneModuleCfg(ConfigBase):
-    """Modules for one fixed-tone program.
-
-    reset is an optional native ResetCfg, default None (no reset). readout is
-    a native MuxReadoutCfg with 1..8 ordered base tones: absolute freq in MHz,
-    normalized gain in [-1, 1], phase in degrees and explicit logical ro_ch.
-    Its generator, mixer and shared playback/ADC timing stay fixed during the
-    offset scan. MuxReadoutCfg owns validation of all readout fields.
-    """
-
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Readout",
-            description=(
-                "Without a slot, mixer_freq comes from $mux.mixer_freq "
-                "independently of kappa; missing mixer stays required and blank. "
-                "ro_length=1.0 us; trig_offset=$mux.time_of_fly "
-                "+5/(2*pi*min group kappa); length=trig_offset+ro_length. "
-                "Missing group flight time or any kappa leaves trigger and length "
-                "required and blank. "
-                "Candidates are not device-confirmed (未經裝置確認); "
-                "capability checks run at Run. With a slot, keep its mixer and "
-                "ADC window, add ringup to its trigger and extend pulse coverage."
-            ),
-        ),
-    ]
-
-
-class MuxOnetoneSweepCfg(ConfigBase):
+class MuxFrequencyOffsetCfg(ConfigBase):
     """Common nominal frequency-offset scan, without hardware-grid rounding.
 
     df is SweepCfg(start, stop, expts, step) in MHz, shared by every tone.
@@ -88,14 +59,14 @@ class MuxOnetoneSweepCfg(ConfigBase):
         return value
 
 
-class MuxOnetoneCfg(ProgramExpCfg):
+class MuxOnetoneCfg(ConfigBase):
     """Scan every selected readout tone by the same frequency offset.
 
-    modules supplies the base mux readout and optional reset. sweep.df supplies
+    modules supplies the base mux readout and optional reset. df supplies
     nominal offsets in MHz; each point uses base_freq[i] + df with no cumulative
     update. Each point's program quantizes these frequencies to the hardware grid.
 
-    Inherited reps (default 1) is repetitions per round; rounds (default 1) is
+    Explicit reps (default 1) is repetitions per round; rounds (default 1) is
     software acquisition rounds per offset. initial_delay and relax_delay are
     program delays in us (both default 1). No external devices are required.
     participants selects original readout indices in execution/column order.
@@ -104,8 +75,60 @@ class MuxOnetoneCfg(ProgramExpCfg):
     Saved data retains the full base readout, including inactive tones.
     """
 
-    modules: MuxOnetoneModuleCfg
-    sweep: MuxOnetoneSweepCfg
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description=(
+                "Without a slot, mixer_freq comes from $mux.mixer_freq "
+                "independently of kappa; missing mixer stays required and blank. "
+                "ro_length=1.0 us; trig_offset=$mux.time_of_fly "
+                "+5/(2*pi*min group kappa); length=trig_offset+ro_length. "
+                "Missing group flight time or any kappa leaves trigger and length "
+                "required and blank. "
+                "Candidates are not device-confirmed (未經裝置確認); "
+                "capability checks run at Run. With a slot, keep its mixer and "
+                "ADC window, add ringup to its trigger and extend pulse coverage."
+            ),
+            group="Modules",
+        ),
+    ]
+    df: Annotated[
+        SweepCfg, FieldMeta(label="Frequency offset", unit="MHz", group="Sweep")
+    ]
+
+    @field_validator("df")
+    @classmethod
+    def _validate_finite_df(cls, value: SweepCfg) -> SweepCfg:
+        if not all(math.isfinite(v) for v in (value.start, value.stop, value.step)):
+            raise ValueError("df start, stop and step must be finite MHz values")
+        return value
+
     participants: Annotated[
         list[StrictInt],
         FieldMeta(
@@ -124,9 +147,9 @@ class MuxOnetoneCfg(ProgramExpCfg):
         """
         if not value or len(set(value)) != len(value):
             raise ValueError("participants must be nonempty and contain unique indices")
-        modules = info.data.get("modules")
-        if isinstance(modules, MuxOnetoneModuleCfg) and any(
-            index < 0 or index >= len(modules.readout.tones) for index in value
+        readout = info.data.get("readout")
+        if isinstance(readout, MuxReadout.Cfg) and any(
+            index < 0 or index >= len(readout.tones) for index in value
         ):
             raise ValueError(
                 "participants indices must be in 0..N-1 of the full readout"
@@ -162,7 +185,7 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=MuxOnetoneResult,
         cfg_type=MuxOnetoneCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="mux/onetone",
     )
 
@@ -179,8 +202,8 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         """
         # 1. Select tones without changing their original indices or base frequencies.
         cfg = deepcopy(config)
-        base_readout = cfg.modules.readout
-        dfs = sweep2array(cfg.sweep.df, "none")
+        base_readout = cfg.readout
+        dfs = sweep2array(cfg.df, "none")
         indices = cfg.participants
         tone_indices = np.asarray(indices, dtype=np.int64)
         active_readout = base_readout.with_updates(
@@ -188,7 +211,8 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         )
         # 2. Give each selected spectrum its own figure and original tone identity.
         viewers = [
-            context.plots.liveplot_1d(
+            live_line(
+                context.plots,
                 f"measurement_{index}",
                 "Nominal frequency offset (MHz)",
                 "Magnitude (a.u.)",
@@ -213,13 +237,21 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                     ]
                 )
                 builder = (
-                    step.prog_builder(context.soc, context.soccfg)
-                    .add_reset("reset", step.cfg.modules.reset)
+                    step.prog_builder(
+                        context.soc,
+                        context.soccfg,
+                        reps=step.cfg.reps,
+                        initial_delay=step.cfg.initial_delay,
+                        relax_delay=step.cfg.relax_delay,
+                    )
+                    .add_reset("reset", step.cfg.reset)
                     .add(MuxReadout("readout", readout))
                 )
                 prog = builder.build()
                 # Collect all selected ADCs and average reps/rounds into this scan row.
-                _ = builder.run_program(prog, raw2signal_fn=partial(_mux_signal, prog))
+                _ = builder.run_program(
+                    prog, raw2signal_fn=partial(_mux_signal, prog), rounds=cfg.rounds
+                )
 
         # 4. Keep acquired rows and the original tone mapping, including partial scans.
         signals_buffer.trigger_update(flush=True)

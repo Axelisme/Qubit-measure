@@ -236,7 +236,7 @@ def test_refresh_keeps_user_fold_of_an_invalid_section(
     assert not driver.observe(object_name="form.input.invalid.value").visible
 
 
-def test_groups_fold_grouped_rows_after_ungrouped_rows(
+def test_groups_fold_rows_at_their_first_visible_member(
     build: Build, qapp: QApplication
 ) -> None:
     view, state = build(GroupForm, None)
@@ -269,26 +269,26 @@ def test_groups_fold_grouped_rows_after_ungrouped_rows(
         block = child(view, QWidget, f"form.group.{name}")
         assert all(block.isAncestorOf(row_of(view, path)) for path in paths), name
         assert all(row_of(view, path).isVisible() for path in paths), name
-    # Ungrouped rows first, then groups by first appearance, members in order.
+    # Each group occupies its first visible member's declaration position.
     order = [
         top(view, row_of(view, path))
         for path in (
-            "mode",
-            "after",
-            "drive.ch",
-            "drive.freq",
-            "drive.phase",
-            "drive.inner",
             "first",
             "second",
+            "mode",
             "window",
+            "after",
+            "drive.ch",
+            "drive.phase",
+            "drive.inner",
+            "drive.freq",
             "visible",
         )
     ]
     assert order == sorted(order), order
     assert len(set(order)) == len(order), order
-    assert top(view, child(view, QWidget, "form.group.Advanced")) > top(
-        view, child(view, QWidget, "form.input.drive.freq")
+    assert top(view, child(view, QWidget, "form.group.Advanced")) < top(
+        view, child(view, QWidget, "form.input.mode")
     )
     # A group title sits in its level's label column like a row's name label:
     # same left edge and width, so the level's controls still share one edge.

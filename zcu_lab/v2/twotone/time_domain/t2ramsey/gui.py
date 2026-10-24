@@ -171,7 +171,7 @@ class T2RamseyAdapter(
             and snapshot is not None
             and req.run_result.result.true_activate_detune is not None
         ):
-            source_freq = snapshot.modules.pi2_pulse.freq
+            source_freq = snapshot.pi2_pulse.freq
             if not isinstance(source_freq, float):
                 raise ValueError(
                     "qubit.freq writeback requires a scalar source pi/2 frequency"

@@ -6,13 +6,9 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.program.v2 import ProgramV2Cfg, SweepCfg
+from zcu_tools.program.v2 import SweepCfg
 
-from .mux_sweep_cfg import (
-    MuxDriveModuleCfg,
-    MuxDriveToneCfg,
-    validate_mux_tones,
-)
+from .mux_sweep_cfg import MuxAcquisition, MuxDriveToneCfg, validate_mux_tones
 
 
 class MuxCoherenceToneCfg(MuxDriveToneCfg):
@@ -30,8 +26,7 @@ class MuxCoherenceToneCfg(MuxDriveToneCfg):
 
 
 def validate_coherence_scan(
-    cfg: ProgramV2Cfg,
-    modules: MuxDriveModuleCfg,
+    cfg: MuxAcquisition,
     tones: Sequence[MuxCoherenceToneCfg],
     delay: SweepCfg,
     participants: Sequence[int],
@@ -44,7 +39,7 @@ def validate_coherence_scan(
     and independent channels. Raise ValueError without changing inputs.
     """
     # Validate original indices and fixed drives before indexing any tone.
-    validate_mux_tones(cfg, modules, tones, participants)
+    validate_mux_tones(cfg, tones, participants)
 
     # Check the shared evolution window and each final-pulse phase ramp.
     if not all(math.isfinite(v) for v in (delay.start, delay.stop, delay.step)):

@@ -69,7 +69,7 @@ def collect_joint_shots(
         if isinstance(module, MuxReadout) and module.name == "readout":
             iq = module.collect_raw_iq(prog, read_index=0)
             shots = iq[..., 0] + 1j * iq[..., 1]
-            if shots.shape != (prog.cfg_model.reps, len(module.cfg.tones)):
+            if shots.shape != (prog.reps, len(module.cfg.tones)):
                 raise ValueError(
                     "Joint readout requires only the reps loop and one mux read"
                 )

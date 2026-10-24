@@ -14,11 +14,12 @@ from zcu_tools.analysis.fitting import (
     fit_decay_fringe,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
@@ -44,19 +45,27 @@ class T2RamseyResult:
     true_activate_detune: float | None = None
 
 
-class T2RamseyModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class T2RamseySweepCfg(ConfigBase):
-    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
-
-
-class T2RamseyCfg(ProgramExpCfg):
-    modules: T2RamseyModuleCfg
-    sweep: T2RamseySweepCfg
+class T2RamseyCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us", group="Sweep")]
     detune: float = 0.0
 
 
@@ -84,7 +93,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T2RamseyResult,
         cfg_type=T2RamseyCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/t2ramsey",
     )
 
@@ -103,13 +112,13 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         soc, soccfg = context.soc, context.soccfg
         detune = cfg.detune
 
-        modules = cfg.modules
+        modules = cfg
 
-        length_sweep = cfg.sweep.length
+        length_sweep = cfg.length
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
         true_detune = actual_detune(
-            cfg.sweep.length,
+            cfg.length,
             detune=detune,
             gen_ch=modules.pi2_pulse.ch,
             soccfg=soccfg,
@@ -118,8 +127,8 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         # 2. Display the IQ projection while averaging the delay sweep.
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Time (us)", "Real Signal", title=title
+        viewer = live_line(
+            context.plots, "measurement", "Time (us)", "Real Signal", title=title
         )
         signals_buffer = SignalBuffer(
             (len(lengths),),
@@ -127,15 +136,17 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg.modules
+            modules = cfg
 
-            length_sweep = cfg.sweep.length
+            length_sweep = cfg.length
             length_param = sweep2param("length", length_sweep)
             detune_param = 360 * detune * length_param
 
             # 3. Let coherence evolve freely, then project with the phase ramp.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Pulse("pi2_pulse1", modules.pi2_pulse),
@@ -149,7 +160,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                     Readout("readout", modules.readout),
                 )
                 .declare_sweep("length", length_sweep)
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         # Keep measured IQ separate from fitted coherence times and fringe frequency.

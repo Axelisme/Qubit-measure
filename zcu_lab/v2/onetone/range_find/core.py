@@ -99,7 +99,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=RangeFindResult,
         cfg_type=RangeFindCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="onetone/range_find",
     )
 
@@ -115,15 +115,20 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         signals = spectrum_buffer(freqs, plots=context.plots)
         with Schedule(cfg, signals, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg.modules
-            freq_sweep = cfg.sweep.freq
+            modules = cfg
+            freq_sweep = cfg.freq
             modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
             _ = (
-                sched.prog_builder(context.soc, context.soccfg)
+                sched.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
+                )
                 .add_reset("reset", modules.reset)
                 .add(PulseReadout("readout", modules.readout))
                 .declare_sweep("freq", freq_sweep)
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
         return RangeFindResult(freqs=freqs, signals=signals.array)
 

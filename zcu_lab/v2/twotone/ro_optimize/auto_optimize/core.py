@@ -16,7 +16,6 @@ from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -27,6 +26,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Readout, Reset, SweepCfg
 
@@ -97,31 +97,38 @@ class ReadoutOptimizer:
         return param
 
 
-class AutoOptModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    # Run optimizes freq/gain/length, which require a pulse-driven readout.
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class AutoOptSweepCfg(ConfigBase):
+class AutoOptCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse", group="Modules")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
     freq: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout freq", unit="MHz", group="Search bounds (min–max)"),
+        FieldMeta(label="Readout freq", unit="MHz", group="Sweep"),
     ]
     gain: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout gain", unit="a.u.", group="Search bounds (min–max)"),
+        FieldMeta(label="Readout gain", unit="a.u.", group="Sweep"),
     ]
     length: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout length", unit="us", group="Search bounds (min–max)"),
+        FieldMeta(label="Readout length", unit="us", group="Sweep"),
     ]
-
-
-class AutoOptCfg(ProgramExpCfg):
-    modules: AutoOptModuleCfg
-    sweep: AutoOptSweepCfg
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
@@ -261,7 +268,7 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     ),
     result_type=AutoOptResult,
     cfg_type=AutoOptCfg,
-    cfg_schema_version="2.0",
+    cfg_schema_version="3.0",
     tag="twotone/ge/ro_optimize/auto",
     result_builder=_build_auto_opt_result,
     result_validator=_validate_auto_opt_result,
@@ -297,9 +304,9 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         soc, soccfg = context.soc, context.soccfg
         num_points = run_cfg.num_points
         optimizer = ReadoutOptimizer(
-            run_cfg.sweep.freq,
-            run_cfg.sweep.gain,
-            run_cfg.sweep.length,
+            run_cfg.freq,
+            run_cfg.gain,
+            run_cfg.length,
             num_points,
         )
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
@@ -315,7 +322,8 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         figure.suptitle("Readout Auto Optimization")
         grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
         viewers = [
-            context.plots.liveplot_1d(
+            live_line(
+                context.plots,
                 "measurement",
                 xlabel,
                 "SNR (a.u.)",
@@ -369,7 +377,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                     break
 
                 params[idx, :] = cur_params
-                modules = step.cfg.modules
+                modules = step.cfg
                 modules.readout.set_param("freq", cur_params[0])
                 modules.readout.set_param("gain", cur_params[1])
                 modules.readout.set_param("length", cur_params[2])
@@ -377,7 +385,12 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
 
                 # Compare pulse-off/on preparations at this candidate's readout settings.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", cfg=modules.reset),
                         Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
@@ -392,6 +405,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                         ),
                         trackers=[tracker],
                         **(acquire_kwargs or {}),
+                        rounds=cfg.rounds,
                     )
                 )
 

@@ -18,7 +18,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -26,6 +26,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import (
     materialize_nonuniform_t1_pulse_lengths,
 )
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Branch,
@@ -67,22 +68,34 @@ class T1WithToneResult:
     )
 
 
-class T1WithToneModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class T1WithToneSweepCfg(ConfigBase):
-    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
-
-
-class T1WithToneCfg(ProgramExpCfg):
+class T1WithToneCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
-    modules: T1WithToneModuleCfg
-    sweep: T1WithToneSweepCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
+    ] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse", group="Modules")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    length: Annotated[
+        SweepCfg | list[float], FieldMeta(label="Delay", unit="us", group="Sweep")
+    ]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -116,7 +129,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=T1WithToneResult,
         cfg_type=T1WithToneCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/t1/t1_with_tone",
     )
 
@@ -132,7 +145,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         figure, _ = plots.subplots("measurement", ncols=2, figsize=(12, 5))
         ax_g, ax_e = figure.axes
         return (
-            plots.liveplot_1d(
+            live_line(
+                plots,
                 "measurement",
                 "Time (us)",
                 "Amplitude",
@@ -140,7 +154,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                 configure_axes=configure_axes,
                 axes=ax_g,
             ),
-            plots.liveplot_1d(
+            live_line(
+                plots,
                 "measurement",
                 "Time (us)",
                 "Amplitude",
@@ -165,9 +180,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         # 1. Quantize durations without changing the caller's pulse settings.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
         if cfg.uniform:
-            length_sweep = cfg.sweep.length
+            length_sweep = cfg.length
             assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
             lengths = sweep2array(
                 length_sweep,
@@ -176,7 +191,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             )
         else:
             lengths = materialize_nonuniform_t1_pulse_lengths(
-                cfg.sweep.length,
+                cfg.length,
                 soccfg=soccfg,
                 gen_ch=modules.probe_pulse.ch,
             )
@@ -193,8 +208,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                 (len(lengths), 2, 2), dtype=np.float64, on_update=plot_fn
             )
             with Schedule(cfg, buffer, scope=context.scope) as sched:
-                modules = sched.cfg.modules
-                inner_length_sweep = sched.cfg.sweep.length
+                modules = sched.cfg
+                inner_length_sweep = sched.cfg.length
                 assert isinstance(inner_length_sweep, SweepCfg), (
                     "uniform mode requires SweepCfg"
                 )
@@ -204,7 +219,12 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
                 # 2a. Sweep tone duration and I/pi preparation inside each shot round.
                 _ = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         Pulse("init_pulse", modules.init_pulse),
@@ -219,6 +239,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                         g_center=cfg.g_center,
                         e_center=cfg.e_center,
                         ge_radius=cfg.radius,
+                        rounds=cfg.rounds,
                     )
                 )
             populations = buffer.array
@@ -236,9 +257,14 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             with Schedule(run_cfg, round_buffer, scope=context.scope) as sched:
                 for _, rep in sched.repeat("round", rounds):
                     for length, step in rep.scan("length", lengths.tolist()):
-                        modules = step.cfg.modules
+                        modules = step.cfg
                         modules.probe_pulse.set_param("length", length)
-                        builder = step.prog_builder(soc, soccfg).add(
+                        builder = step.prog_builder(
+                            soc,
+                            soccfg,
+                            reps=step.cfg.reps,
+                            relax_delay=step.cfg.relax_delay,
+                        ).add(
                             Reset("reset", modules.reset),
                             Pulse("init_pulse", modules.init_pulse),
                             Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
@@ -261,6 +287,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                             g_center=cfg.g_center,
                             e_center=cfg.e_center,
                             ge_radius=cfg.radius,
+                            rounds=cfg.rounds,
                         )
 
             # 3. Average only acquired host data; preserve NaN for missing lengths.

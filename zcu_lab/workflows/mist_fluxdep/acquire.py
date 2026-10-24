@@ -5,6 +5,7 @@ from copy import deepcopy
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.program.v2 import (
     Pulse,
     Readout,
@@ -29,23 +30,25 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
     occurs, and cfg remains unchanged.
     """
     cfg = deepcopy(cfg)
-    if cfg.modules.init_pulse is None:
+    if cfg.init_pulse is None:
         raise ValueError("MIST acquisition requires a calibrated pi preparation")
     soc, soccfg = context.soc, context.soccfg
     gains = sweep2array(
-        cfg.sweep.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.modules.probe_pulse.ch}
+        cfg.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch}
     )
-    plot = context.plots.liveplot_1d("mist/gain", "MIST gain (a.u.)", "MIST")
+    plot = live_line(context.plots, "mist/gain", "MIST gain (a.u.)", "MIST")
     buffer = SignalBuffer(
         (len(gains),),
         on_update=lambda samples: plot.update(gains, mist_signal2real(samples)),
     )
     with Schedule(cfg, buffer, scope=context.scope) as sched:
-        modules = sched.cfg.modules
-        gain_sweep = sched.cfg.sweep.gain
+        modules = sched.cfg
+        gain_sweep = sched.cfg.gain
         modules.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
         (
-            sched.prog_builder(soc, soccfg)
+            sched.prog_builder(
+                soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+            )
             .add(
                 Reset("reset", modules.reset),
                 Pulse("pi_pulse", modules.init_pulse),
@@ -53,6 +56,6 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
                 Readout("readout", modules.readout),
             )
             .declare_sweep("gain", gain_sweep)
-            .build_and_acquire()
+            .build_and_acquire(rounds=cfg.rounds)
         )
     return PowerDepResult(gains, buffer.array)

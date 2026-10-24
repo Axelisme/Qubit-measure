@@ -11,26 +11,20 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
     return Form(
         PowerCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Hidden(),
-                # Run replaces both probe frequency and gain with scan coordinates.
-                "qub_pulse": Template(
-                    "qub_probe",
-                    bindings={"qubit": "$qubit"},
-                    set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {
-                "gain": Range.between(0.001, 1.0, expts=101),
-                "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=201),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Hidden(),
+            "qub_pulse": Template(
+                "qub_probe",
+                bindings={"qubit": "$qubit"},
+                set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "gain": Range.between(0.001, 1.0, expts=101),
+            "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=201),
             "relax_delay": 1.0,
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

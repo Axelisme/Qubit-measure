@@ -18,11 +18,12 @@ from zcu_tools.analysis.fitting.resonance import (
 )
 from zcu_tools.analysis.fitting.resonance.base import remove_background
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
@@ -51,20 +52,34 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.abs(signals)
 
 
-class DispersiveModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Initial pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit preparation pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class DispersiveSweepCfg(ConfigBase):
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-
-
-class DispersiveCfg(ProgramExpCfg):
-    modules: DispersiveModuleCfg
-    sweep: DispersiveSweepCfg
+class DispersiveCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Initial pulse", group="Modules")
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg, FieldMeta(label="Qubit preparation pulse", group="Modules")
+    ]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    freq: Annotated[
+        SweepCfg, FieldMeta(label="Readout freq", unit="MHz", group="Sweep")
+    ]
 
 
 @dataclass(frozen=True)
@@ -129,7 +144,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=DispersiveResult,
         cfg_type=DispersiveCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/dispersive",
     )
 
@@ -150,9 +165,9 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg.modules
+        modules = cfg
 
-        freq_sweep = cfg.sweep.freq
+        freq_sweep = cfg.freq
 
         freqs = sweep2array(
             freq_sweep,
@@ -160,8 +175,8 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Frequency (MHz)", "Amplitude", num_lines=2
+        viewer = live_line(
+            context.plots, "measurement", "Frequency (MHz)", "Amplitude", num_lines=2
         )
         signals_buffer = SignalBuffer(
             (2, len(freqs)),
@@ -171,12 +186,14 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         # Sweep readout frequency for both preparations in the same FPGA program.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg.modules
-            freq_sweep = cfg.sweep.freq
+            modules = cfg
+            freq_sweep = cfg.freq
             modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Pulse("init_pulse", modules.init_pulse),
@@ -185,7 +202,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
                 )
                 .declare_sweep("ge", 2)
                 .declare_sweep("freq", freq_sweep)
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return DispersiveResult(freqs=freqs, signals=signals_buffer.array)

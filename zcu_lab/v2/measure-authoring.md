@@ -101,7 +101,7 @@ averaging（reps、rounds、shots）→ timing（relax_delay、initial_delay）�
 同一物理量使用一致的可見 label 與單位，例如 Frequency、MHz，Delay、us，
 Gain、normalized，以及掃描點數 Expts。以宣告模型的 `FieldMeta` 指定 label／unit；
 SweepCfg 的座標與 step 繼承 unit，點數不帶物理單位。
-既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `sweep.length` 都可顯示 Delay。
+既有 cfg key 不因顯示文字改名，例如 `delays`、`delay` 與 `length` 都可顯示 Delay。
 共用但物理量不同的 range 必須說明單位由哪張實驗決定。
 Flux 軸使用 `flux_unit`，不能把動態單位寫成固定 MHz 或 us。
 Recipe docstring 明列 `n → expts` 或 `points → expts` 的對應。
@@ -218,7 +218,7 @@ class Report(RecipeReport):
 async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
     """Sweep, fit a transition, ask before writeback, then save.
 
-    n sets Form sweep.freq.n, lowered to cfg sweep.freq.expts. Frequencies use MHz.
+    n sets Form freq.n, lowered to cfg freq.expts. Frequencies use MHz.
     pulse_length_us changes the drive duration before acquisition.
     model_type selects the existing lor/sinc fit; plot_fit controls its overlay.
     Missing Form values stop before acquisition. Omitted analysis controls retain
@@ -228,12 +228,12 @@ async def custom_spectrum(session: RecipeSession, inputs: Inputs) -> Report:
         "twotone/freq", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
     )
 
-    tab.command("modules.qub_pulse", "to_inline")
-    tab.command("modules.qub_pulse.waveform", "to_inline")
-    tab.set("sweep.freq.start", inputs.start_mhz)
-    tab.set("sweep.freq.stop", inputs.stop_mhz)
-    tab.set("sweep.freq.n", inputs.n)
-    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+    tab.command("qub_pulse", "to_inline")
+    tab.command("qub_pulse.waveform", "to_inline")
+    tab.set("freq.start", inputs.start_mhz)
+    tab.set("freq.stop", inputs.stop_mhz)
+    tab.set("freq.n", inputs.n)
+    tab.set("qub_pulse.waveform.length", inputs.pulse_length_us)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()
@@ -407,13 +407,13 @@ twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；
 analyze result 加上 current parameter context 補齊且皆為 finite number 時，adapter 同時提出
 ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
 readout role proposal；缺值或 non-finite 值只略過 module writeback。
-`readout_dpm` 以 `source.cfg.modules.readout` 作為 template，將 readout
+`readout_dpm` 以 `source.cfg.readout` 作為 template，將 readout
 `freq` 設為 `best_ro_freq`、`gain` 設為 `best_ro_gain`、
 waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、
 ADC readout length 設為 `best_ro_length`。
 
 `onetone/freq` analyze 仍寫回 parameter context `r_f` / `rf_w` / `theta0`；當來源 RunRecord 的
-`source.cfg` 非 None 且 `source.cfg.modules.readout` 是 pulse readout 時，adapter 也提出
+`source.cfg` 非 None 且 `source.cfg.readout` 是 pulse readout 時，adapter 也提出
 ModuleLibrary `readout_rf`，並以 writeback `role_id="readout"` 標示它是 Pulse
 readout role 的 proposal；`readout_rf` 是 target name，不是新的 role id。
 `readout_rf` 以該 snapshot readout 作為 template，只用 fitted `r_f` 覆寫
@@ -639,7 +639,7 @@ qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿 Form 驗
 ### Run-tested finisher
 
 SingleToneFreq、DualTonePower 與 BathPhase 使用該 Run 的完整
-`source.cfg.modules.tested_reset`。`module_writeback` 從 Run 的 module dump 建立隔離的
+`source.cfg.tested_reset`。`module_writeback` 從 Run 的 module dump 建立隔離的
 持久 Spec，adapter 只替換本次分析欄位，再提出 `ModuleWriteback(proposal=spec)`。
 這份來源已是 materialized runtime cfg，child pulse／waveform 因此成為 inline Spec。
 Adapter 不讀 ext、舊 module 或目前 point/alias 補欄位。手動修改後實際測過的頻率、gain、波形與其他 schema 欄位都保留。

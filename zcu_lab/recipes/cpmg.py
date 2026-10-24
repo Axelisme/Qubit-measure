@@ -124,30 +124,30 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.pi_pulse", inputs.pi_ref)
-    tab.select("modules.pi2_pulse", inputs.pi2_ref)
+    tab.select("reset", inputs.use_reset)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("pi_pulse", inputs.pi_ref)
+    tab.select("pi2_pulse", inputs.pi2_ref)
     counts: list[int] | None = None
     if not isinstance(inputs.times, Keep):
         if not isinstance(inputs.max_n, Keep) or not isinstance(inputs.points, Keep):
             raise ValueError("Use max_n/points or times, not both")
         if inputs.times is None:
-            tab.set("sweep.times", None)
+            tab.set("times", None)
         else:
             counts = inputs.times
-            tab.set("sweep.times", PositiveExplicitIntegerPoints(values=counts))
+            tab.set("times", PositiveExplicitIntegerPoints(values=counts))
     elif not isinstance(inputs.max_n, Keep) or not isinstance(inputs.points, Keep):
         if isinstance(inputs.max_n, Keep) or isinstance(inputs.points, Keep):
             raise ValueError("max_n and points must be supplied together")
         if inputs.max_n is None or inputs.points is None:
-            tab.set("sweep.times", None)
+            tab.set("times", None)
         else:
             count_grid = PositiveLogIntegerPoints(
                 max=inputs.max_n, points=inputs.points
             )
             counts = count_grid.values
-            tab.set("sweep.times", count_grid)
+            tab.set("times", count_grid)
     tab.set("extras.min_length_us", inputs.min_length_us)
     tab.set("extras.max_length_us", inputs.max_length_us)
     tab.set("extras.length_points", inputs.length_points)

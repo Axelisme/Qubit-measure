@@ -120,7 +120,7 @@ class DualTonePowerAdapter(
         root = parameters.resolve_path("$qubit.reset.reset_120")
         items.append(
             module_writeback(
-                cfg.modules.tested_reset,
+                cfg.tested_reset,
                 target="$qubit.reset.reset_120",
                 description="Reset with two pulses from 1 to 2 to 0",
                 field_updates=(

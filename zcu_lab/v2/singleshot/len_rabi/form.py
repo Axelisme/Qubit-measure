@@ -20,14 +20,12 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
     return Form(
         LenRabiCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "qub_pulse": qub_pulse,
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {"length": Range.between(0.03, length_stop, expts=51)},
+            "reset": Slot("$qubit.module.reset"),
+            "qub_pulse": qub_pulse,
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "length": Range.between(0.03, length_stop, expts=51),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),
             "radius": Expr("$qubit.ext.readout_cal.radius"),

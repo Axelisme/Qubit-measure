@@ -16,7 +16,7 @@ from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1ModuleCfg, T1SweepCfg
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
 from zcu_lab.workflows.coherence_fluxdep.calibration import (
     CalibrationFailed,
     CalibrationFiles,
@@ -109,11 +109,10 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
         reps=tun.reps,
         rounds=tun.rounds,
         relax_delay=tun.relax_factor * lifetime_us,
-        modules=T1ModuleCfg(pi_pulse=pi_pulse, readout=readout),
-        sweep=T1SweepCfg(
-            length=SweepCfg(
-                start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
-            )
+        pi_pulse=pi_pulse,
+        readout=readout,
+        length=SweepCfg(
+            start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
         ),
     )
 

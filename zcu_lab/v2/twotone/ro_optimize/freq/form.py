@@ -12,26 +12,20 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(
         FreqCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "qub_pulse": Slot("$qubit.module.x180")
-                if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                # Run supplies frequency.
-                "readout": Slot("$qubit.module.readout", set={"freq": Hidden(0.0)})
-                if ctx.has("$qubit.module.readout")
-                else Template(
-                    "readout",
-                    bindings={"resonator": "$resonator"},
-                    set={"freq": Hidden(0.0)},
-                ),
-            },
-            "sweep": {
-                "freq": Range.around("$resonator.freq", "$resonator.kappa", expts=301)
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "qub_pulse": Slot("$qubit.module.x180")
+            if ctx.has("$qubit.module.x180")
+            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "readout": Slot("$qubit.module.readout", set={"freq": Hidden(0.0)})
+            if ctx.has("$qubit.module.readout")
+            else Template(
+                "readout",
+                bindings={"resonator": "$resonator"},
+                set={"freq": Hidden(0.0)},
+            ),
+            "freq": Range.around("$resonator.freq", "$resonator.kappa", expts=301),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

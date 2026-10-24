@@ -26,7 +26,11 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
         ConditionalPhaseCfg,
         field_order=(
             "roles",
-            "modules",
+            "x180_f1",
+            "x180_f2",
+            "x90_f1",
+            "x90_f2",
+            "readout",
             "drive",
             "target",
             "f1_centers",
@@ -42,13 +46,11 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": roles,
-            "modules": {
-                "x180_f1": Slot("$f1.module.x180", copy=True),
-                "x180_f2": Slot("$f2.module.x180", copy=True),
-                "x90_f1": Slot("$f1.module.x90", copy=True),
-                "x90_f2": Slot("$f2.module.x90", copy=True),
-                "readout": readout,
-            },
+            "x180_f1": Slot("$f1.module.x180", copy=True),
+            "x180_f2": Slot("$f2.module.x180", copy=True),
+            "x90_f1": Slot("$f1.module.x90", copy=True),
+            "x90_f2": Slot("$f2.module.x90", copy=True),
+            "readout": readout,
             "drive": {
                 # dual_line_drive replaces both frequencies, including repeated gates.
                 "f1": Slot(

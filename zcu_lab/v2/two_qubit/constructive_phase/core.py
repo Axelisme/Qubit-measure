@@ -37,6 +37,7 @@ class ConstructivePhaseCfg(DurationScanCfg):
             unit="deg",
             label="Relative phase",
             description="填入 F2 相對 F1 的 phase 起訖值，單位 deg。先以 chevron 選定 frequency 與 duration，再確認相位掃描範圍。",
+            group="Sweep",
         ),
     ]
 
@@ -61,7 +62,7 @@ class ConstructivePhaseExp(Experiment[RabiScanResult, ConstructivePhaseCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=RabiScanResult,
         cfg_type=ConstructivePhaseCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/constructive_phase",
     )
 

@@ -15,11 +15,12 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg, sweep2param
 
@@ -27,20 +28,28 @@ BRANCH_LABELS = ("Before reset", "Reset only", "Reset + Rabi")
 BRANCH_LINESTYLES = ("-", "--", ":")
 
 
-class ResetCheckModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class ResetCheckSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-
-
-class ResetCheckCfg(ProgramExpCfg):
-    modules: ResetCheckModuleCfg
-    sweep: ResetCheckSweepCfg
+class ResetCheckCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse", group="Modules")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -101,7 +110,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=ResetCheckResult,
         cfg_type=ResetCheckCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/reset_check",
     )
 
@@ -126,9 +135,9 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
         cfg = deepcopy(cfg)
         gains = sweep2array(
-            cfg.sweep.gain,
+            cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": cfg.modules.rabi_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.rabi_pulse.ch},
         )
 
         # 2. Show G/E/Other for all three independent preparations.
@@ -138,7 +147,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 line.set(**kwargs)
             ax.legend()
 
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Pulse gain (a.u.)",
             "Classified population",
@@ -154,12 +164,12 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
-            modules = sched.cfg.modules
-            modules.rabi_pulse.set_param(
-                "gain", sweep2param("gain", sched.cfg.sweep.gain)
-            )
+            modules = sched.cfg
+            modules.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
             builder = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Pulse("rabi_pulse", modules.rabi_pulse),
@@ -174,7 +184,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                     ),
                     Readout("readout", modules.readout),
                 )
-                .declare_sweep("gain", sched.cfg.sweep.gain)
+                .declare_sweep("gain", sched.cfg.gain)
                 .declare_sweep("reset_sel", 3)
             )
 
@@ -184,6 +194,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 g_center=g_center,
                 e_center=e_center,
                 ge_radius=radius,
+                rounds=cfg.rounds,
             )
             sched.trigger_update(flush=True)
         return ResetCheckResult(

@@ -105,7 +105,7 @@ class BathPhaseAdapter(
         ):
             items.append(
                 module_writeback(
-                    cfg.modules.tested_reset,
+                    cfg.tested_reset,
                     target=target,
                     description=description,
                     field_updates=(("pi2_cfg.phase", phase),),

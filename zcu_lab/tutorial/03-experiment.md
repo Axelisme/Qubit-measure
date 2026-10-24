@@ -28,27 +28,29 @@ cp -R zcu_lab/v2/twotone/power_dep zcu_lab/v2/twotone/power_map
 
 ## 2. 在 core.py 定義資料與量測
 
-把 `PowerResult`、`PowerSweepCfg`、`PowerModuleCfg`、`PowerCfg`、`PowerExp`
-依序改名為 `PowerMapResult`、`PowerMapSweepCfg`、`PowerMapModuleCfg`、`PowerMapCfg`、`PowerMapExp`。
-保留 cfg 的型別關係。Module cfg 描述 pulse／readout，sweep cfg 描述 gain／frequency。
-程式型 cfg 繼承 `ProgramExpCfg`，module 欄位用模組自己的 `.Cfg`：
+把 `PowerResult`、`PowerCfg`、`PowerExp` 改名為 `PowerMapResult`、`PowerMapCfg`、`PowerMapExp`。
+Cfg 繼承 `ConfigBase`。Module 與掃描欄位放在頂層，group 只控制表單分組，不加入路徑：
 
 ```python
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import ProgramExpCfg
-from zcu_tools.program.v2 import Pulse, Readout, Reset
+from typing import Annotated
 
-class PowerMapModuleCfg(ConfigBase):
-    qub_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    reset: Reset.Cfg | None = None
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
 
-class PowerMapCfg(ProgramExpCfg):
-    modules: PowerMapModuleCfg
+class PowerMapCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(group="Sweep", unit="normalized")]
+    freq: Annotated[SweepCfg, FieldMeta(group="Sweep", unit="MHz")]
+    reps: int = 1
+    rounds: int = 1
+    relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
 ```
 
-這段只示範型別寫法，複製的 power map 仍需保留原本的 sweep 與其他欄位。
-不含 program 欄位的 cfg 仍用 `ExpCfgModel`。完整組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
+這段示範型別與分組，複製的 power map 仍需保留其他實驗欄位。
+Run 明傳 builder 的 reps／relax_delay，acquire 明傳 rounds。
+完整組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
 
 這次不改資料形狀。`PowerMapResult` 保留 `gains`、以 MHz 表示的 `freqs`，
 以及 shape 為 `(Ngain, Nfreq)` 的 complex IQ `signals`。

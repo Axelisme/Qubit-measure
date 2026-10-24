@@ -39,7 +39,8 @@ def host(qapp: QApplication) -> Iterator[Host]:
 
     def make(initial: FormInput[FormModel]) -> ComponentDriver:
         env = FormEnv()
-        editor = FormEditor(FormState(initial), env)
+        state = FormState(initial)
+        editor = FormEditor(state, env)
         window = QWidget()
         windows.append(window)
         layout = QVBoxLayout(window)
@@ -47,6 +48,9 @@ def host(qapp: QApplication) -> Iterator[Host]:
         refresh = QPushButton("Refresh", window)
         refresh.clicked.connect(lambda: editor.refresh(env))
         layout.addWidget(refresh)
+        reset = QPushButton("Reset", window)
+        reset.clicked.connect(lambda: state.reset(initial))
+        layout.addWidget(reset)
         window.resize(800, 760)
         window.show()
         qapp.processEvents()
@@ -141,6 +145,62 @@ def test_multiple_sweep_axes_start_open_and_keep_user_folds_on_refresh(
     driver.screenshot(tmp_path / "05-group-reopened.png")
     assert not driver.observe(object_name="form.input.scan_window.start").visible
     assert driver.observe(object_name="form.input.bias_window.start").visible
+
+
+def test_groups_and_merged_axis_keep_declared_visible_order_after_publications(
+    host: Host, tmp_path: Path
+) -> None:
+    class OrderedCfg(ConfigBase):
+        tail: int = 9
+        diagnostic: Annotated[int, FieldMeta(group="Diagnostics")] = 3
+        sample: Annotated[int, FieldMeta(group="Sensors")] = 1
+        plain: int = 2
+        scan_window: Annotated[
+            SweepCfg, FieldMeta(group="Sweep", label="Frequency", unit="MHz")
+        ]
+
+    form = Form(
+        OrderedCfg,
+        {"scan_window": Range.between(10.0, 20.0, expts=11)},
+        field_order=("sample", "plain", "diagnostic", "scan_window", "tail"),
+    )
+    driver = host(form.default_input(FormEnv()))
+    expected = (
+        "form.fold.group.Sensors",
+        "form.input.plain",
+        "form.fold.group.Diagnostics",
+        "form.fold.scan_window",
+        "form.input.tail",
+    )
+
+    def check_order() -> None:
+        observations = {name: driver.observe(object_name=name) for name in expected}
+        positions = {
+            name: observed.bounds[1]
+            for name, observed in observations.items()
+            if observed.bounds is not None
+        }
+        assert len(positions) == len(expected), observations
+        assert tuple(sorted(positions, key=lambda name: positions[name])) == expected
+
+    driver.screenshot(tmp_path / "01-initial-order.png")
+    check_order()
+    driver.click(object_name="form.fold.group.Sensors")
+    driver.screenshot(tmp_path / "02-expanded-order.png")
+    check_order()
+    driver.enter_text(object_name="form.input.plain", value="5")
+    driver.screenshot(tmp_path / "03-published-order.png")
+    check_order()
+    driver.click("Refresh")
+    driver.screenshot(tmp_path / "04-refreshed-order.png")
+    check_order()
+    assert driver.observe(object_name="form.input.sample").visible
+    assert driver.observe(object_name="form.input.plain").text == "5"
+    driver.click("Reset")
+    driver.screenshot(tmp_path / "05-reset-order.png")
+    check_order()
+    assert driver.observe(object_name="form.input.sample").visible
+    assert driver.observe(object_name="form.input.plain").text == "2"
 
 
 def test_initial_errors_expand_sections_even_when_named_modules(

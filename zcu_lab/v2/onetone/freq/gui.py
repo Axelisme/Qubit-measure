@@ -143,8 +143,8 @@ class OneToneFreqAdapter(
         cfg = result.cfg
         if cfg is None:
             return None
-        res_ch = cfg.modules.readout.gen_ch
-        ro_ch = cfg.modules.readout.ro_ch
+        res_ch = cfg.readout.gen_ch
+        ro_ch = cfg.readout.ro_ch
         if (
             isinstance(res_ch, bool)
             or not isinstance(res_ch, Integral)

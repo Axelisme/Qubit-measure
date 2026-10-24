@@ -107,24 +107,24 @@ async def onetone_spectrum(
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("readout", inputs.readout_ref)
     if not isinstance(inputs.gain, Keep):
-        tab.command("modules.readout", "to_inline")
+        tab.command("readout", "to_inline")
     if isinstance(inputs.center_mhz, Keep) != isinstance(inputs.span_mhz, Keep):
         missing = "span_mhz" if isinstance(inputs.span_mhz, Keep) else "center_mhz"
         raise RecipeNeedsParameters(
             (MissingParameter(missing, "Supply center_mhz and span_mhz together"),)
         )
     if inputs.center_mhz is None or inputs.span_mhz is None:
-        tab.set("sweep.freq.start", None)
-        tab.set("sweep.freq.stop", None)
+        tab.set("freq.start", None)
+        tab.set("freq.stop", None)
     elif not isinstance(inputs.center_mhz, Keep) and not isinstance(
         inputs.span_mhz, Keep
     ):
-        tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
-        tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
-    tab.set("sweep.freq.n", inputs.points)
-    tab.set("modules.readout.gain", inputs.gain)
+        tab.set("freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+        tab.set("freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("freq.n", inputs.points)
+    tab.set("readout.gain", inputs.gain)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

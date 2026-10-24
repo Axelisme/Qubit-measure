@@ -12,10 +12,10 @@ from zcu_lab.v2._support.mux_flux import (
     mux_flux_spec,
     run_flux_scan,
 )
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneSweepCfg
+from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
 
 
-class OnetoneFluxLocalCfg(LocalFluxCfg[MuxOnetoneSweepCfg]):
+class OnetoneFluxLocalCfg(LocalFluxCfg[MuxFrequencyOffsetCfg]):
     """Full mux onetone settings and local native-unit DC scan.
 
     Inherited tones retain original readout identity; participants determines

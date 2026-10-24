@@ -7,10 +7,11 @@ from typing import Annotated, Any, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
 from zcu_lab.v2._support.device import set_flux
@@ -27,29 +28,25 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FluxDepModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class FluxDepSweepCfg(ConfigBase):
-    freq: Annotated[
-        SweepCfg,
+class FluxDepCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
         FieldMeta(
-            label="Frequency", unit="MHz", description="Readout frequency sweep."
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
         ),
-    ]
-    flux: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="Flux device value",
-            description="Flux device sweep in flux_unit coordinates.",
-        ),
-    ]
-
-
-class FluxDepCfg(ProgramExpCfg):
-    modules: FluxDepModuleCfg
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
     flux_dev: Annotated[
         str,
         FieldMeta(
@@ -64,7 +61,23 @@ class FluxDepCfg(ProgramExpCfg):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
-    sweep: FluxDepSweepCfg
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Readout frequency sweep.",
+            group="Sweep",
+        ),
+    ]
+    flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Flux device value",
+            description="Flux device sweep in flux_unit coordinates.",
+            group="Sweep",
+        ),
+    ]
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
@@ -104,9 +117,9 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         # Prepare the device coordinates and the matched generator/ADC grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
-        modules = cfg.modules
-        freq_sweep = cfg.sweep.freq
-        flux_sweep = cfg.sweep.flux
+        modules = cfg
+        freq_sweep = cfg.freq
+        flux_sweep = cfg.flux
 
         dev_values = sweep2array(flux_sweep, allow_array=True)
         freqs = sweep2array(
@@ -129,7 +142,8 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         )
 
         # Display magnitude, but retain complex IQ for each flux/frequency point.
-        viewer = context.plots.liveplot_2d_with_line(
+        viewer = live_heatmap_with_line(
+            context.plots,
             "measurement",
             "Flux device value",
             "Frequency (MHz)",
@@ -155,20 +169,23 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     stop=context.scope.stop,
                     progress=False,
                 )
-                modules = cfg.modules
+                modules = cfg
 
-                freq_sweep = cfg.sweep.freq
+                freq_sweep = cfg.freq
                 modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
                 # Reset at each frequency, then excite and measure the resonator.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add(PulseReadout("readout", modules.readout))
                     .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(
-                        **(acquire_kwargs or {}),
-                    )
+                    .build_and_acquire(**(acquire_kwargs or {}), rounds=cfg.rounds)
                 )
 
         # Publish the final map without treating an acquisition error as success.

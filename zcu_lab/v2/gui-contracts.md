@@ -44,7 +44,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   缺值用 `30 us` 公允時間尺度，無效值留空，來源故障傳遞 owner 的原錯誤。
   初值可覆寫，不寫回校準。純反射的 `flux_onetone` / `check` 等待維持
   `0.1 us` / `0.5 us`，六個 adapter 的 `reps` / `rounds` 不變；
-  `initial_delay` 維持 core-owned hidden default。auto optimizer 的 sweep `expts`
+  未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 us 預設。auto optimizer 的 sweep `expts`
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
 - `_support/measure/` 是 private package，提供至少被兩個 concrete adapters 共用的 mechanics。

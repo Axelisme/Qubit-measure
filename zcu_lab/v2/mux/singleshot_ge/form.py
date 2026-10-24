@@ -40,10 +40,8 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
     return Form(
         MuxGECfg,
         tree={
-            "modules": {
-                "reset": Slot("$mux.module.reset"),
-                "readout": readout,
-            },
+            "reset": Slot("$mux.module.reset"),
+            "readout": readout,
             "tones": mux_tone_initials(tones, participants, fields=("drive",)),
             "participants": [index for index in participants],
             "shots": 100000,
@@ -57,7 +55,8 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
         field_order=(
             "participants",
             "tones",
-            "modules",
+            "reset",
+            "readout",
             "shots",
             "relax_delay",
             "initial_delay",

@@ -156,7 +156,7 @@ class AmpRabiAdapter(
         parameters = req.ctx.parameters
         if parameters is None:
             raise ValueError("Amplitude Rabi writeback requires captured parameters")
-        pulse = snapshot.modules.qub_pulse
+        pulse = snapshot.qub_pulse
         length = pulse.waveform.length
         if not isinstance(length, (int, float)):
             raise ValueError(

@@ -25,11 +25,6 @@ class _HasReadout(Protocol):
     def readout(self) -> object: ...
 
 
-class _HasReadoutModules(Protocol):
-    @property
-    def modules(self) -> _HasReadout: ...
-
-
 _READOUT_DPM_KEYS = ("best_ro_freq", "best_ro_gain", "best_ro_length")
 READOUT_DPM_PULSE_TAIL_US = 0.1
 
@@ -89,7 +84,7 @@ def module_writeback(
 
 
 def pulse_readout_module_writeback_items(
-    cfg_snapshot: _HasReadoutModules | None,
+    cfg_snapshot: _HasReadout | None,
     *,
     target: str,
     desc: str,
@@ -99,7 +94,7 @@ def pulse_readout_module_writeback_items(
     if cfg_snapshot is None:
         return []
 
-    readout_cfg = cfg_snapshot.modules.readout
+    readout_cfg = cfg_snapshot.readout
     if not isinstance(readout_cfg, PulseReadoutCfg):
         return []
 
@@ -116,7 +111,7 @@ def pulse_readout_module_writeback_items(
 
 def readout_dpm_writeback_items(
     ctx: SessionEnv,
-    cfg_snapshot: _HasReadoutModules | None,
+    cfg_snapshot: _HasReadout | None,
     *,
     proposed: Mapping[str, float],
 ) -> list[ModuleWriteback]:

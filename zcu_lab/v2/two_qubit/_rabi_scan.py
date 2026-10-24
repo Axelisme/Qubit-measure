@@ -13,12 +13,12 @@ from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.analysis.fitting.quality import FitQuality
 from zcu_tools.analysis.fitting.rabi import fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg, SweepCfg
+from zcu_tools.program.v2 import PulseCfg, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
 
 from ._drive import DualLineCfg, dual_line_drive
@@ -26,33 +26,7 @@ from ._readout import JointRoles, collect_joint_shots
 from .joint_readout.core import GECenters
 
 
-class RabiModules(ConfigBase):
-    """Calibrated Xπ preparation/contrast pulses and complete ordered mux."""
-
-    x180_f1: Annotated[
-        PulseCfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-        ),
-    ]
-    x180_f2: Annotated[
-        PulseCfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadoutCfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
-        ),
-    ]
-
-
-class DurationScanCfg(ProgramV2Cfg, ExpCfgModel):
+class DurationScanCfg(ConfigBase):
     """Shared B11 → two-line drive → double Xπ → mux inputs.
 
     duration is the requested positive envelope length in us on both lines.
@@ -62,7 +36,54 @@ class DurationScanCfg(ProgramV2Cfg, ExpCfgModel):
     centers are saved capture values, never live lookup. Every shot is kept.
     """
 
-    modules: RabiModules
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    x180_f1: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+            group="Modules",
+        ),
+    ]
+    x180_f2: Annotated[
+        PulseCfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+            group="Modules",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadoutCfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
+            group="Modules",
+        ),
+    ]
     roles: JointRoles
     drive: Annotated[
         DualLineCfg,
@@ -77,6 +98,7 @@ class DurationScanCfg(ProgramV2Cfg, ExpCfgModel):
             unit="us",
             label="Duration",
             description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
+            group="Sweep",
         ),
     ]
     f1_centers: Annotated[
@@ -97,11 +119,8 @@ class DurationScanCfg(ProgramV2Cfg, ExpCfgModel):
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
         """Reject invalid tones, routes, durations and unscalable waveforms."""
-        self.roles.validate_readout(self.modules.readout)
-        if (
-            self.drive.f1.ch != self.modules.x180_f1.ch
-            or self.drive.f2.ch != self.modules.x180_f2.ch
-        ):
+        self.roles.validate_readout(self.readout)
+        if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each drive must use its role's calibrated Xπ generator")
         durations = sweep2array(self.duration)
         if not np.all(np.isfinite(durations)) or np.any(durations <= 0):
@@ -147,8 +166,9 @@ def run_duration_scan(
         raise ValueError("Each finite coordinate requires one explicit drive pair")
     cfg = config.model_copy(deep=True, update={"rounds": 1})
     durations = sweep2array(cfg.duration)
-    ntones = len(cfg.modules.readout.tones)
-    viewer = context.plots.liveplot_1d(
+    ntones = len(cfg.readout.tones)
+    viewer = live_line(
+        context.plots,
         "measurement",
         "Drive duration (us)",
         "Completed shots (all coordinates)",
@@ -168,8 +188,14 @@ def run_duration_scan(
                 drive = drives[index].model_copy(deep=True)
                 for pulse in (drive.f1, drive.f2):
                     pulse.set_param("length", duration)
-                builder = duration_step.prog_builder(context.soc, context.soccfg)
-                m = cfg.modules
+                builder = duration_step.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=duration_step.cfg.reps,
+                    initial_delay=duration_step.cfg.initial_delay,
+                    relax_delay=duration_step.cfg.relax_delay,
+                )
+                m = cfg
                 builder.add_pulse("prepare_f1", m.x180_f1)
                 builder.add_pulse("prepare_f2", m.x180_f2)
                 builder.add(dual_line_drive(drive, frequency=float(drive.f1.freq)))
@@ -179,9 +205,15 @@ def run_duration_scan(
                 prog = builder.build()
                 for _, round_step in duration_step.repeat("round", config.rounds):
                     _ = round_step.prog_builder(
-                        context.soc, context.soccfg
+                        context.soc,
+                        context.soccfg,
+                        reps=round_step.cfg.reps,
+                        initial_delay=round_step.cfg.initial_delay,
+                        relax_delay=round_step.cfg.relax_delay,
                     ).run_program(
-                        prog, raw2signal_fn=partial(collect_joint_shots, prog)
+                        prog,
+                        raw2signal_fn=partial(collect_joint_shots, prog),
+                        rounds=round_step.cfg.rounds,
                     )
     buffer.trigger_update(flush=True)
     return RabiScanResult(
@@ -243,7 +275,7 @@ def joint_return(
     """
     durations = sweep2array(cfg.duration)
     nc, nd = len(coordinates), len(durations)
-    nt, ns = len(cfg.modules.readout.tones), cfg.rounds * cfg.reps
+    nt, ns = len(cfg.readout.tones), cfg.rounds * cfg.reps
     if (
         data.coordinates.shape != coordinates.shape
         or not np.allclose(

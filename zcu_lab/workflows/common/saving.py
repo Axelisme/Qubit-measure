@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.native_persistence import save_run
 from zcu_tools.experiment.records import RunRecord
@@ -24,7 +24,7 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
 )
 
 
-def save_native[Cfg: ExpCfgModel, Result](
+def save_native[Cfg: ConfigBase, Result](
     source: Completed[RunRecord[Cfg, Result]],
     destination: Path,
     *,

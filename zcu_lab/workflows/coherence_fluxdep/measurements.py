@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import LinePlot, Plots
 
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
@@ -81,8 +82,8 @@ def _plot(plots: Plots, kind: LifetimeKind) -> LinePlot:
         figure.add_subplot(2, 1, 2)
 
     plots.draw(kind, rebuild)
-    return plots.liveplot_1d(
-        kind, "Time (us)", "Signal (raw I)", axes=plots[kind].axes[1]
+    return live_line(
+        plots, kind, "Time (us)", "Signal (raw I)", axes=plots[kind].axes[1]
     )
 
 

@@ -62,37 +62,35 @@ def make_form(ctx: FormContext) -> Form[CPMGFormCfg]:
     return Form(
         CPMGFormCfg,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "pi2_pulse",
+            "pi_pulse",
+            "readout",
+            "times",
+            "length",
             "detune_ratio",
             "earlystop_snr",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "pi_pulse": Slot("$qubit.module.x180")
-                if ctx.has("$qubit.module.x180")
-                else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-                "pi2_pulse": Slot("$qubit.module.x90")
-                if ctx.has("$qubit.module.x90")
-                else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {
-                "times": LogPoints(max=16, points=5, include_zero=False),
-                "length": Hidden(),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "pi_pulse": Slot("$qubit.module.x180")
+            if ctx.has("$qubit.module.x180")
+            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "pi2_pulse": Slot("$qubit.module.x90")
+            if ctx.has("$qubit.module.x90")
+            else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "times": LogPoints(max=16, points=5, include_zero=False),
+            "length": Hidden(),
             "length_range": Hidden(),
             "length_expts": Hidden(),
             "detune_ratio": 0.1,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },

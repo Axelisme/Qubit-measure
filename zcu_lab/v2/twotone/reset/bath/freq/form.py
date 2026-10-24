@@ -12,36 +12,31 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
     return Form(
         FreqGainCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "init_pulse": Slot("$qubit.module.x180"),
-                "tested_reset": Template(
-                    "bath_reset",
-                    bindings={"qubit": "$qubit", "resonator": "$resonator"},
-                    set={
-                        # Run replaces these scan coordinates; other reset inputs remain.
-                        "cavity_tone_cfg.freq": Hidden(0.0),
-                        "cavity_tone_cfg.gain": Hidden(0.0),
-                        "pi2_cfg": Slot(
-                            "$qubit.module.x90", copy=True, set={"phase": 90.0}
-                        ),
-                    },
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {
-                "freq": Range.between(
-                    "$resonator.freq - 1.2 * $qubit.ext.rabi_freq",
-                    "$resonator.freq - 0.8 * $qubit.ext.rabi_freq",
-                    expts=51,
-                ),
-                "gain": Range.between(0.4, 1.0, expts=51),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "init_pulse": Slot("$qubit.module.x180"),
+            "tested_reset": Template(
+                "bath_reset",
+                bindings={"qubit": "$qubit", "resonator": "$resonator"},
+                set={
+                    # Run replaces these scan coordinates; other reset inputs remain.
+                    "cavity_tone_cfg.freq": Hidden(0.0),
+                    "cavity_tone_cfg.gain": Hidden(0.0),
+                    "pi2_cfg": Slot(
+                        "$qubit.module.x90", copy=True, set={"phase": 90.0}
+                    ),
+                },
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "freq": Range.between(
+                "$resonator.freq - 1.2 * $qubit.ext.rabi_freq",
+                "$resonator.freq - 0.8 * $qubit.ext.rabi_freq",
+                expts=51,
+            ),
+            "gain": Range.between(0.4, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

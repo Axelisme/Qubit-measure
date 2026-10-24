@@ -93,9 +93,9 @@ Editing participants preserves the fixed tone identities and the shared
 frequency and DC sweep values. Readout identity remains required for every tone.
 All readout identities and local flux_dev names stay required. Local driver
 uniqueness is checked only for selected tones.
-`modules.reset` is optional; `modules.readout` is the complete numeric mux
+`reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
-`modules.readout.module`; this selector wrapper is not part of Python cfg.
+`readout.module`; this selector wrapper is not part of Python cfg.
 `frequency.df` is a SweepCfg of common nominal MHz offsets.
 `tones[i]` contains only its fixed name. `flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.

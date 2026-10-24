@@ -8,11 +8,12 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     LoadValue,
@@ -43,21 +44,35 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class ZigZagScanModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
-    X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class ZigZagScanSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
-    freq: Annotated[SweepCfg | None, FieldMeta(label="Freq", unit="MHz")] = None
-
-
-class ZigZagScanCfg(ProgramExpCfg):
-    modules: ZigZagScanModuleCfg
-    sweep: ZigZagScanSweepCfg
+class ZigZagScanCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse", group="Modules")]
+    X180_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="X180 Pulse", group="Modules")
+    ] = None
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[
+        SweepCfg | None, FieldMeta(label="Gain", unit="a.u.", group="Sweep")
+    ] = None
+    freq: Annotated[
+        SweepCfg | None, FieldMeta(label="Freq", unit="MHz", group="Sweep")
+    ] = None
     n_times: Annotated[
         int,
         FieldMeta(
@@ -102,7 +117,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ZigZagScanResult,
         cfg_type=ZigZagScanCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/ge/zigzag_scan",
     )
 
@@ -124,16 +139,16 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         soc, soccfg = context.soc, context.soccfg
         repeat_on = cfg.repeat_on
 
-        modules = cfg.modules
+        modules = cfg
 
         times = np.arange(0, cfg.n_times + 1)
 
-        if cfg.sweep.freq is not None:
+        if cfg.freq is not None:
             x_key = "freq"
-            x_sweep = cfg.sweep.freq
-        elif cfg.sweep.gain is not None:
+            x_sweep = cfg.freq
+        elif cfg.gain is not None:
             x_key = "gain"
-            x_sweep = cfg.sweep.gain
+            x_sweep = cfg.gain
         else:
             raise ValueError("No sweep parameter found in cfg")
         x_info = ZigZagScanExp.SWEEP_MAP[x_key]
@@ -158,7 +173,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             )
 
         # 2. Track mean IQ on the count-by-parameter grid.
-        viewer = context.plots.liveplot_2d("measurement", "Times", x_info["name"])
+        viewer = live_heatmap(context.plots, "measurement", "Times", x_info["name"])
         signals_buffer = SignalBuffer(
             (len(times), len(values)),
             on_update=lambda data: viewer.update(
@@ -168,7 +183,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             ),
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
+            modules = sched.cfg
 
             # Preserve the preparation pulse before changing the repeated pulse.
             X90_pulse = deepcopy(modules.X90_pulse)
@@ -176,7 +191,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             if repeat_pulse is None:
                 raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
-            x_sweep = getattr(sched.cfg.sweep, x_key)
+            x_sweep = getattr(sched.cfg, x_key)
             assert x_sweep is not None
             x_param = sweep2param(x_info["param_key"], x_sweep)
             repeat_pulse.set_param(x_info["param_key"], x_param)
@@ -189,7 +204,9 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
 
             # 3. Load the count on the board, prepare X90, repeat, then read out.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     LoadValue(
                         "load_repeat_count",
@@ -209,7 +226,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
                 )
                 .declare_sweep("times", len(times))
                 .declare_sweep(x_key, x_sweep)
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return ZigZagScanResult(

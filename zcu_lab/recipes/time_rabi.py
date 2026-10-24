@@ -111,15 +111,15 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.select("modules.reset", inputs.use_reset)
-    tab.select("modules.readout", inputs.readout_ref)
-    tab.select("modules.qub_pulse", inputs.drive_ref)
+    tab.select("reset", inputs.use_reset)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("qub_pulse", inputs.drive_ref)
     if not isinstance(inputs.frequency_mhz, Keep) or not isinstance(inputs.gain, Keep):
-        tab.command("modules.qub_pulse", "to_inline")
-    tab.set("modules.qub_pulse.freq", inputs.frequency_mhz)
-    tab.set("modules.qub_pulse.gain", inputs.gain)
-    tab.set("sweep.length.stop", inputs.max_length_us)
-    tab.set("sweep.length.n", inputs.points)
+        tab.command("qub_pulse", "to_inline")
+    tab.set("qub_pulse.freq", inputs.frequency_mhz)
+    tab.set("qub_pulse.gain", inputs.gain)
+    tab.set("length.stop", inputs.max_length_us)
+    tab.set("length.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

@@ -11,31 +11,26 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(
         FreqCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "flux_pulse": Template(
-                    "flux_pulse",
-                    bindings={"qubit": "$qubit"},
-                    set={"waveform.length": 0.5},
-                ),
-                "qub_pulse": Template(
-                    "qub_probe",
-                    bindings={"qubit": "$qubit"},
-                    # Run supplies the spectroscopy frequency scan.
-                    set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 0.05},
-                ),
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-            },
-            "sweep": {
-                "length": Range.between(0.0, 1.0, expts=101),
-                "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=101),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "flux_pulse": Template(
+                "flux_pulse",
+                bindings={"qubit": "$qubit"},
+                set={"waveform.length": 0.5},
+            ),
+            "qub_pulse": Template(
+                "qub_probe",
+                bindings={"qubit": "$qubit"},
+                # Run supplies the spectroscopy frequency scan.
+                set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 0.05},
+            ),
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "length": Range.between(0.0, 1.0, expts=101),
+            "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=101),
             "readout_t": 2.0,
             "relax_delay": 1.0,
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

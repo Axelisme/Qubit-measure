@@ -13,11 +13,12 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
@@ -36,21 +37,31 @@ class FreqPowerResult:
     )
 
 
-class FreqPowerModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FreqPowerSweepCfg(ConfigBase):
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
-
-
-class FreqPowerCfg(ProgramExpCfg):
-    modules: FreqPowerModuleCfg
-    sweep: FreqPowerSweepCfg
+class FreqPowerCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
+    ] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz", group="Sweep")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.", group="Sweep")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -77,7 +88,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=FreqPowerResult,
         cfg_type=FreqPowerCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/mist/power_freq",
     )
 
@@ -102,10 +113,10 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         # Prepare host gain points and the board frequency grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg.modules
+        modules = cfg
 
-        freq_sweep = cfg.sweep.freq
-        gain_sweep = cfg.sweep.gain
+        freq_sweep = cfg.freq
+        gain_sweep = cfg.gain
 
         gains = sweep2array(
             gain_sweep,
@@ -124,7 +135,8 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             "measurement", nrows=3, ncols=1, figsize=(12, 6)
         )
         viewers = tuple(
-            context.plots.liveplot_2d(
+            live_heatmap(
+                context.plots,
                 "measurement",
                 "gain (a.u.)",
                 "freq (MHz)",
@@ -148,27 +160,31 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             on_update=plot_fn,
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
-            sched.cfg.modules.probe_pulse.set_param(
-                "freq", sweep2param("freq", sched.cfg.sweep.freq)
-            )
+            sched.cfg.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
             for gain, step in sched.scan("gain", gains.tolist()):
-                modules = step.cfg.modules
+                modules = step.cfg
                 modules.probe_pulse.set_param("gain", gain)
 
                 # Fix gain for this row and sweep probe frequency after preparation.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add_pulse("init_pulse", modules.init_pulse)
                     .add_pulse("probe_pulse", modules.probe_pulse)
                     .add_readout("readout", modules.readout)
-                    .declare_sweep("freq", step.cfg.sweep.freq)
+                    .declare_sweep("freq", step.cfg.freq)
                     .build_and_acquire(
                         # Classify individual shots before averaging populations.
                         raw2signal_fn=raw_population_signal,
                         g_center=cfg.g_center,
                         e_center=cfg.e_center,
                         ge_radius=cfg.radius,
+                        rounds=cfg.rounds,
                     )
                 )
 

@@ -29,13 +29,7 @@ from zcu_lab.v2._support.resonator import (
     fit_resonance,
 )
 from zcu_lab.v2.onetone._shared import (
-    FreqModuleCfg as FreqModuleCfg,
-)
-from zcu_lab.v2.onetone._shared import (
     FreqResult as FreqResult,
-)
-from zcu_lab.v2.onetone._shared import (
-    FreqSweepCfg as FreqSweepCfg,
 )
 from zcu_lab.v2.onetone._shared import (
     LinearFreqCfg,
@@ -145,12 +139,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="onetone/freq",
     )
 
     def _round_info(self, cfg: FreqCfg, soccfg) -> dict[str, Any]:
-        modules = cfg.modules
+        modules = cfg
         return {
             "soccfg": soccfg,
             "gen_ch": modules.readout.gen_ch,
@@ -176,7 +170,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             if params is None:
                 raise ValueError("homophasal sampling requires fit parameters")
             freqs = homophasal_sweep2array(
-                cfg.sweep.freq, params, self._round_info(cfg, soccfg)
+                cfg.freq, params, self._round_info(cfg, soccfg)
             )
         else:
             raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
@@ -185,18 +179,23 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg.modules
+            modules = cfg
 
             # 2. Reset, read out and sweep frequencies on the FPGA.
             if cfg.sampling_mode == "linear":
-                freq_sweep = cfg.sweep.freq
+                freq_sweep = cfg.freq
                 modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
                 _ = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add(PulseReadout("readout", modules.readout))
                     .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire()
+                    .build_and_acquire(rounds=cfg.rounds)
                 )
             else:
                 # Homophasal sampling uses the calibrated DDS table.
@@ -214,7 +213,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 # Update DDS words after each point, wrapping for the next rep;
                 # the table readout preserves the native sweep's phase timing.
                 builder = (
-                    sched.prog_builder(soc, soccfg)
+                    sched.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=sched.cfg.reps,
+                        relax_delay=sched.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add(
                         TablePulseReadout(
@@ -229,7 +233,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 )
 
                 # 3. Average reps/rounds and retain completed data on cancellation.
-                _ = builder.build_and_acquire()
+                _ = builder.build_and_acquire(rounds=cfg.rounds)
 
         return FreqResult(freqs=freqs, signals=signals_buffer.array)
 

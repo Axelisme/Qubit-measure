@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import AfterValidator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -17,6 +17,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
+from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rescale
 
@@ -32,25 +33,33 @@ def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rescale(minus_background(np.abs(signals), axis=-1), axis=-1)
 
 
-class PowerDepModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-
-
-class PowerDepSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
-
-
 def _positive_snr_or_none(value: float | None) -> float | None:
     if value is not None and value <= 0:
         raise ValueError("SNR threshold must be positive or left blank (None)")
     return value
 
 
-class PowerDepCfg(ProgramExpCfg):
-    modules: PowerDepModuleCfg
-    sweep: PowerDepSweepCfg
+class PowerDepCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized", group="Sweep")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz", group="Sweep")]
     earlystop_snr: Annotated[
         float | None,
         AfterValidator(_positive_snr_or_none),
@@ -72,7 +81,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="onetone/power_dep",
     )
 
@@ -92,9 +101,9 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         # Prepare the gain points and matched generator/ADC frequency grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
-        gain_sweep = cfg.sweep.gain
+        gain_sweep = cfg.gain
 
         readout_cfg = modules.readout
         gains = sweep2array(
@@ -104,7 +113,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             allow_array=True,
         )
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {
                 "soccfg": soccfg,
@@ -120,8 +129,13 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        viewer = context.plots.liveplot_2d_with_line(
-            "measurement", "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
+        viewer = live_heatmap_with_line(
+            context.plots,
+            "measurement",
+            "Power (a.u.)",
+            "Frequency (MHz)",
+            line_axis=1,
+            num_lines=10,
         )
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),
@@ -135,15 +149,20 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 cfg = step.cfg
-                modules = cfg.modules
+                modules = cfg
 
                 modules.readout.set_param("gain", step.value)
-                freq_sweep = cfg.sweep.freq
+                freq_sweep = cfg.freq
                 modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
                 # Repeat reset/readout across frequency at this fixed gain.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add(PulseReadout("readout", modules.readout))
                     .declare_sweep("freq", freq_sweep)
@@ -156,6 +175,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                                 after_check=update_snr,
                             )
                         ),
+                        rounds=cfg.rounds,
                     )
                 )
 

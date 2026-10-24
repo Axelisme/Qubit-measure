@@ -10,10 +10,11 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ModularProgramV2, Pulse
 from zcu_tools.program.v2.modules import MuxReadout
@@ -40,37 +41,7 @@ def _round_collector(
     return collect
 
 
-class RBModules(ConfigBase):
-    """Positive calibrated X90s for F1/F2 and the complete ordered mux readout.
-
-    x90_f1/x90_f2 define each role's physical X axis in degrees; their channels
-    must match that role's CZ charge line. readout retains every original tone.
-    """
-
-    x90_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ/2",
-            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-        ),
-    ]
-    x90_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ/2",
-            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
-        ),
-    ]
-
-
-class RBCfg(ProgramExpCfg):
+class RBCfg(ConfigBase):
     """Thermal B00 → paired random Clifford + own recovery → one mux read.
 
     modules/drive are captured calibrated inputs, never simulator fallbacks.
@@ -85,7 +56,54 @@ class RBCfg(ProgramExpCfg):
     allow raw acquisition but analysis returns an explicit missing-source reason.
     """
 
-    modules: RBModules
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    x90_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ/2",
+            description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+            group="Modules",
+        ),
+    ]
+    x90_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ/2",
+            description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
+            group="Modules",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+            group="Modules",
+        ),
+    ]
     roles: JointRoles
     drive: Annotated[
         DualLineCfg,
@@ -119,15 +137,15 @@ class RBCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
         """Reject swapped phases, duplicate axes and mismatched role generators."""
-        self.roles.validate_readout(self.modules.readout)
+        self.roles.validate_readout(self.readout)
         self.phase_pair.validate_roles(self.roles)
         if self.depths != sorted(set(self.depths)):
             raise ValueError("RB depths must be unique and increasing")
         if len(set(self.seeds)) != len(self.seeds):
             raise ValueError("RB seeds must be distinct complete integer identities")
         for drive, x90 in (
-            (self.drive.f1, self.modules.x90_f1),
-            (self.drive.f2, self.modules.x90_f2),
+            (self.drive.f1, self.x90_f1),
+            (self.drive.f2, self.x90_f2),
         ):
             if drive.ch != x90.ch:
                 raise ValueError("CZ and X90 must use the same captured role generator")
@@ -172,7 +190,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=RBResult,
         cfg_type=RBCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/rb",
     )
 
@@ -187,9 +205,13 @@ class RBExp(Experiment[RBResult, RBCfg]):
         The input config, aliases and library are not changed or reread.
         """
         cfg = config.model_copy(deep=True, update={"rounds": 1})
-        ntones = len(cfg.modules.readout.tones)
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Random Clifford depth", "Completed shots", num_lines=2
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Random Clifford depth",
+            "Completed shots",
+            num_lines=2,
         )
 
         def update_view(raw: NDArray[np.complex128]) -> None:
@@ -208,22 +230,36 @@ class RBExp(Experiment[RBResult, RBCfg]):
                     pair = make_paired_sequences(depth, seed)
                     for arm, arm_step in seed_step.scan("arm", [0, 1]):
                         sequence = (pair.reference, pair.interleaved)[arm]
-                        builder = arm_step.prog_builder(context.soc, context.soccfg)
+                        builder = arm_step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=arm_step.cfg.reps,
+                            initial_delay=arm_step.cfg.initial_delay,
+                            relax_delay=arm_step.cfg.relax_delay,
+                        )
                         builder.add(
                             sequence_modules(
                                 sequence.gates,
-                                x90_f1=cfg.modules.x90_f1,
-                                x90_f2=cfg.modules.x90_f2,
+                                x90_f1=cfg.x90_f1,
+                                x90_f2=cfg.x90_f2,
                                 drive=cfg.drive,
                                 phase_pair=cfg.phase_pair,
                             )
                         )
-                        builder.add(MuxReadout("readout", cfg.modules.readout))
+                        builder.add(MuxReadout("readout", cfg.readout))
                         prog = builder.build()
                         for _, round_step in arm_step.repeat("round", config.rounds):
                             _ = round_step.prog_builder(
-                                context.soc, context.soccfg
-                            ).run_program(prog, raw2signal_fn=_round_collector(prog))
+                                context.soc,
+                                context.soccfg,
+                                reps=round_step.cfg.reps,
+                                initial_delay=round_step.cfg.initial_delay,
+                                relax_delay=round_step.cfg.relax_delay,
+                            ).run_program(
+                                prog,
+                                raw2signal_fn=_round_collector(prog),
+                                rounds=round_step.cfg.rounds,
+                            )
         buffer.trigger_update(flush=True)
         return RBResult(
             np.array(cfg.depths, dtype=np.int64),

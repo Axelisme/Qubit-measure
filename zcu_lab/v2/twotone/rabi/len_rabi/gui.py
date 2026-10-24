@@ -128,9 +128,9 @@ class LenRabiAdapter(
     def validate_run_request(self, req: RunRequest, cfg: LenRabiCfg) -> None:
         _, soccfg = require_soc_handles(req)
         sweep2array(
-            cfg.sweep.length,
+            cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": cfg.modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
     def analyze(
@@ -185,7 +185,7 @@ class LenRabiAdapter(
         snapshot = req.run_result.cfg
         if snapshot is None:
             return items
-        pulse = snapshot.modules.qub_pulse
+        pulse = snapshot.qub_pulse
         gain = pulse.gain
         if not isinstance(gain, (int, float)):
             raise ValueError("Length Rabi pi_product requires a scalar source gain")

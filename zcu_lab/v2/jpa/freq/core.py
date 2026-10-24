@@ -9,13 +9,14 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
@@ -35,17 +36,23 @@ class FreqAnalysis:
     best_freq: float
 
 
-class FreqModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FreqSweepCfg(ConfigBase):
-    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
-
-
-class FreqCfg(ProgramExpCfg):
+class FreqCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
     jpa_rf_dev: Annotated[
         str | None,
         FieldMeta(
@@ -53,8 +60,12 @@ class FreqCfg(ProgramExpCfg):
             description="Connected RF device name; None skips RF control.",
         ),
     ] = ""
-    modules: FreqModuleCfg
-    sweep: FreqSweepCfg
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    jpa_freq: Annotated[
+        SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz", group="Sweep")
+    ]
     skew_penalty: Annotated[
         float,
         FieldMeta(
@@ -91,7 +102,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # 1. Prepare pump settings and preserve randomized acquisition order.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        jpa_freqs = sweep2array(cfg.sweep.jpa_freq, allow_array=True)
+        jpa_freqs = sweep2array(cfg.jpa_freq, allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
         def configure_axes(ax: Axes) -> None:
@@ -99,7 +110,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             ax.lines[0].set_marker("o")
 
         # Show independent points because neighboring samples need not be nearby.
-        viewer = context.plots.liveplot_1d(
+        viewer = live_line(
+            context.plots,
             "measurement",
             "JPA Frequency (MHz)",
             "Signal Difference",
@@ -120,10 +132,15 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     )
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
-                modules = step.cfg.modules
+                modules = step.cfg
                 tracker = MomentTracker()
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add(
                         Reset("reset", modules.reset),
                         Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
@@ -139,6 +156,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                             )
                         ),
                         trackers=[tracker],
+                        rounds=cfg.rounds,
                     )
                 )
 

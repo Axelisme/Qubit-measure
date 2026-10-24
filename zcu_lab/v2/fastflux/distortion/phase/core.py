@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
@@ -36,22 +37,30 @@ def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class PhaseModuleCfg(ConfigBase):
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    pi2_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-
-
-class PhaseSweepCfg(ConfigBase):
-    length: SweepCfg
-    phase: SweepCfg
-
-
-class PhaseCfg(ProgramExpCfg):
-    modules: PhaseModuleCfg
+class PhaseCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
+    flux_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
     readout_t: float
-    sweep: PhaseSweepCfg
+    length: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    phase: Annotated[SweepCfg, FieldMeta(group="Sweep")]
 
 
 @dataclass(frozen=True)
@@ -70,7 +79,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PhaseResult,
         cfg_type=PhaseCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="fastflux/distortion/phase",
     )
 
@@ -86,10 +95,10 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         # Quantize the pair start time and the second pulse projection phase.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
-        length_sweep = cfg.sweep.length
-        phase_sweep = cfg.sweep.phase
+        length_sweep = cfg.length
+        phase_sweep = cfg.phase
 
         pi2_pulse = modules.pi2_pulse
 
@@ -99,7 +108,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         # Keep one mean IQ value for each pair-start/projection-phase setting.
-        viewer = context.plots.liveplot_2d("measurement", "Time (us)", "Phase (deg)")
+        viewer = live_heatmap(context.plots, "measurement", "Time (us)", "Phase (deg)")
         signals_buffer = SignalBuffer(
             (len(lengths), len(phases)),
             on_update=lambda data: viewer.update(
@@ -108,13 +117,15 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg.modules
-            length_param = sweep2param("length", sched.cfg.sweep.length)
-            phase_param = sweep2param("phase", sched.cfg.sweep.phase)
+            modules = sched.cfg
+            length_param = sweep2param("length", sched.cfg.length)
+            phase_param = sweep2param("phase", sched.cfg.phase)
 
             # Move the whole π/2 pair through the independently scheduled flux pulse.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add(
                     Reset("reset", modules.reset),
                     Join(
@@ -131,9 +142,9 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
                     ),
                     Readout("readout", modules.readout),
                 )
-                .declare_sweep("length", sched.cfg.sweep.length)
-                .declare_sweep("phase", sched.cfg.sweep.phase)
-                .build_and_acquire()
+                .declare_sweep("length", sched.cfg.length)
+                .declare_sweep("phase", sched.cfg.phase)
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return PhaseResult(lengths, phases, signals_buffer.array)
@@ -158,7 +169,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Analysis requires source.cfg")
-        modules = cfg.modules
+        modules = cfg
 
         flux_pulse = modules.flux_pulse
         pi2_len = float(modules.pi2_pulse.waveform.length)

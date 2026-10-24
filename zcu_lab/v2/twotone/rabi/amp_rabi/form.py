@@ -22,25 +22,24 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
     return Form(
         AmpRabiCfg,
         field_order=(
-            "modules",
-            "sweep",
+            "reset",
+            "init_pulse",
+            "qub_pulse",
+            "readout",
+            "gain",
             "reps",
             "rounds",
             "relax_delay",
-            "initial_delay",
         ),
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                "qub_pulse": pulse,
-                "readout": Slot("$qubit.module.readout")
-                if ctx.has("$qubit.module.readout")
-                else Template("readout", bindings={"resonator": "$resonator"}),
-                "init_pulse": Hidden(),
-            },
-            "sweep": {"gain": Range.between(-0.3, 1.0, expts=51)},
+            "reset": Slot("$qubit.module.reset"),
+            "qub_pulse": pulse,
+            "readout": Slot("$qubit.module.readout")
+            if ctx.has("$qubit.module.readout")
+            else Template("readout", bindings={"resonator": "$resonator"}),
+            "init_pulse": Hidden(),
+            "gain": Range.between(-0.3, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-            "initial_delay": Hidden(),
             "reps": 1000,
             "rounds": 10,
         },

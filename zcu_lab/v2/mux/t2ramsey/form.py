@@ -41,10 +41,8 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
     return Form(
         MuxT2RamseyCfg,
         tree={
-            "modules": {
-                "reset": Slot("$mux.module.reset"),
-                "readout": readout,
-            },
+            "reset": Slot("$mux.module.reset"),
+            "readout": readout,
             "tones": mux_tone_initials(tones, participants, fields=("drive",)),
             "participants": [index for index in participants],
             "delay": Range.between(0.0, 30.0, expts=101),
@@ -60,7 +58,8 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
         field_order=(
             "participants",
             "tones",
-            "modules",
+            "reset",
+            "readout",
             "delay",
             "reps",
             "rounds",

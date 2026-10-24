@@ -210,8 +210,8 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
         "synthetic", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
     )
     if not isinstance(inputs.gain, Keep):
-        tab.command("modules.pulse", "to_inline")
-    tab.set("modules.pulse.gain", inputs.gain)
+        tab.command("pulse", "to_inline")
+    tab.set("pulse.gain", inputs.gain)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()

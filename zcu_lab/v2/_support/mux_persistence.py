@@ -1,6 +1,7 @@
 """Native grouped mapping for independent zipped coordinates and averaged IQ."""
 
 import numpy as np
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     GroupedAxesSpec,
     GroupedLoadData,
@@ -8,12 +9,11 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 from .mux import MuxSweepResult, validate_mux_result
 
 
-def mux_sweep_spec[T: ExpCfgModel](
+def mux_sweep_spec[T: ConfigBase](
     cfg_type: type[T],
     *,
     tag: str,
@@ -86,5 +86,5 @@ def mux_sweep_spec[T: ExpCfgModel](
         tag=tag,
         result_builder=build,
         result_validator=validate_mux_result,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
     )

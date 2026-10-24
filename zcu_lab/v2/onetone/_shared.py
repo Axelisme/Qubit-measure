@@ -6,17 +6,12 @@ from typing import Annotated
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import PulseReadoutCfg, ResetCfg, SweepCfg
 
 
 @dataclass(frozen=True)
@@ -27,37 +22,43 @@ class FreqResult:
     signals: NDArray[np.complex128]
 
 
-class FreqModuleCfg(ConfigBase):
-    """Optional reset followed by the pulse readout's generator and ADC settings."""
+class LinearFreqCfg(ConfigBase):
+    """One-tone acquisition settings, averaging, delays and absolute frequency grid."""
 
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset", group="Modules")] = None
     readout: Annotated[
         PulseReadoutCfg,
         FieldMeta(
             label="Readout",
             description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
+            group="Modules",
         ),
     ]
-
-
-class FreqSweepCfg(ConfigBase):
-    """Absolute MHz sweep; the hardware owns both generator and ADC frequencies."""
-
     freq: Annotated[
         SweepCfg,
         FieldMeta(
             label="Frequency",
             unit="MHz",
             description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
+            group="Sweep",
         ),
     ]
-
-
-class LinearFreqCfg(ProgramV2Cfg, ExpCfgModel):
-    """One-tone acquisition settings, averaging, delays and absolute frequency grid."""
-
-    modules: FreqModuleCfg
-    sweep: FreqSweepCfg
 
 
 def linear_freqs(config: LinearFreqCfg, *, context: RunContext) -> NDArray[np.float64]:
@@ -66,9 +67,9 @@ def linear_freqs(config: LinearFreqCfg, *, context: RunContext) -> NDArray[np.fl
     config supplies the sweep and generator/ADC channels without being changed.
     context supplies cached SoC configuration. Invalid sweeps propagate errors.
     """
-    readout = config.modules.readout
+    readout = config.readout
     return sweep2array(
-        config.sweep.freq,
+        config.freq,
         "freq",
         {"soccfg": context.soccfg, "gen_ch": readout.gen_ch, "ro_ch": readout.ro_ch},
     )
@@ -80,7 +81,7 @@ def spectrum_buffer(freqs: NDArray[np.float64], *, plots: Plots) -> SignalBuffer
     plots owns the measurement figure. Buffer updates draw the entire spectrum;
     acquisition and cancellation remain the caller's responsibility.
     """
-    viewer = plots.liveplot_1d("measurement", "Frequency (MHz)", "Amplitude")
+    viewer = live_line(plots, "measurement", "Frequency (MHz)", "Amplitude")
     return SignalBuffer(
         (len(freqs),), on_update=lambda data: viewer.update(freqs, np.abs(data))
     )

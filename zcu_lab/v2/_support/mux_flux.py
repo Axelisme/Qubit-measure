@@ -16,25 +16,26 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.sweep import make_sweep
+from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import ProgramV2Cfg, SweepCfg
+from zcu_tools.program.v2 import ResetCfg, SweepCfg
+from zcu_tools.program.v2.modules import (
+    MuxReadoutCfg,
+)
 
 from zcu_lab.v2._support.device import check_flux_unit, set_flux
 from zcu_lab.v2._support.mux_sweep_cfg import (
-    MuxDriveModuleCfg,
     MuxToneCfg,
     ToneRangeCfg,
     require_tone_value,
     validate_participants,
 )
 from zcu_lab.v2.mux.onetone.core import (
+    MuxFrequencyOffsetCfg,
     MuxOnetoneCfg,
     MuxOnetoneExp,
-    MuxOnetoneModuleCfg,
-    MuxOnetoneSweepCfg,
 )
 from zcu_lab.v2.mux.twotone_spectrum.core import (
     MuxFreqCfg,
@@ -88,23 +89,48 @@ class FluxLineCfg(FluxIdentityCfg):
         return self.sweep
 
 
-class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
-    ProgramV2Cfg, ExpCfgModel
+class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
+    ConfigBase
 ):
     """Flat acquisition settings, original identities and ordered participants.
 
-    modules contains optional common reset and the full mux readout. frequency
-    is MuxOnetoneSweepCfg(df: SweepCfg in nominal MHz offsets) for onetone, or
+    reset is optional; readout contains the full ordered mux readout. frequency
+    is MuxFrequencyOffsetCfg(df: SweepCfg in nominal MHz offsets) for onetone, or
     FluxFrequencyCfg(tones: full named drives/ranges in MHz, expts: int) for
     twotone. tones has one identity/DC range per original readout position.
     participants is a nonempty unique selection in acquisition order.
-    Inherited reps/rounds are positive averaging counts; initial_delay and
+    Explicit reps/rounds are positive averaging counts; initial_delay and
     relax_delay are finite nonnegative us. flux_unit is A, V or native, with
     no conversion. settle is the cancellable wait in seconds after DC writes.
     Persisted cfg uses these same top-level fields, with no nested spectrum.
     """
 
-    modules: MuxDriveModuleCfg
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
+    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
     frequency: S
     tones: Annotated[list[T], FieldMeta(element_label="name")]
     participants: list[StrictInt]
@@ -117,9 +143,7 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
     def validate_identities(self) -> MuxFluxCfg[S, T]:
         """Reject invalid full identities before projecting participant indices."""
         names = [tone.name for tone in self.tones]
-        if len(names) != len(self.modules.readout.tones) or len(set(names)) != len(
-            names
-        ):
+        if len(names) != len(self.readout.tones) or len(set(names)) != len(names):
             raise ValueError(
                 "tones must name every original readout position exactly once"
             )
@@ -145,7 +169,8 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
         """
         if isinstance(self.frequency, FluxFrequencyCfg):
             return MuxFreqCfg(
-                modules=self.modules,
+                reset=self.reset,
+                readout=self.readout,
                 tones=list(self.frequency.tones),
                 expts=self.frequency.expts,
                 participants=list(self.participants),
@@ -155,10 +180,9 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
                 relax_delay=self.relax_delay,
             )
         return MuxOnetoneCfg(
-            modules=MuxOnetoneModuleCfg(
-                reset=self.modules.reset, readout=self.modules.readout
-            ),
-            sweep=self.frequency,
+            reset=self.reset,
+            readout=self.readout,
+            df=self.frequency.df,
             participants=list(self.participants),
             reps=self.reps,
             rounds=self.rounds,
@@ -167,7 +191,7 @@ class MuxFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
         )
 
 
-class GlobalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
+class GlobalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
     MuxFluxCfg[S, FluxIdentityCfg]
 ):
     """One global coil source and one finite native-unit flux sweep."""
@@ -185,7 +209,7 @@ class GlobalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
         return self
 
 
-class LocalFluxCfg[S: (MuxOnetoneSweepCfg, FluxFrequencyCfg)](
+class LocalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
     MuxFluxCfg[S, FluxLineCfg]
 ):
     """Independent local line ranges with one shared positive point count.
@@ -228,8 +252,8 @@ class MuxFluxResult:
 
 
 def run_flux_scan(
-    cfg: GlobalFluxCfg[MuxOnetoneSweepCfg]
-    | LocalFluxCfg[MuxOnetoneSweepCfg]
+    cfg: GlobalFluxCfg[MuxFrequencyOffsetCfg]
+    | LocalFluxCfg[MuxFrequencyOffsetCfg]
     | GlobalFluxCfg[FluxFrequencyCfg]
     | LocalFluxCfg[FluxFrequencyCfg],
     *,
@@ -270,11 +294,9 @@ def run_flux_scan(
     spectrum = cfg.inner_cfg().model_copy(deep=True)
     if isinstance(spectrum, MuxOnetoneCfg):
         spectrum.participants = list(indices)
-        dfs = np.linspace(
-            spectrum.sweep.df.start, spectrum.sweep.df.stop, spectrum.sweep.df.expts
-        )
+        dfs = np.linspace(spectrum.df.start, spectrum.df.stop, spectrum.df.expts)
         frequencies = np.asarray(
-            [spectrum.modules.readout.tones[i].freq + dfs for i in indices]
+            [spectrum.readout.tones[i].freq + dfs for i in indices]
         )
     else:
         spectrum.participants = list(cfg.participants)
@@ -287,7 +309,8 @@ def run_flux_scan(
         dtype=np.complex128,
     )
     viewers = [
-        context.plots.liveplot_2d_with_line(
+        live_heatmap_with_line(
+            context.plots,
             f"flux_{i}",
             f"DC value ({cfg.flux_unit})",
             "Frequency (MHz)",
@@ -369,7 +392,7 @@ def _acquire_spectrum(
         plots.release()
 
 
-def mux_flux_spec[C: ExpCfgModel](
+def mux_flux_spec[C: ConfigBase](
     cfg_type: type[C], *, tag: str
 ) -> GroupedAxesSpec[MuxFluxResult, C]:
     """Declare native tone/flux/frequency grids, converting MHz to Hz on disk.
@@ -438,7 +461,7 @@ def mux_flux_spec[C: ExpCfgModel](
         tag=tag,
         result_builder=build,
         result_validator=validate_flux_result,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         labber_layout="independent",
     )
 

@@ -10,10 +10,11 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import field_serializer, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse
 from zcu_tools.program.v2.modules import MuxReadout
@@ -61,33 +62,7 @@ class GECenters(ConfigBase):
         return self
 
 
-class JointReadoutModules(ConfigBase):
-    """Calibrated Xπ pulses on independent generators and the complete mux."""
-
-    x180_f1: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-        ),
-    ]
-    x180_f2: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-        ),
-    ]
-    readout: Annotated[
-        MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
-        ),
-    ]
-
-
-class JointReadoutCfg(ProgramExpCfg):
+class JointReadoutCfg(ConfigBase):
     """Four thermal preparation branches, with reps shots per software round.
 
     B00/B01/B10/B11 apply I/Xπ to F1/F2 then acquire one mux read. There is no
@@ -98,7 +73,54 @@ class JointReadoutCfg(ProgramExpCfg):
     Keep this original cfg with Result: only the runner copy sets rounds=1.
     """
 
-    modules: JointReadoutModules
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+            group="Modules",
+        ),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+            group="Modules",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+            group="Modules",
+        ),
+    ]
     roles: JointRoles
     f1_centers: Annotated[
         GECenters,
@@ -118,9 +140,9 @@ class JointReadoutCfg(ProgramExpCfg):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Require independent charge generators and in-range original tones."""
-        if self.modules.x180_f1.ch == self.modules.x180_f2.ch:
+        if self.x180_f1.ch == self.x180_f2.ch:
             raise ValueError("F1/F2 Xπ pulses require different charge generators")
-        self.roles.validate_readout(self.modules.readout)
+        self.roles.validate_readout(self.readout)
         return self
 
 
@@ -169,7 +191,7 @@ def _source_shots(
         raise ValueError(
             "Joint analysis requires saved cfg and GE centers; current Form/library is not a substitute"
         )
-    ntones, nshots = len(cfg.modules.readout.tones), cfg.reps * cfg.rounds
+    ntones, nshots = len(cfg.readout.tones), cfg.reps * cfg.rounds
     if (
         not np.array_equal(data.branches, np.arange(4))
         or not np.array_equal(data.tone_indices, np.arange(ntones))
@@ -203,7 +225,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=JointReadoutResult,
         cfg_type=JointReadoutCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/joint_readout",
     )
 
@@ -225,8 +247,9 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         """
         # Retain each host round and every original tone instead of averaging IQ.
         cfg = config.model_copy(deep=True, update={"rounds": 1})
-        ntones = len(cfg.modules.readout.tones)
-        viewer = context.plots.liveplot_1d(
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
             "measurement",
             "Nominal preparation (00, 01, 10, 11)",
             "Acquired shots",
@@ -244,20 +267,32 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         # Prepare each thermal branch independently, then perform one joint read.
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             for branch, step in sched.scan("branch", list(range(4))):
-                builder = step.prog_builder(context.soc, context.soccfg)
+                builder = step.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=step.cfg.reps,
+                    initial_delay=step.cfg.initial_delay,
+                    relax_delay=step.cfg.relax_delay,
+                )
                 if branch & 2:
-                    builder.add_pulse("x180_f1", cfg.modules.x180_f1)
+                    builder.add_pulse("x180_f1", cfg.x180_f1)
                 if branch & 1:
-                    builder.add_pulse("x180_f2", cfg.modules.x180_f2)
-                builder.add(MuxReadout("readout", cfg.modules.readout))
+                    builder.add_pulse("x180_f2", cfg.x180_f2)
+                builder.add(MuxReadout("readout", cfg.readout))
 
                 # Reuse this branch sequence and store completed raw rounds separately.
                 prog = builder.build()
                 for _, round_step in step.repeat("round", config.rounds):
                     _ = round_step.prog_builder(
-                        context.soc, context.soccfg
+                        context.soc,
+                        context.soccfg,
+                        reps=round_step.cfg.reps,
+                        initial_delay=round_step.cfg.initial_delay,
+                        relax_delay=round_step.cfg.relax_delay,
                     ).run_program(
-                        prog, raw2signal_fn=partial(collect_joint_shots, prog)
+                        prog,
+                        raw2signal_fn=partial(collect_joint_shots, prog),
+                        rounds=round_step.cfg.rounds,
                     )
 
         # Preserve round-major shot order when presenting the result.

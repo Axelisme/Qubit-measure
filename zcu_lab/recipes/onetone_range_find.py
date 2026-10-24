@@ -81,7 +81,7 @@ async def onetone_range_find(
     """Run onetone/range_find, Analyze, ask_writeback, accept selections, Save.
 
     freq and n are required. freq supplies absolute MHz bounds and n sets
-    sweep.freq.expts, the shared acquisition sample count. Omitted resonators
+    freq.expts, the shared acquisition sample count. Omitted resonators
     retains the analysis names; an empty list discovers unnamed dips. Supplied
     names label dips in ascending frequency order through Analyze, not cfg.
     A supplied min_separation is finite positive MHz and changes only analysis.
@@ -90,7 +90,7 @@ async def onetone_range_find(
     Expected analysis failures return a reason without writeback. The runtime
     owns cancellation and operation failures. Save once after acquisition.
 
-    n → sweep.freq.expts sets the absolute-frequency sample count.
+    n → freq.expts sets the absolute-frequency sample count.
     Analysis receives resonators and min_separation as explicit updates.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
@@ -99,9 +99,9 @@ async def onetone_range_find(
         target={"resonator": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.set("sweep.freq.start", inputs.freq.start)
-    tab.set("sweep.freq.stop", inputs.freq.stop)
-    tab.set("sweep.freq.n", inputs.n)
+    tab.set("freq.start", inputs.freq.start)
+    tab.set("freq.stop", inputs.freq.stop)
+    tab.set("freq.n", inputs.n)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

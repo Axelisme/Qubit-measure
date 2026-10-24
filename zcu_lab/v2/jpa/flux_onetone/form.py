@@ -18,26 +18,20 @@ def make_form(ctx: FormContext) -> Form[OneToneFluxCfg]:
     return Form(
         OneToneFluxCfg,
         tree={
-            "modules": {
-                "reset": Slot("$qubit.module.reset"),
-                # Run supplies readout frequency for each external-device setting.
-                "readout": Template(
-                    "readout",
-                    bindings={"resonator": "$resonator"},
-                    set={"freq": Hidden(0.0)},
-                ),
-            },
+            "reset": Slot("$qubit.module.reset"),
+            "readout": Template(
+                "readout",
+                bindings={"resonator": "$resonator"},
+                set={"freq": Hidden(0.0)},
+            ),
             "jpa_flux_dev": flux_source,
             "flux_unit": "A",
-            "sweep": {
-                "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
-                "freq": Range.around(
-                    "$resonator.freq", "1.5 * $resonator.kappa", expts=101
-                ),
-            },
+            "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
+            "freq": Range.around(
+                "$resonator.freq", "1.5 * $resonator.kappa", expts=101
+            ),
             "relax_delay": 0.1,
             "reps": 1000,
             "rounds": 10,
-            "initial_delay": Hidden(),
         },
     )

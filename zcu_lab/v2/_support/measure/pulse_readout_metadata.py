@@ -14,7 +14,7 @@ def pulse_readout_seed_metadata(
     No cfg values, sources, units or calibration records are changed.
     """
     return {
-        ("modules", "readout", "module", "gain"): FieldMeta(
+        ("readout", "module", "gain"): FieldMeta(
             description=f"未校準的起始值，來源：固定常數。readout Template/Form gain {gain:g} normalized; operator confirmation required",
             calibration="uncalibrated",
         ),

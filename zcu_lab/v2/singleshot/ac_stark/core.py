@@ -16,11 +16,12 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_heatmap, live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
@@ -67,24 +68,36 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class AcStarkModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+class AcStarkCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
+    ] = None
     stark_pulse1: Annotated[
-        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
+        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)", group="Modules")
     ]
-    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class AcStarkSweepCfg(ConfigBase):
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
-
-
-class AcStarkCfg(ProgramExpCfg):
-    modules: AcStarkModuleCfg
-    sweep: AcStarkSweepCfg
+    stark_pulse2: Annotated[
+        Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)", group="Modules")
+    ]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz", group="Sweep")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]
@@ -126,7 +139,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         z=AxesSpec.Z("populations", "Population", "a.u.", dtype=np.float64),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="singleshot/ac_stark",
     )
 
@@ -153,12 +166,12 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg.modules
+        modules = cfg
 
-        gain_sweep = cfg.sweep.gain
+        gain_sweep = cfg.gain
 
         freqs = sweep2array(
-            cfg.sweep.freq,
+            cfg.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules.stark_pulse2.ch},
         )
@@ -186,7 +199,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         )
         ax_ground, ax_excited, ax_other, ax_current = figure.axes
         g_2d, e_2d, o_2d = (
-            context.plots.liveplot_2d(
+            live_heatmap(
+                context.plots,
                 "measurement",
                 "Stark Pulse Gain (a.u.)",
                 "Probe Frequency (MHz)",
@@ -201,7 +215,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 ("other", ax_other),
             )
         )
-        cur_1d = context.plots.liveplot_1d(
+        cur_1d = live_line(
+            context.plots,
             "measurement",
             "Probe Frequency (MHz)",
             "Population",
@@ -227,19 +242,24 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             on_update=plot_fn,
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
-            sched.cfg.modules.stark_pulse2.set_param(
-                "freq", sweep2param("freq", sched.cfg.sweep.freq)
+            sched.cfg.stark_pulse2.set_param(
+                "freq", sweep2param("freq", sched.cfg.freq)
             )
             for gain_idx, (gain, step) in enumerate(
                 sched.scan("resonator gain", gains.tolist())
             ):
-                modules = step.cfg.modules
+                modules = step.cfg
                 modules.stark_pulse1.set_param("gain", gain)
                 current_index = gain_idx
 
                 # Start the cavity tone nonblocking so the qubit probe can overlap.
                 _ = (
-                    step.prog_builder(soc, soccfg)
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    )
                     .add_reset("reset", modules.reset)
                     .add_pulse("init_pulse", modules.init_pulse)
                     .add_pulse(
@@ -249,13 +269,14 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     )
                     .add_pulse("stark_pulse2", modules.stark_pulse2)
                     .add_readout("readout", modules.readout)
-                    .declare_sweep("freq", step.cfg.sweep.freq)
+                    .declare_sweep("freq", step.cfg.freq)
                     .build_and_acquire(
                         # Classify shots before averaging; do not classify mean IQ.
                         raw2signal_fn=raw_population_signal,
                         g_center=cfg.g_center,
                         e_center=cfg.e_center,
                         ge_radius=cfg.radius,
+                        rounds=cfg.rounds,
                     )
                 )
 

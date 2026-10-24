@@ -8,11 +8,12 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rotate2real
@@ -61,31 +62,45 @@ def qubfreq_signal2real(
     return projected
 
 
-class FreqSweepCfg(ConfigBase):
-    freq: Annotated[
-        SweepCfg,
+class FreqCfg(ConfigBase):
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
         FieldMeta(
-            label="Frequency", unit="MHz", description="Qubit drive frequency sweep."
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
         ),
-    ]
-
-
-class FreqModuleCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
+    ] = None
     qub_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Probe Pulse",
             description="Qubit drive; its frequency is set by the sweep.",
+            group="Modules",
         ),
     ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-
-
-class FreqCfg(ProgramExpCfg):
-    modules: FreqModuleCfg
-    sweep: FreqSweepCfg
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Qubit drive frequency sweep.",
+            group="Sweep",
+        ),
+    ]
 
 
 @dataclass(frozen=True)
@@ -111,7 +126,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
-        cfg_schema_version="2.0",
+        cfg_schema_version="3.0",
         tag="twotone/freq",
     )
 
@@ -124,7 +139,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         """Locate a qubit transition by sweeping the drive frequency.
 
         Apply reset, the frequency-swept qubit probe, then readout; this
-        sequence does not use modules.init_pulse. Return mean complex IQ
+        sequence does not use init_pulse. Return mean complex IQ
         at each frequency in MHz, not a fitted transition frequency. The live
         preview always uses background-subtracted magnitude (``lor``), independent
         of the model selected later for analyze.
@@ -132,16 +147,14 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Prepare the frequency axis and display the background-subtracted contrast.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg.modules
+        modules = cfg
 
         # predicted sweep points before FPGA coercion
         freqs = sweep2array(
-            cfg.sweep.freq, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
+            cfg.freq, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
         )
 
-        viewer = context.plots.liveplot_1d(
-            "measurement", "Frequency (MHz)", "Amplitude"
-        )
+        viewer = live_line(context.plots, "measurement", "Frequency (MHz)", "Amplitude")
         signals_buffer = SignalBuffer(
             (len(freqs),),
             on_update=lambda data: viewer.update(
@@ -151,19 +164,21 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg.modules
+            modules = cfg
 
-            freq_sweep = cfg.sweep.freq
+            freq_sweep = cfg.freq
             modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
             # Reset before each probe; sweep frequency on the FPGA, then read out.
             _ = (
-                sched.prog_builder(soc, soccfg)
+                sched.prog_builder(
+                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+                )
                 .add_reset("reset", modules.reset)
                 .add_pulse("qub_pulse", modules.qub_pulse)
                 .add_readout("readout", modules.readout)
                 .declare_sweep("freq", freq_sweep)
-                .build_and_acquire()
+                .build_and_acquire(rounds=cfg.rounds)
             )
 
         return FreqResult(
