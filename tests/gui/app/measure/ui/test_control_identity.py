@@ -334,7 +334,11 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     )
     assert not new_tab.reset_btn.isEnabled()
     assert not button(ui.window, "New Tab ▾").isEnabled()
-    assert not button(ui.window, "Reload experiments").isEnabled()
+    assert not next(
+        a
+        for a in ComponentDriver(ui.window).menu_actions("More ▾")
+        if a.object_name == "main.more.reload"
+    ).enabled
     assert not ui.tab.reset_btn.isEnabled()
     assert not ui.tab.run_btn.isEnabled()
     assert_remote_forms_readable_without_writes(ui, qapp)

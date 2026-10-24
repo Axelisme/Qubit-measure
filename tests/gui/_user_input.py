@@ -5,6 +5,7 @@ tests send the same Qt events through QApplication.sendEvent instead.
 """
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer
@@ -46,6 +47,7 @@ from PyQt6.QtWidgets import (
 from ._observations import DialogObservation as DialogObservation
 from ._observations import LegendObservation as LegendObservation
 from ._observations import ListRowObservation as ListRowObservation
+from ._observations import MenuActionObservation as MenuActionObservation
 from ._observations import PlotAxesObservation as PlotAxesObservation
 from ._observations import PlotLabelBoundsObservation as PlotLabelBoundsObservation
 from ._observations import PlotObservation as PlotObservation
@@ -1025,6 +1027,36 @@ class ComponentDriver:
         """
         if not path:
             raise ValueError("Supply a nonempty menu caption path")
+        self._visit_menu(opener, lambda: self._select_menu_path(path))
+
+    def menu_actions(
+        self, opener: str, *, evidence: Path | None = None
+    ) -> tuple[MenuActionObservation, ...]:
+        """Open a menu, snapshot its visible entries in order, then press Escape.
+
+        Uses the same mouse delivery and watchdog as select_menu. Disabled
+        openers return no entries. evidence captures the window and popup while
+        expanded. Missing openers or popups raise LookupError.
+        """
+        entries: list[MenuActionObservation] = []
+
+        def observe() -> None:
+            menu = QApplication.activePopupWidget()
+            if not isinstance(menu, QMenu):
+                raise LookupError("No visible popup menu")
+            entries.extend(
+                MenuActionObservation(a.text(), a.isEnabled(), a.objectName())
+                for a in menu.actions()
+                if a.isVisible() and not menu.actionGeometry(a).isEmpty()
+            )
+            if evidence is not None:
+                self.screenshot(evidence)
+            self._dismiss_menus()
+
+        self._visit_menu(opener, observe)
+        return tuple(entries)
+
+    def _visit_menu(self, opener: str, visit: Callable[[], None]) -> None:
         button = self._find(opener, None)
         if not self._can_interact(button):
             return
@@ -1032,8 +1064,8 @@ class ComponentDriver:
 
         def choose() -> None:
             try:
-                self._select_menu_path(path)
-            except (LookupError, RuntimeError, ValueError) as error:
+                visit()
+            except (LookupError, RuntimeError, ValueError, TypeError, OSError) as error:
                 # Return Qt callback failures to the scenario after exec unwinds.
                 errors.append(error)
                 self._dismiss_menus()

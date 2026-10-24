@@ -28,7 +28,7 @@ def test_browser_load_keeps_factory_failure_in_form_and_run(
         qapp.processEvents()
         ui = ComponentDriver(window)
         try:
-            ui.select_menu("Results ▾", ("Results browser…",))
+            ui.select_menu("More ▾", ("Results browser…",))
             ui.select_combo("Experiment → point", object_name="results.group")
             for depth in (1, 2, 3):
                 group = next(

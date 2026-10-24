@@ -33,6 +33,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._operation_plots import attachment as plot_attachment
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleRun
+from tests.gui.app.measure._workflow_window import toggle_tab_family
 
 
 class Plan(FormModel):
@@ -184,7 +185,7 @@ def _snapshot(driver: ComponentDriver, root: Path, name: str) -> None:
 
 
 def _open(driver: ComponentDriver, root: Path, name: str = "flux-list") -> None:
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _snapshot(driver, root, "01-workflows")
     driver.select_menu("New Tab ▾", (name,))
     _snapshot(driver, root, "02-plan")
@@ -303,7 +304,7 @@ def test_sweep_fluxes_edit_errors_and_lowering_match_experiment(plan_window, tmp
     workflow_axes = driver.plots().axes
     assert len(workflow_axes) == 1
     assert workflow_axes[0].ylabel == "fluxes=[0.1, 0.2, 0.3]"
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _snapshot(driver, tmp_path, "10-experiments")
     driver.select_menu("New Tab ▾", ("sweep-experiment",))
     _snapshot(driver, tmp_path, "11-experiment-form")

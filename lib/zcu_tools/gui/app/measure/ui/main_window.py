@@ -23,7 +23,6 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QStatusBar,
@@ -786,16 +785,8 @@ class MainWindow(QMainWindow):
         return tabs
 
     def _install_workflow_views(self) -> None:
-        self._workflow_toggle = self._build_workflow_toggle()
         self._workflow_tabs = self._build_workflow_tabs()
         self._workflow_tabs.synchronize()
-
-    def _build_workflow_toggle(self) -> QPushButton:
-        button = QPushButton("Workflow tabs", self)
-        button.setObjectName("workflow.toggle")
-        button.clicked.connect(self._toggle_workflows)
-        self._toolbar.layout.insertWidget(2, button)
-        return button
 
     def _build_workflow_tabs(self) -> WorkflowTabs:
         tabs = WorkflowTabs(
@@ -808,16 +799,15 @@ class MainWindow(QMainWindow):
         self._status_bar.addPermanentWidget(tabs.badge)
         return tabs
 
-    def _toggle_workflows(self) -> None:
+    def toggle_workflows(self) -> None:
+        """Switch the visible tab family without changing either family's tabs."""
         self._workflow_mode = not self._workflow_mode
-        self._workflow_toggle.setText(
-            "Experiment tabs" if self._workflow_mode else "Workflow tabs"
-        )
+        self._toolbar.set_workflow_mode(workflow=self._workflow_mode)
         self._refresh_empty_hint()
 
     def _show_workflows(self) -> None:
         if not self._workflow_mode:
-            self._toggle_workflows()
+            self.toggle_workflows()
 
     def _refresh_workflow_lock(self) -> None:
         busy = any(s.busy for s in self._ctrl.workflow_control().tabs())

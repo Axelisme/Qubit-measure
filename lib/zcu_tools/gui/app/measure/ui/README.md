@@ -20,7 +20,7 @@ Error notifications are non-modal; confirmations, choosers and writeback editing
 keep their modal protection. See the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
 
-`MainWindow` uses one toggle to show experiment tabs or workflow tabs in the
+`MainWindow` uses the More ▾ tab switch to show experiment tabs or workflow tabs in the
 same stacked area. New Tab lists registrations for the displayed kind.
 `WorkflowTabs` subscribes to the shared workflow facet, so remote opens mount
 panes without going through a GUI selection command. Same-name tabs keep
@@ -107,7 +107,7 @@ completion, not ledger event times. Unreadable metadata stays visible as a file
 row with its error and a selectable path. Selection does not promise Load success;
 the existing Load owner reports file/format errors after selection.
 
-The Results menu retains an independent top-level Results browser. Closing the
+More ▾ → Results browser… opens an independent top-level Results browser. Closing the
 measure window closes this browser. It reads the Controller results query once
 and filters the shared index without changing the opened entry or point.
 The navigation tree starts with entries, then experiment → point → run or

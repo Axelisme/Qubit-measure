@@ -153,7 +153,7 @@ def populated_browser(
                 )
             )
     ui = ComponentDriver(browser_host)
-    ui.select_menu("Results ▾", ("Results browser…",))
+    ui.select_menu("More ▾", ("Results browser…",))
     window = browser_host.findChild(QWidget, "results.browser")
     return ComponentDriver(window)
 

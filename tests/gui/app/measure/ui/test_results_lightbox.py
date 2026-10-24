@@ -67,7 +67,7 @@ def test_run_lightbox_fits_blocks_gallery_and_dismisses_with_browser(
     ui.click(object_name="results.figure.0")
     ui.close_window()
     assert not ui.observe(object_name="results.lightbox").visible
-    ComponentDriver(browser_host).select_menu("Results ▾", ("Results browser…",))
+    ComponentDriver(browser_host).select_menu("More ▾", ("Results browser…",))
     assert not ui.observe(object_name="results.lightbox").visible
     ui.click(object_name="results.figure.1")
     assert (
