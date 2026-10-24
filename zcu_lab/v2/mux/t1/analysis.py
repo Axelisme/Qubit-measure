@@ -85,7 +85,7 @@ def analyze_t1(
         xs = times[options.skip :][finite]
         signal = signal[finite]
         fig, ax = plots.subplots(f"fit_{index}", figsize=(8, 5))
-        ax.set(xlabel="Requested delay (us)", ylabel="Signal (a.u.)")
+        ax.set(xlabel="Delay (us)", ylabel="Signal (a.u.)")
         fig.suptitle(f"tone {index}")
         try:
             minimum = 6 if options.dual_exp else 4

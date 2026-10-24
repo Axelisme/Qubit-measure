@@ -165,6 +165,10 @@ class OvernightTunablesForm(FormModel):
     stay in FormInput, while this model and native conversion carry ordinary values.
     """
 
+    uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = Field(
+        default=True,
+        description="T1 only; False concentrates delays within the same start/stop window",
+    )
     reps: Annotated[int, Display(label="Averages")] = Field(
         default=100, ge=1, description="Native acquisition averages"
     )
@@ -191,6 +195,7 @@ class OvernightTunablesForm(FormModel):
     def to_cfg(self) -> OvernightTunables:
         """Convert validated ordinary knobs; no source, hardware or expression parsing."""
         return OvernightTunables(
+            uniform=self.uniform,
             reps=self.reps,
             rounds=self.rounds,
             t1_guess_us=self.t1_guess_us,

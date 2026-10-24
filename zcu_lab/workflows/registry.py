@@ -43,11 +43,17 @@ def build_registry() -> tuple[Attachment[Calibrated], ...]:
         OvernightTunablesForm,
     )
     from zcu_lab.workflows.overnight.workflow import overnight
+    from zcu_lab.workflows.overnight_mux.form import (
+        OvernightMuxPlanForm,
+        OvernightMuxTunablesForm,
+    )
+    from zcu_lab.workflows.overnight_mux.workflow import overnight_mux
 
     registry = WorkflowRegistry()
     registry.add(coherence_fluxdep)
     registry.add(mist_fluxdep)
     registry.add(overnight)
+    registry.add(overnight_mux)
     coherence = WorkflowAttachment(
         script=coherence_fluxdep,
         plan_model=CoherencePlanForm,
@@ -74,4 +80,12 @@ def build_registry() -> tuple[Attachment[Calibrated], ...]:
         knobs_to_cfg=OvernightTunablesForm.to_cfg,
         seed=lambda _plan, _form: None,
     )
-    return (coherence, mist, monitoring)
+    mux_monitoring = WorkflowAttachment(
+        script=overnight_mux,
+        plan_model=OvernightMuxPlanForm,
+        knobs_model=OvernightMuxTunablesForm,
+        plan_to_cfg=OvernightMuxPlanForm.to_cfg,
+        knobs_to_cfg=OvernightMuxTunablesForm.to_cfg,
+        seed=lambda _plan, _form: None,
+    )
+    return (coherence, mist, monitoring, mux_monitoring)

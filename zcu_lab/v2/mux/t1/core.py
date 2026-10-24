@@ -1,4 +1,4 @@
-"""Simultaneous T1 acquisition on one requested delay axis.
+"""Simultaneous T1 acquisition on one shared delay axis.
 
 Technical reference for lab authors and framework developers.
 
@@ -16,12 +16,14 @@ active mux readout. Reset, reps, rounds, initial delay and relax delay are share
 Pulse pre/post delays remain part of their native branches; no end-alignment
 padding or second compilation is added.
 
-`MuxT1Cfg.delays` is the only delay axis. Supply a linear `SweepCfg` of finite,
-nonnegative, strictly increasing requested times in microseconds.
-All qubits use the same requested axis in one hardware sweep. The program owns
-time quantization, so readout timing can differ from the requested delay by a few
-native ticks. The result and fit retain requested times, not a reconstructed
-actual-delay axis.
+`MuxT1Cfg.delays` defines a finite, nonnegative, strictly increasing start/stop
+window and point count in microseconds. `uniform=True` uses its linear SweepCfg
+axis in one hardware loop. The result and fit retain requested times; readout
+can differ by native timing ticks. `uniform=False` uses the single-qubit T1
+sampling policy to concentrate points in the decay region of the same window.
+LoadValue and DelayAuto execute one shared cycle table for all qubits. Results
+and fits then retain quantized delays; duplicate/reordered quantized points
+raise ValueError before acquisition.
 
 A short pi pulse adds a fixed `max_len - len_i` wait before the common delay.
 For an exponential decay this changes the amplitude, not T1. Pulse delays can
@@ -98,7 +100,8 @@ do not establish physical convergence or calibration accuracy.
 
 ## Results, cancellation and analysis
 
-`MuxT1Result.times` is float64 `(P,)` requested us. `tone_indices` is int64 `(K,)`
+`MuxT1Result.times` is float64 `(P,)` us, requested for uniform sampling and
+quantized for nonuniform sampling. `tone_indices` is int64 `(K,)`
 of original active indices. `signals` is complex128 `(K,P)`, ADC-length-normalized
 average I+jQ. The program averages reps and rounds. Cancellation keeps
 completed-round averages across the whole sweep. Before the first completed
@@ -118,7 +121,7 @@ Malformed source shapes or options raise instead of becoming fit failures.
 Inspect quality and uncertainty before using a fitted value as calibration.
 
 Native save/load preserve full cfg, original indices, complex IQ and the one
-requested axis. Time is seconds on disk and microseconds in memory. Always pass
+recorded delay axis. Time is seconds on disk and microseconds in memory. Always pass
 the captured `RunRecord`; changing a current cfg does not change the saved source.
 Canonical saving requires cfg. External `save_run`/`load_run` use native HDF5;
 `save_labber(source, path, spec=MuxT1Exp.AXES_SPEC)` exports Labber separately.
@@ -143,9 +146,12 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
+    DelayAuto,
+    LoadValue,
     ModularProgramV2,
     ResetCfg,
     SweepCfg,
@@ -179,8 +185,10 @@ class MuxT1Cfg(ConfigBase):
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
     generators distinct from readout. delays is one common linear SweepCfg of
-    strictly increasing, finite, nonnegative requested us. Only equally spaced
-    hardware sweeps are supported. Fits retain requested times, not compiled delays.
+    strictly increasing, finite, nonnegative requested us. uniform defaults True
+    for a linear hardware sweep. False concentrates points within that window
+    using a shared cycle table. Fits retain requested times for uniform sampling,
+    quantized times otherwise.
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
@@ -214,6 +222,7 @@ class MuxT1Cfg(ConfigBase):
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
     delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
@@ -233,10 +242,11 @@ class MuxT1Cfg(ConfigBase):
 
 @dataclass(frozen=True)
 class MuxT1Result:
-    """Averaged complex IQ on a common requested delay axis.
+    """Averaged complex IQ on a common delay axis.
 
-    times is float64 (P,) requested us, not compiled actual delays. tone_indices
-    is int64 (K,) of original full-tone indices in participants order.
+    times is float64 (P,) us, requested for uniform sampling and quantized for
+    nonuniform sampling. tone_indices is int64 (K,) of original full-tone indices
+    in participants order.
     signals is complex128 (K,P), I+jQ in ADC-length-normalized a.u. Unwritten
     entries remain NaN; completed-round means survive cancellation. The caller
     must check the RunContext stop signal before declaring success.
@@ -262,14 +272,14 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
     """Measure selected qubits' energy relaxation on one shared delay axis.
 
     Each point applies simultaneous pi pulses, waits for the longest branch,
-    then waits the requested delay before a joint mux readout. Saved results
-    retain requested times, original tone indices, complex IQ and the full cfg.
+    then waits a shared delay before a joint mux readout. Saved results retain
+    recorded delays, original tone indices, complex IQ and the full cfg.
     """
 
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
     AXES_SPEC: ClassVar[AxesSpec[MuxT1Result, MuxT1Cfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("times", "Requested delay", "s", 1e-6),
+            AxesSpec.Axis("times", "Delay", "s", 1e-6),
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
         ),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
@@ -285,9 +295,12 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         config supplies the full tone list, ordered participants, pi pulses,
         reset/readout and averaging controls; it is validated without mutation.
         Join waits for the longest pi branch, including its pulse delays, before
-        the shared wait. Return requested times (P,), original tone indices (K,)
-        and averaged complex IQ (K,P), with one live figure per tone.
-        One hardware loop sweeps the equally spaced delays. Cancellation retains
+        the shared wait. Return times (P,), original tone indices (K,) and
+        averaged complex IQ (K,P), with one live figure per tone. uniform=True
+        retains the requested linear times; False returns quantized nonuniform
+        delays in the same window using the single-qubit T1 sampling policy.
+        Both paths use one hardware loop. Nonuniform quantization collisions
+        raise ValueError before acquisition. Cancellation retains
         completed-round averages across the sweep, or NaN before any round finishes.
         context supplies offline or hardware handles, plots and a stop signal;
         check context.scope.stop.raise_if_error() before reporting success.
@@ -295,17 +308,26 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         # 1. Keep participant order while selecting readout tones from the full cfg.
         cfg = MuxT1Cfg.model_validate(config.model_dump())
         indices = list(cfg.participants)
-        times = sweep2array(cfg.delays, "none")
+        delay_table = (
+            None
+            if cfg.uniform
+            else materialize_nonuniform_t1_delays(cfg.delays, soccfg=context.soccfg)
+        )
+        times = (
+            sweep2array(cfg.delays, "none")
+            if delay_table is None
+            else delay_table.times_us
+        )
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
 
-        # 2. Show each decay in its own figure on the requested delay axis.
+        # 2. Show each decay on the shared requested or quantized delay axis.
         viewers = [
             live_line(
                 context.plots,
                 f"measurement_{i}",
-                "Requested delay (us)",
+                "Delay (us)",
                 "Magnitude (a.u.)",
                 title=f"{i}: {cfg.tones[i].name}",
             )
@@ -316,28 +338,40 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             for row, viewer in enumerate(viewers):
                 viewer.update(times, np.abs(data[:, row]))
 
-        # 3. Compile one hardware delay sweep; pi pulses start together after reset.
+        # 3. Compile one shared delay loop; pi pulses start together after reset.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(cfg, signals, scope=context.scope) as sched:
             pulses = [
                 Pulse(f"drive_{index}", cfg.tones[index].require_drive())
                 for index in indices
             ]
-            builder = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    initial_delay=sched.cfg.initial_delay,
-                    relax_delay=sched.cfg.relax_delay,
+            builder = sched.prog_builder(
+                context.soc,
+                context.soccfg,
+                reps=sched.cfg.reps,
+                initial_delay=sched.cfg.initial_delay,
+                relax_delay=sched.cfg.relax_delay,
+            )
+            if delay_table is None:
+                delay = Delay("t1_delay", sweep2param("delay", cfg.delays))
+                builder.declare_sweep("delay", cfg.delays)
+            else:
+                # One shared table drives every participant in the same hardware loop.
+                builder.add(
+                    LoadValue(
+                        "load_t1_delay",
+                        values=list(delay_table.cycles),
+                        idx_reg="delay_idx",
+                        val_reg="t1_delay_cycle",
+                        auto_compress=False,
+                    )
                 )
-                .add_reset("reset", cfg.reset)
-                .add(
-                    Join(*pulses),
-                    Delay("t1_delay", sweep2param("delay", cfg.delays)),
-                    MuxReadout("readout", readout),
-                )
-                .declare_sweep("delay", cfg.delays)
+                delay = DelayAuto("t1_delay", t="t1_delay_cycle")
+                builder.declare_sweep("delay_idx", len(delay_table.cycles))
+            builder.add_reset("reset", cfg.reset).add(
+                Join(*pulses),
+                delay,
+                MuxReadout("readout", readout),
             )
             prog = builder.build()
             # Each completed round supplies the full delay/participant IQ matrix.
@@ -358,7 +392,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         *,
         plots: Plots,
     ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
-        """Fit each saved IQ row against the requested delays to estimate T1 in us.
+        """Fit each saved IQ row against its recorded delays to estimate T1 in us.
 
         source is a Run/Load record; its cfg may be absent. options selects
         initial points to skip and single or dual exponential decay. Return

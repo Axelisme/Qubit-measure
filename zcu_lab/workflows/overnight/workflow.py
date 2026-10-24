@@ -63,6 +63,8 @@ class OvernightPlan(BaseModel):
 class OvernightTunables(BaseModel):
     """Resolve lifetime drift using fixed timing, averaging and fit acceptance.
 
+    uniform selects the native T1 linear delay sweep; False concentrates delays
+    within the same start/stop window around the decay. Echo is unchanged.
     reps/rounds are native acquisition averages, not outer monitoring rounds.
     t1_guess_us/t2_guess_us are positive delay estimates in microseconds.
     sweep_factor times each guess gives its grid endpoint; relax_factor times
@@ -73,6 +75,7 @@ class OvernightTunables(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    uniform: bool = Field(default=True, description="Uniform (linear) sweep for T1")
     reps: int = Field(default=100, ge=1, description="Native averages per acquisition")
     rounds: int = Field(default=2, ge=1, description="Native acquisition rounds")
     t1_guess_us: float = Field(
@@ -277,6 +280,7 @@ async def overnight[C](
             # Acquire and save T1 before fitting its scalar summary.
             t1_stop = tun.current.sweep_factor * tun.current.t1_guess_us
             t1_cfg = T1Cfg(
+                uniform=tun.current.uniform,
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
                 relax_delay=tun.current.relax_factor * tun.current.t1_guess_us,

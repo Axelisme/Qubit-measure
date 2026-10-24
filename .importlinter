@@ -336,6 +336,7 @@ forbidden_modules =
     zcu_lab.workflows.coherence_fluxdep.t2_form
     zcu_lab.workflows.mist_fluxdep.form
     zcu_lab.workflows.overnight.form
+    zcu_lab.workflows.overnight_mux.form
     zcu_lab.workflows.common.calibration_form
     zcu_lab.workflows.common.calibration_modules
     qtpy
@@ -363,6 +364,10 @@ source_modules =
     zcu_lab.workflows.coherence_fluxdep.workflow
     zcu_lab.workflows.coherence_fluxdep.measurements
     zcu_lab.workflows.mist_fluxdep.workflow
+    zcu_lab.workflows.overnight.workflow
+    zcu_lab.workflows.overnight.analysis
+    zcu_lab.workflows.overnight_mux.workflow
+    zcu_lab.workflows.overnight_mux.analysis
     zcu_lab.workflows.coherence_fluxdep.t1
     zcu_lab.workflows.coherence_fluxdep.t2
 forbidden_modules =
@@ -381,6 +386,7 @@ name = Overnight trend science does not depend on frontend owners
 type = forbidden
 source_modules =
     zcu_lab.workflows.overnight.trend
+    zcu_lab.workflows.overnight_mux.trend
 forbidden_modules =
     zcu_tools.gui
     zcu_tools.mcp

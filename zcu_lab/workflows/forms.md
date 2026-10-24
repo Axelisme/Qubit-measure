@@ -9,7 +9,7 @@ Native science 不依賴 GUI。宿主、泛型 attachment、表單草稿、prese
 
 ## Catalog 與 Coherence forms
 
-`zcu_lab.workflows.registry.build_registry` 依序配對 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。
+`zcu_lab.workflows.registry.build_registry` 依序配對 `coherence_fluxdep`、`mist_fluxdep`、`overnight`、`overnight_mux`。
 每個 `WorkflowAttachment` 保留 native async script、plan/knobs model、converter 與 scalar seed 的同一版本配對，import 來自 `gui.app.measure.services.workflow_attachment`。
 Caller 把清單交給 measure headless facet。`WorkflowRegistry` 只驗 declaration，不提供 lookup。
 MCP 以 `workflow_open(name)` 明填名稱，再以回傳的 tab_id 呼叫 `workflow_start`。RPC 使用 `workflow.open` 與 `workflow.start`，未知名稱拒絕，不預選 Coherence 或提供舊名 alias。
@@ -28,7 +28,14 @@ Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只�
 
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
 Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
-三個附件共用 measure headless form owner 與 FormEditor，不建立獨立 workflows Window 或第二份 session。
+`OvernightTunablesForm.uniform` 的標籤是 Uniform (linear) sweep，預設 true。設 false 只改 T1 在同一視窗內的 delay 分布，不改 Echo。
+`OvernightMuxPlanForm` 使用手寫 FormModel 與 ModuleInputField，提供 mux readout、nullable reset、完整 tone model list 與 participants 原始索引。
+每個 tone 分別選已校準的 x180 drive 與 x90 pi2_pulse，不從半 gain 推導。
+Fresh defaults 從固定 capture 的 `$mux.qubits` 建立完整名稱順序；`$participants` 缺少或未綁定時選所有 qubit，已有選擇則保留其順序。
+已選 tone 的 x180/x90 與 mux readout/reset 只引用現存 module slot。缺 pulse/readout 留待使用者填入，不建立替代 module；reset 可保留 None。
+表單沒有 flux 欄位。`OvernightMuxTunablesForm` 沿用 overnight 的欄位與意義，包含預設 true 的 `uniform`。關閉時只改 T1 的共用 delay 分布，Echo 不變。
+兩個 guess 分別填最長 qubit 的 T1 與 Echo，供所有 participants 共用各 member 的 delay grid。
+四個附件共用 measure headless form owner 與 FormEditor，不建立獨立 workflows Window 或第二份 session。
 附件只負責 Start/forms/native run，沒有 export/sample binding。
 Saved run conversion 由 coherence_fluxdep.export 與 mist_fluxdep.export 獨立工具負責，GUI/RPC/MCP 不提供匯出入口。
 
