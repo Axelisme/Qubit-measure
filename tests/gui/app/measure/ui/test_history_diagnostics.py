@@ -43,7 +43,7 @@ def test_browser_load_keeps_factory_failure_in_form_and_run(
                 if row.tree_name == "results.navigation" and len(row.path) == 4
             )
             ui.select_tree_row(path, object_name="results.navigation")
-            ui.click("Open in new analysis tab")
+            ui.click("Load into analysis tab")
             assert "Loaded history:" in ui.observe(object_name="results.feedback").text
             assert ui.tabs("history").current == "history"
             reason = "factory: history_source is missing"
