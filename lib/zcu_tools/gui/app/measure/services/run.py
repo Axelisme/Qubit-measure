@@ -415,8 +415,7 @@ class RunService:
                 )
             # Progress alone is ambient; execution dependencies are run-owned.
             with progress_ambient(factory):
-                raw_result = adapter.run(cfg, context=context)
-                result = RunRecord(cfg=cfg, result=raw_result)
+                result = adapter.run(cfg, context=context)
                 stop_signal.raise_if_error()
             # Completion records acquisition progress, not later operation cancellation.
             operation.partial_result = stop_signal.partial_result

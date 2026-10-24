@@ -18,14 +18,15 @@ None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有�
 
 [`adapter/value.py`](adapter/value.py) defines four frozen, keyword-only values.
 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` connects
-native persistence, captured Form construction and raw acquisition.
+native persistence, captured Form construction and adapter-owned acquisition.
 `Analysis(fn, options=None, writeback=None)` and
 `Interactive(plugin, frontend, options=None, writeback=None)` occupy the same
 primary slot. `PostAnalysis(fn, options=None, writeback=None)` declares the
 independent second stage. Authors do not declare capability flags or artifact hooks.
 
-Adapter's six generic slots connect cfg, raw Result, primary options/result and
-post options/result. The four optional slots default to None. Keyword-aware
+Adapter's seven generic slots connect experiment cfg, raw Result, primary
+options/result, post options/result and adapter input. The input slot defaults
+to the experiment cfg type. The four analysis slots default to None. Keyword-aware
 Protocols in [`adapter/hooks.py`](adapter/hooks.py) retain `context=` and `plots=`.
 Analysis and writeback callbacks retain their existing typed request envelopes.
 
@@ -50,8 +51,15 @@ is decided by the declared spec. `restore`, `data_item` and `analysis_item`
 provide framework projections without I/O. Guide reads its declared Markdown
 only when called. Sample proposals declare `coordinate_device` on each item.
 
-RunService wraps the raw result with the admitted cfg in RunRecord before
-attaching acquisition metadata. No adapter class compatibility path is provided.
+Each adapter declares `run(inp, *, context) -> RunRecord`, converts its input
+to the actual experiment cfg and invokes the experiment. Even without a
+conversion, the adapter declares a local run returning that record. RunService
+accepts the record and attaches acquisition metadata. It does not wrap a second
+record or replace the returned cfg, including cfg=None, with Form input.
+Save and analysis consume the record's experiment cfg and result. Load restores
+that record through spec and never fills Form from historical cfg. Analysis and
+writeback do not read current Form input. No adapter class compatibility path
+is provided.
 
 `summary.summarize_analysis(result)` projects fields, arrays and complex numbers
 into JSON and reports non-finite number paths in `AnalysisSummary.invalid`.

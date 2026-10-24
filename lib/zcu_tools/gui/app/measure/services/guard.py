@@ -124,8 +124,7 @@ class GuardService:
     ) -> RunInputs:
         """Check tab_id and capture the current cfg and observed inputs.
 
-        Requires ACTIVE context and the adapter's Run preconditions, including
-        SoC when declared. Unknown tab, readiness and adapter validation failures
+        Requires ACTIVE context, valid adapter input and connected SoC handles. Unknown tab, readiness and adapter validation failures
         raise GuardError; invalid publications keep their cfg errors.
         Cached device settings do not participate in admission.
         None and empty aliases accept current displayed values using the tab's

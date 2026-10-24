@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure import adapter
 from zcu_tools.gui.app.measure.registry import Registry
@@ -18,6 +19,12 @@ from tests.gui.app.measure._form_fakes import form_resources, form_sources
 def saving_form(context: FormContext) -> Form[SavingCfg]:
     del context
     return Form(SavingCfg, {})
+
+
+def saving_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
 
 
 @dataclass(frozen=True)
@@ -81,7 +88,7 @@ def test_generated_options_supply_schema_and_edits_until_source_replacement() ->
     definition = adapter.Adapter(
         spec=SavingCore.AXES_SPEC,
         make_form=saving_form,
-        run=SavingCore().run,
+        run=saving_run,
         guide=None,
         analysis=adapter.Analysis(fn=analyze, options=options),
         post_analysis=adapter.PostAnalysis(fn=post_analyze, options=post_options),

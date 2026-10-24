@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -82,6 +83,12 @@ def sample_form(ctx: FormContext) -> Form[SavingCfg]:
     return Form(SavingCfg, {})
 
 
+def saving_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
+
+
 def sample_analyze(
     req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
 ) -> PaneSummary:
@@ -114,7 +121,7 @@ def sample_adapter(coordinate_device: str | None):
     return Adapter(
         spec=SavingCore.AXES_SPEC,
         make_form=sample_form,
-        run=SavingCore().run,
+        run=saving_run,
         guide=None,
         analysis=Analysis(
             fn=sample_analyze,

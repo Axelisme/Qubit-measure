@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure import adapter
 from zcu_tools.gui.app.measure.registry import Registry
@@ -18,6 +19,12 @@ from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 def saving_form(context: FormContext) -> Form[SavingCfg]:
     del context
     return Form(SavingCfg, {})
+
+
+def saving_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
 
 
 @dataclass(frozen=True)
@@ -58,7 +65,7 @@ def test_registry_publishes_an_immutable_value_and_rejects_invalid_registrations
     definition = adapter.Adapter(
         spec=SavingCore.AXES_SPEC,
         make_form=saving_form,
-        run=SavingCore().run,
+        run=saving_run,
         guide=None,
         analysis=adapter.Analysis(fn=analyze, options=lambda source, env: Options(3.0)),
     )
@@ -87,7 +94,7 @@ def test_generated_options_and_post_options_use_the_declared_source_and_primary(
     definition = adapter.Adapter(
         spec=SavingCore.AXES_SPEC,
         make_form=saving_form,
-        run=SavingCore().run,
+        run=saving_run,
         guide=None,
         analysis=adapter.Analysis(fn=analyze, options=lambda source, env: Options(3.0)),
         post_analysis=adapter.PostAnalysis(
@@ -151,7 +158,7 @@ def test_interactive_uses_the_same_primary_slot_and_a_host_owned_typed_session()
     definition = adapter.Adapter(
         spec=SavingCore.AXES_SPEC,
         make_form=saving_form,
-        run=SavingCore().run,
+        run=saving_run,
         guide=None,
         analysis=adapter.Interactive(
             plugin=plugin,
