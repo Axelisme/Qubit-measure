@@ -8,14 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -25,11 +18,9 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     ProgramV2Cfg,
     Pulse,
-    PulseCfg,
-    PulseReadoutCfg,
+    PulseReadout,
     Readout,
     Reset,
-    ResetCfg,
 )
 
 
@@ -52,9 +43,9 @@ class LookbackAnalysis:
 
 
 class LookbackModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class LookbackCfg(ExpCfgModel):
@@ -87,10 +78,10 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
     Options: ClassVar[type[LookbackAnalyzeOptions]] = LookbackAnalyzeOptions
 
-    # times stored in seconds on disk -> scale=US_TO_S (mem us)
+    # times stored in seconds on disk -> scale=1e-6 (mem us)
     AXES_SPEC = AxesSpec(
-        axes=(Axis("times", "Time", "s", US_TO_S),),
-        z=ZSpec("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=LookbackResult,
         cfg_type=LookbackCfg,
         cfg_schema_version="3.0",

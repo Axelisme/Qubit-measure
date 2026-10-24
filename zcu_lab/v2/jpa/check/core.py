@@ -7,29 +7,13 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
 from zcu_lab.v2._support.device import set_output
 
@@ -48,15 +32,15 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class CheckModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class CheckSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
-class CheckCfg(ProgramV2Cfg, ExpCfgModel):
+class CheckCfg(ProgramExpCfg):
     modules: CheckModuleCfg
     jpa_rf_dev: Annotated[
         str,
@@ -71,13 +55,13 @@ class CheckCfg(ProgramV2Cfg, ExpCfgModel):
 class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP: ClassVar[dict[int, Literal["off", "on"]]] = {0: "off", 1: "on"}
 
-    # freqs stored as Hz on disk -> scale=MHZ_TO_HZ; outputs are int JPA labels.
+    # freqs stored as Hz on disk -> scale=1e6; outputs are int JPA labels.
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("outputs", "JPA Output", "a.u.", dtype=np.int_),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("outputs", "JPA Output", "a.u.", dtype=np.int_),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=CheckResult,
         cfg_type=CheckCfg,
         tag="jpa/check",

@@ -15,47 +15,30 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg, sweep2param
 
 BRANCH_LABELS = ("Before reset", "Reset only", "Reset + Rabi")
 BRANCH_LINESTYLES = ("-", "--", ":")
 
 
 class ResetCheckModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[PulseCfg, FieldMeta(label="Rabi Pulse")]
-    tested_reset: Annotated[ResetCfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class ResetCheckSweepCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
 
-class ResetCheckCfg(ProgramV2Cfg, ExpCfgModel):
+class ResetCheckCfg(ProgramExpCfg):
     modules: ResetCheckModuleCfg
     sweep: ResetCheckSweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
@@ -111,11 +94,11 @@ class ResetCheckExp(PersistableExperiment[ResetCheckResult, ResetCheckCfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("population_states", "GE Population", "None", dtype=np.int64),
-            Axis("reset_states", "Reset State", "None", dtype=np.int64),
-            Axis("gains", "Gain", "a.u.", dtype=np.float64),
+            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("reset_states", "Reset State", "None", dtype=np.int64),
+            AxesSpec.Axis("gains", "Gain", "a.u.", dtype=np.float64),
         ),
-        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=ResetCheckResult,
         cfg_type=ResetCheckCfg,
         cfg_schema_version="2.0",

@@ -11,14 +11,13 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg
-from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
+from zcu_tools.program.v2 import Pulse
+from zcu_tools.program.v2.modules import MuxReadout
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles, collect_joint_shots
@@ -34,21 +33,21 @@ class LocalZModules(ConfigBase):
     """
 
     x90_f1: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
             description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
         ),
     ]
     x90_f2: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
             description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
         ),
     ]
     readout: Annotated[
-        MuxReadoutCfg,
+        MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
@@ -56,7 +55,7 @@ class LocalZModules(ConfigBase):
     ]
 
 
-class LocalZCfg(ProgramV2Cfg, ExpCfgModel):
+class LocalZCfg(ProgramExpCfg):
     """B00 → target X90 → n parallel CZ pairs → independent X/Y projection → mux.
 
     Both targets are acquired in one run, F1 then F2. The other qubit is not
@@ -134,13 +133,13 @@ class LocalZExp(PersistableExperiment[LocalZResult, LocalZCfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("tone_indices", "Tone", "", IDENTITY, dtype=np.int64),
-            Axis("shot_indices", "Shot", "", IDENTITY, dtype=np.int64),
-            Axis("gate_counts", "CZ gate count", "", IDENTITY, dtype=np.int64),
-            Axis("quadratures", "Projection X or Y", "", IDENTITY, dtype=np.int64),
-            Axis("targets", "Target F1 or F2", "", IDENTITY, dtype=np.int64),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
+            AxesSpec.Axis("gate_counts", "CZ gate count", "", dtype=np.int64),
+            AxesSpec.Axis("quadratures", "Projection X or Y", "", dtype=np.int64),
+            AxesSpec.Axis("targets", "Target F1 or F2", "", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Raw IQ", "a.u."),
+        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=LocalZResult,
         cfg_type=LocalZCfg,
         cfg_schema_version="1.0",

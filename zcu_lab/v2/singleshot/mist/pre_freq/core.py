@@ -14,28 +14,13 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -52,18 +37,18 @@ class PreFreqResult:
 
 
 class PreFreqModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg, FieldMeta(label="Preparation pulse")]
-    pi_pulse: Annotated[PulseCfg | None, FieldMeta(label="Pi pulse")] = None
-    probe_pulse: Annotated[PulseCfg, FieldMeta(label="MIST probe pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Preparation pulse")]
+    pi_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Pi pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="MIST probe pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class PreFreqSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
 
 
-class PreFreqCfg(ProgramV2Cfg, ExpCfgModel):
+class PreFreqCfg(ProgramExpCfg):
     modules: PreFreqModuleCfg
     sweep: PreFreqSweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
@@ -85,22 +70,16 @@ class PreFreqExp(PersistableExperiment[PreFreqResult, PreFreqCfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis(
-                "population_states",
-                "GE Population",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis(
+            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis(
                 "freqs",
                 "PrePulse frequency",
                 "Hz",
-                scale=MHZ_TO_HZ,
+                scale=1e6,
                 dtype=np.float64,
             ),
         ),
-        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=PreFreqResult,
         cfg_type=PreFreqCfg,
         cfg_schema_version="2.0",

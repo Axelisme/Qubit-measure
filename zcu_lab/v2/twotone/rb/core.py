@@ -9,27 +9,12 @@ from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ComputedPulse,
-    LoadValue,
-    ProgramV2Cfg,
-    Readout,
-    Repeat,
-    Reset,
-)
+from zcu_tools.program.v2 import ComputedPulse, LoadValue, Readout, Repeat, Reset
 from zcu_tools.utils.process import rotate2real
 
 from .program import RBModuleCfg
@@ -52,7 +37,7 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(mean_signals).real
 
 
-class RBCfg(ProgramV2Cfg, ExpCfgModel):
+class RBCfg(ProgramExpCfg):
     modules: RBModuleCfg
     depths: Annotated[
         list[Annotated[int, Field(ge=0, strict=True)]],
@@ -82,10 +67,10 @@ class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
     # (n_seeds, n_depths) with zero transpose.
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("depths", "Depth", "a.u.", IDENTITY, np.int64),
-            Axis("sub_seeds", "Entropy", "a.u.", IDENTITY, np.int64),
+            AxesSpec.Axis("depths", "Depth", "a.u.", dtype=np.int64),
+            AxesSpec.Axis("sub_seeds", "Entropy", "a.u.", dtype=np.int64),
         ),
-        z=ZSpec("signals2D", "Signal", "a.u."),
+        z=AxesSpec.Z("signals2D", "Signal", "a.u."),
         result_type=RB_Result,
         cfg_type=RBCfg,
         cfg_schema_version="3.0",

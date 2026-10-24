@@ -6,15 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    IDENTITY,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -22,13 +14,9 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SoftDelay,
     SweepCfg,
     sweep2param,
@@ -48,10 +36,10 @@ def acc_phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class AccPhaseModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    flux_pulse: PulseCfg
-    pi2_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    pi2_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class AccPhaseSweepCfg(ConfigBase):
@@ -59,7 +47,7 @@ class AccPhaseSweepCfg(ConfigBase):
     phase: SweepCfg
 
 
-class AccPhaseCfg(ProgramV2Cfg, ExpCfgModel):
+class AccPhaseCfg(ProgramExpCfg):
     modules: AccPhaseModuleCfg
     sweep: AccPhaseSweepCfg
     readout_t: float
@@ -76,10 +64,10 @@ class AccPhaseExp(PersistableExperiment[AccPhaseResult, AccPhaseCfg]):
     # inner phases stored as-is (deg) -> IDENTITY; outer lengths mem us, disk s -> US_TO_S
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("phases", "Phase", "deg", scale=IDENTITY),
-            Axis("lengths", "Wait Time", "s", scale=US_TO_S),
+            AxesSpec.Axis("phases", "Phase", "deg"),
+            AxesSpec.Axis("lengths", "Wait Time", "s", scale=1e-6),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AccPhaseResult,
         cfg_type=AccPhaseCfg,
         cfg_schema_version="2.0",

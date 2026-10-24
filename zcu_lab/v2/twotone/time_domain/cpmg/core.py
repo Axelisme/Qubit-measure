@@ -12,15 +12,14 @@ from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
-    US_TO_S,
     GroupedAxesSpec,
     GroupedLoadData,
     PersistableExperiment,
+    ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import make_sweep
@@ -34,14 +33,10 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Repeat,
     Reset,
-    ResetCfg,
     SoftDelay,
     SweepCfg,
     sweep2param,
@@ -70,10 +65,10 @@ class CPMG_Result:
 
 
 class CPMG_ModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi2_pulse: PulseCfg
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    pi2_pulse: Pulse.Cfg
+    pi_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class CPMG_SweepCfg(ConfigBase):
@@ -87,7 +82,7 @@ class CPMG_SweepCfg(ConfigBase):
     length: SweepCfg | None = None
 
 
-class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
+class CPMG_Cfg(ProgramExpCfg):
     modules: CPMG_ModuleCfg
     sweep: CPMG_SweepCfg
     length_range: list[tuple[float, float]] | tuple[float, float]
@@ -194,7 +189,7 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 field_name="delays",
                 label="Length",
                 unit="s",
-                scale=US_TO_S,
+                scale=1e-6,
                 dtype=np.float64,
             ),
         ),

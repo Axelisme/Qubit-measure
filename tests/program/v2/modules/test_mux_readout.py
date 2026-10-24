@@ -21,6 +21,14 @@ from tests.program.v2._mux_support import (
 )
 
 
+def test_mux_cfg_namespace_preserves_tones_through_readout_dispatch():
+    cfg = readout.MuxReadout.Cfg.model_validate(native_mux().to_dict())
+    parsed = TypeAdapter(readout.Readout.Cfg).validate_python(cfg.to_dict())
+    module = readout.Readout("mux", parsed)
+    assert isinstance(module, readout.MuxReadout)
+    assert [tone.ro_ch for tone in module.cfg.tones] == [4, 1]
+
+
 def test_native_cfg_build_and_union_preserve_order_and_copy():
     core = core_mux()
     cfg = native_mux()

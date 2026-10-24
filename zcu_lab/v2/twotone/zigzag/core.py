@@ -8,28 +8,10 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
-from zcu_tools.program.v2 import (
-    LoadValue,
-    Module,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Repeat,
-    Reset,
-    ResetCfg,
-)
+from zcu_tools.program.v2 import LoadValue, Module, Pulse, Readout, Repeat, Reset
 from zcu_tools.utils.process import rotate2real
 
 
@@ -44,13 +26,13 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
-    X180_pulse: Annotated[PulseCfg | None, FieldMeta(label="X180 Pulse")] = None
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
-class ZigZagCfg(ProgramV2Cfg, ExpCfgModel):
+class ZigZagCfg(ProgramExpCfg):
     modules: ZigZagModuleCfg
     n_times: Annotated[
         int,
@@ -102,8 +84,8 @@ def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
 class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
     # times is an int counter (a.u.) -> Axis dtype int64, scale IDENTITY
     AXES_SPEC = AxesSpec(
-        axes=(Axis("times", "Times", "a.u.", IDENTITY, np.int64),),
-        z=ZSpec("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", "Times", "a.u.", dtype=np.int64),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ZigZagResult,
         cfg_type=ZigZagCfg,
         cfg_schema_version="2.0",

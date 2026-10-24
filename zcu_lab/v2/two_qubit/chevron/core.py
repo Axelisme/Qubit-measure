@@ -5,15 +5,7 @@ from typing import Annotated, Self
 import numpy as np
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
+from zcu_tools.experiment import AxesSpec, PersistableExperiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -63,12 +55,12 @@ class ChevronExp(PersistableExperiment[RabiScanResult, ChevronCfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("tone_indices", "Tone", "", IDENTITY, dtype=np.int64),
-            Axis("shot_indices", "Shot", "", IDENTITY, dtype=np.int64),
-            Axis("durations", "Drive duration", "s", US_TO_S),
-            Axis("coordinates", "Common drive frequency", "Hz", MHZ_TO_HZ),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
+            AxesSpec.Axis("durations", "Drive duration", "s", 1e-6),
+            AxesSpec.Axis("coordinates", "Common drive frequency", "Hz", 1e6),
         ),
-        z=ZSpec("signals", "Raw IQ", "a.u."),
+        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=RabiScanResult,
         cfg_type=ChevronCfg,
         cfg_schema_version="1.0",

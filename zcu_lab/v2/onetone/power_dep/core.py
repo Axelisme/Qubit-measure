@@ -8,15 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import AfterValidator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -25,14 +17,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rescale
 
 
@@ -48,8 +33,8 @@ def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PowerDepModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class PowerDepSweepCfg(ConfigBase):
@@ -63,7 +48,7 @@ def _positive_snr_or_none(value: float | None) -> float | None:
     return value
 
 
-class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):
+class PowerDepCfg(ProgramExpCfg):
     modules: PowerDepModuleCfg
     sweep: PowerDepSweepCfg
     earlystop_snr: Annotated[
@@ -81,10 +66,10 @@ class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
     # freqs stored as Hz on disk (MHz * 1e6); gains stored as-is (IDENTITY)
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("gains", "Power", "a.u.", scale=IDENTITY),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("gains", "Power", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
         cfg_schema_version="2.0",

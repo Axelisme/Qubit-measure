@@ -15,15 +15,7 @@ from zcu_tools.analysis.fitting import (
     lorfunc,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -32,13 +24,9 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
     Join,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     sweep2param,
 )
@@ -251,11 +239,11 @@ def _plot_resonance_maps(
 
 
 class CKPModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
-    res_pulse: Annotated[PulseCfg, FieldMeta(label="Resonator Drive Pulse")]
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit Probe Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    res_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse")]
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class CKPSweepCfg(ConfigBase):
@@ -263,7 +251,7 @@ class CKPSweepCfg(ConfigBase):
     qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
 
 
-class CKP_Cfg(ProgramV2Cfg, ExpCfgModel):
+class CKP_Cfg(ProgramExpCfg):
     modules: CKPModuleCfg
     sweep: CKPSweepCfg
 
@@ -271,25 +259,19 @@ class CKP_Cfg(ProgramV2Cfg, ExpCfgModel):
 class CKP_Exp(PersistableExperiment[CKP_Result, CKP_Cfg]):
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis(
-                "qub_freqs", "Qubit Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64
+            AxesSpec.Axis(
+                "qub_freqs", "Qubit Frequency", "Hz", scale=1e6, dtype=np.float64
             ),
-            Axis(
+            AxesSpec.Axis(
                 "res_freqs",
                 "Resonator Frequency",
                 "Hz",
-                scale=MHZ_TO_HZ,
+                scale=1e6,
                 dtype=np.float64,
             ),
-            Axis(
-                "initial_states",
-                "Initial State",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
+            AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=CKP_Result,
         cfg_type=CKP_Cfg,
         cfg_schema_version="2.0",

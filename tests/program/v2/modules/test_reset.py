@@ -1,4 +1,5 @@
 import pytest
+from pydantic import BaseModel
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
     AbsResetCfg,
@@ -42,6 +43,38 @@ def _make_pi2_cfg():
 # ---------------------------------------------------------------------------
 # Reset factory – dispatch
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["none", "pulse", "two_pulse", "bath"])
+def test_reset_cfg_namespace_validates_and_dispatches(kind):
+    class Modules(BaseModel):
+        reset: Reset.Cfg
+        none: NoneReset.Cfg = NoneReset.Cfg()
+        pulse: PulseReset.Cfg | None = None
+        two_pulse: TwoPulseReset.Cfg | None = None
+        bath: BathReset.Cfg | None = None
+
+    pulse = _make_pulse_cfg().to_dict()
+    raw = {
+        "none": {"type": "reset/none"},
+        "pulse": {"type": "reset/pulse", "pulse_cfg": pulse},
+        "two_pulse": {
+            "type": "reset/two_pulse",
+            "pulse1_cfg": pulse,
+            "pulse2_cfg": pulse,
+        },
+        "bath": {
+            "type": "reset/bath",
+            "cavity_tone_cfg": pulse,
+            "qubit_tone_cfg": pulse,
+            "pi2_cfg": pulse,
+        },
+    }[kind]
+    modules = Modules.model_validate({"reset": raw, kind: raw})
+    module = Reset("reset", modules.reset)
+    assert isinstance(module, (NoneReset, PulseReset, TwoPulseReset, BathReset))
+    assert module.cfg.type == f"reset/{kind}"
+    assert module.cfg == getattr(modules, kind)
 
 
 class TestResetFactory:

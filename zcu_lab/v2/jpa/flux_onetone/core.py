@@ -7,26 +7,11 @@ from typing import Annotated, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
 from zcu_lab.v2._support.device import set_flux
 
@@ -41,8 +26,8 @@ class OneToneFluxResult:
 
 
 class OneToneFluxModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class OneToneFluxSweepCfg(ConfigBase):
@@ -56,7 +41,7 @@ class OneToneFluxSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
-class OneToneFluxCfg(ProgramV2Cfg, ExpCfgModel):
+class OneToneFluxCfg(ProgramExpCfg):
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
@@ -81,10 +66,10 @@ class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
     # signals.shape == (len(fluxes), len(freqs)); non-square sweeps round-trip.
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("freqs", "Readout frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("fluxes", "JPA Flux value", "a.u."),
+            AxesSpec.Axis("freqs", "Readout frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("fluxes", "JPA Flux value", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=OneToneFluxResult,
         cfg_type=OneToneFluxCfg,
         tag="jpa/flux_onetone",

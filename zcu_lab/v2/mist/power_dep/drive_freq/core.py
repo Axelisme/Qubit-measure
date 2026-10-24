@@ -6,32 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
 
 @dataclass(frozen=True)
@@ -52,10 +33,10 @@ def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class DriveFreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    probe_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class DriveFreqSweepCfg(ConfigBase):
@@ -63,19 +44,19 @@ class DriveFreqSweepCfg(ConfigBase):
     gain: SweepCfg
 
 
-class DriveFreqCfg(ProgramV2Cfg, ExpCfgModel):
+class DriveFreqCfg(ProgramExpCfg):
     modules: DriveFreqModuleCfg
     sweep: DriveFreqSweepCfg
 
 
 class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
-    # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ; outer gains -> IDENTITY
+    # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("freqs", "Pulse frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("gains", "Pulse gain", "a.u.", scale=IDENTITY),
+            AxesSpec.Axis("freqs", "Pulse frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("gains", "Pulse gain", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=DriveFreqResult,
         cfg_type=DriveFreqCfg,
         cfg_schema_version="2.0",

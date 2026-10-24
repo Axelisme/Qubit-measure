@@ -9,14 +9,7 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -24,17 +17,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
 from zcu_lab.v2._support.device import set_rf_power
 
@@ -53,16 +36,16 @@ class PowerAnalysis:
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class PowerSweepCfg(ConfigBase):
     jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
 
 
-class PowerCfg(ProgramV2Cfg, ExpCfgModel):
+class PowerCfg(ProgramExpCfg):
     modules: PowerModuleCfg
     jpa_rf_dev: Annotated[
         str,
@@ -85,8 +68,8 @@ class PowerCfg(ProgramV2Cfg, ExpCfgModel):
 class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
     # powers stored in dBm on disk -> scale=IDENTITY (1.0); signals are real -> ZSpec dtype float64
     AXES_SPEC = AxesSpec(
-        axes=(Axis("powers", "JPA Power", "dBm"),),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+        axes=(AxesSpec.Axis("powers", "JPA Power", "dBm"),),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         tag="jpa/power",
