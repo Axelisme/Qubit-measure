@@ -126,7 +126,7 @@ Value_status 區分 available、missing、unavailable；available null 是有效
 `tab.set(path, value)` 原樣替換欄位，不選來源或執行 converter。
 `tab.select(path, option)` 選 owner 的精確 option label 或 captured module key。
 `"Inline"` 或 `"Inline: const"` 等選項沿 owner 的同名同型繼承政策切換。
-`tab.command(path, "to_inline")` 複製固定來源並保留 child keys。已 inline 時成功且不改草稿。
+`tab.command(path, "to_inline")` 複製固定來源並保留 child keys。Owner 在入口判斷 selector，已 inline 時成功、不改草稿，也不發通知。這不依賴 Inline 選項宣告 command；GUI 只在 ref 選項列出 Convert to inline。
 未知、歧義、readonly、來源與 ref 祖先錯誤立即拋出，MCP 不重建 Form 內部資料。
 
 set／select 收到 KEEP 就跳過 mutation。None 原樣交 Form，表示清空／關閉 nullable 欄位。

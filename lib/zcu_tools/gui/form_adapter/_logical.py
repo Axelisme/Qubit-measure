@@ -25,7 +25,13 @@ from zcu_tools.gui.form import (
     Option,
 )
 from zcu_tools.gui.form._describe import describe_field
-from zcu_tools.gui.form._selection import Field, Level, root_level, validate_path
+from zcu_tools.gui.form._selection import (
+    Field,
+    Level,
+    resolve,
+    root_level,
+    validate_path,
+)
 from zcu_tools.gui.form._sources import error_path
 from zcu_tools.gui.form._structure import StructureError, alternatives
 
@@ -734,9 +740,23 @@ def command(
     path: FormWritePath,
     name: str,
     env: FormEnv,
+    *,
+    canonical: bool = False,
 ) -> LogicalEditCandidate:
-    """Run an available owner command on detached input, never live state."""
-    position = _resolve(input, path, env, writing=True)
+    """Run an owner command; inline selectors accept to_inline without a menu action."""
+    position = (
+        _Position(resolve(input.model, input.data, path, env, input.selections), path)
+        if canonical
+        else _resolve(input, path, env, writing=True)
+    )
+    raw = position.target.level.value(position.target.name)
+    if (
+        name == "to_inline"
+        and position.marker is not None
+        and isinstance(raw, dict)
+        and raw.get("kind") == "inline"
+    ):
+        return LogicalEditCandidate(input, False)
     state = FormState(input)
     state.run_command(position.target.path, name, env)
     return LogicalEditCandidate(state.input, not state.input.same_as(input))

@@ -372,6 +372,25 @@ class Form[C: ConfigBase]:
         self._check_logical_input(input)
         return _logical.choose(input, path, option, env)
 
+    def prepare_command(
+        self,
+        input: FormInput[FormModel],
+        path: FormWritePath,
+        name: str,
+        env: FormEnv,
+    ) -> LogicalEditCandidate:
+        """Prepare an owner command at an active canonical model-field path.
+
+        input belongs to this Form. to_inline on a generated inline selector
+        preserves the complete draft with changed=False, without a menu action.
+        Other commands require a current field/option declaration. Unknown or
+        inactive paths, unavailable commands and source failures raise without
+        installation or publication. Hosts must apply mutation guards first and
+        install the candidate in the same turn using the fixed env capture.
+        """
+        self._check_logical_input(input)
+        return _logical.command(input, path, name, env, canonical=True)
+
     def prepare_logical_command(
         self,
         input: FormInput[FormModel],
