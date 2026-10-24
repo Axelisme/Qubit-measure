@@ -84,7 +84,7 @@ def app(qapp, tmp_path, monkeypatch):
     )
     ctrl.add_view(window)
     window.show()
-    tab_id = ctrl.new_tab("demo")
+    tab_id = ctrl.tab_control.new_tab("demo")
     try:
         yield ctrl, window, state, tab_id
     finally:
@@ -135,9 +135,9 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     monkeypatch.setenv("ZCU_MCP_CALL_LOG", "0")
     monkeypatch.setattr("zcu_tools.mcp.measure.tools_lifecycle.status", lambda *_: {})
     ctrl, window, state, focused = app
-    middle = ctrl.new_tab("demo")
-    neighbor = ctrl.new_tab("demo")
-    old_tabs = tuple(ctrl.list_tab_ids())
+    middle = ctrl.tab_control.new_tab("demo")
+    neighbor = ctrl.tab_control.new_tab("demo")
+    old_tabs = tuple(ctrl.tab_control.list_tab_ids())
     assert old_tabs == (focused, middle, neighbor)
     tabs = next(
         widget
@@ -167,7 +167,7 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
                     "params": {"adapter_name": "demo", "data_path": "bad.hdf5"},
                 },
             )
-        assert tuple(ctrl.list_tab_ids()) == old_tabs
+        assert tuple(ctrl.tab_control.list_tab_ids()) == old_tabs
         assert state.active_tab_id == focused
         with open_client(port) as sock:
             snapshot = call(sock, "view.snapshot", {})

@@ -78,7 +78,7 @@ def controller(qapp, tmp_path: Path):
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
         ctrl.context_control.set_alias_rows((AliasRow("qubit", "Q1"),))
-        capture = ctrl.read_context()
+        capture = ctrl.context_control.read_context()
         ctrl.context_control.set_parameter(capture.target, "Q1.ext.freq", 6123.0)
         yield ctrl
     finally:
@@ -91,17 +91,19 @@ def test_registry_template_creation_evaluates_placeholder_and_keeps_bound_slot(
     controller: Controller,
 ):
     controller.create_from_template("module", "probe", "Q1.pulses.probe")
-    library = controller.read_context().library
+    library = controller.context_control.read_context().library
     pulse = library.module_spec("Q1.pulses.probe")
     assert pulse == PulseSpec(
         ch=2, nqz=1, freq=6123.0, gain=0.25, waveform=ConstWaveformCfg(length=0.4)
     )
     controller.create_from_template("waveform", "envelope", "Q1.waveforms.base")
     controller.create_from_template("module", "reset", "Q1.reset.probe")
-    reset = controller.read_context().library.module_spec("Q1.reset.probe")
+    reset = controller.context_control.read_context().library.module_spec(
+        "Q1.reset.probe"
+    )
     assert isinstance(reset, PulseResetSpec)
     assert reset.pulse_cfg == "Q1.pulses.probe"
-    assert controller.read_context().library.waveform_spec(
+    assert controller.context_control.read_context().library.waveform_spec(
         "Q1.waveforms.base"
     ) == ConstWaveformCfg(length=0.5)
 
@@ -118,7 +120,7 @@ def test_registry_template_creation_evaluates_placeholder_and_keeps_bound_slot(
 def test_rejected_creation_leaves_library_unchanged(
     controller: Controller, kind: str, template: str, name: str, error: type[Exception]
 ):
-    capture = controller.read_context()
+    capture = controller.context_control.read_context()
     controller.context_control.set_module(
         capture.target,
         "Q1.pulses.occupied",
@@ -126,10 +128,10 @@ def test_rejected_creation_leaves_library_unchanged(
             ch=0, nqz=1, freq=1.0, gain=0.1, waveform=ConstWaveformCfg(length=1.0)
         ),
     )
-    before = controller.read_context().library
+    before = controller.context_control.read_context().library
     with pytest.raises(error):
         controller.create_from_template(kind, template, name)
-    after = controller.read_context().library
+    after = controller.context_control.read_context().library
     assert after.module_keys() == before.module_keys()
     assert after.waveform_keys() == before.waveform_keys()
     assert after.module_spec("Q1.pulses.occupied") == before.module_spec(
@@ -138,11 +140,11 @@ def test_rejected_creation_leaves_library_unchanged(
 
 
 def test_invalid_template_input_is_rejected_before_write(controller: Controller):
-    capture = controller.read_context()
+    capture = controller.context_control.read_context()
     controller.context_control.set_parameter(capture.target, "Q1.ext.freq", None)
     with pytest.raises(LibraryEntryInvalid, match="freq"):
         controller.create_from_template("module", "probe", "Q1.pulses.new")
-    assert controller.read_context().library.module_keys() == ()
+    assert controller.context_control.read_context().library.module_keys() == ()
 
 
 def test_wire_discovery_and_creation_keep_reply_shapes(controller: Controller):
@@ -183,7 +185,7 @@ def test_wire_discovery_and_creation_keep_reply_shapes(controller: Controller):
         adapter, {"role_id": "probe", "name": "Q1.pulses.rpc"}
     ) == {"created": "Q1.pulses.rpc"}
     assert (
-        controller.read_context()
+        controller.context_control.read_context()
         .library.module_spec("Q1.pulses.rpc")
         .model_dump()["freq"]
         == 6123.0
@@ -207,4 +209,4 @@ def test_wire_missing_id_is_invalid_params_without_write(controller: Controller)
             adapter, {"role_id": "missing", "name": "Q1.pulses.rpc"}
         )
     assert exc.value.code == ErrorCode.INVALID_PARAMS
-    assert controller.read_context().library.module_keys() == ()
+    assert controller.context_control.read_context().library.module_keys() == ()

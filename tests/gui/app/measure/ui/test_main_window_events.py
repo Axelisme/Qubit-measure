@@ -48,7 +48,7 @@ def _snapshot(
     )
 
 
-class RecordingCtrl:
+class RecordingTabControl:
     def __init__(self, log: CallLog, snapshot: object | None = None) -> None:
         self._log = log
         self.snapshot = snapshot or _snapshot()
@@ -61,6 +61,11 @@ class RecordingCtrl:
     def get_running_tab_id(self) -> str | None:
         self._log.add("ctrl", "get_running_tab_id")
         return self.running_tab_id
+
+
+class RecordingCtrl:
+    def __init__(self, log: CallLog, snapshot: object | None = None) -> None:
+        self.tab_control = RecordingTabControl(log, snapshot)
 
 
 class RecordingHost:
@@ -406,9 +411,9 @@ def test_run_finished_refreshes_without_focus_or_navigation(
         # Terminal events are interpreted against the State-owned running identity,
         # not against a cached/payload-derived marker value. Neither outcome may
         # trigger a pane-selection reaction.
-        ctrl.running_tab_id = None
+        ctrl.tab_control.running_tab_id = None
         bus.emit(RunFinishedPayload("tab-1", outcome="cancelled"))
-        ctrl.running_tab_id = None
+        ctrl.tab_control.running_tab_id = None
         bus.emit(RunFinishedPayload("tab-1", outcome="finished"))
 
         assert log.calls == [
@@ -453,10 +458,10 @@ def test_run_finished_event_preserves_each_selected_subtab(
     control_identity = ControlIdentity()
     ctrl.control_identity = control_identity
     ctrl.get_bus.return_value = bus
-    ctrl.get_running_tab_id.return_value = None
+    ctrl.tab_control.get_running_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = with_artifacts(
+    ctrl.tab_control.has_tab.return_value = True
+    ctrl.tab_control.get_tab_snapshot.return_value = with_artifacts(
         TabSnapshot(
             adapter_name="fake",
             cfg_input={},
@@ -482,7 +487,7 @@ def test_run_finished_event_preserves_each_selected_subtab(
     )
     configure_form_lookup(ctrl)
     ctrl.get_left_panel_width.return_value = 500
-    ctrl.get_tab_adapter_name.return_value = "fake"
+    ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
@@ -546,11 +551,11 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
 
     ctrl = MagicMock()
     ctrl.get_bus.return_value = BaseEventBus()
-    ctrl.get_running_tab_id.return_value = "tab-a"
+    ctrl.tab_control.get_running_tab_id.return_value = "tab-a"
     ctrl.control_identity = ControlIdentity()
-    ctrl.get_active_tab_id.return_value = None
+    ctrl.tab_control.get_active_tab_id.return_value = None
     ctrl.active_operation_count.return_value = 0
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
 
     class _TabStub(QWidget):
         def update_interaction_state(self, _snapshot: object) -> None:
@@ -568,7 +573,7 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     tabs.addTab(tab_a, "A")
     tabs.addTab(tab_b, "B")
 
-    window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
+    window.refresh_run_lock(ctrl.tab_control.get_running_tab_id.return_value)
 
     tab_bar = tabs.tabBar()
     assert tab_bar is not None
@@ -577,8 +582,8 @@ def test_main_window_run_marker_tracks_state_and_clears(qapp) -> None:
     assert tab_bar.tabTextColor(0).name() == "#286ac7"
     assert tab_bar.tabToolTip(0) == "A — Run in progress"
 
-    ctrl.get_running_tab_id.return_value = None
-    window.refresh_run_lock(ctrl.get_running_tab_id.return_value)
+    ctrl.tab_control.get_running_tab_id.return_value = None
+    window.refresh_run_lock(ctrl.tab_control.get_running_tab_id.return_value)
 
     assert tabs.tabText(0) == "A"
     assert tabs.tabText(1) == "B"

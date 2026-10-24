@@ -137,7 +137,7 @@ def nested_recipe_rpc(form_rpc, tmp_path):
             ),
         )
         fixture.registry.register("nested-recipe", ModuleRpcAdapter)
-        tab = fixture.ctrl.new_tab("nested-recipe")
+        tab = fixture.ctrl.tab_control.new_tab("nested-recipe")
 
         def respond(method, params):
             reply = rpc.call(method, params)
@@ -155,7 +155,7 @@ def nested_recipe_rpc(form_rpc, tmp_path):
         with closing(client.context.session):
             yield fixture, tab, client, context, target
     finally:
-        if tab is not None and tab in fixture.ctrl.list_tab_ids():
+        if tab is not None and tab in fixture.ctrl.tab_control.list_tab_ids():
             fixture.ctrl.tab_control.close_tab(tab)
         restore_registry(registry_before)
 
@@ -229,7 +229,7 @@ def test_form_option_command_and_readiness_share_the_guarded_logical_owner(
 def container_recipe_rpc(nested_recipe_rpc):
     fixture, _, client, _, _ = nested_recipe_rpc
     fixture.registry.register("container-recipe", ContainerRpcAdapter)
-    tab = fixture.ctrl.new_tab("container-recipe")
+    tab = fixture.ctrl.tab_control.new_tab("container-recipe")
     try:
         yield fixture, tab, client
     finally:

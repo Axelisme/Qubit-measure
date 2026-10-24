@@ -340,7 +340,7 @@ def test_post_run_click_starts_post_analyze(qapp, make_ctrl):
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_tab_snapshot.return_value = _snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = _snapshot(
         "tab-1", post_params=_PostParams(backend="center")
     )
     window = MainWindow(ctrl, templates=lambda: {})
@@ -349,8 +349,8 @@ def test_post_run_click_starts_post_analyze(qapp, make_ctrl):
 
         window.post_analyze_tab("tab-1")
 
-        ctrl.start_post_analyze.assert_called_once()
-        args = ctrl.start_post_analyze.call_args.args
+        ctrl.run_analyze_control.start_post_analyze.assert_called_once()
+        args = ctrl.run_analyze_control.start_post_analyze.call_args.args
         assert args[0] == "tab-1"
         assert args[1] == _PostParams(backend="center")
     finally:
@@ -377,7 +377,7 @@ def test_post_content_refresh_populates_form_and_figure(qapp, monkeypatch, make_
     bus = EventBus()
     ctrl.get_bus.return_value = bus
     post_fig = Figure()
-    ctrl.get_tab_snapshot.return_value = _snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = _snapshot(
         "tab-1",
         has_post_analyze_result=True,
         post_params=_PostParams(backend="pca"),
@@ -426,7 +426,7 @@ def test_post_figure_refresh_clears_invalidated_presentation(qapp, make_ctrl):
     ctrl = make_ctrl()
     bus = EventBus()
     ctrl.get_bus.return_value = bus
-    ctrl.get_tab_snapshot.return_value = _snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = _snapshot(
         "tab-1",
         has_post_analyze_result=False,
         post_analysis_figure=None,
@@ -462,7 +462,7 @@ def test_pane_containers_are_independent_for_post(qapp, make_ctrl):
 
     ctrl = make_ctrl()
     ctrl.get_bus.return_value = EventBus()
-    ctrl.get_tab_snapshot.return_value = _snapshot("tab-1")
+    ctrl.tab_control.get_tab_snapshot.return_value = _snapshot("tab-1")
     window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "ge")
@@ -507,7 +507,7 @@ def test_take_figure_screenshot_captures_post_figure(qapp, make_ctrl):
         post_analysis_figure=post_fig,
         analysis_figure=Figure(),
     )
-    ctrl.get_tab_snapshot.return_value = snapshot
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     window = MainWindow(ctrl, templates=lambda: {})
     try:
         window.add_tab_widget("tab-1", "ge")

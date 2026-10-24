@@ -75,7 +75,7 @@ def test_bound_resonator_creates_original_probe_from_public_template(
     session: TemplateSession,
 ) -> None:
     ctrl = session.controller
-    original = ctrl.read_context()
+    original = ctrl.context_control.read_context()
     ledger = session.entry.ledger.events()
     try:
         ctrl.create_from_template("module", "res_probe", "R1.pulses.probe")
@@ -83,7 +83,7 @@ def test_bound_resonator_creates_original_probe_from_public_template(
         raise AssertionError(
             "A bound calibrated resonator must create the original template"
         ) from error
-    current = ctrl.read_context()
+    current = ctrl.context_control.read_context()
     probe = current.library.module_spec("R1.pulses.probe")
     assert isinstance(probe, PulseSpec)
     assert probe.freq == 6123.0
@@ -99,7 +99,7 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
 ) -> None:
     ctrl = session.controller
     ctrl.context_control.set_parameter(
-        ctrl.read_context().target, "R1.ext.time_of_fly", 0.5
+        ctrl.context_control.read_context().target, "R1.ext.time_of_fly", 0.5
     )
     try:
         ctrl.create_from_template("module", "readout", "R1.readout.rf")
@@ -107,7 +107,7 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
         raise AssertionError(
             "A bound resonator must create the original readout template"
         ) from error
-    readout = ctrl.read_context().library.module_spec("R1.readout.rf")
+    readout = ctrl.context_control.read_context().library.module_spec("R1.readout.rf")
     assert isinstance(readout, PulseReadoutSpec)
     assert readout.freq == 6123.0
     assert readout.gen_ch == 1
@@ -119,13 +119,16 @@ def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
 ) -> None:
     ctrl = session.controller
     ctrl.context_control.set_alias_rows((AliasRow("resonator", "Empty"),))
-    before = ctrl.read_context()
+    before = ctrl.context_control.read_context()
     version = session.state.version.get("context")
     ledger = session.entry.ledger.events()
     with pytest.raises(InvalidInputError) as error:
         ctrl.create_from_template("module", "res_probe", "Empty.readout.probe")
     assert "ch" in str(error.value)
     assert "Field required" in str(error.value)
-    assert ctrl.read_context().library.document() == before.library.document()
+    assert (
+        ctrl.context_control.read_context().library.document()
+        == before.library.document()
+    )
     assert session.state.version.get("context") == version
     assert session.entry.ledger.events() == ledger

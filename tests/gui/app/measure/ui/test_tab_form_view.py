@@ -120,13 +120,13 @@ class TabView:
         if resource is not None:
             self.ctrl.cfg_resources.lookup.side_effect = lambda _tab_id: resource
         self.ctrl.get_left_panel_width.return_value = 500
-        self.ctrl.get_tab_adapter_name.return_value = "fake"
+        self.ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
         self.ctrl.get_adapter_guide.return_value = AdapterGuide(
             markdown="# Synthetic guide\n", resource_dir=None
         )
         self.ctrl.progress_control.attach_progress.return_value = lambda: None
         self.ctrl.progress_control.progress_bars.return_value = []
-        self.ctrl.get_tab_snapshot.return_value = snapshot()
+        self.ctrl.tab_control.get_tab_snapshot.return_value = snapshot()
         self.resource: TabFormResource = self.ctrl.cfg_resources.lookup("tab-1")
         self.actions = MagicMock()
         self.tab = ExpTabWidget(
@@ -383,7 +383,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.2)
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)
-    tab_id = ctrl.new_tab("source")
+    tab_id = ctrl.tab_control.new_tab("source")
     ctrl.cfg_resources.lookup(tab_id).write(
         {("gain",): {"expr": "general.ext.amount * 1.5"}}
     )
@@ -396,8 +396,8 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
         yield window
     finally:
         application.stop()
-        for tab_id in tuple(ctrl.list_tab_ids()):
-            ctrl.close_tab(tab_id)
+        for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
+            ctrl.tab_control.close_tab(tab_id)
         window.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()

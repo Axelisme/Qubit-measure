@@ -181,17 +181,17 @@ def test_background_facets_lock_run_and_keep_completed_work(startup_app, tmp_pat
         assert (
             ctrl.device_control.get_device_info("synthetic") == probe.driver.get_info()
         )
-        assert ctrl.get_tab_snapshot(probe.tab).interaction.startup_active
+        assert ctrl.tab_control.get_tab_snapshot(probe.tab).interaction.startup_active
         with pytest.raises(OperationConflictError, match="startup"):
-            ctrl.start_run(probe.tab)
+            ctrl.run_analyze_control.start_run(probe.tab)
     finally:
         probe.release.set()
     qt_until(
         lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
         label="startup terminal",
     )
-    assert not ctrl.get_tab_snapshot(probe.tab).interaction.startup_active
-    assert ctrl.has_tab(probe.tab)
+    assert not ctrl.tab_control.get_tab_snapshot(probe.tab).interaction.startup_active
+    assert ctrl.tab_control.has_tab(probe.tab)
 
 
 def test_partial_failure_reports_script_line_and_retains_callbacks(
@@ -213,7 +213,7 @@ def test_partial_failure_reports_script_line_and_retains_callbacks(
     assert outcome.error is not None
     assert str(path) in outcome.error and "line 13" in outcome.error
     assert "script failure" in outcome.error
-    assert ctrl.has_tab(probe.tab)
+    assert ctrl.tab_control.has_tab(probe.tab)
     behavior.close(assembly)
     behavior.close(assembly)
     assert probe.calls == ["last", "broken", "first", "hardware", "view released"]
@@ -329,7 +329,7 @@ def test_live_queries_and_close_callback_read_current_not_startup_state(
     )
     run_script(ctrl, path)
     ctrl.setup_control.new_point(PointCreateRequest("later", "", CommandOrigin("gui")))
-    ctrl.new_tab("sample")
+    ctrl.tab_control.new_tab("sample")
     behavior.close(assembly)
     assert probe.calls == ["snapshot", "hardware"]
 
@@ -487,7 +487,7 @@ def test_tab_input_roundtrip_preserves_expression_selection_and_invalid_draft(
     startup_app, tmp_path
 ):
     _behavior, _assembly, ctrl, _window, _probe = startup_app
-    original = ctrl.new_tab("sample")
+    original = ctrl.tab_control.new_tab("sample")
     resource = ctrl.cfg_resources.lookup(original)
     resource.write({("gain",): {"expr": "unfinished +"}, ("reps",): "not-an-int"})
     resource.select(("sweep",), {"kind": "center"})
@@ -502,7 +502,7 @@ def test_tab_input_roundtrip_preserves_expression_selection_and_invalid_draft(
             "    assert ctx.tabs.current()[1].input == tab.input\n",
         ),
     )
-    restored = ctrl.cfg_resources.lookup(ctrl.list_tab_ids()[1])
+    restored = ctrl.cfg_resources.lookup(ctrl.tab_control.list_tab_ids()[1])
     assert restored.input.to_json() == expected
     assert restored.preview().errors
 
@@ -527,7 +527,10 @@ def test_new_tab_rejects_bad_input_and_logs_incompatible_paths(
             '    ctx.tabs.new_tab(\'sample\', input=TabInput(\'{"data":{"gain":0.35,"removed":1},"selections":[]}\'))\n',
         ),
     )
-    assert ctrl.cfg_resources.lookup(ctrl.list_tab_ids()[0]).input.data["gain"] == 0.35
+    assert (
+        ctrl.cfg_resources.lookup(ctrl.tab_control.list_tab_ids()[0]).input.data["gain"]
+        == 0.35
+    )
     assert "discarded" in caplog.text and "removed" in caplog.text
 
 
@@ -634,7 +637,7 @@ def test_startup_progress_and_run_lock_with_user_input(
     # of the startup runner's own admission/progress logic.
     soccfg = make_mock_soccfg()
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
-    ctrl.new_tab("sample")
+    ctrl.tab_control.new_tab("sample")
     window.show()
     refresh = next(
         button

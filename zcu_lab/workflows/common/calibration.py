@@ -39,7 +39,6 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainCfg,
     FreqGainExp,
 )
-from zcu_lab.workflows.common.acquire import run_qubit_freq
 from zcu_lab.workflows.common.analysis import (
     fit_or_failed,
     validate_fit_trace,
@@ -449,7 +448,7 @@ async def calibrate_frequency(
                 step=span / 100,
             ),
         )
-        outcome = await scope.run(run_qubit_freq, cfg, name="frequency")
+        outcome = await scope.run(FreqExp().run, cfg, name="frequency")
         if isinstance(outcome, Failed):
             status, reason = "failed", outcome.reason
             continue

@@ -47,7 +47,7 @@ def scalar_ledger(qapp: QApplication):
         )
     }
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.return_value = {}
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
     ctrl.writeback_control.get_writeback_values_for_pane.side_effect = lambda *a, **k: {
         item.session_id: WritebackValues(
             actual_path="Q1.t1",
@@ -421,7 +421,7 @@ def test_writeback_preview_failure_outside_the_contract_propagates(qapp):
 def test_writeback_preview_failure_keeps_unavailable_reasons(qapp, pane):
     tab, ctrl = _post_tab(qapp)
     reason = "Q1: Sample writeback requires $flux_dev: Alias is not bound"
-    snapshot = ctrl.get_tab_snapshot.return_value
+    snapshot = ctrl.tab_control.get_tab_snapshot.return_value
     snapshot.analysis.unavailable_reasons = (reason,)
     snapshot.post_analysis.unavailable_reasons = (reason,)
     ctrl.writeback_control.get_writeback_values_for_pane.side_effect = (

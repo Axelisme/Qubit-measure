@@ -167,7 +167,7 @@ def test_open_and_reset_capture_selected_point_aliases(
         "context.aliases_set", {"rows": [{"alias": "driver", "value": "Q2"}]}
     )
     application.result("point.use", {"label": "first"})
-    tab = application.controller.new_tab("pointed")
+    tab = application.controller.tab_control.new_tab("pointed")
     query = {"tab_id": tab, "paths": ["$driver.rate"], "module_refs": []}
     assert application.result("tab.parameter_read", query)["values"] == {
         "$driver.rate": 10.0
@@ -374,7 +374,7 @@ def test_context_direct_write_admission_allows_active_run_without_changing_captu
     application.result("point.new", {"label": "base"})
     control = application.controller.context_control
     before = control.read_context()
-    tab_id = application.controller.new_tab("pointed")
+    tab_id = application.controller.tab_control.new_tab("pointed")
     application.state.set_tab_running(tab_id, running=True)
     try:
         reply = application.rpc(method, params)

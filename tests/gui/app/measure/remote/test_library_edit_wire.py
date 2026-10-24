@@ -79,7 +79,7 @@ def test_ml_edit_writes_path_array_edits_and_evaluated_expressions(
     )
     assert reply["ok"] is True, reply
     assert reply["result"] == {"valid": True, "errors": []}
-    written = fx.ctrl.read_context().library.module_spec(PULSE)
+    written = fx.ctrl.context_control.read_context().library.module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert (written.gain, written.freq, written.waveform) == (0.75, 120.0, WAVEFORM)
 
@@ -88,7 +88,7 @@ def test_ml_edit_invalid_field_leaves_library_unchanged_and_names_its_path(
     library_socket,
 ) -> None:
     fx, sock = library_socket
-    before = fx.ctrl.read_context().library.document()
+    before = fx.ctrl.context_control.read_context().library.document()
     reply = ml_edit(
         sock,
         "module",
@@ -102,14 +102,14 @@ def test_ml_edit_invalid_field_leaves_library_unchanged_and_names_its_path(
     assert reply["result"]["valid"] is False
     assert [error["path"] for error in reply["result"]["errors"]] == [["gain"]]
     assert all(error["message"] for error in reply["result"]["errors"])
-    assert fx.ctrl.read_context().library.document() == before
+    assert fx.ctrl.context_control.read_context().library.document() == before
 
 
 def test_ml_edit_unknown_path_is_rejected_without_a_partial_write(
     library_socket,
 ) -> None:
     fx, sock = library_socket
-    before = fx.ctrl.read_context().library.document()
+    before = fx.ctrl.context_control.read_context().library.document()
     reply = ml_edit(
         sock,
         "waveform",
@@ -123,7 +123,7 @@ def test_ml_edit_unknown_path_is_rejected_without_a_partial_write(
     assert reply["error"]["code"] == "invalid_params"
     assert reply["error"]["reason"] == "form_errors"
     assert "missing" in reply["error"]["message"]
-    assert fx.ctrl.read_context().library.document() == before
+    assert fx.ctrl.context_control.read_context().library.document() == before
 
 
 def test_ml_edit_save_as_creates_a_new_entry_and_keeps_the_source(
@@ -139,14 +139,14 @@ def test_ml_edit_save_as_creates_a_new_entry_and_keeps_the_source(
     )
     assert reply["ok"] is True, reply
     assert reply["result"] == {"valid": True, "errors": []}
-    library = fx.ctrl.read_context().library
+    library = fx.ctrl.context_control.read_context().library
     assert library.waveform_spec("Q1.waveforms.copy").length == 0.25
     assert library.waveform_spec(WAVEFORM).length == 0.1
 
 
 def test_ml_edit_save_as_rejects_an_existing_name(library_socket) -> None:
     fx, sock = library_socket
-    before = fx.ctrl.read_context().library.document()
+    before = fx.ctrl.context_control.read_context().library.document()
     reply = ml_edit(
         sock,
         "waveform",
@@ -157,4 +157,4 @@ def test_ml_edit_save_as_rejects_an_existing_name(library_socket) -> None:
     assert reply["ok"] is False
     assert reply["error"]["code"] == "invalid_params"
     assert "already exists" in reply["error"]["message"]
-    assert fx.ctrl.read_context().library.document() == before
+    assert fx.ctrl.context_control.read_context().library.document() == before

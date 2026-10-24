@@ -704,10 +704,10 @@ def load_browser(
     ctrl.add_view(window)
     window.show()
     qapp.processEvents()
-    before = set(ctrl.list_tab_ids())
+    before = set(ctrl.tab_control.list_tab_ids())
     yield ComponentDriver(window), variant
-    for tab_id in set(ctrl.list_tab_ids()) - before:
-        ctrl.close_tab(tab_id)
+    for tab_id in set(ctrl.tab_control.list_tab_ids()) - before:
+        ctrl.tab_control.close_tab(tab_id)
 
 
 @pytest.mark.parametrize(

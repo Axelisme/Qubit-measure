@@ -56,7 +56,7 @@ def test_cfg_diagnostics_include_every_original_tone_and_seed_without_mutation(
 ) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("diagnostics", DiagnosticAdapter)
-    tab = fixture.ctrl.new_tab("diagnostics")
+    tab = fixture.ctrl.tab_control.new_tab("diagnostics")
     owner = fixture.ctrl.cfg_resources.lookup(tab)
     before = owner.input.to_json()
     try:
@@ -137,7 +137,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
     )
 
     fixture.registry.register("seed-metadata", SeedMetadataAdapter)
-    tab = fixture.ctrl.new_tab("seed-metadata")
+    tab = fixture.ctrl.tab_control.new_tab("seed-metadata")
     try:
         observed = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
         rows = {tuple(row["path"]): row for row in observed["diagnostics"]}
@@ -176,7 +176,7 @@ def test_single_read_elements_keeps_sibling_drafts(form_rpc):
         library.module_spec("Q.pulses.drive"),
     )
     fixture.registry.register("indexed-rpc", IndexedRpcAdapter)
-    tab = fixture.ctrl.new_tab("indexed-rpc")
+    tab = fixture.ctrl.tab_control.new_tab("indexed-rpc")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         owner.write({("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]})
@@ -234,7 +234,7 @@ def test_aggregate_relative_fields_use_real_rpc_and_keep_owner_errors(form_rpc):
         library.module_spec("Q.pulses.drive"),
     )
     fixture.registry.register("indexed-fields", IndexedRpcAdapter)
-    tab = fixture.ctrl.new_tab("indexed-fields")
+    tab = fixture.ctrl.tab_control.new_tab("indexed-fields")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         owner.write({("tones", 0, "phase"): {"expr": "1 / 0"}})
@@ -313,7 +313,7 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
 
     fixture, _, rpc = form_rpc
     fixture.registry.register("fixed-elements", FixedAdapter)
-    tab = fixture.ctrl.new_tab("fixed-elements")
+    tab = fixture.ctrl.tab_control.new_tab("fixed-elements")
     try:
         reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["tones"]})
         assert reply["ok"], reply

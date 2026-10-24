@@ -54,7 +54,7 @@ def _make_snapshot_shell(
     we pass a plain SimpleNamespace instead.
     """
     ctrl = MagicMock()
-    ctrl.list_tab_ids.return_value = list(state_tab_ids)
+    ctrl.tab_control.list_tab_ids.return_value = list(state_tab_ids)
 
     tab_count = 1 if current_widget is not None else 0
     tabs_stub = _FakeQTabWidget(current=current_widget, count=tab_count)

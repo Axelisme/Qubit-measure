@@ -21,10 +21,10 @@ from ._helpers import Fixture, call, open_client
 def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
     fx = Fixture(project_root=str(tmp_path / "project"))
     fx.start()
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
-        fx.ctrl.start_run(tab_id)
+        fx.ctrl.run_analyze_control.start_run(tab_id)
         qt_until(
             lambda: fx.ctrl.active_operation_count() == 0, label="sample Run terminal"
         )

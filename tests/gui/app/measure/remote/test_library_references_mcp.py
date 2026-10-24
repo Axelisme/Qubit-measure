@@ -97,15 +97,17 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
     kind, put, field, path, adapter_type = reference_library
     fx = Fixture(project_root=str(tmp_path), active_label="ctx001")
     fx.ctrl.context_control.add_component("Q1", "fake/drive/a", {})
-    fx.ctrl.apply_library_change(fx.ctrl.read_context(), put)
+    fx.ctrl.context_control.apply_library_change(
+        fx.ctrl.context_control.read_context(), put
+    )
     if kind == "waveform":
         fx.ctrl.context_control.set_module(
-            fx.ctrl.read_context().target,
+            fx.ctrl.context_control.read_context().target,
             "Q1.pulses.carrier",
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.5, waveform=path),
         )
     fx.registry.register("references", adapter_type)
-    tab_id = fx.ctrl.new_tab("references")
+    tab_id = fx.ctrl.tab_control.new_tab("references")
     owner = fx.ctrl.cfg_resources.lookup(tab_id)
     if kind == "waveform":
         owner.write(
@@ -135,8 +137,8 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
         )
         leaves = {tuple(item["path"]): item["value"] for item in before["values"]}
         assert leaves[inline_path] == 0.75
-        fx.ctrl.apply_library_change(
-            fx.ctrl.read_context(),
+        fx.ctrl.context_control.apply_library_change(
+            fx.ctrl.context_control.read_context(),
             LibraryChange(
                 kind,
                 "rename" if action == "rename" else "delete",
@@ -153,7 +155,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
             raise TypeError("Expected captured library")
         keys = captured.module_keys() if kind == "module" else captured.waveform_keys()
         assert path in keys
-        current = fx.ctrl.read_context().library
+        current = fx.ctrl.context_control.read_context().library
         current_keys = (
             current.module_keys() if kind == "module" else current.waveform_keys()
         )

@@ -571,7 +571,7 @@ def test_optional_invalid_input_disables_fit_and_shows_recoverable_error(
     _session, ctrl, window, tab_id = live_ui
     tab = _tab(window, tab_id)
     tab.populate_analyze_params(_OptionalFitParams())
-    tab.update_interaction_state(ctrl.get_tab_snapshot(tab_id))
+    tab.update_interaction_state(ctrl.tab_control.get_tab_snapshot(tab_id))
     window.resize(1200, 850)
     window.show()
     driver = ComponentDriver(window)
@@ -630,7 +630,7 @@ def test_window_dimensions_roundtrip_through_layout_caretaker(
     _session, ctrl, window, _original_tab = live_ui
     ctrl.add_view(window)
     ctrl.attach_caretaker(create_persistence_caretaker(ctrl, cache_dir=tmp_path))
-    original_ids = set(ctrl.list_tab_ids())
+    original_ids = set(ctrl.tab_control.list_tab_ids())
     window.resize(1100, 820)
     ctrl.persist_all()
     window.resize(900, 650)
@@ -638,9 +638,9 @@ def test_window_dimensions_roundtrip_through_layout_caretaker(
         ctrl.restore_all()
         assert (window.width(), window.height()) == (1100, 820)
     finally:
-        for tab_id in tuple(ctrl.list_tab_ids()):
+        for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
             if tab_id not in original_ids:
-                ctrl.close_tab(tab_id)
+                ctrl.tab_control.close_tab(tab_id)
 
 
 def test_prepare_run_container_clears_run_and_downstream_figures(
@@ -734,7 +734,7 @@ def test_retired_view_stops_authority_projection(
 ) -> None:
     _session, ctrl, _fixture_window, _fixture_tab = live_ui
     ctrl.attach_caretaker(create_persistence_caretaker(ctrl))
-    tab_id = ctrl.new_tab("saving")
+    tab_id = ctrl.tab_control.new_tab("saving")
     dialogs = RecordingDialogPresenter(destructive_answers=[True, True])
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     window.add_tab_widget(tab_id, "saving")
@@ -759,7 +759,7 @@ def test_retired_view_stops_authority_projection(
         assert widget.read_only_changes == [False]
     finally:
         ctrl.abort_shutdown()
-        if ctrl.has_tab(tab_id):
+        if ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -908,7 +908,7 @@ def test_interactive_success_restores_committed_figure_in_analysis_pane(
     session.state.update_tab_analyze(
         tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
     )
-    window.refresh_tab_figure(tab_id, ctrl.get_tab_snapshot(tab_id))
+    window.refresh_tab_figure(tab_id, ctrl.tab_control.get_tab_snapshot(tab_id))
     assert tab.get_current_figure_for_pane("analysis") is committed_figure
     captured = tab.get_analysis_container()
 

@@ -464,7 +464,7 @@ class WritebackWidget(QWidget):
         values: dict[str, WritebackValues] = {}
         for item in items:
             if isinstance(item, ModuleWriteback):
-                form = self._ctrl.get_writeback_item_form_for_pane(
+                form = self._ctrl.writeback_control.get_writeback_item_form_for_pane(
                     self._tab_id, self._pane, item.session_id
                 )
                 local_invalid = (
@@ -657,7 +657,7 @@ class WritebackWidget(QWidget):
     def _on_check_toggled(self, item: WritebackItem) -> None:
         selected = self._checks[item.session_id].isChecked()
         assert self._tab_id is not None
-        self._ctrl.set_writeback_item_for_pane(
+        self._ctrl.writeback_control.set_writeback_item_for_pane(
             self._tab_id,
             self._pane,
             item.session_id,
@@ -696,7 +696,9 @@ class WritebackWidget(QWidget):
         return isinstance(item, ModuleWriteback)
 
     def _get_applied_states(self) -> dict[str, bool]:
-        getter = getattr(self._ctrl, "get_writeback_applied_for_pane", None)
+        getter = getattr(
+            self._ctrl.writeback_control, "get_writeback_applied_for_pane", None
+        )
         if getter is None or not callable(getter):
             return {}
         result = getter(self._tab_id, self._pane)

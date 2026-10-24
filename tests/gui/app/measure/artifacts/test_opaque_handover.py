@@ -111,7 +111,7 @@ def opaque_host(
         yield state, controller
     finally:
         for tab_id in tuple(state.list_tab_ids()):
-            controller.close_tab(tab_id)
+            controller.tab_control.close_tab(tab_id)
         controller.close()
         qapp.processEvents()
 
@@ -120,7 +120,7 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     opaque_host: tuple[State, Controller], qapp: QApplication
 ) -> None:
     state, controller = opaque_host
-    tab_id = controller.new_tab("opaque")
+    tab_id = controller.tab_control.new_tab("opaque")
     controller.run_analyze_control.start_run(tab_id, origin=CommandOrigin("mcp"))
     # The admitted synthetic run returns; pump its terminal owner delivery.
     qt_until(lambda: not state.is_tab_busy(tab_id), label="opaque run terminal")

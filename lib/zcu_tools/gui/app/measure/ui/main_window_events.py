@@ -242,18 +242,18 @@ class MainWindowEventCoordinator:
                 _TabReaction.INTERACTION,
             ),
         )
-        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self._host.refresh_run_lock(self._ctrl.tab_control.get_running_tab_id())
 
     def _on_run_finished(self, payload: RunFinishedPayload) -> None:
         """Refresh terminal state without changing the user's selected pane."""
         self._react_to_tab(payload.tab_id, (_TabReaction.INTERACTION,))
-        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self._host.refresh_run_lock(self._ctrl.tab_control.get_running_tab_id())
 
     def _on_context_switched(self, payload: ContextSwitchedPayload) -> None:
         del payload
         self._host.refresh_context_panel()
         for tab_id in self._host.view_tab_ids():
-            snapshot = self._ctrl.get_tab_snapshot(tab_id)
+            snapshot = self._ctrl.tab_control.get_tab_snapshot(tab_id)
             self._host.refresh_tab_interaction(tab_id, snapshot)
 
     def _on_tab_added(self, payload: TabAddedPayload) -> None:
@@ -264,7 +264,7 @@ class MainWindowEventCoordinator:
 
     def _on_tab_closed(self, payload: TabClosedPayload) -> None:
         self._host.remove_tab_widget(payload.tab_id)
-        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self._host.refresh_run_lock(self._ctrl.tab_control.get_running_tab_id())
 
     def _on_tab_content_changed(self, payload: TabContentChangedPayload) -> None:
         self._react_to_tab(payload.tab_id, _CONTENT_REACTIONS[payload.fact])
@@ -273,7 +273,7 @@ class MainWindowEventCoordinator:
         """Apply a fact's ordered View reactions with at most one snapshot read."""
         if not reactions or not self._host.has_tab_widget(tab_id):
             return
-        snapshot = self._ctrl.get_tab_snapshot(tab_id)
+        snapshot = self._ctrl.tab_control.get_tab_snapshot(tab_id)
         actions = {
             _TabReaction.ANALYZE_FORM: lambda: self._host.refresh_tab_analyze_form(
                 tab_id, snapshot
@@ -300,7 +300,7 @@ class MainWindowEventCoordinator:
 
     def _on_soc_changed(self, payload: SocChangedPayload) -> None:
         del payload
-        self._host.refresh_run_lock(self._ctrl.get_running_tab_id())
+        self._host.refresh_run_lock(self._ctrl.tab_control.get_running_tab_id())
 
     def _on_save_data_finished(self, payload: SaveDataFinishedPayload) -> None:
         self._host.handle_save_data_finished(payload)

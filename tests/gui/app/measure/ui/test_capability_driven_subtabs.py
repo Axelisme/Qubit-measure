@@ -58,7 +58,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         owned_authorities.append(ctrl.control_identity)
         configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
-        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = AdapterGuide(
             markdown="", resource_dir=None
         )
@@ -208,8 +208,8 @@ def test_main_window_follow_selects_subpane_on_already_selected_tab(
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
     ctrl = make_ctrl()
-    ctrl.list_tab_ids.return_value = ["tab-1", "tab-2"]
-    ctrl.get_tab_snapshot.side_effect = lambda tab_id: make_snapshot(
+    ctrl.tab_control.list_tab_ids.return_value = ["tab-1", "tab-2"]
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: make_snapshot(
         tab_id,
         analysis=AnalysisMode.FIT,
         post=True,
@@ -497,7 +497,7 @@ def test_analysis_terminal_restores_retained_figures_via_coordinator(
     # Initial snapshot with retained figures (State still holds them)
     fig_a_retained = Figure()
     fig_p_retained = Figure()
-    ctrl.get_tab_snapshot.return_value = make_snapshot(
+    ctrl.tab_control.get_tab_snapshot.return_value = make_snapshot(
         "tab-1",
         analysis=AnalysisMode.FIT,
         post=True,
@@ -679,7 +679,9 @@ def test_operation_gates_editing_for_affected_pane(qapp, exp_tab_widget, make_ct
 def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget, make_ctrl):
     ctrl = make_ctrl()
     # Setup controller mock to track pane-qualified calls
-    ctrl.set_writeback_item_for_pane = MagicMock(return_value={"valid": True})
+    ctrl.writeback_control.set_writeback_item_for_pane = MagicMock(
+        return_value={"valid": True}
+    )
     ctrl.get_writeback_item_draft_for_pane = MagicMock(return_value=MagicMock())
     snap = make_snapshot(
         "tab-1", analysis=AnalysisMode.FIT, post=True, has_post_result=True
@@ -702,11 +704,11 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget, make_ctr
         pass
     # Directly call handler via widget
     tab.post_writeback_widget._on_check_toggled(item)
-    ctrl.set_writeback_item_for_pane.assert_called_with(
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_with(
         "tab-1", "post_analysis", "param-1", selected=item.selected
     )
     # Edit should also route pane-qualified
-    ctrl.set_writeback_item_for_pane.reset_mock()
+    ctrl.writeback_control.set_writeback_item_for_pane.reset_mock()
     # Simulate edit via widget's edit path not needed; verify that primary widget still uses analysis pane
     primary_item = ParameterWriteback(
         target_name="y", description="d2", proposed_value=2
@@ -717,7 +719,7 @@ def test_post_writeback_operates_on_its_own_draft(qapp, exp_tab_widget, make_ctr
         [primary_item], {primary_item.session_id: WritebackValues("y", None, 2, None)}
     )
     tab.writeback_widget._on_check_toggled(primary_item)
-    ctrl.set_writeback_item_for_pane.assert_called_with(
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_with(
         "tab-1", "analysis", "param-1", selected=primary_item.selected
     )
     tab.detach()

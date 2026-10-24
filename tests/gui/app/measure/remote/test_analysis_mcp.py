@@ -74,7 +74,7 @@ def fx(tmp_path, qapp):
 
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_writeback_preview_accepts_matching_analysis_operation(fx, stage):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     fx.state.update_tab_result(tab, RunRecord(None, object()))
     _install_result(fx, tab, stage, 3.0, 101)
     with open_client(fx.service.port) as sock:
@@ -106,7 +106,7 @@ def connected_mcp(fx, tmp_path, request):
 def test_unestimable_error_is_null_with_reason_through_public_rpc(
     fx, connected_mcp, stage
 ):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     _install_result(
         fx,
         tab,
@@ -143,7 +143,7 @@ def test_unestimable_error_is_null_with_reason_through_public_rpc(
 def test_nested_nonfinite_analysis_values_have_precise_paths(
     fx, connected_mcp, stage, operation_id
 ):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     _install_result(
         fx,
         tab,
@@ -180,7 +180,7 @@ def test_nested_nonfinite_analysis_values_have_precise_paths(
 
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     reply = connected_mcp(
         "rpc_call", {"method": _result_method(stage), "params": {"tab_id": tab}}
     )
@@ -190,7 +190,7 @@ def test_empty_analysis_result_has_no_invalid_values(fx, connected_mcp, stage):
 
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_finite_analysis_preserves_zero_and_existing_null(fx, connected_mcp, stage):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     _install_result(
         fx,
         tab,
@@ -219,7 +219,7 @@ def test_finite_analysis_preserves_zero_and_existing_null(fx, connected_mcp, sta
 def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
     fx, stage
 ):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     fx.state.update_tab_result(tab, RunRecord(None, object()))
     if stage == "post_analysis":
         _install_result(fx, tab, "analysis", 1.0, 100)
@@ -258,7 +258,7 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
 
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     metadata = historical_metadata()
     source = RunRecord(None, object(), metadata=metadata)
     fx.state.update_tab_result(tab, source)
@@ -309,7 +309,7 @@ def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
 
 
 def test_operation_bound_run_figure_is_rejected(fx):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     with open_client(fx.service.port) as sock:
         rejected = call(
             sock,
@@ -320,7 +320,7 @@ def test_operation_bound_run_figure_is_rejected(fx):
 
 
 def test_result_without_figure_does_not_report_a_saved_image(fx, tmp_path):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     fx.state.update_tab_result(tab, RunRecord(None, object()))
     fx.state.update_tab_analyze(tab, ScalarResult(3.0), None, source_operation_id=101)
     fx.service.render_view = None

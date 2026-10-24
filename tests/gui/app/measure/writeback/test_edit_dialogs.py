@@ -77,7 +77,7 @@ def test_value_context_and_live_validation(value_editor, qapp):
     value.setText("not a number")
     assert "Enter a number" in label_text(dialog)
     assert not button(dialog, "Save").isEnabled()
-    assert not ctrl.set_writeback_item_for_pane.called
+    assert not ctrl.writeback_control.set_writeback_item_for_pane.called
     error = next(
         label
         for label in dialog.findChildren(QLabel)
@@ -105,7 +105,7 @@ def test_value_matching_unit_save_and_cancel(value_editor):
     button(dialog, "Save").click()
     assert not dialog.isVisible()
     assert item.proposed_value == 6013.25
-    ctrl.set_writeback_item_for_pane.assert_called_once_with(
+    ctrl.writeback_control.set_writeback_item_for_pane.assert_called_once_with(
         "tab-1",
         "analysis",
         "param-1",
@@ -135,13 +135,18 @@ def test_string_value_keeps_matching_unit_suffix(value_editor):
     button(dialog, "Save").click()
     assert item.proposed_value == "abcMHz"
     assert (
-        ctrl.set_writeback_item_for_pane.call_args.kwargs["proposed_value"] == "abcMHz"
+        ctrl.writeback_control.set_writeback_item_for_pane.call_args.kwargs[
+            "proposed_value"
+        ]
+        == "abcMHz"
     )
 
 
 def test_value_controller_refusal_stays_inline(value_editor):
     _, dialog, item, ctrl, messages = value_editor
-    ctrl.set_writeback_item_for_pane.side_effect = RuntimeError("Tab is busy")
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = RuntimeError(
+        "Tab is busy"
+    )
     button(dialog, "Save").click()
     assert "Tab is busy" in label_text(dialog)
     assert dialog.isVisible()
@@ -226,7 +231,7 @@ def module_editor(qapp, monkeypatch):
     current = spec.model_dump(mode="python")
     current["freq"] = 6000.0
     ctrl = MagicMock()
-    ctrl.get_writeback_item_form_for_pane.return_value = form
+    ctrl.writeback_control.get_writeback_item_form_for_pane.return_value = form
 
     def preview(*args, **kwargs):
         return {
@@ -241,7 +246,7 @@ def module_editor(qapp, monkeypatch):
     def set_item(*args, **kwargs):
         item.target_name = kwargs.get("target_name", item.target_name)
 
-    ctrl.set_writeback_item_for_pane.side_effect = set_item
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = set_item
     ctrl.writeback_control.get_writeback_values_for_pane.side_effect = preview
     messages = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *a: messages.append(a))
@@ -332,7 +337,9 @@ def test_module_finish_commits_name_and_drops_only_local_text(module_editor, fin
 def test_module_target_refusal_is_inline(module_editor):
     _, dialog, item, ctrl, _, _, messages = module_editor
     assert "Changes go to the writeback draft at once" in label_text(dialog)
-    ctrl.set_writeback_item_for_pane.side_effect = RuntimeError("Tab is busy")
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = RuntimeError(
+        "Tab is busy"
+    )
     name = next(e for e in dialog.findChildren(QLineEdit) if e.text() == "pulse")
     name.setText("tuned")
     name.editingFinished.emit()
@@ -340,7 +347,7 @@ def test_module_target_refusal_is_inline(module_editor):
     assert dialog.isVisible()
     assert item.target_name == "pulse"
     assert messages == []
-    ctrl.set_writeback_item_for_pane.side_effect = None
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = None
 
 
 def test_module_ledger_summarizes_changes_and_exposes_full_tooltip(module_editor):

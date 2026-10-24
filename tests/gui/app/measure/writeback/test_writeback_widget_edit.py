@@ -268,16 +268,16 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         context.set_parameter(context.read_context().target, "general.ext.gain", 0.4)
         board = white_noise()
         ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
-        tab_id = ctrl.new_tab("synthetic/module")
-        ctrl.start_run(tab_id)
+        tab_id = ctrl.tab_control.new_tab("synthetic/module")
+        ctrl.run_analyze_control.start_run(tab_id)
         # The admitted synthetic run returns; pump its terminal owner delivery.
         qt_until(
             lambda: ctrl.active_operation_count() == 0,
             label="module writeback run terminal delivery",
         )
-        run = ctrl.get_tab_snapshot(tab_id).run
+        run = ctrl.tab_control.get_tab_snapshot(tab_id).run
         assert run is not None and run.result is not None
-        ctrl.analyze(tab_id, SampleParams())
+        ctrl.run_analyze_control.analyze(tab_id, SampleParams())
         # The admitted fit returns; its terminal owner delivery installs the draft.
         qt_until(
             lambda: ctrl.active_operation_count() == 0,
@@ -304,7 +304,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
             for dialog in widget.findChildren(QDialog):
                 dialog.reject()
             widget.deleteLater()
-        if tab_id is not None and ctrl.has_tab(tab_id):
+        if tab_id is not None and ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
@@ -313,7 +313,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
 
 def _populate_module(module_widget):
     ctrl, widget, tab_id, pane = module_widget
-    snapshot = ctrl.get_tab_snapshot(tab_id).analysis
+    snapshot = ctrl.tab_control.get_tab_snapshot(tab_id).analysis
     assert snapshot is not None
     widget.populate(
         snapshot.writeback_items,
@@ -351,7 +351,7 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     ctrl, widget, tab_id, pane = _populate_module(module_widget)
     dialog = _module_dialog(widget)
     # This public owner returns the actual module Edit draft and fixed capture.
-    form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     assert MODULE_PROPOSAL_WAVEFORM in form.parameters.library.waveform_keys()
     current = form.state.input.data["waveform"]
     assert current == {"kind": "ref", "name": MODULE_PROPOSAL_WAVEFORM}
@@ -398,7 +398,9 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     # Preview and Apply use the opening capture, not subsequently changed values.
     context = ctrl.context_control
     context.set_parameter(context.read_context().target, "general.ext.gain", 0.8)
-    widget.apply_requested.connect(lambda: ctrl.apply_writeback_for_pane(tab_id, pane))
+    widget.apply_requested.connect(
+        lambda: ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
+    )
     dialog.accept()
     _apply(widget).click()
     spec = _pulse(ctrl, "Q1.pulses.retuned")
@@ -428,9 +430,11 @@ def test_module_option_command_uses_captured_source_and_current_admission(
         _edit_button(widget).click()
         assert not errors, f"Module Edit must open through the public Qt seam: {errors}"
         dialog = _find_open_dialog("Edit module —")
-        form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+        form = ctrl.writeback_control.get_writeback_item_form_for_pane(
+            tab_id, pane, "ml-1"
+        )
         captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
-        ctrl.apply_writeback_for_pane(tab_id, pane)
+        ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
         assert ctrl.writeback_control.get_writeback_applied_for_pane(tab_id, pane)[
             "ml-1"
         ]
@@ -465,7 +469,7 @@ def test_module_option_command_uses_captured_source_and_current_admission(
             assert not ctrl.writeback_control.get_writeback_applied_for_pane(
                 tab_id, pane
             )["ml-1"]
-            ctrl.apply_writeback_for_pane(tab_id, pane)
+            ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
             assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).waveform == captured
         assert dialog.isVisible()
     finally:
@@ -501,7 +505,7 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
     )
     if invalid_kind == "expression":
         with pytest.raises(LibraryEntryInvalid, match="gain"):
-            ctrl.apply_writeback_for_pane(tab_id, pane)
+            ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
     dialog.accept()
     # Closing drops only unparsed view text; invalid State input survives.
     assert _apply(widget).isEnabled() == (invalid_kind == "unparsed")
@@ -517,7 +521,9 @@ def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
     commit_text(_input(dialog, "gain"), "0.45")
     assert proposed.text().endswith(" changes")
     assert _apply(widget).isEnabled()
-    widget.apply_requested.connect(lambda: ctrl.apply_writeback_for_pane(tab_id, pane))
+    widget.apply_requested.connect(
+        lambda: ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
+    )
     _apply(widget).click()
     assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).gain == 0.45
 
@@ -555,7 +561,9 @@ def test_module_validity_refresh_uses_current_view_or_repaired_state(
         commit_text(_input(dialog, "gain"), "missing.value")
         dialog.accept()
         assert not _apply(widget).isEnabled()
-        ctrl.set_writeback_item_for_pane(tab_id, pane, "ml-1", edits={("gain",): 0.5})
+        ctrl.writeback_control.set_writeback_item_for_pane(
+            tab_id, pane, "ml-1", edits={("gain",): 0.5}
+        )
         _populate_module(module_widget)
         assert _apply(widget).isEnabled()
 
@@ -566,7 +574,7 @@ def test_busy_module_field_edit_is_rejected_and_dialog_keeps_authored_input(
     ctrl, widget, tab_id, pane = _populate_module(module_widget)
     dialog = _module_dialog(widget)
     commit_text(_input(dialog, "freq"), "5100.125")
-    form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     before = form.state.input.data
     ctrl.set_running(tab_id, running=True)
     try:
@@ -622,7 +630,7 @@ def module_host(module_widget, qapp):
         yield ctrl, window, widget, tab_id, pane, presenter
     finally:
         # Publish the real tab close while its subscribed Qt host is still live.
-        if ctrl.has_tab(tab_id):
+        if ctrl.tab_control.has_tab(tab_id):
             ctrl.tab_control.close_tab(tab_id)
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -644,7 +652,7 @@ def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
     assert dialog.isVisible() and _input(dialog, "freq").text() == "5100.125"
     assert not _apply(widget).isEnabled()
     with pytest.raises(LibraryEntryInvalid):
-        ctrl.apply_writeback_for_pane(tab_id, pane)
+        ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     proposed = widget.findChild(QLabel, "writebackProposed")
     assert proposed is not None and proposed.text() == "Invalid configuration"
@@ -671,7 +679,7 @@ def test_host_apply_presents_expected_busy_error_without_losing_draft(module_hos
     ctrl, window, widget, tab_id, pane, presenter = module_host
     dialog = _module_dialog(widget)
     commit_text(_input(dialog, "freq"), "5100.125")
-    form = ctrl.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     before = form.state.input.data
     ctrl.set_running(tab_id, running=True)
     try:
@@ -706,7 +714,7 @@ def test_controller_apply_propagates_unexpected_storage_error(module_host):
     try:
         # The application propagates storage failures; the Qt host presents them.
         with pytest.raises(DIRECTORY_OPEN_ERROR):
-            ctrl.apply_writeback_for_pane(tab_id, pane)
+            ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
         assert presenter.calls == []
         assert (
             MODULE_PROPOSAL_TARGET not in context.read_context().library.module_keys()

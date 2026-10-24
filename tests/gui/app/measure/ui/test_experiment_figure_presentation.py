@@ -163,7 +163,7 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.session_services.soc_connection.install_soc(
             board.soc, board.soccfg
         )
-        app.controller.new_tab("presentation")
+        app.controller.tab_control.new_tab("presentation")
         app.window.resize(1280, 800)
         yield app.window
 
@@ -213,7 +213,7 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.session_services.soc_connection.install_soc(
             board.soc, board.soccfg
         )
-        app.controller.new_tab("layout")
+        app.controller.tab_control.new_tab("layout")
         app.window.resize(1440, 900)
         yield app.window
 

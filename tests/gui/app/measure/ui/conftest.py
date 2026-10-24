@@ -211,7 +211,7 @@ def live_ui(
             progress_transport=DirectProgressTransport(),
             project_root=str(tmp_path),
         )
-        tab_id = ctrl.new_tab("saving")
+        tab_id = ctrl.tab_control.new_tab("saving")
         original = session.state.get_tab("tab")
         session.state.update_tab_result(
             tab_id,

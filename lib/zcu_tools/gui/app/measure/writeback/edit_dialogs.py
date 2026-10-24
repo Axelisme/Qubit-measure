@@ -72,7 +72,7 @@ class WritebackEditDialogs:
         """
 
         def save(name: str, value: Any) -> None:
-            self._ctrl.set_writeback_item_for_pane(
+            self._ctrl.writeback_control.set_writeback_item_for_pane(
                 self._tab_id,
                 self._pane,
                 item.session_id,
@@ -92,7 +92,7 @@ class WritebackEditDialogs:
     ) -> None:
         """Re-admit a write or option command and translate only expected refusals."""
         try:
-            form = self._ctrl.get_writeback_item_form_for_pane(
+            form = self._ctrl.writeback_control.get_writeback_item_form_for_pane(
                 self._tab_id, self._pane, session_id
             )
             edit(form)
@@ -110,7 +110,7 @@ class WritebackEditDialogs:
         Report local and shared validity to the ledger until the view closes.
         """
         try:
-            form = self._ctrl.get_writeback_item_form_for_pane(
+            form = self._ctrl.writeback_control.get_writeback_item_form_for_pane(
                 self._tab_id, self._pane, item.session_id
             )
         except Exception as exc:
@@ -143,7 +143,7 @@ class WritebackEditDialogs:
             )
 
         def retarget(name: str) -> None:
-            self._ctrl.set_writeback_item_for_pane(
+            self._ctrl.writeback_control.set_writeback_item_for_pane(
                 self._tab_id, self._pane, item.session_id, target_name=name
             )
             item.target_name = name

@@ -179,7 +179,9 @@ def test_writeback_widget_projects_draft_owned_applied_state(qapp):
     item = ParameterWriteback(target_name="r_f", description="d", proposed_value=6000.0)
     item.session_id = "param-1"
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.return_value = {"param-1": False}
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {
+        "param-1": False
+    }
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
 
     widget.populate([item], _parameter_values([item]))
@@ -191,7 +193,9 @@ def test_writeback_widget_projects_draft_owned_applied_state(qapp):
         label.text() == "* = not applied" for label in widget.findChildren(QLabel)
     )
 
-    ctrl.get_writeback_applied_for_pane.return_value = {"param-1": True}
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {
+        "param-1": True
+    }
     widget.populate([item], _parameter_values([item]))
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     checkbox = widget.findChildren(QCheckBox)[0]
@@ -203,7 +207,9 @@ def test_writeback_widget_does_not_hide_applied_projection_failures(qapp):
     item = ParameterWriteback(target_name="r_f", description="d", proposed_value=6000.0)
     item.session_id = "param-1"
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.side_effect = RuntimeError("projection failed")
+    ctrl.writeback_control.get_writeback_applied_for_pane.side_effect = RuntimeError(
+        "projection failed"
+    )
     widget = WritebackWidget(ctrl, tab_id="tab-1", pane="analysis")
 
     with pytest.raises(RuntimeError, match="projection failed"):
@@ -356,7 +362,7 @@ def test_writeback_proposed_matrix_has_view_while_current_stays_summary_only(qap
     """A2 — Proposed shows the 3×3 view; Current stays bounded summary-only."""
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
     controller = MagicMock()
-    controller.get_writeback_summaries_for_pane.return_value = {
+    controller.writeback_control.get_writeback_summaries_for_pane.return_value = {
         "param-1": ("3 × 3 matrix", "3 × 3 matrix")
     }
     widget = WritebackWidget(controller, tab_id="tab-1", pane="analysis")
@@ -507,9 +513,9 @@ def test_captured_paths_stderr_and_matrix_copy_are_visible_in_each_pane(
     }
     ctrl = MagicMock()
     applied = {"param-1": False, "param-2": False}
-    ctrl.get_writeback_applied_for_pane.return_value = applied
     ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied
-    ctrl.get_writeback_summaries_for_pane.return_value = {
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied
+    ctrl.writeback_control.get_writeback_summaries_for_pane.return_value = {
         "param-1": ("18.0", "19.0"),  # stale baseline, not the supplied live facts
         "param-2": ("—", "2 × 2 matrix"),
     }
@@ -599,7 +605,7 @@ def sample_row(
     item.session_id = "sample-1"
     ctrl = MagicMock()
     applied_states = {item.session_id: applied}
-    ctrl.get_writeback_applied_for_pane.return_value = applied_states
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied_states
     ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied_states
     host = QTabWidget()
     host.addTab(QWidget(), "Overview")
@@ -692,7 +698,7 @@ def test_nonempty_preview_requires_each_service_fact(qapp) -> None:
     item = ParameterWriteback("driver.ext.value", "Value", proposed_value=1.0)
     item.session_id = "param-1"
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.return_value = {}
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
     widget = WritebackWidget(ctrl, tab_id="captured")
     try:
         with pytest.raises(KeyError, match="param-1"):
@@ -713,8 +719,10 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
         actual_path="Q1.frequency", current=19.8, proposed=20.09, unit="MHz"
     )
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.return_value = {}
-    ctrl.get_writeback_summaries_for_pane.return_value = {"param-1": ("19.8", "20.09")}
+    ctrl.writeback_control.get_writeback_applied_for_pane.return_value = {}
+    ctrl.writeback_control.get_writeback_summaries_for_pane.return_value = {
+        "param-1": ("19.8", "20.09")
+    }
 
     def commit_edit(
         tab_id: str,
@@ -735,7 +743,7 @@ def test_retarget_edit_refreshes_captured_path_current_and_proposal(
             )
         }
 
-    ctrl.set_writeback_item_for_pane.side_effect = commit_edit
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = commit_edit
     ctrl.writeback_control.set_writeback_item_for_pane.side_effect = commit_edit
     widget = WritebackWidget(ctrl, tab_id="captured", pane=pane)
     try:

@@ -34,9 +34,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.aliases import scalar_alias_bindings
-from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
-from zcu_tools.gui.session.device_models import ActiveDeviceOperation
 from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
@@ -54,7 +52,6 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
-from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import library_key_kind
 
 from .adapter import AdapterGuide, SessionEnv
@@ -75,9 +72,7 @@ from .registry import ExperimentResolution, Registry
 from .remote.dialogs import DialogName
 from .services import (
     AppPersistedState,
-    LoadTabResultOutcome,
     PersistenceError,
-    TabSnapshot,
     build_app_services,
 )
 from .services.results_index import ResultsIndex, scan_results
@@ -114,7 +109,7 @@ if TYPE_CHECKING:
     from .services.tab_control import TabControlPort
     from .services.tab_form import TabFormResources
     from .services.workflow_control import WorkflowControlFacet
-    from .writeback import WritebackControlPort, WritebackPane
+    from .writeback import WritebackControlPort
 
 
 logger = logging.getLogger(__name__)
@@ -731,25 +726,6 @@ class Controller(SessionControllerMixin):
         return host.current_left_panel_width()
 
     # ------------------------------------------------------------------
-    # ExpTab operations (TabService)
-    # ------------------------------------------------------------------
-
-    def new_tab(self, adapter_name: str) -> str:
-        return self._tab_control.new_tab(adapter_name)
-
-    def close_tab(self, tab_id: str) -> None:
-        self._tab_control.close_tab(tab_id)
-
-    def set_active_tab(self, tab_id: str) -> None:
-        self._tab_control.set_active_tab(tab_id)
-
-    def reorder_tabs(self, tab_ids: list[str]) -> None:
-        self._tab_control.reorder_tabs(tab_ids)
-
-    def get_active_tab_id(self) -> str | None:
-        return self._tab_control.get_active_tab_id()
-
-    # ------------------------------------------------------------------
     # Run flow (RunService & ContextService)
     # ------------------------------------------------------------------
 
@@ -761,9 +737,6 @@ class Controller(SessionControllerMixin):
 
     def has_active_context(self) -> bool:
         return self._ctx_svc.is_active_context()
-
-    def get_running_tab_id(self) -> str | None:
-        return self._tab_control.get_running_tab_id()
 
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
@@ -782,19 +755,6 @@ class Controller(SessionControllerMixin):
     def resources_versions(self) -> dict[str, int]:
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
-
-    def start_run(self, tab_id: str) -> int:
-        """Run displayed cfg values using the tab's fixed source capture.
-
-        See RunAnalyzeControlFacet.start_run for admission and failure semantics.
-        """
-        return self._run_analyze_control.start_run(tab_id)
-
-    def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
-        return self._run_analyze_control.load_tab_result(tab_id, data_path)
-
-    def cancel_run(self) -> bool:
-        return self._run_analyze_control.cancel_run()
 
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0066)
@@ -952,22 +912,8 @@ class Controller(SessionControllerMixin):
         self._services.experiment_access.shutting_down = False
 
     # ------------------------------------------------------------------
-    # Analyze flow (TabService)
-    # ------------------------------------------------------------------
-
-    def analyze(self, tab_id: str, analyze_params_instance: object) -> int:
-        return self._run_analyze_control.analyze(tab_id, analyze_params_instance)
-
-    # ------------------------------------------------------------------
     # Post-analysis flow (second layer; PostAnalyzeService)
     # ------------------------------------------------------------------
-
-    def start_post_analyze(
-        self, tab_id: str, post_analyze_params_instance: object
-    ) -> int:
-        return self._run_analyze_control.start_post_analyze(
-            tab_id, post_analyze_params_instance
-        )
 
     def update_tab_post_analyze_param_instance(
         self, tab_id: str, instance: object
@@ -993,80 +939,6 @@ class Controller(SessionControllerMixin):
             on_done=on_done,
             on_error=on_error,
         )
-
-    # ------------------------------------------------------------------
-    # Pane-qualified writeback commands
-    # ------------------------------------------------------------------
-
-    def get_writeback_item_form_for_pane(
-        self, tab_id: str, pane: WritebackPane, session_id: str
-    ) -> ModuleEntryForm:
-        """Admit access to a module item's shared editing Form for this pane.
-
-        Every call checks writeback permission, tab idle and current draft
-        ownership. Call again immediately before each state.write or
-        state.run_command; retaining a Form does not retain admission.
-        See WritebackService.get_item_form for the Form's editing effects.
-        """
-        return self._writeback_control.get_writeback_item_form_for_pane(
-            tab_id, pane, session_id
-        )
-
-    def set_writeback_item_for_pane(
-        self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
-    ) -> None:
-        self._writeback_control.set_writeback_item_for_pane(
-            tab_id, pane, session_id, **changes
-        )
-
-    def apply_writeback_for_pane(
-        self,
-        tab_id: str,
-        pane: WritebackPane,
-        *,
-        item_ids: tuple[str, ...] | None = None,
-    ) -> dict[str, Any]:
-        return self._writeback_control.apply_writeback_for_pane(
-            tab_id, pane, item_ids=item_ids
-        )
-
-    def get_writeback_summaries_for_pane(
-        self, tab_id: str, pane: WritebackPane
-    ) -> dict[str, tuple[str | None, str | None]]:
-        return self._writeback_control.get_writeback_summaries_for_pane(tab_id, pane)
-
-    def get_writeback_applied_for_pane(
-        self, tab_id: str, pane: WritebackPane
-    ) -> dict[str, bool]:
-        return self._writeback_control.get_writeback_applied_for_pane(tab_id, pane)
-
-    # ------------------------------------------------------------------
-    # Context and IO operations via ContextService
-    # ------------------------------------------------------------------
-
-    def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext:
-        """Fix point/library/storage and aliases through the context owner.
-
-        aliases maps alias names to temporary concrete components, preserving
-        authored dependent links without changing global state. Reads perform
-        no I/O or kind checks and retain no live callback. Missing/unbound $
-        aliases fail by name on use; EMPTY/source/invalid override errors
-        propagate. See ContextControlPort.read_context for the full contract.
-        """
-        return self._context_control.read_context(aliases=aliases)
-
-    def apply_library_change(
-        self, parameters: ParameterContext, change: LibraryChange
-    ) -> None:
-        """Commit one library structure command at the supplied fixed capture.
-
-        Put/replace carry the persistent Spec to write. ContextService owns
-        target validation, the single resource transaction and publication.
-        Failed commands leave editor teardown to the caller.
-        """
-        self._context_control.apply_library_change(parameters, change)
 
     # ------------------------------------------------------------------
     # Arbitrary waveform assets (qubit-scoped repository)
@@ -1189,7 +1061,7 @@ class Controller(SessionControllerMixin):
                 raise LibraryEntryInvalid(
                     entry.kind, FormErrors({path: str(exc)})
                 ) from exc
-        self.apply_library_change(parameters, entry.put(name))
+        self._context_control.apply_library_change(parameters, entry.put(name))
 
     # ------------------------------------------------------------------
     # Library entry editing through the shared Form entry
@@ -1222,7 +1094,7 @@ class Controller(SessionControllerMixin):
         Invalid input raises LibraryEntryInvalid without writing. Target,
         conflict and I/O failures from apply_library_change propagate.
         """
-        self.apply_library_change(entry.parameters, entry.put(name))
+        self._context_control.apply_library_change(entry.parameters, entry.put(name))
 
     def edit_library_entry(
         self,
@@ -1280,13 +1152,6 @@ class Controller(SessionControllerMixin):
         return None
 
     # ------------------------------------------------------------------
-    # Device operations via DeviceService
-    # ------------------------------------------------------------------
-
-    def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
-        return self._dev_svc.get_active_device_operations()
-
-    # ------------------------------------------------------------------
     # Project root and settings
     # ------------------------------------------------------------------
 
@@ -1330,22 +1195,8 @@ class Controller(SessionControllerMixin):
         self._soc_svc.connect_sync(req)
 
     # ------------------------------------------------------------------
-    # View query interface (TabService) — strict APIs; callers must check
-    # has_tab() and short-circuit if false. State / TabService raise KeyError
-    # on unknown tab_id, which is a fatal contract violation.
+    # Analysis parameter updates and adapter discovery
     # ------------------------------------------------------------------
-
-    def has_tab(self, tab_id: str) -> bool:
-        return self._tab_control.has_tab(tab_id)
-
-    def list_tab_ids(self) -> list[str]:
-        return self._tab_control.list_tab_ids()
-
-    def get_tab_adapter_name(self, tab_id: str) -> str:
-        return self._tab_control.get_tab_adapter_name(tab_id)
-
-    def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
-        return self._tab_control.get_tab_snapshot(tab_id)
 
     def update_tab_analyze_param_instance(self, tab_id: str, instance: object) -> None:
         self._tab_svc.update_tab_analyze_param_instance(tab_id, instance)
