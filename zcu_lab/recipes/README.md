@@ -148,7 +148,7 @@ Run scope cancel 只停止正在取得資料的 Run，回傳 partial，recipe �
 取消 recipe 根則讓下一個 call／ask await raise `ScriptCancelled`。
 進行中的 Run 先合作 drain，runtime 保留 run_id、partial 與完成事實，再 raise。
 這是普通例外，不是 `asyncio.CancelledError`。
-Analyze、ask_writeback、session.ask 都回非 Optional 物件，不用 None 表示根取消。
+`tab.analyze` 與 `tab.ask_writeback` 都回非 Optional 物件，不用 None 表示根取消。
 AnalysisResult.result 的 null 表示該分析沒有成功結果，與根取消的例外不同。
 作者不 catch 根取消。已進入 try 的 `finally` 仍在原 worker 同步 Save。
 本目錄的 `await tab.run()` 保持在 try 外，根取消在此 raise 時不進入 Save finalizer。
