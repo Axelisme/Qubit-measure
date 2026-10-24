@@ -50,6 +50,7 @@ from zcu_lab.workflows.common.calibration import (
     CalCarry,
     Calibrated,
     CalibrationInputs,
+    CalibrationSource,
     CalibrationTunables,
     FrequencyResult,
     RabiResult,
@@ -57,6 +58,7 @@ from zcu_lab.workflows.common.calibration import (
     calibrate_frequency,
     calibrate_rabi,
     calibrate_readout,
+    calibration_source,
     current_point_calibration,
     readout_due,
 )
@@ -120,6 +122,8 @@ class CoherencePoint(BaseModel):
     ordered T1, Ramsey, Echo. Failed/skipped enabled items retain missing-value
     semantics; disabled items have no element. Native references are not an
     existence/completeness guarantee and are never inferred from effect order.
+    calibration_sources names each consumer's pulse producer and fallback use;
+    readout_source identifies the retained readout producer or fixed host seed.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -130,6 +134,8 @@ class CoherencePoint(BaseModel):
     rabi: RabiResult | None = None
     readout: ReadoutResult | None = None
     singleshot: SingleshotResult | None = None
+    calibration_sources: dict[str, CalibrationSource] = Field(default_factory=dict)
+    readout_source: CalibrationSource | None = None
     measurements: tuple[LifetimeResult, ...] = ()
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
@@ -194,7 +200,7 @@ def draw_summaries(
 
 
 def dependency_skips(plan: CoherencePlan) -> tuple[LifetimeResult, ...]:
-    """Describe enabled measurements that require this point's accepted calibration."""
+    """Describe enabled measurements without a usable dependency pulse."""
     enabled_lifetimes: tuple[tuple[LifetimeKind, bool], ...] = (
         ("t1", plan.measure_t1),
         ("t2ramsey", plan.measure_t2ramsey),
@@ -204,7 +210,9 @@ def dependency_skips(plan: CoherencePlan) -> tuple[LifetimeResult, ...]:
         LifetimeResult(
             kind,
             "skipped",
-            "Requires this point's accepted frequency and Rabi",
+            "Requires this point's accepted pi pulse (NOW)"
+            if kind == "t1"
+            else "Requires a latest accepted pi/pi2 pulse",
             None,
             None,
             None,
@@ -231,7 +239,25 @@ async def run_t1_stage(
     snapshot: RunSnapshot,
     tun: T1Tunables,
 ) -> bool:
-    """Save and classify T1, retaining collected values before point cancellation."""
+    """Require NOW pi, then save and classify T1 before checking cancellation."""
+    if point_record.rabi is None or point_record.rabi.status != "accepted":
+        point_record.measurements += (
+            LifetimeResult(
+                "t1",
+                "skipped",
+                "Requires this point's accepted pi pulse (NOW)",
+                None,
+                None,
+                None,
+            ),
+        )
+        return iteration.cancelled
+    point_record.calibration_sources["t1"] = CalibrationSource(
+        need="now",
+        source_index=point_record.index,
+        source_flux=point_record.flux,
+        fallback=False,
+    )
     t1 = await measure_t1(
         iteration,
         cfg,
@@ -253,8 +279,10 @@ async def run_ramsey_stage(
     plots: Plots,
     *,
     snapshot: RunSnapshot,
+    source: CalibrationSource,
 ) -> bool:
-    """Save and classify Ramsey, retaining collected values before point cancellation."""
+    """Record the pi2 producer, then save and classify Ramsey before cancellation."""
+    point_record.calibration_sources["t2ramsey"] = source
     ramsey = await measure_ramsey(
         iteration,
         cfg,
@@ -275,8 +303,10 @@ async def run_echo_stage(
     plots: Plots,
     *,
     snapshot: RunSnapshot,
+    source: CalibrationSource,
 ) -> bool:
-    """Save and classify Echo, retaining collected values before point cancellation."""
+    """Record the pi/pi2 producer, then save and classify Echo before cancellation."""
+    point_record.calibration_sources["t2echo"] = source
     echo = await measure_echo(
         iteration,
         cfg,
@@ -344,11 +374,9 @@ async def run_readout_stage(
     carry: CalCarry,
     estimate: float,
 ) -> bool:
-    """Keep the existing Rabi dependency and readout cadence before point cancellation."""
+    """Scan readout on cadence with LATEST pi, then check point cancellation."""
     assert point_record.rabi is not None
-    if point_record.rabi.status != "accepted" or readout_due(
-        inputs.point_index, inputs.tun
-    ):
+    if readout_due(inputs.point_index, inputs.tun):
         point_record.readout = await calibrate_readout(
             iteration,
             plots=plots,
@@ -364,6 +392,10 @@ async def run_readout_stage(
             None,
             None,
             None,
+        )
+    if point_record.readout.status != "skipped" and carry.pi_source is not None:
+        point_record.calibration_sources["readout"] = calibration_source(
+            carry.pi_source, inputs.point_index
         )
     if iteration.cancelled:
         point_record.status = "skipped"
@@ -510,7 +542,9 @@ async def coherence_fluxdep(
     requires accepted Rabi and absolute flux distance >= singleshot.min_spacing
     from the last Completed GE, including partial. GE saves raw only and uses
     T1's history-based relax timing. Current
-    frequency/Rabi are required; nonaccepted readout retains legal prior values.
+    Rabi frequency is NOW; T1 requires this point's accepted pi. Ramsey/Echo
+    use latest accepted pi/pi2, with producer coordinates in calibration_sources.
+    Nonaccepted readout retains legal prior values.
     Save each completed trace before fitting and commit one CoherencePoint per
     setpoint. Each accepted lifetime updates only its own delay-grid history.
     Unexpected adapter/writer/fit/plot errors propagate. Pause resumes the pending
@@ -547,10 +581,16 @@ async def coherence_fluxdep(
                 point_record,
                 CalibrationStageHistory(carry, t1_by_flux),
             )
+            # T2 consumes LATEST; the T1 stage independently requires NOW pi.
             cal = (
-                current_point_calibration(point_record.rabi, carry)
+                current_point_calibration(
+                    point_record.rabi, carry, point_index=index, flux=flux
+                )
                 if point_record.rabi is not None
                 else None
+            )
+            point_record.readout_source = calibration_source(
+                carry.readout_source, index
             )
             # Optionally collect raw GE after readout, before any lifetime.
             if plan.measure_singleshot:
@@ -569,7 +609,7 @@ async def coherence_fluxdep(
             if iteration.cancelled:
                 point_record.status = "skipped"
                 continue
-            # Without current calibration, record only the enabled dependency skips.
+            # Without a latest pi/pi2 pulse, retain enabled dependency skips.
             if cal is None:
                 point_record.measurements = dependency_skips(plan)
             else:
@@ -606,6 +646,7 @@ async def coherence_fluxdep(
                         point_record,
                         env.plots,
                         snapshot=plan.snapshot,
+                        source=calibration_source(carry.pi_source, index),
                     )
                     _append(t2ramsey_by_flux, flux, point_record.measurements[-1])
                     if skip:
@@ -623,6 +664,7 @@ async def coherence_fluxdep(
                         point_record,
                         env.plots,
                         snapshot=plan.snapshot,
+                        source=calibration_source(carry.pi_source, index),
                     )
                     _append(t2echo_by_flux, flux, point_record.measurements[-1])
                     if skip:
