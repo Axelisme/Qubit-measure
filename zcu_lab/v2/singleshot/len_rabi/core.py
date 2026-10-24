@@ -15,15 +15,7 @@ from zcu_tools.analysis.fitting.singleshot_rabi import (
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -32,13 +24,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.plotting.singleshot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import ProgramV2Cfg, Pulse, Readout, Reset, SweepCfg
 
 from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 
@@ -55,9 +41,9 @@ class LenRabiSweepCfg(ConfigBase):
 
 
 class LenRabiModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qub Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class LenRabiCfg(ExpCfgModel):
@@ -102,16 +88,10 @@ class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis(
-                "shot_indices",
-                "Shot Index",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis("lengths", "Length", "s", scale=US_TO_S, dtype=np.float64),
+            AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
+            AxesSpec.Axis("lengths", "Length", "s", scale=1e-6, dtype=np.float64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
         cfg_schema_version="3.0",

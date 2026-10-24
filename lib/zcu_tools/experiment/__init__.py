@@ -39,7 +39,7 @@ if TYPE_CHECKING:
         ZSpec,
     )
     from .base import PersistableExperiment
-    from .cfg_model import ExpCfgModel
+    from .cfg_model import ExpCfgModel, ProgramExpCfg
     from .interfaces import (
         PersistableRecordExperiment,
         RecordExperiment,
@@ -82,6 +82,7 @@ __all__ = [
     "capture_software_provenance",
     "new_run_id",
     "ExpCfgModel",
+    "ProgramExpCfg",
     "RunRecord",
     "RunSnapshot",
     "save_run",
@@ -136,6 +137,7 @@ _EXPORT_MODULES = {
     "capture_software_provenance": ".acquisition",
     "new_run_id": ".acquisition",
     "ExpCfgModel": ".cfg_model",
+    "ProgramExpCfg": ".cfg_model",
     "RunRecord": ".records",
     "RunSnapshot": ".metadata",
     "save_run": ".native_persistence",

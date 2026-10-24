@@ -82,6 +82,27 @@ SINGLE = AxesSpec(
 )
 
 
+def test_axes_namespace_maps_memory_units_to_native_values():
+    spec = AxesSpec(
+        axes=(AxesSpec.Axis("frequency", "Frequency", "Hz", scale=1e6),),
+        z=AxesSpec.Z("signal", "Signal", "V", scale=1e-3),
+        result_type=SingleResult,
+        cfg_type=NativeCfg,
+        tag="test/namespace",
+    )
+    record = RunRecord(
+        cfg=NativeCfg(),
+        result=SingleResult(
+            frequency=np.array([100.0, 200.0]),
+            signal=np.array([1.0 + 2.0j, 3.0 + 4.0j]),
+        ),
+    )
+    prepared = prepare_run_data(record, spec=spec, comment="namespace")
+    variable = prepared.container.vars["data"]
+    np.testing.assert_array_equal(variable.axes[0].values, [100e6, 200e6])
+    np.testing.assert_allclose(variable.values, [0.001 + 0.002j, 0.003 + 0.004j])
+
+
 class SingleExperiment(PersistableExperiment[SingleResult, NativeCfg]):
     AXES_SPEC: ClassVar = SINGLE
 

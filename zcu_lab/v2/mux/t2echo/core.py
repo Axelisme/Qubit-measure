@@ -135,22 +135,13 @@ from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Delay,
-    ModularProgramV2,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Delay, ModularProgramV2, Pulse, SweepCfg, sweep2param
 from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2._support.mux import MuxFitFailure
@@ -180,16 +171,16 @@ class MuxEchoToneCfg(MuxCoherenceToneCfg):
     tones may leave pulses None; name identifies the qubit in saved results.
     """
 
-    pi_pulse: PulseCfg | None = None
+    pi_pulse: Pulse.Cfg | None = None
 
-    def require_pi_pulse(self) -> PulseCfg:
+    def require_pi_pulse(self) -> Pulse.Cfg:
         """Return the active x180 pulse, or raise ValueError naming the tone."""
         if self.pi_pulse is None:
             raise ValueError(f"{self.name}: active tone requires pi_pulse")
         return self.pi_pulse
 
 
-class MuxT2EchoCfg(ProgramV2Cfg, ExpCfgModel):
+class MuxT2EchoCfg(ProgramExpCfg):
     """Mux Hahn Echo pulses, participating qubits and a shared total-delay scan.
 
     modules holds optional reset and the complete mux readout. tones contains

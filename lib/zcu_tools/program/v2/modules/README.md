@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
 
@@ -14,6 +14,19 @@ roles and design boundaries.
 Each module owns a small piece of program setup in `init()` and time-ordered
 runtime emission in `run()`. The module layer should preserve experiment meaning
 without leaking hardware register choreography into experiment classes.
+
+## Configuration names
+
+In zcu_lab cores, import the runtime module and annotate settings with its
+`Cfg` alias, for example `Pulse.Cfg`, `Readout.Cfg`, `Reset.Cfg`,
+`PulseReadout.Cfg` or `MuxReadout.Cfg`. Concrete reset and waveform classes
+also expose their paired settings as `Cfg`. These are type aliases, so Pydantic
+fields and static annotations use the existing schemas without a second model.
+The standalone `*Cfg` names remain available to framework code and tests.
+
+`Readout(name, cfg)` and `Reset(name, cfg)` are factory classes. Their `__new__`
+returns the concrete module from `cfg.build(name)`, not an instance of the
+factory class. `Reset(name, None)` still returns `NoneReset`.
 
 ## Dmem Tables
 

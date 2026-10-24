@@ -80,15 +80,14 @@ from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg, sweep2param
+from zcu_tools.program.v2 import ModularProgramV2, sweep2param
 from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
 
 from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
@@ -103,7 +102,7 @@ from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 from .analysis import MuxFreqFit, analyze_frequency
 
 
-class MuxFreqCfg(ProgramV2Cfg, ExpCfgModel):
+class MuxFreqCfg(ProgramExpCfg):
     """Settings for simultaneous qubit frequency sweeps and mux readout.
 
     modules supplies optional reset and the full readout tone list. tones gives

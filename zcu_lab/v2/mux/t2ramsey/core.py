@@ -124,21 +124,13 @@ from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Delay,
-    ModularProgramV2,
-    ProgramV2Cfg,
-    Pulse,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Delay, ModularProgramV2, Pulse, SweepCfg, sweep2param
 from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2._support.mux import MuxFitFailure
@@ -160,7 +152,7 @@ from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
 
 
-class MuxT2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
+class MuxT2RamseyCfg(ProgramExpCfg):
     """Named x90 drives and a shared delay sweep for mux Ramsey fringes.
 
     modules holds the optional reset and full mux readout. tones follows the

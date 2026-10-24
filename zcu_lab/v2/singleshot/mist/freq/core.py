@@ -14,28 +14,13 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -52,17 +37,17 @@ class FreqResult:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class FreqSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
 
 
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqCfg(ProgramExpCfg):
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
@@ -84,16 +69,10 @@ class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis(
-                "population_states",
-                "GE Population",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis("freqs", "Drive Freq", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
+            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("freqs", "Drive Freq", "Hz", scale=1e6, dtype=np.float64),
         ),
-        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="2.0",

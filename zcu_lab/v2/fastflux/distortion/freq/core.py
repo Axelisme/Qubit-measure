@@ -7,16 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -24,13 +15,9 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SoftDelay,
     SweepCfg,
     sweep2param,
@@ -69,10 +56,10 @@ def get_resonance_freq(
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    flux_pulse: PulseCfg
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class FreqSweepCfg(ConfigBase):
@@ -80,7 +67,7 @@ class FreqSweepCfg(ConfigBase):
     freq: SweepCfg
 
 
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqCfg(ProgramExpCfg):
     modules: FreqModuleCfg
     readout_t: float
     sweep: FreqSweepCfg
@@ -93,14 +80,14 @@ class FreqAnalysis:
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
-    # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ;
-    # outer lengths stores us on disk (disk s) -> scale=US_TO_S
+    # inner freqs stores MHz on disk (disk Hz) -> scale=1e6;
+    # outer lengths stores us on disk (disk s) -> scale=1e-6
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("lengths", "Wait Time", "s", scale=US_TO_S),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("lengths", "Wait Time", "s", scale=1e-6),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="2.0",

@@ -102,7 +102,12 @@ class AxesSpec(Generic[T_Result, T_Config]):
     inferred from a label. cfg_schema_version is declaration-owned major.minor,
     defaulting to 1.0. Invalid Result fields fail at declaration time. Existing
     save exports Labber; native load/save_run/load_run consume this same spec.
+    zcu_lab declares child specs through ``AxesSpec.Axis`` and ``AxesSpec.Z``;
+    the standalone Axis and ZSpec names remain available.
     """
+
+    Axis = Axis
+    Z = ZSpec
 
     axes: tuple[Axis, ...]  # inner-first
     z: ZSpec

@@ -359,7 +359,9 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ## v2 cfg 組合慣例
 
-具體實驗使用自己的 module／sweep cfg，並視需要組合 program/v2 的 `ProgramV2Cfg` 與父層 `ExpCfgModel`。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
+具體實驗使用自己的 module／sweep cfg。需要 reps、rounds、initial_delay、relax_delay 的 cfg 從 `zcu_tools.experiment` import `ProgramExpCfg`，再以 `class XxxCfg(ProgramExpCfg)` 加上實驗欄位。不含 program 欄位的 cfg 仍繼承 `ExpCfgModel`；在 run 內另建設定時保留 `ProgramV2Cfg`。
+
+Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型別寫 `Pulse.Cfg`、`Readout.Cfg`、`Reset.Cfg`。具體 readout／reset／waveform 也使用自己的 `.Cfg`，例如 `MuxReadout.Cfg` 與 `BathReset.Cfg`。`SweepCfg` 與硬體指令仍按需 import。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
 ---
 
@@ -430,11 +432,11 @@ distinct depths 時分析明確失敗。
 
 ## 寫新 Experiment 時的檢查清單
 
-1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
+1. 定義 `XxxModuleCfg` / `XxxSweepCfg`，通常繼承 `ConfigBase`。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別。需要 program 欄位時，`XxxCfg` 繼承 `ProgramExpCfg`，否則繼承 `ExpCfgModel`。
 2. 需要 typed record 持久化時，繼承 `PersistableExperiment[T_Result, XxxCfg]` 並宣告 class-level `AXES_SPEC`，single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 由 RunRecord 持有。`from_stored(stored)` 還原已讀取的 native data，`load(source)` 是讀檔包裝；`save_run(source, destination, *, metadata, replace=False)` 寫 native，`save(source, destination)` 另作 Labber 匯出，兩者不猜格式。GUI 透過 adapter 的 restore 與保存內容 hooks 使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。
-5. 持久化由 `AXES_SPEC` 宣告。每個 `Axis` 帶 `scale`，頻率用 `MHZ_TO_HZ`、時間用 `US_TO_S`，盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
+5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
 
 Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。

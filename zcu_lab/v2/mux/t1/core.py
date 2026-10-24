@@ -137,20 +137,13 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import US_TO_S, AxesSpec, Axis, PersistableExperiment, ZSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Delay,
-    ModularProgramV2,
-    ProgramV2Cfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Delay, ModularProgramV2, SweepCfg, sweep2param
 from zcu_tools.program.v2.modules import (
     Join,
     MuxReadout,
@@ -172,7 +165,7 @@ class MuxT1ToneCfg(MuxDriveToneCfg):
     """One original qubit's nullable fixed pi pulse, required only when active."""
 
 
-class MuxT1Cfg(ProgramV2Cfg, ExpCfgModel):
+class MuxT1Cfg(ProgramExpCfg):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     modules holds optional reset and complete mux readout. tones contains one
@@ -246,10 +239,10 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("times", "Requested delay", "s", US_TO_S),
-            Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("times", "Requested delay", "s", 1e-6),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=MuxT1Result,
         cfg_type=MuxT1Cfg,
         cfg_schema_version="1.0",

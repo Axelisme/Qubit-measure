@@ -181,15 +181,15 @@ from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, Axis, PersistableExperiment, RunRecord, ZSpec
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, RunRecord
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg, PulseCfg
+from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
 from zcu_tools.program.v2.modules import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
+    ConstWaveform,
+    FlatTopWaveform,
     Join,
     MuxReadout,
     Pulse,
@@ -214,7 +214,7 @@ from .analysis import (
 )
 
 
-def _validate_fixed_pulse(pulse: PulseCfg) -> None:
+def _validate_fixed_pulse(pulse: Pulse.Cfg) -> None:
     for name in ("freq", "gain", "phase", "pre_delay", "post_delay"):
         value = getattr(pulse, name)
         if isinstance(value, QickParam) or not math.isfinite(value):
@@ -222,7 +222,7 @@ def _validate_fixed_pulse(pulse: PulseCfg) -> None:
     if pulse.pre_delay < 0 or pulse.post_delay < 0:
         raise ValueError("pulse delays must be nonnegative us")
     if isinstance(
-        pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)
+        pulse.waveform, (ConstWaveform.Cfg, FlatTopWaveform.Cfg)
     ) and isinstance(pulse.waveform.length, QickParam):
         raise ValueError("pulse length must be fixed")
 
@@ -236,7 +236,7 @@ class MuxGEToneCfg(MuxDriveToneCfg):
     validated only when selected. Nonparticipant settings do not run.
     """
 
-    init_pulse: PulseCfg | None = None
+    init_pulse: Pulse.Cfg | None = None
 
     def validate_pulses(self) -> MuxGEToneCfg:
         """Reject swept values or shared-branch generators for every element."""
@@ -441,11 +441,11 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("shot_indices", "Shot Index", "", dtype=np.int64),
-            Axis("prepared_states", "Probe On", "", dtype=np.int64),
-            Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", "Shot Index", "", dtype=np.int64),
+            AxesSpec.Axis("prepared_states", "Probe On", "", dtype=np.int64),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=MuxGEResult,
         cfg_type=MuxGECfg,
         cfg_schema_version="2.0",

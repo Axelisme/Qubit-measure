@@ -10,14 +10,13 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import field_serializer, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg, PulseCfg
-from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
+from zcu_tools.program.v2 import Pulse
+from zcu_tools.program.v2.modules import MuxReadout
 
 from .._readout import JointRoles, collect_joint_shots
 
@@ -66,21 +65,21 @@ class JointReadoutModules(ConfigBase):
     """Calibrated Xπ pulses on independent generators and the complete mux."""
 
     x180_f1: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ",
             description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
         ),
     ]
     x180_f2: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ",
             description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
         ),
     ]
     readout: Annotated[
-        MuxReadoutCfg,
+        MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
@@ -88,7 +87,7 @@ class JointReadoutModules(ConfigBase):
     ]
 
 
-class JointReadoutCfg(ProgramV2Cfg, ExpCfgModel):
+class JointReadoutCfg(ProgramExpCfg):
     """Four thermal preparation branches, with reps shots per software round.
 
     B00/B01/B10/B11 apply I/Xπ to F1/F2 then acquire one mux read. There is no
@@ -197,11 +196,11 @@ class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]
 
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("tone_indices", "Tone", "", scale=IDENTITY, dtype=np.int64),
-            Axis("shot_indices", "Shot", "", scale=IDENTITY, dtype=np.int64),
-            Axis("branches", "Nominal preparation", "", scale=IDENTITY, dtype=np.int64),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
+            AxesSpec.Axis("branches", "Nominal preparation", "", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Raw IQ", "a.u."),
+        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=JointReadoutResult,
         cfg_type=JointReadoutCfg,
         cfg_schema_version="1.0",

@@ -7,33 +7,20 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     TwoPulseReset,
     sweep2param,
 )
-from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.process import (
     SmoothingOptions,
     SmoothMethod,
@@ -55,10 +42,10 @@ class FreqResult:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class FreqSweepCfg(ConfigBase):
@@ -66,7 +53,7 @@ class FreqSweepCfg(ConfigBase):
     freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
 
 
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqCfg(ProgramExpCfg):
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
     method: Literal["soft", "hard"] = "soft"
@@ -97,10 +84,10 @@ class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
     # (freqs2 inner, freqs1 outer). both axes store MHz on disk (disk Hz).
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("freqs2", "Frequency2", "Hz", scale=MHZ_TO_HZ),
-            Axis("freqs1", "Frequency1", "Hz", scale=MHZ_TO_HZ),
+            AxesSpec.Axis("freqs2", "Frequency2", "Hz", scale=1e6),
+            AxesSpec.Axis("freqs1", "Frequency1", "Hz", scale=1e6),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="2.0",

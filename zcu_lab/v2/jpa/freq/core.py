@@ -9,15 +9,7 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -25,17 +17,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
 from zcu_lab.v2._support.device import set_rf_frequency
 
@@ -54,16 +36,16 @@ class FreqAnalysis:
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class FreqSweepCfg(ConfigBase):
     jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
 
 
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqCfg(ProgramExpCfg):
     jpa_rf_dev: Annotated[
         str | None,
         FieldMeta(
@@ -84,10 +66,10 @@ class FreqCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
-    # jpa_freq stored as Hz on disk -> scale=MHZ_TO_HZ; signals are SNR (float64)
+    # jpa_freq stored as Hz on disk -> scale=1e6; signals are SNR (float64)
     AXES_SPEC = AxesSpec(
-        axes=(Axis("freqs", "JPA Frequency", "Hz", scale=MHZ_TO_HZ),),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+        axes=(AxesSpec.Axis("freqs", "JPA Frequency", "Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         tag="jpa/freq",

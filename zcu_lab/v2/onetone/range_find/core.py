@@ -10,7 +10,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-from zcu_tools.experiment import MHZ_TO_HZ, AxesSpec, Axis, PersistableExperiment, ZSpec
+from zcu_tools.experiment import AxesSpec, PersistableExperiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule
@@ -94,8 +94,8 @@ class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
     Options = RangeFindOptions
 
     AXES_SPEC = AxesSpec(
-        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
-        z=ZSpec("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=RangeFindResult,
         cfg_type=RangeFindCfg,
         cfg_schema_version="1.0",

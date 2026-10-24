@@ -104,18 +104,17 @@ from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import US_TO_S, PersistableExperiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
+    ConstWaveform,
+    FlatTopWaveform,
     Join,
     MuxReadout,
     TableLengthPulse,
@@ -144,7 +143,7 @@ def _averaged_signal(
     raise ValueError("Mux scan program is missing its named MuxReadout")
 
 
-class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
+class MuxLenRabiCfg(ProgramExpCfg):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     modules holds optional reset and complete mux readout. tones contains one
@@ -176,7 +175,7 @@ class MuxLenRabiCfg(ProgramV2Cfg, ExpCfgModel):
         for index in self.participants:
             tone = self.tones[index]
             drive = tone.require_drive()
-            if not isinstance(drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)):
+            if not isinstance(drive.waveform, (ConstWaveform.Cfg, FlatTopWaveform.Cfg)):
                 raise ValueError(
                     f"tones[{index}].drive.waveform: length sweep requires const or "
                     "flat_top; arb length is asset-derived with no public length sweep"
@@ -244,7 +243,7 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
         tag="mux/rabi/len",
         coordinate_label="Pulse length",
         unit="s",
-        scale=US_TO_S,
+        scale=1e-6,
     )
 
     Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions

@@ -9,32 +9,13 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    BathReset,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-)
-from zcu_tools.program.v2.modules import BathResetCfg
+from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg
 
 
 def _default_phase_values() -> NDArray[np.float64]:
@@ -59,17 +40,17 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class LengthSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
-class LengthCfg(ProgramV2Cfg, ExpCfgModel):
+class LengthCfg(ProgramExpCfg):
     modules: LengthModuleCfg
     sweep: LengthSweepCfg
 
@@ -77,10 +58,10 @@ class LengthCfg(ProgramV2Cfg, ExpCfgModel):
 class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
     AXES_SPEC = AxesSpec(
         axes=(
-            Axis("phases", "Pi2 Phase", "deg", scale=IDENTITY, dtype=np.float64),
-            Axis("lengths", "Length", "s", scale=US_TO_S, dtype=np.float64),
+            AxesSpec.Axis("phases", "Pi2 Phase", "deg", dtype=np.float64),
+            AxesSpec.Axis("lengths", "Length", "s", scale=1e-6, dtype=np.float64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="2.0",

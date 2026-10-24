@@ -13,16 +13,14 @@ from skopt.space import Real
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    US_TO_S,
     GroupedAxesSpec,
     GroupedLoadData,
     PersistableExperiment,
+    ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -30,17 +28,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    PulseReadoutCfg,
-    Readout,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Readout, Reset, SweepCfg
 
 
 @dataclass(frozen=True)
@@ -110,10 +98,10 @@ class ReadoutOptimizer:
 
 
 class AutoOptModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit pulse")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     # Run optimizes freq/gain/length, which require a pulse-driven readout.
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class AutoOptSweepCfg(ConfigBase):
@@ -131,7 +119,7 @@ class AutoOptSweepCfg(ConfigBase):
     ]
 
 
-class AutoOptCfg(ProgramV2Cfg, ExpCfgModel):
+class AutoOptCfg(ProgramExpCfg):
     modules: AutoOptModuleCfg
     sweep: AutoOptSweepCfg
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
@@ -229,7 +217,7 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 field_name="params",
                 label="Readout Frequency",
                 unit="Hz",
-                scale=MHZ_TO_HZ,
+                scale=1e6,
                 dtype=np.float64,
                 index=0,
                 index_axis=1,
@@ -254,7 +242,7 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 field_name="params",
                 label="Readout Length",
                 unit="s",
-                scale=US_TO_S,
+                scale=1e-6,
                 dtype=np.float64,
                 index=2,
                 index_axis=1,

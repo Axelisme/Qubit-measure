@@ -31,12 +31,30 @@ cp -R zcu_lab/v2/twotone/power_dep zcu_lab/v2/twotone/power_map
 把 `PowerResult`、`PowerSweepCfg`、`PowerModuleCfg`、`PowerCfg`、`PowerExp`
 依序改名為 `PowerMapResult`、`PowerMapSweepCfg`、`PowerMapModuleCfg`、`PowerMapCfg`、`PowerMapExp`。
 保留 cfg 的型別關係。Module cfg 描述 pulse／readout，sweep cfg 描述 gain／frequency。
-組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
+程式型 cfg 繼承 `ProgramExpCfg`，module 欄位用模組自己的 `.Cfg`：
+
+```python
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment import ProgramExpCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset
+
+class PowerMapModuleCfg(ConfigBase):
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    reset: Reset.Cfg | None = None
+
+class PowerMapCfg(ProgramExpCfg):
+    modules: PowerMapModuleCfg
+```
+
+這段只示範型別寫法，複製的 power map 仍需保留原本的 sweep 與其他欄位。
+不含 program 欄位的 cfg 仍用 `ExpCfgModel`。完整組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
 
 這次不改資料形狀。`PowerMapResult` 保留 `gains`、以 MHz 表示的 `freqs`，
 以及 shape 為 `(Ngain, Nfreq)` 的 complex IQ `signals`。
 把 `AXES_SPEC.tag` 改成 `"twotone/power_map"`，並讓 `result_type`、`cfg_type` 指向新型別。
-Axes 保持 inner-first 的 `freqs`、`gains`，頻率在檔案中以 Hz 保存。
+Axes 保持 inner-first 的 `freqs`、`gains`。宣告寫 `AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6)`，將 MHz 換成檔案中的 Hz。
+Gain 軸省略 scale，預設保留原值。Signal 寫 `AxesSpec.Z("signals", "Signal", "a.u.")`。
 之後若改 Result 欄位、軸序或單位，也要一起改 spec，見 [資料形狀](../v2/experiment-authoring.md#版本實驗的資料形狀)。
 
 `run(cfg, *, context)` 先保留原序列。它對每個 host gain 掃描 FPGA frequency，
