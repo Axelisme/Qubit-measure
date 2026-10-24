@@ -733,10 +733,13 @@ async def calibrate_rabi(
         return RabiResult(
             "rejected", "Rabi fit rejected", f01, None, None, "rabi.h5", gain
         )
-    if inputs.tun.drive_gain_mode == "auto_pi_product":
-        carry.rabi_drive.observe(
-            inputs.point_index, fit.pi_length_us, gain, inputs.tun.target_pi_length_us
-        )
+    carry.rabi_drive.observe(
+        inputs.point_index,
+        fit.pi_length_us,
+        gain,
+        inputs.tun.target_pi_length_us,
+        control=inputs.tun.drive_gain_mode == "auto_pi_product",
+    )
     pi2 = (
         fit.pi2_length_us
         if math.isfinite(fit.pi2_length_us) and fit.pi2_length_us >= 0.03

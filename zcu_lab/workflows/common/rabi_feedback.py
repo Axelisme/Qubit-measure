@@ -40,13 +40,21 @@ class RabiDriveFeedback:
         return min(1.0, max(float.fromhex("0x1p-1022"), base))
 
     def observe(
-        self, index: int, pi_us: float, gain: float, target_pi_us: float
+        self,
+        index: int,
+        pi_us: float,
+        gain: float,
+        target_pi_us: float,
+        *,
+        control: bool = True,
     ) -> None:
         """Record an accepted fit and propose the next gain toward target_pi_us.
 
         index is the current flux index. pi_us and gain are the measured pulse
         duration and actual acquisition gain. Product smoothing uses .7**gap;
         the first accepted observation replaces the seed without smoothing.
+        control=False learns the product without changing the gain proposal, so
+        fixed-gain observations remain available if auto mode is enabled later.
         """
         product = pi_us * gain
         if self.pi_product is None or self.last_index is None:
@@ -55,4 +63,5 @@ class RabiDriveFeedback:
             weight = 0.7 ** max(1, index - self.last_index)
             self.pi_product = (1 - weight) * product + weight * self.pi_product
         self.last_index = index
-        self.controller.propose(gain, math.log(pi_us / target_pi_us))
+        if control:
+            self.controller.propose(gain, math.log(pi_us / target_pi_us))
