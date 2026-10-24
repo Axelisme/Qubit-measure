@@ -131,7 +131,7 @@ def test_live_frontend_preview_remote_commit_and_done_share_result(fx, qapp) -> 
         assert done["preview_active"] is False
         assert widget.preview_active is False
         assert base64.b64decode(done["figure"]["png_b64"]).startswith(b"\x89PNG")
-        result = fx.ctrl.get_tab_analyze_result(tab_id)
+        result = fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id)
         assert result.flx_half == pytest.approx(after_gui["flux_half"])
         assert fx.state.get_tab(tab_id).analysis.plots["pick"] is not widget.figure
         assert (
@@ -155,10 +155,9 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
         if terminal == "done":
             assert interact(sock, tab_id, {"command": "done"})["ok"] is True
         else:
-            assert (
-                rpc(sock, "analyze.cancel", {"tab_id": tab_id})["result"]["cancelled"]
-                is True
-            )
+            assert rpc(sock, "operation.cancel", {"operation_id": token})["result"][
+                "status"
+            ] in ("cancelling", "cancelled")
         assert rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
             "result"
         ]["status"] == ("finished" if terminal == "done" else "cancelled")
@@ -337,13 +336,15 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
             assert committed.result is not old_result
             assert committed.result.flx_half == pytest.approx(changed["flux_half"])
             assert committed.result.flx_int == pytest.approx(changed["flux_int"])
-            assert fx.ctrl.get_tab_analyze_result(tab_id) is committed.result
+            assert (
+                fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id)
+                is committed.result
+            )
             assert committed.plots is not old_plots
         else:
-            assert (
-                rpc(sock, "analyze.cancel", {"tab_id": tab_id})["result"]["cancelled"]
-                is True
-            )
+            assert rpc(sock, "operation.cancel", {"operation_id": token})["result"][
+                "status"
+            ] in ("cancelling", "cancelled")
             cancelled = fx.state.get_tab(tab_id).analysis
             assert cancelled.params is old_params
             assert cancelled.result is old_result
@@ -563,7 +564,7 @@ def test_mounted_equal_seed_done_failure_preserves_editor_then_recovers(
         rejected = interact(sock, tab_id, {"command": "done"})
         assert rejected["error"]["code"] == "precondition_failed"
         assert window.interactive_presentation(tab_id)[0] is widget.figure
-        assert fx.ctrl.get_tab_analyze_result(tab_id) is None
+        assert fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id) is None
         moved = interact(
             sock,
             tab_id,
@@ -591,7 +592,9 @@ def test_two_mounted_tabs_unmount_one_without_retiring_other(mounted_fx, qapp) -
     assert window.interactive_presentation(second_id)[0] is second_widget.figure
     with open_client(fx.service.port) as sock:
         before = interact(sock, second_id)["result"]["state"]
-        assert rpc(sock, "analyze.cancel", {"tab_id": first_id})["result"]["cancelled"]
+        assert rpc(sock, "operation.cancel", {"operation_id": first_token})["result"][
+            "status"
+        ] in ("cancelling", "cancelled")
         assert window.interactive_presentation(first_id) is None
         qapp.processEvents()
         assert window.interactive_presentation(second_id)[0] is second_widget.figure

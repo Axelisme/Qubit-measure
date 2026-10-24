@@ -45,7 +45,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
             "readout": readout,
             "tones": mux_tone_initials(tones, participants, fields=("drive",)),
             "participants": [index for index in participants],
-            "delay": Range.between(0.0, 30.0, expts=101),
+            "delay": Range(0.0, 30.0, expts=101),
             "relax_delay": mux_relax_delay(ctx, names),
             "initial_delay": Hidden(),
             "reps": 1000,

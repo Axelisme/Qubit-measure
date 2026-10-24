@@ -544,8 +544,8 @@ class ContextService:
 
         SavedPoint opens independent point/library views in the currently opened
         entry and may perform file I/O. Supplied role names
-        stay fixed. Cross-entry, missing point, schema, source and
-        I/O failures propagate. This read publishes no versions or events.
+        stay fixed. Missing required point documents raise MissingPointError.
+        Cross-entry, schema, source and other I/O failures propagate. This read publishes no versions or events.
         """
         self._owner.assert_owner()
         entry = self._require_write_target(target)

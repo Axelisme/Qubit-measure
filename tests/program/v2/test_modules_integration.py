@@ -17,7 +17,7 @@ from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Repeat
+from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -29,7 +29,6 @@ from zcu_tools.program.v2.modules.readout import (
 )
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
-    NoneResetCfg,
     PulseResetCfg,
     Reset,
     TwoPulseResetCfg,
@@ -452,13 +451,36 @@ class TestReadoutIntegration:
 
 
 class TestResetIntegration:
-    def test_none_reset_compiles(self):
-        prog = _make_prog(modules=[Reset("r", NoneResetCfg())])
-        assert prog.binprog is not None
+    @pytest.mark.parametrize(
+        "container", ["program", "repeat", "branch", "join", "scan"]
+    )
+    def test_optional_modules_preserve_compiled_pulses_and_timing(self, container):
+        def compile_sequence(optional):
+            pulse = Pulse("drive", _pulse_cfg())
+            sequence = [None, pulse, Reset("r", None)] if optional else [pulse]
+            sweep = None
+            if container == "repeat":
+                modules = [Repeat("repeat", 2).add_content(None).add_content(sequence)]
+            elif container == "branch":
+                modules = [Branch("select", None, sequence)]
+                sweep = [("select", 2)]
+            elif container == "join":
+                modules = [Join(sequence)]
+            elif container == "scan":
+                modules = [
+                    ScanWith("scan", [1, 2], "value")
+                    .add_content(None)
+                    .add_content(sequence)
+                ]
+            else:
+                modules = sequence
+            return _make_prog(modules=modules, sweep=sweep)
 
-    def test_reset_none_cfg_compiles(self):
-        prog = _make_prog(modules=[Reset("r", None)])
-        assert prog.binprog is not None
+        expected = compile_sequence(False)
+        actual = compile_sequence(True)
+        assert actual.prog_list == expected.prog_list
+        assert actual.gen_chs == expected.gen_chs
+        np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
 
     def test_pulse_reset_compiles(self):
         cfg = PulseResetCfg(pulse_cfg=_pulse_cfg(ch=GEN_CH))

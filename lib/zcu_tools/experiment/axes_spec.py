@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from pathlib import Path
 from typing import Generic, Literal, TypeVar
 
 import numpy as np
@@ -26,16 +25,10 @@ from zcu_tools.datafile import (
 )
 from zcu_tools.datafile import (
     DataVariable,
-    LabberMetadata,
     LabberPayload,
     Variable,
     cast_labber_values,
-    encode_labber_comment,
-    format_ext,
-    save_grouped_labber_data,
-    write_labber,
 )
-from zcu_tools.experiment.records import RunRecord
 
 __all__ = [
     "Axis",
@@ -215,18 +208,13 @@ class LoadedVariableData:
 
 @dataclass(frozen=True)
 class GroupedLoadData(Generic[T_Config]):
-    """Validated grouped payload plus reconstructed cfg snapshot.
+    """Validated grouped arrays used to rebuild an experiment Result.
 
     variables maps each DataVariable identity to its memory-unit loaded arrays.
-    metadata contains shared file metadata. cfg_snapshot is the reconstructed
-    experiment config when supplied, or None when unavailable. Native restore
-    passes None because it builds and validates the Result before typed cfg.
-    Native result builders must reconstruct from variables, not cfg_snapshot.
+    Result builders reconstruct from these arrays before typed cfg validation.
     """
 
     variables: Mapping[DataVariable, LoadedVariableData]
-    metadata: LabberMetadata
-    cfg_snapshot: T_Config | None
 
     def variable(self, variable: str | DataVariable) -> LoadedVariableData:
         """Get loaded arrays by snake_case identity; invalid/missing names raise ValueError."""
@@ -487,51 +475,6 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
             )
             for variable in self.variables
         }
-
-    def save_grouped_result(
-        self,
-        filepath: str,
-        result: T_Result,
-        *,
-        comment: str = "",
-        tag: str | None = None,
-    ) -> str:
-        return save_grouped_labber_data(
-            filepath,
-            self.payloads_from_result(result),
-            metadata=LabberMetadata(comment=comment, tags=tag or self.tag),
-        )
-
-    def save(
-        self,
-        source: RunRecord[T_Config, T_Result],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str | None = None,
-    ) -> None:
-        """Map this explicit record to one Labber export using labber_layout.
-
-        source.cfg must be present. destination follows the existing Labber
-        extension normalization. comment is optional user text; tag overrides
-        this declaration's tag. Invalid cfg JSON or data raises ValueError;
-        existing files raise FileExistsError and I/O errors propagate. No native
-        file is written and no directory/name reservation is performed.
-        """
-        if source.cfg is None:
-            raise ValueError("Cannot save a RunRecord without cfg")
-        from zcu_tools.experiment.native_persistence import prepare_run_data
-
-        prepared = prepare_run_data(source, spec=self, comment=comment or "")
-        write_labber(
-            Path(format_ext(str(destination))),
-            prepared.container,
-            metadata=LabberMetadata(
-                comment=encode_labber_comment(prepared.cfg.values, comment),
-                tags=tag or self.tag,
-            ),
-            grouped_layout=self.labber_layout,
-        )
 
 
 def _validate_cfg_schema_version(version: str) -> None:

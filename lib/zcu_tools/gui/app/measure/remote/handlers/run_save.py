@@ -38,9 +38,7 @@ def h_tab_run_start(
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     try:
         follow_tab(adapter, tab_id, "run")
-        operation_id = control.start_run(
-            tab_id, aliases=aliases, origin=CommandOrigin("mcp")
-        )
+        operation_id = control.start_run(tab_id, origin=CommandOrigin("mcp"))
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
     return {"operation_id": operation_id}
@@ -70,24 +68,6 @@ def h_tab_load_data(
     else:
         result["analyze_params"] = {}
     return result
-
-
-def h_tab_run_cancel(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    # cancelled is best-effort: True when a live run was signalled, False on a
-    # no-op. The worker's true terminal is observed via the run handle (ADR-0066
-    # §8) — cancel only requests, it does not wait for the stop.
-    cancelled = adapter.run_analyze_control.cancel_run()
-    return {"ok": True, "cancelled": cancelled}
-
-
-def h_run_running_tab(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return {"tab_id": adapter.run_analyze_control.get_running_tab_id()}
 
 
 def _operation_id(value: object, field: str) -> int | None:
@@ -134,7 +114,7 @@ def h_tab_save_artifacts(
             ErrorCode.INVALID_PARAMS, "artifacts must be all or artifact refs"
         )
     tab_id = str(params["tab_id"])
-    if not adapter.save_control.has_tab(tab_id):
+    if not adapter.tab_control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     origin = CommandOrigin("mcp")
     run_operation_id = _operation_id(params["run_operation_id"], "run_operation_id")

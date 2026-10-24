@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -109,7 +109,11 @@ framing、authentication 與回覆交付。詳見 [remote README](remote/README.
 
 MCP entrypoint 使用共用 bridge，手寫工具組裝基礎 RPC 並摘要資料，control tools 轉送同一
 authority。MCP 不訂閱業務 event-push，不維護另一套 holder 或 operation registry。
-RPC clients 可訂閱 EventBus facts。Agent 不關閉使用者的 GUI。
+RPC clients 輪詢 `spectrum.list`、`spectrum.snapshot(name)`、`selection.snapshot` 與
+`fit.result` 讀取目前狀態。Search 使用 `fit.search` 回傳的 token 呼叫
+`operation.await(token, timeout)`；逾時可再次等待，完成後重讀 `fit.result`。
+EventBus 供 app 內部事件使用，不提供業務事件的 RPC 訂閱；controller diagnostics
+保留獨立的 broadcast 與 queue 路徑。Agent 不關閉使用者的 GUI。
 
 `Controller.control_identity` 是控制身份的唯一 owner。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。

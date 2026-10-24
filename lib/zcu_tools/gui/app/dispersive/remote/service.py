@@ -5,7 +5,7 @@ The RPC face onto the dispersive ``Controller``, peer to the Qt ``MainWindow``
 beyond the shared scaffolding — no version guard, no editor sessions, no off-main
 handlers, a bare main-thread marshal. So this module is just the thin binding of
 :class:`RemoteControlServiceBase` to dispersive's domain (its method registry,
-event serializers, versions, server name); all the mechanism lives in the base.
+versions, server name); all the mechanism lives in the base.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.ports import OwnerScheduler
 
 from .dispatch import METHOD_REGISTRY
-from .events import EVENT_SERIALIZERS, wire_event_name
 from .wire_version import GUI_VERSION, WIRE_VERSION
 
 
@@ -34,8 +33,7 @@ class RemoteControlAdapter(RemoteControlServiceBase):
 
     Dispatch handlers receive *this adapter*, so they reach commands through
     ``adapter.ctrl.<m>``. Construct after the Controller exists; inert until
-    ``start()``. dispersive's EventBus is reached via the base default
-    (``ctrl.bus``) and its serializers are keyed by payload ``type``.
+    ``start()``. The base uses ``ctrl.bus`` to attribute RPC-origin commands.
     """
 
     ctrl: Controller
@@ -55,8 +53,6 @@ class RemoteControlAdapter(RemoteControlServiceBase):
                 gui_version=GUI_VERSION,
                 server_name="DispersiveRemoteServer",
                 method_registry=METHOD_REGISTRY,
-                event_serializers=EVENT_SERIALIZERS,
-                wire_event_name=wire_event_name,
             ),
             owner_scheduler=owner_scheduler,
         )

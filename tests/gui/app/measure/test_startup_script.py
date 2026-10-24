@@ -632,6 +632,8 @@ def test_startup_progress_and_run_lock_with_user_input(
     # Composition and the external synthetic source barrier are fixture setup.
     # Clicking the real Refresh button makes that source ready, independently
     # of the startup runner's own admission/progress logic.
+    soccfg = make_mock_soccfg()
+    ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     ctrl.new_tab("sample")
     window.show()
     refresh = next(

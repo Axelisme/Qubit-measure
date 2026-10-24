@@ -66,9 +66,7 @@ class ReadOnlyForm(FormModel):
     mode: Literal["fast", "slow"] = "fast"
     flag: bool = False
     drive: str = "Q1.pulses.pi"
-    section: Annotated[Section, Display(collapsed=True)] = Field(
-        default_factory=Section
-    )
+    section: Section = Field(default_factory=Section)
     extra: Extra | None = None
     phase: Annotated[float, Display(group="Advanced")] = 0.5
 
@@ -88,9 +86,7 @@ class GroupFirstForm(FormModel):
     mode: Literal["fast", "slow"] = "fast"
     flag: bool = False
     drive: str = "Q1.pulses.pi"
-    section: Annotated[Section, Display(collapsed=True)] = Field(
-        default_factory=Section
-    )
+    section: Section = Field(default_factory=Section)
     extra: Extra | None = None
 
     @classmethod

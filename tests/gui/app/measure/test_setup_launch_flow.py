@@ -56,9 +56,7 @@ def _reopen_setup(app: LaunchedMeasureApp, qapp: QApplication) -> SetupDialog:
 
 
 @pytest.mark.uses_wall_clock
-def test_setup_survives_screenshot_and_toolbar(
-    qapp: QApplication, tmp_path: Path
-) -> None:
+def test_setup_survives_toolbar_reopen(qapp: QApplication, tmp_path: Path) -> None:
     with launched_measure_app(qapp, tmp_path) as app:
         (dialog,) = visible_setup_dialogs(app.window)
         initial_fields = _field_texts(dialog)
@@ -72,22 +70,6 @@ def test_setup_survives_screenshot_and_toolbar(
         qapp.processEvents()
         before = (QApplication.activeWindow(), QApplication.focusWidget())
         assert before[1] is open_entry
-
-        shot = Path(
-            app.invoke(
-                "rpc_call",
-                {
-                    "method": "dialog.screenshot",
-                    "params": {
-                        "name": "setup",
-                        "out_path": str(tmp_path / "setup.png"),
-                    },
-                },
-            )["saved_to"]
-        )
-        assert shot.read_bytes().startswith(b"\x89PNG")
-        assert (QApplication.activeWindow(), QApplication.focusWidget()) == before
-        assert visible_setup_dialogs(app.window) == [dialog]
 
         click_toolbar_setup(app.window)
         qapp.processEvents()

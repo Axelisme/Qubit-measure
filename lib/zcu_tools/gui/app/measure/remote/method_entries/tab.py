@@ -112,32 +112,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "tab.select_recipe_module",
-        "tab:h_tab_select_recipe_module",
-        MethodSpec(
-            5.0,
-            "Select/copy/disable a typed logical generated module selector (str names/int indexes). use_library "
-            "requires an actual captured key allowed by the owner. Keep real cfg "
-            'containers: mux readout uses ["modules", "readout"], as in recipes. Other actions '
-            "must omit key; explicit null is invalid. use_inline explicitly copies "
-            "fixed captured Spec content, preserving child keys; inline is a guarded "
-            "no-op. Ref ancestors require explicit outer copies first. Returns "
-            "changed and a fresh same-turn field observation. No retry or rollback.",
-            (
-                required_string("tab_id"),
-                ParamSpec("path", JsonType.ARRAY),
-                ParamSpec(
-                    "action",
-                    JsonType.STRING,
-                    enum=("use_library", "use_inline", "disable"),
-                ),
-                ParamSpec(
-                    "key", JsonType.STRING, required=False, omit_when_missing=True
-                ),
-            ),
-        ),
-    ),
-    method_entry(
         "tab.new",
         "tab:h_tab_new",
         MethodSpec(
@@ -330,9 +304,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Each edit has path: [segments] and value: Form input JSON. "
             "Expressions use {expr: text}, complex literals use __complex__, "
             "and child key leaves are literal strings. Module selection uses "
-            'tab.select_recipe_module with logical paths, e.g. ["modules", "readout"], '
+            'tab.select_recipe_option with logical paths, e.g. ["modules", "readout"], '
             "not a key string at the module container. Ref descendants require "
-            "use_inline first. Rejections list active editable_paths and selection_paths. "
+            "the to_inline recipe command first. Rejections list active editable_paths and selection_paths. "
             "Edit range leaves separately. "
             "Invalid values stay editable with errors; structural failures preserve "
             "the entire input. Returns input, values and errors.",
@@ -365,49 +339,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 ),
             ),
             readonly=True,
-        ),
-    ),
-    method_entry(
-        "tab.read_module",
-        "tab:h_tab_read_module",
-        MethodSpec(
-            5.0,
-            "Read {value, mode, source} for one typed core module path from fixed "
-            "Open/Reset sources. Key mode reads the captured library; inline mode "
-            "evaluates only this module. Other invalid fields do not block reads. "
-            "No native cfg or extras lowering, mutation or source refresh occurs. "
-            "This module's invalid values are rejected. Busy reads are allowed.",
-            (
-                required_string("tab_id"),
-                ParamSpec(
-                    "field",
-                    JsonType.ARRAY,
-                    description="Nonempty str field names and int model-list indexes",
-                ),
-            ),
-            readonly=True,
-        ),
-    ),
-    method_entry(
-        "tab.use_inline",
-        "tab:h_tab_use_inline",
-        MethodSpec(
-            5.0,
-            "Convert one typed core module path to inline input through guarded "
-            "option command. Copy a key from the fixed captured library. Preserve "
-            "locks. Existing inline is a guarded no-op. Disabled or unresolved "
-            "modules fail; select an Inline option to use template/type defaults. "
-            "Busy, revoked and reentrant calls are rejected. One changed input "
-            "publishes once; failures have no successful prefix. "
-            "Returns the complete Form observation.",
-            (
-                required_string("tab_id"),
-                ParamSpec(
-                    "field",
-                    JsonType.ARRAY,
-                    description="Nonempty str field names and int model-list indexes",
-                ),
-            ),
         ),
     ),
 )

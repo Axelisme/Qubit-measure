@@ -40,7 +40,7 @@ class FieldDiagnostic:
     name/index identify the deepest model-list element, or None outside lists.
     seed_source is an expression, library key, author description, or None.
     seed_status describes Open/Reset, not current validity. uncalibrated is True
-    for an authored uncalibrated seed, False for measured, None when unknown.
+    for an authored uncalibrated seed and None when unknown.
     No value or missing field implies a calibration status.
     """
 
@@ -148,9 +148,7 @@ def field_diagnostics(
                 if meta is not None and meta.description is not None
                 else seed.source,
                 seed.status,
-                None
-                if meta is None or meta.calibration is None
-                else meta.calibration == "uncalibrated",
+                None if meta is None or meta.calibration is None else True,
             )
         )
     return tuple(rows)

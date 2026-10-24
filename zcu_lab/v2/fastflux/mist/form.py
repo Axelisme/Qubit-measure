@@ -28,8 +28,8 @@ def make_form(ctx: FormContext) -> Form[MistCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "flux_gain": Range.between(0.0, 0.1, expts=101),
-            "mist_gain": Range.between(0.0, 0.1, expts=101),
+            "flux_gain": Range(0.0, 0.1, expts=101),
+            "mist_gain": Range(0.0, 0.1, expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5.0),
             "reps": 1000,
             "rounds": 10,

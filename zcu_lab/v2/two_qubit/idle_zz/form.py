@@ -54,8 +54,8 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
             "x90_f2": Slot("$f2.module.x90", copy=True),
             "readout": readout,
             "detune": None,
-            "delay": Range.between(0, 10, expts=101),
+            "delay": Range(0, 10, expts=101),
             "dc_device": None,
-            "dc_values": Range.between(0, 0, expts=1),
+            "dc_values": Range(0, 0, expts=1),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

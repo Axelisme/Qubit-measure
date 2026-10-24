@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormPreview
-from zcu_tools.gui.session.types import ParameterContext
 
 from .tab_input import StartupTab, TabInput
 
@@ -42,7 +40,13 @@ class TabControlPort(Protocol):
     def open_tab_from_file(
         self, adapter_name: str, data_path: str
     ) -> LoadTabResultOutcome:
-        """Create/load/focus, cleaning up on failure; Load preserves form input."""
+        """Create/load/focus; isolate only adapter.make_form failure at creation.
+
+        A factory failure leaves no Form: the form area and disabled Run retain
+        its reason, and Reset may recover. Template/default/Load failures still
+        propagate. Failed Load closes the new tab and restores previous focus.
+        Load never fills form input from native cfg.
+        """
         ...
 
     def close_tab(self, tab_id: str) -> None: ...
@@ -58,27 +62,6 @@ class TabControlPort(Protocol):
         self, tab_id: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
-
-    def capture_parameters(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext | None:
-        """Freeze current sources with optional named aliases overrides.
-
-        aliases maps alias names to concrete components. None and {} use global
-        rows. Unknown tab and source/alias errors propagate. EMPTY returns None
-        without overrides and rejects nonempty overrides with no_context. No tab/session mutation or guard observation occurs.
-        """
-        ...
-
-    def preview_cfg(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> FormPreview:
-        """Preview editable values/errors using the tab's fixed source capture.
-
-        None and {} reuse that capture. Nonempty aliases raise
-        FailedPreconditionError; use the resource Reset command first.
-        """
-        ...
 
 
 class TabControlFacet:
@@ -115,7 +98,8 @@ class TabControlFacet:
     ) -> LoadTabResultOutcome:
         """Compose new-tab loading; this does not roll back external side effects."""
         previous = self.get_active_tab_id()
-        tab_id = self.new_tab(adapter_name)
+        self._access.require_available()
+        tab_id = self._workspace.new_tab(adapter_name, allow_factory_failure=True)
         try:
             outcome = self._load_tab_result(tab_id, data_path)
             self.set_active_tab(tab_id)
@@ -167,15 +151,3 @@ class TabControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
-
-    def capture_parameters(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext | None:
-        """Freeze current sources; see TabControlPort.capture_parameters."""
-        return self._tab.capture_parameters(tab_id, aliases=aliases)
-
-    def preview_cfg(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> FormPreview:
-        """Read fixed-source form preview; see TabControlPort.preview_cfg."""
-        return self._tab.preview_cfg(tab_id, aliases=aliases)

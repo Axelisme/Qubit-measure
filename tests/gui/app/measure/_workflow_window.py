@@ -25,7 +25,18 @@ from zcu_tools.gui.session.types import SessionEnv
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
+
+
+def toggle_tab_family(driver: ComponentDriver) -> None:
+    """Select the visible switch to the other tab family from More."""
+    caption = next(
+        a.text
+        for a in driver.menu_actions("More ▾")
+        if a.object_name == "main.more.workflow"
+    )
+    driver.select_menu("More ▾", (caption,))
 
 
 class Plan(FormModel):
@@ -95,7 +106,7 @@ def host_window(
     ctrl.setup_control.new_entry(EntryRequest("workflow-ui"))
     ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
     board = white_noise()
-    ctrl.install_soc(board.soc, board.soccfg)
+    ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )

@@ -41,10 +41,6 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
         tab = invoke(
             "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
         )["tab_id"]
-        initial = invoke(
-            "rpc_call", {"method": "tab.get_analyze_params", "params": {"tab_id": tab}}
-        )
-        assert initial["definitions"] == []
         live_gui.ctrl.start_run(tab)
         qt_until(
             lambda: live_gui.ctrl.active_operation_count() == 0,
@@ -71,10 +67,6 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
         )["tabs"][0]
         assert overview["adapter_name"] == "fake"
         assert overview["interaction"]["has_run_result"] is True
-        params = invoke(
-            "rpc_call", {"method": "tab.get_analyze_params", "params": {"tab_id": tab}}
-        )
-        assert any(entry["name"] == "threshold" for entry in params["definitions"])
         assert overview["interaction"]["is_running"] is False
         assert overview["tab_id"] == tab
         assert overview["result_state"]["available"] is True

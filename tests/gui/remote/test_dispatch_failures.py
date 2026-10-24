@@ -108,8 +108,6 @@ def _harness() -> Harness:
             gui_version=1,
             server_name="DispatchFailureTest",
             method_registry=build_method_registry(handlers, specs),
-            event_serializers={},
-            wire_event_name=lambda key: str(key),
         ),
         owner_scheduler=scheduler,
     )
@@ -176,8 +174,6 @@ def test_timed_out_reply_continues_only_accepted_handler_on_owner(
                 {"app.shutdown": handler},
                 {"app.shutdown": MethodSpec(5.0, "synthetic shutdown")},
             ),
-            event_serializers={},
-            wire_event_name=str,
             reply_continuations={
                 "app.shutdown": lambda outcome: outcomes.append(
                     (outcome, scheduler.is_owner_thread())

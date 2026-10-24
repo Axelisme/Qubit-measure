@@ -11,7 +11,6 @@ from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.dispersive_file import load_dispersive_file
 from zcu_tools.resources.entry import document_value, snapshot
-from zcu_tools.resources.t1_curve_file import load_t1_curve_file
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -19,6 +18,7 @@ from migrations.storage_migration import (
     MigrationRequest,
     migrate_storage,
 )
+from migrations.storage_migration.t1_curve_file import load_t1_curve_file
 from tests.migrations.storage_migration.fakes import (
     assert_difference,
     noop_validation,
@@ -77,7 +77,12 @@ def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
     for kind in ("dispersive", "t1_curve"):
         file = entry.result_path / kind / "Qlegacy.json"
         assert file.is_file(), f"migration must publish {kind} fit"
-        owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
+        package = (
+            "zcu_tools.resources"
+            if kind == "dispersive"
+            else "migrations.storage_migration"
+        )
+        owner = importlib.import_module(f"{package}.{kind}_file")
         loaded = getattr(owner, f"load_{kind}_file")(file)
         assert loaded.source.run_id is None
         assert any(
@@ -95,7 +100,7 @@ def test_analysis_files_publish_typed_unknowns_and_keep_original_sections(
                 item.location == "dispersive.timestamp" for item in report.pending
             )
         else:
-            assert entry.t1_curve_path == file.parent
+            assert (entry.result_path / "t1_curve") == file.parent
             assert loaded.params.params.Q_cap is None
             assert loaded.params.params.Temp == 0.04
             assert loaded.params.stderr.Q_cap is None

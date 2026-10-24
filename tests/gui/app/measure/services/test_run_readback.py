@@ -97,9 +97,7 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
             inputs,
             snapshot=RunSnapshot(
                 entry_id=UUID(int=1),
-                entry_name="entry",
                 point="point",
-                description="",
                 roles={},
             ),
             experiment_tag=adapter.experiment_tag,

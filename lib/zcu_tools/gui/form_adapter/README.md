@@ -22,8 +22,6 @@ Measure 的 `Form[T_Input]` 輸出 adapter 自己的輸入，預設可直接使�
 
 Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `TypeError` 拒絕，訊息列出欄位路徑與 mapping 型別。Literal mapping 由 core default、`FormState.write` 或 restore 提供，其中名為 `expr` 的 key 是資料。作者樹不支援整份 Mapping literal seed；scalar Expr 保持原有求值規則。
 
-`AliasName` 的 devices 選項包含 core 欄位的靜態字串預設，空字串顯示為 None。Description 與驗證共用同一份 choices。缺 alias 時 input 保持缺席，有 core 預設就用該預設，無預設的 required 欄位仍 Invalid。綁定 alias 照舊帶入裝置名，其他未列出的值仍被拒絕。
-
 生成器集中處理兩條翻譯政策，host 與 `gui.form` 使用轉換結果：
 
 - `FieldMeta` 的 label、unit、decimals、description、group、readonly 與 element_label 轉成 `Display`，core 欄位與 module 欄位共用同一個翻譯。`Display` 按明示屬性疊加，外層明示的 False／None 也優先；未指定屬性沿用 alias。生成器用 `Display.overlay` 加上 hidden 或 sweep 政策，保留其餘屬性的未指定狀態。`InputDefault` 等其他 metadata 仍整份覆蓋。唯讀不把欄位改成單值 Literal，原有數值型別與精度保留。Sweep 的 decimals 與 unit 傳到 start／stop、center／span 與 step float 欄位，不套 n。外層保留 unit 作為軸標示。
@@ -126,7 +124,7 @@ class Group(ConfigBase):
 
 form = Form(Group, {
     "tones": [{"name": "Q1", "drive": Slot("Q1.pulses.drive"),
-               "sweep": Range.between(4000, 4100, expts=3)}],
+               "sweep": Range(4000, 4100, expts=3)}],
     "participants": [0],
 }, fixed_elements=(FixedElements(("tones",), "name", ("participants",)),))
 # form.default_input(env) uses the caller's fixed capture containing the slot.
@@ -166,7 +164,7 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 ## Seed diagnostics
 
-`Form.with_seed_metadata(mapping)` 回傳帶逐位置 metadata 的新 Form，原 Form 不變。Mapping 以 canonical typed paths 指向 FieldMeta，來源公式使用 description，calibration 接受 measured／uncalibrated／None。後一次呼叫取代整份 mapping。只有實際產生推導初值的 Form 需要這項宣告，不將動態 seed 的校準狀態綁到 core 靜態欄位。
+`Form.with_seed_metadata(mapping)` 回傳帶逐位置 metadata 的新 Form，原 Form 不變。Mapping 以 canonical typed paths 指向 FieldMeta，來源公式使用 description，calibration 接受 uncalibrated／None。後一次呼叫取代整份 mapping。只有實際產生推導初值的 Form 需要這項宣告，不將動態 seed 的校準狀態綁到 core 靜態欄位。
 
 `default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。保留 input 的 host 在 Refresh 換 Form 時也保留這份 mapping，Reset 才重算。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
 

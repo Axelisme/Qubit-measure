@@ -125,21 +125,6 @@ def cpmg_result_to_grouped_payloads(result: CPMG_Result) -> dict[str, LabberPayl
     return CPMG_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
-def save_cpmg_grouped_result(
-    filepath: str,
-    result: CPMG_Result,
-    *,
-    comment: str = "",
-    tag: str = "twotone/ge/cpmg",
-) -> str:
-    return CPMG_GROUPED_AXES_SPEC.save_grouped_result(
-        filepath,
-        result,
-        comment=comment,
-        tag=tag,
-    )
-
-
 def _validate_cpmg_arrays(
     times: NDArray[np.int64],
     lengths: NDArray[np.float64],

@@ -14,7 +14,6 @@ from zcu_tools.cfg_model import (
     FlatTopWaveformSpec,
     GaussWaveformCfg,
     ModuleCfgFactory,
-    NoneResetCfg,
     PulseCfg,
     PulseResetCfg,
     PulseSpec,
@@ -373,10 +372,6 @@ class TestModuleCfgFactoryFromRaw:
             }
         )
         assert isinstance(cfg, PulseCfg)
-
-    def test_dispatch_reset_none(self):
-        cfg = ModuleCfgFactory.from_raw({"type": "reset/none"})
-        assert isinstance(cfg, NoneResetCfg)
 
     def test_unknown_type_raises(self):
         with pytest.raises(ValueError, match="union_tag_invalid") as failure:

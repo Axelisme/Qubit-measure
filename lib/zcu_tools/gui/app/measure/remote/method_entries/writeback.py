@@ -65,7 +65,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Edit write=[{id,target?,value?,edits?}] sequentially in the shared draft. "
-            "edits uses the tab.writeback_set module grammar. An edit failure, "
+            "edits uses [{path: [segments], value: Form input JSON}]. An edit failure, "
             "including a listed module whose form is invalid, preserves the draft "
             "prefix and starts no context write; an invalid module form fails with "
             "invalid_params, reason form_errors and data.errors [{path, message}]. "
@@ -113,7 +113,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "corresponds to a ModuleLibrary role. A complex parameter proposed_value "
             "is carried as "
             '{"__complex__": [re, im]} (JSON has no complex). Edit an item via '
-            "rpc_call on tab.writeback_set; the user's Edit dialog renders the same "
+            "rpc_call on tab.writeback_write; the user's Edit dialog renders the same "
             "model (WYSIWYG). Optional operation_id requires that analysis result "
             "before reading the draft; replaced results are rejected.",
             (
@@ -122,81 +122,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                 optional_integer("operation_id"),
             ),
             readonly=True,
-        ),
-    ),
-    method_entry(
-        "tab.writeback_set",
-        "writeback:h_tab_writeback_set",
-        MethodSpec(
-            5.0,
-            "Edit a pane's persistent writeback item by id — the single writeback "
-            "editing surface. Requires (tab_id, subtab_id) with closed values "
-            "analysis|post_analysis. selected? / target_name? apply to any item. "
-            "proposed_value? is "
-            "the METADICT-only facet (a complex value is passed as "
-            '{"__complex__": [re, im]}, the same shape the list emits; it applies as '
-            "a Python complex). edits? is the MODULE-only facet: one batch "
-            "[{path:[field,...], value}] written into the item's form with the "
-            "tab.edit_cfg grammar (path segments are model field names; text fields "
-            'accept {"expr": text} evaluated at the draft capture). The batch '
-            "installs whole: unknown paths fail with invalid_params and change "
-            "nothing, while invalid values stay in the form and appear in errors. "
-            "proposed_value and edits are mutually exclusive (different item kinds). "
-            "Echoes the edited {item}; an edits batch also returns the form "
-            "observation {input, values, errors}. Read current/proposed "
-            "values via tab.writeback_preview.",
-            (
-                required_string("tab_id"),
-                required_string("subtab_id", "Pane: analysis|post_analysis"),
-                required_string("id", "writeback item session id (<kind>-<n>)"),
-                # Boolean (not JSON): a JSON schema of {type: boolean} makes the
-                # client send a real boolean. Declared as JSON, the client may send
-                # the string "false", which ``bool("false")`` wrongly reads as True.
-                ParamSpec("selected", JsonType.BOOLEAN, required=False),
-                optional_string("target_name", "new apply destination name"),
-                ParamSpec(
-                    "proposed_value",
-                    JsonType.JSON,
-                    required=False,
-                    description="Proposed parameter scalar (parameter items only)",
-                ),
-                ParamSpec(
-                    "edits",
-                    JsonType.JSON,
-                    required=False,
-                    description="Form edits [{path:[field,...], value}] "
-                    "(module items only)",
-                ),
-            ),
-        ),
-    ),
-    method_entry(
-        "tab.writeback_apply",
-        "writeback:h_tab_writeback_apply",
-        MethodSpec(
-            10.0,
-            "Apply a pane's persistent writeback draft as-is (edit it first via "
-            "rpc_call on tab.writeback_set). Requires (tab_id, subtab_id) with closed "
-            "values analysis|post_analysis. Optional ids applies only those items without "
-            "changing GUI selection; omitted or null ids uses selected items. Empty ids writes "
-            "nothing; unknown or duplicate IDs fail before writing. Returns "
-            "{applied_ids, written, context_version, destination_context}: written lists the destination "
-            "names actually pushed, split by kind ({parameter, ml_modules, samples}); "
-            "an invalid module form writes nothing and fails with invalid_params, "
-            "reason form_errors and data.errors; "
-            "context_version is the bumped 'context' resource version after apply; "
-            "destination_context is the active SessionEnv projection at reply time. "
-            "Requires a selected working point but always writes to the draft's captured SavedPoint.",
-            (
-                required_string("tab_id"),
-                required_string("subtab_id", "Pane: analysis|post_analysis"),
-                ParamSpec(
-                    "ids",
-                    JsonType.JSON,
-                    required=False,
-                    description="Explicit writeback item IDs; omitted uses GUI selection",
-                ),
-            ),
         ),
     ),
 )

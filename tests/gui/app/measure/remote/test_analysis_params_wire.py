@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_analyze,
-    h_tab_get_analyze_params,
     h_tab_post_analyze,
 )
 from zcu_tools.gui.remote.errors import RemoteError
@@ -25,18 +24,16 @@ def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
     tab_id = fx.ctrl.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
-        primary = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
-        assert primary["ok"] is True
-        assert primary["result"]["analyze_params"] is None
-        assert primary["result"]["definitions"] == []
         fx.ctrl.start_run(tab_id)
         qt_until(
             lambda: fx.ctrl.active_operation_count() == 0, label="sample Run terminal"
         )
         assert fx.state.get_tab(tab_id).run.result is not None
-        generated = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
-        assert generated["ok"] is True
-        assert generated["result"]["definitions"] == [
+        rejected = call(
+            sock, "tab.analyze", {"tab_id": tab_id, "updates": {"unknown": 1}}
+        )
+        assert rejected["ok"] is False
+        assert rejected["error"]["data"]["definitions"] == [
             {
                 "name": "threshold",
                 "type": "float",
@@ -45,10 +42,13 @@ def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
                 "default": 0.5,
             }
         ]
-        post = call(sock, "tab.get_post_analyze_params", {"tab_id": tab_id})
-        assert post["ok"] is True
-        assert post["result"]["post_analyze_params"] is None
-        assert isinstance(post["result"]["definitions"], list)
+        started = call(sock, "tab.analyze", {"tab_id": tab_id})
+        assert started["ok"] is True
+        assert started["result"]["params"] == {"threshold": 0.5}
+        qt_until(
+            lambda: fx.ctrl.active_operation_count() == 0,
+            label="sample analysis terminal",
+        )
     finally:
         sock.close()
         fx.stop()
@@ -74,18 +74,8 @@ def _adapter_with_params(params: ChoiceParams) -> MagicMock:
     return adapter
 
 
-def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None:
+def test_remote_analyze_accepts_amplitude_slope_key() -> None:
     adapter = _adapter_with_params(ChoiceParams())
-
-    reply = h_tab_get_analyze_params(adapter, {"tab_id": "t"})
-    assert reply["analyze_params"] == {
-        "model_type": "hm",
-        "fit_bg_amp_slope": True,
-        "fit_bg_phase_curvature": False,
-        "edelay_mode": "auto",
-        "manual_edelay": None,
-        "max_edelay_search_radius": 100.0,
-    }
 
     started = h_tab_analyze(
         adapter,

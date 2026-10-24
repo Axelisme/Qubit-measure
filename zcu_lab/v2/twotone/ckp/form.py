@@ -49,7 +49,7 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
             "res_freq": Range.around(
                 "$resonator.freq", "1.5 * $resonator.kappa", expts=101
             ),
-            "qub_freq": Range.between("$qubit.freq - 10", "$qubit.freq + 5", expts=101),
+            "qub_freq": Range("$qubit.freq - 10", "$qubit.freq + 5", expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

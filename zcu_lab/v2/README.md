@@ -156,7 +156,7 @@ RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 gro
 start/span/step 量化。Frequency preparation 不建立逐點 pulse；
 Core 以各 tone 的 start／stop 與共用 expts 建立 `SweepCfg`，
 `run()` 再用 `sweep2param("point", sweep)` 建立 symbolic drive。
-`prepare_amplitude_scan(cfg, soccfg=...)` 仍回傳 `support.mux.MuxPulseScan`，
+`prepare_amplitude_scan(cfg, soccfg=...)` 仍回傳 `mux.amp_rabi.core.MuxPulseScan`，
 包含原始 `indices`、量化 gain `coordinates (K,P)` 及
 固定 numeric `point_pulses (P,K)`。Gain conversion 沿既有 `round_zcu_gain`。
 這些入口只準備資料，不 acquire；各 public `run()` 直接寫出 common-start zip 排程，

@@ -27,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "jpa_rf_dev": rf_source,
-            "jpa_freq": Range.between(
+            "jpa_freq": Range(
                 "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
             ),
             "skew_penalty": 0.0,

@@ -11,7 +11,6 @@ from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined, PydanticUndefinedType
 
 from zcu_tools.cfg_model import (
-    AliasName,
     CfgInputValue,
     ConfigBase,
     Expr,
@@ -36,7 +35,6 @@ from zcu_tools.gui.form import (
     static_defaults,
 )
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.resources.entry.roles import RoleResolutionError
 
 from ._display import field_display
 from ._modules import (
@@ -159,16 +157,6 @@ def _check_position_seed(node: FormNode, path: FormWritePath) -> None:
     elif isinstance(node, list):
         for index, child in enumerate(node):
             _check_position_seed(child, (*path, index))
-
-
-def _alias_name(node: AliasName, env: FormEnv) -> str | None:
-    if env.parameters is None:
-        return None
-    path = node.alias if node.alias.startswith("$") else f"${node.alias}"
-    try:
-        return env.parameters.resolve_path(path)
-    except RoleResolutionError:
-        return None
 
 
 def _field_info(info: FieldInfo) -> FieldInfo:
@@ -337,14 +325,8 @@ class Section:
             del cls
             return section.default_data(env)
 
-        def choices(
-            cls: type[FormModel], env: FormEnv
-        ) -> Mapping[tuple[str | int, ...], tuple[JsonValue, ...]]:
-            del cls
-            return section._alias_choices(env)
-
         def options(
-            cls: type[FormModel], env: FormEnv
+            _cls: type[FormModel], env: FormEnv
         ) -> Mapping[tuple[str | int, ...], tuple[Option, ...]]:
             result: dict[tuple[str | int, ...], tuple[Option, ...]] = {
                 (name,): field.options(env) for name, field in section.modules.items()
@@ -371,20 +353,12 @@ class Section:
                     if isinstance(node, LogPoints)
                 }
             )
-            # Empty device defaults need a label; choices remains the value policy.
-            result.update(
-                {
-                    path: tuple(Option(str(value) or "None", value) for value in values)
-                    for path, values in cls.choices(env).items()
-                }
-            )
             return result
 
         namespace.update(
             converters=classmethod(partial(_section_converters, section.modules, core)),
             __annotations__=annotations,
             defaults=classmethod(defaults),
-            choices=classmethod(choices),
             options=classmethod(options),
         )
         model = new_class(
@@ -395,26 +369,6 @@ class Section:
         if not issubclass(model, FormModel):
             raise TypeError("Generated model must implement FormModel")
         self.model = model
-
-    def _alias_choices(
-        self, env: FormEnv
-    ) -> dict[tuple[str | int, ...], tuple[JsonValue, ...]]:
-        """Share core device defaults and captured names with descriptions and validation."""
-        result: dict[tuple[str | int, ...], tuple[JsonValue, ...]] = {}
-        for name, node in self.tree.items():
-            if not isinstance(node, AliasName) or node.choices_source != "devices":
-                continue
-            info = self.core.model_fields[name]
-            values: tuple[JsonValue, ...] = (
-                (None, *env.devices)
-                if type(None) in _members(info.annotation)
-                else tuple(env.devices)
-            )
-            # Unresolved aliases use the core default without writing input.
-            if isinstance(info.default, str) and info.default not in values:
-                values = (info.default, *values)
-            result[(name,)] = values
-        return result
 
     def _annotation(self, name: str, info: FieldInfo, node: FormNode) -> object:
         if isinstance(node, Expr):
@@ -504,9 +458,6 @@ class Section:
                 result[(*prefix, name)] = node.path
             elif isinstance(node, Template):
                 result[(*prefix, name)] = f"template:{node.id}"
-        for name, node in self.tree.items():
-            if isinstance(node, AliasName):
-                result[(*prefix, name)] = node.alias
         for name, child in self.children.items():
             result.update(child.seed_origins((*prefix, name)))
         for name, positions in self.element_seeds.items():
@@ -573,10 +524,6 @@ class Section:
                     "stop": _seed_json(node.stop),
                     "n": node.expts,
                 }
-            elif isinstance(node, AliasName):
-                data.pop(name, None)
-                if (value := _alias_name(node, env)) is not None:
-                    data[name] = value
             else:
                 data[name] = _seed_json(node)
         # Only core-disabled modules get an explicit selection. Existing initial

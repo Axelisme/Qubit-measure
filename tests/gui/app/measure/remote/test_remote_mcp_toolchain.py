@@ -5,41 +5,27 @@ from __future__ import annotations
 import threading
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     PostAnalysis,
 )
-from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_models import (
-    ActiveDeviceOperation,
-    ConnectDeviceRequest,
-    DeviceEntry,
-    DeviceSnapshot,
-    DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
-from zcu_tools.gui.session.events import (
-    DeviceSetupFinishedPayload,
-    DeviceSetupStartedPayload,
-)
-from zcu_tools.gui.session.ports import OperationKind
-from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
 
-from ._helpers import Fixture, call, open_client, recv_push
+from ._helpers import Fixture, call, open_client
 
 
 @pytest.fixture()
@@ -48,28 +34,6 @@ def fx(tmp_path, qapp):
     f.start()
     yield f
     f.stop()
-
-
-def test_device_setup_started_and_finished_push(fx):
-    sock = open_client(fx.service.port)
-    try:
-        call(
-            sock,
-            "events.subscribe",
-            {"events": ["device_setup_started", "device_setup_finished"]},
-        )
-        fx.bus.emit(DeviceSetupStartedPayload(name="bias"))
-        started = recv_push(sock, "device_setup_started")
-        assert started["payload"] == {"name": "bias"}
-
-        fx.bus.emit(
-            DeviceSetupFinishedPayload(name="bias", outcome="finished"),
-        )
-        finished = recv_push(sock, "device_setup_finished")
-        assert finished["payload"]["name"] == "bias"
-        assert finished["payload"]["outcome"] == "finished"
-    finally:
-        sock.close()
 
 
 def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
@@ -202,7 +166,6 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
             prior = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
             assert await_terminal(sock, prior)["result"]["status"] == "finished"
         before = call(sock, "tab.snapshot", {"tab_id": tab})["result"]
-        params_before = call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"]
         result_before = call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
         fx.view.select_tab_pane.reset_mock()
         reply = call(
@@ -220,10 +183,6 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
         assert reply["error"]["code"] == "precondition_failed"
         assert reply["error"]["reason"] == "result_superseded"
         assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
-        assert (
-            call(sock, "tab.get_analyze_params", {"tab_id": tab})["result"]
-            == params_before
-        )
         assert (
             call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
             == result_before
@@ -313,65 +272,6 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
         sock.close()
 
 
-def test_device_active_operations_enumerate_with_kind(fx):
-    # Phase C: active_operations lists EVERY in-flight op, each tagged with its
-    # kind + device_name so the agent knows which device and which operation.
-    fx.service.device_control.get_active_device_operations = MagicMock(
-        return_value=(
-            ActiveDeviceOperation(
-                device_name="bias",
-                kind=OperationKind.DEVICE_SETUP,
-                snapshot=DeviceSnapshot(
-                    name="bias",
-                    type_name="YOKOGS200",
-                    address="addr1",
-                    status=DeviceStatus.SETTING_UP,
-                ),
-                token=11,
-            ),
-            ActiveDeviceOperation(
-                device_name="flux",
-                kind=OperationKind.DEVICE_CONNECT,
-                snapshot=DeviceSnapshot(
-                    name="flux",
-                    type_name="FakeDevice",
-                    address="addr2",
-                    status=DeviceStatus.CONNECTING,
-                ),
-                token=12,
-            ),
-        )
-    )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.active_operations")
-        assert resp["ok"] is True
-        # P2: the reply key is 'operations'; each entry carries its 'handle' (the
-        # op token) and drops the duplicate snapshot.name (device_name is the key).
-        assert resp["result"]["operations"] == [
-            {
-                "handle": 11,
-                "device_name": "bias",
-                "kind": "device_setup",
-                "type_name": "YOKOGS200",
-                "address": "addr1",
-                "status": DeviceStatus.SETTING_UP.value,
-                "error": None,
-            },
-            {
-                "handle": 12,
-                "device_name": "flux",
-                "kind": "device_connect",
-                "type_name": "FakeDevice",
-                "address": "addr2",
-                "status": DeviceStatus.CONNECTING.value,
-                "error": None,
-            },
-        ]
-    finally:
-        sock.close()
-
-
 def test_operation_progress_device_setup_bars(fx):
     # operation.progress covers device setup too: live (token, ProgressBarModel).
     import time
@@ -380,9 +280,6 @@ def test_operation_progress_device_setup_bars(fx):
 
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
-    fx.ctrl.get_operation_progress = MagicMock(
-        side_effect=AssertionError("operation.progress must use operation_control")
-    )
     fx.service.operation_control.get_operation_progress = MagicMock(
         return_value=((1, m),)
     )
@@ -399,7 +296,6 @@ def test_operation_progress_device_setup_bars(fx):
         assert bar["eta_s"] is not None and bar["eta_s"] >= 0
         assert "Ramp" in bar["format"]
         fx.service.operation_control.get_operation_progress.assert_called_once_with(7)
-        fx.ctrl.get_operation_progress.assert_not_called()
     finally:
         sock.close()
 
@@ -540,183 +436,6 @@ def test_device_setup_rejects_wrong_info_model_type(fx):
         sock.close()
 
 
-def test_device_setup_spec_lists_settable_fields_with_current(fx):
-    fx.service.device_control.get_device_info = MagicMock(
-        return_value=FakeDeviceInfo(address="none", value=2.5)
-    )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.setup_spec", {"name": "bias"})
-        assert resp["ok"] is True
-        fields = {f["name"]: f for f in resp["result"]["fields"]}
-        # protected fields reported but settable=false
-        assert fields["address"]["settable"] is False
-        assert fields["type"]["settable"] is False
-        # driver fields are settable, typed, carry the current value
-        assert fields["value"]["settable"] is True
-        assert fields["value"]["type"] == "float"
-        assert fields["value"]["current"] == 2.5
-        assert fields["rampstep"]["settable"] is True
-    finally:
-        sock.close()
-
-
-def test_device_setup_spec_exposes_literal_choices(fx):
-    # A driver with Literal enum fields (YOKO output/mode) → choices surfaced.
-    fx.service.device_control.get_device_info = MagicMock(
-        return_value=YOKOGS200Info(address="x", type="YOKOGS200", mode="voltage")
-    )
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.setup_spec", {"name": "flux"})
-        assert resp["ok"] is True
-        fields = {f["name"]: f for f in resp["result"]["fields"]}
-        assert fields["output"]["type"] == "enum"
-        assert fields["output"]["choices"] == ["on", "off"]
-        assert fields["mode"]["choices"] == ["voltage", "current"]
-    finally:
-        sock.close()
-
-
-def test_device_setup_spec_requires_live_info(fx):
-    fx.service.device_control.get_device_info = MagicMock(return_value=None)
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.setup_spec", {"name": "ghost"})
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "precondition_failed"
-    finally:
-        sock.close()
-
-
-def test_device_setup_spec_uses_device_control_facet(fx):
-    ctrl_get = MagicMock(side_effect=AssertionError("broad controller used"))
-    fx.ctrl.get_device_info = ctrl_get
-    facet_get = MagicMock(return_value=FakeDeviceInfo(address="none", value=2.5))
-    fx.service.device_control.get_device_info = facet_get
-
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.setup_spec", {"name": "bias"})
-        assert resp["ok"] is True
-        fields = {f["name"]: f for f in resp["result"]["fields"]}
-        assert fields["value"]["current"] == 2.5
-        ctrl_get.assert_not_called()
-        facet_get.assert_called_once_with("bias")
-    finally:
-        sock.close()
-
-
-class _PoisonController:
-    def resources_versions(self) -> dict[str, int]:
-        return {}
-
-    def __getattr__(self, name: str) -> object:
-        raise AssertionError(f"broad controller used for {name}")
-
-
-def _dispatch_with_device_control(
-    method: str, params: dict[str, object], device_control: MagicMock
-) -> dict[str, object]:
-    adapter = SimpleNamespace(
-        ctrl=_PoisonController(),
-        device_control=device_control,
-    )
-    return dict(METHOD_REGISTRY[method].handler(adapter, params))
-
-
-def test_device_handlers_dispatch_only_through_device_control_facet():
-    dev = MagicMock()
-    dev.get_device_unit.return_value = "A"
-    dev.start_connect_device.return_value = 101
-    dev.start_disconnect_device.return_value = 102
-    dev.start_reconnect_device.return_value = 103
-    dev.start_setup_device.return_value = 104
-    dev.get_device_info.return_value = FakeDeviceInfo(address="none", value=0.0)
-    dev.get_active_device_operations.return_value = (
-        ActiveDeviceOperation(
-            device_name="bias",
-            kind=OperationKind.DEVICE_SETUP,
-            snapshot=DeviceSnapshot(
-                name="bias",
-                type_name="FakeDevice",
-                address="none",
-                status=DeviceStatus.SETTING_UP,
-            ),
-            token=105,
-        ),
-    )
-    dev.list_devices.return_value = [
-        DeviceEntry("bias", "FakeDevice", DeviceStatus.CONNECTED.value)
-    ]
-    dev.get_device_snapshot.return_value = DeviceSnapshot(
-        name="bias",
-        type_name="FakeDevice",
-        address="none",
-        status=DeviceStatus.CONNECTED,
-        info=FakeDeviceInfo(address="none", value=1.0),
-    )
-
-    assert _dispatch_with_device_control(
-        "device.connect",
-        {
-            "type_name": "FakeDevice",
-            "name": "bias",
-            "address": "none",
-        },
-        dev,
-    ) == {"operation_id": 101}
-    assert isinstance(dev.start_connect_device.call_args.args[0], ConnectDeviceRequest)
-
-    assert _dispatch_with_device_control(
-        "device.disconnect", {"name": "bias"}, dev
-    ) == {"operation_id": 102}
-    assert isinstance(
-        dev.start_disconnect_device.call_args.args[0], DisconnectDeviceRequest
-    )
-
-    assert _dispatch_with_device_control("device.reconnect", {"name": "bias"}, dev) == {
-        "operation_id": 103,
-    }
-    assert _dispatch_with_device_control("device.forget", {"name": "bias"}, dev) == {
-        "forgotten": "bias",
-    }
-
-    assert _dispatch_with_device_control(
-        "device.setup", {"name": "bias", "cfg": {"address": "none", "value": 2.0}}, dev
-    ) == {"operation_id": 104}
-    assert isinstance(dev.start_setup_device.call_args.args[0], SetupDeviceRequest)
-
-    assert "fields" in _dispatch_with_device_control(
-        "device.setup_spec", {"name": "bias"}, dev
-    )
-    assert _dispatch_with_device_control(
-        "device.cancel_operation", {"name": "bias"}, dev
-    ) == {"ok": True, "cancelled": True}
-    assert _dispatch_with_device_control("device.active_operations", {}, dev) == {
-        "operations": [
-            {
-                "handle": 105,
-                "device_name": "bias",
-                "kind": "device_setup",
-                "type_name": "FakeDevice",
-                "address": "none",
-                "status": "setting_up",
-                "error": None,
-            }
-        ]
-    }
-    assert _dispatch_with_device_control("device.list", {}, dev) == {
-        "devices": [{"name": "bias", "type_name": "FakeDevice", "status": "connected"}]
-    }
-    snapshot = _dispatch_with_device_control("device.snapshot", {"name": "bias"}, dev)[
-        "snapshot"
-    ]
-    assert isinstance(snapshot, dict)
-    assert snapshot["info"]["value"] == 1.0
-    assert snapshot["unit"] == "A"
-
-
 # ---------------------------------------------------------------------------
 # soc.info — read the connected SoC's hardware summary (wire v11)
 # ---------------------------------------------------------------------------
@@ -762,16 +481,6 @@ def test_soc_info_requires_connected_soc(fx):
     sock = open_client(fx.service.port)
     try:
         resp = call(sock, "soc.info")
-        assert resp["ok"] is False
-        assert resp["error"]["code"] == "precondition_failed"
-    finally:
-        sock.close()
-
-
-def test_device_mutation_error_path_is_precondition_failed(fx):
-    sock = open_client(fx.service.port)
-    try:
-        resp = call(sock, "device.disconnect", {"name": "missing"})
         assert resp["ok"] is False
         assert resp["error"]["code"] == "precondition_failed"
     finally:
@@ -853,7 +562,7 @@ def _add_fake_tab(fx, tab_id: str) -> None:
     from tests.gui.app.measure._synthetic import SampleCfg
 
     fx.prepare_tab(
-        tab_id, adapter, Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
+        tab_id, adapter, Form(SampleCfg, {"sweep": Range(5.0, 6.0, expts=11)})
     )
 
 

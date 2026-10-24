@@ -40,7 +40,7 @@ def answering_client(qapp, tmp_path):
     controller.session_services.context.install_entry(entry)
     controller.session_services.context.use_point(PointUseRequest("source"))
     board = white_noise()
-    controller.install_soc(board.soc, board.soccfg)
+    controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     control = controller.workflow_control()
     control.configure((AskAuthor().attachment(),))
     remote = RemoteControlAdapter(

@@ -28,8 +28,8 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "gain1": Range.between(0.0, 1.0, expts=51),
-            "gain2": Range.between(0.0, 1.0, expts=51),
+            "gain1": Range(0.0, 1.0, expts=51),
+            "gain2": Range(0.0, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

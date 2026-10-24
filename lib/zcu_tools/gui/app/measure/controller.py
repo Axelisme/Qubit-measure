@@ -50,7 +50,6 @@ from zcu_tools.gui.session.library_entry import (
     new_library_entry,
     open_library_entry,
 )
-from zcu_tools.gui.session.operation_handles import AwaitResult
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
@@ -72,7 +71,7 @@ from .events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
-from .registry import Registry
+from .registry import ExperimentResolution, Registry
 from .remote.dialogs import DialogName
 from .services import (
     AppPersistedState,
@@ -81,6 +80,7 @@ from .services import (
     TabSnapshot,
     build_app_services,
 )
+from .services.results_index import ResultsIndex, scan_results
 from .state import State
 
 if TYPE_CHECKING:
@@ -94,7 +94,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.pbar_host import ProgressBarModel
     from zcu_tools.gui.session.persistence import SingleFileCaretaker
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
@@ -106,7 +105,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.progress_control import ProgressControlPort
     from zcu_tools.gui.session.services.build import SessionServices
     from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
-    from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
     from zcu_tools.plotting.figures import FigureCollection
 
     from .artifacts import SaveControlPort
@@ -767,22 +765,6 @@ class Controller(SessionControllerMixin):
     def get_running_tab_id(self) -> str | None:
         return self._tab_control.get_running_tab_id()
 
-    def install_soc(self, soc: SocHandle, soccfg: SocCfgHandle) -> None:
-        """Install or replace a caller-owned board/config on the Qt owner thread.
-
-        Clear the remote endpoint and publish the new pair. Run/connect conflicts
-        raise OperationConflictError. The caller retains board cleanup ownership.
-        """
-        self._soc_svc.install_soc(soc, soccfg)
-
-    def uninstall_soc(self) -> None:
-        """Clear the board/config on the Qt owner thread without closing it.
-
-        Publish the empty connection. Run/connect conflicts raise
-        OperationConflictError; external resource cleanup stays with the caller.
-        """
-        self._soc_svc.uninstall_soc()
-
     def has_soc(self) -> bool:
         return self._soc_svc.has_soc()
 
@@ -801,23 +783,18 @@ class Controller(SessionControllerMixin):
         """Full resource-version snapshot (the resources.versions RPC payload)."""
         return self._state.version.snapshot()
 
-    def start_run(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> int:
-        """Run displayed cfg values; nonempty aliases require an explicit Reset first.
+    def start_run(self, tab_id: str) -> int:
+        """Run displayed cfg values using the tab's fixed source capture.
 
         See RunAnalyzeControlFacet.start_run for admission and failure semantics.
         """
-        return self._run_analyze_control.start_run(tab_id, aliases=aliases)
+        return self._run_analyze_control.start_run(tab_id)
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         return self._run_analyze_control.load_tab_result(tab_id, data_path)
 
     def cancel_run(self) -> bool:
         return self._run_analyze_control.cancel_run()
-
-    def cancel_analyze(self, tab_id: str) -> bool:
-        return self._run_analyze_control.cancel_analyze(tab_id)
 
     # ------------------------------------------------------------------
     # Shutdown coordination (cancel-all + wait, ADR-0066)
@@ -974,14 +951,6 @@ class Controller(SessionControllerMixin):
         """
         self._services.experiment_access.shutting_down = False
 
-    def get_operation_progress(
-        self, operation_id: int
-    ) -> tuple[tuple[int, ProgressBarModel], ...]:
-        return self._operation_control.get_operation_progress(operation_id)
-
-    def get_tab_analyze_result(self, tab_id: str) -> object | None:
-        return self._run_analyze_control.get_tab_analyze_result(tab_id)
-
     # ------------------------------------------------------------------
     # Analyze flow (TabService)
     # ------------------------------------------------------------------
@@ -999,9 +968,6 @@ class Controller(SessionControllerMixin):
         return self._run_analyze_control.start_post_analyze(
             tab_id, post_analyze_params_instance
         )
-
-    def get_post_analyze_result(self, tab_id: str) -> object | None:
-        return self._run_analyze_control.get_post_analyze_result(tab_id)
 
     def update_tab_post_analyze_param_instance(
         self, tab_id: str, instance: object
@@ -1225,20 +1191,11 @@ class Controller(SessionControllerMixin):
                 ) from exc
         self.apply_library_change(parameters, entry.put(name))
 
-    def has_ml_entry(self, item_kind: str, name: str) -> bool:
-        """Query a concrete root in the selected library; invalid kind raises."""
-        library = self._context_control.read_context().library
-        if item_kind == "module":
-            return name in library.module_keys()
-        if item_kind == "waveform":
-            return name in library.waveform_keys()
-        raise FailedPreconditionError(f"Unknown library kind: {item_kind!r}")
-
     # ------------------------------------------------------------------
     # Library entry editing through the shared Form entry
     # ------------------------------------------------------------------
 
-    def open_library_entry(
+    def _open_library_entry(
         self, item_kind: LibraryKind, name: str
     ) -> ModuleEntryForm | WaveformEntryForm:
         """Open a selected library root as a Form at one fixed capture.
@@ -1257,7 +1214,7 @@ class Controller(SessionControllerMixin):
             arb_names=self._arb_waveform_svc.list_data_keys(),
         )
 
-    def commit_library_entry(
+    def _commit_library_entry(
         self, entry: ModuleEntryForm | WaveformEntryForm, name: str
     ) -> None:
         """Put entry's current Spec at root name in its captured library.
@@ -1266,16 +1223,6 @@ class Controller(SessionControllerMixin):
         conflict and I/O failures from apply_library_change propagate.
         """
         self.apply_library_change(entry.parameters, entry.put(name))
-
-    def replace_library_entry(
-        self, entry: ModuleEntryForm | WaveformEntryForm, source: str, new_name: str
-    ) -> None:
-        """Atomically replace root source with entry's Spec, renaming to new_name.
-
-        Failures follow commit_library_entry; an occupied different new_name
-        or a missing source is rejected with the library unchanged.
-        """
-        self.apply_library_change(entry.parameters, entry.replace(source, new_name))
 
     def edit_library_entry(
         self,
@@ -1287,7 +1234,7 @@ class Controller(SessionControllerMixin):
     ) -> FormErrors | None:
         """Apply one Form write batch to library root name and write it if valid.
 
-        The root opens as with open_library_entry. batch maps model-field leaf
+        The root opens at one fixed selected-point capture. batch maps model-field leaf
         paths to Form input values, such as {"expr": text} for an expression
         or a plain key string for a child library entry, and is written in one
         FormState.write. A valid result is put at save_as, which must be a
@@ -1301,7 +1248,7 @@ class Controller(SessionControllerMixin):
         original types. Target, conflict and I/O failures from
         apply_library_change propagate.
         """
-        entry = self.open_library_entry(item_kind, name)
+        entry = self._open_library_entry(item_kind, name)
         if save_as is not None:
             library = entry.parameters.library
             keys = (
@@ -1327,7 +1274,7 @@ class Controller(SessionControllerMixin):
                 raise
             raise InvalidInputError(str(exc), reason_code="form_errors") from exc
         try:
-            self.commit_library_entry(entry, name if save_as is None else save_as)
+            self._commit_library_entry(entry, name if save_as is None else save_as)
         except LibraryEntryInvalid as exc:
             return exc.errors
         return None
@@ -1336,21 +1283,30 @@ class Controller(SessionControllerMixin):
     # Device operations via DeviceService
     # ------------------------------------------------------------------
 
-    def list_device_names(self) -> list[str]:
-        return self._dev_svc.list_device_names()
-
-    def get_device_value_for_new_context(self, name: str) -> float | None:
-        return self._dev_svc.get_device_value_for_new_context(name)
-
     def get_active_device_operations(self) -> tuple[ActiveDeviceOperation, ...]:
         return self._dev_svc.get_active_device_operations()
-
-    def await_operation(self, operation_id: int, timeout: float) -> AwaitResult | None:
-        return self._operation_control.await_operation(operation_id, timeout)
 
     # ------------------------------------------------------------------
     # Project root and settings
     # ------------------------------------------------------------------
+
+    def resolve_experiment(self, experiment: str | None) -> ExperimentResolution:
+        """Resolve historical identity through the live catalog, without mutation.
+
+        Exact registered names win; otherwise a unique load-capable tag owner is
+        returned. Unknown/missing/ambiguous identities carry a rejection reason.
+        """
+        return self._registry.resolve_experiment(experiment)
+
+    def query_results(self) -> ResultsIndex:
+        """Read all saved Database runs under the current project root.
+
+        Return a fresh detached snapshot shared by the browser and RPC, without
+        changing the opened entry/point or creating files/locks. Missing Database
+        returns an empty index. Ledger/schema and escaping-path errors propagate;
+        individual unreadable run documents remain visible through run.issues.
+        """
+        return scan_results(Path(self.get_project_root()))
 
     def get_project_root(self) -> str:
         """Return the injected base directory for result and Database roots.

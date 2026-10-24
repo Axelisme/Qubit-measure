@@ -8,17 +8,6 @@
 
 只為遷移存在的程式、對照表與宣告都放在本目錄，不放進 `zcu_lab` 或 `lib`。遷移完成後，刪除整個 `migrations/`（連同 `tests/migrations/` 與 `docs/storage-migration.md`）即可，不需要到其他目錄找殘留。使用者於 2026-10-14 表示：「我自己會預期，我遷移完後刪除migrations就可以了」。
 
-## Container 升級
-
-`upgrade_containers(sources, *, output_dir, replace=False)` 讀明示的來源檔，依原檔名寫入 output_dir，回傳 exact outputs。它重用 datafile.load/save，把舊 zcu.experiment-data 2.x 轉為 zcu.container 3.0，保留 opaque 子樹，不另寫一套 decoder。來源不變。只有明選相同來源目錄與 replace=True 才原地替換。重複 basename 在寫入前拒絕。每個檔案獨立原子發布，後項失敗不回滾前項。
-
-```bash
-uv run --directory <checkout> --no-sync -- python -m migrations.container_upgrade \
-  first.h5 second.h5 --output-dir converted
-```
-
-既有目的檔預設拒絕，明示 `--replace` 才覆寫。不掃描真實資料，不自動刪來源，也不操作硬體。
-
 ## Legacy result／Database → native storage
 
 `migrations.storage_migration` 擁有離線轉換、歷史 evidence 與可續跑 publication。Caller 明填 mapping 與 native 驗證，不接正常 runtime。`migrations.legacy_labber.load_legacy_labber_payload` 以明確 disk schema 讀取 single 或 marker-qualified grouped Labber。未標記多 log 以 caller 的 schema 變數順序對應 root、Log_2 等，各自嚴格驗證 label、單位與 shape，不猜 variable identity 或單位。

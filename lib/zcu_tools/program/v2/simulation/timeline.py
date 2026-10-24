@@ -24,7 +24,7 @@ from ..modules.delay import Delay, DelayAuto, Join, SoftDelay
 from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
 from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
-from ..modules.reset import BathReset, NoneReset, PulseReset, TwoPulseReset
+from ..modules.reset import BathReset, PulseReset, TwoPulseReset
 from ..modules.util import round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
@@ -281,8 +281,6 @@ class TimelineInterpreter:
 
     def reset(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Expand reset wrappers into real pulses only; never set a quantum state."""
-        if type(module) is NoneReset:
-            return t
         if type(module) is PulseReset:
             return self.pulse(module.reset_pulse, t)
         if type(module) is TwoPulseReset:

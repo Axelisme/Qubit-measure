@@ -76,8 +76,6 @@ def test_spectrum_export_roundtrips_native_data_and_leaves_observations_unchange
         for key in ("dev_values", "fluxs", "freqs"):
             np.testing.assert_array_equal(restored["points"][key], original.points[key])
     assert state.version.snapshot() == before
-    # Export adds no new observations, but must not consume existing ones.
-    assert route_harness.request(client, "spectrum.reset_points", name="nonempty")["ok"]
 
 
 def test_export_defaults_create_only_and_explicit_overwrite_replaces_output(

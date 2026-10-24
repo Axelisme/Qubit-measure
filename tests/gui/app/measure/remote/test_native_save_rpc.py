@@ -92,7 +92,7 @@ def native_save_rpc(
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
         board = white_noise()
-        controller.install_soc(board.soc, board.soccfg)
+        controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler
         )

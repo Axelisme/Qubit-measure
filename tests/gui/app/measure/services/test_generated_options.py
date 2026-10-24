@@ -108,7 +108,6 @@ def test_generated_options_supply_schema_and_edits_until_source_replacement() ->
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda aliases: None,
     )
     cfg = SavingCfg()
     source = RunRecord(cfg, SavingCore().run(cfg, context=None))

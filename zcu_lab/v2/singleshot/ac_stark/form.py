@@ -40,10 +40,8 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "gain": Range.between(0.0, 0.22, expts=301),
-            "freq": Range.between(
-                "$qubit.freq - 700.0", "$qubit.freq + 100.0", expts=801
-            ),
+            "gain": Range(0.0, 0.22, expts=301),
+            "freq": Range("$qubit.freq - 700.0", "$qubit.freq + 100.0", expts=801),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),
             "radius": Expr("$qubit.ext.readout_cal.radius"),

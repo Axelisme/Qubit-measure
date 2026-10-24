@@ -51,7 +51,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
             "rounds": 10,
             "reset": Hidden(),
             "readout": readout,
-            "df": Range.between(-1.0, 1.0, expts=101),
+            "df": Range(-1.0, 1.0, expts=101),
             "initial_delay": Hidden(),
         },
         fixed_elements=(READOUT_ELEMENTS,),

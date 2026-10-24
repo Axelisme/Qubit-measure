@@ -144,21 +144,6 @@ def jpa_auto_result_to_grouped_payloads(
     return JPA_AUTO_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
-def save_jpa_auto_grouped_result(
-    filepath: str,
-    result: JPAOptimizeResult,
-    *,
-    comment: str = "",
-    tag: str = "jpa/auto_optimize",
-) -> str:
-    return JPA_AUTO_GROUPED_AXES_SPEC.save_grouped_result(
-        filepath,
-        result,
-        comment=comment,
-        tag=tag,
-    )
-
-
 def _validate_jpa_auto_arrays(
     params: NDArray[np.float64],
     phases: NDArray[Any],

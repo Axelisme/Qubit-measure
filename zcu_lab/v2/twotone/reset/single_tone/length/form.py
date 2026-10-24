@@ -22,7 +22,7 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "length": Range.between(0.1, 20.0, expts=50),
+            "length": Range(0.1, 20.0, expts=50),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

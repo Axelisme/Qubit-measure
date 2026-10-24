@@ -6,10 +6,10 @@ from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2.support.measure.pulse_readout_metadata import (
+from zcu_lab.v2.support.measure.rabi_initial_values import amp_rabi_initial_pulse
+from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
-from zcu_lab.v2.support.measure.rabi_initial_values import amp_rabi_initial_pulse
 
 from .core import AmpRabiCfg
 
@@ -38,7 +38,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "init_pulse": Hidden(),
-            "gain": Range.between(-0.3, 1.0, expts=51),
+            "gain": Range(-0.3, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

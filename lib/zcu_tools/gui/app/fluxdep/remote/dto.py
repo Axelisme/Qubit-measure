@@ -228,13 +228,6 @@ class SpectrumListReply(TypedDict):
     spectrums: list[SpectrumListItem]
 
 
-class PointcloudReply(TypedDict):
-    """fluxs (Phi_0) and freqs (GHz) are paired, complete published points."""
-
-    fluxs: list[float]
-    freqs: list[float]
-
-
 class DatabaseInfoReply(TypedDict):
     """Search DB path, candidate/level counts and inclusive parameter ranges.
 
@@ -320,17 +313,6 @@ class FitResultReply(TypedDict):
     transitions: TransitionWire
     r_f: float | None
     sample_f: float | None
-
-
-class StateCheckReply(TypedDict):
-    """has_project excludes placeholders; spectrum_count is loaded count.
-
-    has_active indicates a selected display spectrum, not a live input context.
-    """
-
-    has_project: bool
-    spectrum_count: int
-    has_active: bool
 
 
 class ResourceVersionsReply(TypedDict):
@@ -453,12 +435,6 @@ class SpectrumRemovedReply(TypedDict):
     removed: Literal[True]
 
 
-class ActiveSpectrumReply(TypedDict):
-    """active_spectrum is the display selection, or None after clearing it."""
-
-    active_spectrum: str | None
-
-
 class FitUpdatedReply(TypedDict):
     """fit is the complete replacement receipt; it does not start a search."""
 
@@ -483,23 +459,6 @@ class ParamsExportedReply(TypedDict):
     alignment_from: str
     component: str
     analysis_id: str
-
-
-class OperationActivityReply(TypedDict):
-    """token is a retained positive app handle, not an MCP session ID.
-
-    status is pending or terminal. error is a failure message or None.
-    """
-
-    token: int
-    status: Literal["pending", "finished", "failed", "cancelled"]
-    error: str | None
-
-
-class OperationStatusReply(TypedDict):
-    """activity is the requested/current activity, or None if none has started."""
-
-    activity: OperationActivityReply | None
 
 
 class OperationOutcomeReply(TypedDict):

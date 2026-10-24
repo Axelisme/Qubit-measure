@@ -122,21 +122,3 @@ def test_export_refuses_existing_path_and_scalar_before_creation(
     )
     with pytest.raises(ValueError, match="axis|rank"):
         datafile.write_labber(tmp_path / "scalar.hdf5", container)
-
-
-@pytest.mark.parametrize(
-    "text", ["operator note", "2024", "[1,2]", '"quoted"', '{"operator":"note"}', ""]
-)
-def test_comment_decoder_preserves_non_envelope_text(text: str) -> None:
-    decoded = datafile.decode_labber_comment(text)
-    assert decoded.cfg is None
-    assert decoded.timestamp is None
-    assert decoded.comment == text
-
-
-@pytest.mark.parametrize(
-    "text", ['{"cfg":[]}', '{"cfg":5}', '{"comment":false}', '{"timestamp":42}']
-)
-def test_comment_decoder_rejects_malformed_envelope_fields(text: str) -> None:
-    with pytest.raises(ValueError, match="cfg|comment|timestamp"):
-        datafile.decode_labber_comment(text)

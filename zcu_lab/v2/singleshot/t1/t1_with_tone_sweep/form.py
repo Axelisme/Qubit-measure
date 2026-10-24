@@ -10,7 +10,7 @@ from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 def _length_sweep(ctx: FormContext) -> Range:
     # Zero is not a valid probe duration; the operator must choose the start.
     stop = t1_initial_time(ctx.parameters, multiplier=5.0, with_tone=True)
-    return Range.between(None, stop, expts=51)
+    return Range(None, stop, expts=51)
 
 
 def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
@@ -33,7 +33,7 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": _length_sweep(ctx),
-            "gain": Range.between(0.0, 1.0, expts=21),
+            "gain": Range(0.0, 1.0, expts=21),
             "freq": Hidden(),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),

@@ -23,7 +23,7 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
                 bindings={"resonator": "$resonator"},
                 set={"gain": Hidden(0.0)},
             ),
-            "gain": Range.between(0.001, 0.2, expts=101),
+            "gain": Range(0.001, 0.2, expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

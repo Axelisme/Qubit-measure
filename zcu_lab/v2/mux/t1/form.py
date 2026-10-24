@@ -45,7 +45,7 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
             "readout": readout,
             "tones": mux_tone_initials(tones, participants, fields=("drive",)),
             "participants": [index for index in participants],
-            "delays": Range.between(0.0, recovery, expts=101),
+            "delays": Range(0.0, recovery, expts=101),
             "relax_delay": recovery,
             "initial_delay": Hidden(),
             "reps": 1000,

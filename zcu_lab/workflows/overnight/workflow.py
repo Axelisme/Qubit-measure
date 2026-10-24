@@ -22,7 +22,7 @@ from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
 from zcu_lab.workflows.common.devices import set_flux
-from zcu_lab.workflows.common.saving import save_t1, save_t2echo
+from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
@@ -164,9 +164,10 @@ async def run_t1_stage(
     """Save T1 before fitting and retain its summary on point cancellation."""
     t1_record = await iteration.run(T1Exp().run, cfg, name="T1")
     if not isinstance(t1_record, Failed):
-        save_t1(
+        save_native(
             t1_record,
             iteration.dir / "t1.h5",
+            spec=T1Exp.AXES_SPEC,
             snapshot=snapshot,
             identity=iteration.identity,
         )
@@ -194,9 +195,10 @@ async def run_echo_stage(
     """Save T2 Echo before fitting and retain its summary on point cancellation."""
     t2_record = await iteration.run(T2EchoExp().run, cfg, name="Echo")
     if not isinstance(t2_record, Failed):
-        save_t2echo(
+        save_native(
             t2_record,
             iteration.dir / "t2echo.h5",
+            spec=T2EchoExp.AXES_SPEC,
             snapshot=snapshot,
             identity=iteration.identity,
         )

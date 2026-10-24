@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive import PluginDefinition, Session
+from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 from .plot_lifecycle import discard_unpublished_plots
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
@@ -100,10 +103,9 @@ class RunAnalyzeControlPort(Protocol):
         self,
         tab_id: str,
         *,
-        aliases: Mapping[str, str] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
-        """Start observed inputs with optional named alias overrides for one Run.
+        """Start displayed inputs using the tab's fixed source capture.
 
         See RunAnalyzeControlFacet.start_run for guards and terminal semantics.
         """
@@ -224,18 +226,14 @@ class RunAnalyzeControlFacet:
         self,
         tab_id: str,
         *,
-        aliases: Mapping[str, str] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> int:
         """Start tab_id's current inputs and return an asynchronous token.
 
         Unavailable/busy tabs raise before start.
-        None and {} accept the cached Valid publication.
-        Nonempty aliases maps alias names to concrete components and resolves
-        these inputs against that fixed capture, even if the global publication
-        is Invalid. Alias/source errors propagate before admission.
+        Accept the current Valid publication using the tab's fixed source capture.
         Neither global aliases nor cfg inputs/publication change. The accepted
-        values and Run evidence share the same capture. origin identifies the
+        values and Run evidence share that capture. origin identifies the
         initiating gui/mcp frontend for
         acquired. Native terminal ledger failures settle failed on that token
         with ERROR diagnostics, retaining the published result for Save;
@@ -243,7 +241,7 @@ class RunAnalyzeControlFacet:
         No refresh, focus substitution, Save or automatic retry occurs.
         """
         self._access.require_available()
-        inputs = self._guard.capture_run_inputs(tab_id, aliases=aliases)
+        inputs = self._guard.capture_run_inputs(tab_id)
         self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
@@ -465,7 +463,6 @@ class RunAnalyzeControlFacet:
         tab_id: str = "",
         pane: str = "",
     ) -> Plots:
-        from zcu_tools.gui.app.measure.driven.figure_presentation import MeasurePlotHost
         from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
         view = self._render_host()
@@ -487,3 +484,25 @@ class RunAnalyzeControlFacet:
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
         return self._tab.get_tab_post_analyze_result(tab_id)
+
+
+class MeasurePlotHost(QtPlotHost):
+    """Keep QtPlotHost rendering and publish its changed membership on the owner.
+
+    The callback reads the operation's original named collection, not a copied
+    registry. It runs synchronously after attachment; failures propagate to the
+    producer just like attachment errors. Release remains QtPlotHost's job.
+    """
+
+    def __init__(
+        self,
+        container: FigureContainer,
+        owner: OwnerScheduler,
+        on_present: Callable[[], None],
+    ) -> None:
+        super().__init__(container, owner)
+        self._on_present = on_present
+
+    def present(self, figure: Figure) -> None:
+        super().present(figure)
+        self._on_present()

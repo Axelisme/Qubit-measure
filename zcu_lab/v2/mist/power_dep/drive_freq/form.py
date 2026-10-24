@@ -25,7 +25,7 @@ def make_form(ctx: FormContext) -> Form[DriveFreqCfg]:
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=51),
-            "gain": Range.between(0.0, 1.0, expts=51),
+            "gain": Range(0.0, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Iterator
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 
 import pytest
 from pydantic import Field, model_validator
@@ -16,7 +16,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QWidget,
 )
-from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState
+from zcu_tools.gui.form import FormEnv, FormModel, FormState
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.widgets.form import FormEditor
@@ -24,6 +24,7 @@ from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDo
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 from tests.gui.widgets.form._field_errors import error_widget, field_error, row_tooltip
+from tests.gui.widgets.form._sections import expand_sections
 from tests.gui.widgets.form._text_input import commit_text
 
 
@@ -50,7 +51,7 @@ class PresentationForm(FormModel):
     nqz: Literal[1, 2] = 2
     enabled: bool = True
     samples: tuple[float, ...] = (1.0,)
-    inner: Annotated[Inner, Display(collapsed=False)] = Field(default_factory=Inner)
+    inner: Inner = Field(default_factory=Inner)
     after: float = 5.0
 
 
@@ -119,6 +120,7 @@ def editor(
     env = alias_env()
     state = FormState(PresentationForm.default_input(env))
     view = FormEditor(state, env)
+    expand_sections(view, "inner")
     yield view, state
     view.close()
     view.deleteLater()

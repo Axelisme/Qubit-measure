@@ -29,7 +29,6 @@ from .models import (
     LabberMetadata,
     LabberPayload,
 )
-from .paths import format_ext
 
 GROUPED_DATASET_VERSION = 2
 GROUPED_VERSION_ATTR = "zcu_tools.grouped_dataset_version"
@@ -38,25 +37,6 @@ DATA_VARIABLE_CHANNELS_ATTR = "zcu_tools.dataset_role_channels"
 DATA_VARIABLE_ATTR = "zcu_tools.dataset_role"
 _STREAMING_VERSION_ATTR = "zcu_tools.streaming_grouped_dataset_version"
 _STREAMING_GROUPED_DATASET_VERSION = 1
-
-
-def save_grouped_labber_data(
-    path: str,
-    variables: Mapping[str | DataVariable, LabberPayload],
-    *,
-    metadata: LabberMetadata | None = None,
-) -> str:
-    """Save named common-grid variables as parallel channels in one Labber log.
-
-    path is the destination; its filename is normalized to the Labber extension.
-    variables maps snake_case identities to payloads sharing axes, shape and
-    timestamps. metadata is shared, or empty when omitted. Return the written
-    path. Invalid variables/grid raise ValueError before creating the file;
-    invalid payload/metadata types raise TypeError. Existing paths raise FileExistsError.
-    """
-    return write_grouped_labber_data_file(
-        format_ext(path), GroupedLabberData(variables, metadata=metadata)
-    )
 
 
 def write_grouped_labber_data_file(path: str, grouped: GroupedLabberData) -> str:

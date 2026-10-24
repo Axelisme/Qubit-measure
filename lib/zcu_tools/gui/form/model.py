@@ -185,7 +185,6 @@ class _DisplayProperties(TypedDict, total=False):
     description: str | None
     unit: str | None
     placeholder: str | None
-    collapsed: bool
     decimals: int | None
     hidden: bool
     group: str | None
@@ -205,7 +204,6 @@ class Display:
     and False, override them. None clears a text hint or uses the field's
     ordinary title/description fallback. Public attributes expose concrete
     defaults even when omitted; overlay retains which keywords were supplied.
-    Model sections start folded; collapsed=False starts them expanded.
     decimals is how many digits a float field shows after the decimal point,
     rounded with trailing zeros trimmed; None shows the full value. It never
     rounds input. A negative count raises ValueError here; describe raises
@@ -233,7 +231,6 @@ class Display:
     description: str | None = None
     unit: str | None = None
     placeholder: str | None = None
-    collapsed: bool = True
     decimals: int | None = None
     hidden: bool = False
     group: str | None = None

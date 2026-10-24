@@ -10,42 +10,45 @@ from zcu_tools.gui.app.measure.services.operation_control import (
 from zcu_tools.gui.app.measure.services.run_analyze_control import ActiveTabOperation
 from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.device_models import ActiveDeviceOperation, DeviceSnapshot
 from zcu_tools.gui.session.operation_handles import (
     AwaitResult,
     OperationHandles,
     OperationOutcome,
 )
 from zcu_tools.gui.session.pbar_host import ProgressBarModel
+from zcu_tools.gui.session.ports import OperationKind
+from zcu_tools.gui.session.services.progress import ProgressService
+from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._control_fakes import CallLog, call
 from tests.gui.app.measure.services._operation_owner_fakes import (
-    DeviceOperation,
     DeviceOperationOwner,
     TabOperationOwner,
 )
 
 
-class RecordingHandles:
+class RecordingHandles(OperationHandles):
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.result = AwaitResult(reason="timeout")
 
-    def await_known_outcome(self, operation_id: int, timeout: float) -> AwaitResult:
-        self._log.add("handles", "await_known_outcome", operation_id, timeout)
+    def await_known_outcome(self, token: int, timeout: float) -> AwaitResult:
+        self._log.add("handles", "await_known_outcome", token, timeout)
         return self.result
 
-    def elapsed_seconds(self, operation_id: int) -> float:
-        self._log.add("handles", "elapsed_seconds", operation_id)
+    def elapsed_seconds(self, token: int) -> float:
+        self._log.add("handles", "elapsed_seconds", token)
         return 0.5
 
-    def known_outcome(self, operation_id: int) -> OperationOutcome | None:
-        raise AssertionError(f"unexpected cancel lookup: {operation_id}")
+    def known_outcome(self, token: int) -> OperationOutcome | None:
+        raise AssertionError(f"unexpected cancel lookup: {token}")
 
-    def has_cancel_hook(self, operation_id: int) -> bool:
-        raise AssertionError(f"unexpected cancel lookup: {operation_id}")
+    def has_cancel_hook(self, token: int) -> bool:
+        raise AssertionError(f"unexpected cancel lookup: {token}")
 
 
-class RecordingProgress:
+class RecordingProgress(ProgressService):
     def __init__(self, log: CallLog) -> None:
         self._log = log
         self.bars = ((1, ProgressBarModel(label="bar", total=10, start_time=0.0)),)
@@ -78,7 +81,16 @@ def test_operation_control_routes_await_and_elapsed_to_handles() -> None:
 def test_active_operations_merge_tab_and_device_owners() -> None:
     log = CallLog()
     run = TabOperationOwner((ActiveTabOperation(11, "gui-tab", "run"),))
-    device = DeviceOperationOwner((DeviceOperation(12),))
+    device = DeviceOperationOwner(
+        (
+            ActiveDeviceOperation(
+                "device",
+                OperationKind.DEVICE_SETUP,
+                DeviceSnapshot("device", "fake", "", DeviceStatus.CONNECTED),
+                12,
+            ),
+        )
+    )
     facet = OperationControlFacet(
         handles=RecordingHandles(log),
         progress=RecordingProgress(log),
@@ -115,7 +127,14 @@ def test_cancel_by_handle_uses_owner_hook_and_preserves_other_operations() -> No
         on_cancel_run=cancel_run,
     )
     device = DeviceOperationOwner(
-        (DeviceOperation(device_token, "bias"),),
+        (
+            ActiveDeviceOperation(
+                "bias",
+                OperationKind.DEVICE_SETUP,
+                DeviceSnapshot("bias", "fake", "", DeviceStatus.CONNECTED),
+                device_token,
+            ),
+        ),
         on_cancel=lambda _name: handles.cancel(device_token),
     )
     facet = OperationControlFacet(

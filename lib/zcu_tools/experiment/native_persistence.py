@@ -296,7 +296,7 @@ def restore_run(
 
     Validate metadata/tag, required variables, units/axes/dtypes/shapes and cfg
     envelope. Reconstruct and validate Result before concrete cfg validation;
-    grouped builders receive cfg_snapshot=None. Extra variables/unknown cfg keys
+    grouped builders receive only loaded arrays. Extra variables/unknown cfg keys
     remain in the Container, not the typed record. Malformed docs or data raise
     ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
     cfg_issue and one CfgUnavailableWarning, retaining data and record.metadata.
@@ -329,8 +329,6 @@ def restore_run(
         result = spec.result_builder(
             GroupedLoadData(
                 variables=loaded,
-                metadata=metadata.labber or LabberMetadata(),
-                cfg_snapshot=None,
             )
         )
         if not isinstance(result, spec.result_type):

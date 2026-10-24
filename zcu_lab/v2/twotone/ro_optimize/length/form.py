@@ -23,7 +23,7 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
                 bindings={"resonator": "$resonator"},
                 set={"ro_length": Hidden(0.0)},
             ),
-            "length": Range.between(0.01, 3.5, expts=51),
+            "length": Range(0.01, 3.5, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

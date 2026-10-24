@@ -11,6 +11,7 @@ from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import RoleBinding
+from zcu_tools.resources.entry import MissingPointError
 
 from .plot_lifecycle import release_retired_plots
 
@@ -43,6 +44,8 @@ class LoadTabResultOutcome:
     has_analyze_params: bool
     source_kind: str = "loaded"
     analysis_error: str | None = None
+    # Fixed reason for no analysis source; history is still committed successfully.
+    analysis_source_issue: str | None = None
 
 
 class LoadDataError(FailedPreconditionError):
@@ -100,8 +103,9 @@ class LoadService:
         In the same entry, read the file's point/roles once for analysis and WB.
         This reads current persisted values, not an unrecorded historical version.
         Foreign-entry/pointless/EMPTY loads have no analysis source; context-free
-        analysis remains available. Historical source read failures propagate
-        before result replacement. Retain native history without acquisition.
+        analysis remains available. A missing required historical point document
+        commits history without a source and returns analysis_source_issue.
+        Schema, references and other I/O failures propagate before replacement. Retain native history without acquisition.
         Return committed result details without validating or replacing form input.
         Busy or cfg notification reentrancy rejects before loading;
         incompatible files and restore
@@ -149,21 +153,30 @@ class LoadService:
             )
         history = metadata.snapshot
         parameters = None
-        if (
-            captured is not None
-            and captured.target.entry_id == str(history.entry_id)
-            and history.point is not None
-        ):
-            parameters = self._context.read_target(
-                SavedPoint(entry_id=str(history.entry_id), point=history.point),
-                roles=RoleBinding(None, {}, history.roles),
-            )
+        analysis_source_issue = None
+        if captured is None:
+            analysis_source_issue = "No active context is available"
+        elif captured.target.entry_id != str(history.entry_id):
+            analysis_source_issue = "Historical entry differs from the opened entry"
+        elif history.point is None:
+            analysis_source_issue = "Historical metadata has no point"
+        else:
+            try:
+                parameters = self._context.read_target(
+                    SavedPoint(entry_id=str(history.entry_id), point=history.point),
+                    roles=RoleBinding(None, {}, history.roles),
+                )
+            except MissingPointError as error:
+                analysis_source_issue = (
+                    f"Historical point {history.point!r} is unavailable: {error}"
+                )
         retired = self._state.update_tab_loaded_result(
             tab_id,
             restored.record,
             data_path,
             parameters=parameters,
             storage=storage,
+            analysis_source_issue=analysis_source_issue,
         )
         self._teardown_retired(retired)
         return LoadTabResultOutcome(
@@ -172,6 +185,7 @@ class LoadService:
             result_type=type(restored.record).__name__,
             cfg_issue=restored.cfg_issue,
             has_analyze_params=False,
+            analysis_source_issue=analysis_source_issue,
         )
 
     def _teardown_retired(self, retired: RetiredPaneResources) -> None:

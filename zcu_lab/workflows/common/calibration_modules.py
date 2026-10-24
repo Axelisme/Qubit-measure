@@ -35,20 +35,14 @@ from zcu_lab.workflows.common.calibration import Calibrated
 
 DRIVE_MODULE_FIELD = ModuleInputField(ModuleSpec, ref_family=PulseSpec)
 READOUT_MODULE_FIELD = ModuleInputField(ModuleSpec, ref_family=PulseReadoutSpec)
-MIST_MODULE_FIELD = ModuleInputField(ModuleSpec)
-RESET_MODULE_FIELD = ModuleInputField(ModuleSpec, nullable=True)
 
 # Runtime schemas come from field.annotation; static aliases only view nominal values.
 if TYPE_CHECKING:
     type DriveModuleInput = ModuleInput
     type ReadoutModuleInput = ModuleInput
-    type MistModuleInput = ModuleInput
-    type ResetModuleInput = ModuleInput | None
 else:
     DriveModuleInput = DRIVE_MODULE_FIELD.annotation
     ReadoutModuleInput = READOUT_MODULE_FIELD.annotation
-    MistModuleInput = MIST_MODULE_FIELD.annotation
-    ResetModuleInput = RESET_MODULE_FIELD.annotation
 
 
 @dataclass(frozen=True)

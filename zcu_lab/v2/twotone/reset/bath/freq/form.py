@@ -29,12 +29,12 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
             "readout": Slot("$qubit.module.readout")
             if ctx.has("$qubit.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "freq": Range.between(
+            "freq": Range(
                 "$resonator.freq - 1.2 * $qubit.ext.rabi_freq",
                 "$resonator.freq - 0.8 * $qubit.ext.rabi_freq",
                 expts=51,
             ),
-            "gain": Range.between(0.4, 1.0, expts=51),
+            "gain": Range(0.4, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

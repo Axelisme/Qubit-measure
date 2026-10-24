@@ -222,7 +222,7 @@ def test_wire_version_is_no_auth(tmp_path, qapp):
             assert resp["result"]["wire_version"] == WIRE_VERSION
 
             # A normal method is still gated.
-            _send(sock, {"id": "2", "method": "state.has_context", "params": {}})
+            _send(sock, {"id": "2", "method": "state.has_active_context", "params": {}})
             assert _recv_response(sock)["error"]["code"] == "unauthorized"
         finally:
             sock.close()
@@ -239,7 +239,7 @@ def test_token_gated_when_set(tmp_path, qapp):
         sock = _open_client(f.service.port)
         try:
             # Before auth: non-auth method rejected.
-            _send(sock, {"id": "1", "method": "state.has_context", "params": {}})
+            _send(sock, {"id": "1", "method": "state.has_active_context", "params": {}})
             resp = _recv_response(sock)
             assert resp["ok"] is False
             assert resp["error"]["code"] == "unauthorized"
@@ -254,7 +254,7 @@ def test_token_gated_when_set(tmp_path, qapp):
             _send(sock, {"id": "3", "method": "auth", "params": {"token": "s3cr3t"}})
             assert _recv_response(sock)["ok"] is True
 
-            _send(sock, {"id": "4", "method": "state.has_context", "params": {}})
+            _send(sock, {"id": "4", "method": "state.has_active_context", "params": {}})
             assert _recv_response(sock)["ok"] is True
         finally:
             sock.close()
@@ -357,7 +357,7 @@ def test_malformed_json_returns_invalid_params(fx):
         sock.close()
 
 
-def test_run_start_then_running_tab_then_finishes(fx):
+def test_run_start_then_finishes(fx):
     """Drive a fake adapter from open to its real remote operation terminal."""
     sock = _open_client(fx.service.port)
     try:
@@ -389,7 +389,6 @@ def test_run_start_then_running_tab_then_finishes(fx):
             {"operation_id": started["result"]["operation_id"], "timeout": 30},
         )
         assert terminal["result"] == {"reason": "completed", "status": "finished"}
-        assert _raw_call(sock, "run.running_tab")["result"]["tab_id"] is None
 
         _send(sock, {"id": "3", "method": "tab.snapshot", "params": {"tab_id": tab_id}})
         snap = _recv_response(sock)

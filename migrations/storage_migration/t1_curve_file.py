@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
-
-from ._analysis_file import load_file, save_file
-from .analysis_source import AnalysisSource
+from zcu_tools.resources._analysis_file import load_file, save_file
+from zcu_tools.resources.analysis_source import AnalysisSource
 
 
 class T1NoiseParams(BaseModel):

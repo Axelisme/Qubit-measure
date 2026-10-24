@@ -15,6 +15,7 @@ from tests.gui.app.measure._workflow_window import (
     NativeTunables,
     Plan,
     Tunables,
+    toggle_tab_family,
 )
 
 
@@ -69,7 +70,7 @@ def _status(driver: ComponentDriver, text: str) -> bool:
 
 def test_stopping_locks_tunables_edits_and_submission(stopping_window, tmp_path):
     driver = ComponentDriver(stopping_window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _open(driver, tmp_path / "stop-01-open.png")
     driver.click("Start")
     qt_until(lambda: _status(driver, "running"), label="cleanup scenario accepted")
@@ -100,7 +101,7 @@ def test_pause_selects_tunables_and_clears_hint_on_resume_or_stop(
 ):
     _, window = workflow_window
     driver = ComponentDriver(window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _open(driver, tmp_path / "pause-01-open.png")
     driver.click("Start")
     qt_until(lambda: _status(driver, "running"), label="pause scenario accepted")
@@ -132,7 +133,7 @@ def test_pause_selects_tunables_and_clears_hint_on_resume_or_stop(
 def test_discard_restores_latest_applied_tunables(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
-    driver.click(object_name="workflow.toggle")
+    toggle_tab_family(driver)
     _open(driver, tmp_path / "01-open.png")
     driver.click("Start")
     qt_until(lambda: _status(driver, "running"), label="tunables run accepted")

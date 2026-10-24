@@ -359,8 +359,6 @@ def test_accepted_operation_survives_transfer_and_disconnect_new_holder_cancels(
                     ),
                 },
             ),
-            event_serializers={},
-            wire_event_name=str,
         ),
         owner_scheduler=ImmediateOwnerScheduler(),
         control_identity=h.ctrl.control_identity,

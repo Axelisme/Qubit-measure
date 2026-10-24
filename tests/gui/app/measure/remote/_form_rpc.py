@@ -77,7 +77,7 @@ def ContainerRpcAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
     del ctx
     return Form(
         ContainerRpcInput,
-        {"sweep": Range.between(1.0, 2.0, expts=3)},
+        {"sweep": Range(1.0, 2.0, expts=3)},
     )
 
 
@@ -105,7 +105,7 @@ def IndexedRpcAdapter_make_form(ctx: FormContext):
     )
     return Form(
         cfg,
-        {"sweep": Range.between(1, 2, expts=3), **indexed_tree()},
+        {"sweep": Range(1, 2, expts=3), **indexed_tree()},
         fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
     )
 
@@ -122,7 +122,7 @@ IndexedRpcAdapter = Adapter(
 
 def ModuleRpcAdapter_make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
     del ctx
-    return Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+    return Form(ModuleRpcCfg, {"sweep": Range(1.0, 2.0, expts=3)})
 
 
 ModuleRpcAdapter = Adapter(

@@ -43,7 +43,7 @@ JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
 取得 driver，不認得 alias。Analyze／WB／Save 使用 Run 的固定來源，不重讀目前表。
 具名欄位與範本契約見 [ADR-0073](../docs/adr/0073-measure-form-derivation.md)。
 
-Framework 的 `RecipeTab` 提供 Form read／set／select／command／check_ready，以及 Run／Analyze／問答／同步 Save。Read、寫入與 overrides 都用 dotted string。Session 的 `context.read` 讀 session 值，`tab.read_parameter` 讀 tab 固定捕捉的參數，`session.device_unit` 只讀裝置快取。
+Framework 的 `RecipeTab` 提供 Form read／set／select／command／check_ready，以及 Run／Analyze／問答／同步 Save。Read、寫入與 overrides 都用 dotted string。`tab.read_parameter` 讀 tab 固定捕捉的參數，`session.device_unit` 只讀裝置快取。
 可省略的實驗欄位用 KEEP 保留表單值，明填 null 原樣交 owner 清空／關閉。Analysis updates 也只濾 KEEP。掃描端點與 flux 範圍直接在 recipe 主體計算，不另選校準 fallback。Center／span 成對提供或成對省略，缺一個就回 needs_parameters，不從 Form endpoints 或校準補齊。明填 module scalar 前直接 command to_inline，保留既有 waveform family。已 inline 時不改值。完整作者契約見 [recipes README](recipes/README.md)。
 
 Recipe 直接引用分析 owner 的具名 summary，不另宣告 FitQuality、QualityIssue 或 summary 鏡像。Recipe 的 Report 由作者選欄位並繼承 RecipeReport，不另宣告 SummaryElements 或 estimates 路徑。框架回 `RecipeOutcome(status, report, runs)`；runs 保留各次 Run 與 Save 收據，full query 另保留 Run 前條件、owner-native analysis summary／invalid 與明確捕捉的寫回提案。元素位置與名稱由 owner 提供，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。

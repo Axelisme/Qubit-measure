@@ -5,6 +5,7 @@ Native load contracts live in test_native_persistence and Notebook load tests.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,6 @@ from typing import Any, ClassVar
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import decode_labber_comment
 from zcu_tools.experiment.axes_spec import (
     MHZ_TO_HZ,
     US_TO_S,
@@ -142,8 +142,8 @@ def test_save_preserves_comment_and_tag(tmp_path: Path, tag: str | None) -> None
         spec=_Exp1D.AXES_SPEC,
     )
     data = load_labber_data(str(path))
-    decoded = decode_labber_comment(data.comment)
-    cfg, comment, timestamp = decoded.cfg, decoded.comment, decoded.timestamp
+    decoded = json.loads(data.comment)
+    cfg, comment, timestamp = decoded["cfg"], decoded["comment"], decoded["timestamp"]
 
     assert cfg is not None
     assert cfg["reps"] == 17

@@ -249,7 +249,7 @@ class TextCfg(SampleCfg):
 
 def TextAdapter_make_form(ctx: FormContext) -> Form[TextCfg]:
     del ctx
-    return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+    return Form(TextCfg, {"sweep": Range(1.0, 2.0, expts=3)})
 
 
 TextAdapter = Adapter(
