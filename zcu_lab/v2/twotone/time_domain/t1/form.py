@@ -35,7 +35,7 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "sweep": {"length": Range.between(0.0, relax_delay, expts=101)},
+            "sweep": {"length": Range(0.0, relax_delay, expts=101)},
             "relax_delay": relax_delay,
             "initial_delay": Hidden(),
             "uniform": True,

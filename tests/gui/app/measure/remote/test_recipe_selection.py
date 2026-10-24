@@ -19,7 +19,7 @@ class MuxAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[MuxCfg]:
         del ctx
-        return Form(MuxCfg, {"sweep": Range.between(1, 2, expts=3)})
+        return Form(MuxCfg, {"sweep": Range(1, 2, expts=3)})
 
 
 @pytest.fixture

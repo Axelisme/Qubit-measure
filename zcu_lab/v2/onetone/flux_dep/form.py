@@ -52,7 +52,7 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                 "freq": Range.around(
                     "$resonator.freq", "1.0 * $resonator.kappa", expts=101
                 ),
-                "flux": Range.between(
+                "flux": Range(
                     "1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half",
                     "1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int",
                     expts=101,

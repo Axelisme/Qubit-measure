@@ -26,7 +26,6 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import (
-    Display,
     FormCommandResult,
     FormEnv,
     FormErrors,
@@ -49,6 +48,7 @@ from zcu_tools.resources.context.library import (
 from tests.gui._form_converters import RebuildingForm
 from tests.gui._user_input import ComponentDriver
 from tests.gui.widgets.form._field_errors import field_error
+from tests.gui.widgets.form._sections import expand_sections
 
 type Editor = FormEditor[FormModel]
 type Batch = Mapping[FormWritePath, JsonValue]
@@ -282,8 +282,8 @@ def test_unmatched_input_shows_the_current_value_as_missing_and_keeps_state(
 class ModuleCore(ConfigBase):
     """A nullable single-kind module and a nullable multi-kind module."""
 
-    pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
-    reset: Annotated[ResetCfg | None, Display(collapsed=False)] = None
+    pulse: PulseCfg | None = None
+    reset: ResetCfg | None = None
 
 
 def test_dangling_module_blocks_unrelated_text_write_without_qt_slot_exception(
@@ -364,6 +364,7 @@ def test_nullable_modules_offer_none_keys_and_inline_kinds_without_enabled(
         assert editor.findChild(QCheckBox, f"form.enabled.{name}") is None, name
 
     choose(reset, "Inline: reset/two_pulse")
+    expand_sections(editor, "reset")
 
     selected = state.input.data["reset"]
     assert isinstance(selected, dict)
@@ -385,7 +386,7 @@ def test_default_none_module_selection_via_component_events(
     from tests.gui._user_input import ComponentDriver
 
     class EventCore(ConfigBase):
-        pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
+        pulse: PulseCfg | None = None
 
     env = module_env()
     form = form_adapter.Form(EventCore, {})
@@ -491,7 +492,7 @@ class ShapeForm(RebuildingForm):
 
     branch_models = {("shape",): (Flat, Ramp)}
 
-    shape: Annotated[Flat | Ramp, Field(discriminator="kind"), Display(collapsed=False)]
+    shape: Annotated[Flat | Ramp, Field(discriminator="kind")]
 
 
 def test_tagged_union_dropdown_draws_the_selected_branch_and_starts_new_ones_fresh(
@@ -501,6 +502,7 @@ def test_tagged_union_dropdown_draws_the_selected_branch_and_starts_new_ones_fre
     state = new_state(ShapeForm, {"shape": {"kind": "flat", "length": 5.0}})
     editor = build(state, env, None, None, None)
 
+    expand_sections(editor, "shape")
     dropdown = child(editor, QComboBox, "form.input.shape")
     assert items(dropdown) == [("flat", {"kind": "flat"}), ("ramp", {"kind": "ramp"})]
     assert dropdown.currentText() == "flat"
@@ -538,9 +540,7 @@ class NumericForm(RebuildingForm):
 
     branch_models = {("branch",): (One, Three)}
 
-    branch: Annotated[
-        One | Three, Field(discriminator="kind"), Display(collapsed=False)
-    ]
+    branch: Annotated[One | Three, Field(discriminator="kind")]
 
 
 def test_numeric_tags_are_written_as_typed_option_values(build: Build) -> None:
@@ -548,6 +548,7 @@ def test_numeric_tags_are_written_as_typed_option_values(build: Build) -> None:
     state = new_state(NumericForm, {"branch": {"kind": 1}})
     editor = build(state, env, None, None, None)
 
+    expand_sections(editor, "branch")
     dropdown = child(editor, QComboBox, "form.input.branch")
     assert items(dropdown) == [("1", {"kind": 1}), ("3", {"kind": 3})]
     choose(dropdown, "3")
@@ -573,9 +574,7 @@ class AliasShapeForm(RebuildingForm):
 
     branch_models = {("shape",): (AliasFlat, Ramp)}
 
-    shape: Annotated[
-        AliasFlat | Ramp, Field(discriminator="kind"), Display(collapsed=False)
-    ]
+    shape: Annotated[AliasFlat | Ramp, Field(discriminator="kind")]
 
 
 def test_an_alias_tag_is_its_own_option_with_its_branch_fields(build: Build) -> None:
@@ -583,6 +582,7 @@ def test_an_alias_tag_is_its_own_option_with_its_branch_fields(build: Build) -> 
     state = new_state(AliasShapeForm, {"shape": {"kind": "plateau", "length": 5.0}})
     editor = build(state, env, None, None, None)
 
+    expand_sections(editor, "shape")
     dropdown = child(editor, QComboBox, "form.input.shape")
     assert items(dropdown) == schema_items(state, env, "shape")
     assert items(dropdown) == [
@@ -622,9 +622,7 @@ class NumericAliasForm(RebuildingForm):
 
     branch_models = {("branch",): (AliasOne, Three)}
 
-    branch: Annotated[
-        AliasOne | Three, Field(discriminator="kind"), Display(collapsed=False)
-    ]
+    branch: Annotated[AliasOne | Three, Field(discriminator="kind")]
 
 
 def test_a_numeric_alias_tag_is_a_typed_option_with_its_branch_fields(
@@ -634,6 +632,7 @@ def test_a_numeric_alias_tag_is_a_typed_option_with_its_branch_fields(
     state = new_state(NumericAliasForm, {"branch": {"kind": 2, "a_only": 7.0}})
     editor = build(state, env, None, None, None)
 
+    expand_sections(editor, "branch")
     dropdown = child(editor, QComboBox, "form.input.branch")
     assert items(dropdown) == [
         ("1", {"kind": 1}),
@@ -734,7 +733,7 @@ def test_host_command_route_receives_the_command_and_its_rejection_shows(
 class FixedShapeForm(FormModel):
     """One fixed option value, with editable children and an explicit command."""
 
-    shape: Annotated[Flat, Display(collapsed=False)]
+    shape: Flat
 
     @classmethod
     def options(cls, _env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
@@ -777,6 +776,7 @@ def test_fixed_option_keeps_editable_children_and_guarded_commands(
         run,
         lambda path, selection: state.select(path, selection, env),
     )
+    expand_sections(editor, "shape")
     length = child(editor, QLineEdit, "form.input.shape.length")
     assert not length.isReadOnly()
     action = command(editor, "shape", "lengthen")
@@ -833,7 +833,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
     from tests.gui._user_input import ComponentDriver
 
     class EventCore(ConfigBase):
-        pulse: Annotated[PulseCfg | None, Display(collapsed=False)] = None
+        pulse: PulseCfg | None = None
         note: str = "$literal-name"
 
     env = FormEnv(
@@ -879,6 +879,7 @@ def test_generated_nested_copy_and_fresh_selection_via_component_events(
     driver.invoke_context_action(
         object_name="form.input.pulse", action="Convert to inline"
     )
+    driver.click(object_name="form.fold.pulse")
     driver.screenshot(tmp_path / "02-outer-inline.png")
     assert driver.observe(object_name="form.input.pulse").text == "Inline"
     assert driver.observe(object_name="form.input.pulse.module.freq").text == "100.0"

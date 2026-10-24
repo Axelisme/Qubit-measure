@@ -38,7 +38,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
                 else Template("readout", bindings={"resonator": "$resonator"}),
                 "init_pulse": Hidden(),
             },
-            "sweep": {"gain": Range.between(-0.3, 1.0, expts=51)},
+            "sweep": {"gain": Range(-0.3, 1.0, expts=51)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "reps": 1000,

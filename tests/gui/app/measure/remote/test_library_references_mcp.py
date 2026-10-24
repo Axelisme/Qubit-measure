@@ -28,7 +28,7 @@ class PulseReferenceAdapter(SampleAdapter):
         return Form(
             PulseReferenceCfg,
             {
-                "sweep": Range.between(1.0, 2.0, expts=3),
+                "sweep": Range(1.0, 2.0, expts=3),
                 "linked": Slot("Q1.pulses.seed"),
                 "inline": Slot("Q1.pulses.seed", copy=True, set={"gain": 0.75}),
             },
@@ -42,7 +42,7 @@ class WaveformReferenceAdapter(SampleAdapter):
         return Form(
             PulseReferenceCfg,
             {
-                "sweep": Range.between(1.0, 2.0, expts=3),
+                "sweep": Range(1.0, 2.0, expts=3),
                 "linked": Slot("Q1.pulses.carrier", copy=True),
                 "inline": Slot("Q1.pulses.carrier", copy=True),
             },

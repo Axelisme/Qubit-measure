@@ -40,8 +40,8 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
             "flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
-                "flux": Range.between("$qubit.flux_int", "$qubit.flux_half", expts=101),
-                "gain": Range.between(0.0, 0.5, expts=101),
+                "flux": Range("$qubit.flux_int", "$qubit.flux_half", expts=101),
+                "gain": Range(0.0, 0.5, expts=101),
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

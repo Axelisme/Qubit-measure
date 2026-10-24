@@ -98,7 +98,7 @@ class SelectableInline(FormModel):
 
 
 class DescribeForm(FormModel):
-    settings: Annotated[Settings, Display(group="Advanced", collapsed=True)]
+    settings: Annotated[Settings, Display(group="Advanced")]
     optional: Settings | None = None
     selection: Annotated[
         KeyRef | Inline | NullableInline | SelectableInline | None,
@@ -155,7 +155,7 @@ def test_root_model_leaf_are_single_layer_and_keep_display_constraints() -> None
     ]
     settings = root.children[0]
     assert settings.kind == "model" and settings.title == "Settings"
-    assert settings.group == "Advanced" and settings.collapsed
+    assert settings.group == "Advanced"
     model = state.describe(("settings",), env)
     assert [field.path for field in model.children] == [
         ("settings", "frequency"),

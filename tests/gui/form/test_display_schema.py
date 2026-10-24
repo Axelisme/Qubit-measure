@@ -141,9 +141,7 @@ def test_three_annotated_layers_overlay_from_inner_to_outer() -> None:
         type Inner = Annotated[
             float, Display(label="Inner", unit="V", decimals=3, selector=False)
         ]
-        type Middle = Annotated[
-            Inner, Display(label="Middle", unit="mV", collapsed=False)
-        ]
+        type Middle = Annotated[Inner, Display(label="Middle", unit="mV")]
 
         gain: Annotated[Middle, Display(label="Outer", decimals=None)] = 1.0
 
@@ -151,7 +149,6 @@ def test_three_annotated_layers_overlay_from_inner_to_outer() -> None:
     field = FormState(OverlayForm.default_input(env)).describe((), env).children[0]
     assert (field.title, field.unit, field.decimals) == ("Outer", "mV", None)
     assert field.selector is False
-    assert field.collapsed is False
 
 
 def test_label_overlay_preserves_alias_readonly_admission() -> None:

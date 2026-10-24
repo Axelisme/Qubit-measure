@@ -52,7 +52,7 @@ class TargetAdapter(SampleAdapter):
         del ctx
         return Form(
             TargetCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
+            {"sweep": Range(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
         )
 
 
@@ -60,7 +60,7 @@ class RolelessAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[TargetCfg]:
         del ctx
-        return Form(TargetCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+        return Form(TargetCfg, {"sweep": Range(1.0, 2.0, expts=3)})
 
 
 @dataclass

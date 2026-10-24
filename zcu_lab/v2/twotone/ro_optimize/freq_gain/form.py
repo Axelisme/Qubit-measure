@@ -33,7 +33,7 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
                 "freq": Range.around(
                     "$resonator.freq", "0.5 * $resonator.kappa", expts=31
                 ),
-                "gain": Range.between(0.0, 0.2, expts=31),
+                "gain": Range(0.0, 0.2, expts=31),
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

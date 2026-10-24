@@ -29,7 +29,7 @@ def make_form(ctx: FormContext) -> Form[FreqPowerCfg]:
                 "freq": Range.around(
                     "$resonator.freq", "1.5 * $resonator.kappa", expts=51
                 ),
-                "gain": Range.between(0.0, 1.0, expts=51),
+                "gain": Range(0.0, 1.0, expts=51),
             },
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),

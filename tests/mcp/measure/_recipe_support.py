@@ -209,8 +209,8 @@ class LookbackGui:
         form = Form(
             self.cfg_cls,
             {
-                "range": Range.between(1.0, 2.0, expts=11),
-                "sweep": Range.between(1.0, 2.0, expts=51),
+                "range": Range(1.0, 2.0, expts=11),
+                "sweep": Range(1.0, 2.0, expts=51),
                 "modules": {
                     "reset": Slot("$qubit.module.reset"),
                     "init_pulse": Slot("$qubit.module.init_pulse"),

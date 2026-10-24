@@ -51,7 +51,7 @@ class SchemaAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[SampleCfg]:
         del ctx
-        return Form(SampleCfg, {"gain": 1.0, "sweep": Range.between(5, 6, expts=11)})
+        return Form(SampleCfg, {"gain": 1.0, "sweep": Range(5, 6, expts=11)})
 
 
 @pytest.fixture
@@ -240,7 +240,7 @@ class GlobalSourceAdapter(SampleAdapter):
         del ctx
         return Form(
             SampleCfg,
-            {"gain": Expr("$qubit.gain"), "sweep": Range.between(5, 6, expts=11)},
+            {"gain": Expr("$qubit.gain"), "sweep": Range(5, 6, expts=11)},
         )
 
     def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> NoReturn:
@@ -255,7 +255,7 @@ class MissingModuleSlotAdapter(GlobalSourceAdapter):
             SampleCfg,
             {
                 "gain": Expr("$qubit.module.x180.gain"),
-                "sweep": Range.between(5, 6, expts=11),
+                "sweep": Range(5, 6, expts=11),
             },
         )
 

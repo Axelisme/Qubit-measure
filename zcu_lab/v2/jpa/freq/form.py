@@ -30,7 +30,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             },
             "jpa_rf_dev": rf_source,
             "sweep": {
-                "jpa_freq": Range.between(
+                "jpa_freq": Range(
                     "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
                 )
             },

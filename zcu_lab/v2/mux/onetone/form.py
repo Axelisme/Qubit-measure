@@ -53,7 +53,7 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
                 "reset": Hidden(),
                 "readout": readout,
             },
-            "sweep": {"df": Range.between(-1.0, 1.0, expts=101)},
+            "sweep": {"df": Range(-1.0, 1.0, expts=101)},
             "initial_delay": Hidden(),
         },
         fixed_elements=(READOUT_ELEMENTS,),

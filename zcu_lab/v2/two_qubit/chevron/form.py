@@ -65,8 +65,8 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
                 "readout": readout,
             },
             "drive": drive,
-            "frequency": Range.between(None, None, expts=25),
-            "duration": Range.between(None, None, expts=101),
+            "frequency": Range(None, None, expts=25),
+            "duration": Range(None, None, expts=101),
             "f1_centers": {
                 "g": Expr("$f1.ext.readout_cal.g_center"),
                 "e": Expr("$f1.ext.readout_cal.e_center"),

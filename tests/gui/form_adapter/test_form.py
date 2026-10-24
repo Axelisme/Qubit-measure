@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import typing
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Annotated
 
 import pytest
@@ -12,12 +12,7 @@ from zcu_tools import cfg_model as nodes
 from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta
 from zcu_tools.gui import form_adapter
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel, FormState
-from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.program.v2.sweep import SweepCfg
-from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
 
 class SweepSection(ConfigBase):
@@ -41,7 +36,7 @@ class ScalarCfg(ConfigBase):
 
 def test_field_order_is_local_partial_and_preserves_nested_order() -> None:
     env = FormEnv()
-    tree = {"sweep": {"freq": nodes.Range.between(1.0, 2.0, expts=3)}}
+    tree = {"sweep": {"freq": nodes.Range(1.0, 2.0, expts=3)}}
     default = form_adapter.Form(ScalarCfg, tree)
     try:
         ordered = form_adapter.Form(ScalarCfg, tree, field_order=("amount", "sweep"))
@@ -183,17 +178,13 @@ def test_failed_range_endpoint_requires_input(endpoint: str, expression: str) ->
 
 
 @pytest.mark.parametrize(
-    "factory", [nodes.Range, nodes.Range.between], ids=["direct", "between"]
-)
-@pytest.mark.parametrize(
     "blank", [("start",), ("stop",), ("start", "stop")], ids=["start", "stop", "both"]
 )
 def test_blank_range_endpoints_remain_required_when_input_keys_are_absent(
-    factory: Callable[[float | None, float | None, int], nodes.Range],
     blank: tuple[str, ...],
 ) -> None:
     env = FormEnv()
-    node = factory(
+    node = nodes.Range(
         None if "start" in blank else 2.0, None if "stop" in blank else 8.0, 4
     )
     form = form_adapter.Form(ScalarCfg, {"sweep": {"freq": node}})
@@ -276,7 +267,7 @@ class PreciseSweepCfg(ConfigBase):
 def test_sweep_decimals_decorate_only_float_endpoints(authored: bool) -> None:
     form = form_adapter.Form(
         PreciseSweepCfg,
-        {"sweep": nodes.Range.between("2 + 1", 9.0, 4)} if authored else {},
+        {"sweep": nodes.Range("2 + 1", 9.0, 4)} if authored else {},
     )
     env = FormEnv()
     state = FormState(form.default_input(env))
@@ -347,13 +338,6 @@ def test_hidden_explicit_none_overrides_core_default() -> None:
     )
 
 
-class DeviceCfg(ConfigBase):
-    """Core device names remain independent of aliases and sessions."""
-
-    flux_dev: str
-    optional_dev: str | None = None
-
-
 class Extras(BaseModel):
     """A GUI-only value is lowered without changing the core declaration."""
 
@@ -406,9 +390,7 @@ def test_core_tree_generates_schema_defaults_and_typed_cfg() -> None:
 
 def test_range_single_point_conversion_reports_core_error_at_sweep_path() -> None:
     assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
-    form = form_adapter.Form(
-        ScalarCfg, {"sweep": {"freq": nodes.Range.between(1, 2, expts=1)}}
-    )
+    form = form_adapter.Form(ScalarCfg, {"sweep": {"freq": nodes.Range(1, 2, expts=1)}})
     env = FormEnv()
     result = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
     assert isinstance(result, FormErrors)
@@ -425,48 +407,6 @@ def test_invalid_authored_tree_fails_at_construction(scenario: str) -> None:
         form_adapter.Form(ScalarCfg, tree)
 
 
-def alias_env() -> FormEnv:
-    """Capture aliases without connected drivers, point I/O or hardware."""
-    library = LibrarySnapshot(
-        ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
-    )
-    parameters = ParameterContext(
-        point=PointDocument(
-            format="zcu.parameter-container",
-            format_version="1.0",
-            general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
-        ),
-        library=library,
-        target=SavedPoint(entry_id="synthetic", point="synthetic"),
-        roles=None,
-        storage=None,
-    ).bind_aliases((AliasRow("flux_dev", "yoko"), AliasRow("missing", "")), {})
-    return FormEnv(parameters=parameters, library=library)
-
-
-def test_alias_name_resolves_direct_name_and_missing_required_is_invalid() -> None:
-    assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
-    env = alias_env()
-    form = form_adapter.Form(
-        DeviceCfg,
-        {
-            "flux_dev": nodes.AliasName("flux_dev", choices_source=None),
-            "optional_dev": nodes.AliasName("missing", choices_source=None),
-        },
-    )
-    assert form.default_input(env).data == {"flux_dev": "yoko"}
-    assert form.to_cfg(
-        require_result(FormState(form.default_input(env)), env), env
-    ) == DeviceCfg(flux_dev="yoko")
-    missing = form_adapter.Form(
-        DeviceCfg, {"flux_dev": nodes.AliasName("missing", choices_source=None)}
-    )
-    state = FormState(missing.default_input(env))
-    result = state.result(env)
-    assert isinstance(result, FormErrors)
-    assert ("flux_dev",) in result.messages
-
-
 def lower_extras(extras: Extras, cfg: ScalarCfg) -> ScalarCfg:
     """Multiply a typed core value using a GUI-only input."""
     return cfg.model_copy(update={"amount": cfg.amount * extras.multiplier})
@@ -476,7 +416,7 @@ def test_extras_lower_receives_validated_named_models() -> None:
     assert hasattr(form_adapter, "Form"), "Missing core-derived Form"
     form = form_adapter.Form(
         ScalarCfg,
-        {"sweep": {"freq": nodes.Range.between(0, 2, expts=3)}},
+        {"sweep": {"freq": nodes.Range(0, 2, expts=3)}},
         extras=Extras,
         lower=lower_extras,
     )
@@ -484,38 +424,6 @@ def test_extras_lower_receives_validated_named_models() -> None:
     cfg = form.to_cfg(require_result(FormState(form.default_input(env)), env), env)
     assert isinstance(cfg, ScalarCfg)
     assert cfg.amount == 4
-
-
-class NullableDeviceNames(ConfigBase):
-    """Nullable and required are separate core constraints."""
-
-    optional_dev: str | None = None
-    nullable_required_dev: str | None
-
-
-def test_nullable_alias_choices_accept_none_without_device_sources() -> None:
-    env = FormEnv()
-    form = form_adapter.Form(
-        NullableDeviceNames,
-        {
-            "optional_dev": nodes.AliasName("missing"),
-            "nullable_required_dev": nodes.AliasName("also_missing"),
-        },
-    )
-    state = FormState(form.default_input(env))
-    missing = state.result(env)
-    assert isinstance(missing, FormErrors)
-    assert ("nullable_required_dev",) in missing.messages
-    state.write({("nullable_required_dev",): None}, env)
-    result = require_result(state, env)
-    assert form.to_cfg(result, env) == NullableDeviceNames(nullable_required_dev=None)
-    assert form.model.choices(env) == {
-        ("optional_dev",): (None,),
-        ("nullable_required_dev",): (None,),
-    }
-    required = form_adapter.Form(DeviceCfg, {"flux_dev": nodes.AliasName("missing")})
-    assert required.model.choices(env)[("flux_dev",)] == ()
-    assert isinstance(FormState(required.default_input(env)).result(env), FormErrors)
 
 
 class DisplayedCfg(ConfigBase):

@@ -10,7 +10,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.core import T1WithToneSweepCfg
 def _length_sweep(ctx: FormContext) -> Range:
     # Zero is not a valid probe duration; the operator must choose the start.
     stop = t1_initial_time(ctx.parameters, multiplier=5.0, with_tone=True)
-    return Range.between(None, stop, expts=51)
+    return Range(None, stop, expts=51)
 
 
 def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
@@ -36,7 +36,7 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
             },
             "sweep": {
                 "length": _length_sweep(ctx),
-                "gain": Range.between(0.0, 1.0, expts=21),
+                "gain": Range(0.0, 1.0, expts=21),
                 "freq": Hidden(),
             },
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
