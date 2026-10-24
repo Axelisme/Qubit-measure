@@ -6,6 +6,7 @@ import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
@@ -28,6 +29,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ComponentSchema
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -72,13 +74,15 @@ def PlottedSavingAdapter_get_writeback_items(
     ]
 
 
-def PlottedSavingAdapter_run(cfg: SavingCfg, *, context: RunContext) -> SavingResult:
+def PlottedSavingAdapter_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
     record = SavingAdapter.run(cfg, context=context)
     context.plots.subplots("signal")
 
     def draw(figure: Figure) -> None:
         axes = figure.axes[0]
-        axes.plot(record.frequency, record.signal.real, label="Signal")
+        axes.plot(record.result.frequency, record.result.signal.real, label="Signal")
         axes.legend()
 
     context.plots.draw("signal", draw)
@@ -119,6 +123,7 @@ def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
         app.controller.context_control.add_component(
             "calibration", "synthetic/calibration", {}
         )
+        app.controller.install_soc(MagicMock(), make_mock_soccfg())
         app.controller.new_tab("synthetic")
         # Load's File chooser starts at the opened entry's database directory.
         # Keep both relative-path validation and real chooser input rooted there.

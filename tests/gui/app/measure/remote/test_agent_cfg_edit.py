@@ -128,13 +128,19 @@ def test_reset_during_active_run_preserves_the_publication(live_tab, monkeypatch
     release = Event()
     original_run = SampleAdapter.run
 
-    def blocked_run(self, req, raw_cfg, *, context):
+    def blocked_run(cfg, *, context):
         # The test finally releases the held collaborator.
         if not release.wait(timeout=30):
             raise TimeoutError("test did not release the fake run")
-        return original_run(self, req, raw_cfg, context=context)
+        return original_run(cfg, context=context)
 
-    monkeypatch.setattr(SampleAdapter, "run", blocked_run)
+    fixture.state.get_tab(tab_id).adapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=blocked_run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+    )
     sock = open_client(fixture.service.port)
     try:
         observe_run_inputs(

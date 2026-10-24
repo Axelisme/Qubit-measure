@@ -1,12 +1,8 @@
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import pytest
 from qtpy.QtCore import QMetaObject, Qt
 from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import Container
-from zcu_tools.experiment.native_persistence import RestoredRun
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     SessionEnv,
@@ -14,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
-from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -23,9 +18,11 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.experiment._saving_support import SavingCfg
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._load_support import write_native_file
-from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
+from tests.gui.app.measure._native_save_support import SavingAdapter
+from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import (
     call,
     mcp_client,
@@ -34,12 +31,7 @@ from tests.gui.app.measure.remote._helpers import (
 from tests.gui.app.measure.ui._qt_interactions import modal_action
 
 
-@dataclass
-class Result:
-    data_path: str
-
-
-class RuntimeCfg(ConfigBase):
+class RuntimeCfg(SavingCfg):
     """The experiment cfg this adapter runs and stores with its results."""
 
     knob: int = 7
@@ -51,12 +43,12 @@ def LoadAdapter_make_form(ctx: FormContext) -> Form[RuntimeCfg]:
 
 
 LoadAdapter = Adapter(
-    spec=replace(replace(OldAdapter.spec, cfg_type=RuntimeCfg), tag="test/load"),
+    spec=replace(SavingAdapter.spec, tag="test/load"),
     make_form=LoadAdapter_make_form,
-    run=OldAdapter.run,
+    run=SavingAdapter.run,
     guide=None,
     analysis=None,
-    post_analysis=OldAdapter.post_analysis,
+    post_analysis=None,
 )
 
 
@@ -65,7 +57,7 @@ def app(qapp, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     write_native_file(tmp_path / "result.hdf5")
     write_native_file(tmp_path / "missing.hdf5", gain=2.0)
-    write_native_file(tmp_path / "bad.hdf5")
+    write_native_file(tmp_path / "bad.hdf5", tag="wrong/experiment")
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = Registry()
     registry.register("demo", LoadAdapter)
@@ -156,12 +148,6 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     assert state.active_tab_id == focused
     assert window.get_view_snapshot()["active_tab_id"] == focused
 
-    def reject_load(
-        self: LoadAdapter, stored: Container
-    ) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
-        raise LoadDataError("bad data", reason_code="invalid_data_file")
-
-    monkeypatch.setattr(LoadAdapter, "restore", reject_load)
     remote = RemoteControlAdapter(
         controller=ctrl,
         opts=ControlOptions(port=0),
@@ -173,7 +159,7 @@ def test_failed_mcp_load_restores_non_neighbor_visible_tab(
     try:
         invoke("connect", {"port": port})
         invoke("rpc_call", {"method": "context.snapshot"})
-        with pytest.raises(GuiRpcError, match="bad data"):
+        with pytest.raises(GuiRpcError, match="Cannot load this data file"):
             invoke(
                 "rpc_call",
                 {

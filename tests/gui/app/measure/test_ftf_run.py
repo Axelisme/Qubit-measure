@@ -8,6 +8,7 @@ import yaml
 from zcu_tools.datafile import load
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
@@ -62,7 +63,10 @@ def FTFAcquisitionAdapter_run(cfg, *, context):
     )
     assert acquired is not None
     iq = acquired[0][0]
-    return SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1])
+    return RunRecord(
+        cfg=cfg,
+        result=SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1]),
+    )
 
 
 FTFAcquisitionAdapter = Adapter(

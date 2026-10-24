@@ -9,10 +9,21 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.datafile import save
 from zcu_tools.device import FakeDevice
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.native_persistence import (
+    RestoredRun,
+    metadata_from_container,
+    prepare_run_data,
+)
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import ContextReadiness, SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
+    ContextReadiness,
+    SessionEnv,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -48,6 +59,7 @@ from tests.gui._controller_adapter import (
     InteractiveAdapter,
     RecordingAdapter,
     RecordingCfg,
+    RecordingResult,
 )
 from tests.gui._qt_waits import qt_until as _wait_for
 from tests.gui.app.measure._load_support import historical_metadata, write_native_file
@@ -324,7 +336,7 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
 
     acquired = RunRecord(None, object())
 
-    def _capture_run(req, accepted: RecordingCfg, *, context):
+    def _capture_run(accepted: RecordingCfg, *, context):
         captured["cfg"] = accepted
         assert isinstance(context.plots, Plots)
         return acquired
@@ -389,19 +401,30 @@ def test_result_commit_survives_analysis_preparation_failure(
     cf, monkeypatch, source, tmp_path
 ):
     tab_id = cf.ctrl.new_tab("fake")
-    adapter = cf.state.get_tab(tab_id).adapter
-    monkeypatch.setattr(
-        adapter,
-        "capabilities",
-        dataclasses.replace(adapter.capabilities, load_data=True),
-    )
 
     def fail_params(*_args):
         raise ValueError("analysis defaults unavailable")
 
-    loaded = RunRecord(None, object(), historical_metadata())
-    monkeypatch.setattr(adapter, "get_analyze_params", fail_params)
-    monkeypatch.setattr(adapter, "restore", lambda _stored: RestoredRun(loaded, None))
+    metadata = historical_metadata().model_copy(
+        update={"experiment": RecordingAdapter.spec.tag}
+    )
+    loaded = RunRecord(RecordingCfg(), RecordingResult(), metadata)
+
+    def run(cfg: RecordingCfg, *, context: RunContext):
+        if source == "cancelled":
+            entered.set()
+            # Cancellation assertions release the accepted run in finally.
+            if not release.wait(30):
+                raise RuntimeError("test did not release partial run")
+        return dataclasses.replace(loaded, cfg=cfg)
+
+    cf.state.get_tab(tab_id).adapter = Adapter(
+        spec=RecordingAdapter.spec,
+        make_form=RecordingAdapter.make_form,
+        run=run,
+        guide=None,
+        analysis=Analysis(fn=RecordingAdapter.analyze, options=fail_params),
+    )
     cf.state.update_tab_analyze_param_instance(tab_id, object())
     facts = []
     cf.bus.subscribe(TabContentChangedPayload, facts.append)
@@ -410,15 +433,6 @@ def test_result_commit_survives_analysis_preparation_failure(
         cf.bus.subscribe(RunFinishedPayload, terminal.append)
         entered, release = threading.Event(), threading.Event()
 
-        def partial_run(*_args, **_kwargs):
-            entered.set()
-            # Cancellation assertions release the accepted run in finally.
-            if not release.wait(30):
-                raise RuntimeError("test did not release partial run")
-            return loaded
-
-        if source == "cancelled":
-            monkeypatch.setattr(adapter, "run", partial_run)
         cf.ctrl.start_run(tab_id)
         if source == "cancelled":
             try:
@@ -441,8 +455,10 @@ def test_result_commit_survives_analysis_preparation_failure(
         )
     else:
         path = tmp_path / "loaded.hdf5"
-        write_native_file(path)
-        monkeypatch.setattr(adapter, "experiment_tag", "test/load")
+        prepared = prepare_run_data(
+            loaded, spec=RecordingAdapter.spec, comment="history"
+        )
+        save(path, prepared.to_container(metadata))
         outcome = cf.ctrl.load_tab_result(tab_id, str(path))
         assert outcome.analysis_error == "analysis defaults unavailable"
         assert outcome.has_analyze_params is False
@@ -450,7 +466,9 @@ def test_result_commit_survives_analysis_preparation_failure(
     snapshot = cf.ctrl.get_tab_snapshot(tab_id)
     assert snapshot.run.result is not None
     if source == "load":
-        assert snapshot.run.result is loaded
+        assert snapshot.run.result is not None
+        assert snapshot.run.result.result == loaded.result
+        assert snapshot.run.result.metadata == metadata
     assert snapshot.analysis.params is None
     assert snapshot.analysis.result is None
     assert snapshot.post_analysis.result is None
@@ -611,11 +629,10 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
     )
     loaded = RunRecord(None, object(), historical_metadata())
     adapter = MagicMock()
-    # Final contract requires explicit load_data capability; RecordingAdapter's
-    # default lacks it, so set load_data True for the driving path.
+    # This isolated host collaborator advertises the same Load admission as a value.
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 
-    adapter.capabilities = AdapterCapabilities(requires_soc=False, load_data=True)
+    adapter.capabilities = AdapterCapabilities(load_data=True)
     adapter.experiment_tag = "test/load"
     adapter.restore.return_value = RestoredRun(loaded, None)
     adapter.get_analyze_params.return_value = _LoadedAnalyzeParams(threshold=0.7)

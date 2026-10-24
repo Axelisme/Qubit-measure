@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -108,10 +109,16 @@ def PaneAdapter_get_post_writeback_items(
     ]
 
 
+def SavingCore_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
+
+
 PaneAdapter = Adapter(
     spec=replace(SavingCore.AXES_SPEC, tag="test/saving"),
     make_form=PaneAdapter_make_form,
-    run=SavingCore().run,
+    run=SavingCore_run,
     guide=None,
     analysis=Analysis(
         fn=PaneAdapter_analyze,

@@ -27,7 +27,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    RunRequest,
     SessionEnv,
     WritebackRequest,
 )
@@ -76,10 +75,10 @@ def _parameter_values(items: list[WritebackItem]) -> dict[str, WritebackValues]:
     return values
 
 
-def _default_analyze_params(
-    adapter: PairAdapter, result: SampleRun, ctx: SessionEnv
-) -> SampleParams:
-    return adapter.get_analyze_params(result, ctx)
+def _default_analyze_params(result: SampleRun, ctx: SessionEnv) -> SampleParams:
+    params = PairAdapter.get_analyze_params(result, ctx)
+    assert params is not None
+    return params
 
 
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
@@ -91,7 +90,6 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
 
     run_plots = Plots(NonPresentingHost())
     result = adapter.run(
-        RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None),
         SampleCfg(sweep=SweepCfg(start=5.0, stop=6.0, expts=11, step=0.1)),
         context=RunContext(
             ctx.soc, ctx.soccfg, run_plots, devices={}, scope=Scope("run")
@@ -103,7 +101,7 @@ def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     analyze_result = adapter.analyze(
         AnalyzeRequest(
             run_result=result,
-            analyze_params=_default_analyze_params(adapter, result, ctx),
+            analyze_params=_default_analyze_params(result, ctx),
             parameters=ctx.parameters,
         ),
         plots=analysis_plots,

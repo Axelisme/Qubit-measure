@@ -67,9 +67,11 @@ def SavingAdapter_make_form(ctx: FormContext) -> Form[SavingCfg]:
     return Form(SavingCfg, {})
 
 
-def SavingAdapter_run(cfg: SavingCfg, *, context: RunContext) -> SavingResult:
+def SavingAdapter_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
     """Acquire a typed record using only the offline fake backend."""
-    return SavingCore().run(cfg, context=context)
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
 
 
 SavingAdapter = Adapter(

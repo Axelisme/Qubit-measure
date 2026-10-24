@@ -16,6 +16,7 @@ from zcu_tools.experiment import (
     Experiment,
     ZSpec,
 )
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -129,10 +130,16 @@ def SpectrumAdapter_get_writeback_items(
     ]
 
 
+def SpectrumCore_run(
+    cfg: SpectrumCfg, *, context: RunContext
+) -> RunRecord[SpectrumCfg, SpectrumResult]:
+    return RunRecord(cfg=cfg, result=SpectrumCore().run(cfg, context=context))
+
+
 SpectrumAdapter = Adapter(
     spec=replace(SpectrumCore.AXES_SPEC, tag="test/spectrum"),
     make_form=SpectrumAdapter_make_form,
-    run=SpectrumCore().run,
+    run=SpectrumCore_run,
     guide=None,
     analysis=Interactive(
         plugin=SpectrumAdapter_make_interactive_plugin,

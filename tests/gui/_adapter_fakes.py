@@ -33,12 +33,14 @@ def dummy_form(ctx: FormContext) -> Form[ConfigBase]:
     return Form(ConfigBase, {})
 
 
-def dummy_run(cfg: ConfigBase, *, context: RunContext) -> DummyResult:
-    return DummyResult()
+def dummy_run[C: ConfigBase](
+    cfg: C, *, context: RunContext
+) -> RunRecord[C, DummyResult]:
+    return RunRecord(cfg=cfg, result=DummyResult())
 
 
-def dummy_analyze(
-    req: AnalyzeRequest[RunRecord[ConfigBase, DummyResult], DummyAnalyzeParams],
+def dummy_analyze[C: ConfigBase](
+    req: AnalyzeRequest[RunRecord[C, DummyResult], DummyAnalyzeParams],
     *,
     plots: Plots,
 ) -> DummyAnalyzeResult:

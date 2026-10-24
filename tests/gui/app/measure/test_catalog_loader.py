@@ -65,6 +65,7 @@ def test_reload_keeps_templates_for_open_and_reset(tmp_path: Path, qapp) -> None
     (root / "catalog.py").write_text(
         """from zcu_tools.cfg_model import ConfigBase, Template, PulseCfg
 from zcu_tools.experiment import AxesSpec, ZSpec
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter as Definition
 from zcu_tools.gui.form_adapter import Form, FormContext
 from tests.gui._adapter_fakes import DummyResult
@@ -74,7 +75,7 @@ def make_form(ctx: FormContext) -> Form[Cfg]:
     return Form(Cfg, {"probe": Template("probe")})
 Adapter = Definition(spec=AxesSpec(axes=(), z=ZSpec("value", "value", ""),
     result_type=DummyResult, cfg_type=Cfg, tag="test/template"),
-    make_form=make_form, run=lambda cfg, *, context: DummyResult(), guide=None)
+    make_form=make_form, run=lambda cfg, *, context: RunRecord(cfg=cfg, result=DummyResult()), guide=None)
 def register_all(registry):
     registry.register("demo", Adapter)
 """

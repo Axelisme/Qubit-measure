@@ -227,9 +227,7 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
     bg.run_work()
 
     context = adapter.run.call_args.kwargs["context"]
-    adapter.run.assert_called_once_with(
-        inputs.request, inputs.accepted_cfg.cfg, context=context
-    )
+    adapter.run.assert_called_once_with(inputs.accepted_cfg.cfg, context=context)
     assert context.plots is plots
     assert context.soc is inputs.request.soc
     assert context.soccfg is inputs.request.soccfg
@@ -251,8 +249,8 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
 
     def RecordingSnapshotAdapter_run(
         cfg: SampleCfg, *, context: RunContext
-    ) -> SampleResult:
-        return SampleResult(np.empty(0))
+    ) -> RunRecord[SampleCfg, SampleResult]:
+        return RunRecord(cfg=cfg, result=SampleResult(np.empty(0)))
 
     RecordingSnapshotAdapter = Adapter(
         spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),

@@ -18,6 +18,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AxesSpec, ZSpec
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
@@ -391,7 +392,7 @@ def footer_form_window(tmp_path: Path, qapp: QApplication) -> Iterator[MainWindo
             tag="test/DiagnosticAdapter",
         ),
         make_form=DiagnosticAdapter_make_form,
-        run=lambda cfg, *, context: DiagnosticResult(),
+        run=lambda cfg, *, context: RunRecord(cfg=cfg, result=DiagnosticResult()),
         guide=None,
         analysis=None,
         post_analysis=None,

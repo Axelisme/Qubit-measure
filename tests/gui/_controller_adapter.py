@@ -38,8 +38,10 @@ def RecordingAdapter_make_form(ctx: FormContext) -> Form[RecordingCfg]:
     return Form(RecordingCfg, {})
 
 
-def RecordingAdapter_run(cfg: RecordingCfg, *, context: RunContext) -> RecordingResult:
-    return RecordingResult()
+def RecordingAdapter_run(
+    cfg: RecordingCfg, *, context: RunContext
+) -> RunRecord[RecordingCfg, RecordingResult]:
+    return RunRecord(cfg=cfg, result=RecordingResult())
 
 
 def RecordingAdapter_get_analyze_params(

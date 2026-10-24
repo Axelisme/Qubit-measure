@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
@@ -52,7 +53,10 @@ def NoiseAdapter_run(cfg, *, context):
     )
     assert acquired is not None
     iq = acquired[0][0]
-    return SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1])
+    return RunRecord(
+        cfg=cfg,
+        result=SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1]),
+    )
 
 
 NoiseAdapter = Adapter(

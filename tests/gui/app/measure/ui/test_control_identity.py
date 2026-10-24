@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QMetaObject, Qt, QTimer
@@ -29,6 +30,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     SessionEnv,
@@ -59,6 +61,7 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
@@ -68,6 +71,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
 from tests.gui.app.measure._components import ResonatorSchema
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
 from tests.gui.app.measure.ui._qt_interactions import modal_action
@@ -76,11 +80,12 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
 
-def StoppableAdapter_run(cfg: ConfigBase, *, context: RunContext) -> DummyResult:
-    del cfg
+def StoppableAdapter_run(
+    cfg: ConfigBase, *, context: RunContext
+) -> RunRecord[ConfigBase, DummyResult]:
     if not context.scope.stop.event.wait(30):
         raise RuntimeError("test run was not stopped")
-    return DummyResult()
+    return RunRecord(cfg=cfg, result=DummyResult())
 
 
 StoppableAdapter = Adapter(
@@ -93,22 +98,13 @@ StoppableAdapter = Adapter(
 )
 
 
-class ModalRuntimeCfg(ConfigBase):
-    knob: int = 42
-
-
-@dataclass
-class ModalLoadResult:
-    data_path: str
-
-
 ModalLoadAdapter = Adapter(
-    spec=replace(OldAdapter.spec, tag="test/load"),
-    make_form=OldAdapter.make_form,
-    run=OldAdapter.run,
+    spec=replace(SavingAdapter.spec, tag="test/load"),
+    make_form=SavingAdapter.make_form,
+    run=SavingAdapter.run,
     guide=None,
-    analysis=OldAdapter.analysis,
-    post_analysis=OldAdapter.post_analysis,
+    analysis=None,
+    post_analysis=None,
 )
 
 
@@ -192,7 +188,7 @@ def control_ui(
         devices = DeviceManager()
         devices.register_device("bias", FakeDevice(fast_mode=False))
     ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
         registry,
         None,
         BaseEventBus(),

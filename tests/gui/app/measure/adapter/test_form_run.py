@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
@@ -22,8 +23,10 @@ class MeasurementResult:
     cfg: MeasurementCfg
 
 
-def recording_run(cfg: MeasurementCfg, *, context: RunContext) -> MeasurementResult:
-    return MeasurementResult(cfg)
+def recording_run(
+    cfg: MeasurementCfg, *, context: RunContext
+) -> RunRecord[MeasurementCfg, MeasurementResult]:
+    return RunRecord(cfg=cfg, result=MeasurementResult(cfg))
 
 
 def measurement_form(ctx: FormContext) -> Form[MeasurementCfg]:
@@ -63,8 +66,8 @@ def test_base_run_preserves_form_output_identity() -> None:
     )
     try:
         result = FormAdapter.run(measurement(accepted.cfg), context=context)
-        assert result.cfg is accepted.cfg
-        assert result.cfg.amount == 4.5
+        assert result.result.cfg is accepted.cfg
+        assert result.result.cfg.amount == 4.5
     finally:
         plots.finish()
         plots.release()

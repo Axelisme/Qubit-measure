@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, ContextReadiness, SessionEnv
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
@@ -34,9 +35,11 @@ def test_form_output_is_forwarded_without_rebuilding() -> None:
     captures: list[str] = []
     factories: list[str] = []
 
-    def run(cfg: ChoiceCfg, *, context: RunContext) -> ChoiceResult:
+    def run(
+        cfg: ChoiceCfg, *, context: RunContext
+    ) -> RunRecord[ChoiceCfg, ChoiceResult]:
         executed.append(cfg)
-        return ChoiceResult("complete")
+        return RunRecord(cfg=cfg, result=ChoiceResult("complete"))
 
     def factory(ctx: FormContext) -> Form[ChoiceCfg]:
         factories.append("factory")

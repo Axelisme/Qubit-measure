@@ -8,6 +8,7 @@ from threading import Event
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
@@ -31,7 +32,9 @@ def soc_app(
 ) -> Iterator[tuple[LaunchedMeasureApp, Event, Event]]:
     entered, release = Event(), Event()
 
-    def HeldAdapter_run(cfg: SavingCfg, *, context: RunContext) -> SavingResult:
+    def HeldAdapter_run(
+        cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
         entered.set()
         if not release.wait(30):
             raise RuntimeError("scenario did not release synthetic run")

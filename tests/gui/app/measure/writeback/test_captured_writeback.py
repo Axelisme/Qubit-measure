@@ -60,7 +60,11 @@ from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
-from tests.gui.app.measure._native_save_support import PaneSummary, native_save_session
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
+    PaneSummary,
+    native_save_session,
+)
 from tests.gui.app.measure._record_support import require_metadata, require_record
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -358,12 +362,12 @@ def test_analysis_draft_uses_start_run_identity(
             return []
 
         tab.adapter = Adapter(
-            spec=tab.adapter.spec,
-            make_form=tab.adapter.make_form,
-            run=tab.adapter.run,
+            spec=AnalysisSavingAdapter.spec,
+            make_form=AnalysisSavingAdapter.make_form,
+            run=AnalysisSavingAdapter.run,
             guide=None,
             analysis=Analysis(fn=analyze, writeback=proposals),
-            post_analysis=tab.adapter.post_analysis,
+            post_analysis=AnalysisSavingAdapter.post_analysis,
         )
         control = ContextControlFacet(context=native.context)
         writeback = WritebackService(control, arb_names=lambda: ())
@@ -497,11 +501,11 @@ def test_post_analysis_draft_retains_primary_identity(
             )
 
         tab.adapter = Adapter(
-            spec=tab.adapter.spec,
-            make_form=tab.adapter.make_form,
-            run=tab.adapter.run,
+            spec=AnalysisSavingAdapter.spec,
+            make_form=AnalysisSavingAdapter.make_form,
+            run=AnalysisSavingAdapter.run,
             guide=None,
-            analysis=tab.adapter.analysis,
+            analysis=AnalysisSavingAdapter.analysis,
             post_analysis=PostAnalysis(fn=post_analyze, writeback=proposals),
         )
         runner = OperationRunner(

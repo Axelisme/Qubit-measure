@@ -55,7 +55,7 @@ def make_state(
     tab_id = "tab-1"
     adapter = MagicMock()
     adapter.run.return_value = RunRecord(None, object())
-    adapter.capabilities = AdapterCapabilities(requires_soc=True)
+    adapter.capabilities = AdapterCapabilities()
     state.add_tab(
         tab_id,
         Session(

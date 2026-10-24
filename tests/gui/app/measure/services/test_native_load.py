@@ -58,6 +58,7 @@ from zcu_tools.resources.entry import (
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
     NativeSaveSession,
     PaneParams,
     PaneSummary,
@@ -230,12 +231,12 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         return [ParameterWriteback("$source_qubit.rate", "Rate", proposed_value=12.0)]
 
     tab.adapter = Adapter(
-        spec=tab.adapter.spec,
-        make_form=tab.adapter.make_form,
-        run=tab.adapter.run,
+        spec=AnalysisSavingAdapter.spec,
+        make_form=AnalysisSavingAdapter.make_form,
+        run=AnalysisSavingAdapter.run,
         guide=None,
         analysis=Analysis(fn=analyze, writeback=proposals),
-        post_analysis=tab.adapter.post_analysis,
+        post_analysis=AnalysisSavingAdapter.post_analysis,
     )
     writeback = WritebackService(control, arb_names=lambda: ())
     runner = OperationRunner(

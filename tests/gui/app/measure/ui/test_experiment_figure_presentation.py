@@ -90,7 +90,9 @@ def LayoutAdapter_draw_figures(plots: Plots, count: int, prefix: str) -> None:
         plots.draw(name, draw)
 
 
-def PresentationAdapter_run(cfg: SavingCfg, *, context: RunContext) -> SavingResult:
+def PresentationAdapter_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
     record = AnalysisSavingAdapter.run(cfg, context=context)
     context.plots.subplots("signal")
 
@@ -165,7 +167,9 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
 def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
     layout_counts = [3, 3]
 
-    def LayoutAdapter_run(cfg: SavingCfg, *, context: RunContext) -> SavingResult:
+    def LayoutAdapter_run(
+        cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
         record = AnalysisSavingAdapter.run(cfg, context=context)
         layout_counts[0] += 1
         LayoutAdapter_draw_figures(context.plots, layout_counts[0], "Run")

@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting import compute_fit_quality
-from zcu_tools.cfg_model import PulseSpec
+from zcu_tools.cfg_model import ConfigBase, PulseSpec
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     AnalyzeResultBase,
@@ -19,7 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.gui._adapter_fakes import DummyAdapter
+from tests.gui._adapter_fakes import DummyAdapter, DummyResult
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:
@@ -76,7 +77,7 @@ def test_base_adapter_analyze_raises_by_default():
 
     adapter = _make_concrete_adapter()
     req = AnalyzeRequest(
-        run_result=MagicMock(),
+        run_result=RunRecord(ConfigBase(), DummyResult()),
         analyze_params=None,
         parameters=None,
     )

@@ -46,7 +46,7 @@ class SampleCfg(ConfigBase):
     sweep: SweepCfg
 
 
-SampleRun = RunRecord[ConfigBase, SampleResult]
+SampleRun = RunRecord[SampleCfg, SampleResult]
 
 
 @dataclass
@@ -64,20 +64,22 @@ def SampleAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
     return Form(SampleCfg, {"sweep": Range.between(5.0, 6.0, expts=11)})
 
 
-def SampleAdapter_run(cfg: ConfigBase, *, context: RunContext) -> SampleResult:
-    return SampleResult(np.array([0.1, 0.2, 0.3]))
+def SampleAdapter_run[C: ConfigBase](
+    cfg: C, *, context: RunContext
+) -> RunRecord[C, SampleResult]:
+    return RunRecord(cfg=cfg, result=SampleResult(np.array([0.1, 0.2, 0.3])))
 
 
-def SampleAdapter_analyze(
-    req: AnalyzeRequest[SampleRun, SampleParams], *, plots: Plots
+def SampleAdapter_analyze[C: ConfigBase](
+    req: AnalyzeRequest[RunRecord[C, SampleResult], SampleParams], *, plots: Plots
 ) -> SampleAnalysis:
     _, ax = plots.subplots("fit")
     ax.plot(req.run_result.result.data)
     return SampleAnalysis(peak=float(np.max(req.run_result.result.data)))
 
 
-def SampleAdapter_get_writeback_items(
-    req: WritebackRequest[SampleRun, SampleAnalysis],
+def SampleAdapter_get_writeback_items[C: ConfigBase](
+    req: WritebackRequest[RunRecord[C, SampleResult], SampleAnalysis],
 ) -> Sequence[WritebackItem]:
     return [
         ParameterWriteback(
@@ -110,8 +112,8 @@ MODULE_PROPOSAL_TARGET = "Q1.pulses.tuned"
 MODULE_PROPOSAL_WAVEFORM = "Q1.waveforms.flat"
 
 
-def ModuleProposalAdapter_get_writeback_items(
-    req: WritebackRequest[SampleRun, SampleAnalysis],
+def ModuleProposalAdapter_get_writeback_items[C: ConfigBase](
+    req: WritebackRequest[RunRecord[C, SampleResult], SampleAnalysis],
 ) -> Sequence[WritebackItem]:
     return [
         ModuleWriteback(
@@ -157,8 +159,8 @@ class EmptyParams:
     pass
 
 
-def PairAdapter_get_writeback_items(
-    req: WritebackRequest[SampleRun, SampleAnalysis],
+def PairAdapter_get_writeback_items[C: ConfigBase](
+    req: WritebackRequest[RunRecord[C, SampleResult], SampleAnalysis],
 ) -> Sequence[WritebackItem]:
     return [
         ParameterWriteback("r_f", "First", 6100.0),

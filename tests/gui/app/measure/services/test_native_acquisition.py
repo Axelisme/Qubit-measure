@@ -14,7 +14,7 @@ from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    RunRequest,
+    Adapter,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
@@ -52,6 +52,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
+    SavingAdapter,
 )
 from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure._synthetic import ALIAS_PRESET
@@ -91,6 +92,9 @@ def _acquire_to_terminal(
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
+    session.state.set_context(
+        replace(session.state.session_env, soc=MagicMock(), soccfg=MagicMock())
+    )
     session.state.get_tab("tab").cfg.reset()
     inputs = GuardService(session.state).capture_run_inputs("tab")
     finished: list[RunFinishedPayload] = []
@@ -108,6 +112,43 @@ def _acquire_to_terminal(
     assert len(finished) == 1
     assert not session.state.is_tab_busy("tab")
     return token, finished[0]
+
+
+def test_run_without_cfg_records_acquired_evidence(
+    native_session: NativeSaveSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = native_session
+
+    def acquire(
+        cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        record = SavingAdapter.run(cfg, context=context)
+        return RunRecord(cfg=None, result=record.result)
+
+    session.state.get_tab("tab").adapter = Adapter(
+        spec=SavingAdapter.spec,
+        make_form=SavingAdapter.make_form,
+        run=acquire,
+        guide=None,
+    )
+    token, terminal = _acquire_to_terminal(session, monkeypatch)
+    assert terminal.outcome == "finished"
+    outcome = session.handles.known_outcome(token)
+    assert outcome is not None and outcome.status == "finished"
+    record = require_record(session.state.get_tab("tab").run)
+    assert record.cfg is None
+    metadata = record.metadata
+    assert metadata is not None
+    (event,) = session.entry.ledger.events()
+    assert event.kind == "acquired" and event.origin == "gui"
+    assert event.at == metadata.finished_at
+    assert isinstance(event.payload, AcquiredPayload)
+    assert event.payload.run_id == metadata.run_id
+    assert event.payload.experiment == metadata.experiment
+    assert event.payload.point == "p"
+    assert event.payload.roles == dict(metadata.snapshot.roles)
+    assert not (session.entry.database_path / "runs").exists()
 
 
 @pytest.mark.parametrize("frontend", ["gui", "mcp"])
@@ -167,7 +208,7 @@ def role_application(
 ) -> Generator[tuple[State, AppServices, BaseEventBus]]:
     """Compose offline production services and restore registry/Qt owners."""
     before = registry_state()
-    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    state = State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=MagicMock()))
     bus = BaseEventBus()
     registry = Registry()
     registry.register("role_saving", RoleSavingAdapter)
@@ -292,22 +333,25 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
     failure: bool,
 ) -> None:
     session = native_session
-    adapter = session.state.get_tab("tab").adapter
-    original = adapter.run
+    original = SavingAdapter.run
 
     def acquire(
-        req: RunRequest,
         cfg: SavingCfg,
         *,
         context: RunContext,
     ) -> RunRecord[SavingCfg, SavingResult]:
         if failure:
             raise RuntimeError("offline acquisition failed")
-        record = original(req, cfg, context=context)
+        record = original(cfg, context=context)
         context.scope.stop.set()
         return record
 
-    monkeypatch.setattr(adapter, "run", acquire)
+    session.state.get_tab("tab").adapter = Adapter(
+        spec=SavingAdapter.spec,
+        make_form=SavingAdapter.make_form,
+        run=acquire,
+        guide=None,
+    )
     token, terminal = _acquire_to_terminal(session, monkeypatch)
     outcome = session.handles.known_outcome(token)
     assert outcome is not None

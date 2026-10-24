@@ -7,6 +7,7 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
 from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
 )
@@ -35,8 +36,10 @@ def TraceAdapter_make_form(ctx: FormContext) -> Form[TraceCfg]:
     return Form(TraceCfg, {"amount": Expr("general.ext.amount")})
 
 
-def TraceAdapter_run(cfg: TraceCfg, *, context: RunContext) -> TraceResult:
-    return TraceResult(cfg)
+def TraceAdapter_run(
+    cfg: TraceCfg, *, context: RunContext
+) -> RunRecord[TraceCfg, TraceResult]:
+    return RunRecord(cfg=cfg, result=TraceResult(cfg))
 
 
 TraceAdapter = Adapter(
@@ -95,7 +98,7 @@ def test_tab_factory_errors_surface_at_use_and_reset_keeps_live_form(
             tag="test/FactoryAdapter",
         ),
         make_form=FactoryAdapter_make_form,
-        run=lambda cfg, *, context: FactoryResult(),
+        run=lambda cfg, *, context: RunRecord(cfg=cfg, result=FactoryResult()),
         guide=None,
         analysis=None,
         post_analysis=None,

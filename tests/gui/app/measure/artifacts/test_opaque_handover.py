@@ -4,6 +4,7 @@ import json
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -31,6 +32,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
@@ -55,8 +57,10 @@ def opaque_form(ctx: FormContext) -> Form[SavingCfg]:
     return Form(SavingCfg, {})
 
 
-def opaque_run(cfg: SavingCfg, *, context: RunContext) -> OpaqueRun:
-    return OpaqueRun(SavingCore().run(cfg, context=context))
+def opaque_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, OpaqueRun]:
+    return RunRecord(cfg=cfg, result=OpaqueRun(SavingCore().run(cfg, context=context)))
 
 
 def opaque_analyze(
@@ -89,7 +93,9 @@ def opaque_host(
     """Register synthetic adapters in one real offline application host."""
     registry = Registry()
     registry.register("opaque", OpaqueAdapter)
-    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    state = State(
+        SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())
+    )
     controller = Controller(
         state=state,
         registry=registry,

@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 from qtpy.QtWidgets import QApplication
-from zcu_tools import plotting
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.adapter import (
@@ -36,6 +36,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._operation_plots import attachment as plot_attachment
+from tests.gui.app.measure._operation_plots import draw_line
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
 
 
@@ -55,12 +56,18 @@ class RequiredSweepPlan(FormModel):
     )
 
 
-def FluxAdapter_run(cfg: SampleCfg, *, context: RunContext) -> SampleResult:
+def FluxAdapter_run(
+    cfg: SampleCfg, *, context: RunContext
+) -> RunRecord[SampleCfg, SampleResult]:
     values = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
-    viewer = plotting.live_line(
-        context.plots, "flux trace", "Flux", f"fluxes={values.tolist()}"
+    draw_line(
+        context.plots,
+        "flux trace",
+        "Flux",
+        f"fluxes={values.tolist()}",
+        values.tolist(),
+        values.tolist(),
     )
-    viewer.update(values, values)
     return SampleAdapter.run(cfg, context=context)
 
 
@@ -108,11 +115,15 @@ async def _plot_fluxes(
     env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
 ) -> None:
     if plan.fluxes:
-        viewer = plotting.live_line(
-            env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}"
-        )
         values = np.asarray(plan.fluxes)
-        viewer.update(values, values * tun.current.gain)
+        draw_line(
+            env.plots,
+            "flux trace",
+            "Flux",
+            f"fluxes={plan.fluxes}",
+            plan.fluxes,
+            (values * tun.current.gain).tolist(),
+        )
     await env.wait_until(env.started_at)
 
 
@@ -121,10 +132,14 @@ async def _plot_sweep(
     env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
 ) -> None:
     values = np.asarray(plan.fluxes)
-    viewer = plotting.live_line(
-        env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}"
+    draw_line(
+        env.plots,
+        "flux trace",
+        "Flux",
+        f"fluxes={plan.fluxes}",
+        plan.fluxes,
+        (values * tun.current.gain).tolist(),
     )
-    viewer.update(values, values * tun.current.gain)
     await env.wait_until(env.started_at)
 
 

@@ -2,14 +2,17 @@
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, PostAnalysis
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.experiment._saving_support import SavingCfg, SavingCore
 from tests.gui._qt_waits import qt_until
@@ -24,7 +27,7 @@ def FiguresAdapter_make_form(ctx):
 
 
 def FiguresAdapter_run(cfg, *, context):
-    return SavingCore().run(cfg, context=context)
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
 
 
 def FiguresAdapter_analyze(req, *, plots) -> None:
@@ -74,6 +77,7 @@ def figures_rpc(tmp_path, qapp, post):
         )
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
+        controller.install_soc(MagicMock(), make_mock_soccfg())
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), ImmediateScheduler()
         )

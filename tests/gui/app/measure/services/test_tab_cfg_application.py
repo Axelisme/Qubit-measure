@@ -44,6 +44,7 @@ from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -292,7 +293,9 @@ def global_sources(
 ) -> Generator[tuple[AppServices, State], None, None]:
     before = component_registry.kinds()
     component_registry.register("cfg/drive", SourceDrive)
-    state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
+    state = State(
+        SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())
+    )
     registry = Registry()
     registry.register("global-source", GlobalSourceAdapter)
     registry.register("missing-slot", MissingModuleSlotAdapter)
