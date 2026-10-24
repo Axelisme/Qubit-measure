@@ -15,11 +15,11 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
+from zcu_lab.v2._support import live_line
 from zcu_lab.v2._support.device import set_flux
 
 from .._drive import DualLineCfg, dual_line_drive

@@ -3,23 +3,23 @@
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .core import CPMG_Cfg, CPMG_Exp, CPMG_Result, CPMGAnalyzeOptions
-from .form import make_form
+from .form import CPMGInput, make_form
 
 CPMGRunResult: TypeAlias = RunRecord[CPMG_Cfg, CPMG_Result]
 
@@ -72,43 +72,56 @@ class CPMGAnalyzeResult(AnalyzeResultBase):
         return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
-class CPMGAdapter(
-    BaseAdapter[CPMG_Cfg, CPMGRunResult, CPMGAnalyzeResult, CPMGAnalyzeParams]
-):
-    """Acquire CPMG decay rows and fit their count dependence without writeback."""
+def _CPMG_make_form(ctx: FormContext) -> Form[CPMGInput]:
+    """Build shared time-window controls and captured module selections."""
+    return make_form(ctx)
 
-    exp_cls = CPMG_Exp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[CPMG_Cfg]:
-        """Build shared time-window controls and captured module selections."""
-        return make_form(ctx)
+def _CPMG_analyze(
+    req: AnalyzeRequest[CPMGRunResult, CPMGAnalyzeParams], *, plots: Plots
+) -> CPMGAnalyzeResult:
+    """Fit the saved run and publish T2 per count, without changing calibration."""
+    params = req.analyze_params
+    result = CPMG_Exp().analyze(
+        req.run_result,
+        CPMGAnalyzeOptions(fit_fringe=params.fit_fringe, t2r=params.t2r, t1=params.t1),
+        plots=plots,
+    )
+    return CPMGAnalyzeResult(
+        ns=result.ns.tolist(),
+        t2s=[float(value) if isfinite(value) else None for value in result.t2s],
+        t2errs=[
+            float(error) if isfinite(value) else None
+            for value, error in zip(result.t2s, result.t2errs, strict=True)
+        ],
+    )
 
-    def run(
-        self, req: RunRequest, cfg: CPMG_Cfg, *, context: RunContext
-    ) -> CPMGRunResult:
-        """Acquire the accepted count/time grid and retain its exact cfg."""
-        del req
-        return RunRecord(cfg=cfg, result=CPMG_Exp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[CPMGRunResult, CPMGAnalyzeParams], *, plots: Plots
-    ) -> CPMGAnalyzeResult:
-        """Fit the saved run and publish T2 per count, without changing calibration."""
-        params = req.analyze_params
-        result = CPMG_Exp().analyze(
-            req.run_result,
-            CPMGAnalyzeOptions(
-                fit_fringe=params.fit_fringe, t2r=params.t2r, t1=params.t1
-            ),
-            plots=plots,
-        )
-        return CPMGAnalyzeResult(
-            ns=result.ns.tolist(),
-            t2s=[float(value) if isfinite(value) else None for value in result.t2s],
-            t2errs=[
-                float(error) if isfinite(value) else None
-                for value, error in zip(result.t2s, result.t2errs, strict=True)
-            ],
-        )
+def _run(inp: CPMGInput, *, context: RunContext) -> RunRecord[CPMG_Cfg, CPMG_Result]:
+    """Apply the shared time window to every pi-pulse count and record it."""
+    cfg = CPMG_Cfg(
+        reps=inp.reps,
+        rounds=inp.rounds,
+        relax_delay=inp.relax_delay,
+        reset=inp.reset,
+        pi2_pulse=inp.pi2_pulse,
+        pi_pulse=inp.pi_pulse,
+        readout=inp.readout,
+        times=inp.times,
+        length_range=(inp.min_length_us, inp.max_length_us),
+        length_expts=inp.length_points,
+        detune_ratio=inp.detune_ratio,
+        earlystop_snr=inp.earlystop_snr,
+    )
+    return RunRecord(cfg=cfg, result=CPMG_Exp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=CPMG_Exp.AXES_SPEC,
+    make_form=_CPMG_make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_CPMG_analyze, options=lambda source, env: CPMGAnalyzeParams()
+    ),
+)

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_from_container
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import RoleBinding
@@ -92,12 +91,6 @@ class LoadService:
         self._state = state
         self._writeback = writeback
 
-    @staticmethod
-    def _supports_load_data(adapter: object) -> bool:
-        """Enforce the same capability gate when a service is called directly."""
-        caps = getattr(adapter, "capabilities", None)
-        return isinstance(caps, AdapterCapabilities) and caps.load_data
-
     def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         """Load data_path into an existing tab after GuardService.check_load.
 
@@ -111,7 +104,7 @@ class LoadService:
         before result replacement. Retain native history without acquisition.
         Return committed result details without validating or replacing form input.
         Busy or cfg notification reentrancy rejects before loading;
-        adapter file/capability
+        incompatible files and restore
         failures raise LoadDataError without replacing the previous result.
         """
         if self._state.is_tab_busy(tab_id):
@@ -119,11 +112,6 @@ class LoadService:
 
         tab = self._state.get_tab(tab_id)
         tab.cfg.require_mutation_allowed()
-        if not self._supports_load_data(tab.adapter):
-            raise LoadDataError(
-                "This tab does not support loading data files.",
-                reason_code="unsupported_load",
-            )
         captured = self._captured_parameters(None)
         # Native history owns aliases; Save needs only the Load-time entry capability.
         storage = None if captured is None else captured.bind_aliases((), {}).storage

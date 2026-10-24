@@ -4,24 +4,21 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.analyze_params import ParamMeta
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
@@ -136,140 +133,126 @@ class RangeFindAnalysis(AnalyzeResultBase):
         return self.summary().model_dump()
 
 
-class RangeFindAdapter(
-    BaseAdapter[
-        RangeFindCfg,
-        RangeFindRun,
-        RangeFindAnalysis,
-        RangeFindParams,
-    ]
-):
-    """Find coarse resonator frequencies and propose only captured scalar freq rows."""
+def _get_analyze_params(result: RangeFindRun, ctx: SessionEnv) -> RangeFindParams:
+    """Start Run/Load analysis with unnamed discovery and default MHz spacing.
 
-    exp_cls = RangeFindExp
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, load_data=True
+    result and ctx do not seed names. The operator may name dips after
+    inspecting the discovery plot, without changing the acquisition cfg.
+    """
+    del result, ctx
+    return RangeFindParams()
+
+
+def _analyze(
+    req: AnalyzeRequest[RangeFindRun, RangeFindParams],
+    *,
+    plots: Plots,
+) -> RangeFindAnalysis:
+    """Discover unnamed dips, or find all requested named dips without partial success.
+
+    req supplies raw IQ, options and the fixed Run/Load parameter capture.
+    Empty names return ordered dips without proposals or identity claims.
+    plots receives the annotated fit. Missing capture/components still allow pure
+    calculation but omit their proposals and explain why in the summary.
+    Only finite, strictly ascending captured frequencies establish name order.
+    Otherwise summary and proposals flag unconfirmed pairing without blocking
+    analysis or reordering names. Set but invalid captured frequencies, invalid
+    curves/options and insufficient dips raise ValueError.
+    """
+    options = req.analyze_params.to_options()
+    dips = RangeFindExp().analyze(req.run_result, options, plots=plots)
+    if not options.resonators:
+        return RangeFindAnalysis(dips, (), None, None)
+    components = (
+        req.parameters.document().components if req.parameters is not None else {}
     )
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
-        """Build blank required sweep endpoints without acquisition dip names."""
-        return make_form(ctx)
-
-    def run(
-        self, req: RunRequest, cfg: RangeFindCfg, *, context: RunContext
-    ) -> RangeFindRun:
-        """Acquire one spectrum and pair it with the unchanged acquisition cfg.
-
-        context supplies SoC, cached config, cancellation and live plots. req is
-        unused. Stop preserves NaNs for unacquired points; the
-        host checks cancellation errors before publishing a successful result.
-        """
-        del req
-        return RunRecord(cfg=cfg, result=RangeFindExp().run(cfg, context=context))
-
-    def get_analyze_params(
-        self, result: RangeFindRun, ctx: SessionEnv
-    ) -> RangeFindParams:
-        """Start Run/Load analysis with unnamed discovery and default MHz spacing.
-
-        result and ctx do not seed names. The operator may name dips after
-        inspecting the discovery plot, without changing the acquisition cfg.
-        """
-        del result, ctx
-        return RangeFindParams()
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[RangeFindRun, RangeFindParams],
-        *,
-        plots: Plots,
-    ) -> RangeFindAnalysis:
-        """Discover unnamed dips, or find all requested named dips without partial success.
-
-        req supplies raw IQ, options and the fixed Run/Load parameter capture.
-        Empty names return ordered dips without proposals or identity claims.
-        plots receives the annotated fit. Missing capture/components still allow pure
-        calculation but omit their proposals and explain why in the summary.
-        Only finite, strictly ascending captured frequencies establish name order.
-        Otherwise summary and proposals flag unconfirmed pairing without blocking
-        analysis or reordering names. Set but invalid captured frequencies, invalid
-        curves/options and insufficient dips raise ValueError.
-        """
-        options = req.analyze_params.to_options()
-        dips = RangeFindExp().analyze(req.run_result, options, plots=plots)
-        if not options.resonators:
-            return RangeFindAnalysis(dips, (), None, None)
-        components = (
-            req.parameters.document().components if req.parameters is not None else {}
+    frequencies = (
+        resonator_frequencies(
+            req.parameters,
+            [name for name in options.resonators if name in components],
         )
-        frequencies = (
-            resonator_frequencies(
-                req.parameters,
-                [name for name in options.resonators if name in components],
-            )
-            if req.parameters is not None
-            else None
+        if req.parameters is not None
+        else None
+    )
+    identity_diagnostic = (
+        "dip 與元件身分配對待確認"
+        if frequencies is None
+        or len(frequencies) != len(options.resonators)
+        or any(
+            left >= right
+            for left, right in zip(frequencies, frequencies[1:], strict=False)
         )
-        identity_diagnostic = (
-            "dip 與元件身分配對待確認"
-            if frequencies is None
-            or len(frequencies) != len(options.resonators)
-            or any(
-                left >= right
-                for left, right in zip(frequencies, frequencies[1:], strict=False)
-            )
-            else None
+        else None
+    )
+    if req.parameters is None:
+        return RangeFindAnalysis(
+            dips,
+            (),
+            "No Run/Load parameter capture; no frequency proposals",
+            identity_diagnostic,
         )
-        if req.parameters is None:
-            return RangeFindAnalysis(
-                dips,
-                (),
-                "No Run/Load parameter capture; no frequency proposals",
-                identity_diagnostic,
-            )
-        writable: list[str] = []
-        missing: list[str] = []
-        for dip in dips:
-            if dip.name is None:
-                continue
-            if dip.name in components:
-                writable.append(dip.name)
-            else:
-                missing.append(dip.name)
-        diagnostic = (
-            f"Names absent from capture: {', '.join(missing)}; their proposals omitted"
-            if missing
-            else None
-        )
-        return RangeFindAnalysis(dips, tuple(writable), diagnostic, identity_diagnostic)
+    writable: list[str] = []
+    missing: list[str] = []
+    for dip in dips:
+        if dip.name is None:
+            continue
+        if dip.name in components:
+            writable.append(dip.name)
+        else:
+            missing.append(dip.name)
+    diagnostic = (
+        f"Names absent from capture: {', '.join(missing)}; their proposals omitted"
+        if missing
+        else None
+    )
+    return RangeFindAnalysis(dips, tuple(writable), diagnostic, identity_diagnostic)
 
-    def get_writeback_items(
-        self, req: WritebackRequest[RangeFindRun, RangeFindAnalysis]
-    ) -> Sequence[WritebackItem]:
-        """Propose one independently selectable <name>.freq MHz row per captured dip.
 
-        req pairs the accepted analysis with its fixed source. No module, kappa
-        or electrical-delay rows are produced. Unconfirmed dip/component pairing
-        is carried from the analysis into every row description. The warning does
-        not disable selection or Apply. This method never applies changes.
-        """
-        if req.ctx.parameters is None:
-            return []
-        return [
-            ParameterWriteback(
-                target_name=f"{dip.name}.freq",
-                description=(
-                    f"Coarse dip frequency (MHz), depth {dip.depth:.6g} a.u."
-                    + (
-                        f"; {req.analyze_result.identity_diagnostic}"
-                        if req.analyze_result.identity_diagnostic is not None
-                        else ""
-                    )
-                ),
-                proposed_value=dip.freq,
-            )
-            for dip in req.analyze_result.dips
-            if dip.name is not None and dip.name in req.analyze_result.writable
-        ]
+def _get_writeback_items(
+    req: WritebackRequest[RangeFindRun, RangeFindAnalysis],
+) -> Sequence[WritebackItem]:
+    """Propose one independently selectable <name>.freq MHz row per captured dip.
+
+    req pairs the accepted analysis with its fixed source. No module, kappa
+    or electrical-delay rows are produced. Unconfirmed dip/component pairing
+    is carried from the analysis into every row description. The warning does
+    not disable selection or Apply. This method never applies changes.
+    """
+    if req.ctx.parameters is None:
+        return []
+    return [
+        ParameterWriteback(
+            target_name=f"{dip.name}.freq",
+            description=(
+                f"Coarse dip frequency (MHz), depth {dip.depth:.6g} a.u."
+                + (
+                    f"; {req.analyze_result.identity_diagnostic}"
+                    if req.analyze_result.identity_diagnostic is not None
+                    else ""
+                )
+            ),
+            proposed_value=dip.freq,
+        )
+        for dip in req.analyze_result.dips
+        if dip.name is not None and dip.name in req.analyze_result.writable
+    ]
+
+
+def run(
+    cfg: RangeFindCfg, *, context: RunContext
+) -> RunRecord[RangeFindCfg, RangeFindResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=RangeFindExp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=RangeFindExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_analyze,
+        options=_get_analyze_params,
+        writeback=_get_writeback_items,
+    ),
+)

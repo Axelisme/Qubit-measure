@@ -6,7 +6,6 @@ import numpy as np
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.plotting import live_line
 from zcu_tools.program.v2 import (
     Delay,
     Pulse,
@@ -15,6 +14,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
+from zcu_lab.v2._support import live_line
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyResult
 

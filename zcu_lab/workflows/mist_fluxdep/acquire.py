@@ -5,7 +5,6 @@ from copy import deepcopy
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.plotting import live_line
 from zcu_tools.program.v2 import (
     Pulse,
     Readout,
@@ -13,6 +12,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
+from zcu_lab.v2._support import live_line
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 

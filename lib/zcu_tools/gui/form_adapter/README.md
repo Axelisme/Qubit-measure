@@ -1,18 +1,22 @@
-# gui/form_adapter — 從 core cfg 生成 Form
+# gui/form_adapter — 從輸入型別生成 Form
 
 **Last updated:** 2026-10-24
 
-**讀者：** framework-dev。Core cfg 與持久 Spec 的表單推導與轉換契約。
+**讀者：** framework-dev。Adapter 輸入型別與持久 Spec 的表單推導與轉換契約。
 
-本 package 是 GUI 的 Qt-free 前端框架。它把 core cfg 宣告與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的 core cfg。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
+本 package 是 GUI 的 Qt-free 前端框架。它把輸入型別與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的輸入物件。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
 主要生成入口如下：
 
-- `Form(core_cfg, tree, *, extras=None, lower=None, fixed_elements=(), field_order=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。Form 的 cfg 結果型別具協變性，具體 `Form[SampleCfg]` 可交給 generic-free host，`to_cfg` 仍回傳 SampleCfg 或 FormErrors。Core annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的端點與點數也沒有數值預設。端點為 None 或 Expr 求值失敗時保持空白必填。樹中明填的端點與點數保留原值。未宣告的掃描只選 Range + Expts，start／stop／n 留空必填。
+- `Form(core_cfg, tree, *, fixed_elements=(), field_order=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。`Form[T_Input].to_cfg` 回傳 T_Input 或 FormErrors。輸入型別的 annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的端點與點數也沒有數值預設。端點為 None 或 Expr 求值失敗時保持空白必填。樹中明填的端點與點數保留原值。未宣告的掃描只選 Range + Expts，start／stop／n 留空必填。
 - `module_form(spec_type)`：為一個具體持久 module 或 waveform Spec class 建 Form。生成的 model 可當 FormState root，也可當 `ModuleInline` 的 module 欄位；host 的選項沿用自己的 `choices(env)`。`to_cfg` 回傳同一個 Spec，child library key 保持字串，不讀 library、asset，也不轉 native cfg。`Form.input_from_spec(spec, env)` 把既有 Spec（library entry 或 writeback proposal）投影成 input；它只接受這類 Form 的同型 Spec。
 - `FormContext(parameters)`：實驗 `make_form(ctx)` 使用的固定來源查詢。parameters 是捕捉的 ParameterContext，缺來源時為 None。`has(ref)` 接受 library root 或 point module slot，含 `$alias` 前綴。缺 key、未設定或懸空的 slot、缺或未綁 alias 回 False；語法錯誤、其他 alias 解析錯誤與來源故障仍 raise。它不 materialize module、不讀 asset、不 refresh。
 - `ModuleValues`：`Form.read_module` 回傳的單一 module 欄位實際值、模式與來源。
 - `ModuleInputField(family, *, nullable=False, ref_family=None)`：把具體持久 ModuleSpec class 或其 union 生成為手寫 FormModel 可用的 tagged 欄位。`annotation` 是 runtime Pydantic 型別，`options(env)` 是同一欄位的選項與複製指令。`family` 決定 inline 家族，`ref_family` 只限制 captured ref keys，省略時沿用 family。`nullable` 單獨決定 None，不在 family 再放 None。空、不支援或超出 inline family 的 ref 宣告在建構時拒絕。`to_spec(value)` 接收該欄位的成功 FormState.result 值，ref 回 literal key，inline 回 detached、驗證過的持久 Spec，nullable None 保 None。它保留 child keys、不讀來源或 materialize，屏蔽欄位由 Spec defaults 補回。其他欄位的 generated 值或不合法 Spec 明確拒絕。
+
+Measure 的 `Form[T_Input]` 輸出 adapter 自己的輸入，預設可直接使用實驗 cfg 型別。Adapter 的 `run(inp, *, context)` 負責轉成實際實驗 cfg、呼叫實驗並回傳 `RunRecord(cfg=actual_cfg, result=...)`。Form 不提供 extras 或 lower callback。Host 不另存 Form input 作為分析來源，Save 保存 record 的實驗 cfg，Load 依 spec 還原 record 而不反填 Form。分析與 writeback 只讀 record。
+
+輸入型別若繼承 `FormModel`，生成器保留其 `converters(env)` 宣告，並與生成的 module converters 合併。Hook 只綁定本次固定 env，不重新捕捉來源。宣告 hook 沿用 FormModel 的既有優先順序，在同一路徑覆蓋自身 metadata；未覆蓋的 module converters 仍由生成器提供。生成器不自動繼承其他手寫 hooks 或 validators。
 
 手寫表單在 `options(env)` hook 將 `ModuleInputField.options(env)` 放到欄位路徑，並在 `converters(env)` 的同一路徑宣告 `ModuleInputField.converter(env)`。兩個 hook 使用 host 的同一份固定 capture。宣告不讀來源，也不儲存共享 mutable capture。既有最深 local choices 規則照舊。Python 型別檢查器不能反射 runtime `annotation`，靜態別名可用 `ModuleRef | ModuleInline` 作 nominal value view，nullable 時另含 None。這個 view 只供保存結果與傳給 `to_spec`，不表示 generated `.module` 已是持久 Spec。Workflows 三個 plan 表單共用這個入口，先取持久形式再交既有 core/native factories；校準 policy 仍屬 workflows。
 
@@ -37,7 +41,7 @@ Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `
 
 `readout/mux` 沿用 module 的 ref／inline 與 Convert to inline。Scalar 欄位分別編輯，tones 使用一般 model-list 的 indexed editing，每筆 tone 的 freq、gain、phase、ro_ch 與 label 都是獨立欄位。它沒有 waveform 或逐 tone 引用。生成器不推導 mux group 或 resonator 校準初值。
 
-Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。Extras 若有宣告，仍在最後。
+Core-cfg 表單可用 `field_order=("participants", "tones", ...)` 把指定頂層欄位放在前面。未列欄位維持原相對順序，nested model 不變。空 tuple 沿用原序，tree 的寫入順序不控制畫面。未知或重複欄位在建構時以 ValueError 拒絕。持久 Spec 的非空 field_order 也以 ValueError 拒絕，保留繼承的欄位順序與 validators。
 
 `Template.set`／`Slot.set` 的 model-list seed 使用原 Spec 欄位名，例如 `set={"tones": [{"freq": Expr("6000 + 2"), "gain": 0.1, "ro_ch": 0}]}`。生成器先按原 Spec 補各位置的結構預設，再以共享元素宣告保留 expression 的 requiredness 與原 schema 驗證。某位置的 expression 算不出時留空，不使用該欄位的靜態預設；其他位置仍有自己的初值。未知元素欄位在建立 input 時以含 list index 的路徑報錯。實驗自行提供清單，生成器不推導來源關係或通道。
 

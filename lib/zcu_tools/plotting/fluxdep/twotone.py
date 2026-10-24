@@ -17,8 +17,8 @@ from zcu_tools.analysis.fluxdep.twotone import (
     TwoTonePickView,
     project_twotone_pick,
 )
-from zcu_tools.plotting.liveplot.segments.plot2d import PlotNonUniform2DSegment
 
+from ._background import NonUniformBackground
 from .brush import BrushBand
 from .palette import (
     ADDED_COLOR,
@@ -53,10 +53,10 @@ class TwoTonePickPlot:
         # Brush radii use sample endpoint spans, not the padded image limits.
         self._x_span = abs(device_last - device_first)
         self._y_span = abs(frequency_last - frequency_first)
-        self._background = PlotNonUniform2DSegment(
+        self._background = NonUniformBackground(
             "Device value (native)", "Frequency (GHz)"
         )
-        self._mask_segment = PlotNonUniform2DSegment(
+        self._mask_segment = NonUniformBackground(
             "Device value (native)", "Frequency (GHz)", vmin=0, vmax=1
         )
         # NonUniformImage does not bake scalar alpha into its Agg raster.

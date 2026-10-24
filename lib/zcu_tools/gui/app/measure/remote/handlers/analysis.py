@@ -150,9 +150,7 @@ def h_tab_get_analyze_params(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = control.get_tab_snapshot(tab_id)
-    definitions = adapter.tab_control.analyze_param_definitions(
-        adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
-    )
+    definitions = adapter.tab_control.analyze_param_definitions(tab_id, stage="primary")
     ap = None if snap.analysis is None else snap.analysis.params
     return {"analyze_params": _params_to_wire(ap), "definitions": definitions}
 
@@ -183,7 +181,7 @@ def h_tab_analyze(
         )
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None and adapter.tab_control.analyze_param_definitions(
-        adapter.tab_control.get_tab_adapter_name(tab_id), stage="primary"
+        tab_id, stage="primary"
     ):
         raise RemoteError(ErrorCode.PRECONDITION_FAILED, "no analyze params available")
     # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
@@ -263,9 +261,7 @@ def h_tab_get_post_analyze_params(
     if not control.has_tab(tab_id):
         raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     snap = control.get_tab_snapshot(tab_id)
-    definitions = adapter.tab_control.analyze_param_definitions(
-        adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
-    )
+    definitions = adapter.tab_control.analyze_param_definitions(tab_id, stage="post")
     pp = None if snap.post_analysis is None else snap.post_analysis.params
     return {"post_analyze_params": _params_to_wire(pp), "definitions": definitions}
 
@@ -299,7 +295,7 @@ def h_tab_post_analyze(
         )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
     if pp is None and adapter.tab_control.analyze_param_definitions(
-        adapter.tab_control.get_tab_adapter_name(tab_id), stage="post"
+        tab_id, stage="post"
     ):
         raise RemoteError(
             ErrorCode.PRECONDITION_FAILED, "no post-analysis params available"

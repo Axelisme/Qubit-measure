@@ -9,20 +9,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.jpa.freq.core import FreqCfg, FreqExp, FreqResult
@@ -36,39 +35,34 @@ class JpaFreqAnalyzeResult(AnalyzeResultBase):
     best_freq: float
 
 
-class JpaFreqAdapter(BaseAdapter[FreqCfg, JpaFreqRunResult, JpaFreqAnalyzeResult]):
-    exp_cls = FreqExp
+def _analyze(
+    req: AnalyzeRequest[JpaFreqRunResult, None], *, plots: Plots
+) -> JpaFreqAnalyzeResult:
+    answer = FreqExp().analyze(req.run_result, None, plots=plots)
+    return JpaFreqAnalyzeResult(best_freq=answer.best_freq)
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[FreqCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _get_writeback_items(
+    req: WritebackRequest[JpaFreqRunResult, JpaFreqAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback(
+            target_name="$jpa.pump_freq",
+            description="Best JPA pump frequency (MHz)",
+            proposed_value=req.analyze_result.best_freq,
+        )
+    ]
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: FreqCfg,
-        *,
-        context: RunContext,
-    ) -> JpaFreqRunResult:
-        del req
-        return RunRecord(cfg, FreqExp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[JpaFreqRunResult, None], *, plots: Plots
-    ) -> JpaFreqAnalyzeResult:
-        answer = FreqExp().analyze(req.run_result, None, plots=plots)
-        return JpaFreqAnalyzeResult(best_freq=answer.best_freq)
+def run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
 
-    def get_writeback_items(
-        self, req: WritebackRequest[JpaFreqRunResult, JpaFreqAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback(
-                target_name="$jpa.pump_freq",
-                description="Best JPA pump frequency (MHz)",
-                proposed_value=req.analyze_result.best_freq,
-            )
-        ]
+
+DEFINITION = Adapter(
+    spec=FreqExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+)

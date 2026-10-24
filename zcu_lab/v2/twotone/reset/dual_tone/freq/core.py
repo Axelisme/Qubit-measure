@@ -12,7 +12,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.plotting import live_heatmap, live_heatmap_with_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Pulse,
@@ -29,6 +28,8 @@ from zcu_tools.utils.process import (
     rotate2real,
     smooth_signal_nd,
 )
+
+from zcu_lab.v2._support import live_heatmap, live_heatmap_with_line
 
 
 def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

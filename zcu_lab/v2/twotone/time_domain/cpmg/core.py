@@ -29,7 +29,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
-from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
@@ -42,6 +41,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.process import rotate2real
+
+from zcu_lab.v2._support import live_heatmap_with_line
 
 
 def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

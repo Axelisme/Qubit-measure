@@ -316,7 +316,6 @@ class WritebackService:
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: Mapping[str, JsonObject] | None = None,
-        sample_device_alias: str | None = None,
     ) -> WritebackDraft:
         """Create a draft with one Form per module item at the creation capture.
 
@@ -343,9 +342,9 @@ class WritebackService:
         It stays fixed through Save, selection changes, edits and application.
         Application copies it into accepted evidence and library provenance.
         device_snapshot maps Run-fixed device names to their JSON settings; None
-        means no device evidence. sample_device_alias is the adapter-declared
-        device alias path ("$name"); None disables Sample proposals. Samples
-        require run_id and that alias resolving to a nonempty device name in the
+        means no device evidence. Each Sample declares coordinate_device, a
+        device alias path ("$name"); None omits that proposal. Samples require
+        run_id and that alias resolving to a nonempty device name in the
         captured snapshot with value/value_unit. Alias errors and missing facts
         omit only those proposals
         and appear in draft.unavailable_reasons. Sample fields are detached and
@@ -373,7 +372,7 @@ class WritebackService:
                         item.proposed_value,
                         parameters,
                         device_snapshot,
-                        sample_device_alias,
+                        item.coordinate_device,
                     )
                 except FailedPreconditionError as exc:
                     unavailable_reasons.append(f"{item.target_name}: {exc}")

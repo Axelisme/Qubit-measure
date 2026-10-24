@@ -5,19 +5,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -35,55 +35,54 @@ class CKPAnalyzeResult(AnalyzeResultBase):
     res_freq: float
 
 
-class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult]):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
+def _CKP_make_form(ctx: FormContext) -> Form[CKP_Cfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
-    exp_cls = CKP_Exp
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _CKP_analyze(
+    req: AnalyzeRequest[CKPRunResult, None], *, plots: Plots
+) -> CKPAnalyzeResult:
+    analysis = CKP_Exp().analyze(req.run_result, None, plots=plots)
+    return CKPAnalyzeResult(
+        chi=analysis.chi,
+        kappa=analysis.kappa,
+        res_freq=analysis.res_freq,
+    )
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: CKP_Cfg,
-        *,
-        context: RunContext,
-    ) -> CKPRunResult:
-        del req
-        result = CKP_Exp().run(cfg, context=context)
-        return RunRecord(cfg=cfg, result=result)
 
-    def analyze(
-        self, req: AnalyzeRequest[CKPRunResult, None], *, plots: Plots
-    ) -> CKPAnalyzeResult:
-        analysis = CKP_Exp().analyze(req.run_result, None, plots=plots)
-        return CKPAnalyzeResult(
-            chi=analysis.chi,
-            kappa=analysis.kappa,
-            res_freq=analysis.res_freq,
-        )
+def _CKP_get_writeback_items(
+    req: WritebackRequest[CKPRunResult, CKPAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    result = req.analyze_result
+    return [
+        ParameterWriteback(
+            target_name="$qubit.ext.chi",
+            description="Dispersive shift chi (MHz)",
+            proposed_value=result.chi,
+        ),
+        ParameterWriteback(
+            target_name="$resonator.kappa",
+            description="Resonator linewidth kappa (MHz)",
+            proposed_value=result.kappa,
+        ),
+        ParameterWriteback(
+            target_name="$resonator.freq",
+            description="Readout frequency (MHz)",
+            proposed_value=result.res_freq,
+        ),
+    ]
 
-    def get_writeback_items(
-        self, req: WritebackRequest[CKPRunResult, CKPAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        result = req.analyze_result
-        return [
-            ParameterWriteback(
-                target_name="$qubit.ext.chi",
-                description="Dispersive shift chi (MHz)",
-                proposed_value=result.chi,
-            ),
-            ParameterWriteback(
-                target_name="$resonator.kappa",
-                description="Resonator linewidth kappa (MHz)",
-                proposed_value=result.kappa,
-            ),
-            ParameterWriteback(
-                target_name="$resonator.freq",
-                description="Readout frequency (MHz)",
-                proposed_value=result.res_freq,
-            ),
-        ]
+
+def _run(cfg: CKP_Cfg, *, context: RunContext) -> RunRecord[CKP_Cfg, CKP_Result]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=CKP_Exp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=CKP_Exp.AXES_SPEC,
+    make_form=_CKP_make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_CKP_analyze, writeback=_CKP_get_writeback_items),
+)

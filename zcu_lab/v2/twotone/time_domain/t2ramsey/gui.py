@@ -4,22 +4,22 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
-    RunRequest,
     SampleWriteback,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -31,7 +31,7 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyResult,
 )
 
-from .form import make_form
+from .form import T2RamseyInput, make_form
 
 logger = logging.getLogger(__name__)
 
@@ -86,117 +86,136 @@ class T2RamseyAnalyzeResult(AnalyzeResultBase):
         return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
-class T2RamseyAdapter(
-    BaseAdapter[
-        T2RamseyCfg,
-        T2RamseyRunResult,
-        T2RamseyAnalyzeResult,
-        T2RamseyAnalyzeParams,
+def _T2Ramsey_make_form(ctx: FormContext) -> Form[T2RamseyInput]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
+
+
+def _T2Ramsey_analyze(
+    req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams],
+    *,
+    plots: Plots,
+) -> T2RamseyAnalyzeResult:
+    params = req.analyze_params
+    analysis = T2RamseyExp().analyze(
+        req.run_result,
+        T2RamseyAnalyzeOptions(
+            fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
+        ),
+        plots=plots,
+    )
+    return T2RamseyAnalyzeResult(
+        t2r=analysis.t2r,
+        t2r_err=analysis.t2r_err,
+        fit_quality=fit_quality_summary(analysis.fit_quality),
+        detune=analysis.detune,
+        fit_fringe=params.fit_fringe,
+    )
+
+
+def _T2Ramsey_get_writeback_items(
+    req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    """Propose captured qubit.t2r, plus qubit.freq for a sourced fringe fit.
+
+    req supplies the committed fit, source record and captured context.
+    Frequency is source pi/2 frequency + realized detune - fitted detune;
+    it is omitted for decay fits, cfg=None or unknown realized detune.
+    Non-scalar source frequency raises ValueError. WritebackService resolves
+    destinations on req.ctx.parameters and rejects missing captures/unbound
+    roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
+    resolved $qubit; an unbound alias raises RoleResolutionError. Without
+    a capture, retain parameter proposals only so loaded data can still be
+    analyzed. The service adds bias coordinates or omits the sample with a
+    public reason. This Run leaves devices fixed; no live calibration lookup,
+    device access or write occurs here.
+    """
+    result = req.analyze_result
+    items: list[WritebackItem] = [
+        ParameterWriteback(
+            target_name="$qubit.t2r",
+            description="T2 Ramsey time (us)",
+            proposed_value=result.t2r,
+        ),
     ]
-):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[T2RamseyCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
 
-    sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
-    exp_cls = T2RamseyExp
-
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: T2RamseyCfg,
-        *,
-        context: RunContext,
-    ) -> T2RamseyRunResult:
-        del req
-        result = self.exp_cls().run(cfg, context=context)
-        logger.info("T2Ramsey true detune: %s MHz", result.true_activate_detune)
-        return RunRecord(cfg=cfg, result=result)
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> T2RamseyAnalyzeResult:
-        params = req.analyze_params
-        analysis = T2RamseyExp().analyze(
-            req.run_result,
-            T2RamseyAnalyzeOptions(
-                fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
-            ),
-            plots=plots,
-        )
-        return T2RamseyAnalyzeResult(
-            t2r=analysis.t2r,
-            t2r_err=analysis.t2r_err,
-            fit_quality=fit_quality_summary(analysis.fit_quality),
-            detune=analysis.detune,
-            fit_fringe=params.fit_fringe,
-        )
-
-    def get_writeback_items(
-        self, req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        """Propose captured qubit.t2r, plus qubit.freq for a sourced fringe fit.
-
-        req supplies the committed fit, source record and captured context.
-        Frequency is source pi/2 frequency + realized detune - fitted detune;
-        it is omitted for decay fits, cfg=None or unknown realized detune.
-        Non-scalar source frequency raises ValueError. WritebackService resolves
-        destinations on req.ctx.parameters and rejects missing captures/unbound
-        roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
-        resolved $qubit; an unbound alias raises RoleResolutionError. Without
-        a capture, retain parameter proposals only so loaded data can still be
-        analyzed. The service adds bias coordinates or omits the sample with a
-        public reason. This Run leaves devices fixed; no live calibration lookup,
-        device access or write occurs here.
-        """
-        result = req.analyze_result
-        items: list[WritebackItem] = [
+    # Frequency correction uses only the source run, never current calibration.
+    snapshot = req.run_result.cfg
+    if (
+        result.fit_fringe
+        and snapshot is not None
+        and req.run_result.result.true_activate_detune is not None
+    ):
+        source_freq = snapshot.pi2_pulse.freq
+        if not isinstance(source_freq, float):
+            raise ValueError(
+                "qubit.freq writeback requires a scalar source pi/2 frequency"
+            )
+        q_f = source_freq + req.run_result.result.true_activate_detune - result.detune
+        items.append(
             ParameterWriteback(
-                target_name="$qubit.t2r",
-                description="T2 Ramsey time (us)",
-                proposed_value=result.t2r,
-            ),
-        ]
+                target_name="$qubit.freq",
+                description="Qubit frequency (MHz)",
+                proposed_value=q_f,
+            )
+        )
 
-        # Frequency correction uses only the source run, never current calibration.
-        snapshot = req.run_result.cfg
-        if (
-            result.fit_fringe
-            and snapshot is not None
-            and req.run_result.result.true_activate_detune is not None
-        ):
-            source_freq = snapshot.pi2_pulse.freq
-            if not isinstance(source_freq, float):
-                raise ValueError(
-                    "qubit.freq writeback requires a scalar source pi/2 frequency"
-                )
-            q_f = (
-                source_freq + req.run_result.result.true_activate_detune - result.detune
+    parameters = req.ctx.parameters
+    if parameters is not None:
+        items.append(
+            SampleWriteback(
+                coordinate_device="$qubit.flux_source",
+                target_name=parameters.resolve_path("$qubit"),
+                description="T2 Ramsey sample at the captured bias",
+                proposed_value={
+                    "t2r_us": result.t2r,
+                    "t2r_err_us": result.t2r_err,
+                },
             )
-            items.append(
-                ParameterWriteback(
-                    target_name="$qubit.freq",
-                    description="Qubit frequency (MHz)",
-                    proposed_value=q_f,
-                )
-            )
+        )
+    return items
 
-        parameters = req.ctx.parameters
-        if parameters is not None:
-            items.append(
-                SampleWriteback(
-                    target_name=parameters.resolve_path("$qubit"),
-                    description="T2 Ramsey sample at the captured bias",
-                    proposed_value={
-                        "t2r_us": result.t2r,
-                        "t2r_err_us": result.t2r_err,
-                    },
-                )
-            )
-        return items
+
+def _run(
+    inp: T2RamseyInput, *, context: RunContext
+) -> RunRecord[T2RamseyCfg, T2RamseyResult]:
+    """Convert fringes/step to MHz, acquire and record the actual detune cfg.
+
+    Zero ratio disables detune. Nonzero ratio on a zero-step delay sweep fails
+    before acquisition. The measured, hardware-rounded detune is logged in MHz.
+    """
+    if inp.detune_ratio == 0.0:
+        detune = 0.0
+    elif inp.length.step == 0.0:
+        raise ValueError(
+            "cannot apply a nonzero detune_ratio on a degenerate "
+            "length sweep (expts < 2, step == 0)"
+        )
+    else:
+        detune = inp.detune_ratio / inp.length.step
+    cfg = T2RamseyCfg(
+        reps=inp.reps,
+        rounds=inp.rounds,
+        relax_delay=inp.relax_delay,
+        reset=inp.reset,
+        pi2_pulse=inp.pi2_pulse,
+        readout=inp.readout,
+        length=inp.length,
+        detune=detune,
+    )
+    result = T2RamseyExp().run(cfg, context=context)
+    logger.info("T2Ramsey true detune: %s MHz", result.true_activate_detune)
+    return RunRecord(cfg=cfg, result=result)
+
+
+DEFINITION = Adapter(
+    spec=T2RamseyExp.AXES_SPEC,
+    make_form=_T2Ramsey_make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_T2Ramsey_analyze,
+        options=lambda source, env: T2RamseyAnalyzeParams(),
+        writeback=_T2Ramsey_get_writeback_items,
+    ),
+)

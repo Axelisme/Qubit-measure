@@ -6,7 +6,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Polygon
 from numpy.typing import NDArray
-
 from zcu_tools.analysis.singleshot import classify_result
 
 

@@ -55,7 +55,7 @@ class TabControlPort(Protocol):
     def list_tab_ids(self) -> list[str]: ...
     def get_tab_adapter_name(self, tab_id: str) -> str: ...
     def analyze_param_definitions(
-        self, adapter_name: str, *, stage: Literal["primary", "post"]
+        self, tab_id: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
 
@@ -161,9 +161,9 @@ class TabControlFacet:
         return self._tab.get_tab_adapter_name(tab_id)
 
     def analyze_param_definitions(
-        self, adapter_name: str, *, stage: Literal["primary", "post"]
+        self, tab_id: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]:
-        return self._tab.analyze_param_definitions(adapter_name, stage=stage)
+        return self._tab.analyze_param_definitions(tab_id, stage=stage)
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
