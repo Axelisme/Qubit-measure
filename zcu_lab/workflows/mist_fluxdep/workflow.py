@@ -41,6 +41,7 @@ from zcu_lab.workflows.common.calibration import (
     readout_due,
 )
 from zcu_lab.workflows.common.devices import set_flux
+from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
 from zcu_lab.workflows.mist_fluxdep.acquire import run_mist
 from zcu_lab.workflows.mist_fluxdep.analysis import (
     mist_fluxdep_signal2real,
@@ -75,6 +76,9 @@ class MISTPlan(BaseModel):
     gain_start: float
     gain_stop: float
     gain_points: int = Field(ge=2)
+    predictor: FrequencyModel = Field(
+        description="Captured fluxonium model and device affine map"
+    )
     snapshot: RunSnapshot
     measure_mode: Literal["excited", "ground", "both"] = "excited"
     t1_us: float | None = Field(default=None, gt=0)
@@ -376,7 +380,9 @@ async def mist_fluxdep(
     """
     _ = env.soc
     _ = env.devices
-    carry = CalCarry(env.context)
+    carry = CalCarry(
+        env.context, frequency_tracker=FrequencyTracker(plan.predictor.make_predictor())
+    )
     modes: tuple[Literal["excited", "ground"], ...] = (
         ("excited", "ground") if plan.measure_mode == "both" else (plan.measure_mode,)
     )

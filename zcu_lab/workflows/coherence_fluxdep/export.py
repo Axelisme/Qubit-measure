@@ -122,6 +122,7 @@ def _channels(
 
     fluxes = np.array(plan.fluxes)
     lifetimes = np.full(len(fluxes), np.nan)
+    detunes = np.full(len(fluxes), np.nan)
     traces: dict[int, LabberPayload] = {}
     for saved in points:
         point = saved.record
@@ -132,6 +133,8 @@ def _channels(
         traces[point.index] = load_lifetime_trace(saved.directory, item.file, item.kind)
         if item.status == "accepted" and item.lifetime_us is not None:
             lifetimes[point.index] = item.lifetime_us / 1e6
+            if item.detune_mhz is not None:
+                detunes[point.index] = item.detune_mhz * 1e6
     if not traces:
         return {}
     count = max(len(trace.z) for trace in traces.values())
@@ -142,13 +145,18 @@ def _channels(
         time[index, : len(trace.z)] = trace.axes[0].values
     flux_axis = Axis("Flux", plan.flux_unit, fluxes)
     axes = [Axis(kind + " Time Index", "", np.arange(count)), flux_axis]
-    return {
+    channels = {
         DataVariable(kind + "_signal"): LabberPayload(
             (kind + " Signal", "a.u.", signal), axes
         ),
         DataVariable(kind + "_time"): LabberPayload((kind + " Time", "s", time), axes),
         DataVariable(kind): LabberPayload((kind, "s", lifetimes), [flux_axis]),
     }
+    if kind == "t2ramsey":
+        channels[DataVariable("t2ramsey_detune")] = LabberPayload(
+            ("Ramsey physical detune", "Hz", detunes), [flux_axis]
+        )
+    return channels
 
 
 def prepare_export(
@@ -158,8 +166,9 @@ def prepare_export(
 
     points are typed, validated saved commits, never Engine.records or journal.
     Each measured kind has Signal/Time Flux×index and Flux-only lifetime seconds;
-    rejected fits keep raw and NaN lifetime. Disabled/unmeasured kinds have no
-    channels. Missing rows/short traces are NaN; no union/round/interpolation or
+    rejected fits keep raw and NaN lifetime. Ramsey also exports physical detune
+    in Hz, with NaN for rejected or historical records lacking that scalar.
+    Disabled/unmeasured kinds have no channels. Missing rows/short traces are NaN; no union/round/interpolation or
     calibration traces enter this payload. No usable trace raises before writes.
     """
     variables: dict[DataVariable, LabberPayload] = {}

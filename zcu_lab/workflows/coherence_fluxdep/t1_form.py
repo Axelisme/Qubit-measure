@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
 from zcu_tools.gui.form import Display, FormEnv, FormModel
@@ -36,6 +36,31 @@ class T1TunablesForm(FormModel):
     relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=3.0, gt=0, description="Relax delay divided by lifetime guess"
     )
+    sweep_mode: Annotated[Literal["auto", "fixed"], Display(label="Sweep mode")] = (
+        "auto"
+    )
+    sweep_start_us: Annotated[float, Display(label="Sweep start", unit="µs")] = Field(
+        default=0.5, ge=0
+    )
+    sweep_stop_us: Annotated[float, Display(label="Fixed sweep stop", unit="µs")] = (
+        Field(default=50.0, gt=0)
+    )
+    sweep_stop_min_us: Annotated[
+        float, Display(label="Auto stop minimum", unit="µs")
+    ] = Field(default=1.0, gt=0)
+    max_length_us: Annotated[float, Display(label="Auto stop maximum", unit="µs")] = (
+        Field(default=50.0, gt=0)
+    )
+    relax_mode: Annotated[Literal["auto", "fixed"], Display(label="Relax mode")] = (
+        "auto"
+    )
+    relax_delay_us: Annotated[float, Display(label="Fixed relax delay", unit="µs")] = (
+        Field(default=30.0, ge=0)
+    )
+    relax_min_us: Annotated[float, Display(label="Auto relax minimum", unit="µs")] = (
+        Field(default=1.0, ge=0)
+    )
+    uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = True
     max_rel_err: Annotated[float, Display(label="Max relative error")] = Field(
         default=0.3, gt=0, le=1, description="Strict T1 error/lifetime upper bound"
     )
@@ -80,6 +105,15 @@ class T1TunablesForm(FormModel):
             guess_us=self.guess_us,
             sweep_factor=self.sweep_factor,
             relax_factor=self.relax_factor,
+            sweep_mode=self.sweep_mode,
+            sweep_start_us=self.sweep_start_us,
+            sweep_stop_us=self.sweep_stop_us,
+            sweep_stop_min_us=self.sweep_stop_min_us,
+            max_length_us=self.max_length_us,
+            relax_mode=self.relax_mode,
+            relax_delay_us=self.relax_delay_us,
+            relax_min_us=self.relax_min_us,
+            uniform=self.uniform,
             max_rel_err=self.max_rel_err,
             max_fit_residual=self.max_fit_residual,
         )
