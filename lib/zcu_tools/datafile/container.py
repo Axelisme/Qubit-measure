@@ -149,20 +149,15 @@ def copy_group(destination: h5.Group, name: str, source: GroupSource) -> None:
 
 
 def load(path: Path) -> Container:
-    """Read and close a major-3 container or legacy native major-2 file.
+    """Read and close a major-3 container.
 
     All arrays/docs are detached, and opaque groups retain a detached file image.
     Unknown named content is retained. Known nodes must be local, never external
-    links. Same-major future minors are accepted. Legacy metadata is mapped to
-    docs/cfg and docs/metadata and its original tree is retained in groups/legacy.
+    links. Same-major future minors are accepted.
     Malformed content raises path-qualified FormatError; I/O errors propagate.
     """
-    from .legacy_native import load_legacy
-
     with h5.File(path, "r") as file:
         try:
-            if text_attr(file, "format") == "zcu.experiment-data":
-                return load_legacy(file)
             attrs = root_attrs(file)
             variables = known_group(file, "vars")
             documents = known_group(file, "docs")
@@ -191,23 +186,17 @@ def load(path: Path) -> Container:
 def read_doc(path: Path, name: str) -> JsonObject:
     """Read one detached finite JSON object without loading vars or other docs.
 
-    path is an exact major-3 container or legacy native major-2 file. name is a
-    nonempty path segment excluding '.', '..', slash and NUL. Legacy cfg and
-    metadata use the same projections as load; no other legacy docs are defined.
+    path is an exact major-3 container. name is a nonempty path segment
+    excluding '.', '..', slash and NUL.
     Only the header and requested document's nodes are validated. Invalid vars
     do not prevent document reads, and success does not promise load will work.
     Missing documents raise KeyError naming path and name. Invalid names raise
     ValueError; malformed headers/documents or external links raise path-qualified
     FormatError. File I/O errors propagate. The file is closed before returning.
     """
-    from .legacy_native import legacy_header, read_legacy_doc
-
     name_segment(name)
     with h5.File(path, "r") as file:
         try:
-            if text_attr(file, "format") == "zcu.experiment-data":
-                legacy_header(file)
-                return read_legacy_doc(file, name)
             root_attrs(file)
             documents = known_group(file, "docs")
             if known_node(documents, name) is None:
@@ -226,12 +215,8 @@ def inspect(path: Path) -> ContainerInfo:
     inspect is not a promise that load will succeed. Legacy headers and variable
     schemas are supported. Malformed schema raises FormatError; I/O propagates.
     """
-    from .legacy_native import inspect_legacy
-
     with h5.File(path, "r") as file:
         try:
-            if text_attr(file, "format") == "zcu.experiment-data":
-                return inspect_legacy(file)
             attrs = root_attrs(file)
             variables = known_group(file, "vars")
             documents = known_group(file, "docs")

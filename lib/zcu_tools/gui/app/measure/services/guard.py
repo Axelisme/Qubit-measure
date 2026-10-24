@@ -177,11 +177,7 @@ class GuardService:
         ):
             storage = parameters.capture_storage()
             snapshot = RunSnapshot(
-                entry_id=storage.entry_id,
-                entry_name=storage.entry_name,
-                point=storage.point,
-                description=storage.description,
-                roles=storage.roles,
+                entry_id=storage.entry_id, point=storage.point, roles=storage.roles
             )
         logger.debug("capture_run_inputs: tab_id=%r", tab_id)
         return RunInputs(

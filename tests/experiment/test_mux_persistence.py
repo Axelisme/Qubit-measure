@@ -1,11 +1,11 @@
 """New mux cfg and helper results use the existing numeric-axis storage seam."""
 
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 from zcu_tools.datafile import (
-    decode_labber_comment,
     encode_labber_comment,
     load_labber_data,
     write_labber,
@@ -90,5 +90,5 @@ def test_mux_numeric_tones_and_order_survive_native_and_labber(tmp_path: Path):
     np.testing.assert_array_equal(loaded.z, result.signals)
     np.testing.assert_array_equal(loaded.axes[0][2], [0, 1])
     np.testing.assert_array_equal(loaded.axes[1][2], result.offsets * 1e6)
-    envelope = decode_labber_comment(loaded.metadata.comment)
-    assert envelope.cfg == cfg.model_dump(mode="json")
+    envelope = json.loads(loaded.metadata.comment)
+    assert envelope["cfg"] == cfg.model_dump(mode="json")

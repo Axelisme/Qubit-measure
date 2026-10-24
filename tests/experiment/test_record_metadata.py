@@ -13,13 +13,13 @@ import numpy as np
 import pytest
 import zcu_tools.experiment as experiment
 from pydantic import TypeAdapter
-from zcu_tools.datafile import DataVariable, LabberMetadata, load, save
+from zcu_tools.datafile import DataVariable, load, save
 
 
 def historical_metadata(
     run_id: str = "20261006T010000Z-a1b2c3",
 ) -> experiment.RunMetadata:
-    """Return historical facts for run_id, including Labber input metadata."""
+    """Return fixed historical facts for run_id without accessing live state."""
     return experiment.RunMetadata(
         run_id=run_id,
         experiment="test/metadata",
@@ -28,9 +28,7 @@ def historical_metadata(
         completion="unknown",
         snapshot=experiment.RunSnapshot(
             entry_id=UUID("12345678-1234-5678-1234-567812345678"),
-            entry_name="historical entry",
             point="sweet",
-            description=None,
             roles={"qubit": "Q1"},
         ),
         provenance=experiment.SoftwareProvenance(
@@ -42,13 +40,6 @@ def historical_metadata(
             hostname=None,
         ),
         device_snapshot={"bias": {"value": 0.25, "unit": "A"}},
-        labber=LabberMetadata(
-            comment="handwritten note",
-            tags=["offline"],
-            project="project",
-            user="operator",
-            creation_time=1759276800.0,
-        ),
     )
 
 
@@ -131,9 +122,7 @@ def test_run_identity_rejects_other_strings(entry: str, run_id: str) -> None:
 def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
     snapshot = experiment.RunSnapshot(
         entry_id=UUID("12345678-1234-5678-1234-567812345678"),
-        entry_name="historical entry",
         point="sweet",
-        description=None,
         roles=MappingProxyType({"qubit": "Q1"}),
     )
     adapter = TypeAdapter(experiment.RunSnapshot)
@@ -146,9 +135,7 @@ def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
     assert not caught, [str(warning.message) for warning in caught]
     expected_json = {
         "entry_id": "12345678-1234-5678-1234-567812345678",
-        "entry_name": "historical entry",
         "point": "sweet",
-        "description": None,
         "roles": {"qubit": "Q1"},
     }
     assert python_doc == {**expected_json, "entry_id": snapshot.entry_id}
@@ -172,10 +159,6 @@ def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     assert record.result is result
     assert record.metadata.snapshot.roles == {"qubit": "Q1"}
     assert record.metadata.snapshot is not metadata.snapshot
-    assert record.metadata.labber is not None
-    assert metadata.labber is not None
-    metadata.labber.tags.append("later")
-    assert record.metadata.labber.tags == ["offline"]
 
 
 @pytest.mark.parametrize(

@@ -41,6 +41,5 @@ def test_save_merges_acquisition_and_point_metadata_into_the_handed_record(
     assert record.metadata.started_at == evidence.started_at.isoformat()
     assert record.metadata.finished_at == evidence.finished_at.isoformat()
     assert record.metadata.provenance == evidence.provenance
-    assert record.metadata.snapshot.entry_name == "record-entry"
     assert record.metadata.snapshot.point == "sweet"
     assert record.metadata.device_snapshot == {}

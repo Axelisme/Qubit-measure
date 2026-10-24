@@ -11,9 +11,9 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from zcu_tools.datafile import (
     JsonObject,
+    LabberData,
     LabberMetadata,
     encode_labber_comment,
-    save_labber_data,
 )
 from zcu_tools.experiment.metadata import CfgSnapshot, SoftwareProvenance
 from zcu_tools.resources.entry import ComponentSchema
@@ -110,14 +110,13 @@ def write_run(
         cfg_type="SyntheticCfg",
         schema_version="1.0",
     )
-    save_labber_data(
-        str(source),
-        z=("signal", "V", np.array([1 + 2j, 3 + 4j])),
-        axes=[("x", "s", np.array([0.0, 1.0]))],
+    LabberData(
+        ("signal", "V", np.array([1 + 2j, 3 + 4j])),
+        [("x", "s", np.array([0.0, 1.0]))],
         metadata=LabberMetadata(
             tags=["synthetic_scan"], comment=encode_labber_comment(cfg.values)
         ),
-    )
+    ).save(str(source))
     with source.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     evidence = LegacyRunEvidence(

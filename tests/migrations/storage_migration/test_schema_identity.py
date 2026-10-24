@@ -11,9 +11,9 @@ import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import (
     DataVariable,
+    LabberData,
     LabberMetadata,
     encode_labber_comment,
-    save_labber_data,
 )
 from zcu_tools.experiment.metadata import CfgSnapshot
 
@@ -440,14 +440,13 @@ def test_same_tag_selects_distinct_cfg_type_schemas_and_callbacks(
     cfg = CfgSnapshot(
         values={"other": 3}, cfg_type="AlternateCfg", schema_version="1.0"
     )
-    save_labber_data(
-        str(second_source),
-        z=("signal", "V", np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])),
-        axes=[("y", "s", np.array([0.0, 1.0, 2.0])), ("x", "s", np.array([0.0, 1.0]))],
+    LabberData(
+        ("signal", "V", np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])),
+        [("y", "s", np.array([0.0, 1.0, 2.0])), ("x", "s", np.array([0.0, 1.0]))],
         metadata=LabberMetadata(
             tags=["synthetic_scan"], comment=encode_labber_comment(cfg.values)
         ),
-    )
+    ).save(str(second_source))
     with second_source.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     second = replace(

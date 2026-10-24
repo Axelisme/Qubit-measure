@@ -16,8 +16,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有 [[0080]] 的通用容器格式與讀寫，不反向依賴 experiment。Container 只認 vars、docs、groups；cfg、metadata 的具名型別、編碼與驗證由 experiment 擁有。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameters` 的 2.0 header、metadata 讀寫與 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
-- 獨立參數能力由 `resources.parameters` 擁有。Caller 只傳既有文件路徑與自己的 Pydantic value model 給 `open_parameters`，不組裝 DocumentStore，不要求 entry、kind registry、general、roots 或 ledger。`components` 保存直接值，`metadata` 是 opaque YAML mapping 旁表。一般欄位回傳數字等原值，metadata 從獨立入口讀寫。DocumentStore 仍是唯一單檔交易 owner。Resources 不查 metadata 的來源，不解釋 stderr 或 comment，也不因改值自動產生或清除 metadata。Caller 在同筆 edit 中明確替換 metadata mapping，提交沿用既有 mapping-leaf 合併與衝突規則。FieldView 與完整 value-model staging 由 resources 共用，沒有第二套交易或 validator framework。依賴仍由 C8 分層、C9 無循環與 C10 有狀態能力模組獨立 contract 約束。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
 - Setup 與每個 point 各自的 authored alias 表由 `resources.entry` 保存為獨立的 `aliases.yaml`，不是 memento 或 ledger。ContextService 擁有有序表的語法與 Apply 時機，resources 擁有檔案表示、建立時複製及單檔原子替換。MCP 的單次 aliases／target 覆寫不保存它。
 - SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；條目樣本使用 append-only JSONL，讀取取每個 run_id 最後一整行，CSV 只作匯出。舊 CSV reader 留在 root `migrations/` 供離線轉換，runtime 不作 fallback。
@@ -27,7 +26,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 
 設定快照的正本只在 `data.h5` 的 `/cfg`，以 CfgSnapshot 保存 values、cfg_type 與 schema_version。Labber 從同一份 prepared payload／snapshot 產生，供 Log Browser 使用，不是另一份讀回權威。Notebook 與 GUI 都讀 native `data.h5`。
 
-Ledger 的 acquired 只記 run_id、tab／tab_id、experiment、point、roles 與事件時間，不保存 cfg_summary，也不從 Form 或 RunRecord.cfg 序列化第二份設定。只量測未保存仍可追加 acquired，不建立 run 目錄。
+Ledger 的 acquired 只記 run_id、experiment、point、roles 與事件時間，不保存 cfg_summary，也不從 Form 或 RunRecord.cfg 序列化第二份設定。只量測未保存仍可追加 acquired，不建立 run 目錄。
 
 RecordsLedger 讀取 envelope 與依 kind 選出的 payload 時忽略未知欄位，包括舊 1.0 行的 cfg_summary。讀取不改寫原行或附檔，get 的 raw event_json 保留未知內容。已知欄位型別、必填欄位、格式 major、kind、entry identity 與 JSON 損壞仍按契約拒絕；append 仍驗證已知欄位。不升格式 major，也不做 strip／rewrite migration。
 
@@ -66,9 +65,9 @@ Workflow 的兩側目錄都使用 `workflows/<workflow名>_<run_id>/`，保留�
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
 
-舊 Native `zcu.experiment-data` 2.1 的歷史欄位規則如下；新檔由 [[0080]] 的 zcu.container 3.0 保存，欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造，也不加遷移來源標記。正常量測路徑仍必填開始時間，只產生已知完成狀態。2.1 的 started_at attr 必填，以空字串編碼 None；completion attr 以 unknown 編碼未知。缺失 attr、非法型別與非法時間仍拒絕。
+新檔由 [[0080]] 的 zcu.container 3.0 保存，實驗欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造。正常量測路徑仍必填開始時間，只產生已知完成狀態。
 
-同一個容器 reader 長期接受舊 major 2，轉成 Container 後寫回一律使用 3.0，不再提供 major-2 writer。來源完整子樹以 opaque groups/legacy 保留。同 major-3 的 forward minor 與未知內容在 load、修改、save 往返時保留，不降版。格式解碼由 [[0080]] 擁有，實驗欄位是否合法由 experiment 的文件 schema 驗證。
+Reader 只接受 zcu.container major 3。同 major 的 forward minor 與未知內容在 load、修改、save 往返時保留，不降版。舊 native 2.x 不再支援。使用者於 2026-10-24 裁定不支援的舊資料 Load 失敗即可，因此移除舊 reader 與批次升級工具。實驗欄位是否合法仍由 experiment 的文件 schema 驗證。
 
 GUI Load 與共用 typed loader 保留未知歷史值，不把 unknown 改成 complete。Workflow `load_trace` 是 complete-only 分析入口：None＋complete 可載入，unknown 與 partial／stopped 同樣拒絕，因為未知完成度不能證明 acquisition 完整。Notebook 仍只載入 RunRecord，不把載入資料變成 acquisition evidence。現有前端不顯示或排序這兩個 metadata 欄位，本格式變更不新增 UI。
 
@@ -78,7 +77,7 @@ GUI Load 與共用 typed loader 保留未知歷史值，不把 unknown 改成 co
 
 兩路每台只呼叫一次 get_info。任一台失敗就拒絕 Run，不寫設定、不進 adapter/core，也不用 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，不是 setup 後或每個 core 的 checkpoint。後續 sweep 不改寫它，實驗使用的值由 cfg 的 dev、flux_unit、sweep 範圍與 persisted axes 記錄。
 
-Experiment 將 snapshot 寫入 Container 的 `docs/metadata.device_snapshot`。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時寫 JSON null，空 mapping 則寫 `{}`。舊 native 2.x 的 `/device` 由 legacy reader 映入相同欄位。單位沿各 DeviceInfo 的儲存欄位。YOKO 的 `value_unit` 是 A 或 V，與 current／voltage mode 一致；Fake 是 native。Value 與 rampstep 沿該單位保存。RF 頻率為 Hz，功率為 dBm，不加 `value_unit`。Snapshot 不另造單位欄位或換算值。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
+Experiment 將 snapshot 寫入 Container 的 `docs/metadata.device_snapshot`。Key 是 device 名稱，value 是 get_info 的設定。Snapshot 為 None 時寫 JSON null，空 mapping 則寫 `{}`。單位沿各 DeviceInfo 的儲存欄位。YOKO 的 `value_unit` 是 A 或 V，與 current／voltage mode 一致；Fake 是 native。Value 與 rampstep 沿該單位保存。RF 頻率為 Hz，功率為 dBm，不加 `value_unit`。Snapshot 不另造單位欄位或換算值。GUI 和 Notebook Save 都使用當次 Run 的固定 snapshot，不重讀硬體或取下一輪值。
 
 Labber 成功後，保存編排將 labber_path 放入 SaveReport 與 saved ledger 事件，不寫入 RunMetadata。輸出結果與 saved ledger 事件由保存編排產生，RecordsLedger 只驗證與追加事件。Ledger 追加失敗不能把已寫好的檔案改標為量測失敗，也不代表那些檔案已回滾。
 
@@ -90,7 +89,7 @@ DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer
 
 GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
-GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion 與 Labber 子欄位，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
+GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。BaseAdapter 使用核心 from_stored，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion、snapshot 與 provenance，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
 
 原始 cfg 正本保存在 native 資料檔的 docs/cfg，可透過公開 datafile.load 離線讀取。使用者於 2026-10-16 選擇「A」時不新增 GUI 入口；2026-10-23 批准的 Results browser 是唯讀檢視例外，呈現保存的 cfg_type、schema_version 與以 values 為根的相對路徑。瀏覽器不修改檔案、不回填表單，也不重新分析。視窗與前端邊界見 [[0067]]；Load 與 adapter 的 opaque record 契約不變。
 

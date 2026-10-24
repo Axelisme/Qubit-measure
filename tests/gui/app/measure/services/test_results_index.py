@@ -52,11 +52,7 @@ def _native(run: Path, entry: ResultEntry, run_id: str, point: str) -> None:
         finished_at=None,
         completion="unknown",
         snapshot=RunSnapshot(
-            entry_id=UUID(entry.entry_id),
-            entry_name=entry.result_path.name,
-            point=point,
-            description=None,
-            roles={"qubit": "Q1"},
+            entry_id=UUID(entry.entry_id), point=point, roles={"qubit": "Q1"}
         ),
         provenance=SoftwareProvenance(
             software_versions={},
@@ -88,7 +84,6 @@ def _acquired(entry: ResultEntry, run_id: str, point: str) -> None:
             origin="notebook",
             payload=AcquiredPayload(
                 run_id=run_id,
-                tab="Synthetic",
                 experiment="mux/readout",
                 point=point,
                 roles={"qubit": "Q1"},

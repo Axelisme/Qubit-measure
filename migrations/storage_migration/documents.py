@@ -30,7 +30,8 @@ from zcu_tools.resources.entry.schema import (
     SetupDocument,
 )
 from zcu_tools.resources.predictor_file import PredictorFile, load_predictor_file
-from zcu_tools.resources.t1_curve_file import load_t1_curve_file
+
+from migrations.storage_migration.t1_curve_file import load_t1_curve_file
 
 from .errors import MigrationInputError
 from .models import DocumentBaseline, DocumentKind, ExistingItem, MigrationDifference

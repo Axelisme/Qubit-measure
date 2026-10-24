@@ -6,8 +6,7 @@ from pathlib import Path
 import h5py as h5
 import numpy as np
 from pydantic import JsonValue
-
-from .container_models import JsonObject
+from zcu_tools.datafile import JsonObject
 
 
 class LabberSnapshotError(ValueError):

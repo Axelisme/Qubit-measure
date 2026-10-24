@@ -239,8 +239,6 @@ class RunService:
                 origin=op.origin.origin,
                 payload=AcquiredPayload(
                     run_id=metadata.run_id,
-                    tab=op.adapter_name,
-                    tab_id=op.tab_id,
                     experiment=metadata.experiment,
                     point=metadata.snapshot.point,
                     roles=dict(metadata.snapshot.roles),

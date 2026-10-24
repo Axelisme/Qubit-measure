@@ -97,11 +97,7 @@ def populated_browser(
             finished_at=None,
             completion="unknown",
             snapshot=RunSnapshot(
-                entry_id=UUID(entry.entry_id),
-                entry_name=entry_name,
-                point=point,
-                description=None,
-                roles={"qubit": "Q1"},
+                entry_id=UUID(entry.entry_id), point=point, roles={"qubit": "Q1"}
             ),
             provenance=SoftwareProvenance(
                 software_versions={},
@@ -145,7 +141,6 @@ def populated_browser(
                     origin="notebook",
                     payload=AcquiredPayload(
                         run_id=run_id,
-                        tab="Synthetic",
                         experiment=experiment,
                         point=point,
                         roles={"qubit": "Q1"},

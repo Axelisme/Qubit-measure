@@ -93,13 +93,7 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
         inputs = replace(
             inputs,
             request=replace(inputs.request, soc=None, soccfg=None),
-            snapshot=RunSnapshot(
-                entry_id=UUID(int=1),
-                entry_name="entry",
-                point="point",
-                description="",
-                roles={},
-            ),
+            snapshot=RunSnapshot(entry_id=UUID(int=1), point="point", roles={}),
             experiment_tag=adapter.experiment_tag,
         )
         token = services.run.start_run(inputs, plots=make_plots())

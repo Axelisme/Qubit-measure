@@ -1,8 +1,8 @@
 """Write Labber 1.8.6 uniform-grid and variable-length trace HDF5 logs.
 
 Axes are inner-first; array dimensions are outermost-first, inner axis last.
-Save helpers normalize the Labber suffix through LabberData.save. Exact-path
-writers and borrowed-log writers document their own path and handle ownership.
+Exact-path writers and borrowed-log writers document their own path and handle
+ownership. LabberData.save normalizes the Labber suffix.
 New files use exclusive creation and failures may leave partial new files.
 Shared bookkeeping labels, dtypes and string conversion belong to labber_format;
 loading belongs to labber_reader. Neither owner chooses caller artifact policy.
@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
 
 import h5py
 import numpy as np
@@ -37,71 +36,8 @@ from .models import (
     LabberMetadata,
     LabberPayload,
     as_tag_list,
-    unpack_triple,
 )
 from .paths import format_ext
-
-if TYPE_CHECKING:
-    # array-like type alias (covers ndarray, list, tuple, scalars) for checkers
-    from numpy.typing import ArrayLike
-else:
-    ArrayLike = Any
-
-__all__ = ["save_labber_data", "save_labber_trace_data"]
-
-
-def save_labber_data(
-    path: str,
-    z: tuple[str, str, ArrayLike],
-    axes: Sequence[tuple[str, str, ArrayLike]],
-    *,
-    metadata: LabberMetadata | None = None,
-    timestamps: ArrayLike | None = None,
-) -> str:
-    """Save complex measurement data to a Labber-compatible HDF5 log file.
-
-    Both the log channel ``z`` and every axis are described by a
-    ``(name, unit, values)`` triple, e.g.::
-
-        save_labber_data("scan",
-            z=("S21", "", z_data),
-            axes=[("Frequency", "Hz", freq),     # inner axis (x)
-                  ("Power", "dBm", power)])       # outer axis (y)
-
-    The data array (the ``values`` part of ``z``) has the **inner axis last**;
-    outer axes precede it in its natural index order, so ``z_data[i_power, :]``
-    selects the inner trace at ``power[i_power]``.  Supports 1-D, 2-D, 3-D and
-    arbitrary N-D by passing that many axes.
-
-    Parameters
-    ----------
-    path : str
-        Output file path.  ``.hdf5`` is appended if missing (``.h5`` -> ``.hdf5``).
-    z : (name, unit, values)
-        The complex log channel.  ``values`` is the data array, shaped
-        ``(Nx,)`` for 1-D, ``(Ny, Nx)`` for 2-D, ``(Nw, Ny, Nx)`` for 3-D, ...
-    axes : sequence of (name, unit, values)
-        One triple per axis, **inner axis first** (``axes[0]`` is x).
-        ``len(axes)`` must equal ``values.ndim`` and each ``len(axes[k][2])``
-        must match the corresponding data dimension.
-    metadata : LabberMetadata, optional
-        Comment, tags, project, user and optional creation epoch. Omission uses
-        default metadata. The supplied object is passed through without copying.
-    timestamps : array_like, optional
-        Per-entry absolute timestamps (epoch s), one per stored entry.  If
-        omitted, the current time is used for all entries.
-
-    Returns
-    -------
-    str
-        The path actually written.
-    """
-    return LabberData(
-        z,
-        axes,
-        metadata=metadata,
-        timestamps=timestamps,
-    ).save(path)
 
 
 def write_labber_data_file(path: str, ld: LabberData) -> str:
@@ -265,66 +201,6 @@ def _resolve_timestamps(timestamps, n_entry, creation_time: float | None = None)
         )
     t0 = float(ts_abs[0]) if creation_time is None else float(creation_time)
     return t0, ts_abs - t0
-
-
-def save_labber_trace_data(
-    path: str,
-    z: tuple[str, str, Sequence[ArrayLike]],
-    x: tuple[str, str, ArrayLike | Sequence[ArrayLike]],
-    y: tuple[str, str, ArrayLike] | None = None,
-    *,
-    metadata: LabberMetadata | None = None,
-    timestamps: ArrayLike | None = None,
-) -> str:
-    """Save **variable-length** complex traces (Labber ``vector=True`` mode).
-
-    Unlike :func:`save_labber_data` (which needs a uniform x-axis shared by all
-    traces), this stores each trace in the ``Traces/`` group with its own
-    x-axis, so entries may have **different lengths and/or non-uniform x**.
-
-    Like :func:`save_labber_data`, the channel and axes use ``(name, unit,
-    values)`` triples::
-
-        save_labber_trace_data("scan",
-            z=("S21", "", traces),                  # traces = list of arrays
-            x=("Frequency", "Hz", xs),              # xs = shared array or per-trace
-            y=("Power", "dBm", power))              # optional outer axis
-
-    Parameters
-    ----------
-    path : str
-        Output path (``.hdf5`` appended if missing).
-    z : (name, unit, traces)
-        ``traces`` is a sequence of complex arrays, one per entry; lengths may
-        differ between entries.
-    x : (name, unit, values)
-        The inner x-axis.  ``values`` is either a single array shared by all
-        traces, or a sequence with one x array per trace (matching each trace's
-        length).
-    y : (name, unit, values), optional
-        Outer step axis, one value per trace (e.g. Power).  ``len(values)`` must
-        equal ``len(traces)``.  If omitted, the traces are an unstructured list.
-    metadata : LabberMetadata, optional
-        File metadata (see :func:`save_labber_data`); passed without copying.
-    timestamps : array_like, optional
-        Per-entry absolute timestamps (epoch s), one per trace.  If omitted,
-        the current time is used for all entries.
-
-    Returns
-    -------
-    str
-        The path actually written.
-    """
-    z_name, z_unit, traces = unpack_triple(z, "z")
-    # store the trace list as data.values; LabberData.save() detects the list
-    # and routes to the trace writer.  x keeps its per-trace-or-shared values.
-    axes = [x] if y is None else [x, y]
-    return LabberData(
-        (z_name, z_unit, list(traces)),
-        axes,
-        metadata=metadata,
-        timestamps=timestamps,
-    ).save(path)
 
 
 def write_labber_trace_file(path: str, ld: LabberData) -> str:

@@ -305,7 +305,6 @@ def test_real_caller_writes_all_formats_and_retains_acquisition(
     assert loaded_metadata.completion == acquisition.completion
     assert loaded_metadata.provenance == acquisition.provenance
     assert loaded_metadata.snapshot.point == "sweet"
-    assert loaded_metadata.snapshot.description == "save-time context"
     assert loaded_metadata.snapshot.roles == {}
     assert (
         TypeAdapter(CfgSnapshot).validate_python(loaded.docs["cfg"]).values["gain"]

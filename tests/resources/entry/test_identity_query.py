@@ -58,7 +58,6 @@ def test_event_snapshot_does_not_resolve_components_or_publish_files(
         origin="gui",
         payload=AcquiredPayload(
             run_id="opaque-run",
-            tab="synthetic",
             experiment="synthetic/tag",
             point="historical",
             roles={"qubit": "Q1"},
