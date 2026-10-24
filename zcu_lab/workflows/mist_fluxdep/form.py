@@ -23,7 +23,6 @@ from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFact
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
     BathResetCfg,
-    NoneResetCfg,
     PulseResetCfg,
     TwoPulseResetCfg,
 )
@@ -167,7 +166,7 @@ class MISTPlanForm(FormModel):
                 native_reset = NativeModuleCfgFactory.from_core(core, context=context)
                 if not isinstance(
                     native_reset,
-                    (NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg),
+                    (PulseResetCfg, TwoPulseResetCfg, BathResetCfg),
                 ):
                     raise ValueError("MIST reset selection must be a native reset")
                 reset = native_reset

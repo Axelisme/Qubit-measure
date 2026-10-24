@@ -648,9 +648,9 @@ def test_template_binding_error_names_adapter_and_field_path(fault: str) -> None
     node = Template("missing") if fault == "unknown" else Template("pulse")
     catalog = templates()
     if fault == "family":
-        from zcu_tools.cfg_model import NoneResetCfg
+        from zcu_tools.cfg_model import PulseResetSpec
 
-        catalog["pulse"] = TemplateDef(NoneResetCfg, "Wrong family", {})
+        catalog["pulse"] = TemplateDef(PulseResetSpec, "Wrong family", {})
     elif fault == "tag":
         catalog["pulse"] = TemplateDef(
             PulseSpec, "Bad tag", {"waveform.style": "unknown"}

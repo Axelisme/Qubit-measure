@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, override
 
 from qick.asm_v2 import QickParam
 
 from ..utils import is_qick_param
-from .base import Module
+from .base import Module, ModuleGroup, as_modules
 from .util import merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
@@ -105,21 +104,22 @@ class DelayAuto(Module):
 class Join(Module):
     """Start independent branches together and wait for their longest duration.
 
-    args are modules or module sequences. Delay/DelayAuto branches are invalid.
-    Table-length joins require exactly one TableLengthPulse per branch, distinct
+    args are modules or module sequences. None means no module and is skipped;
+    a None branch is empty. Delay/DelayAuto branches are invalid.
+    Table-length joins require one TableLengthPulse per nonempty branch, distinct
     generators and a shared index register/table size. Other table combinations
     raise ValueError. table_pulses holds those branches, or an empty tuple for
     ordinary joins. Their common wait uses each point's quantized maximum, not
     a sweep-wide maximum. Input modules become owned by this Join.
     """
 
-    def __init__(self, *args: Module | Sequence[Module]) -> None:
+    def __init__(self, *args: ModuleGroup) -> None:
         self.name = ""
 
         if len(args) == 0:
             raise ValueError("Join must contain at least one module")
 
-        join_modules = [[m] if isinstance(m, Module) else list(m) for m in args]
+        join_modules = [as_modules(group) for group in args]
         for mod_list in join_modules:
             for m in mod_list:
                 if isinstance(m, (DelayAuto, Delay)):
@@ -137,8 +137,9 @@ class Join(Module):
         ]
         self.table_pulses: tuple[TableLengthPulse, ...] = tuple(tables)
         if tables:
-            if len(tables) != len(join_modules) or any(
-                len(branch) != 1 for branch in join_modules
+            nonempty_branches = [branch for branch in join_modules if branch]
+            if len(tables) != len(nonempty_branches) or any(
+                len(branch) != 1 for branch in nonempty_branches
             ):
                 raise ValueError(
                     "Table-length Join requires one TableLengthPulse per branch"

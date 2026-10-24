@@ -54,6 +54,22 @@ def test_program_builder_build_returns_program_with_isolated_cfg():
     assert fresh_program.reps == 5
 
 
+def test_program_builder_skips_absent_modules_and_preserves_order() -> None:
+    program = None
+    with Schedule(
+        _cfg(), SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
+    ) as sched:
+        program = (
+            sched.prog_builder("soc", "soccfg", program_cls=FakeProgram, marker="kw")
+            .add(None, FakeModule("drive"), [None, FakeModule("readout"), None])
+            .add_reset("reset", None)
+            .build()
+        )
+
+    assert program is not None
+    assert [module.name for module in program.modules] == ["drive", "readout"]
+
+
 def test_program_builder_projects_mapping_cfg_to_program_cfg() -> None:
     program = None
     FakeProgram.instances.clear()
