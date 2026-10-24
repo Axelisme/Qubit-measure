@@ -27,17 +27,36 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
     qf_rounds: Annotated[int, Display(label="Spectroscopy rounds")] = Field(
         default=1, ge=1, description="Spectroscopy averaging rounds"
     )
+    qf_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    qf_earlystop_snr: float | None = Field(
+        default=50.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     rabi_reps: Annotated[int, Display(label="Rabi averages")] = Field(
         default=100, ge=1, description="Rabi averages"
     )
     rabi_rounds: Annotated[int, Display(label="Rabi rounds")] = Field(
         default=1, ge=1, description="Rabi averaging rounds"
     )
+    rabi_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    rabi_earlystop_snr: float | None = Field(
+        default=30.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     ro_reps: Annotated[int, Display(label="Readout averages")] = Field(
         default=100, ge=1, description="Readout averages"
     )
     ro_rounds: Annotated[int, Display(label="Readout rounds")] = Field(
         default=1, ge=1, description="Readout averaging rounds"
+    )
+    ro_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     span_mhz: Annotated[float, Display(label="Spectroscopy span", unit="MHz")] = Field(
         default=30.0, gt=0, description="Base spectroscopy span"
@@ -154,10 +173,15 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         return CalibrationTunables(
             qf_reps=self.qf_reps,
             qf_rounds=self.qf_rounds,
+            qf_acquire_retry=self.qf_acquire_retry,
+            qf_earlystop_snr=self.qf_earlystop_snr,
             rabi_reps=self.rabi_reps,
             rabi_rounds=self.rabi_rounds,
+            rabi_acquire_retry=self.rabi_acquire_retry,
+            rabi_earlystop_snr=self.rabi_earlystop_snr,
             ro_reps=self.ro_reps,
             ro_rounds=self.ro_rounds,
+            ro_acquire_retry=self.ro_acquire_retry,
             span_mhz=self.span_mhz,
             qf_widen=self.qf_widen,
             detune_center_mhz=self.detune_center_mhz,

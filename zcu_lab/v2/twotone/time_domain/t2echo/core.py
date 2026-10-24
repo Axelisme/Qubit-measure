@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -17,8 +18,10 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
@@ -53,6 +56,20 @@ class T2EchoCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop averaging after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -166,7 +183,15 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
                     Readout("readout", cfg.readout),
                 )
                 .declare_sweep("length", length_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
+                .build_and_acquire(
+                    rounds=cfg.rounds,
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry,
+                        stop_condition=snr_checker(
+                            signals_buffer.at(), cfg.earlystop_snr, t2echo_signal2real
+                        ),
+                    ),
+                )
             )
 
         # Keep measured IQ separate from fitted coherence times and fringe frequency.

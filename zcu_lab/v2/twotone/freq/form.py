@@ -21,6 +21,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             "freq",
             "reps",
             "rounds",
+            "acquire_retry",
+            "earlystop_snr",
             "relax_delay",
         ),
         tree={

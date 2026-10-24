@@ -6,13 +6,16 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rotate2real
@@ -71,6 +74,20 @@ class FreqCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop averaging after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -174,7 +191,17 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 .add_pulse("qub_pulse", cfg.qub_pulse)
                 .add_readout("readout", cfg.readout)
                 .declare_sweep("freq", freq_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
+                .build_and_acquire(
+                    rounds=cfg.rounds,
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry,
+                        stop_condition=snr_checker(
+                            signals_buffer.at(),
+                            cfg.earlystop_snr,
+                            lambda data: rotate2real(data).real,
+                        ),
+                    ),
+                )
             )
 
         return FreqResult(

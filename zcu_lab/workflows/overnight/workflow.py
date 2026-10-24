@@ -84,6 +84,22 @@ class OvernightTunables(BaseModel):
     t2_guess_us: float = Field(
         default=10.0, gt=0, description="Fixed Echo timing guess, microseconds"
     )
+    t1_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    t1_earlystop_snr: float | None = Field(
+        default=None,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
+    t2_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    t2_earlystop_snr: float | None = Field(
+        default=None,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     sweep_factor: float = Field(
         default=4.0, gt=0, description="Grid endpoint / timing guess"
     )
@@ -283,6 +299,8 @@ async def overnight[C](
                 uniform=tun.current.uniform,
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
+                acquire_retry=tun.current.t1_acquire_retry,
+                earlystop_snr=tun.current.t1_earlystop_snr,
                 relax_delay=tun.current.relax_factor * tun.current.t1_guess_us,
                 pi_pulse=plan.qub_pulse,
                 readout=plan.readout,
@@ -302,6 +320,8 @@ async def overnight[C](
             t2_cfg = T2EchoCfg(
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
+                acquire_retry=tun.current.t2_acquire_retry,
+                earlystop_snr=tun.current.t2_earlystop_snr,
                 relax_delay=tun.current.relax_factor * tun.current.t2_guess_us,
                 pi_pulse=plan.qub_pulse,
                 pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),

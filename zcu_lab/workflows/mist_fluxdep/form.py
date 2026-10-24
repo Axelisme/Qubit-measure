@@ -27,6 +27,7 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 
+from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.workflows.common.calibration_form import CalibrationTunablesForm
 from zcu_lab.workflows.common.calibration_modules import (
     DRIVE_MODULE_FIELD,
@@ -93,6 +94,9 @@ class MISTPlanForm(FormModel):
     mist_pulse: Annotated[MistModuleInput, Display(label="MIST pulse")] = Field(
         description="Required native MIST disturbance pulse"
     )
+    measure_mode: Annotated[
+        Literal["excited", "ground", "both"], Display(label="Preparation")
+    ] = Field(default="excited", description="Excited pi, ground without pi, or both")
     gain_start: Annotated[float, Display(label="Gain start", unit="a.u.")] = Field(
         description="Fixed sweep start gain (a.u.)"
     )
@@ -198,6 +202,12 @@ class MISTPlanForm(FormModel):
             gain_stop=self.gain_stop,
             gain_points=self.gain_points,
             snapshot=snapshot,
+            measure_mode=self.measure_mode,
+            t1_us=(
+                optional_parameter_float(env.parameters, "$qubit.t1")
+                if env.parameters is not None
+                else None
+            ),
         )
 
 
@@ -216,6 +226,9 @@ class MISTTunablesForm(FormModel):
         default=100, ge=1, description="MIST averages"
     )
     rounds: int = Field(default=10, ge=1, description="MIST averaging rounds")
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
     guess_us: Annotated[float, Display(label="T1 guess", unit="µs")] = Field(
         default=20.0, gt=0, description="Calibration T1 timing estimate (µs)"
     )
@@ -229,6 +242,7 @@ class MISTTunablesForm(FormModel):
             cal=self.cal.to_cfg(),
             reps=self.reps,
             rounds=self.rounds,
+            acquire_retry=self.acquire_retry,
             guess_us=self.guess_us,
             relax_factor=self.relax_factor,
         )

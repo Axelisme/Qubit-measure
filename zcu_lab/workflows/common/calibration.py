@@ -8,14 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from numpy.typing import NDArray
-from pydantic import ConfigDict, Field, model_validator
-from zcu_tools.analysis.fitting import (
-    FitQuality,
-    compute_fit_quality,
-    fit_qubit_freq,
-    fit_rabi,
-)
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
@@ -28,21 +21,26 @@ from zcu_lab.v2.twotone.freq.core import (
     FreqCfg,
     FreqExp,
     FreqResult,
-    qubfreq_signal2real,
 )
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiCfg,
     LenRabiExp,
-    LenRabiResult,
-    rabi_signal2real,
 )
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainCfg,
     FreqGainExp,
 )
-from zcu_lab.workflows.common.analysis import (
-    fit_or_failed,
-    validate_fit_trace,
+from zcu_lab.workflows.common.calibration_analysis import (
+    FrequencyFit as FrequencyFit,
+)
+from zcu_lab.workflows.common.calibration_analysis import (
+    RabiFit as RabiFit,
+)
+from zcu_lab.workflows.common.calibration_analysis import (
+    analyze_len_rabi as analyze_len_rabi,
+)
+from zcu_lab.workflows.common.calibration_analysis import (
+    analyze_qubit_freq as analyze_qubit_freq,
 )
 from zcu_lab.workflows.common.calibration_plots import (
     CalibrationTrace,
@@ -61,133 +59,6 @@ from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
 from zcu_lab.workflows.common.saving import save_native
 
 
-@dataclass(frozen=True)
-class FrequencyFit:
-    """Lorentzian frequency estimate and same-coordinate projected curves.
-
-    frequency_mhz/error_mhz are the fitted center and its marginal standard
-    error. width_mhz/width_error_mhz are the FWHM and its standard error.
-    observed/fitted are float64 vectors aligned with source.freqs.
-    quality contains residual diagnostics with no parameter-error entries.
-    Values are not acceptance-filtered: native nonfinite errors and unavailable
-    diagnostics remain visible for the workflow to reject.
-    """
-
-    frequency_mhz: float
-    error_mhz: float
-    width_mhz: float
-    width_error_mhz: float
-    observed: NDArray[np.float64]
-    fitted: NDArray[np.float64]
-    quality: FitQuality
-
-
-@dataclass(frozen=True)
-class RabiFit:
-    """Lowest-mean-absolute-residual Rabi candidate with native phase estimation.
-
-    pi_length_us/error_us are the fitted pi-pulse duration and its propagated
-    standard error. pi2_length_us/pi2_error_us retain the phase-aware native
-    pi/2 duration and propagated error, not half the fitted pi duration.
-    Both durations use the same acquisition waveform and gain, in microseconds.
-    observed/fitted are float64 vectors aligned with
-    source.lengths. quality contains residual diagnostics with no
-    parameter-error entries. Native nonfinite estimates/errors are retained;
-    this value does not certify calibration acceptance.
-    """
-
-    pi_length_us: float
-    error_us: float
-    pi2_length_us: float
-    pi2_error_us: float
-    observed: NDArray[np.float64]
-    fitted: NDArray[np.float64]
-    quality: FitQuality
-
-
-def analyze_qubit_freq(result: FreqResult) -> FrequencyFit | Failed:
-    """Fit the spectroscopy trace to estimate the qubit resonance and linewidth.
-
-    result uses MHz coordinates and complex128 signals of matching shape.
-    Reuse the native background-removal/magnitude projection without skipping
-    or masking observations. Return estimate, error, FWHM and residual curves.
-    Do not mutate result or acquire, plot, save, or apply an acceptance threshold.
-    Return Failed(reason) for nonfinite measured IQ or the expected fit
-    failures documented by fit_or_failed. Structural/configuration errors and
-    unexpected projection/fitter errors propagate; no samples are replaced.
-    """
-    failure = validate_fit_trace(result.freqs, result.signals)
-    if failure is not None:
-        return failure
-    # Remove the native background, then fit the complete resonance trace.
-    observed = qubfreq_signal2real(result.signals)
-    fit = fit_or_failed(lambda: fit_qubit_freq(result.freqs, observed, type="lor"))
-    if isinstance(fit, Failed):
-        return fit
-    frequency, error, width, width_error, fitted, _optimizer = fit
-    # The workflow uses public estimates/errors, not positional optimizer vectors.
-    quality = compute_fit_quality(observed, fitted, {}, None)
-    return FrequencyFit(
-        float(frequency),
-        float(error),
-        float(width),
-        float(width_error),
-        observed,
-        fitted,
-        quality,
-    )
-
-
-def analyze_len_rabi(result: LenRabiResult) -> RabiFit | Failed:
-    """Fit Rabi oscillations to estimate phase-aware pi and pi/2 durations.
-
-    result uses microsecond coordinates and complex128 signals of matching
-    1-D shape. Reuse the native real-axis rotation and phase-aware pi estimate.
-    Estimating phase avoids a fixed-phase optimizer local minimum on native
-    traces whose first sample is nonzero. Fit both decay and non-decay candidates,
-    then use the lower mean absolute residual; one failed candidate is allowed.
-    Return pi and pi/2 durations, propagated uncertainties and residual curves.
-    Do not skip/mask data, mutate result or acquire, plot, save, or accept a fit.
-    Nonfinite measured IQ and fit_or_failed's expected fit failures return
-    Failed(reason). Structural/configuration and unexpected errors propagate.
-    """
-    failure = validate_fit_trace(result.lengths, result.signals)
-    if failure is not None:
-        return failure
-    # Rotate IQ to the signal axis, then fit oscillations with free phase.
-    observed = rabi_signal2real(result.signals)
-    candidates = []
-    for decay in (True, False):
-        candidate = fit_or_failed(
-            lambda decay=decay: fit_rabi(
-                result.lengths, observed, decay=decay, init_phase=None
-            )
-        )
-        if not isinstance(candidate, Failed):
-            candidates.append(candidate)
-    if not candidates:
-        return Failed("Rabi decay and non-decay fits both failed")
-    fit = min(
-        candidates,
-        key=lambda candidate: (
-            float(np.mean(np.abs(observed - candidate[6])))
-            if np.all(np.isfinite(candidate[6]))
-            else math.inf
-        ),
-    )
-    pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit
-    quality = compute_fit_quality(observed, fitted, {}, None)
-    return RabiFit(
-        float(pi_length),
-        float(error),
-        float(pi2),
-        float(pi2_error),
-        observed,
-        fitted,
-        quality,
-    )
-
-
 class CalibrationTunables(FrequencyTunables):
     """Generation and acceptance knobs captured once per flux-point invocation.
 
@@ -202,10 +73,29 @@ class CalibrationTunables(FrequencyTunables):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     qf_reps: int = Field(default=100, ge=1, description="Spectroscopy averages")
     qf_rounds: int = Field(default=1, ge=1, description="Spectroscopy rounds")
+    qf_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    qf_earlystop_snr: float | None = Field(
+        default=50.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     rabi_reps: int = Field(default=100, ge=1, description="Rabi averages")
     rabi_rounds: int = Field(default=1, ge=1, description="Rabi rounds")
+    rabi_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    rabi_earlystop_snr: float | None = Field(
+        default=30.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     ro_reps: int = Field(default=100, ge=1, description="Readout averages")
     ro_rounds: int = Field(default=1, ge=1, description="Readout rounds")
+    ro_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
     max_frequency_rel_err: float = Field(
         default=0.3, gt=0, le=1, description="Strict center-error/FWHM upper bound"
     )
@@ -352,6 +242,8 @@ class CalCarry:
     frequency history even when a later stage fails. frequency_traces/rabi_traces
     retain one projected sweep row per point for run-local heatmaps, not Figures.
     rabi_drive holds the pi-product history and query-aged gain controller.
+    last_pi retains the frequency paired with accepted pi/pi2; pi_source and
+    readout_source identify their producer points, or None before acceptance.
     Widening replaces the current point's frequency row. Pause preserves this carry;
     only explicit point commits persist reports. There are no stage checkpoints.
     frequency_tracker owns the run-local physical overlay, IDW and linewidth
@@ -365,10 +257,27 @@ class CalCarry:
     frequency_traces: list[CalibrationTrace] = field(default_factory=list)
     rabi_traces: list[CalibrationTrace] = field(default_factory=list)
     rabi_drive: RabiDriveFeedback = field(default_factory=RabiDriveFeedback)
+    last_pi: CalibratedPi2 | None = None
+    pi_source: CalibrationSource | None = None
+    readout_source: CalibrationSource | None = None
     frequency_tracker: FrequencyTracker | None = None
     # Matrix-element feed-forward for the Rabi lane; refreshed at every point.
     cur_m: float | None = None
     m_ratio: float | None = None
+
+
+class CalibrationSource(BaseModel):
+    """Identify the accepted dependency used by a consumer at a flux point.
+
+    need is latest (prior accepted points allowed) or now (current point only).
+    source_index/source_flux identify the producer; None means the fixed host
+    seed. fallback marks a prior-point or seed dependency, not a new acceptance.
+    """
+
+    need: Literal["latest", "now"] = "latest"
+    source_index: int | None = None
+    source_flux: float | None = None
+    fallback: bool = True
 
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
@@ -504,6 +413,8 @@ def _frequency_cfg(
     return FreqCfg(
         reps=inputs.tun.qf_reps,
         rounds=inputs.tun.qf_rounds,
+        acquire_retry=inputs.tun.qf_acquire_retry,
+        earlystop_snr=inputs.tun.qf_earlystop_snr,
         relax_delay=1.0,
         qub_pulse=drive,
         readout=ro,
@@ -728,6 +639,8 @@ async def calibrate_rabi(
     cfg = LenRabiCfg(
         reps=inputs.tun.rabi_reps,
         rounds=inputs.tun.rabi_rounds,
+        acquire_retry=inputs.tun.rabi_acquire_retry,
+        earlystop_snr=inputs.tun.rabi_earlystop_snr,
         relax_delay=(
             max(
                 inputs.tun.rabi_relax_min_us,
@@ -828,7 +741,7 @@ def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
     The rule is point_index % tun.ro_every == 0; index zero naturally scans.
     Failed/rejected prior scans do not change the cadence or cause extra scans.
     The caller retains legal seed/prior readout on cadence skips and checks this
-    point's Rabi dependency separately. Negative indexes raise ValueError.
+    point's latest-pi dependency separately. Negative indexes raise ValueError.
     """
     if point_index < 0:
         raise ValueError("Readout point index must be nonnegative")
@@ -846,39 +759,35 @@ async def calibrate_readout(
 ) -> ReadoutResult:
     """Scan readout frequency and gain to maximize discrimination after Rabi.
 
-    An accepted rabi implies a current accepted frequency; its frequency_mhz
-    is the MHz used here, never a prior frequency. Nonaccepted Rabi returns a
-    named dependency skip. Caller uses readout_due to decide flux cadence;
-    an accepted Rabi causes a scan whenever this stage is called. Timing is
-    positive finite smoothed T1 us. Relaxation uses readout auto/fixed knobs.
+    Resolve the latest accepted pi pulse with its source frequency and gain.
+    A failed Rabi can reuse that pulse; no accepted pulse gives a dependency skip.
+    Caller uses readout_due to decide cadence. Accepted pulse pairs record their
+    producer in carry. Relaxation follows smoothed T1 or the fixed readout knob.
     Search windows follow retained readout with configurable half widths and gain
     clipped to [0, 1]. A wavelet-smoothed map needs a unique interior prominent
-    maximum meeting the SNR floor. carry's readout changes only on acceptance. Failure/rejection retains legal prior
+    maximum meeting the SNR floor. Failure/rejection retains legal prior
     readout, without returning fabricated accepted values. inputs.snapshot is
     the fixed historical entry/point state used to save readout.h5 after Completed,
     including rejection. Partial saves then returns rejected/stopped without
     selecting a best point or updating carry. Invalid input/unexpected errors raise.
     Await in a workflow; cancellation remains Engine-owned.
     """
-    # Require accepted frequency and pulse durations at this point.
+    # Readout consumes the latest accepted pi module, unlike Rabi's NOW frequency.
     _validate_calibration_inputs(0.0, t1_estimate_us)
-    if rabi.status != "accepted":
+    cal = current_point_calibration(
+        rabi, carry, point_index=inputs.point_index, flux=inputs.flux
+    )
+    if cal is None:
         return ReadoutResult(
-            "skipped",
-            "Requires this point's accepted frequency and Rabi",
-            None,
-            None,
-            None,
+            "skipped", "Requires a latest accepted pi pulse", None, None, None
         )
-    if rabi.frequency_mhz is None or rabi.pi_length_us is None:
-        raise ValueError("Accepted Rabi requires current frequency and pi duration")
     prior = carry.seed if carry.last is None else carry.last
     # Sweep readout gain and frequency with the calibrated pi drive.
     drive = inputs.qub_pulse.model_copy(deep=True)
-    drive.set_param("freq", rabi.frequency_mhz)
-    drive.set_param("length", rabi.pi_length_us)
-    if rabi.drive_gain is not None:
-        drive.set_param("gain", rabi.drive_gain)
+    drive.set_param("freq", cal.f01_mhz)
+    drive.set_param("length", cal.pi_length_us)
+    if cal.drive_gain is not None:
+        drive.set_param("gain", cal.drive_gain)
     ro = inputs.readout.model_copy(deep=True)
     apply_readout_calibration(ro, prior)
     gain_start = max(0.0, prior.readout_gain - inputs.tun.ro_gain_half_width)
@@ -886,6 +795,7 @@ async def calibrate_readout(
     cfg = FreqGainCfg(
         reps=inputs.tun.ro_reps,
         rounds=inputs.tun.ro_rounds,
+        acquire_retry=inputs.tun.ro_acquire_retry,
         relax_delay=(
             max(inputs.tun.ro_relax_min_us, inputs.tun.ro_relax_factor * t1_estimate_us)
             if inputs.tun.ro_relax_mode == "auto"
@@ -951,32 +861,83 @@ async def calibrate_readout(
     frequency = optimum.freq
     gain = optimum.gain
     carry.last = replace(prior, readout_freq_mhz=frequency, readout_gain=gain)
+    carry.readout_source = CalibrationSource(
+        source_index=inputs.point_index, source_flux=inputs.flux, fallback=False
+    )
     return ReadoutResult("accepted", None, frequency, gain, "readout.h5")
 
 
-def current_point_calibration(
-    rabi: RabiResult, carry: CalCarry
-) -> CalibratedPi2 | None:
-    """Combine current accepted Rabi with retained legal readout for acquisition.
+def current_pi_calibration(
+    rabi: RabiResult | None, carry: CalCarry
+) -> Calibrated | None:
+    """Return this point's accepted pi with its own frequency/gain, without pi2.
 
-    Return None for failed/rejected/skipped Rabi or untrusted pi2, never borrowing
-    prior durations or frequency. Accepted Rabi must contain positive fitted pi
-    and current MHz; invalid accepted records raise. The current acquisition gain
-    travels with pi/pi2 for downstream pulse construction. Readout comes from accepted carry or
-    the legal host seed. No I/O or carry mutation occurs.
+    Nonaccepted or absent Rabi returns None; no prior pi is borrowed. An accepted
+    record missing its frequency or pi duration raises ValueError. Readout uses
+    its independent latest value or host seed. This resolver does not change the
+    retained pi/pi2 pair or its source, so T1/GE NOW cannot overwrite T2 LATEST.
     """
-    if rabi.status != "accepted":
-        return None
-    if rabi.pi2_length_us is None:
+    if rabi is None or rabi.status != "accepted":
         return None
     if rabi.frequency_mhz is None or rabi.pi_length_us is None:
-        raise ValueError("Accepted Rabi requires current frequency, pi and pi2")
+        raise ValueError("Accepted Rabi requires current frequency and pi")
     prior = carry.seed if carry.last is None else carry.last
-    return CalibratedPi2(
+    return Calibrated(
         rabi.frequency_mhz,
         rabi.pi_length_us,
         prior.readout_freq_mhz,
         prior.readout_gain,
-        rabi.pi2_length_us,
         drive_gain=rabi.drive_gain,
     )
+
+
+def current_point_calibration(
+    rabi: RabiResult,
+    carry: CalCarry,
+    *,
+    point_index: int,
+    flux: float,
+    need: Literal["latest", "now"] = "latest",
+) -> CalibratedPi2 | None:
+    """Resolve accepted pulse pairs with latest or current-point-only semantics.
+
+    A trusted current pi/pi2 pair stores its frequency, acquisition gain and
+    producer index/flux in carry. Rejected/skipped Rabi or untrusted pi2 leaves
+    the previous pair intact. latest may reuse it without an age limit; now
+    returns None when this point has no trusted pair. Later frequency/gain
+    updates never retune an older pi module. Readout independently uses its
+    latest accepted value or host seed. No seed pi/2 is fabricated.
+    """
+    prior = carry.seed if carry.last is None else carry.last
+    if rabi.status == "accepted":
+        if rabi.frequency_mhz is None or rabi.pi_length_us is None:
+            raise ValueError("Accepted Rabi requires current frequency and pi")
+        if rabi.pi2_length_us is not None:
+            carry.last_pi = CalibratedPi2(
+                rabi.frequency_mhz,
+                rabi.pi_length_us,
+                prior.readout_freq_mhz,
+                prior.readout_gain,
+                rabi.pi2_length_us,
+                drive_gain=rabi.drive_gain,
+            )
+            carry.pi_source = CalibrationSource(
+                source_index=point_index, source_flux=flux, fallback=False
+            )
+    if need == "now" and (rabi.status != "accepted" or rabi.pi2_length_us is None):
+        return None
+    if carry.last_pi is None:
+        return None
+    return replace(
+        carry.last_pi,
+        readout_freq_mhz=prior.readout_freq_mhz,
+        readout_gain=prior.readout_gain,
+    )
+
+
+def calibration_source(
+    source: CalibrationSource | None, point_index: int
+) -> CalibrationSource:
+    """Mark whether a dependency came from this point, a prior point or host seed."""
+    source = CalibrationSource() if source is None else source
+    return source.model_copy(update={"fallback": source.source_index != point_index})

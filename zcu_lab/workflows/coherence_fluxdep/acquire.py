@@ -4,8 +4,10 @@ from copy import deepcopy
 
 import numpy as np
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.program.v2 import (
     Delay,
     Pulse,
@@ -16,7 +18,11 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyResult
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
+    T2RamseyCfg,
+    T2RamseyResult,
+    t2ramsey_signal2real,
+)
 
 
 def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
@@ -58,7 +64,15 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
                 Readout("readout", sched.cfg.readout),
             )
             .declare_sweep("length", length_sweep)
-            .build_and_acquire(rounds=cfg.rounds)
+            .build_and_acquire(
+                rounds=cfg.rounds,
+                options=AcquireOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real
+                    ),
+                ),
+            )
         )
     return T2RamseyResult(
         times=times,

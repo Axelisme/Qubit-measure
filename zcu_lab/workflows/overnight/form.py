@@ -179,6 +179,22 @@ class OvernightTunablesForm(FormModel):
     t2_guess_us: Annotated[float, Display(label="Echo guess", unit="µs")] = Field(
         default=10.0, gt=0, description="Fixed Echo timing guess, microseconds"
     )
+    t1_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    t1_earlystop_snr: float | None = Field(
+        default=None,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
+    t2_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    t2_earlystop_snr: float | None = Field(
+        default=None,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     sweep_factor: Annotated[float, Display(label="Sweep factor")] = Field(
         default=4.0, gt=0, description="Delay endpoint / timing guess"
     )
@@ -198,6 +214,10 @@ class OvernightTunablesForm(FormModel):
             uniform=self.uniform,
             reps=self.reps,
             rounds=self.rounds,
+            t1_acquire_retry=self.t1_acquire_retry,
+            t1_earlystop_snr=self.t1_earlystop_snr,
+            t2_acquire_retry=self.t2_acquire_retry,
+            t2_earlystop_snr=self.t2_earlystop_snr,
             t1_guess_us=self.t1_guess_us,
             t2_guess_us=self.t2_guess_us,
             sweep_factor=self.sweep_factor,

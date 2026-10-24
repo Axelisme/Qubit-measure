@@ -171,6 +171,8 @@ def _run(
     cfg = T2EchoCfg(
         reps=inp.reps,
         rounds=inp.rounds,
+        acquire_retry=inp.acquire_retry,
+        earlystop_snr=inp.earlystop_snr,
         relax_delay=inp.relax_delay,
         reset=inp.reset,
         pi2_pulse=inp.pi2_pulse,

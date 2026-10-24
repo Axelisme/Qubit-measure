@@ -11,6 +11,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -47,6 +48,13 @@ class FreqGainCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -168,6 +176,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                         ge_axis=1,
                         skew_penalty=sched.cfg.skew_penalty,
                     ),
+                    options=AcquireOptions(retry=cfg.acquire_retry),
                     trackers=[tracker],
                     **(acquire_kwargs or {}),
                     rounds=cfg.rounds,

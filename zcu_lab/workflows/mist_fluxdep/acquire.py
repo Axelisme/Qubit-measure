@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -18,20 +19,18 @@ from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 
 
 def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
-    """Acquire a disturbance gain trace to resolve MIST after calibrated pi preparation.
+    """Acquire a disturbance gain trace after optional pi preparation.
 
-    Supply native PowerDepCfg: init_pulse is required here and represents the
-    calibrated pi pulse; probe_pulse is the fixed MIST disturbance waveform.
+    Supply native PowerDepCfg: init_pulse is the calibrated pi pulse for excited
+    preparation, or None for ground. probe_pulse is the fixed disturbance.
     Native optional reset retains its meaning. gain SweepCfg is fixed by plan.
     Return actual rounded gains and complex IQ with partial data on stop.
-    context supplies SoC, plots and the cancellation token. Missing preparation
-    raises ValueError before acquisition. Schedule records acquisition failures
+    context supplies SoC, plots and the cancellation token.
+    Schedule records acquisition failures
     on the token; other errors propagate. No fitting, device setup or saving
     occurs, and cfg remains unchanged.
     """
     cfg = deepcopy(cfg)
-    if cfg.init_pulse is None:
-        raise ValueError("MIST acquisition requires a calibrated pi preparation")
     soc, soccfg = context.soc, context.soccfg
     gains = sweep2array(
         cfg.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch}
@@ -55,6 +54,8 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
                 Readout("readout", sched.cfg.readout),
             )
             .declare_sweep("gain", gain_sweep)
-            .build_and_acquire(rounds=cfg.rounds)
+            .build_and_acquire(
+                rounds=cfg.rounds, options=AcquireOptions(retry=cfg.acquire_retry)
+            )
         )
     return PowerDepResult(gains, buffer.array)

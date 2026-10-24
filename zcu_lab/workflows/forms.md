@@ -30,6 +30,7 @@ Ramsey detune_ratio 預設 0.05 fringes/step，不論開關都驗有限值。Pla
 Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只報 `t1.guess_us` 的 Field required，不落回 20。使用者寫的 expression 留在 FormInput，Engine journal 只存普通值。
 
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
+measure_mode 預設 excited，可選 ground 或 both。to_cfg 從固定 capture 的 $qubit.t1 取微秒 T1 存入 plan.t1_us，無值時為 None。MIST relax 有 T1 用 5*T1，沒有則用 tunables 的 relax_factor*guess_us。
 Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
 `OvernightTunablesForm.uniform` 的標籤是 Uniform (linear) sweep，預設 true。設 false 只改 T1 在同一視窗內的 delay 分布，不改 Echo。
 `OvernightMuxPlanForm` 使用手寫 FormModel 與 ModuleInputField，提供 mux readout、nullable reset、完整 tone model list 與 participants 原始索引。
