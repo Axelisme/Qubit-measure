@@ -2,20 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Protocol
-
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QWidget
 
-
-class InteractiveFrontendEnv(Protocol):
-    def run_background(
-        self,
-        compute: Callable[[], object],
-        on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
-    ) -> None: ...
+from ..adapter.hooks import InteractiveFrontendEnv as InteractiveFrontendEnv
 
 
 class InteractiveFrontend(QWidget):

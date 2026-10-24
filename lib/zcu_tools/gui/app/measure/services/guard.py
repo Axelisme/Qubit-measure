@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    ExpAdapterProtocol,
     RunRequest,
     require_soc_handles,
 )
+from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
 from zcu_tools.resources.entry import PointStorageBinding
@@ -65,7 +64,7 @@ class RunInputs:
     tab_id: str
     adapter_name: str
     request: RunRequest
-    adapter: ExpAdapterProtocol
+    adapter: RegisteredAdapter
     accepted_cfg: AcceptedFormConfig
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
@@ -154,18 +153,10 @@ class GuardService:
             if parameters is None
             else parameters.library.validation_context(),
         )
-        if tab.adapter.capabilities.requires_soc:
-            try:
-                require_soc_handles(req)
-            except RuntimeError as exc:
-                raise GuardError(str(exc), reason_code="no_soc") from exc
-
         try:
-            tab.adapter.validate_run_request(req, accepted.cfg)
-        except Exception as exc:
-            raise GuardError(
-                f"Run config invalid: {exc}", reason_code="invalid_cfg"
-            ) from exc
+            require_soc_handles(req)
+        except RuntimeError as exc:
+            raise GuardError(str(exc), reason_code="no_soc") from exc
 
         snapshot = None
         storage = None
@@ -209,25 +200,14 @@ class GuardService:
             )
         logger.debug("check_save: tab_id=%r", tab_id)
 
-    @staticmethod
-    def _supports_load_data(adapter: Any) -> bool:
-        """Read the import-validated load capability without probing a worker."""
-        caps = getattr(adapter, "capabilities", None)
-        return isinstance(caps, AdapterCapabilities) and caps.load_data
-
     def check_load(self, tab_id: str) -> None:
-        """Require an existing tab and load_data capability.
+        """Permit every registered adapter to attempt Load on an existing tab.
 
         No live context, SoC or result is required. EMPTY loads retain native
         history without an analysis source. Raise GuardError on rejection;
         return None without mutation on success.
         """
-        tab = self._require_tab(tab_id)
-        if not self._supports_load_data(tab.adapter):
-            raise GuardError(
-                "This tab does not support loading data files.",
-                reason_code="unsupported_load",
-            )
+        self._require_tab(tab_id)
         logger.debug("check_load: tab_id=%r", tab_id)
 
     def check_analyze(self, tab_id: str) -> None:

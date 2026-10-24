@@ -7,10 +7,9 @@
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
 view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
-framework 只看 `ExpAdapterProtocol`。
-Adapter 的 `analysis_result_tone_count` 從 captured Run／Load 宣告 measured tone 數，非 mux 預設為零。
-RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 Form 或猜 opaque result 結構。
-共用 `BaseAdapter` 住在 `adapter/base.py`。Adapter 宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
+framework 接收 caller 注入的 `Adapter` 值。
+RunAnalyzeControl 對 MCP 結果讀取使用固定 60 秒 budget，不猜 opaque result 結構。
+Adapter 的 `make_form` 從固定 `FormContext` 產生 fresh input。
 分析與 Post 的結果／參數槽位預設 None，表示沒有數值或輸入。
 Figures-only 的完成事實由 pane plots 保留，不靠 numeric payload 判斷。
 None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有保存格式。
@@ -33,8 +32,8 @@ Analysis and writeback callbacks retain their existing typed request envelopes.
 Primary options have signature `(source, env) -> O`; post options also receive
 the adopted primary result. The returned object's type supplies the form and
 JSON schema. None means no options form, not a missing analysis capability.
-The host must generate once when preparing a new source or primary, retain the
-object for schema queries, and pass edited options to analysis. Existing lab
+The host generates once when preparing a new source or primary, retains the
+object for schema queries, and passes edited options to analysis. Existing lab
 wrappers may still read historical parameters during analysis. Their cleanup is
 a separate task.
 
@@ -51,16 +50,19 @@ is decided by the declared spec. `restore`, `data_item` and `analysis_item`
 provide framework projections without I/O. Guide reads its declared Markdown
 only when called. Sample proposals declare `coordinate_device` on each item.
 
-The legacy BaseAdapter/protocol and host calls below describe the pre-migration
-host. Host migration replaces them with these value contracts; the registry
-does not provide a class/value runtime bridge.
+RunService wraps the raw result with the admitted cfg in RunRecord before
+attaching acquisition metadata. No adapter class compatibility path is provided.
+
+`summary.summarize_analysis(result)` projects fields, arrays and complex numbers
+into JSON and reports non-finite number paths in `AnalysisSummary.invalid`.
+It does not call result serializers. This API is not active in Save, MCP or the
+results browser yet. Those consumers still use `to_summary_dict`.
 
 ## Owners
 
-- [`adapter/`](adapter/protocol.py)：framework-facing contract、request/result/analyze params、
-  adapter validation 與 protocol signature 所需的 session vocabulary。BaseAdapter 的 `exp_cls` 是 `type[Experiment[Any, Any]]`。預設 tag 讀取 `exp_cls.AXES_SPEC.tag`，adapter 可明確覆寫。預設 restore 將已讀 Container 與 `AXES_SPEC` 交給 `restore_run`，不建構 core。Load capability 要求有效 spec 或 concrete restore override。Writeback 型別由
-  `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
-  ModuleSpec。
+- [`adapter/`](adapter/value.py)：四種定義值、typed callback hooks、request/result 與分析參數。
+  `spec.tag` 提供 experiment tag。`restore` 將已讀 Container 與 spec 交給 `restore_run`，不建構 core。
+  Writeback 型別由 `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久 ModuleSpec。
 - [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
@@ -289,16 +291,15 @@ Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI �
 但目的地仍是候選捕捉的 SavedPoint，不跟隨畫面上的 point。
 Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。
 
-Adapter 以 `sample_device_alias` 宣告提供 Sample 座標的 device alias path。
-預設 `None` 不提供 Sample writeback，不影響 Parameter／Module proposals。
-Analyze／Post-analyze 只轉送宣告，WritebackService 從固定 Run／Load parameters
-與 device snapshot 解析座標。缺 alias 或裝置證據時略過 Sample，並提供不可用原因。
+每個 `SampleWriteback` 以 `coordinate_device` 宣告座標裝置的 alias path。
+預設 `None` 略過該 Sample，不影響 Parameter／Module proposals。
+WritebackService 從固定 Run／Load parameters 與 device snapshot 解析座標。
+缺 alias 或裝置證據時略過 Sample，並提供不可用原因。不查 live 裝置。
 
-`ExpAdapterProtocol` 是 framework 呼叫 adapter 的契約。`AdapterCapabilities`
-宣告 SoC 需求、analysis、post-analysis、load 的支援範圍；`requires_soc` 不代表
-SoC 已連線。Run guard 檢查 context、cfg、SoC 與 preflight；operation owner 另
-檢查動態 gate。Load permit 和 `LoadService` 檢查 `load_data`，Qt tab 依 analysis／
-post-analysis 宣告建立控制項，remote writeback subtab params 也檢查對應宣告。
+`AdapterCapabilities` 由定義值推導 analysis 與 post-analysis。
+每個 Run 都需要 SoC，guard 檢查 context、cfg 與連線。實驗的輸入驗證在 run 內執行。
+每個 adapter 都可嘗試 Load，LoadService 以檔案與 spec 判斷相容性，失敗保留舊成果。
+Qt tab 依 analysis／post-analysis 建立控制項，remote writeback subtab params 也檢查對應宣告。
 但 analyze permit 未查 analysis，非 interactive 的分析會進 FIT 路徑；
 post-analyze 入口未查 post-analysis。不可將 UI／remote 的局部檢查視為
 所有 application 入口的保證；補齊目標見

@@ -1,16 +1,23 @@
-"""Adapter-declared sample coordinates through analysis service entry points."""
+"""Proposal-declared sample coordinates through analysis service entry points."""
 
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import PostWritebackRequest, WritebackRequest
-from zcu_tools.gui.app.measure.adapter.types import AnalyzeResult
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
+    AnalyzeRequest,
+    PostAnalysis,
+    PostAnalyzeRequest,
+    PostWritebackRequest,
+    WritebackRequest,
+)
+from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.writeback import (
@@ -21,6 +28,7 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackItem,
     WritebackService,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
@@ -28,9 +36,8 @@ from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui.app.measure._native_save_support import (
-    AnalysisSavingAdapter,
     PaneParams,
     PaneSummary,
     native_save_session,
@@ -51,7 +58,7 @@ def registered_components() -> Generator[None]:
         restore_registry(before)
 
 
-def sample_proposals() -> list[WritebackItem]:
+def sample_proposals(coordinate_device: str | None) -> list[WritebackItem]:
     return [
         ParameterWriteback("general.description", "Description", proposed_value="fit"),
         ModuleWriteback(
@@ -65,21 +72,61 @@ def sample_proposals() -> list[WritebackItem]:
             "Q1",
             "Sample",
             proposed_value={"freq_mhz": 1250.0, "dev_value": 999, "dev_unit": "V"},
+            coordinate_device=coordinate_device,
         ),
     ]
 
 
-class SampleProposingAdapter(AnalysisSavingAdapter):
-    def get_writeback_items(
-        self, req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary]
-    ) -> list[WritebackItem]:
-        return sample_proposals()
+def sample_form(ctx: FormContext) -> Form[SavingCfg]:
+    del ctx
+    return Form(SavingCfg, {})
 
-    def get_post_writeback_items[T: AnalyzeResult](
-        self,
-        req: PostWritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary, T],
+
+def sample_analyze(
+    req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
+) -> PaneSummary:
+    return PaneSummary()
+
+
+def sample_post_analyze(
+    req: PostAnalyzeRequest[
+        RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams
+    ],
+    *,
+    plots: Plots,
+) -> PaneSummary:
+    return PaneSummary()
+
+
+def sample_adapter(coordinate_device: str | None):
+    def writeback(
+        req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
     ) -> list[WritebackItem]:
-        return sample_proposals()
+        return sample_proposals(coordinate_device)
+
+    def post_writeback(
+        req: PostWritebackRequest[
+            RunRecord[SavingCfg, SavingResult], PaneSummary, PaneSummary
+        ],
+    ) -> list[WritebackItem]:
+        return sample_proposals(coordinate_device)
+
+    return Adapter(
+        spec=SavingCore.AXES_SPEC,
+        make_form=sample_form,
+        run=SavingCore().run,
+        guide=None,
+        analysis=Analysis(
+            fn=sample_analyze,
+            options=lambda source, env: PaneParams(),
+            writeback=writeback,
+        ),
+        post_analysis=PostAnalysis(
+            fn=sample_post_analyze,
+            options=lambda source, primary, env: PaneParams(),
+            writeback=post_writeback,
+        ),
+    )
 
 
 @pytest.mark.parametrize("source", ["device_at_run", None])
@@ -99,11 +146,17 @@ def test_sample_coordinates_follow_the_captured_component_source(
             ContextControlFacet(context=native.context), arb_names=lambda: ()
         )
         draft = writeback.create_draft(
-            [SampleWriteback("Q1", "Sample", {"freq_mhz": 1250.0})],
+            [
+                SampleWriteback(
+                    "Q1",
+                    "Sample",
+                    {"freq_mhz": 1250.0},
+                    coordinate_device="$target.source",
+                )
+            ],
             parameters=captured,
             experiment_name="synthetic",
             run_id="captured-run",
-            sample_device_alias="$target.source",
             device_snapshot={"device_at_run": {"value": 0.00125, "value_unit": "A"}},
         )
         try:
@@ -126,13 +179,9 @@ def test_sample_coordinates_follow_the_captured_component_source(
             writeback.teardown_draft(draft)
 
 
-class DeclaredSampleAdapter(SampleProposingAdapter):
-    sample_device_alias: ClassVar[str | None] = "$coordinate_source"
-
-
 @pytest.mark.parametrize("stage", ["fit", "interactive", "post"])
 @pytest.mark.parametrize("declared", [True, False], ids=["declared", "undeclared"])
-def test_analysis_uses_only_the_declared_sample_device_alias(
+def test_analysis_uses_only_the_proposal_coordinate_device(
     tmp_path: Path,
     qapp: QApplication,
     registered_components: None,
@@ -142,7 +191,11 @@ def test_analysis_uses_only_the_declared_sample_device_alias(
     with native_save_session(tmp_path, qapp) as native:
         native.context.add_component("Q1", "fake/drive/a", {})
         tab = native.state.get_tab("tab")
-        tab.adapter = DeclaredSampleAdapter() if declared else SampleProposingAdapter()
+        registry = Registry()
+        registry.register(
+            "sample", sample_adapter("$coordinate_source" if declared else None)
+        )
+        tab.adapter = registry.create("sample")
         native.context.set_alias_rows(
             (
                 AliasRow("coordinate_source", "device_at_run"),
