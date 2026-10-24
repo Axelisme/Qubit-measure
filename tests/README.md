@@ -412,8 +412,10 @@ absence assertions 或獨立程序匯入結果作測試。框架案例使用 syn
 `services/test_tab_form_resource.py`、`test_tab_form_notifications.py` 與
 `test_tab_cfg_application.py` 擁有固定 capture、Reset、busy／lifetime 與通知。
 `tests/gui/form_adapter/` 擁有推導與持久範本契約。舊 builder、Seed wrapper 與角色表的專用測試退休。
-Singleshot Rabi 數值與畫圖分別由 `tests/analysis/fitting/test_singleshot_rabi.py`
-及 `tests/plotting/test_singleshot_rabi.py` 驗證。Notebook flux picker 使用 caller 提供的
+Singleshot Rabi 數值由 `tests/analysis/fitting/test_singleshot_rabi.py` 驗證。
+畫圖工具歸 lab，直接審閱其格式；框架測試不 import lab。
+`tests/plotting/test_live_update.py` 驗證通用 handle 的資料隔離、owner callback、refresh
+及 finish／release 拒絕。Frontend 與 workflow 測試使用合成繪圖 callback，不固定 lab 格式。Notebook flux picker 使用 caller 提供的
 `FluxPickInputs`，由 `tests/notebook/test_flux_dep.py` 驗證。
 
 `tests/gui/app/measure/adapter/` 保留 BaseAdapter 的 capability、canonical load、
