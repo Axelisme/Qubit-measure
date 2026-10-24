@@ -132,7 +132,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
@@ -140,6 +140,7 @@ from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
@@ -157,6 +158,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.acquire import mux_snr_checker
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
@@ -213,6 +215,20 @@ class MuxT2EchoCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop when every active tone reaches this trace SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -379,7 +395,15 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             # 4. Average completed rounds into tone-major IQ, preserving NaN gaps.
             prog = builder.build()
             _ = builder.run_program(
-                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+                prog,
+                raw2signal_fn=partial(_averaged_signal, prog),
+                rounds=cfg.rounds,
+                options=AcquireOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=mux_snr_checker(
+                        signals, cfg.earlystop_snr, tone_axis=0
+                    ),
+                ),
             )
         signals.trigger_update(flush=True)
         return MuxCoherenceResult(

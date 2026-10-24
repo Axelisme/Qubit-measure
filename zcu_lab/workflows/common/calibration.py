@@ -183,10 +183,29 @@ class CalibrationTunables(FrequencyTunables):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     qf_reps: int = Field(default=100, ge=1, description="Spectroscopy averages")
     qf_rounds: int = Field(default=1, ge=1, description="Spectroscopy rounds")
+    qf_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    qf_earlystop_snr: float | None = Field(
+        default=50.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     rabi_reps: int = Field(default=100, ge=1, description="Rabi averages")
     rabi_rounds: int = Field(default=1, ge=1, description="Rabi rounds")
+    rabi_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    rabi_earlystop_snr: float | None = Field(
+        default=30.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     ro_reps: int = Field(default=100, ge=1, description="Readout averages")
     ro_rounds: int = Field(default=1, ge=1, description="Readout rounds")
+    ro_acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
     max_frequency_rel_err: float = Field(
         default=0.3, gt=0, le=1, description="Strict center-error/FWHM upper bound"
     )
@@ -422,6 +441,8 @@ def _frequency_cfg(
     return FreqCfg(
         reps=inputs.tun.qf_reps,
         rounds=inputs.tun.qf_rounds,
+        acquire_retry=inputs.tun.qf_acquire_retry,
+        earlystop_snr=inputs.tun.qf_earlystop_snr,
         relax_delay=1.0,
         qub_pulse=drive,
         readout=ro,
@@ -629,6 +650,8 @@ async def calibrate_rabi(
     cfg = LenRabiCfg(
         reps=inputs.tun.rabi_reps,
         rounds=inputs.tun.rabi_rounds,
+        acquire_retry=inputs.tun.rabi_acquire_retry,
+        earlystop_snr=inputs.tun.rabi_earlystop_snr,
         relax_delay=5 * t1_estimate_us,
         qub_pulse=drive,
         readout=ro,
@@ -756,6 +779,7 @@ async def calibrate_readout(
     cfg = FreqGainCfg(
         reps=inputs.tun.ro_reps,
         rounds=inputs.tun.ro_rounds,
+        acquire_retry=inputs.tun.ro_acquire_retry,
         relax_delay=5 * t1_estimate_us,
         qub_pulse=drive,
         readout=ro,

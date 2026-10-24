@@ -2,6 +2,7 @@
 
 from typing import Annotated
 
+from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
@@ -22,6 +23,20 @@ class T2EchoInput(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop averaging after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -53,6 +68,8 @@ def make_form(ctx: FormContext) -> Form[T2EchoInput]:
             "length",
             "reps",
             "rounds",
+            "acquire_retry",
+            "earlystop_snr",
             "relax_delay",
         ),
         tree={

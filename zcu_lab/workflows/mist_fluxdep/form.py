@@ -216,6 +216,9 @@ class MISTTunablesForm(FormModel):
         default=100, ge=1, description="MIST averages"
     )
     rounds: int = Field(default=10, ge=1, description="MIST averaging rounds")
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
     guess_us: Annotated[float, Display(label="T1 guess", unit="µs")] = Field(
         default=20.0, gt=0, description="Calibration T1 timing estimate (µs)"
     )
@@ -229,6 +232,7 @@ class MISTTunablesForm(FormModel):
             cal=self.cal.to_cfg(),
             reps=self.reps,
             rounds=self.rounds,
+            acquire_retry=self.acquire_retry,
             guess_us=self.guess_us,
             relax_factor=self.relax_factor,
         )
