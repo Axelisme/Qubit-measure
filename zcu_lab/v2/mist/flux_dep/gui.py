@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -70,10 +71,17 @@ def _analyze(
     return MistFluxDepAnalysis()
 
 
+def run(
+    cfg: FluxDepCfg, *, context: RunContext
+) -> RunRecord[FluxDepCfg, FluxDepResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=FluxDepExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FluxDepExp.AXES_SPEC,
     make_form=make_form,
-    run=FluxDepExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze, options=lambda source, env: MistFluxDepParams()),
 )

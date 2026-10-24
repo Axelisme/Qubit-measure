@@ -7,6 +7,7 @@ from typing import TypeAlias
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -86,10 +87,17 @@ def _get_writeback_items(
     ]
 
 
+def run(
+    cfg: FluxDepCfg, *, context: RunContext
+) -> RunRecord[FluxDepCfg, FluxDepResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=FluxDepExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FluxDepExp.AXES_SPEC,
     make_form=make_form,
-    run=FluxDepExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Interactive(
         plugin=_make_interactive_plugin,

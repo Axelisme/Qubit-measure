@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -237,10 +238,17 @@ def _get_writeback_items(
     ]
 
 
+def run(
+    cfg: RangeFindCfg, *, context: RunContext
+) -> RunRecord[RangeFindCfg, RangeFindResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=RangeFindExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=RangeFindExp.AXES_SPEC,
     make_form=make_form,
-    run=RangeFindExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,

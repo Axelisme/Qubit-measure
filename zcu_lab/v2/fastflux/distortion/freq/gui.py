@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -24,10 +25,15 @@ def _analyze(req: AnalyzeRequest[FreqRunResult, None], *, plots: Plots) -> None:
     return
 
 
+def run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=make_form,
-    run=FreqExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze),
 )

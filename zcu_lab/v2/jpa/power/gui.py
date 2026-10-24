@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from matplotlib.figure import Figure
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -68,10 +69,15 @@ def _get_writeback_items(
     ]
 
 
+def run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=PowerExp.AXES_SPEC,
     make_form=make_form,
-    run=PowerExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
 )

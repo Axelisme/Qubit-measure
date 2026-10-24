@@ -6,6 +6,7 @@ from typing import TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -41,10 +42,15 @@ def _analyze(
     )
 
 
+def run(cfg: PhaseCfg, *, context: RunContext) -> RunRecord[PhaseCfg, PhaseResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=PhaseExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=PhaseExp.AXES_SPEC,
     make_form=make_form,
-    run=PhaseExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze),
 )

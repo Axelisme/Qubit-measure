@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 import numpy as np
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -31,8 +32,9 @@ from zcu_lab.v2.onetone.freq.core import (
     FreqCfg,
     FreqExp,
     FreqResult,
+    HomophasalSamplingCfg,
 )
-from zcu_lab.v2.onetone.freq.form import make_form
+from zcu_lab.v2.onetone.freq.form import FreqInput, HomophasalInput, make_form
 
 OneToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 SamplingMode: TypeAlias = Literal["linear", "homophasal"]
@@ -285,10 +287,33 @@ def _get_writeback_items(
     return items
 
 
+def run(inp: FreqInput, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
+    """Acquire the selected grid and record its actual core sampling configuration."""
+    sampling = inp.sampling
+    homophasal = (
+        HomophasalSamplingCfg(
+            r_f=sampling.r_f, rf_w=sampling.rf_w, theta0=sampling.theta0
+        )
+        if isinstance(sampling, HomophasalInput)
+        else None
+    )
+    cfg = FreqCfg(
+        reset=inp.reset,
+        readout=inp.readout,
+        freq=inp.freq,
+        reps=inp.reps,
+        rounds=inp.rounds,
+        relax_delay=inp.relax_delay,
+        sampling_mode="homophasal" if homophasal is not None else "linear",
+        homophasal=homophasal,
+    )
+    return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=make_form,
-    run=FreqExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,
