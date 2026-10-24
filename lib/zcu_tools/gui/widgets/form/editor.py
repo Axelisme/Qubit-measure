@@ -363,7 +363,7 @@ class FormEditor[F: FormModel](QWidget):
         self._root_error.hide()
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
-        self._layout.addWidget(self._content)
+        self._layout.addWidget(self._content, stretch=1)
         content_layout = QVBoxLayout(self._content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(ROW_SPACING)
