@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, get_args
+from types import UnionType
+from typing import TypeVar, Union, get_args, get_origin
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.program.v2 import SweepCfg
 
 T = TypeVar("T")
@@ -83,31 +83,27 @@ def _infer_sweep_step(
     return (stop - start) / (expts - 1)
 
 
-def unwrap_model_annotation(annotation: Any) -> type[BaseModel] | None:
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation
+def get_single_sweep_name(cfg_model: type[ConfigBase]) -> str | None:
+    """Return the sole top-level SweepCfg field name, or None for zero/many.
 
-    for arg in get_args(annotation):
-        if (model := unwrap_model_annotation(arg)) is not None:
-            return model
-
-    return None
-
-
-def get_single_sweep_name(cfg_model: type[ExpCfgModel]) -> str | None:
-    sweep_field = cfg_model.model_fields.get("sweep")
-    if sweep_field is None:
-        return None
-
-    sweep_model = unwrap_model_annotation(sweep_field.annotation)
-    if sweep_model is None:
-        return None
-
-    sweep_names = tuple(sweep_model.model_fields)
-    if len(sweep_names) != 1:
-        return None
-
-    return sweep_names[0]
+    Nullable SweepCfg annotations and subclasses count as axes. Nested models
+    and lists are not traversed; field names and display groups are irrelevant.
+    This inspects the schema without constructing a cfg or accessing hardware.
+    """
+    sweep_names: list[str] = []
+    for name, field in cfg_model.model_fields.items():
+        annotation = field.annotation
+        candidates = (
+            get_args(annotation)
+            if get_origin(annotation) in (UnionType, Union)
+            else (annotation,)
+        )
+        if any(
+            isinstance(candidate, type) and issubclass(candidate, SweepCfg)
+            for candidate in candidates
+        ):
+            sweep_names.append(name)
+    return sweep_names[0] if len(sweep_names) == 1 else None
 
 
 def format_sweep1D(
