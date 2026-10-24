@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -21,7 +22,6 @@ from qtpy.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -130,30 +130,12 @@ class SetupDialog(QDialog):
         self._ctrl = controller
         self._read_only = False
         self.setWindowTitle("Setup")
-        self.resize(900, 680)
+        self.resize(620, 640)
 
         root_layout = QVBoxLayout(self)
-
-        # Entry and creation form on the left; working-point browser on the right.
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        root_layout.addWidget(splitter, stretch=1)
-
-        # Entry and new working point.
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(4, 4, 4, 4)
-
-        left_layout.addWidget(self._build_entry_group())
-
-        left_layout.addWidget(self._build_new_point_group())
-
-        left_layout.addStretch()
-        splitter.addWidget(left_widget)
-        splitter.addWidget(self._build_point_list())
-        splitter.setStretchFactor(1, 1)
-
-        splitter.setSizes([450, 450])
+        root_layout.addWidget(self._build_entry_group())
+        root_layout.addWidget(self._build_point_list(), stretch=1)
+        root_layout.addWidget(self._build_new_point_group())
 
         # ── Close button ─────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -189,8 +171,8 @@ class SetupDialog(QDialog):
         entry_row = QHBoxLayout()
         self._entry_combo = QComboBox()
         self._entry_combo.setObjectName("result_entry")
-        self._entry_combo.setMinimumWidth(260)
-        entry_row.addWidget(self._entry_combo)
+        self._entry_combo.setMinimumWidth(160)
+        entry_row.addWidget(self._entry_combo, stretch=1)
         refresh_entries_btn = QPushButton("↻")
         refresh_entries_btn.setFixedWidth(28)
         refresh_entries_btn.setToolTip("Refresh result entries")
@@ -198,16 +180,13 @@ class SetupDialog(QDialog):
             lambda checked=False: self._refresh_entries(refresh=True)
         )
         entry_row.addWidget(refresh_entries_btn)
-        entry_form.addRow("Entry:", entry_row)
-
-        entry_actions = QHBoxLayout()
         self._new_entry_btn = QPushButton("New entry…")
         self._new_entry_btn.clicked.connect(self._on_new_entry_clicked)
-        entry_actions.addWidget(self._new_entry_btn)
+        entry_row.addWidget(self._new_entry_btn)
         self._open_entry_btn = QPushButton("Open")
         self._open_entry_btn.clicked.connect(self._on_open_entry_clicked)
-        entry_actions.addWidget(self._open_entry_btn)
-        entry_form.addRow("", entry_actions)
+        entry_row.addWidget(self._open_entry_btn)
+        entry_form.addRow("Entry:", entry_row)
         self._result_path = _ElidedPathLabel("result_path")
         self._result_open = self._open_folder_button(self._result_path)
         entry_form.addRow(
@@ -236,9 +215,8 @@ class SetupDialog(QDialog):
         ctx_layout.addWidget(self._ctx_list, stretch=1)
         self._point_descriptions: dict[str, str] = {}
         self._selected_description = _wrapping_label("selected_point_description")
-        ctx_layout.addWidget(self._selected_description)
-
         switch_row = QHBoxLayout()
+        switch_row.addWidget(self._selected_description, stretch=1)
         self._switch_btn = QPushButton("Switch to selected")
         self._switch_btn.clicked.connect(self._on_switch_clicked)
         switch_row.addWidget(self._switch_btn)
@@ -248,7 +226,9 @@ class SetupDialog(QDialog):
     def _build_new_point_group(self) -> QGroupBox:
         # new context
         new_group = QGroupBox("New working point")
-        new_form = QFormLayout(new_group)
+        new_form = QGridLayout(new_group)
+        new_form.setColumnStretch(1, 1)
+        new_form.setColumnStretch(3, 1)
 
         device_row = QHBoxLayout()
         self._device_combo = QComboBox()
@@ -261,24 +241,36 @@ class SetupDialog(QDialog):
         refresh_dev_btn.setToolTip("Refresh device list")
         refresh_dev_btn.clicked.connect(self._refresh_device_list)
         device_row.addWidget(refresh_dev_btn)
-        new_form.addRow("Track device:", device_row)
+        track_label = QLabel("Track device:")
+        track_label.setBuddy(self._device_combo)
+        new_form.addWidget(track_label, 0, 0)
+        new_form.addLayout(device_row, 0, 1)
 
         self._label_edit = QLineEdit()
         self._label_edit.setObjectName("point_label")
-        new_form.addRow("Label:", self._label_edit)
+        label_label = QLabel("Label:")
+        label_label.setBuddy(self._label_edit)
+        new_form.addWidget(label_label, 0, 2)
+        new_form.addWidget(self._label_edit, 0, 3, 1, 2)
 
         self._clone_combo = QComboBox()
         self._clone_combo.setObjectName("clone_from")
         self._clone_combo.setMinimumWidth(160)
-        new_form.addRow("Clone from:", self._clone_combo)
+        clone_label = QLabel("Clone from:")
+        clone_label.setBuddy(self._clone_combo)
+        new_form.addWidget(clone_label, 1, 0)
+        new_form.addWidget(self._clone_combo, 1, 1)
 
         self._description_edit = QLineEdit()
         self._description_edit.setObjectName("point_description")
-        new_form.addRow("Description:", self._description_edit)
+        description_label = QLabel("Description:")
+        description_label.setBuddy(self._description_edit)
+        new_form.addWidget(description_label, 1, 2)
+        new_form.addWidget(self._description_edit, 1, 3)
 
         self._new_ctx_btn = QPushButton("Create")
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
-        new_form.addRow("", self._new_ctx_btn)
+        new_form.addWidget(self._new_ctx_btn, 1, 4)
         return new_group
 
     def set_read_only(self, *, read_only: bool) -> None:
