@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.power.core import (
+    PowerAnalysis,
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
@@ -43,16 +43,11 @@ class RoOptPowerAnalyzeParams:
     ] = 0.5
 
 
-@dataclass
-class RoOptPowerAnalyzeResult(AnalyzeResultBase):
-    best_gain: float
-
-
 class RoOptPowerAdapter(
     BaseAdapter[
         PowerCfg,
         RoOptPowerRunResult,
-        RoOptPowerAnalyzeResult,
+        PowerAnalysis,
         RoOptPowerAnalyzeParams,
     ]
 ):
@@ -80,20 +75,17 @@ class RoOptPowerAdapter(
         req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams],
         *,
         plots: Plots,
-    ) -> RoOptPowerAnalyzeResult:
+    ) -> PowerAnalysis:
         params = req.analyze_params
         options = PowerAnalyzeOptions(
             penalty_ratio=params.penalty_ratio,
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )
-        result = PowerExp().analyze(req.run_result, options, plots=plots)
-        return RoOptPowerAnalyzeResult(
-            best_gain=result.best_gain,
-        )
+        return PowerExp().analyze(req.run_result, options, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[RoOptPowerRunResult, RoOptPowerAnalyzeResult]
+        self, req: WritebackRequest[RoOptPowerRunResult, PowerAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [

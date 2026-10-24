@@ -10,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -21,9 +20,9 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
+    AmpRabiAnalysis,
     AmpRabiAnalyzeOptions,
     AmpRabiCfg,
     AmpRabiExp,
@@ -35,59 +34,37 @@ from .form import make_form
 AmpRabiRunResult: TypeAlias = RunRecord[AmpRabiCfg, AmpRabiResult]
 
 
+class AmplitudeRabiSummary(BaseModel):
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
+
+    pi_amp: float | None = Field(
+        description="Owner pi_amp in gain; null retains an unavailable estimate."
+    )
+
+    pi_amp_err: float | None = Field(
+        description="Owner pi_amp_err in gain; null retains an unavailable estimate."
+    )
+
+    pi2_amp: float | None = Field(
+        description="Owner pi2_amp in gain; null retains an unavailable estimate."
+    )
+
+    pi2_amp_err: float | None = Field(
+        description="Owner pi2_amp_err in gain; null retains an unavailable estimate."
+    )
+
+
 @dataclass
 class AmpRabiAnalyzeParams:
     skip: Annotated[int, ParamMeta(label="Skip points")] = 0
-
-
-class AmplitudeRabiSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
-
-    pi_gain: float | None = Field(
-        description="Owner pi_gain in gain; null retains an unavailable estimate."
-    )
-
-    pi_gain_err: float | None = Field(
-        description="Owner pi_gain_err in gain; null retains an unavailable estimate."
-    )
-
-    pi2_gain: float | None = Field(
-        description="Owner pi2_gain in gain; null retains an unavailable estimate."
-    )
-
-    pi2_gain_err: float | None = Field(
-        description="Owner pi2_gain_err in gain; null retains an unavailable estimate."
-    )
-
-
-@dataclass
-class AmpRabiAnalyzeResult(AnalyzeResultBase):
-    # Fitted gains stay in this analysis result and the proposed pulse modules.
-    pi_gain: float
-    pi_gain_err: float
-    pi2_gain: float
-    pi2_gain_err: float
-    fit_quality: dict[str, dict[str, object]] | None = None
-
-    def summary(self) -> AmplitudeRabiSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return AmplitudeRabiSummary(
-            pi_gain=self.pi_gain,
-            pi_gain_err=self.pi_gain_err,
-            pi2_gain=self.pi2_gain,
-            pi2_gain_err=self.pi2_gain_err,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class AmpRabiAdapter(
     BaseAdapter[
         AmpRabiCfg,
         AmpRabiRunResult,
-        AmpRabiAnalyzeResult,
-        AmpRabiAnalyzeParams,
+        AmpRabiAnalysis,
+        AmpRabiAnalyzeOptions,
     ]
 ):
     @staticmethod
@@ -118,33 +95,25 @@ class AmpRabiAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeParams],
+        req: AnalyzeRequest[AmpRabiRunResult, AmpRabiAnalyzeOptions],
         *,
         plots: Plots,
-    ) -> AmpRabiAnalyzeResult:
-        params = req.analyze_params
-        analysis = AmpRabiExp().analyze(
+    ) -> AmpRabiAnalysis:
+        return AmpRabiExp().analyze(
             req.run_result,
-            AmpRabiAnalyzeOptions(skip=params.skip),
+            req.analyze_params,
             plots=plots,
-        )
-        return AmpRabiAnalyzeResult(
-            pi_gain=analysis.pi_amp,
-            pi_gain_err=analysis.pi_amp_err,
-            pi2_gain=analysis.pi2_amp,
-            pi2_gain_err=analysis.pi2_amp_err,
-            fit_quality=fit_quality_summary(analysis.fit_quality),
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[AmpRabiRunResult, AmpRabiAnalyzeResult]
+        self, req: WritebackRequest[AmpRabiRunResult, AmpRabiAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose five independent calibrations from the captured source.
 
         req pairs the source RunRecord, fitted gains and captured ctx.parameters.
         With a cfg, return pulse-module proposals at qubit.pulses.pi_amp/pi2_amp,
         separate x180/x90 slot proposals containing their resolved library keys,
-        and qubit.ext.pi_product = pi_gain * source waveform.length (a.u. * us).
+        and qubit.ext.pi_product = pi_amp * source waveform.length (a.u. * us).
         Same-key slots are still proposed. Without cfg return no items.
         Only module gains change; source cfg is not mutated. Missing capture,
         role resolution, non-scalar source length and conversion/asset faults
@@ -165,11 +134,11 @@ class AmpRabiAdapter(
         result = req.analyze_result
         items: list[WritebackItem] = []
         for target, slot, gain, description in (
-            ("$qubit.pulses.pi_amp", "$qubit.module.x180", result.pi_gain, "Pi pulse"),
+            ("$qubit.pulses.pi_amp", "$qubit.module.x180", result.pi_amp, "Pi pulse"),
             (
                 "$qubit.pulses.pi2_amp",
                 "$qubit.module.x90",
-                result.pi2_gain,
+                result.pi2_amp,
                 "Pi/2 pulse",
             ),
         ):
@@ -193,7 +162,7 @@ class AmpRabiAdapter(
             ParameterWriteback(
                 target_name="$qubit.ext.pi_product",
                 description="Pi pulse gain times length (a.u. * us)",
-                proposed_value=result.pi_gain * length,
+                proposed_value=result.pi_amp * length,
             )
         )
         return items

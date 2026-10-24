@@ -28,8 +28,8 @@ class LenRabiResult:
 
 @dataclass(frozen=True)
 class LenRabiAnalyzeOptions:
-    decay: bool = True
-    fit_phase: bool = False
+    decay: Annotated[bool, FieldMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset")] = False
 
 
 @dataclass(frozen=True)

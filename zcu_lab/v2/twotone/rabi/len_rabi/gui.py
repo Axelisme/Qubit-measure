@@ -11,7 +11,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -23,9 +22,9 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
+    LenRabiAnalysis,
     LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiExp,
@@ -37,14 +36,8 @@ from .form import make_form
 LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
 
 
-@dataclass
-class LenRabiAnalyzeParams:
-    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
-
-
 class TimeRabiSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     pi_len: float | None = Field(
         description="Owner pi_len in us; null retains an unavailable estimate."
@@ -72,37 +65,17 @@ class TimeRabiSummary(BaseModel):
 
 
 @dataclass
-class LenRabiAnalyzeResult(AnalyzeResultBase):
-    pi_len: float
-    pi_len_err: float
-    pi2_len: float
-    pi2_len_err: float
-    # Rabi oscillation frequency in MHz (1/us), proposed at qubit.ext.rabi_freq.
-    rabi_f: float
-    rabi_f_err: float
-    fit_quality: dict[str, dict[str, object]] | None = None
-
-    def summary(self) -> TimeRabiSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return TimeRabiSummary(
-            pi_len=self.pi_len,
-            pi_len_err=self.pi_len_err,
-            pi2_len=self.pi2_len,
-            pi2_len_err=self.pi2_len_err,
-            rabi_f=self.rabi_f,
-            rabi_f_err=self.rabi_f_err,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
+class LenRabiAnalyzeParams:
+    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
 
 
 class LenRabiAdapter(
     BaseAdapter[
         LenRabiCfg,
         LenRabiRunResult,
-        LenRabiAnalyzeResult,
-        LenRabiAnalyzeParams,
+        LenRabiAnalysis,
+        LenRabiAnalyzeOptions,
     ]
 ):
     @staticmethod
@@ -135,28 +108,18 @@ class LenRabiAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams],
+        req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeOptions],
         *,
         plots: Plots,
-    ) -> LenRabiAnalyzeResult:
-        params = req.analyze_params
-        analysis = LenRabiExp().analyze(
+    ) -> LenRabiAnalysis:
+        return LenRabiExp().analyze(
             req.run_result,
-            LenRabiAnalyzeOptions(decay=params.decay, fit_phase=params.fit_phase),
+            req.analyze_params,
             plots=plots,
-        )
-        return LenRabiAnalyzeResult(
-            pi_len=analysis.pi_len,
-            pi_len_err=analysis.pi_len_err,
-            pi2_len=analysis.pi2_len,
-            pi2_len_err=analysis.pi2_len_err,
-            rabi_f=analysis.rabi_f,
-            rabi_f_err=analysis.rabi_f_err,
-            fit_quality=fit_quality_summary(analysis.fit_quality),
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult]
+        self, req: WritebackRequest[LenRabiRunResult, LenRabiAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose independent calibrations from the source and captured roles.
 

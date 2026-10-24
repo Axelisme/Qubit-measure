@@ -78,11 +78,17 @@ class DispersiveCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class DispersiveAnalyzeOptions:
-    fit_bg_amp_slope: bool = False
+    """Choose whether both resonance fits allow an amplitude-background slope."""
+
+    fit_bg_amp_slope: Annotated[
+        bool, FieldMeta(label="Fit background amplitude slope")
+    ] = False
 
 
 @dataclass(frozen=True)
 class DispersiveAnalysis:
+    """Half the absolute resonance separation and mean FWHM, both in MHz."""
+
     chi: float
     avg_fwhm: float
 

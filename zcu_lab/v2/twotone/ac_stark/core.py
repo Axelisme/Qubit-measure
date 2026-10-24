@@ -61,13 +61,17 @@ class AcStarkAnalyzeOptions:
 
 @dataclass(frozen=True)
 class AcStarkAnalysis:
+    """Mean photon number coefficient: n = ac_coeff * Stark gain squared."""
+
     ac_coeff: float
 
 
 @dataclass(frozen=True)
 class AcStarkRamseyAnalyzeOptions:
-    detune: float = 0.0
-    cutoff: float | None = None
+    """FFT center in MHz (subtracted from the axis) and exclusive gain cutoff."""
+
+    detune: Annotated[float, FieldMeta(label="FFT detune (MHz)")] = 0.0
+    cutoff: Annotated[float | None, FieldMeta(label="Gain cutoff (a.u.)")] = None
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

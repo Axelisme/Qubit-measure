@@ -156,10 +156,10 @@ async def amplitude_rabi(
             writeback_applied = bool(receipt.items)
 
         return AmplitudeRabiReport(
-            pi_gain=report_number(analysis.result.pi_gain),
-            pi_gain_err=report_number(analysis.result.pi_gain_err),
-            pi2_gain=report_number(analysis.result.pi2_gain),
-            pi2_gain_err=report_number(analysis.result.pi2_gain_err),
+            pi_gain=report_number(analysis.result.pi_amp),
+            pi_gain_err=report_number(analysis.result.pi_amp_err),
+            pi2_gain=report_number(analysis.result.pi2_amp),
+            pi2_gain_err=report_number(analysis.result.pi2_amp_err),
             writeback_applied=writeback_applied,
         )
     finally:

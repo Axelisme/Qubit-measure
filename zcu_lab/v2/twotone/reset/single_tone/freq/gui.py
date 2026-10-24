@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -9,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -20,20 +18,19 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
-from zcu_lab.v2.twotone.reset.single_tone.freq.core import FreqCfg, FreqExp, FreqResult
+from zcu_lab.v2.twotone.reset.single_tone.freq.core import (
+    FreqAnalysis,
+    FreqCfg,
+    FreqExp,
+    FreqResult,
+)
 from zcu_lab.v2.twotone.reset.single_tone.freq.form import make_form
 
 SingleToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-@dataclass
-class SingleToneFreqAnalyzeResult(AnalyzeResultBase):
-    freq: float
-    fwhm: float
-
-
 class SingleToneFreqAdapter(
-    BaseAdapter[FreqCfg, SingleToneFreqRunResult, SingleToneFreqAnalyzeResult]
+    BaseAdapter[FreqCfg, SingleToneFreqRunResult, FreqAnalysis]
 ):
     exp_cls = FreqExp
 
@@ -63,13 +60,12 @@ class SingleToneFreqAdapter(
         req: AnalyzeRequest[SingleToneFreqRunResult, None],
         *,
         plots: Plots,
-    ) -> SingleToneFreqAnalyzeResult:
-        result = FreqExp().analyze(req.run_result, None, plots=plots)
-        return SingleToneFreqAnalyzeResult(freq=result.freq, fwhm=result.fwhm)
+    ) -> FreqAnalysis:
+        return FreqExp().analyze(req.run_result, None, plots=plots)
 
     def get_writeback_items(
         self,
-        req: WritebackRequest[SingleToneFreqRunResult, SingleToneFreqAnalyzeResult],
+        req: WritebackRequest[SingleToneFreqRunResult, FreqAnalysis],
     ) -> Sequence[WritebackItem]:
         """Propose ext scalars and the Run-tested reset with fitted frequency.
 

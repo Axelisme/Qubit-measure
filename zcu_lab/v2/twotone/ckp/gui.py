@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -11,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -21,21 +19,14 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result
+from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result, CKPAnalysis
 
 from .form import make_form
 
 CKPRunResult: TypeAlias = RunRecord[CKP_Cfg, CKP_Result]
 
 
-@dataclass
-class CKPAnalyzeResult(AnalyzeResultBase):
-    chi: float
-    kappa: float
-    res_freq: float
-
-
-class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult]):
+class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalysis]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -58,16 +49,11 @@ class CKPAdapter(BaseAdapter[CKP_Cfg, CKPRunResult, CKPAnalyzeResult]):
 
     def analyze(
         self, req: AnalyzeRequest[CKPRunResult, None], *, plots: Plots
-    ) -> CKPAnalyzeResult:
-        analysis = CKP_Exp().analyze(req.run_result, None, plots=plots)
-        return CKPAnalyzeResult(
-            chi=analysis.chi,
-            kappa=analysis.kappa,
-            res_freq=analysis.res_freq,
-        )
+    ) -> CKPAnalysis:
+        return CKP_Exp().analyze(req.run_result, None, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[CKPRunResult, CKPAnalyzeResult]
+        self, req: WritebackRequest[CKPRunResult, CKPAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [

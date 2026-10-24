@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -9,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -20,21 +18,18 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
-from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
+from zcu_lab.v2.twotone.reset.bath.phase.core import (
+    PhaseAnalysis,
+    PhaseCfg,
+    PhaseExp,
+    PhaseResult,
+)
 from zcu_lab.v2.twotone.reset.bath.phase.form import make_form
 
 BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
 
-@dataclass
-class BathPhaseAnalyzeResult(AnalyzeResultBase):
-    max_phase: float
-    min_phase: float
-
-
-class BathPhaseAdapter(
-    BaseAdapter[PhaseCfg, BathPhaseRunResult, BathPhaseAnalyzeResult]
-):
+class BathPhaseAdapter(BaseAdapter[PhaseCfg, BathPhaseRunResult, PhaseAnalysis]):
     exp_cls = PhaseExp
 
     @staticmethod
@@ -63,15 +58,12 @@ class BathPhaseAdapter(
         req: AnalyzeRequest[BathPhaseRunResult, None],
         *,
         plots: Plots,
-    ) -> BathPhaseAnalyzeResult:
-        analysis = PhaseExp().analyze(req.run_result, None, plots=plots)
-        return BathPhaseAnalyzeResult(
-            max_phase=analysis.max_phase, min_phase=analysis.min_phase
-        )
+    ) -> PhaseAnalysis:
+        return PhaseExp().analyze(req.run_result, None, plots=plots)
 
     def get_writeback_items(
         self,
-        req: WritebackRequest[BathPhaseRunResult, BathPhaseAnalyzeResult],
+        req: WritebackRequest[BathPhaseRunResult, PhaseAnalysis],
     ) -> Sequence[WritebackItem]:
         """Propose ext phases, independent tested variants and a ground slot.
 

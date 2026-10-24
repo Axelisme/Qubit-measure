@@ -159,7 +159,7 @@ class AllXYCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class AllXYAnalyzeOptions:
-    fit_ge: bool = False
+    fit_ge: Annotated[bool, FieldMeta(label="Fit g/e levels")] = False
 
 
 @dataclass(frozen=True)

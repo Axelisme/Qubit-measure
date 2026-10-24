@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq.core import (
+    FreqAnalysis,
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
@@ -40,16 +40,11 @@ class RoOptFreqAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 2.0
 
 
-@dataclass
-class RoOptFreqAnalyzeResult(AnalyzeResultBase):
-    best_freq: float
-
-
 class RoOptFreqAdapter(
     BaseAdapter[
         FreqCfg,
         RoOptFreqRunResult,
-        RoOptFreqAnalyzeResult,
+        FreqAnalysis,
         RoOptFreqAnalyzeParams,
     ]
 ):
@@ -77,19 +72,16 @@ class RoOptFreqAdapter(
         req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams],
         *,
         plots: Plots,
-    ) -> RoOptFreqAnalyzeResult:
+    ) -> FreqAnalysis:
         params = req.analyze_params
         options = FreqAnalyzeOptions(
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )
-        result = FreqExp().analyze(req.run_result, options, plots=plots)
-        return RoOptFreqAnalyzeResult(
-            best_freq=result.best_freq,
-        )
+        return FreqExp().analyze(req.run_result, options, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[RoOptFreqRunResult, RoOptFreqAnalyzeResult]
+        self, req: WritebackRequest[RoOptFreqRunResult, FreqAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [

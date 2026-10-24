@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
+    FreqGainAnalysis,
     FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
@@ -40,17 +40,11 @@ class RoOptFreqGainAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class RoOptFreqGainAnalyzeResult(AnalyzeResultBase):
-    best_freq: float
-    best_gain: float
-
-
 class RoOptFreqGainAdapter(
     BaseAdapter[
         FreqGainCfg,
         RoOptFreqGainRunResult,
-        RoOptFreqGainAnalyzeResult,
+        FreqGainAnalysis,
         RoOptFreqGainAnalyzeParams,
     ]
 ):
@@ -78,20 +72,16 @@ class RoOptFreqGainAdapter(
         req: AnalyzeRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeParams],
         *,
         plots: Plots,
-    ) -> RoOptFreqGainAnalyzeResult:
+    ) -> FreqGainAnalysis:
         params = req.analyze_params
         options = FreqGainAnalyzeOptions(
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )
-        result = FreqGainExp().analyze(req.run_result, options, plots=plots)
-        return RoOptFreqGainAnalyzeResult(
-            best_freq=result.best_freq,
-            best_gain=result.best_gain,
-        )
+        return FreqGainExp().analyze(req.run_result, options, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeResult]
+        self, req: WritebackRequest[RoOptFreqGainRunResult, FreqGainAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [

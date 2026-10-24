@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -21,6 +20,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.reset.dual_tone.freq.core import (
+    FreqAnalysis,
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
@@ -39,17 +39,11 @@ class DualToneFreqAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class DualToneFreqAnalyzeResult(AnalyzeResultBase):
-    freq1: float
-    freq2: float
-
-
 class DualToneFreqAdapter(
     BaseAdapter[
         FreqCfg,
         DualToneFreqRunResult,
-        DualToneFreqAnalyzeResult,
+        FreqAnalysis,
         DualToneFreqAnalyzeParams,
     ]
 ):
@@ -79,20 +73,19 @@ class DualToneFreqAdapter(
         req: AnalyzeRequest[DualToneFreqRunResult, DualToneFreqAnalyzeParams],
         *,
         plots: Plots,
-    ) -> DualToneFreqAnalyzeResult:
+    ) -> FreqAnalysis:
         params = req.analyze_params
-        result = FreqExp().analyze(
+        return FreqExp().analyze(
             req.run_result,
             FreqAnalyzeOptions(
                 smooth=params.smooth, smooth_method=params.smooth_method
             ),
             plots=plots,
         )
-        return DualToneFreqAnalyzeResult(freq1=result.freq1, freq2=result.freq2)
 
     def get_writeback_items(
         self,
-        req: WritebackRequest[DualToneFreqRunResult, DualToneFreqAnalyzeResult],
+        req: WritebackRequest[DualToneFreqRunResult, FreqAnalysis],
     ) -> Sequence[WritebackItem]:
         """Propose this analysis's two frequencies to captured qubit ext."""
         result = req.analyze_result

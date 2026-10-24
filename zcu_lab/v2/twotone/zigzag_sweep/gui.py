@@ -10,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
 )
@@ -19,6 +18,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.zigzag_sweep.core import (
+    ZigZagScanAnalysis,
     ZigZagScanAnalyzeOptions,
     ZigZagScanCfg,
     ZigZagScanExp,
@@ -36,16 +36,11 @@ class ZigZagScanAnalyzeParams:
     find_max: Annotated[float | None, ParamMeta(label="Search to")] = None
 
 
-@dataclass
-class ZigZagScanAnalyzeResult(AnalyzeResultBase):
-    best_value: float
-
-
 class _ZigZagScanBase(
     BaseAdapter[
         ZigZagScanCfg,
         ZigZagScanRunResult,
-        ZigZagScanAnalyzeResult,
+        ZigZagScanAnalysis,
         ZigZagScanAnalyzeParams,
     ]
 ):
@@ -69,14 +64,13 @@ class _ZigZagScanBase(
         req: AnalyzeRequest[ZigZagScanRunResult, ZigZagScanAnalyzeParams],
         *,
         plots: Plots,
-    ) -> ZigZagScanAnalyzeResult:
+    ) -> ZigZagScanAnalysis:
         params = req.analyze_params
-        analysis = ZigZagScanExp().analyze(
+        return ZigZagScanExp().analyze(
             req.run_result,
             ZigZagScanAnalyzeOptions(find_range=(params.find_min, params.find_max)),
             plots=plots,
         )
-        return ZigZagScanAnalyzeResult(best_value=analysis.min_value)
 
 
 class ZigZagScanGainAdapter(_ZigZagScanBase):

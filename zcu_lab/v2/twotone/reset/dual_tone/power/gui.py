@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
+    PowerAnalysis,
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
@@ -40,17 +40,11 @@ class DualTonePowerAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class DualTonePowerAnalyzeResult(AnalyzeResultBase):
-    gain1: float
-    gain2: float
-
-
 class DualTonePowerAdapter(
     BaseAdapter[
         PowerCfg,
         DualTonePowerRunResult,
-        DualTonePowerAnalyzeResult,
+        PowerAnalysis,
         DualTonePowerAnalyzeParams,
     ]
 ):
@@ -79,20 +73,19 @@ class DualTonePowerAdapter(
         req: AnalyzeRequest[DualTonePowerRunResult, DualTonePowerAnalyzeParams],
         *,
         plots: Plots,
-    ) -> DualTonePowerAnalyzeResult:
+    ) -> PowerAnalysis:
         params = req.analyze_params
-        result = PowerExp().analyze(
+        return PowerExp().analyze(
             req.run_result,
             PowerAnalyzeOptions(
                 smooth=params.smooth, smooth_method=params.smooth_method
             ),
             plots=plots,
         )
-        return DualTonePowerAnalyzeResult(gain1=result.gain1, gain2=result.gain2)
 
     def get_writeback_items(
         self,
-        req: WritebackRequest[DualTonePowerRunResult, DualTonePowerAnalyzeResult],
+        req: WritebackRequest[DualTonePowerRunResult, PowerAnalysis],
     ) -> Sequence[WritebackItem]:
         """Propose ext gains and the Run-tested reset with those fitted gains.
 

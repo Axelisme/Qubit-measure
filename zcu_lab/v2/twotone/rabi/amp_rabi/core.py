@@ -30,7 +30,7 @@ class AmpRabiResult:
 
 @dataclass(frozen=True)
 class AmpRabiAnalyzeOptions:
-    skip: int = 0
+    skip: Annotated[int, FieldMeta(label="Skip points")] = 0
 
 
 @dataclass(frozen=True)

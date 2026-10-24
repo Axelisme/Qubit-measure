@@ -10,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -23,6 +22,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.freq.core import (
+    FreqAnalysis,
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
@@ -33,14 +33,8 @@ from zcu_lab.v2.twotone.freq.form import make_form
 FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-@dataclass
-class FreqAnalyzeParams:
-    model_type: Annotated[Literal["lor", "sinc"], ParamMeta(label="Model type")] = "lor"
-    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
-
-
 class TwotoneSpectrumSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     freq: float | None = Field(
         description="Owner freq in MHz; null retains an unavailable estimate."
@@ -60,27 +54,13 @@ class TwotoneSpectrumSummary(BaseModel):
 
 
 @dataclass
-class FreqAnalyzeResult(AnalyzeResultBase):
-    freq: float
-    freq_err: float
-    fwhm: float
-    fwhm_err: float
-
-    def summary(self) -> TwotoneSpectrumSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return TwotoneSpectrumSummary(
-            freq=self.freq,
-            freq_err=self.freq_err,
-            fwhm=self.fwhm,
-            fwhm_err=self.fwhm_err,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
+class FreqAnalyzeParams:
+    model_type: Annotated[Literal["lor", "sinc"], ParamMeta(label="Model type")] = "lor"
+    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
 
 class FreqAdapter(
-    BaseAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
+    BaseAdapter[FreqCfg, FreqRunResult, FreqAnalysis, FreqAnalyzeOptions]
 ):
     sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
     exp_cls = FreqExp
@@ -104,23 +84,16 @@ class FreqAdapter(
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeParams], *, plots: Plots
-    ) -> FreqAnalyzeResult:
-        params = req.analyze_params
-        analysis = FreqExp().analyze(
+        self, req: AnalyzeRequest[FreqRunResult, FreqAnalyzeOptions], *, plots: Plots
+    ) -> FreqAnalysis:
+        return FreqExp().analyze(
             req.run_result,
-            FreqAnalyzeOptions(model_type=params.model_type, plot_fit=params.plot_fit),
+            req.analyze_params,
             plots=plots,
-        )
-        return FreqAnalyzeResult(
-            freq=analysis.freq,
-            freq_err=analysis.freq_err,
-            fwhm=analysis.fwhm,
-            fwhm_err=analysis.fwhm_err,
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[FreqRunResult, FreqAnalyzeResult]
+        self, req: WritebackRequest[FreqRunResult, FreqAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose fitted qubit frequency parameters and a captured-component sample.
 

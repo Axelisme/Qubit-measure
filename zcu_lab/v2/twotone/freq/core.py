@@ -101,8 +101,8 @@ class FreqCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class FreqAnalyzeOptions:
-    model_type: Literal["lor", "sinc"] = "lor"
-    plot_fit: bool = True
+    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+    plot_fit: Annotated[bool, FieldMeta(label="Plot fit")] = True
 
 
 @dataclass(frozen=True)

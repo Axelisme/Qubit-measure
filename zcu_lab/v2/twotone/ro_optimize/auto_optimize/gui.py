@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -9,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -21,6 +19,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import (
+    AutoOptAnalysis,
     AutoOptCfg,
     AutoOptExp,
     AutoOptResult,
@@ -30,16 +29,7 @@ from zcu_lab.v2.twotone.ro_optimize.auto_optimize.form import make_form
 RoOptAutoRunResult: TypeAlias = RunRecord[AutoOptCfg, AutoOptResult]
 
 
-@dataclass
-class RoOptAutoAnalyzeResult(AnalyzeResultBase):
-    best_freq: float
-    best_gain: float
-    best_length: float
-
-
-class RoOptAutoAdapter(
-    BaseAdapter[AutoOptCfg, RoOptAutoRunResult, RoOptAutoAnalyzeResult]
-):
+class RoOptAutoAdapter(BaseAdapter[AutoOptCfg, RoOptAutoRunResult, AutoOptAnalysis]):
     exp_cls = AutoOptExp
 
     @staticmethod
@@ -64,16 +54,11 @@ class RoOptAutoAdapter(
         req: AnalyzeRequest[RoOptAutoRunResult, None],
         *,
         plots: Plots,
-    ) -> RoOptAutoAnalyzeResult:
-        result = AutoOptExp().analyze(req.run_result, None, plots=plots)
-        return RoOptAutoAnalyzeResult(
-            best_freq=result.best_freq,
-            best_gain=result.best_gain,
-            best_length=result.best_length,
-        )
+    ) -> AutoOptAnalysis:
+        return AutoOptExp().analyze(req.run_result, None, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[RoOptAutoRunResult, RoOptAutoAnalyzeResult]
+        self, req: WritebackRequest[RoOptAutoRunResult, AutoOptAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, ClassVar, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -23,7 +23,6 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyAnalyzeOptions,
     T2RamseyCfg,
@@ -39,14 +38,8 @@ logger = logging.getLogger(__name__)
 T2RamseyRunResult: TypeAlias = RunRecord[T2RamseyCfg, T2RamseyResult]
 
 
-@dataclass
-class T2RamseyAnalyzeParams:
-    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = True
-
-
 class T2RamseySummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     t2r: float | None = Field(
         description="Owner t2r in us; null retains an unavailable estimate."
@@ -64,26 +57,20 @@ class T2RamseySummary(BaseModel):
 
 
 @dataclass
-class T2RamseyAnalyzeResult(AnalyzeResultBase):
+class T2RamseyAnalyzeResult:
     t2r: float
     t2r_err: float
     # ``detune`` is the fitted fringe frequency (MHz); meaningful only when the
     # fringe fit ran (``fit_fringe`` True). Decay-only fits report 0.0.
     detune: float
     fit_fringe: bool
-    fit_quality: dict[str, dict[str, object]] | None = None
+    fit_quality: Mapping[str, FitQuality] | None = None
 
-    def summary(self) -> T2RamseySummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return T2RamseySummary(
-            t2r=self.t2r,
-            t2r_err=self.t2r_err,
-            detune=self.detune,
-            fit_fringe=self.fit_fringe,
-        )
 
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
+@dataclass
+class T2RamseyAnalyzeParams:
+    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
+    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = True
 
 
 class T2RamseyAdapter(
@@ -91,7 +78,7 @@ class T2RamseyAdapter(
         T2RamseyCfg,
         T2RamseyRunResult,
         T2RamseyAnalyzeResult,
-        T2RamseyAnalyzeParams,
+        T2RamseyAnalyzeOptions,
     ]
 ):
     @staticmethod
@@ -118,22 +105,20 @@ class T2RamseyAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams],
+        req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeOptions],
         *,
         plots: Plots,
     ) -> T2RamseyAnalyzeResult:
         params = req.analyze_params
         analysis = T2RamseyExp().analyze(
             req.run_result,
-            T2RamseyAnalyzeOptions(
-                fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
-            ),
+            req.analyze_params,
             plots=plots,
         )
         return T2RamseyAnalyzeResult(
             t2r=analysis.t2r,
             t2r_err=analysis.t2r_err,
-            fit_quality=fit_quality_summary(analysis.fit_quality),
+            fit_quality=analysis.fit_quality,
             detune=analysis.detune,
             fit_fringe=params.fit_fringe,
         )

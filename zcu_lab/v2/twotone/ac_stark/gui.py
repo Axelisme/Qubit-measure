@@ -11,7 +11,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -26,6 +25,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2._support.measure.singleshot_shared import read_chi_kappa
 
 from .core import (
+    AcStarkAnalysis,
     AcStarkAnalyzeOptions,
     AcStarkCfg,
     AcStarkExp,
@@ -49,25 +49,8 @@ class AcStarkAnalyzeParams:
     cutoff: Annotated[float | None, ParamMeta(label="Gain cutoff (a.u.)")] = None
 
 
-@dataclass
-class AcStarkAnalyzeResult(AnalyzeResultBase):
-    """Mean photon number coefficient: n = ac_coeff * Stark gain squared."""
-
-    ac_coeff: float
-
-
-@dataclass
-class AcStarkRamseyAnalyzeParams:
-    """FFT center in MHz (subtracted from the axis) and exclusive gain cutoff."""
-
-    detune: Annotated[float, ParamMeta(label="FFT detune (MHz)")] = 0.0
-    cutoff: Annotated[float | None, ParamMeta(label="Gain cutoff (a.u.)")] = None
-
-
 class AcStarkAdapter(
-    BaseAdapter[
-        AcStarkCfg, AcStarkRunResult, AcStarkAnalyzeResult, AcStarkAnalyzeParams
-    ]
+    BaseAdapter[AcStarkCfg, AcStarkRunResult, AcStarkAnalysis, AcStarkAnalyzeParams]
 ):
     """Acquire probe-frequency maps and propose the photon/gain-squared calibration."""
 
@@ -91,24 +74,23 @@ class AcStarkAdapter(
         req: AnalyzeRequest[AcStarkRunResult, AcStarkAnalyzeParams],
         *,
         plots: Plots,
-    ) -> AcStarkAnalyzeResult:
+    ) -> AcStarkAnalysis:
         """Fit the Stark slope with chi/kappa from this Run/Load capture in MHz.
 
         Missing calibration fails explicitly. The core publishes the fit figure.
         """
         chi, kappa = read_chi_kappa(req.parameters)
         params = req.analyze_params
-        analysis = self.exp_cls().analyze(
+        return self.exp_cls().analyze(
             req.run_result,
             AcStarkAnalyzeOptions(
                 chi=chi, kappa=kappa, deg=params.deg, cutoff=params.cutoff
             ),
             plots=plots,
         )
-        return AcStarkAnalyzeResult(ac_coeff=analysis.ac_coeff)
 
     def get_writeback_items(
-        self, req: WritebackRequest[AcStarkRunResult, AcStarkAnalyzeResult]
+        self, req: WritebackRequest[AcStarkRunResult, AcStarkAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose the photon calibration; Apply remains an explicit user action."""
         return [
@@ -125,7 +107,7 @@ class AcStarkRamseyAdapter(
         AcStarkRamseyCfg,
         AcStarkRamseyRunResult,
         None,
-        AcStarkRamseyAnalyzeParams,
+        AcStarkRamseyAnalyzeOptions,
     ]
 ):
     """Acquire Stark-driven Ramsey maps and display the core's normalized FFT."""
@@ -147,24 +129,23 @@ class AcStarkRamseyAdapter(
 
     def get_analyze_params(
         self, result: AcStarkRamseyRunResult, ctx: SessionEnv
-    ) -> AcStarkRamseyAnalyzeParams:
+    ) -> AcStarkRamseyAnalyzeOptions:
         """Seed the FFT center from the acquired cfg, or zero for cfg-free data."""
         del ctx
-        return AcStarkRamseyAnalyzeParams(
+        return AcStarkRamseyAnalyzeOptions(
             detune=result.cfg.detune if result.cfg is not None else 0.0
         )
 
     def analyze(
         self,
-        req: AnalyzeRequest[AcStarkRamseyRunResult, AcStarkRamseyAnalyzeParams],
+        req: AnalyzeRequest[AcStarkRamseyRunResult, AcStarkRamseyAnalyzeOptions],
         *,
         plots: Plots,
     ) -> None:
         """Publish contrast/FFT maps, without fitting or proposing calibration."""
-        params = req.analyze_params
         self.exp_cls().analyze(
             req.run_result,
-            AcStarkRamseyAnalyzeOptions(detune=params.detune, cutoff=params.cutoff),
+            req.analyze_params,
             plots=plots,
         )
         return

@@ -19,7 +19,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
     T1AnalyzeOptions,
@@ -37,14 +36,8 @@ from zcu_tools.plotting.plots import Plots
 T1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
-@dataclass
-class T1AnalyzeParams:
-    dual_exp: Annotated[bool, ParamMeta(label="Dual exponential")] = False
-    skip: Annotated[int, ParamMeta(label="Skip leading points")] = 0
-
-
 class T1Summary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     t1: float | None = Field(
         description="Owner t1 in us; null retains an unavailable estimate."
@@ -63,37 +56,13 @@ class T1Summary(BaseModel):
     )
 
 
-@dataclass(frozen=True)
-class T1AnalyzeResult:
-    """GUI summary over the unchanged, typed core analysis."""
-
-    analysis: T1Analysis
-
-    @property
-    def t1(self) -> float:
-        return self.analysis.t1
-
-    @property
-    def t1_err(self) -> float:
-        return self.analysis.t1_err
-
-    def summary(self) -> T1Summary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return T1Summary(
-            t1=self.analysis.t1,
-            t1_err=self.analysis.t1_err,
-            t1b=self.analysis.t1b,
-            t1b_err=self.analysis.t1b_err,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {
-            **self.summary().model_dump(),
-            "fit_quality": fit_quality_summary(self.analysis.fit_quality),
-        }
+@dataclass
+class T1AnalyzeParams:
+    dual_exp: Annotated[bool, ParamMeta(label="Dual exponential")] = False
+    skip: Annotated[int, ParamMeta(label="Skip leading points")] = 0
 
 
-class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams]):
+class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1Analysis, T1AnalyzeOptions]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T1Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -116,20 +85,19 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[T1RunResult, T1AnalyzeParams], *, plots: Plots
-    ) -> T1AnalyzeResult:
+        self, req: AnalyzeRequest[T1RunResult, T1AnalyzeOptions], *, plots: Plots
+    ) -> T1Analysis:
         params = req.analyze_params
         if params.skip < 0:
             raise ValueError("Skip leading points must be nonnegative")
-        analysis = T1Exp().analyze(
+        return T1Exp().analyze(
             req.run_result,
-            T1AnalyzeOptions(dual_exp=params.dual_exp, skip=params.skip),
+            req.analyze_params,
             plots=plots,
         )
-        return T1AnalyzeResult(analysis)
 
     def get_writeback_items(
-        self, req: WritebackRequest[T1RunResult, T1AnalyzeResult]
+        self, req: WritebackRequest[T1RunResult, T1Analysis]
     ) -> Sequence[WritebackItem]:
         """Propose fitted T1 parameters and a captured-component sample.
 

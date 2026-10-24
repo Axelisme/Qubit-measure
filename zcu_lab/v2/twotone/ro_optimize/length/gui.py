@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.length.core import (
+    LengthAnalysis,
     LengthAnalyzeOptions,
     LengthCfg,
     LengthExp,
@@ -44,16 +44,11 @@ class RoOptLengthAnalyzeParams:
     duration_t0: Annotated[float | None, ParamMeta(label="Duration t0 (us)")] = None
 
 
-@dataclass
-class RoOptLengthAnalyzeResult(AnalyzeResultBase):
-    best_length: float
-
-
 class RoOptLengthAdapter(
     BaseAdapter[
         LengthCfg,
         RoOptLengthRunResult,
-        RoOptLengthAnalyzeResult,
+        LengthAnalysis,
         RoOptLengthAnalyzeParams,
     ]
 ):
@@ -81,20 +76,17 @@ class RoOptLengthAdapter(
         req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams],
         *,
         plots: Plots,
-    ) -> RoOptLengthAnalyzeResult:
+    ) -> LengthAnalysis:
         params = req.analyze_params
         options = LengthAnalyzeOptions(
             t0=params.duration_t0,
             smooth=params.smooth,
             smooth_method=params.smooth_method,
         )
-        result = LengthExp().analyze(req.run_result, options, plots=plots)
-        return RoOptLengthAnalyzeResult(
-            best_length=result.best_length,
-        )
+        return LengthExp().analyze(req.run_result, options, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[RoOptLengthRunResult, RoOptLengthAnalyzeResult]
+        self, req: WritebackRequest[RoOptLengthRunResult, LengthAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         items: list[WritebackItem] = [
