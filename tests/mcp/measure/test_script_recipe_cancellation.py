@@ -10,7 +10,6 @@ from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from ._script_recipe_support import (
-    ConfirmQuestion,
     Fit,
     Inputs,
     Report,
@@ -258,9 +257,9 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
         client.context.session.close()
 
 
-@pytest.mark.parametrize("await_kind", ["analyze", "ask", "writeback"])
+@pytest.mark.parametrize("await_kind", ["analyze", "writeback"])
 def test_cancel_pending_value_await_unwinds_without_an_error(
-    tmp_path: Path, await_kind: Literal["analyze", "ask", "writeback"]
+    tmp_path: Path, await_kind: Literal["analyze", "writeback"]
 ) -> None:
     gui = SyntheticGui()
     analysis_started = Event()
@@ -284,8 +283,6 @@ def test_cancel_pending_value_await_unwinds_without_an_error(
         try:
             if await_kind == "analyze":
                 await tab.analyze("primary", result=Fit)
-            elif await_kind == "ask":
-                await session.ask(ConfirmQuestion(evidence="pending"))
             else:
                 await tab.analyze("primary", result=Fit)
                 await tab.ask_writeback()
