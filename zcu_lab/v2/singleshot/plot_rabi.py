@@ -7,7 +7,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
 from zcu_tools.analysis.singleshot import classify_rabi_iq

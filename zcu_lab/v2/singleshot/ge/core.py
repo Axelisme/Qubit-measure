@@ -20,13 +20,13 @@ from zcu_tools.experiment.utils.single_shot.ge import (
 )
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.plotting.singleshot import plot_with_classified
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
 from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
 from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2.singleshot.plot import plot_with_classified
 
 # ------------------------------------------------------------
 # Helper Functions
