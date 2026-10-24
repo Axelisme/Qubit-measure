@@ -1,14 +1,22 @@
 """Author-configured mux planning and FTF joint shots, independent of YAML shape."""
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import ftf as ftf_module
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import ADC
-from zcu_tools.simulate.evolution import Engine, EvolutionResult, PathDiagnostics
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EvolutionResult,
+    ModelSource,
+    PathDiagnostics,
+    TimelineBatch,
+)
 
 from tests.experiment._ftf_templates import request, settings, snapshot, template
 
@@ -132,8 +140,15 @@ class MixedEngine(Engine):
         super().__init__(1, 0)
 
     def evolve(
-        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
-    ):
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+    ) -> EvolutionResult:
         points = np.concatenate([batch.points for batch in batches])
         densities = np.tile(np.diag([0.4, 0.6])[None], (len(points), 1, 1))
         return EvolutionResult(points, densities, PathDiagnostics())
