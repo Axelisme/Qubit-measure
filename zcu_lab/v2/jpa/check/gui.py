@@ -8,16 +8,14 @@ operator guide. The core experiment lives in ``zcu_lab.v2.jpa``
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.jpa.check.core import CheckCfg, CheckExp, CheckResult
@@ -26,28 +24,15 @@ from zcu_lab.v2.jpa.check.form import make_form
 JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
 
-class JpaCheckAdapter(BaseAdapter[CheckCfg, JpaCheckRunResult]):
-    exp_cls = CheckExp
+def _analyze(req: AnalyzeRequest[JpaCheckRunResult, None], *, plots: Plots) -> None:
+    CheckExp().analyze(req.run_result, None, plots=plots)
+    return
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[CheckCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: CheckCfg,
-        *,
-        context: RunContext,
-    ) -> JpaCheckRunResult:
-        del req
-        return RunRecord(cfg, CheckExp().run(cfg, context=context))
-
-    def analyze(
-        self, req: AnalyzeRequest[JpaCheckRunResult, None], *, plots: Plots
-    ) -> None:
-        CheckExp().analyze(req.run_result, None, plots=plots)
-        return
+DEFINITION = Adapter(
+    spec=CheckExp.AXES_SPEC,
+    make_form=make_form,
+    run=CheckExp().run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze),
+)

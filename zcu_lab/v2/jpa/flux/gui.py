@@ -9,21 +9,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from matplotlib.figure import Figure
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
@@ -57,40 +55,30 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
             ax.legend()
 
 
-class JpaFluxAdapter(BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult]):
-    exp_cls = FluxExp
+def _analyze(
+    req: AnalyzeRequest[JpaFluxRunResult, None], *, plots: Plots
+) -> JpaFluxAnalyzeResult:
+    answer = FluxExp().analyze(req.run_result, None, plots=plots)
+    _relabel_flux_figure(plots["fit"], answer.best_flux)
+    return JpaFluxAnalyzeResult(best_flux=answer.best_flux)
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[FluxCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _get_writeback_items(
+    req: WritebackRequest[JpaFluxRunResult, JpaFluxAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback(
+            target_name="$jpa.flux",
+            description="Best JPA flux device value",
+            proposed_value=req.analyze_result.best_flux,
+        )
+    ]
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: FluxCfg,
-        *,
-        context: RunContext,
-    ) -> JpaFluxRunResult:
-        del req
-        return RunRecord(cfg, FluxExp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[JpaFluxRunResult, None], *, plots: Plots
-    ) -> JpaFluxAnalyzeResult:
-        answer = FluxExp().analyze(req.run_result, None, plots=plots)
-        _relabel_flux_figure(plots["fit"], answer.best_flux)
-        return JpaFluxAnalyzeResult(best_flux=answer.best_flux)
-
-    def get_writeback_items(
-        self, req: WritebackRequest[JpaFluxRunResult, JpaFluxAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback(
-                target_name="$jpa.flux",
-                description="Best JPA flux device value",
-                proposed_value=req.analyze_result.best_flux,
-            )
-        ]
+DEFINITION = Adapter(
+    spec=FluxExp.AXES_SPEC,
+    make_form=make_form,
+    run=FluxExp().run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
+)
