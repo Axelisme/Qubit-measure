@@ -14,7 +14,6 @@ from zcu_tools.cfg_model import (
     ModuleCfgFactory,
     MuxReadoutCfg,
     MuxReadoutSpec,
-    NoneResetCfg,
     PulseCfg,
     PulseReadoutCfg,
     PulseResetCfg,
@@ -166,17 +165,6 @@ def _make_reset_pi2_cfg():
         freq=4000.0,
         gain=0.5,
     )
-
-
-class TestNoneResetCfg:
-    def test_validate_basic(self):
-        cfg = NoneResetCfg.model_validate({"type": "reset/none"})
-        assert isinstance(cfg, NoneResetCfg)
-
-    def test_set_param_always_raises(self):
-        cfg = NoneResetCfg()
-        with pytest.raises(ValueError, match="NoneReset does not support set_param"):
-            cfg.set_param("anything", 1.0)
 
 
 class TestPulseResetCfg:
@@ -497,10 +485,6 @@ class TestBathResetCfg:
 
 
 class TestResetCfgAdapter:
-    def test_dispatch_none(self):
-        cfg = _RESET_ADAPTER.validate_python({"type": "reset/none"})
-        assert isinstance(cfg, NoneResetCfg)
-
     def test_dispatch_pulse(self):
         cfg = _RESET_ADAPTER.validate_python(
             {"type": "reset/pulse", "pulse_cfg": _reset_pulse_dict()}

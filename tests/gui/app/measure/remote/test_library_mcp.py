@@ -69,7 +69,7 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
         "rpc_call",
         {
             "method": "context.ml_create_from_role",
-            "params": {"role_id": "none_reset", "name": "Q1.reset.seed"},
+            "params": {"role_id": "reset", "name": "Q1.reset.seed"},
         },
     )
     invoke("rpc_call", {"method": "context.snapshot"})
@@ -354,22 +354,22 @@ def test_ml_roles_and_create_use_gui_role_defaults(library_client):
     roles = invoke("rpc_call", {"method": "context.ml_list_roles", "params": {}})[
         "roles"
     ]
-    role = next(item for item in roles if item["role_id"] == "none_reset")
+    role = next(item for item in roles if item["role_id"] == "reset")
     assert role["item_kind"] == "module"
-    assert role["default_name"] == "reset_none"
+    assert role["default_name"] == "reset"
     created = invoke(
         "rpc_call",
         {
             "method": "context.ml_create_from_role",
-            "params": {"role_id": "none_reset", "name": "Q1.reset.reset_none"},
+            "params": {"role_id": "reset", "name": "Q1.reset.reset"},
         },
     )
-    assert created == {"created": "Q1.reset.reset_none"}
+    assert created == {"created": "Q1.reset.reset"}
     stored = invoke(
         "rpc_call",
         {
             "method": "context.snapshot",
-            "params": {"path": "library.components.Q1.reset.reset_none"},
+            "params": {"path": "library.components.Q1.reset.reset"},
         },
     )
-    assert stored["value"] == modules(fx)["Q1.reset.reset_none"]
+    assert stored["value"] == modules(fx)["Q1.reset.reset"]

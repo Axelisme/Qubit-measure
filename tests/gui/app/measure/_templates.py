@@ -3,8 +3,8 @@
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     Expr,
-    NoneResetCfg,
     PulseReadoutSpec,
+    PulseResetSpec,
     PulseSpec,
     TemplateDef,
 )
@@ -39,6 +39,8 @@ TEMPLATES: dict[str, TemplateDef] = {
         },
         "readout_rf",
     ),
-    "none_reset": TemplateDef(NoneResetCfg, "No reset", {}, "reset_none"),
+    "reset": TemplateDef(
+        PulseResetSpec, "Pulse reset", {"pulse_cfg": "Q1.pulses.seed"}, "reset"
+    ),
     "const": TemplateDef(ConstWaveformCfg, "Constant", {"length": 0.0}),
 }

@@ -34,8 +34,6 @@ from .reset import (
     AbsResetCfg,
     BathReset,
     BathResetCfg,
-    NoneReset,
-    NoneResetCfg,
     PulseReset,
     PulseResetCfg,
     Reset,
