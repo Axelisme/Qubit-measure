@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QPoint, QSize, Qt
 from qtpy.QtGui import QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
+    QDialog,
     QFrame,
     QGridLayout,
     QLabel,
@@ -37,7 +40,9 @@ class ResultImageAction(Enum):
 
 
 class ResultImage(QLabel):
-    """Clickable PNG raster; invalid PNG bytes raise ValueError.
+    """Clickable saved raster, from PNG bytes or a decoded QPixmap.
+
+    Invalid PNG bytes or an empty pixmap raise ValueError.
 
     activated emits on left click. action_requested emits one ResultImageAction
     on context-menu selection; dismissing the menu emits nothing. The receiver
@@ -47,11 +52,13 @@ class ResultImage(QLabel):
     activated = pyqtSignal()
     action_requested = pyqtSignal(ResultImageAction)
 
-    def __init__(self, png: bytes, parent: QWidget | None = None) -> None:
+    def __init__(self, png: bytes | QPixmap, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._image = QPixmap()
-        if not self._image.loadFromData(png):
+        self._image = QPixmap(png) if isinstance(png, QPixmap) else QPixmap()
+        if isinstance(png, bytes) and not self._image.loadFromData(png):
             raise ValueError("Cannot decode saved PNG")
+        if self._image.isNull():
+            raise ValueError("Cannot display an empty raster")
         self.setMinimumWidth(180)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         policy.setHeightForWidth(True)
@@ -60,6 +67,10 @@ class ResultImage(QLabel):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._context_menu)
+
+    def original_pixmap(self) -> QPixmap:
+        """Return an implicitly shared copy of the unscaled decoded raster."""
+        return QPixmap(self._image)
 
     def mousePressEvent(self, ev: QMouseEvent | None) -> None:
         if ev is not None and ev.button() == Qt.MouseButton.LeftButton:
@@ -102,12 +113,32 @@ class ResultImage(QLabel):
         menu.deleteLater()
 
 
+@dataclass
+class _SavedCard:
+    signature: tuple[int, int, int, int, int]
+    frame: QFrame
+    caption: QLabel
+    image: ResultImage
+
+
 class ResultsGallery(QScrollArea):
     """Tile saved previews in two columns; the browser owns focus and commands."""
 
     def __init__(self, index: ResultsIndex, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._index = index
+        # At most one card per indexed PNG, owned by this gallery's lifetime.
+        self._cards: dict[tuple[str, str], _SavedCard] = {}
+        self._retained = QWidget(self)
+        self._retained.hide()
+        self._presentation: tuple[
+            tuple[str, str, tuple[int, int, int, int, int] | None], ...
+        ] = ()
+        self._all_figures = False
+        self._viewer = QDialog(self, Qt.WindowType.Tool)
+        self._viewer.setObjectName("results.image_viewer")
+        self._viewer_layout = QVBoxLayout(self._viewer)
+        self._viewer_layout.setContentsMargins(0, 0, 0, 0)
         self.setObjectName("results.gallery")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -120,7 +151,11 @@ class ResultsGallery(QScrollArea):
         *,
         all_figures: bool = False,
     ) -> None:
-        """Replace cards with each run's first PNG, or all PNGs when all_figures.
+        """Show each run's first PNG, or all PNGs when all_figures.
+
+        Reuse cards and decoded rasters for unchanged indexed members within this
+        gallery. File identity, size and modification/change times invalidate a
+        retained card; failed reads are retried on the next presentation.
 
         runs contains indexed runs from this gallery's ResultsIndex. By default
         show each run's first indexed PNG; all_figures=True shows every member.
@@ -136,49 +171,164 @@ class ResultsGallery(QScrollArea):
         This gallery does not execute commands or write saved results. Callback
         exceptions are not caught; dismissing the menu invokes no callback.
         """
+        self._activate = activate
+        self._action = action
+        members = [
+            (run, path, self._signature(path))
+            for run in runs
+            for path in (run.figure_paths if all_figures else run.figure_paths[:1])
+        ]
+        presentation = tuple(
+            (run.key, path.name, signature) for run, path, signature in members
+        )
+        if (
+            self.widget() is not None
+            and presentation == self._presentation
+            and all_figures == self._all_figures
+            and all(
+                signature is not None and (key, name) in self._cards
+                for key, name, signature in presentation
+            )
+        ):
+            return
+        for saved in self._cards.values():
+            saved.frame.setParent(self._retained)
+            saved.frame.hide()
+            saved.frame.setObjectName("")
+            saved.image.setObjectName("")
         old = self.takeWidget()
         if old is not None:
             old.setParent(None)
             old.deleteLater()
         content = QWidget()
         grid = QGridLayout(content)
+        grid.setColumnStretch(0, 1)
+        # Stretch a second column only when it has cards; a lone card uses all width.
+        grid.setColumnStretch(1, int(len(members) > 1))
         number = 0
-        for run in runs:
-            paths = run.figure_paths if all_figures else run.figure_paths[:1]
-            for path in paths:
-                card = QFrame()
-                card.setFrameShape(QFrame.Shape.StyledPanel)
-                layout = QVBoxLayout(card)
-                caption = QLabel(
-                    path.name
-                    if all_figures
-                    else f"{run.experiment or 'Unknown experiment'} · {run.run_path.name[-6:]}\n"
-                    f"{run.entry} / {run.point or 'Global / unknown'} · {run.at or 'Unknown time'}"
-                )
-                caption.setWordWrap(True)
-                make_label_selectable(caption)
-                caption.setStyleSheet("font-weight: 600; padding-bottom: 3px;")
-                layout.addWidget(caption)
-                card.setObjectName(f"results.card.{number}")
-                try:
-                    image = ResultImage(self._index.read_figure(run.key, path.name))
-                except (OSError, ValueError, KeyError) as error:
-                    layout.addWidget(QLabel(f"{path.name}: {error}"))
-                else:
-                    image.setObjectName(f"results.figure.{number}")
-                    image.setToolTip(
-                        f"{run.entry} / {run.point or 'Global / unknown'}\n"
-                        f"{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n"
-                        f"{run.at or 'Unknown date'}\n{path}"
-                    )
-                    image.activated.connect(lambda r=run, f=path.name: activate(r, f))
-                    image.action_requested.connect(
-                        lambda a, r=run, f=path.name: action(r, f, a)
-                    )
-                    layout.addWidget(image)
-                grid.addWidget(card, number // 2, number % 2)
+        for run, path, signature in members:
+            try:
+                saved = self._saved_card(run, path, signature)
+            except (OSError, ValueError, KeyError) as error:
+                grid.addWidget(QLabel(f"{path.name}: {error}"), number // 2, number % 2)
                 number += 1
+                continue
+            saved.caption.setText(
+                path.name
+                if all_figures
+                else f"{run.experiment or 'Unknown experiment'} · {run.run_path.name[-6:]}\n"
+                f"{run.entry} / {run.point or 'Global / unknown'} · {run.at or 'Unknown time'}"
+            )
+            saved.frame.setObjectName(f"results.card.{number}")
+            saved.image.setObjectName(f"results.figure.{number}")
+            grid.addWidget(saved.frame, number // 2, number % 2)
+            saved.frame.show()
+            number += 1
         if number == 0:
             grid.addWidget(QLabel("No figures in this selection"), 0, 0)
         grid.setRowStretch(grid.rowCount(), 1)
         self.setWidget(content)
+        self._presentation = presentation
+        self._all_figures = all_figures
+
+    def show_image(self, run: ResultRun, selector: str) -> None:
+        """Open or replace the single non-modal Tool preview for an indexed PNG.
+
+        The initial window fits the smaller of native image size and 80% of the
+        screen's available area. Reuse an unchanged decoded gallery image. Unknown
+        run/member raises KeyError; read/decode errors propagate to the caller.
+        Esc/close hides the preview; the gallery owns its lifetime.
+        """
+        run = self._index.get_run(run.key)
+        path = next((path for path in run.figure_paths if path.name == selector), None)
+        if path is None:
+            raise KeyError(selector)
+        saved = self._saved_card(run, path, self._signature(path))
+        raster = saved.image.original_pixmap()
+        image = ResultImage(raster)
+        image.setMinimumWidth(0)
+        image.setObjectName("results.image_viewer.image")
+        image.setToolTip(saved.image.toolTip())
+        image.action_requested.connect(
+            lambda command: self._action(run, selector, command)
+        )
+        old = self._viewer_layout.takeAt(0)
+        if old is not None and (widget := old.widget()) is not None:
+            widget.hide()
+            widget.setObjectName("")
+            widget.deleteLater()
+        self._viewer_layout.addWidget(image)
+        self._viewer.setWindowTitle(f"{run.run_path.name[-6:]} / {selector}")
+        if not self._viewer.isVisible():
+            screen = self.screen()
+            available = (
+                screen.availableGeometry() if screen is not None else self.rect()
+            )
+            self._viewer.resize(
+                min(raster.width(), round(available.width() * 0.8)),
+                min(raster.height(), round(available.height() * 0.8)),
+            )
+        self._viewer.show()
+        self._viewer.raise_()
+
+    def close_image(self) -> None:
+        """Hide the retained floating preview when its browser closes."""
+        self._viewer.close()
+
+    @staticmethod
+    def _signature(path: Path) -> tuple[int, int, int, int, int] | None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return (
+            stat.st_dev,
+            stat.st_ino,
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ctime_ns,
+        )
+
+    def _saved_card(
+        self,
+        run: ResultRun,
+        path: Path,
+        signature: tuple[int, int, int, int, int] | None,
+    ) -> _SavedCard:
+        key = (run.key, path.name)
+        saved = self._cards.get(key)
+        if saved is not None and saved.signature != signature:
+            saved.frame.deleteLater()
+            del self._cards[key]
+            saved = None
+        if saved is None:
+            saved = self._read_card(run, path)
+            saved.frame.setParent(self._retained)
+            self._cards[key] = saved
+        return saved
+
+    def _read_card(self, run: ResultRun, path: Path) -> _SavedCard:
+        image = ResultImage(self._index.read_figure(run.key, path.name))
+        signature = self._signature(path)
+        if signature is None:
+            image.deleteLater()
+            raise OSError(f"Saved PNG disappeared: {path}")
+        card = QFrame()
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout(card)
+        caption = QLabel()
+        caption.setWordWrap(True)
+        make_label_selectable(caption)
+        caption.setStyleSheet("font-weight: 600; padding-bottom: 3px;")
+        layout.addWidget(caption)
+        image.setToolTip(
+            f"{run.entry} / {run.point or 'Global / unknown'}\n"
+            f"{run.experiment or 'Unknown experiment'}\n{run.run_path.name}\n"
+            f"{run.at or 'Unknown date'}\n{path}"
+        )
+        image.activated.connect(lambda: self._activate(run, path.name))
+        image.action_requested.connect(
+            lambda command: self._action(run, path.name, command)
+        )
+        layout.addWidget(image)
+        return _SavedCard(signature, card, caption, image)

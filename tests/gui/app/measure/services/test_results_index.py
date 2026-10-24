@@ -126,6 +126,58 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_old_metadata_and_cfg_are_browsed_without_current_experiment_schema(
+    tmp_path: Path,
+) -> None:
+    cfg: JsonObject = {
+        "cfg_type": "DeletedCfg",
+        "schema_version": "2.0",
+        "values": {"old_key": 123},
+    }
+    samples: tuple[tuple[str, JsonObject], ...] = (
+        (
+            "old",
+            {
+                "experiment": "deleted/experiment",
+                "snapshot": {"point": "legacy", "roles": {"qubit": "Q9"}},
+                "unknown_future_field": True,
+            },
+        ),
+        ("broken", {"experiment": ["not a string"]}),
+        ("missing", {}),
+    )
+    for name, metadata in samples:
+        run = tmp_path / "Database" / "entry" / "runs" / name
+        run.mkdir(parents=True)
+        save(
+            run / "data.h5",
+            Container(
+                vars={},
+                docs={"metadata": metadata, "cfg": cfg},
+                groups={},
+                attrs=ContainerAttrs("3.0", "synthetic", None, {}),
+            ),
+        )
+        (run / "figures").mkdir()
+        (run / "figures" / "saved.png").write_bytes(b"saved raster")
+    index = scan_results(tmp_path)
+    old = index.get_run("entry/old")
+    assert (old.experiment, old.point, old.roles) == (
+        "deleted/experiment",
+        "legacy",
+        {"qubit": "Q9"},
+    )
+    assert old.at is None and old.run_id is None
+    assert index.read_cfg(old.key) == cfg
+    assert index.read_metadata(old.key)["unknown_future_field"] is True
+    assert not old.issues
+    broken = index.get_run("entry/broken")
+    assert broken.issues and "experiment" in broken.issues[0]
+    assert index.read_figure(broken.key, "saved.png") == b"saved raster"
+    assert index.get_run("entry/missing").experiment is None
+    assert len(index.runs) == 3
+
+
 def test_index_spans_entries_points_and_preserves_slash_tag(project: Path) -> None:
     index = scan_results(project)
     assert len(index.runs) == 5

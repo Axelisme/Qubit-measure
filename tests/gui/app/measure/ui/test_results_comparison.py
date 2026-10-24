@@ -1,13 +1,12 @@
-"""Drive pinned comparison tables and the four-run image selection."""
+"""Drive the fixed comparison table and aligned all-PNG run columns."""
 
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QImage, QPainter
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QScrollArea, QSplitter, QTableWidget
 from zcu_tools.datafile import JsonObject
 from zcu_tools.gui.app.measure.services.results_index import ResultsIndex
 from zcu_tools.gui.app.measure.ui.results_comparison import ResultsComparison
@@ -38,7 +37,12 @@ def comparison(qapp: QApplication, tmp_path: Path) -> Iterator[ResultsComparison
         if number != 4:
             folder = run.run_path / "figures"
             folder.mkdir()
-            paths = tuple(folder / name for name in ("first.png", "selected.png"))
+            names = (
+                ("first.png", "other.png")
+                if number == 5
+                else ("first.png", "selected.png")
+            )
+            paths = tuple(folder / name for name in names)
             for path, colour in zip(paths, ("navy", "darkred"), strict=True):
                 image = QImage(480, 300, QImage.Format.Format_RGB32)
                 image.fill(QColor("white"))
@@ -63,7 +67,7 @@ def comparison(qapp: QApplication, tmp_path: Path) -> Iterator[ResultsComparison
         runs.append(run)
     widget = ResultsComparison(ResultsIndex(tmp_path, tuple(runs)))
     for run in runs:
-        widget.pin_run(run, "selected.png" if run.figure_paths else None)
+        widget.pin_run(run)
     widget.resize(1400, 900)
     widget.show()
     qapp.processEvents()
@@ -79,15 +83,11 @@ def test_pins_table_remove_and_clear(
     ui = ComponentDriver(comparison)
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 6"
     rows = ui.table_rows(object_name="results.comparison_table")
-    assert len(rows) == 6
+    assert comparison.findChildren(QTableWidget)[0].rowCount() == 6
     assert "Q5: 21.25\nQ9: 8" in rows[0].columns
     ui.screenshot(tmp_path / "comparison-table.png")
-    ui.select_table_row("run-2", object_name="results.comparison_table")
-    ui.click("Unpin selected")
+    ui.click(object_name="results.compare.remove.2")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 5"
-    assert not any(
-        row.selected for row in ui.table_rows(object_name="results.comparison_table")
-    )
     ui.screenshot(tmp_path / "comparison-unpinned.png")
     ui.click("Clear comparison")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 0"
@@ -95,34 +95,32 @@ def test_pins_table_remove_and_clear(
     ui.screenshot(tmp_path / "comparison-cleared.png")
 
 
-def test_four_image_selection_keeps_all_pins_and_exact_png(
+def test_all_run_columns_align_png_rows_and_missing_members(
     comparison: ResultsComparison, tmp_path: Path
 ) -> None:
     ui = ComponentDriver(comparison)
-    ui.click("2 × 2 figures")
-    assert ui.observe(object_name="results.compare.caption.0").text.endswith(
-        "selected.png"
-    )
-    assert ui.observe(object_name="results.compare.caption.3").text.endswith(
-        "selected.png"
-    )
-    ui.screenshot(tmp_path / "comparison-four-images.png")
-    ui.select_list_row("sample / run-4")
-    ui.press_key(Qt.Key.Key_Space, object_name="results.pins")
-    assert "at most 4" in ui.observe(object_name="results.compare.feedback").text
-    ui.screenshot(tmp_path / "comparison-limit-rejected.png")
-    ui.select_list_row("sample / run-0")
-    ui.press_key(Qt.Key.Key_Space, object_name="results.pins")
-    ui.select_list_row("sample / run-4")
-    ui.press_key(Qt.Key.Key_Space, object_name="results.pins")
-    assert "No saved PNG" in ui.observe(object_name="results.compare.caption.3").text
-    assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 6"
-    ui.screenshot(tmp_path / "comparison-no-png.png")
-    ui.click("Comparison table")
-    assert len(ui.table_rows(object_name="results.comparison_table")) == 6
-    ui.click("2 × 2 figures")
-    assert "No saved PNG" in ui.observe(object_name="results.compare.caption.3").text
-    ui.screenshot(tmp_path / "comparison-mode-retained.png")
+    ui.resize_window(1000, 850)
+    assert ui.observe(object_name="results.compare.row.0").text == "first.png"
+    assert ui.observe(object_name="results.compare.row.1").text == "selected.png"
+    assert ui.observe(object_name="results.compare.row.2").text == "other.png"
+    assert ui.observe(object_name="results.compare.missing.2.0").text == "—"
+    assert "run-0" in ui.observe(object_name="results.compare.header.0").text
+    assert ui.observe(object_name="results.compare.missing.0.4").text == "—"
+    scroll = comparison.findChildren(QScrollArea)[0]
+    bar = scroll.horizontalScrollBar()
+    assert bar is not None and bar.maximum() > 0
+    assert comparison.findChildren(QTableWidget)[0].rowCount() == 6
+    ui.screenshot(tmp_path / "comparison-all-images.png")
+    splitter = comparison.findChild(QSplitter, "results.compare.splitter")
+    assert splitter is not None
+    sizes = splitter.sizes()
+    ui.drag_splitter(70, object_name="results.compare.splitter")
+    assert splitter.sizes()[0] > sizes[0]
+    activated: list[str] = []
+    comparison.run_activated.connect(activated.append)
+    ui.click(object_name="results.compare.header.0", double_click=True)
+    assert activated == [comparison.pinned_runs()[0].key]
+    ui.screenshot(tmp_path / "comparison-splitter-dragged.png")
 
 
 @pytest.mark.parametrize(
@@ -184,7 +182,7 @@ def test_saved_summary_cells_are_visible(
         assert fact in rows[0].columns
         ui.select_table_row("historical", object_name="results.comparison_table")
         ui.screenshot(tmp_path / f"comparison-{scenario}.png")
-        ui.click("Unpin selected")
+        ui.click("Clear comparison")
         assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 0"
     finally:
         widget.close()
@@ -203,18 +201,11 @@ def test_pin_api_is_atomic_and_preserves_insertion_order(
     changes = []
     widget.pins_changed.connect(lambda: changes.append("changed"))
     widget.pin_run(run)
-    assert widget.selected_figure(run.key) == "first.png"
-    widget.pin_run(run, "second.png")
     widget.pin_run(run)
     assert widget.pinned_runs() == (run,)
-    assert widget.selected_figure(run.key) == "second.png"
-    with pytest.raises(KeyError):
-        widget.pin_run(run, "missing.png")
     with pytest.raises(KeyError):
         widget.pin_run(replace(run, key="unknown"))
-    with pytest.raises(KeyError):
-        widget.selected_figure("unknown")
-    assert widget.selected_figure(run.key) == "second.png"
-    assert len(changes) == 2
+    assert widget.pinned_runs() == (run,)
+    assert len(changes) == 1
     widget.deleteLater()
     qapp.processEvents()
