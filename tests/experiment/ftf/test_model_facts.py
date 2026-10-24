@@ -1,14 +1,21 @@
 """Physical model reuse at the acquire/engine and numeric-builder boundaries."""
 
 import weakref
+from collections.abc import Sequence
 from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, replay
 from zcu_tools.experiment.ftf import template as template_module
-from zcu_tools.simulate.evolution import Engine, ModelSource
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EvolutionResult,
+    ModelSource,
+    TimelineBatch,
+)
 from zcu_tools.simulate.ftf import JointModel
 
 from tests.experiment._ftf_templates import (
@@ -30,8 +37,15 @@ class ObservedEngine(Engine):
         self.sources: list[weakref.ReferenceType[ModelSource]] = []
 
     def evolve(
-        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
-    ):
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+    ) -> EvolutionResult:
         self.sources.append(weakref.ref(source))
         return super().evolve(
             source,
