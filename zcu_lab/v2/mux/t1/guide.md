@@ -64,16 +64,24 @@ includes the intended longest delay before budgeting the full scan.
 
 ## Measurement and analysis
 
-Use calibrated fixed pi pulses. All qubits share a linear, equally spaced delay
-axis in us, executed by one program's hardware loop.
-Requested times must be finite, nonnegative and strictly increasing.
+Use calibrated fixed pi pulses. All qubits share one delay axis in us,
+executed by one program's hardware loop. Requested window endpoints and the
+linear input axis must be finite, nonnegative and strictly increasing.
+
+**Uniform (linear) sweep** defaults to true. Turn it off to concentrate delay
+samples in the decay region within the same start/stop window, using the same
+sampling policy as single-qubit T1. Every participant uses the same cycle table.
+Nonuniform samples must remain distinct and increasing after hardware
+quantization; otherwise Run reports an error before acquisition.
 
 The sequence is common reset, simultaneous pi pulses, common delay, then mux
 readout. The delay starts after the longest pulse branch, including pre/post delays.
 With zero pulse delays, a shorter pulse waits an extra `max_len - len_i`.
 That fixed wait changes an exponential decay's amplitude while preserving T1.
-The plotted and fitted axis is the requested delay; hardware timing may differ
-by a few ticks. Choose a window that constrains both decay and baseline.
+With uniform sampling, plots and fits retain requested delays; hardware timing
+may differ by a few ticks. With nonuniform sampling, plots, fits and native
+files retain the quantized delays. Choose a window that constrains both decay
+and baseline.
 
 Skip removes leading points before finite-IQ filtering.
 Choose the single- or dual-exponential model and inspect quality and uncertainty.
@@ -88,7 +96,7 @@ Review the model, uncertainty and captured destination before Apply.
 ## Results and saved sources
 
 Run draws one `measurement_i` figure per participant, without a shared overlay.
-Each figure uses the common requested-delay axis.
+Each figure uses the common recorded-delay axis.
 The index `i` is the original tone position in the saved configuration.
 Analyze uses the selected Run/Load source. Use the Analysis figure picker for
 `fit_i`.
@@ -124,7 +132,9 @@ The recipe applies overrides last, then calls `check_ready()` before Run.
 See the [mux recipe guide](../../../recipes/mux-guide.md#mux_t1) for dotted-path overrides,
 parameter origins and explicit writeback decisions.
 
-The MCP recipe is `mux_t1`.
+The MCP recipe is `mux_t1`. Set the generated Form field through an override
+such as `{"path": "uniform", "value": false}`. The recipe applies overrides
+before `check_ready()`; omission keeps the current value.
 
 ## Simulation limits
 

@@ -65,6 +65,7 @@ Map 使用 native 實際 gain 與有單位的 flux sample centres，不用 reque
 MIST partial 先保存 mist.h5，再回 success=False、reason=stopped，gain_file 保留檔名。不更新 map 的成功 trace，也不保存完整 gain 圖。
 
 `overnight` 維持固定 flux、有限 T1→Hahn-echo pair、固定開始間隔與無 feedback。
+Tunables 的 `uniform` 預設 true，控制 T1 的線性 delay sweep。設 false 時，native T1 在同一 start/stop 視窗內把 delay 集中在衰減段，Echo 不變。
 它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
 每個 Completed member 先保存 raw，partial 不擬合並記原有原因。預期 fit failure 記 reason 且 lifetime/error 為 None。
 目前 iteration 未取消時才開始另一 member。取消的 pair 留 status="skipped" 與已取得欄位，再進下一點。
@@ -76,6 +77,15 @@ Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop �
 只有一個 pair 時，以 actual_start 為中心取 ±plan.start_interval_s，UTC 刻度顯示 HH:MM:SS。多 pair 保留實際時間與自動範圍。
 宿主不輪詢 committed records 來呼叫它們。Workflow 透過 `env.plots` 決定資料與更新時機，framework 不保證只畫 journal 已提交的紀錄。
 沒有自動保存或從 run 目錄重開趨勢圖。保存責任見 ADR-0062。
+
+`overnight_mux` 保留 overnight 的有限 pair、開始間隔、不追趕排程、取消與 finally commit。
+每輪先用 `MuxT1Exp` 同時量所有 participants，再用 `MuxT2EchoExp` 同時量 Echo。它不設定 flux、不校準，也不做 feedback。
+Plan 保存完整 mux readout 順序、participants 原始索引、每個 tone 的已校準 x180 與獨立 x90、可省略的共用 reset，以及歷史 snapshot。
+Mux tunables 與 overnight 的欄位及意義相同。`uniform` 預設 true，只控制 T1 的取樣分布，所有 participants 共用同一條 delay grid。
+設 false 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
+Native mux 分析逐 tone 擬合，再各自套 overnight 的 relative-error 與 normalized-residual 門檻。
+每輪保存兩個 native 檔名、排程與實際 UTC 開始時間、status，以及每個 participant 的名稱、T1/Echo 接受值、誤差與原因。
+`overnight_mux_trend` 的 T1/Echo panels 各為每個 qubit 畫一條線，缺值留 gap。單輪範圍、更新時機與不自動保存的契約同 overnight。
 
 ## Native、裝置與前端邊界
 
