@@ -1,4 +1,4 @@
-"""Pinned fixed-column tables and filename-aligned saved PNG comparisons."""
+"""Pinned summary-JSON tables and filename-aligned saved PNG comparisons."""
 
 from __future__ import annotations
 

@@ -138,8 +138,10 @@ ResultsComparison. Tree run context menus pin the clicked run or Load into
 analysis tab through the same Load owner as the right-side button. Group nodes
 have neither command. The right-side action row contains only Load into analysis
 tab; the action loads saved data without measurement or automatic analysis.
-`ResultsComparison` shows the fixed-column table above a filename-aligned image
-grid, separated by a vertical splitter. All pins are run columns; PNG filenames
+`ResultsComparison` shows identity columns and an ordered union of saved summary
+JSON leaf paths above a filename-aligned image grid, separated by a vertical
+splitter. Object-list cells use indexed lines; other lists use JSON text. Table
+columns support dragging and horizontal scrolling. All pins are run columns; PNG filenames
 are rows. Missing members show an em dash. Headers unpin or open a run. Pin count
 updates the Comparison tab caption. Context-menu pinning reveals that PNG row;
 there is no per-pin selected-image state.

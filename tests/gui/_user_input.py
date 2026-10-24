@@ -453,7 +453,7 @@ class ComponentDriver:
             viewport.height() // 2,
         )
         end = start + QPoint(delta, 0)
-        if not self._can_interact(header) or not all(
+        if not self._can_interact(viewport) or not all(
             viewport.visibleRegion().contains(point) for point in (start, end)
         ):
             return
