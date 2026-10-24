@@ -1,37 +1,23 @@
-"""Single-shot T1-with-tone-sweep adapters (split by outer sweep axis).
+"""Single-shot T1 versus probe length and either gain or frequency.
 
-The domain ``T1WithToneSweepExp`` is a 2D experiment: it always sweeps the
-probe ``length`` plus exactly one *outer* axis (gain XOR freq), enforced by its
-``_resolve_outer_sweep`` (it raises unless exactly one of gain/freq is set).
-``T1WithToneSweepSweepCfg`` makes both gain and freq ``Optional``.
-
-Rather than expose both optional sweeps in one form (which would let a user set
-zero or two and hit the domain's run-time error — least-surprise violation),
-this module splits into two adapters that each expose ``length`` + exactly one
-outer sweep:
-
-- ``SsT1ToneSweepGainAdapter`` → length + gain (registry 'singleshot/t1_tone_sweep_gain')
-- ``SsT1ToneSweepFreqAdapter`` → length + freq (registry 'singleshot/t1_tone_sweep_freq')
-
-Each lowers a cfg with only its one outer sweep set, so the domain's
-``_resolve_outer_sweep`` is satisfied by construction. The shared run / analyze /
-writeback / guide logic lives in ``_SsT1ToneSweepBase``; the subclasses differ
-only in which outer sweep they declare + its default.
+GAIN_DEFINITION exposes length + gain at 'singleshot/t1_tone_sweep_gain'.
+FREQ_DEFINITION exposes length + frequency at 'singleshot/t1_tone_sweep_freq'.
+Each form supplies exactly one outer sweep, as required by the core run.
+Analysis shares the captured correction inputs but labels its own outer axis.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_shared import (
@@ -52,67 +38,65 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
 SsT1ToneSweepRunResult: TypeAlias = RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]
 
 
-class _SsT1ToneSweepBase(BaseAdapter[T1WithToneSweepCfg, SsT1ToneSweepRunResult]):
-    """Shared body for the two T1-with-tone-sweep adapters.
-
-    Subclasses declare the single outer sweep axis (gain XOR freq) so the lowered
-    cfg sets only one of them and the domain ``_resolve_outer_sweep`` is satisfied.
-    """
-
-    exp_cls = T1WithToneSweepExp
-
-    # Subclasses supply the Form, analysis axis label and filename token.
-    outer_label: ClassVar[str]
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: T1WithToneSweepCfg,
-        *,
-        context: RunContext,
-    ) -> SsT1ToneSweepRunResult:
-        del req
-        return RunRecord(cfg, T1WithToneSweepExp().run(cfg, context=context))
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[SsT1ToneSweepRunResult, None],
-        *,
-        plots: Plots,
-    ) -> None:
-        # ``ac_coeff`` (= md 'ac_stark_coeff') rescales the outer x-axis to photon
-        # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
-        # user knobs. ``xlabel`` labels the rate plots with this adapter's outer
-        # axis.
-        ac_coeff = read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff")
-        confusion = read_confusion_matrix(req.parameters)
-        T1WithToneSweepExp().analyze(
-            req.run_result,
-            T1WithToneSweepAnalyzeOptions(
-                ac_coeff=ac_coeff, confusion_matrix=confusion, xlabel=self.outer_label
-            ),
-            plots=plots,
-        )
-        return
+def _analyze(
+    req: AnalyzeRequest[SsT1ToneSweepRunResult, None],
+    *,
+    plots: Plots,
+    xlabel: str,
+) -> None:
+    # ``ac_coeff`` (= md 'ac_stark_coeff') rescales the outer x-axis to photon
+    # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
+    # user knobs. ``xlabel`` labels the rate plots with this adapter's outer
+    # axis.
+    ac_coeff = read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff")
+    confusion = read_confusion_matrix(req.parameters)
+    T1WithToneSweepExp().analyze(
+        req.run_result,
+        T1WithToneSweepAnalyzeOptions(
+            ac_coeff=ac_coeff, confusion_matrix=confusion, xlabel=xlabel
+        ),
+        plots=plots,
+    )
+    return
 
 
-class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form_gain(ctx)
-
-    outer_label: ClassVar[str] = "Probe gain (a.u.)"
-
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
+def _analyze_gain(
+    req: AnalyzeRequest[SsT1ToneSweepRunResult, None], *, plots: Plots
+) -> None:
+    _analyze(req, plots=plots, xlabel="Probe gain (a.u.)")
 
 
-class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form_freq(ctx)
+def _run_gain(
+    cfg: T1WithToneSweepCfg, *, context: RunContext
+) -> RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]:
+    return RunRecord(cfg=cfg, result=T1WithToneSweepExp().run(cfg, context=context))
 
-    outer_label: ClassVar[str] = "Probe frequency (MHz)"
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")
+GAIN_DEFINITION = Adapter(
+    spec=T1WithToneSweepExp.AXES_SPEC,
+    make_form=make_form_gain,
+    run=_run_gain,
+    guide=Path(__file__).with_name("guide.gain.md"),
+    analysis=Analysis(fn=_analyze_gain),
+)
+
+
+def _analyze_freq(
+    req: AnalyzeRequest[SsT1ToneSweepRunResult, None], *, plots: Plots
+) -> None:
+    _analyze(req, plots=plots, xlabel="Probe frequency (MHz)")
+
+
+def _run_freq(
+    cfg: T1WithToneSweepCfg, *, context: RunContext
+) -> RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]:
+    return RunRecord(cfg=cfg, result=T1WithToneSweepExp().run(cfg, context=context))
+
+
+FREQ_DEFINITION = Adapter(
+    spec=T1WithToneSweepExp.AXES_SPEC,
+    make_form=make_form_freq,
+    run=_run_freq,
+    guide=Path(__file__).with_name("guide.freq.md"),
+    analysis=Analysis(fn=_analyze_freq),
+)
