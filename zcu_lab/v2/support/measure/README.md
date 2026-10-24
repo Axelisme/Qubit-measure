@@ -4,7 +4,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-這個 private package 擁有至少兩個 measure experiment adapters 共用的 implementation
+這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
 已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
@@ -103,7 +103,7 @@ None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不�
 ```python
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_bindings import validate_mux_bindings
+from zcu_lab.v2.support.measure.mux_bindings import validate_mux_bindings
 
 from .core import TwoQubitCfg
 

@@ -27,7 +27,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)

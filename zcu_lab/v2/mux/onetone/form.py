@@ -3,17 +3,17 @@
 from zcu_tools.cfg_model import Hidden, Range
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_bindings import (
+from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
+from zcu_lab.v2.support.measure.mux_bindings import (
     require_mux_group,
     validate_mux_bindings,
 )
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_participants,
     mux_readout_initial,
     mux_readout_seed_metadata,
 )
-from zcu_lab.v2.mux.onetone.core import MuxOnetoneCfg
 
 
 def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:

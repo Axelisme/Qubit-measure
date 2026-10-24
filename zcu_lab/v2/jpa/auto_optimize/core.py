@@ -28,9 +28,9 @@ from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
-from zcu_lab.v2._support import live_scatter
-from zcu_lab.v2._support.device import set_flux, set_rf_frequency, set_rf_power
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
+from zcu_lab.v2.support import live_scatter
+from zcu_lab.v2.support.device import set_flux, set_rf_frequency, set_rf_power
 
 
 @dataclass(frozen=True)

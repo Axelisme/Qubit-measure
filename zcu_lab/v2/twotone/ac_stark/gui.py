@@ -23,7 +23,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.singleshot_shared import read_chi_kappa
+from zcu_lab.v2.support.measure.singleshot_shared import read_chi_kappa
 
 from .core import (
     AcStarkAnalyzeOptions,

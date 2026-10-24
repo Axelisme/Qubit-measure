@@ -18,7 +18,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.singleshot_rabi import rabi_calibration_writeback
 from zcu_lab.v2.singleshot.amp_rabi.core import (
     AmpRabiAnalyzeOptions,
     AmpRabiCfg,
@@ -27,6 +26,7 @@ from zcu_lab.v2.singleshot.amp_rabi.core import (
     AmpRabiResult,
 )
 from zcu_lab.v2.singleshot.amp_rabi.form import make_form
+from zcu_lab.v2.support.measure.singleshot_rabi import rabi_calibration_writeback
 
 SsAmpRabiRunResult = RunRecord[AmpRabiCfg, AmpRabiResult]
 

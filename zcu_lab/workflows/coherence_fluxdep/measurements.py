@@ -12,7 +12,7 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support import LinePlot, live_line
+from zcu_lab.v2.support import LinePlot, live_line
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg

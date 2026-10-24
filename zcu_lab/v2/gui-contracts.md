@@ -39,7 +39,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   `flux_onetone` / `check`）是單一可發現的 JPA 校準 family，依 bring-up 順序
   註冊於 `../definitions.py`。Concrete adapters 各自擁有 acquisition 初值政策，
   並共同暴露 `reps` / `rounds` / `relax_delay`。四個 qubit SNR adapter 的
-  `relax_delay` 採 `1*T1`，透過 `_support/measure/ctx_helpers.py` 的
+  `relax_delay` 採 `1*T1`，透過 `support/measure/ctx_helpers.py` 的
   `t1_initial_time` 共用固定 capture 的來源分類 mechanics。有效 T1 用捕捉校準，
   缺值用 `30 us` 公允時間尺度，無效值留空，來源故障傳遞 owner 的原錯誤。
   初值可覆寫，不寫回校準。純反射的 `flux_onetone` / `check` 等待維持
@@ -47,13 +47,13 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   未使用的 `initial_delay` 不宣告為實驗欄位，builder 沿用 1.0 us 預設。auto optimizer 的 sweep `expts`
   是 allocation resolution hint，flux 則使用中性 device-value contract。完整家族
   契約見 `measure-authoring.md`。
-- `_support/measure/` 是 private package，提供至少被兩個 concrete adapters 共用的 mechanics。
+- `support/measure/` 是公開支援 package，提供至少被兩個 concrete adapters 共用的 mechanics。
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
   本 package 不擁有 registry order，也不 import concrete adapter。
-- `_support/resonator.py` 不依賴 GUI，供 onetone/freq core 與 mux adapter 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `_support/measure/` 載入 GUI。
+- `support/resonator.py` 不依賴 GUI，供 onetone/freq core 與 mux adapter 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `support/measure/` 載入 GUI。
 - `../definitions.py` 明確列出可重載的 adapter catalog；`../components/` 擁有 startup-only component schema 註冊。
-- Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `BaseAdapter` 與 `_support/measure/`。
+- Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `BaseAdapter` 與 `support/measure/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
 ## 共用 lifecycle hooks
@@ -157,7 +157,7 @@ GUI 與 remote 讀同一份已提交輸出；取消或失敗不覆蓋前次成�
 Generic model 生成、module materialization 與 typed cfg 轉換由
 [`zcu_tools.gui.form_adapter`](../../lib/zcu_tools/gui/form_adapter/README.md) 擁有，
 通用輸入狀態與驗證由 [`gui.form`](../../lib/zcu_tools/gui/form/README.md) 擁有。
-Concrete Form 選擇 `_support/measure/` 的 domain helpers；實驗結構與初值政策仍由 lab 擁有，
+Concrete Form 選擇 `support/measure/` 的 domain helpers；實驗結構與初值政策仍由 lab 擁有，
 不移入 generic framework。
 
 ## Capability 宣告與實作
@@ -171,8 +171,8 @@ Concrete Form 選擇 `_support/measure/` 的 domain helpers；實驗結構與初
 ## 修改原則
 
 1. 單一實驗的初值政策留在其 `form.py`；其他設定、文字與流程 policy 留在 authoritative adapter file。
-2. helper 確實出現第二個 caller，且有清楚 mechanics seam 或符合上述共用初值政策邊界時，才移入 `_support/measure/`。
-3. 不以 forwarding wrapper 隱藏單行邏輯；不讓 `_support` 解讀 registry key 或實驗順序。
+2. helper 確實出現第二個 caller，且有清楚 mechanics seam 或符合上述共用初值政策邊界時，才移入 `support/measure/`。
+3. 不以 forwarding wrapper 隱藏單行邏輯；不讓 `support` 解讀 registry key 或實驗順序。
 4. 新增 adapter 時同步加入 `../definitions.py` 與 operator guide。實驗定義以直接 review、表單開啟 smoke 與離線合成資料保存／讀回走查驗證，不寫 lab 專屬 pytest，也不建立 `tests/zcu_lab/`。Framework owner 用最小合成 adapter 驗證公開契約，不 import `zcu_lab`；刪掉本套件後整套 pytest 仍須通過，包含 slow。
 
 單一實驗的 range centre/span/fallback 直接寫在其 `form.py`。已定案且多個 Form 共用的初值來源、有效性與首次值，可由上述具名 domain helper 擁有。

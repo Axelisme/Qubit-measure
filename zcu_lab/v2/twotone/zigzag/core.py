@@ -14,7 +14,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.program.v2 import LoadValue, Module, Pulse, Readout, Repeat, Reset
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)

@@ -16,7 +16,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import find_rotate_angle
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.reset.rabi_check.fit import RabiCheckFit, fit_reset_rabi
 
 

@@ -20,8 +20,8 @@ from zcu_tools.mcp.measure.recipe_contracts import (
     RecipeNeedsParameters,
 )
 
-from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
 from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiSummary
+from zcu_lab.v2.support.measure.mux_results import MuxSummaryFailure
 
 from .mux_helpers import (
     MuxToneReport,

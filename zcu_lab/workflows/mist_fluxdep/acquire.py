@@ -12,8 +12,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 
-from zcu_lab.v2._support import live_line
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
+from zcu_lab.v2.support import live_line
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 
 

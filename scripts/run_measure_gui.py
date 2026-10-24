@@ -117,8 +117,8 @@ def _build_measure_catalogs():
         reload_modules=("zcu_lab.v2", "zcu_lab.definitions"),
         preserved_modules=(
             "zcu_lab.templates",
-            "zcu_lab.v2._support.measure",
-            "zcu_lab.v2._support.singleshot",
+            "zcu_lab.v2.support.measure",
+            "zcu_lab.v2.support.singleshot",
         ),
         catalog_module="zcu_lab.definitions",
         current_registry=registry,

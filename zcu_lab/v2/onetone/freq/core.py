@@ -22,12 +22,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
-from zcu_lab.v2._support.resonator import (
-    ResonanceOptions as FreqAnalyzeOptions,
-)
-from zcu_lab.v2._support.resonator import (
-    fit_resonance,
-)
 from zcu_lab.v2.onetone._shared import (
     FreqResult as FreqResult,
 )
@@ -35,6 +29,12 @@ from zcu_lab.v2.onetone._shared import (
     LinearFreqCfg,
     linear_freqs,
     spectrum_buffer,
+)
+from zcu_lab.v2.support.resonator import (
+    ResonanceOptions as FreqAnalyzeOptions,
+)
+from zcu_lab.v2.support.resonator import (
+    fit_resonance,
 )
 
 SamplingMode = Literal["linear", "homophasal"]

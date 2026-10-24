@@ -14,7 +14,7 @@ from zcu_tools.cfg_model import module_spec_from_raw
 from zcu_tools.gui.app.measure.adapter import ModuleWriteback
 from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 
-from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv

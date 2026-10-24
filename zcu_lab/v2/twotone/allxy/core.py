@@ -18,7 +18,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ComputedPulse, LoadValue, Pulse, Readout, Reset
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)

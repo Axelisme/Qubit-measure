@@ -21,8 +21,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
-from zcu_lab.v2._support.measure.writeback_helpers import module_writeback
+from zcu_lab.v2.support.measure.analyze_results import fit_quality_summary
+from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
     AmpRabiAnalyzeOptions,
     AmpRabiCfg,

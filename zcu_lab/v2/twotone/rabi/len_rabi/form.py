@@ -3,11 +3,11 @@
 from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.pulse_readout_metadata import (
     pulse_readout_seed_metadata,
 )
-from zcu_lab.v2._support.measure.rabi_initial_values import len_rabi_initial_values
+from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_initial_values
 
 from .core import LenRabiCfg
 

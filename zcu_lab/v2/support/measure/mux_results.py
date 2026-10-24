@@ -11,13 +11,13 @@ from zcu_tools.analysis.fitting.sampling import FringeSamplingQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.session.parameters import ParameterContext
 
-from zcu_lab.v2._support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux import MuxFitFailure
 
 from .analyze_results import fit_quality_models
 from .mux_bindings import require_mux_qubits
 
 if TYPE_CHECKING:
-    from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
+    from zcu_lab.v2.support.mux_coherence_analysis import MuxCoherenceFit
 
 
 def captured_qubits(

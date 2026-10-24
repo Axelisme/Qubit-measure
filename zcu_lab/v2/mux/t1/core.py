@@ -34,7 +34,7 @@ T1 with a probe tone or singleshot T1.
 Import the leaf without loading a GUI:
 
 ```python
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveModuleCfg
 from zcu_lab.v2.mux.t1 import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -158,9 +158,9 @@ from zcu_tools.program.v2.modules import (
     Pulse,
 )
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.mux import MuxFitFailure
-from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
 from .analysis import MuxT1Fit, analyze_t1

@@ -560,11 +560,11 @@ def leaf_catalog(
         "v2/__init__.py": "from .family.demo.core import Experiment\n",
         "v2/family/__init__.py": "",
         "v2/family/demo/__init__.py": "",
-        "v2/_support/__init__.py": "",
-        "v2/_support/shared.py": "class Result:\n    pass\n",
-        "roles.py": "from .v2._support.shared import Result\nROLE_RESULT = Result()\n",
+        "v2/support/__init__.py": "",
+        "v2/support/shared.py": "class Result:\n    pass\n",
+        "roles.py": "from .v2.support.shared import Result\nROLE_RESULT = Result()\n",
         "v2/family/demo/core.py": """
-            from loader_leaf.v2._support.shared import Result
+            from loader_leaf.v2.support.shared import Result
             class Experiment:
                 def label(self):
                     return "v1"
@@ -605,7 +605,7 @@ def leaf_catalog(
                 SourcePackage("loader_leaf", root),
             ),
             reload_modules=("loader_leaf.v2", "loader_leaf.definitions"),
-            preserved_modules=("loader_leaf.v2._support", "loader_leaf.roles"),
+            preserved_modules=("loader_leaf.v2.support", "loader_leaf.roles"),
             catalog_module="loader_leaf.definitions",
             catalog_builder=lambda: build_registry("loader_leaf.definitions"),
         )
@@ -632,13 +632,13 @@ def leaf_catalog(
 def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types(
     leaf_catalog: CatalogFixture,
 ) -> None:
-    shared = importlib.import_module("loader_leaf.v2._support.shared")
+    shared = importlib.import_module("loader_leaf.v2.support.shared")
     roles = importlib.import_module("loader_leaf.roles")
     old_adapter = importlib.import_module("loader_leaf.v2.family.demo.gui").Adapter
     leaf_catalog.write(
         "v2/family/demo/core.py",
         """
-        from loader_leaf.v2._support.shared import Result
+        from loader_leaf.v2.support.shared import Result
         class Experiment:
             def label(self):
                 return "v2"
@@ -664,7 +664,7 @@ def test_leaf_catalog_reloads_core_gui_and_exports_without_replacing_fixed_types
     assert isinstance(roles.ROLE_RESULT, core.Result)
 
 
-@pytest.mark.parametrize("relative", ["v2/_support/shared.py", "roles.py"])
+@pytest.mark.parametrize("relative", ["v2/support/shared.py", "roles.py"])
 def test_leaf_fixed_shared_or_startup_role_change_requires_restart(
     leaf_catalog: CatalogFixture, relative: str
 ) -> None:

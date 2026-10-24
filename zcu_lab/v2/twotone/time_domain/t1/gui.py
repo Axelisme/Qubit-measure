@@ -19,7 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
+from zcu_lab.v2.support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
     T1AnalyzeOptions,

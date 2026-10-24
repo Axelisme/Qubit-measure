@@ -7,7 +7,7 @@ from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, validate_mux_result
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalyzeOptions,
     rabi_signal2real,

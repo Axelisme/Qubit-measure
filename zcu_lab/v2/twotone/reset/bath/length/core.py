@@ -17,7 +17,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg
 
-from zcu_lab.v2._support import live_line
+from zcu_lab.v2.support import live_line
 
 
 def _default_phase_values() -> NDArray[np.float64]:

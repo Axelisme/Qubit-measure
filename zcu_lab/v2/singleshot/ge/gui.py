@@ -24,7 +24,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
@@ -34,6 +33,7 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEPostAnalyzeOptions,
 )
 from zcu_lab.v2.singleshot.ge.form import make_form
+from zcu_lab.v2.support.measure.analyze_results import fit_quality_summary
 
 if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots

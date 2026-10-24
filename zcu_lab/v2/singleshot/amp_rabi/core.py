@@ -24,9 +24,9 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 
-from zcu_lab.v2._support import live_line
-from zcu_lab.v2._support.singleshot.util import raw_shots_to_signal
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
 @dataclass(frozen=True)

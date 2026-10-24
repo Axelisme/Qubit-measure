@@ -114,7 +114,7 @@ physical models, evolution and sampling.
 
 ## Device 操作邊界
 
-DeviceInfo 描述設定與讀回結果。Device driver 提供儀器本身的操作，flux 或 RF 角色由使用者套件定義。使用者套件選 driver、明示單位與操作用途；具體 helpers 位於 `zcu_lab/v2/_support/device.py`，見 [lab v2 說明](../../../zcu_lab/v2/README.md#實驗角色與-device-操作)。
+DeviceInfo 描述設定與讀回結果。Device driver 提供儀器本身的操作，flux 或 RF 角色由使用者套件定義。使用者套件選 driver、明示單位與操作用途；具體 helpers 位於 `zcu_lab/v2/support/device.py`，見 [lab v2 說明](../../../zcu_lab/v2/README.md#實驗角色與-device-操作)。
 
 Workflow 的同步 `get_device_cfg(name)` 與完整 cfg `setup_device(name, cfg)` 由宿主提供。使用者工具組合讀取、單位檢查與欄位修改。Framework 轉交完整 cfg；部分欄位的合併與 value／unit 處理由使用者工具負責。Measure MCP 的 partial `device_setup` 是另一個有界工具，見 ADR-0068。
 

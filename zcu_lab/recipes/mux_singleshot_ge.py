@@ -13,8 +13,8 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
 from zcu_lab.v2.mux.singleshot_ge.gui import MuxGEPostSummary, MuxGESummary
+from zcu_lab.v2.support.measure.mux_results import MuxSummaryFailure
 
 from .mux_helpers import (
     MuxToneReport,

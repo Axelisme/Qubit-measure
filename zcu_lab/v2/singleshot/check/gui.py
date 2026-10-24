@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.singleshot_shared import read_ge_centers
 from zcu_lab.v2.singleshot.check.core import (
     CheckAnalyzeOptions,
     CheckCfg,
@@ -20,6 +19,7 @@ from zcu_lab.v2.singleshot.check.core import (
     CheckResult,
 )
 from zcu_lab.v2.singleshot.check.form import make_form
+from zcu_lab.v2.support.measure.singleshot_shared import read_ge_centers
 
 CheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 

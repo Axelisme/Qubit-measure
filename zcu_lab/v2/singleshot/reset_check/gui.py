@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2._support.measure.singleshot_shared import read_confusion_matrix
 from zcu_lab.v2.singleshot.reset_check.core import (
     ResetCheckAnalyzeOptions,
     ResetCheckCfg,
@@ -21,6 +20,7 @@ from zcu_lab.v2.singleshot.reset_check.core import (
     ResetCheckResult,
 )
 from zcu_lab.v2.singleshot.reset_check.form import make_form
+from zcu_lab.v2.support.measure.singleshot_shared import read_confusion_matrix
 
 SsResetCheckRunResult = RunRecord[ResetCheckCfg, ResetCheckResult]
 

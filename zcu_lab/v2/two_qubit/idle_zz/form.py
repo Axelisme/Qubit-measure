@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Range, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.mux_forms import (
+from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
     mux_readout_seed_metadata,
 )

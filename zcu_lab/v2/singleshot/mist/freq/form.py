@@ -3,8 +3,8 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2.singleshot.mist.freq.core import FreqCfg
+from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:

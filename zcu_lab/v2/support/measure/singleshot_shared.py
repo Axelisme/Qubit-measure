@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.format_version import YamlValue
 
-from zcu_lab.v2._support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.parameters import ParameterContext

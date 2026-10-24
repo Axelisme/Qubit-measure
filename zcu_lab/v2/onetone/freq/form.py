@@ -18,12 +18,12 @@ from zcu_tools.gui.form import (
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.pulse_readout_metadata import (
-    pulse_readout_seed_metadata,
-)
 from zcu_lab.v2.onetone._form_shared import initial_spectrum_tree
 from zcu_lab.v2.onetone._shared import LinearFreqCfg
 from zcu_lab.v2.onetone.freq.core import HomophasalSamplingCfg
+from zcu_lab.v2.support.measure.pulse_readout_metadata import (
+    pulse_readout_seed_metadata,
+)
 
 
 class LinearInput(FormModel):
