@@ -158,10 +158,10 @@ def test_complete_md_values_survive_preview_and_write_socket(
     fx.start()
     sock = open_client(fx.service.port)
     try:
-        tab = fx.ctrl.new_tab("proposals")
+        tab = fx.ctrl.tab_control.new_tab("proposals")
         for operation in (
-            lambda: fx.ctrl.start_run(tab),
-            lambda: fx.ctrl.analyze(tab, SampleParams()),
+            lambda: fx.ctrl.run_analyze_control.start_run(tab),
+            lambda: fx.ctrl.run_analyze_control.analyze(tab, SampleParams()),
         ):
             assert_terminal_finished(fx, sock, operation())
         params = {"tab_id": tab, "subtab_id": "analysis"}
@@ -192,7 +192,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
         else:
             for invalid in (before, after):
                 assert_rejected_write_preserves_context(fx, sock, tab, invalid)
-            fx.ctrl.set_writeback_item_for_pane(
+            fx.ctrl.writeback_control.set_writeback_item_for_pane(
                 tab, "analysis", "param-1", proposed_value=1.0
             )
         for invalid in (
@@ -238,10 +238,10 @@ def _stored_pulse(**changes: object) -> PulseSpec:
 
 
 def _analyzed_module_tab(fx: Fixture, sock) -> str:
-    tab = fx.ctrl.new_tab("synthetic/module_writeback")
+    tab = fx.ctrl.tab_control.new_tab("synthetic/module_writeback")
     for operation in (
-        lambda: fx.ctrl.start_run(tab),
-        lambda: fx.ctrl.analyze(tab, SampleParams()),
+        lambda: fx.ctrl.run_analyze_control.start_run(tab),
+        lambda: fx.ctrl.run_analyze_control.analyze(tab, SampleParams()),
     ):
         assert_terminal_finished(fx, sock, operation())
     assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
@@ -278,7 +278,7 @@ def test_apply_writeback_tool_writes_module_proposal_by_id(
     invoke("connect", {"port": module_fixture.service.port})
     receipt = invoke("apply_writeback", {"tab": tab})
     assert receipt["status"] == "finished", receipt
-    library = module_fixture.ctrl.read_context().library
+    library = module_fixture.ctrl.context_control.read_context().library
     assert library.module_spec(MODULE_PROPOSAL_TARGET) == _stored_pulse(gain=0.3)
 
 
@@ -311,10 +311,10 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     fx.start()
     sock = open_client(fx.service.port)
     try:
-        tab = fx.ctrl.new_tab("proposals")
-        run = fx.ctrl.start_run(tab)
+        tab = fx.ctrl.tab_control.new_tab("proposals")
+        run = fx.ctrl.run_analyze_control.start_run(tab)
         assert_terminal_finished(fx, sock, run)
-        analyze = fx.ctrl.analyze(tab, SampleParams())
+        analyze = fx.ctrl.run_analyze_control.analyze(tab, SampleParams())
         assert_terminal_finished(fx, sock, analyze)
         assert call(sock, "tab.snapshot", {"tab_id": tab})["ok"]
         assert call(sock, "context.snapshot", {})["ok"]
@@ -336,7 +336,9 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
         after = call(sock, "tab.writeback_preview", params)["result"]
         assert [item["current"] for item in after["items"]] == [11.0, 2.0]
         assert all(item["selected"] for item in after["items"])
-        assert fx.ctrl.get_writeback_applied_for_pane(tab, "analysis") == {
+        assert fx.ctrl.writeback_control.get_writeback_applied_for_pane(
+            tab, "analysis"
+        ) == {
             "param-1": True,
             "param-2": False,
         }
@@ -444,12 +446,14 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     captured = context.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
-    tab = controller.new_tab("pointed")
+    tab = controller.tab_control.new_tab("pointed")
     application.state.get_tab(tab).adapter = definition
     application.state.replace_run_pane(
         tab, RunPaneState(result=RunRecord(None, 1.0), parameters=captured)
     )
-    analyzed = terminal_result(application, controller.analyze(tab, SampleParams()))
+    analyzed = terminal_result(
+        application, controller.run_analyze_control.analyze(tab, SampleParams())
+    )
     assert analyzed["status"] == "finished", analyzed
     context.set_parameter(captured.target, "Q1.ext.value", 19.9)
     application.result("point.new", {"label": "b"})
@@ -552,7 +556,7 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
         ),
         replace=True,
     )
-    tab = fx.ctrl.new_tab("captured-coupler")
+    tab = fx.ctrl.tab_control.new_tab("captured-coupler")
     port = fx.start()
     try:
         with open_client(port) as client:

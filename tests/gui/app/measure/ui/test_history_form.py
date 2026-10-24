@@ -48,7 +48,7 @@ def history_ui(
             "binding": "Q1.pulses.template",
         }[request.param]
         ctrl.context_control.set_module(
-            ctrl.read_context().target,
+            ctrl.context_control.read_context().target,
             key,
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.flat"),
         )

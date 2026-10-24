@@ -90,11 +90,11 @@ def review(qapp: QApplication, tmp_path: Path) -> Generator[ComponentDriver]:
         items, parameters=context.read_context(), experiment_name="test/review"
     )
     ctrl = MagicMock()
-    ctrl.get_writeback_applied_for_pane.side_effect = lambda *_: (
+    ctrl.writeback_control.get_writeback_applied_for_pane.side_effect = lambda *_: (
         service.get_all_applied(draft)
     )
-    ctrl.set_writeback_item_for_pane.side_effect = lambda _tab, _pane, sid, **changes: (
-        service.edit_draft(draft, sid, **changes)
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = (
+        lambda _tab, _pane, sid, **changes: service.edit_draft(draft, sid, **changes)
     )
     widget = WritebackWidget(ctrl, tab_id="review", pane="analysis")
 

@@ -139,9 +139,9 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
 
 
 def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
-    tab_id = cf.ctrl.new_tab("interactive")
+    tab_id = cf.ctrl.tab_control.new_tab("interactive")
     cf.state.update_tab_result(tab_id, RunRecord(cfg=None, result=object()))
-    token = cf.ctrl.analyze(tab_id, None)
+    token = cf.ctrl.run_analyze_control.analyze(tab_id, None)
     cf.view.mount_interactive_analysis.assert_called_once()
     assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None
     return tab_id, token
@@ -239,25 +239,25 @@ def test_close_timeout_keeps_admission_closed_and_can_be_retried(cf):
 
 
 def test_new_tab_adds_entry_to_state(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     assert tab_id in cf.state.tabs
     assert cf.state.get_tab(tab_id).adapter is RecordingAdapter
 
 
 def test_new_tab_unknown_adapter_raises(cf):
     with pytest.raises(KeyError):
-        cf.ctrl.new_tab("no_such_adapter")
+        cf.ctrl.tab_control.new_tab("no_such_adapter")
 
 
 def test_new_tab_returns_unique_ids(cf):
-    t1 = cf.ctrl.new_tab("fake")
-    t2 = cf.ctrl.new_tab("fake")
+    t1 = cf.ctrl.tab_control.new_tab("fake")
+    t2 = cf.ctrl.tab_control.new_tab("fake")
     assert t1 != t2
 
 
 def test_close_tab_removes_from_state(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.close_tab(tab_id)
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.tab_control.close_tab(tab_id)
     assert tab_id not in cf.state.tabs
 
 
@@ -273,7 +273,7 @@ def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
     assert cf.state.is_tab_analyzing(tab_id) is True
     # is_analyzing makes the tab busy, so closing it is rejected up front.
     with pytest.raises(RuntimeError, match="busy"):
-        cf.ctrl.close_tab(tab_id)
+        cf.ctrl.tab_control.close_tab(tab_id)
 
     cancelled = cf.ctrl.run_analyze_control.cancel_analyze(tab_id)
 
@@ -284,12 +284,12 @@ def test_cancel_analyze_tears_down_picker_and_lets_tab_close(cf):
     )
     # is_analyzing cleared -> the tab is no longer busy and can be closed.
     assert cf.state.is_tab_analyzing(tab_id) is False
-    cf.ctrl.close_tab(tab_id)
+    cf.ctrl.tab_control.close_tab(tab_id)
     assert tab_id not in cf.state.tabs
 
 
 def test_cancel_analyze_without_interactive_is_graceful(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     # No interactive analyze in flight -> graceful no-op (still unmounts defensively).
     assert cf.ctrl.run_analyze_control.cancel_analyze(tab_id) is False
     cf.view.unmount_interactive_analysis.assert_called_once_with(
@@ -315,8 +315,8 @@ def test_cancel_analyze_without_interactive_is_graceful(cf):
 
 
 def test_start_run_sets_is_running(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     assert cf.state.is_tab_running(tab_id)
@@ -325,7 +325,7 @@ def test_start_run_sets_is_running(cf):
 
 def test_start_run_passes_lowered_committed_state_cfg(cf):
     """start_run delivers values accepted from the tab cfg resource."""
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
 
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     cfg.write({("reps",): 42})
@@ -347,18 +347,18 @@ def test_start_run_passes_lowered_committed_state_cfg(cf):
     spy.run.side_effect = _capture_run
     cf.state.get_tab(tab_id).adapter = spy
 
-    cf.ctrl.start_run(
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
     assert captured["cfg"].reps == 42
-    assert cf.ctrl.get_tab_snapshot(tab_id).run.result is acquired
+    assert cf.ctrl.tab_control.get_tab_snapshot(tab_id).run.result is acquired
 
 
 def test_start_run_emits_run_started(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     cf.bus.emit.assert_any_call(RunStartedPayload(tab_id=tab_id))
@@ -366,8 +366,8 @@ def test_start_run_emits_run_started(cf):
 
 
 def test_run_finished_updates_tab_state(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -375,8 +375,8 @@ def test_run_finished_updates_tab_state(cf):
 
 
 def test_run_finished_emits_run_finished(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -386,8 +386,8 @@ def test_run_finished_emits_run_finished(cf):
 
 
 def test_run_finished_calls_refresh_tab(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -400,7 +400,7 @@ def test_run_finished_calls_refresh_tab(cf):
 def test_result_commit_survives_analysis_preparation_failure(
     cf, monkeypatch, source, tmp_path
 ):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
 
     def fail_params(*_args):
         raise ValueError("analysis defaults unavailable")
@@ -433,11 +433,11 @@ def test_result_commit_survives_analysis_preparation_failure(
         cf.bus.subscribe(RunFinishedPayload, terminal.append)
         entered, release = threading.Event(), threading.Event()
 
-        cf.ctrl.start_run(tab_id)
+        cf.ctrl.run_analyze_control.start_run(tab_id)
         if source == "cancelled":
             try:
                 _wait_for(entered.is_set)
-                cf.ctrl.cancel_run()
+                cf.ctrl.run_analyze_control.cancel_run()
             finally:
                 release.set()
         _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -459,11 +459,11 @@ def test_result_commit_survives_analysis_preparation_failure(
             loaded, spec=RecordingAdapter.spec, comment="history"
         )
         save(path, prepared.to_container(metadata))
-        outcome = cf.ctrl.load_tab_result(tab_id, str(path))
+        outcome = cf.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
         assert outcome.analysis_error == "analysis defaults unavailable"
         assert outcome.has_analyze_params is False
         expected_fact = TabContentFact.LOADED_RESULT_COMMITTED
-    snapshot = cf.ctrl.get_tab_snapshot(tab_id)
+    snapshot = cf.ctrl.tab_control.get_tab_snapshot(tab_id)
     assert snapshot.run.result is not None
     if source == "load":
         assert snapshot.run.result is not None
@@ -483,7 +483,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     """
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     no_analysis = MagicMock(spec=RecordingAdapter)
     no_analysis.run.return_value = RunRecord(
         None, object()
@@ -495,7 +495,7 @@ def test_run_finished_skips_analyze_init_for_non_analysis_adapter(cf):
     )
     cf.state.get_tab(tab_id).adapter = no_analysis
 
-    cf.ctrl.start_run(
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -517,10 +517,10 @@ def test_run_failed_shows_status_message(cf):
     bad_adapter = MagicMock(spec=RecordingAdapter)
     bad_adapter.experiment_tag = None
     bad_adapter.run.side_effect = RuntimeError("boom")
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -533,10 +533,10 @@ def test_run_failed_clears_run_lock(cf):
     bad_adapter = MagicMock(spec=RecordingAdapter)
     bad_adapter.experiment_tag = None
     bad_adapter.run.side_effect = RuntimeError("oops")
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = bad_adapter
 
-    cf.ctrl.start_run(
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
@@ -553,17 +553,17 @@ def test_start_run_while_running_raises(cf):
     ev = threading.Event()
     slow.run.side_effect = lambda *a, **kw: ev.wait()
 
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
 
     try:
         assert cf.state.is_tab_running(tab_id)
-        other_tab_id = cf.ctrl.new_tab("fake")
+        other_tab_id = cf.ctrl.tab_control.new_tab("fake")
         with pytest.raises(OperationConflictError, match="run is active"):
-            cf.ctrl.start_run(
+            cf.ctrl.run_analyze_control.start_run(
                 other_tab_id,
             )
     finally:
@@ -572,7 +572,7 @@ def test_start_run_while_running_raises(cf):
 
 
 def test_start_run_while_device_setup_active_raises(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.ctrl._operation_gate.register(
         1,
         OperationKind.DEVICE_SETUP,
@@ -583,7 +583,7 @@ def test_start_run_while_device_setup_active_raises(cf):
     )
 
     with pytest.raises(OperationConflictError, match="device_setup is active"):
-        cf.ctrl.start_run(
+        cf.ctrl.run_analyze_control.start_run(
             tab_id,
         )
 
@@ -591,7 +591,7 @@ def test_start_run_while_device_setup_active_raises(cf):
 
 
 def test_unselected_context_rejects_real_run(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
             cf.state.session_env,
@@ -602,7 +602,7 @@ def test_unselected_context_rejects_real_run(cf):
     )
 
     with pytest.raises(RuntimeError, match="active file-backed context"):
-        cf.ctrl.start_run(
+        cf.ctrl.run_analyze_control.start_run(
             tab_id,
         )
 
@@ -616,7 +616,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
     cf,
     tmp_path,
 ):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.state.set_context(
         dataclasses.replace(
             cf.state.session_env,
@@ -641,7 +641,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
 
     path = tmp_path / "loaded.hdf5"
     metadata = write_native_file(path)
-    outcome = cf.ctrl.load_tab_result(tab_id, str(path))
+    outcome = cf.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
 
     assert cf.state.get_tab(tab_id).run.result is loaded
     assert cf.state.get_tab(tab_id).run.source_path == str(path)
@@ -657,7 +657,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
 
 
 def test_run_rejected_while_soc_connect_lease_active(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.ctrl._operation_gate.register(
         1,
         OperationKind.SOC_CONNECT,
@@ -667,7 +667,7 @@ def test_run_rejected_while_soc_connect_lease_active(cf):
     )
 
     with pytest.raises(OperationConflictError, match="soc_connect is active"):
-        cf.ctrl.start_run(
+        cf.ctrl.run_analyze_control.start_run(
             tab_id,
         )
 
@@ -695,13 +695,13 @@ def test_device_connect_updates_state_and_presents_ui_feedback(
 
 
 def test_run_completion_prepares_pure_tab_snapshot(cf):
-    tab_id = cf.ctrl.new_tab("fake")
-    cf.ctrl.start_run(
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     _wait_for(lambda: not cf.state.is_tab_running(tab_id))
 
-    snapshot = cf.ctrl.get_tab_snapshot(tab_id)
+    snapshot = cf.ctrl.tab_control.get_tab_snapshot(tab_id)
 
     assert snapshot.interaction.has_run_result is True
     assert snapshot.analysis is not None
@@ -710,7 +710,7 @@ def test_run_completion_prepares_pure_tab_snapshot(cf):
 
 def test_cfg_edit_publishes_without_full_tab_interaction_rebuild(cf):
 
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     published = []
     cfg.subscribe(lambda: published.append(cfg.input))
@@ -721,7 +721,7 @@ def test_cfg_edit_publishes_without_full_tab_interaction_rebuild(cf):
 
 
 def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.bus.emit.reset_mock()
 
     cf.ctrl.update_tab_analyze_param_instance(tab_id, object())
@@ -739,7 +739,7 @@ def test_local_analyze_and_post_params_emit_precise_zero_reaction_facts(cf):
 
 
 def test_tab_cfg_reset_restores_adapter_default_on_same_resource(cf):
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cfg = cf.ctrl.cfg_resources.lookup(tab_id)
     cfg.write({("reps",): 123})
     cfg.reset()
@@ -752,9 +752,9 @@ def test_reset_tab_cfg_while_running_raises(cf):
     ev = threading.Event()
     slow.run.side_effect = lambda *a, **kw: ev.wait()
 
-    tab_id = cf.ctrl.new_tab("fake")
+    tab_id = cf.ctrl.tab_control.new_tab("fake")
     cf.state.get_tab(tab_id).adapter = slow
-    cf.ctrl.start_run(
+    cf.ctrl.run_analyze_control.start_run(
         tab_id,
     )
     try:

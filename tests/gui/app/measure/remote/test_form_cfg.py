@@ -73,7 +73,7 @@ def test_dangling_module_rejects_unrelated_rpc_write_without_publication(
 ) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("module-rpc", ModuleRpcAdapter)
-    tab = fixture.ctrl.new_tab("module-rpc")
+    tab = fixture.ctrl.tab_control.new_tab("module-rpc")
     try:
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         owner.restore_input(
@@ -209,7 +209,7 @@ FailingOptionsAdapter = Adapter(
 def test_describe_cfg_does_not_classify_author_valueerror_as_bad_path(form_rpc) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("failing-options", FailingOptionsAdapter)
-    tab = fixture.ctrl.new_tab("failing-options")
+    tab = fixture.ctrl.tab_control.new_tab("failing-options")
     try:
         FailingOptionsExtras.broken = True
         reply = rpc.call("tab.describe_cfg", {"tab_id": tab, "path": ["extras"]})
@@ -243,7 +243,7 @@ MissingValuesAdapter = Adapter(
 def test_describe_cfg_distinguishes_missing_from_null(form_rpc) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("missing-values", MissingValuesAdapter)
-    tab = fixture.ctrl.new_tab("missing-values")
+    tab = fixture.ctrl.tab_control.new_tab("missing-values")
     try:
         fixture.ctrl.cfg_resources.lookup(tab).write({("nullable_value",): None})
         missing = rpc.call(
@@ -317,7 +317,7 @@ def test_describe_cfg_mcp_preserves_path_and_internal_error_boundary(
 
     fixture, _, rpc = form_rpc
     fixture.registry.register("failing-options", FailingOptionsAdapter)
-    tab = fixture.ctrl.new_tab("failing-options")
+    tab = fixture.ctrl.tab_control.new_tab("failing-options")
     path = ["extras"] if author_failure else ["gain", "child"]
 
     def respond(method, params):
@@ -507,7 +507,7 @@ def test_refresh_rpc_recaptures_aliases_preserving_input_and_obeys_admission(
 def test_form_tuple_complex_values_have_lossless_json_projection(form_rpc) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("tuple", TupleAdapter)
-    tab = fixture.ctrl.new_tab("tuple")
+    tab = fixture.ctrl.tab_control.new_tab("tuple")
     try:
         reply = rpc.call("tab.get_cfg", {"tab_id": tab})
         assert reply["ok"], reply
@@ -526,7 +526,7 @@ def test_form_tuple_complex_values_have_lossless_json_projection(form_rpc) -> No
 def test_extras_errors_keep_authored_input_and_other_preview_values(form_rpc) -> None:
     fixture, _, rpc = form_rpc
     fixture.registry.register("extras", ExtrasAdapter)
-    tab = fixture.ctrl.new_tab("extras")
+    tab = fixture.ctrl.tab_control.new_tab("extras")
     try:
         reply = rpc.call(
             "tab.edit_cfg",

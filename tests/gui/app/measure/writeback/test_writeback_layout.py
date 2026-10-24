@@ -172,7 +172,7 @@ def test_shipped_analysis_scroll_reaches_apply_and_the_last_ledger_row(
     ctrl.get_left_panel_width.return_value = 500
     ctrl.progress_control.attach_progress.return_value = lambda: None
     ctrl.progress_control.progress_bars.return_value = []
-    ctrl.get_tab_adapter_name.return_value = "fake"
+    ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
     ctrl.get_adapter_guide.return_value = AdapterGuide(markdown="", resource_dir=None)
     tab = ExpTabWidget("t", ctrl, AdapterCapabilities())
     tab.resize(600, 500)

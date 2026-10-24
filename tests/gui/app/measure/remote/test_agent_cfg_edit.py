@@ -22,7 +22,7 @@ from ._helpers import Fixture, call, mcp_client, observe_run_inputs, open_client
 @pytest.fixture()
 def live_tab(tmp_path, qapp):
     fixture = Fixture(project_root=str(tmp_path / "project"))
-    tab_id = fixture.ctrl.new_tab("fake")
+    tab_id = fixture.ctrl.tab_control.new_tab("fake")
     fixture.start()
     yield fixture, tab_id
     fixture.stop()
@@ -187,7 +187,7 @@ def test_cfg_edit_requires_authentication(tmp_path, qapp):
         ControlOptions(port=0, token="cfg-auth-test"),
         project_root=str(tmp_path / "project"),
     )
-    tab_id = fixture.ctrl.new_tab("fake")
+    tab_id = fixture.ctrl.tab_control.new_tab("fake")
     fixture.start()
     authorized = open_client(fixture.service.port)
     unauthorized = open_client(fixture.service.port)
@@ -265,7 +265,7 @@ TextAdapter = Adapter(
 def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(tmp_path, qapp):
     fixture = Fixture(project_root=str(tmp_path / "project"))
     fixture.registry.register("text", TextAdapter)
-    tab_id = fixture.ctrl.new_tab("text")
+    tab_id = fixture.ctrl.tab_control.new_tab("text")
     owner = fixture.ctrl.cfg_resources.lookup(tab_id)
     fixture.start()
     sock = open_client(fixture.service.port)

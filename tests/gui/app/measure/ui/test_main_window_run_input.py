@@ -68,7 +68,7 @@ def run_form(
         has_analyze_result=False,
         has_figure=False,
     )
-    ctrl.get_tab_snapshot.return_value = snapshot
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
     sources = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     owner = make_form(Form(ValueCfg, {}), state=sources)
     ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
@@ -77,7 +77,7 @@ def run_form(
     def start(tab_id: str) -> None:
         runs.append(owner.accept())
 
-    ctrl.start_run.side_effect = start
+    ctrl.run_analyze_control.start_run.side_effect = start
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )
@@ -159,7 +159,7 @@ def test_valid_input_does_not_bypass_other_run_gates(
     block: str,
 ) -> None:
     fx = run_form
-    fx.ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    fx.ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "pending-tab",
         supports_analysis=False,
         has_run_result=False,
@@ -178,14 +178,14 @@ def test_valid_input_does_not_bypass_other_run_gates(
 def test_stop_does_not_publish_or_run(run_form: RunFormFixture) -> None:
     fx = run_form
     edit_run_input(fx, "3.5")
-    fx.ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
+    fx.ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
         "pending-tab",
         supports_analysis=False,
         is_running=True,
     )
     fx.window.run_or_stop_tab("pending-tab")
     assert fx.runs == []
-    fx.ctrl.cancel_run.assert_called_once_with()
+    fx.ctrl.run_analyze_control.cancel_run.assert_called_once_with()
 
 
 def test_reset_replaces_published_input_with_defaults(

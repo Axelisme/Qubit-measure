@@ -71,21 +71,24 @@ def test_reload_button_cancellation_and_successful_restore(
     window_app: WindowApp,
 ) -> None:
     app = window_app
-    first = app.ctrl.new_tab("demo")
-    app.ctrl.new_tab("demo")
-    app.ctrl.set_active_tab(first)
+    first = app.ctrl.tab_control.new_tab("demo")
+    app.ctrl.tab_control.new_tab("demo")
+    app.ctrl.tab_control.set_active_tab(first)
     driver = ComponentDriver(app.window)
     app.dialogs.queue_destructive_confirm(False)
     driver.select_menu("More ▾", ("Reload experiments",))
-    assert app.ctrl.list_tab_ids()[0] == first
+    assert app.ctrl.tab_control.list_tab_ids()[0] == first
     assert app.loader.loads == 0
     app.dialogs.queue_destructive_confirm(True)
     driver.select_menu("More ▾", ("Reload experiments",))
     assert app.loader.loads == 1
-    assert len(app.ctrl.list_tab_ids()) == 2
-    assert first not in app.ctrl.list_tab_ids()
-    assert app.ctrl.get_active_tab_id() == app.ctrl.list_tab_ids()[0]
-    assert app.window.view_tab_ids() == app.ctrl.list_tab_ids()
+    assert len(app.ctrl.tab_control.list_tab_ids()) == 2
+    assert first not in app.ctrl.tab_control.list_tab_ids()
+    assert (
+        app.ctrl.tab_control.get_active_tab_id()
+        == app.ctrl.tab_control.list_tab_ids()[0]
+    )
+    assert app.window.view_tab_ids() == app.ctrl.tab_control.list_tab_ids()
     app.dialogs.assert_no_unexpected_messages()
 
 
@@ -93,16 +96,16 @@ def test_catalog_failure_retry_button_reuses_original_snapshot(
     window_app: WindowApp,
 ) -> None:
     app = window_app
-    app.ctrl.new_tab("demo")
+    app.ctrl.tab_control.new_tab("demo")
     app.loader.failure = CatalogReloadError("broken import")
     app.dialogs.queue_destructive_confirm(True)
     app.window.reload_experiments()
-    assert app.ctrl.list_tab_ids() == []
+    assert app.ctrl.tab_control.list_tab_ids() == []
     app.dialogs.consume_message_containing("critical", "broken import")
     driver = ComponentDriver(app.window)
     app.loader.failure = None
     driver.select_menu("More ▾", ("Retry reload",))
-    assert len(app.ctrl.list_tab_ids()) == 1
+    assert len(app.ctrl.tab_control.list_tab_ids()) == 1
     app.dialogs.assert_no_unexpected_messages()
 
 
@@ -110,7 +113,7 @@ def test_remote_facing_facets_cannot_reenter_during_import(
     window_app: WindowApp,
 ) -> None:
     app = window_app
-    previous = app.ctrl.new_tab("demo")
+    previous = app.ctrl.tab_control.new_tab("demo")
     assert app.ctrl.cfg_resources.lookup(previous).input.data == {"knob": 7}
 
     def during_load() -> None:
@@ -124,7 +127,7 @@ def test_remote_facing_facets_cannot_reenter_during_import(
     app.loader.during_load = during_load
     app.dialogs.queue_destructive_confirm(True)
     app.window.reload_experiments()
-    assert len(app.ctrl.list_tab_ids()) == 1
+    assert len(app.ctrl.tab_control.list_tab_ids()) == 1
     app.dialogs.assert_no_unexpected_messages()
 
 
@@ -132,7 +135,7 @@ def test_cancel_after_shutdown_settles_restores_experiment_access(
     window_app: WindowApp, qapp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app = window_app
-    previous = app.ctrl.new_tab("demo")
+    previous = app.ctrl.tab_control.new_tab("demo")
     unsaved = False
     operations = 1
     monkeypatch.setattr(ExpTabWidget, "has_unsaved_data", lambda self: unsaved)
@@ -141,7 +144,7 @@ def test_cancel_after_shutdown_settles_restores_experiment_access(
     def settle(on_closed: Callable[[], None]) -> None:
         nonlocal unsaved, operations
         with pytest.raises(FailedPreconditionError):
-            app.ctrl.new_tab("demo")
+            app.ctrl.tab_control.new_tab("demo")
         unsaved = True
         operations = 0
         on_closed()
@@ -160,8 +163,8 @@ def test_cancel_after_shutdown_settles_restores_experiment_access(
         "destructive_confirm",
     ]
     assert app.window.isVisible()
-    assert app.ctrl.list_tab_ids() == [previous]
-    assert app.ctrl.new_tab("demo") != previous
+    assert app.ctrl.tab_control.list_tab_ids() == [previous]
+    assert app.ctrl.tab_control.new_tab("demo") != previous
     app.ctrl.prepare_experiment_reload()
     app.dialogs.assert_no_unexpected_messages()
 
@@ -175,7 +178,7 @@ def test_shutdown_begin_failure_restores_access(
     monkeypatch.setattr(app.ctrl, "_shutdown_driver", driver)
     with pytest.raises(RuntimeError, match="shutdown failed"):
         app.ctrl.begin_shutdown(lambda: None)
-    app.ctrl.new_tab("demo")
+    app.ctrl.tab_control.new_tab("demo")
     app.ctrl.prepare_experiment_reload()
 
 
@@ -198,7 +201,7 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
     window_app: WindowApp, request_kind: str
 ) -> None:
     app = window_app
-    previous = app.ctrl.new_tab("demo")
+    previous = app.ctrl.tab_control.new_tab("demo")
     cfg = app.ctrl.cfg_resources.lookup(previous)
     cfg.write({("knob",): 8})
     scheduler = ObservedOwnerScheduler()
@@ -230,23 +233,23 @@ def test_remote_requests_queued_during_reload_use_fresh_state(
                 scheduler.posted.get(timeout=3)
                 scheduler.record = False
                 # No event pumping: the command is admitted but not executed.
-                assert app.ctrl.list_tab_ids() == []
+                assert app.ctrl.tab_control.list_tab_ids() == []
 
             app.loader.during_load = during_load
             app.dialogs.queue_destructive_confirm(True)
             app.window.reload_experiments()
-            restored = app.ctrl.list_tab_ids()
+            restored = app.ctrl.tab_control.list_tab_ids()
             assert len(restored) == 1
             assert previous not in restored
             reply = recv_response(client, "queued")
             if request_kind == "new":
                 assert reply["ok"]
                 created = reply["result"]["tab_id"]
-                assert app.ctrl.list_tab_ids() == [*restored, created]
+                assert app.ctrl.tab_control.list_tab_ids() == [*restored, created]
                 assert app.state.get_tab(created).adapter is NewAdapter
             else:
                 assert not reply["ok"]
-                assert app.ctrl.list_tab_ids() == restored
+                assert app.ctrl.tab_control.list_tab_ids() == restored
                 assert "unknown tab_id" in reply["error"]["message"]
             app.dialogs.assert_no_unexpected_messages()
     finally:

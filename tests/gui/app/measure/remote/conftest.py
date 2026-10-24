@@ -85,7 +85,7 @@ def fx(qapp, tmp_path):
 @pytest.fixture
 def form_rpc(tmp_path, qapp) -> Iterator[tuple[Fixture, str, FormRpc]]:
     fixture = Fixture(project_root=str(tmp_path / "project"))
-    tab_id = fixture.ctrl.new_tab("fake")
+    tab_id = fixture.ctrl.tab_control.new_tab("fake")
     remote = RemoteControlAdapter(
         fixture.ctrl,
         ControlOptions(port=0),

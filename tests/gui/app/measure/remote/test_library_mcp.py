@@ -45,7 +45,7 @@ def library_client(qapp, tmp_path):
 
 
 def waveforms(fx):
-    library = fx.ctrl.read_context().library
+    library = fx.ctrl.context_control.read_context().library
     return {
         key: library.waveform_spec(key).model_dump(mode="python")
         for key in library.waveform_keys()
@@ -53,7 +53,7 @@ def waveforms(fx):
 
 
 def modules(fx):
-    library = fx.ctrl.read_context().library
+    library = fx.ctrl.context_control.read_context().library
     return {
         key: library.module_spec(key).model_dump(mode="python")
         for key in library.module_keys()
@@ -82,14 +82,15 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
     other_seed = f"Q1.{other_family}.seed"
     before = selected(fx)[seed]
     other_before = other(fx)[other_seed]
-    fx.ctrl.apply_library_change(
-        fx.ctrl.read_context(), LibraryChange(kind, "rename", seed, new_path=moved)
+    fx.ctrl.context_control.apply_library_change(
+        fx.ctrl.context_control.read_context(),
+        LibraryChange(kind, "rename", seed, new_path=moved),
     )
     assert seed not in selected(fx)
     assert selected(fx)[moved] == before
     assert other(fx)[other_seed] == other_before
-    fx.ctrl.apply_library_change(
-        fx.ctrl.read_context(), LibraryChange(kind, "delete", moved)
+    fx.ctrl.context_control.apply_library_change(
+        fx.ctrl.context_control.read_context(), LibraryChange(kind, "delete", moved)
     )
     assert moved not in selected(fx)
     assert other(fx)[other_seed] == other_before
@@ -98,15 +99,15 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
 def test_ml_rename_rejects_collision_without_overwriting(library_client):
     invoke, fx = library_client
     fx.ctrl.context_control.set_waveform(
-        fx.ctrl.read_context().target,
+        fx.ctrl.context_control.read_context().target,
         "Q1.waveforms.occupied",
         ConstWaveformCfg(length=0.3),
     )
     invoke("rpc_call", {"method": "context.snapshot"})
     before = waveforms(fx)
     with pytest.raises(ValueError, match="exists|collision|already"):
-        fx.ctrl.apply_library_change(
-            fx.ctrl.read_context(),
+        fx.ctrl.context_control.apply_library_change(
+            fx.ctrl.context_control.read_context(),
             LibraryChange(
                 "waveform",
                 "rename",
@@ -207,7 +208,9 @@ def test_ml_create_binds_placeholders_to_resolved_alias_not_entry_name(role_sock
         {"role_id": "probe", "name": "Q2.pulses.probe"},
     )
     assert reply["ok"] is True, reply
-    written = fx.ctrl.read_context().library.module_spec("Q2.pulses.probe")
+    written = fx.ctrl.context_control.read_context().library.module_spec(
+        "Q2.pulses.probe"
+    )
     assert written.model_dump(mode="json")["freq"] == 234.0
 
 
@@ -218,7 +221,7 @@ def test_ml_create_missing_alias_reports_binding_without_writing(
     fx, sock = role_socket
     if alias_value is not None:
         fx.ctrl.context_control.set_alias_rows((AliasRow("qubit", alias_value),))
-    before = fx.ctrl.read_context().library.document()
+    before = fx.ctrl.context_control.read_context().library.document()
     reply = call(
         sock,
         "context.ml_create_from_role",
@@ -228,7 +231,7 @@ def test_ml_create_missing_alias_reports_binding_without_writing(
     assert reply["error"]["code"] == "invalid_params"
     assert "qubit" in reply["error"]["message"]
     assert "Aliases" in reply["error"]["message"]
-    assert fx.ctrl.read_context().library.document() == before
+    assert fx.ctrl.context_control.read_context().library.document() == before
 
 
 @pytest.mark.parametrize("whole_module", [False, True])
@@ -249,7 +252,9 @@ def test_parameter_set_binds_missing_module_slot_and_returns_previous_value(
         "before": {} if whole_module else None,
         "value": value,
     }
-    assert fx.ctrl.read_context().library_key("R1.module.readout") == key
+    assert (
+        fx.ctrl.context_control.read_context().library_key("R1.module.readout") == key
+    )
     replaced = call(sock, "context.set_parameter", {"path": path, "value": value})
     assert replaced["ok"] is True, replaced
     assert replaced["result"]["before"] == value
@@ -258,7 +263,7 @@ def test_parameter_set_binds_missing_module_slot_and_returns_previous_value(
 @pytest.mark.parametrize("name", ["mux_ro", "R1.mux_ro", "R1.invalid.mux_ro"])
 def test_ml_create_reports_name_format_without_writing(role_socket, name):
     fx, sock = role_socket
-    before = fx.ctrl.read_context().library.document()
+    before = fx.ctrl.context_control.read_context().library.document()
     reply = call(
         sock,
         "context.ml_create_from_role",
@@ -275,7 +280,7 @@ def test_ml_create_reports_name_format_without_writing(role_socket, name):
     assert all(
         partition in error["message"] for partition in ("pulses", "readout", "reset")
     )
-    assert fx.ctrl.read_context().library.document() == before
+    assert fx.ctrl.context_control.read_context().library.document() == before
 
 
 def test_ml_create_from_role_applies_edits_before_validation(role_socket):
@@ -294,7 +299,9 @@ def test_ml_create_from_role_applies_edits_before_validation(role_socket):
     )
     assert reply["ok"] is True, reply
     assert reply["result"] == {"created": "R1.readout.mux_readout"}
-    written = fx.ctrl.read_context().library.module_spec("R1.readout.mux_readout")
+    written = fx.ctrl.context_control.read_context().library.module_spec(
+        "R1.readout.mux_readout"
+    )
     assert written.model_dump(mode="json")["tones"] == [
         MuxReadoutTone.model_validate(tone).model_dump(mode="json")
         for tone in MUX_TONES
@@ -335,7 +342,7 @@ def test_ml_create_from_role_rejects_invalid_input_without_writing(
     role_socket, edits, error_path
 ):
     fx, sock = role_socket
-    before = fx.ctrl.read_context().library.document()
+    before = fx.ctrl.context_control.read_context().library.document()
     params = {"role_id": "mux:blank", "name": "R1.readout.mux_readout"}
     if edits is not None:
         params["edits"] = edits
@@ -346,7 +353,7 @@ def test_ml_create_from_role_rejects_invalid_input_without_writing(
     assert error.get("data") is not None, error
     assert [item["path"] for item in error["data"]["errors"]] == [error_path]
     assert all(item["message"] for item in error["data"]["errors"])
-    assert fx.ctrl.read_context().library.document() == before
+    assert fx.ctrl.context_control.read_context().library.document() == before
 
 
 def test_ml_roles_and_create_use_gui_role_defaults(library_client):

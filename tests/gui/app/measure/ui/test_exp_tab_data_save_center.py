@@ -42,7 +42,7 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     session.state.update_tab_analyze(
         tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
     )
-    snap = ctrl.get_tab_snapshot(tab_id)
+    snap = ctrl.tab_control.get_tab_snapshot(tab_id)
     window.refresh_tab_figure(tab_id, snap)
     window.refresh_tab_interaction(tab_id, snap)
     window.resize(1280, 800)
@@ -79,12 +79,12 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     session.state.update_tab_analyze(
         tab_id, PaneSummary(), replacement, analyze_params_instance=PaneParams()
     )
-    window.refresh_tab_figure(tab_id, ctrl.get_tab_snapshot(tab_id))
+    window.refresh_tab_figure(tab_id, ctrl.tab_control.get_tab_snapshot(tab_id))
     assert window.take_figure_screenshot_for_subtab(tab_id, "analysis").startswith(
         b"\x89PNG"
     )
     session.state.update_tab_analyze(tab_id, None, None)
-    cleared = ctrl.get_tab_snapshot(tab_id)
+    cleared = ctrl.tab_control.get_tab_snapshot(tab_id)
     window.refresh_tab_figure(tab_id, cleared)
     window.refresh_tab_interaction(tab_id, cleared)
     assert [section.section for section in cleared.artifacts] == ["run"]
@@ -109,7 +109,7 @@ def test_load_data_gates(
     enabled: bool,
 ) -> None:
     _, ctrl, window, tab_id = live_ui
-    snap = ctrl.get_tab_snapshot(tab_id)
+    snap = ctrl.tab_control.get_tab_snapshot(tab_id)
     assert snap.interaction is not None
     center = window.findChild(ArtifactSaveCenter)
     assert center is not None
@@ -137,9 +137,9 @@ def test_remote_save_completion_refreshes_state_owned_status(
     center = window.findChild(ArtifactSaveCenter)
     assert tab is not None and center is not None
     assert tab.has_unsaved_data()
-    before = ctrl.get_tab_snapshot(tab_id)
+    before = ctrl.tab_control.get_tab_snapshot(tab_id)
     report = ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)
-    after = ctrl.get_tab_snapshot(tab_id)
+    after = ctrl.tab_control.get_tab_snapshot(tab_id)
     assert after.artifacts[0].artifacts[0].status is SaveStatus.SAVED
     # Restore the view alone: the completion must read already-committed State.
     center.update_interaction(before)
@@ -187,7 +187,7 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
     qapp.processEvents()
     assert editor.toPlainText() == "orig!inal"
     assert session.state.get_tab(tab_id).save.comment == "orig!inal"
-    dirty = ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0]
+    dirty = ctrl.tab_control.get_tab_snapshot(tab_id).artifacts[0].artifacts[0]
     assert dirty.status is SaveStatus.UNSAVED_CHANGES
     assert editor.textCursor().position() == 5
     document = editor.document()
@@ -198,7 +198,7 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
     qapp.processEvents()
     assert session.state.get_tab(tab_id).save.comment == "original"
     assert (
-        ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
+        ctrl.tab_control.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
         is SaveStatus.UNSAVED_CHANGES
     )
     assert [edit.toolTip() for edit in center.findChildren(QLineEdit)] == [
@@ -206,7 +206,7 @@ def test_live_comment_typing_preserves_undo_through_state_projection(
     ]
     ctrl.save_control.save_data(tab_id, origin=GUI_ORIGIN)
     assert (
-        ctrl.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
+        ctrl.tab_control.get_tab_snapshot(tab_id).artifacts[0].artifacts[0].status
         is SaveStatus.SAVED
     )
     ctrl.save_control.set_comment(tab_id, "external edit")
@@ -232,7 +232,7 @@ def test_tab_close_query_reads_only_data_artifact(
     tab = window.findChild(ExpTabWidget)
     assert tab is not None
     if status is not SaveStatus.NOT_SAVED:
-        current = ctrl.get_tab_snapshot(tab_id)
+        current = ctrl.tab_control.get_tab_snapshot(tab_id)
         outputs = tuple(
             OutputResult(
                 member.key,
@@ -257,7 +257,7 @@ def test_tab_close_query_reads_only_data_artifact(
     session.state.update_tab_analyze(
         tab_id, PaneSummary(), None, analyze_params_instance=PaneParams()
     )
-    current = ctrl.get_tab_snapshot(tab_id)
+    current = ctrl.tab_control.get_tab_snapshot(tab_id)
     assert (
         next(
             artifact.status

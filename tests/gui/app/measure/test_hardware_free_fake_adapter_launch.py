@@ -130,7 +130,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     """Public Form tab Run/analysis renders a native 6100 MHz writeback ledger."""
     ctrl, window = hw_fixture
     assert "fake/freq" in ctrl.get_adapter_names()
-    tab_id = ctrl.new_tab("fake/freq")
+    tab_id = ctrl.tab_control.new_tab("fake/freq")
     QApplication.processEvents()
     (tab,) = window.findChildren(ExpTabWidget)
     assert tab.analyze_form.font().pixelSize() == 13
@@ -169,19 +169,23 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
 
     cfg = ctrl.cfg_resources.lookup(tab_id)
     cfg.write({("rounds",): 1})
-    ctrl.start_run(tab_id)
+    ctrl.run_analyze_control.start_run(tab_id)
 
-    qt_until(lambda: ctrl.get_tab_snapshot(tab_id).run.result is not None)
-    qt_until(lambda: not ctrl.get_tab_snapshot(tab_id).interaction.is_running)
-    ctrl.analyze(tab_id, tab.analyze_form.read_params())
-    qt_until(lambda: ctrl.get_tab_snapshot(tab_id).analysis.has_writeback_draft)
-    items = ctrl.get_tab_snapshot(tab_id).analysis.writeback_items
+    qt_until(lambda: ctrl.tab_control.get_tab_snapshot(tab_id).run.result is not None)
+    qt_until(
+        lambda: not ctrl.tab_control.get_tab_snapshot(tab_id).interaction.is_running
+    )
+    ctrl.run_analyze_control.analyze(tab_id, tab.analyze_form.read_params())
+    qt_until(
+        lambda: ctrl.tab_control.get_tab_snapshot(tab_id).analysis.has_writeback_draft
+    )
+    items = ctrl.tab_control.get_tab_snapshot(tab_id).analysis.writeback_items
     assert len(items) == 1
-    current, proposed = ctrl.get_writeback_summaries_for_pane(tab_id, "analysis")[
-        items[0].session_id
-    ]
+    current, proposed = ctrl.writeback_control.get_writeback_summaries_for_pane(
+        tab_id, "analysis"
+    )[items[0].session_id]
     assert current is not None and proposed is not None
-    window.refresh_tab_writeback(tab_id, ctrl.get_tab_snapshot(tab_id))
+    window.refresh_tab_writeback(tab_id, ctrl.tab_control.get_tab_snapshot(tab_id))
     QApplication.processEvents()
     current_labels = tab.writeback_widget.findChildren(QLabel, "writebackCurrent")
     proposed_labels = tab.writeback_widget.findChildren(QLabel, "writebackProposed")
@@ -190,7 +194,7 @@ def test_hardware_free_fake_shows_run_tree_and_analysis_ledger(hw_fixture):
     assert any(current in label.text() for label in current_labels)
     assert any(proposed in label.text() for label in proposed_labels)
     assert len(tab.writeback_widget.findChildren(QCheckBox)) >= 1
-    ctrl.apply_writeback_for_pane(tab_id, "analysis")
-    assert ctrl.read_context().value("R1.freq") == 6100.0
-    ctrl.close_tab(tab_id)
+    ctrl.writeback_control.apply_writeback_for_pane(tab_id, "analysis")
+    assert ctrl.context_control.read_context().value("R1.freq") == 6100.0
+    ctrl.tab_control.close_tab(tab_id)
     QApplication.processEvents()

@@ -58,7 +58,7 @@ def soc_app(
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Synthetic source", CommandOrigin("gui"))
         )
-        app.controller.new_tab("held")
+        app.controller.tab_control.new_tab("held")
         try:
             yield app, entered, release
         finally:

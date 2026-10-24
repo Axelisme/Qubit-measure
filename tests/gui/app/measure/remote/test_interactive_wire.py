@@ -60,7 +60,10 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         done = interact(sock, tab_id, {"command": "done"})
         assert done["result"]["state"] == committed
         assert done["result"]["operation_id"] == token
-        assert fx.ctrl.get_tab_snapshot(tab_id).analysis.source_operation_id == token
+        assert (
+            fx.ctrl.tab_control.get_tab_snapshot(tab_id).analysis.source_operation_id
+            == token
+        )
         assert base64.b64decode(done["result"]["figure"]["png_b64"]).startswith(
             b"\x89PNG"
         )

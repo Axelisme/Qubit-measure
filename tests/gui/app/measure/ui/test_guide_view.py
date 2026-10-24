@@ -42,7 +42,7 @@ def open_guide(qapp: QApplication) -> Iterator[Callable[[AdapterGuide], QTextBro
         owned_authorities.append(ctrl.control_identity)
         configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 300
-        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = guide
         ctrl.progress_control.attach_progress.return_value = lambda: None
         ctrl.progress_control.progress_bars.return_value = []

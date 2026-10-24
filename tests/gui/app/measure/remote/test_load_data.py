@@ -33,7 +33,7 @@ StoredAdapter = Adapter(
 def stored_app(qapp, tmp_path: Path):
     fx = Fixture(project_root=str(tmp_path), empty_project=True, headless=True)
     fx.registry.register("stored", StoredAdapter)
-    tab_id = fx.ctrl.new_tab("stored")
+    tab_id = fx.ctrl.tab_control.new_tab("stored")
     path = tmp_path / "data.h5"
     metadata = write_native_file(path)
     try:
@@ -102,8 +102,8 @@ class _AnalyzeParams:
 @pytest.mark.parametrize("analysis_error", [None, "analysis defaults unavailable"])
 def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> None:
     ctrl = MagicMock()
-    ctrl.has_tab.return_value = True
-    ctrl.load_tab_result.return_value = LoadTabResultOutcome(
+    ctrl.run_analyze_control.has_tab.return_value = True
+    ctrl.run_analyze_control.load_tab_result.return_value = LoadTabResultOutcome(
         tab_id="tab-1",
         data_path="/tmp/result.hdf5",
         result_type="Result",
@@ -111,13 +111,13 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
         has_analyze_params=analysis_error is None,
         analysis_error=analysis_error,
     )
-    ctrl.get_tab_snapshot.return_value = SimpleNamespace(
+    ctrl.run_analyze_control.get_tab_snapshot.return_value = SimpleNamespace(
         interaction=SimpleNamespace(has_run_result=True),
         analysis=SimpleNamespace(
             params=_AnalyzeParams(threshold=0.25) if analysis_error is None else None
         ),
     )
-    adapter = SimpleNamespace(run_analyze_control=ctrl)
+    adapter = SimpleNamespace(run_analyze_control=ctrl.run_analyze_control)
 
     reply = h_tab_load_data(
         # tolerated(cast): The control-only namespace is not a RemoteControlAdapter.
@@ -125,7 +125,9 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
         {"tab_id": "tab-1", "data_path": "/tmp/result.hdf5"},
     )
 
-    ctrl.load_tab_result.assert_called_once_with("tab-1", "/tmp/result.hdf5")
+    ctrl.run_analyze_control.load_tab_result.assert_called_once_with(
+        "tab-1", "/tmp/result.hdf5"
+    )
     assert reply == {
         "tab_id": "tab-1",
         "data_path": "/tmp/result.hdf5",
@@ -141,14 +143,14 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
 
 def test_tab_load_data_dispatch_maps_load_data_error() -> None:
     ctrl = MagicMock()
-    ctrl.has_tab.return_value = True
-    ctrl.load_tab_result.side_effect = LoadDataError(
+    ctrl.run_analyze_control.has_tab.return_value = True
+    ctrl.run_analyze_control.load_tab_result.side_effect = LoadDataError(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",
         reason_code="invalid_data_file",
     )
     with pytest.raises(RemoteError) as exc_info:
         dispatch_handler(
-            ctrl,
+            ctrl.run_analyze_control,
             "tab.load_data",
             {"tab_id": "tab-1", "data_path": "/tmp/bad.hdf5"},
         )

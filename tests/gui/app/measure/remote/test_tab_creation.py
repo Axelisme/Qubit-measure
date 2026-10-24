@@ -24,17 +24,17 @@ def test_remote_creation_allows_empty_source_and_keeps_global_aliases(
         created = h_tab_new(application.service, {"adapter_name": "fake"})
         tab_id = created["tab_id"]
         assert isinstance(tab_id, str)
-        assert ctrl.list_tab_ids() == [tab_id]
-        interaction = ctrl.get_tab_snapshot(tab_id).interaction
+        assert ctrl.tab_control.list_tab_ids() == [tab_id]
+        interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
         assert ctrl.context_control.get_alias_rows() == rows
         ctrl.setup_control.new_entry(EntryRequest("entry"))
-        interaction = ctrl.get_tab_snapshot(tab_id).interaction
+        interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
-        assert ctrl.list_tab_ids() == [tab_id]
+        assert ctrl.tab_control.list_tab_ids() == [tab_id]
     finally:
         assert background.quiesce()
-        for tab_id in tuple(ctrl.list_tab_ids()):
-            ctrl.close_tab(tab_id)
+        for tab_id in tuple(ctrl.tab_control.list_tab_ids()):
+            ctrl.tab_control.close_tab(tab_id)
         application.stop()
         qapp.processEvents()

@@ -58,7 +58,7 @@ def diagnostic_window(
 
 
 def open_tab(ctrl: Controller, window: MainWindow) -> ExpTabWidget:
-    tab_id = ctrl.new_tab("sample")
+    tab_id = ctrl.tab_control.new_tab("sample")
     return next(
         tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id
     )
@@ -99,7 +99,7 @@ def test_invalid_edit_disables_run_and_repair_restores_it(
     tab.run_btn.click()
     subscription.unsubscribe()
     assert started == []
-    assert ctrl.get_running_tab_id() is None
+    assert ctrl.tab_control.get_running_tab_id() is None
     commit_text(reps_input(tab), "12")
     assert tab.run_btn.isEnabled()
 

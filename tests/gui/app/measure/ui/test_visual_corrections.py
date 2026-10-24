@@ -40,7 +40,7 @@ def make_ctrl() -> Iterator[Callable[[], MagicMock]]:
         owned_authorities.append(ctrl.control_identity)
         configure_form_lookup(ctrl)
         ctrl.get_left_panel_width.return_value = 500
-        ctrl.get_tab_adapter_name.return_value = "fake"
+        ctrl.tab_control.get_tab_adapter_name.return_value = "fake"
         ctrl.get_adapter_guide.return_value = AdapterGuide(
             markdown="", resource_dir=None
         )

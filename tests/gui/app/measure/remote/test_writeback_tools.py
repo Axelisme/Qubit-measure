@@ -85,10 +85,10 @@ def _snapshot(
 
 def _ctrl() -> MagicMock:
     ctrl = MagicMock()
-    ctrl.has_tab.return_value = True
+    ctrl.tab_control.has_tab.return_value = True
     ctrl.get_context_version.return_value = 7
     # New pane-qualified controls
-    ctrl.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
+    ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
         tab_id, _items(), has_writeback_draft=True
     )
     ctrl.get_session_env.return_value = MagicMock(
@@ -117,7 +117,7 @@ def _ctrl() -> MagicMock:
         "applied_ids": ["param-1"],
         "written": {"parameter": ["r_f"], "ml_modules": []},
     }
-    wc.get_tab_snapshot = ctrl.get_tab_snapshot
+    wc.get_tab_snapshot = ctrl.tab_control.get_tab_snapshot
     # attach to ctrl for dispatch helper fallback
     ctrl.tab_control = MagicMock()
     ctrl.tab_control.get_tab_snapshot.side_effect = lambda tab_id: _snapshot(
@@ -227,7 +227,7 @@ def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
     ctrl.writeback_control = writeback_control
     # preview now reads via tab_control snapshot (pane-qualified), not directly via writeback_control items
     # but still requires writeback_control.has_tab for existence check
-    ctrl.has_tab = MagicMock(
+    ctrl.tab_control.has_tab = MagicMock(
         side_effect=AssertionError(
             "tab.writeback_preview must use writeback_control/tab_control"
         )
@@ -242,7 +242,7 @@ def test_preview_delegates_to_writeback_control_without_ctrl_fallback():
     writeback_control.has_tab.assert_called_once_with("t")
     # snapshot via tab_control
     tab_control.get_tab_snapshot.assert_called_with("t")
-    ctrl.has_tab.assert_not_called()
+    ctrl.tab_control.has_tab.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -251,7 +251,7 @@ def setup_window_with_tabs(
     ctrl = apply_window_defaults(editor_wiring_ctrl(control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.active_operation_count.return_value = active_operations
-    ctrl.has_tab.side_effect = lambda tid: True
+    ctrl.tab_control.has_tab.side_effect = lambda tid: True
     dialogs = dialog_presenter or RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
     return window, ctrl
@@ -278,12 +278,12 @@ def add_tab(
         has_run_result=has_run,
         data_status=SaveStatus.SAVED if saved else None,
     )
-    original_snapshot = ctrl.get_tab_snapshot.return_value
-    ctrl.get_tab_snapshot.return_value = snap
+    original_snapshot = ctrl.tab_control.get_tab_snapshot.return_value
+    ctrl.tab_control.get_tab_snapshot.return_value = snap
     try:
         window.add_tab_widget(tab_id, tab_id)
     finally:
-        ctrl.get_tab_snapshot.return_value = original_snapshot
+        ctrl.tab_control.get_tab_snapshot.return_value = original_snapshot
     tab = next(tab for tab in window.findChildren(ExpTabWidget) if tab.tab_id == tab_id)
     if selected is not None:
         tabs.setCurrentWidget(selected)

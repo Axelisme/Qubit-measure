@@ -43,7 +43,7 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
 
     from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
 
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     sock = open_client(fx.service.port)
     entered = threading.Event()
     release = threading.Event()
@@ -57,7 +57,9 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
         return original_analyze(request, plots=plots)
 
     try:
-        run_id = fx.ctrl.start_run(tab_id)  # GUI path, not an MCP start.
+        run_id = fx.ctrl.run_analyze_control.start_run(
+            tab_id
+        )  # GUI path, not an MCP start.
         run_result = await_terminal(sock, run_id)
         assert run_result["ok"] is True
         assert run_result["result"]["status"] == "finished"
@@ -70,7 +72,7 @@ def test_gui_started_analyze_handle_is_indexed_and_awaited_over_remote(
                 fn=held_analyze, options=lambda source, env: SampleParams()
             ),
         )
-        analysis_id = fx.ctrl.analyze(tab_id, SampleParams())
+        analysis_id = fx.ctrl.run_analyze_control.analyze(tab_id, SampleParams())
         # Submission reaches the held synthetic adapter, before terminal release.
         qt_until(entered.is_set, label="adapter entered")
         active = call(sock, "operation.active")
@@ -98,7 +100,7 @@ def await_terminal(sock, operation_id):
 
 
 def _completed_run(fx, sock, tab_id):
-    operation_id = fx.ctrl.start_run(tab_id)
+    operation_id = fx.ctrl.run_analyze_control.start_run(tab_id)
     terminal = await_terminal(sock, operation_id)["result"]
     assert terminal["status"] == "finished"
     return operation_id
@@ -108,7 +110,7 @@ def _completed_run(fx, sock, tab_id):
 def test_run_preview_requires_the_original_source_before_rendering(
     fx, monkeypatch, replacement
 ):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     with open_client(fx.service.port) as sock:
         original = _completed_run(fx, sock, tab)
         if replacement == "run":
@@ -141,7 +143,7 @@ def test_run_preview_requires_the_original_source_before_rendering(
 
 
 def test_run_snapshot_identifies_the_operation_that_published_its_result(fx):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     with open_client(fx.service.port) as sock:
         for _ in range(2):
             run = _completed_run(fx, sock, tab)
@@ -154,7 +156,7 @@ def test_run_snapshot_identifies_the_operation_that_published_its_result(fx):
 def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
     fx, monkeypatch, replacement
 ):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     with open_client(fx.service.port) as sock:
         original = 1000
         if replacement != "no_result":
@@ -198,7 +200,7 @@ def test_original_run_can_be_analyzed_without_bypassing_seen_guards(fx, monkeypa
         record = original_run(cfg, context=context)
         return replace(record, result=replace(record.result, data=np.array([1.0, 3.0])))
 
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     fx.state.get_tab(tab).adapter = Adapter(
         spec=SampleAdapter.spec,
         make_form=SampleAdapter.make_form,
@@ -225,7 +227,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
     fx, monkeypatch: pytest.MonkeyPatch, keep_partial: bool
 ) -> None:
 
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     sock = open_client(fx.service.port)
     entered = threading.Event()
     release = threading.Event()
@@ -249,13 +251,13 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
             guide=None,
             analysis=SampleAdapter.analysis,
         )
-        run_id = fx.ctrl.start_run(tab_id)
+        run_id = fx.ctrl.run_analyze_control.start_run(tab_id)
         # Submission reaches the held synthetic adapter, before terminal release.
         qt_until(entered.is_set, label="adapter entered")
         running = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert running["result_state"]["available"] is False
         assert running["result_state"]["source_operation_id"] is None
-        assert fx.ctrl.cancel_run()
+        assert fx.ctrl.run_analyze_control.cancel_run()
         release.set()
         reply = await_terminal(sock, run_id)
         assert reply["result"] == {
@@ -318,14 +320,14 @@ def test_operation_progress_elapsed_uses_operation_clock_not_bar_age(
 
     from zcu_tools.gui.session.pbar_host import ProgressBarModel
 
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     sock = open_client(fx.service.port)
     try:
         # Control the external clock, not the operation owner or its elapsed helper.
         with monkeypatch.context() as clock:
             now = 1000.0
             clock.setattr(time, "monotonic", lambda: now)
-            operation_id = fx.ctrl.start_run(tab_id)
+            operation_id = fx.ctrl.run_analyze_control.start_run(tab_id)
             bar = ProgressBarModel(
                 label="late progress", total=2, start_time=now - 3600
             )
@@ -489,7 +491,7 @@ def test_soc_info_requires_connected_soc(fx):
 
 @pytest.mark.parametrize("source", ["primary", "run"])
 def test_post_control_rejects_replaced_source_without_starting(fx, source):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
         primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]
@@ -510,7 +512,7 @@ def test_post_control_rejects_replaced_source_without_starting(fx, source):
 def test_post_analysis_uses_requested_sources_before_following_the_pane(
     fx, monkeypatch, source
 ):
-    tab = fx.ctrl.new_tab("fake")
+    tab = fx.ctrl.tab_control.new_tab("fake")
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
         primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]

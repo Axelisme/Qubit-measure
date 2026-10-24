@@ -210,7 +210,7 @@ def control_ui(
         dialog_presenter=None if getattr(request, "param", None) == "qt" else dialogs,
     )
     ctrl.add_view(window)
-    tab_id = ctrl.new_tab("stoppable")
+    tab_id = ctrl.tab_control.new_tab("stoppable")
     remote = RemoteControlAdapter(
         ctrl, ControlOptions(port=0), ctrl.owner_scheduler, render_view=window
     )
@@ -228,7 +228,7 @@ def control_ui(
         if devices is not None:
             devices.close_all_devices()
         ctrl.abort_shutdown()
-        for tid in tuple(ctrl.list_tab_ids()):
+        for tid in tuple(ctrl.tab_control.list_tab_ids()):
             ctrl.tab_control.close_tab(tid)
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -307,7 +307,7 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     qapp: QApplication,
 ) -> None:
     ui = control_ui
-    ui.controller.new_tab("stoppable")
+    ui.controller.tab_control.new_tab("stoppable")
     ui.connect()
     created = ui.rpc("tab.new", adapter_name="stoppable")
     assert created["ok"], created
@@ -376,7 +376,7 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
 
 def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
     ui = control_ui
-    handle = ui.controller.start_run(ui.tab_id)
+    handle = ui.controller.run_analyze_control.start_run(ui.tab_id)
     ui.connect()
     assert ui.tab.run_btn.text() == "Stop" and ui.tab.run_btn.isEnabled()
     ui.tab.run_btn.click()
@@ -389,7 +389,7 @@ def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
         ui.rpc("operation.await", timeout=30, operation_id=handle)["result"]["status"]
         == "cancelled"
     )
-    assert ui.controller.get_running_tab_id() is None
+    assert ui.controller.tab_control.get_running_tab_id() is None
 
 
 @pytest.mark.parametrize("control_ui", ["published-device"], indirect=True)
@@ -605,11 +605,11 @@ def test_load_file_return_accept_and_cancel_preserve_result_contract(
     control_ui, qapp, tmp_path, decision
 ):
     ui = control_ui
-    tab_id = ui.controller.new_tab("loadable")
+    tab_id = ui.controller.tab_control.new_tab("loadable")
     path = tmp_path / "selected.h5"
     write_native_file(path)
-    ui.controller.load_tab_result(tab_id, "original.hdf5")
-    before = ui.controller.get_tab_snapshot(tab_id).run
+    ui.controller.run_analyze_control.load_tab_result(tab_id, "original.hdf5")
+    before = ui.controller.tab_control.get_tab_snapshot(tab_id).run
     assert before is not None
 
     def open_file(dialog: RunLoadDialog) -> None:
@@ -635,7 +635,7 @@ def test_load_file_return_accept_and_cancel_preserve_result_contract(
         lambda: ui.window.load_tab_data_dialog(tab_id),
         [(RunLoadDialog, open_file), (QFileDialog, choose)],
     )
-    after = ui.controller.get_tab_snapshot(tab_id).run
+    after = ui.controller.tab_control.get_tab_snapshot(tab_id).run
     assert after is not None
     if decision == "local":
         assert after.source_path == str(path)
@@ -704,8 +704,8 @@ def test_inspect_delete_confirmation_uses_live_library_owner(
 @pytest.mark.parametrize("decision", ["local", "cancel"])
 def test_unsaved_tab_close_confirmation_accept_and_cancel(control_ui, qapp, decision):
     ui = control_ui
-    tab_id = ui.controller.new_tab("loadable")
-    ui.controller.load_tab_result(tab_id, "unsaved.hdf5")
+    tab_id = ui.controller.tab_control.new_tab("loadable")
+    ui.controller.run_analyze_control.load_tab_result(tab_id, "unsaved.hdf5")
     tabs = next(
         t
         for t in ui.window.findChildren(QTabWidget)
@@ -722,7 +722,7 @@ def test_unsaved_tab_close_confirmation_accept_and_cancel(control_ui, qapp, deci
     modal_action(
         qapp, lambda: tabs.tabCloseRequested.emit(index), [(QMessageBox, choose)]
     )
-    assert ui.controller.has_tab(tab_id) is (decision != "local")
+    assert ui.controller.tab_control.has_tab(tab_id) is (decision != "local")
 
 
 @pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
@@ -776,9 +776,9 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
     control_ui, qapp, tmp_path, stage
 ):
     ui = control_ui
-    tab_id = ui.controller.new_tab("loadable")
-    ui.controller.load_tab_result(tab_id, "original.hdf5")
-    before = ui.controller.get_tab_snapshot(tab_id).run
+    tab_id = ui.controller.tab_control.new_tab("loadable")
+    ui.controller.run_analyze_control.load_tab_result(tab_id, "original.hdf5")
+    before = ui.controller.tab_control.get_tab_snapshot(tab_id).run
     assert before is not None
     path = tmp_path / "late-choice.h5"
     write_native_file(path)
@@ -824,7 +824,7 @@ def test_shutdown_finishes_load_interaction_before_owner_teardown(
     modal_action(qapp, lambda: ui.window.load_tab_data_dialog(tab_id), interactions)
     assert owner_finished == [True]
     assert finished == [(int(QDialog.DialogCode.Rejected), None, True)]
-    after = ui.controller.get_tab_snapshot(tab_id).run
+    after = ui.controller.tab_control.get_tab_snapshot(tab_id).run
     assert after is not None
     assert after.source_path == before.source_path
     assert after.result is before.result

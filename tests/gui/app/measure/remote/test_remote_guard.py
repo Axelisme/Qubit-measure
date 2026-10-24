@@ -86,7 +86,7 @@ def _await_completed_run(
 
 
 def _edit_context_as_gui(fx: _Fixture, key: str, value: str | int) -> None:
-    parameters = fx.ctrl.read_context()
+    parameters = fx.ctrl.context_control.read_context()
     assert parameters is not None
     fx.ctrl.context_control.set_parameter(
         parameters.target, f"general.ext.{key}", value
@@ -150,7 +150,7 @@ def test_mcp_created_tab_can_start_a_guarded_run_on_real_gui_state(
 
 def test_attached_gui_tab_runs_after_explicit_full_reads(fx, tmp_path: Path) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")  # Created by GUI before MCP attaches.
+    tab_id = fx.ctrl.tab_control.new_tab("fake")  # Created by GUI before MCP attaches.
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -268,7 +268,7 @@ def test_tab_run_uses_the_attached_gui_draft_and_returns_a_waitable_handle(
     fx, tmp_path: Path
 ) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -304,7 +304,7 @@ def test_tab_run_rejects_missing_active_context_without_starting(
     fx, tmp_path: Path
 ) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     fx.ctrl.setup_control.open_entry(EntryRequest("fake_qubit"))
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
@@ -339,7 +339,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
     fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: str
 ) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     entered = threading.Event()
     release = threading.Event()
     original_run = SampleAdapter.run
@@ -404,8 +404,8 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
                 command()
             assert blocked.value.reason is CfgPreconditionReason.MUTATION_BLOCKED
         with pytest.raises(RuntimeError, match="busy"):
-            fx.ctrl.close_tab(tab_id)
-        other = fx.ctrl.new_tab("fake")
+            fx.ctrl.tab_control.close_tab(tab_id)
+        other = fx.ctrl.tab_control.new_tab("fake")
         other_editor = fx.ctrl.cfg_resources.lookup(other)
         other_editor.write({("gain",): 0.3})
         _edit_context_as_gui(fx, "run_source", 17)
@@ -415,7 +415,7 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
         # The admitted synthetic operation must publish terminal; 30s only guards a hang.
         assert call("wait", {"op": op, "timeout": 30})["status"] == terminal
         assert fx.state.get_tab(tab_id).run.result is not None
-        fx.ctrl.close_tab(tab_id)
+        fx.ctrl.tab_control.close_tab(tab_id)
         with pytest.raises(CfgPreconditionError) as gone:
             _ = editor.input
         assert gone.value.reason is CfgPreconditionReason.RESOURCE_GONE
@@ -433,7 +433,7 @@ def test_large_context_roundtrip_restores_load_guard(
     fx, tmp_path: Path, value_bytes: int
 ) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -461,7 +461,7 @@ def test_oversized_context_read_returns_error_without_advancing_guard(
     fx, tmp_path: Path
 ) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -495,7 +495,7 @@ def test_oversized_context_read_returns_error_without_advancing_guard(
 
 def test_current_cfg_runs_from_another_holder_connection(fx) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     source = _open_client(fx.service.port)
     runner = _open_client(fx.service.port)
     try:
@@ -526,7 +526,7 @@ def test_current_cfg_runs_from_another_holder_connection(fx) -> None:
 
 def test_socket_snapshot_exposes_result_replacement(fx) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     sock = _open_client(fx.service.port)
     try:
 
@@ -574,7 +574,7 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
 
 def test_frozen_run_does_not_require_large_context_export(fx, tmp_path: Path) -> None:
     _prepare_guarded_context(fx)
-    tab_id = fx.ctrl.new_tab("fake")
+    tab_id = fx.ctrl.tab_control.new_tab("fake")
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})

@@ -117,7 +117,7 @@ def load_native_spectrum(
         ),
     )
     save_run(replace(RunRecord(cfg, result), metadata=metadata), path, spec=spec)
-    fx.ctrl.load_tab_result(tab_id, str(path))
+    fx.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
     assert require_record(fx.state.get_tab(tab_id).run).metadata == metadata
 
 
@@ -130,7 +130,7 @@ def start_mounted(
     pane: Literal["run", "data"] | None = None,
     native_source: Path | None = None,
 ):
-    tab_id = fx.ctrl.new_tab(adapter)
+    tab_id = fx.ctrl.tab_control.new_tab(adapter)
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.exp(
@@ -159,7 +159,7 @@ def start_mounted(
 
 
 def start_interactive(fx, *, background=None):
-    tab_id = fx.ctrl.new_tab("synthetic/interactive")
+    tab_id = fx.ctrl.tab_control.new_tab("synthetic/interactive")
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))

@@ -51,7 +51,7 @@ def saving_view(
             progress_transport=DirectProgressTransport(),
             project_root=str(tmp_path),
         )
-        tab_id = ctrl.new_tab("saving")
+        tab_id = ctrl.tab_control.new_tab("saving")
         original = session.state.get_tab("tab")
         session.state.update_tab_result(
             tab_id,
@@ -91,7 +91,7 @@ def test_single_artifact_title_and_output_filenames(saving_view) -> None:
     assert "Analysis results" in labels
     outputs = [
         output
-        for section in ctrl.get_tab_snapshot(tab_id).artifacts
+        for section in ctrl.tab_control.get_tab_snapshot(tab_id).artifacts
         for artifact in section.artifacts
         for member in artifact.members
         for output in member.outputs
@@ -167,7 +167,7 @@ def test_paths_use_run_storage_after_switching_entry(
     editors = center.findChildren(QLineEdit)
     outputs = [
         output
-        for section in ctrl.get_tab_snapshot(tab_id).artifacts
+        for section in ctrl.tab_control.get_tab_snapshot(tab_id).artifacts
         for artifact in section.artifacts
         for member in artifact.members
         for output in member.outputs
@@ -196,7 +196,7 @@ def test_paths_use_run_storage_after_switching_entry(
 @pytest.mark.parametrize("failed", [False, True])
 def test_reports_show_inline_symbols_and_summary(saving_view, failed) -> None:
     session, ctrl, window, tab_id, center = saving_view
-    snap = ctrl.get_tab_snapshot(tab_id)
+    snap = ctrl.tab_control.get_tab_snapshot(tab_id)
     outputs = tuple(
         OutputResult(
             member.key,

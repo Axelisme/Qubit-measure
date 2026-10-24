@@ -78,7 +78,7 @@ def library_provider_app(library_app, tmp_path: Path):
     controllers: list[Controller] = []
 
     def build(failure: Exception) -> Controller:
-        source = library_app.read_context()
+        source = library_app.context_control.read_context()
         parameters = ParameterContext(
             point=source.document(),
             library=_FailingLibraryProvider(source.library.document(), failure),
@@ -112,22 +112,22 @@ def test_library_edit_preserves_unexpected_provider_failure(
     library_provider_app, failure: Exception
 ) -> None:
     controller = library_provider_app(failure)
-    before = controller.read_context().library.document()
+    before = controller.context_control.read_context().library.document()
     with pytest.raises((ValueError, InvalidInputError)) as caught:
         controller.edit_library_entry("module", PULSE, {("gain",): 0.4})
     assert caught.value is failure
-    assert controller.read_context().library.document() == before
+    assert controller.context_control.read_context().library.document() == before
 
 
 def test_library_edit_translates_directed_source_refusal(library_provider_app) -> None:
     failure = field_error(("waveform",), "Missing captured waveform source")
     controller = library_provider_app(failure)
-    before = controller.read_context().library.document()
+    before = controller.context_control.read_context().library.document()
     with pytest.raises(InvalidInputError) as caught:
         controller.edit_library_entry("module", PULSE, {("gain",): 0.4})
     assert caught.value.reason_code == "form_errors"
     assert caught.value.__cause__ is failure
-    assert controller.read_context().library.document() == before
+    assert controller.context_control.read_context().library.document() == before
 
 
 @pytest.mark.parametrize(
@@ -145,11 +145,11 @@ def test_library_edit_translates_directed_source_refusal(library_provider_app) -
 def test_library_edit_translates_owner_request_errors(
     library_app, batch: Mapping[FormWritePath, JsonValue]
 ) -> None:
-    before = library_app.read_context().library.document()
+    before = library_app.context_control.read_context().library.document()
     with pytest.raises(InvalidInputError) as caught:
         library_app.edit_library_entry("module", PULSE, batch)
     assert caught.value.reason_code == "form_errors"
-    assert library_app.read_context().library.document() == before
+    assert library_app.context_control.read_context().library.document() == before
 
 
 def test_commit_writes_a_new_destination_and_keeps_the_source(library_app) -> None:
@@ -160,15 +160,15 @@ def test_commit_writes_a_new_destination_and_keeps_the_source(library_app) -> No
         )
         is None
     )
-    library = ctrl.read_context().library
+    library = ctrl.context_control.read_context().library
     assert library.waveform_spec("Q1.waveforms.copy").length == 0.25
     assert library.waveform_spec(WAVEFORM).length == 0.1
 
 
 def test_invalid_entry_is_not_committed(library_app) -> None:
     ctrl = library_app
-    before = ctrl.read_context().library.document()
+    before = ctrl.context_control.read_context().library.document()
     errors = ctrl.edit_library_entry("module", PULSE, {("freq",): "bad"})
     assert errors is not None
     assert ("freq",) in errors.messages
-    assert ctrl.read_context().library.document() == before
+    assert ctrl.context_control.read_context().library.document() == before

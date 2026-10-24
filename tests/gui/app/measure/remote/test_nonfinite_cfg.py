@@ -65,11 +65,11 @@ def test_invalid_resource_publishes_complete_socket_and_mcp_cfg_then_blocks_run(
             tab_id,
             lambda method, params: call(sock, method, params)["result"],
         )
-        before = fx.ctrl.get_tab_snapshot(tab_id)
+        before = fx.ctrl.tab_control.get_tab_snapshot(tab_id)
         rejected = call(sock, "tab.run_start", {"tab_id": tab_id}, rid="run")
         assert not rejected["ok"]
         assert rejected["error"]["reason"] == "not_valid"
-        after = fx.ctrl.get_tab_snapshot(tab_id)
+        after = fx.ctrl.tab_control.get_tab_snapshot(tab_id)
         assert not after.interaction.is_running
         assert after.run.result is before.run.result
     finally:

@@ -407,7 +407,7 @@ class ExpTabWidget(QWidget):
 
     def _build_guide_panel(self) -> None:
         # ── Tab: Guide (always) ──────────────────────────────────
-        adapter_name = self._ctrl.get_tab_adapter_name(self.tab_id)
+        adapter_name = self._ctrl.tab_control.get_tab_adapter_name(self.tab_id)
         self._guide_panel = GuideView(self._ctrl.get_adapter_guide(adapter_name))
         self._left_tabs.addTab(self._guide_panel, "Guide")
 
@@ -586,7 +586,7 @@ class ExpTabWidget(QWidget):
     def _refresh_writeback(
         self, pane: WritebackPane, items: list[WritebackItem]
     ) -> None:
-        snapshot = self._ctrl.get_tab_snapshot(self.tab_id)
+        snapshot = self._ctrl.tab_control.get_tab_snapshot(self.tab_id)
         if pane == "analysis":
             widget, section = self.writeback_widget, self.writeback_section
             facts = snapshot.analysis
@@ -620,7 +620,9 @@ class ExpTabWidget(QWidget):
         if self._actions is None:
             return
         self._ctrl.save_control.set_comment(self.tab_id, text)
-        self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
+        self.update_interaction_state(
+            self._ctrl.tab_control.get_tab_snapshot(self.tab_id)
+        )
 
     def has_unsaved_data(self) -> bool:
         """Return True if this tab contains unsaved measurement data."""
@@ -874,7 +876,9 @@ class ExpTabWidget(QWidget):
         self._writable = writable
         self._figure_area.set_writable(writable=writable)
         if self._actions is not None:
-            self.update_interaction_state(self._ctrl.get_tab_snapshot(self.tab_id))
+            self.update_interaction_state(
+                self._ctrl.tab_control.get_tab_snapshot(self.tab_id)
+            )
 
     def _update_run_action_row(
         self,
