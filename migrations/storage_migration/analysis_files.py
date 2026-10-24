@@ -11,7 +11,8 @@ from zcu_tools.resources.dispersive_file import (
     save_dispersive_file,
 )
 from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.t1_curve_file import (
+
+from migrations.storage_migration.t1_curve_file import (
     T1CurveFile,
     save_t1_curve_file,
 )
@@ -123,7 +124,11 @@ def convert_analysis_files(
     dispersive_path = (
         entry.dispersive_path if entry is not None else root / "dispersive"
     )
-    t1_path = entry.t1_curve_path if entry is not None else root / "t1_curve"
+    t1_path = (entry.result_path if entry is not None else root) / "t1_curve"
+    if entry is not None and not t1_path.resolve().is_relative_to(
+        entry.result_path.resolve()
+    ):
+        raise ValueError(f"{t1_path}: t1_curve directory escapes its entry")
     rows = _convert_dispersive(
         session, source, dispersive_path / f"{name}.json", values
     )

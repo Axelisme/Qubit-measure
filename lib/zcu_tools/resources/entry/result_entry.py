@@ -181,18 +181,6 @@ class ResultEntry:
             raise ValueError(f"{path}: dispersive directory escapes its entry")
         return path
 
-    @property
-    def t1_curve_path(self) -> Path:
-        """Return the entry's T1 curve directory without creating it.
-
-        File names and content belong to resources.t1_curve_file. A symlink
-        escaping this entry raises ValueError; no component or ledger is read.
-        """
-        path = self._result_path / "t1_curve"
-        if not path.resolve().is_relative_to(self._result_path.resolve()):
-            raise ValueError(f"{path}: t1_curve directory escapes its entry")
-        return path
-
     def load_aliases(self, *, point: str | None = None) -> EntryAliases:
         """Read setup aliases, or one existing point's aliases when point is set.
 

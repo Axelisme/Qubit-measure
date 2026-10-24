@@ -9,7 +9,6 @@ from zcu_tools.datafile import JsonObject
 from zcu_tools.resources.dispersive_file import load_dispersive_file
 from zcu_tools.resources.entry import document_value, snapshot
 from zcu_tools.resources.predictor_file import load_predictor_file
-from zcu_tools.resources.t1_curve_file import load_t1_curve_file
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
 from migrations.storage_migration import (
@@ -19,6 +18,7 @@ from migrations.storage_migration import (
     report_json,
 )
 from migrations.storage_migration.state import read_manifest
+from migrations.storage_migration.t1_curve_file import load_t1_curve_file
 from tests.migrations.storage_migration.fakes import (
     assert_difference,
     manifest_path,
@@ -443,9 +443,9 @@ def test_raw_params_preservation_is_typed_located_and_durable(
         load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.bare_rf
         == 5.1
     )
-    assert load_t1_curve_file(entry.t1_curve_path / "Qlegacy.json").params.model_dump(
-        exclude_unset=True
-    )["params"] == {"Q_cap": None, "Temp": 0.04}
+    assert load_t1_curve_file(
+        (entry.result_path / "t1_curve") / "Qlegacy.json"
+    ).params.model_dump(exclude_unset=True)["params"] == {"Q_cap": None, "Temp": 0.04}
 
     # Both report encoding and durable manifest decoding must retain typed status/keys.
     encoded = report_json(report)
@@ -521,7 +521,7 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
     assert dispersive.params.g == 0.03
     assert dispersive.params.plot_transitions is not None
     assert dispersive.params.plot_transitions.model_extra == {"literal.key": [1, None]}
-    t1 = load_t1_curve_file(entry.t1_curve_path / "Qlegacy.json")
+    t1 = load_t1_curve_file((entry.result_path / "t1_curve") / "Qlegacy.json")
     assert t1.source.created_at == timestamp
     assert not report.pending
 

@@ -62,11 +62,7 @@ def acquired(session: NativeSaveSession, run_id: str) -> None:
             entry_id=session.entry.entry_id,
             origin="gui",
             payload=AcquiredPayload(
-                run_id=run_id,
-                tab="scan",
-                experiment="ledger/tag",
-                point="other",
-                roles={},
+                run_id=run_id, experiment="ledger/tag", point="other", roles={}
             ),
         )
     )

@@ -57,7 +57,6 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
             "snapshot": replace(
                 original.snapshot,
                 entry_id=UUID(snapshot(entry.setup).general.entry_id),
-                entry_name="entry",
             )
         }
     )

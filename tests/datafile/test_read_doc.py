@@ -1,4 +1,4 @@
-"""Single-document reads across container and legacy native wire formats."""
+"""Single-document reads from native containers."""
 
 import json
 from pathlib import Path
@@ -8,40 +8,20 @@ import pytest
 from zcu_tools import datafile
 
 
-@pytest.fixture(params=["container", "legacy"])
-def document_file(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
-    """Write docs plus an unreadable variable in each supported wire format."""
+@pytest.fixture
+def document_file(tmp_path: Path) -> Path:
+    """Write docs plus an unreadable variable without loading it."""
     path = tmp_path / "documents.h5"
     with h5py.File(path, "w") as file:
-        if request.param == "container":
-            file.attrs.update(
-                format="zcu.container", format_version="3.9", producer="synthetic"
-            )
-            file.create_group("vars").create_group("broken")
-            file.create_group("groups")
-            docs = file.create_group("docs")
-            docs.create_dataset("cfg", data='{"values":{"label":"保留"}}')
-            docs.create_dataset("metadata", data='{"run_id":"historical"}')
-            docs.create_dataset("unrelated", data="not JSON")
-        else:
-            file.attrs.update(
-                format="zcu.experiment-data",
-                format_version="2.9",
-                run_id="historical",
-                experiment="synthetic",
-                started_at="",
-                finished_at="",
-                completion="unknown",
-            )
-            file.create_group("data").create_group("broken").attrs["signal"] = "absent"
-            cfg = file.create_dataset("cfg", data='{"label":"保留"}')
-            cfg.attrs.update(cfg_type="SyntheticCfg", cfg_schema_version="1.0")
-            file.create_dataset("context", data='{"entry_name":"historical entry"}')
-            file.create_dataset("device", data='{"flux":{"value":0.25}}')
-            provenance = file.create_group("provenance")
-            provenance.attrs.update(
-                software_versions='{"synthetic":"1.0"}', git_dirty="unknown"
-            )
+        file.attrs.update(
+            format="zcu.container", format_version="3.9", producer="synthetic"
+        )
+        file.create_group("vars").create_group("broken")
+        file.create_group("groups")
+        docs = file.create_group("docs")
+        docs.create_dataset("cfg", data='{"values":{"label":"保留"}}')
+        docs.create_dataset("metadata", data='{"run_id":"historical"}')
+        docs.create_dataset("unrelated", data="not JSON")
     return path
 
 
@@ -57,29 +37,10 @@ def test_read_doc_returns_one_detached_object_without_loading_vars(
 
 def test_read_doc_ignores_invalid_unselected_document(document_file: Path) -> None:
     with h5py.File(document_file, "r+") as file:
-        cfg_path = "docs/cfg" if "docs" in file else "cfg"
+        cfg_path = "docs/cfg"
         del file[cfg_path]
         file.create_dataset(cfg_path, data="not JSON")
-        legacy = "docs" not in file
     expected: datafile.JsonObject = {"run_id": "historical"}
-    if legacy:
-        expected.update(
-            experiment="synthetic",
-            started_at=None,
-            finished_at=None,
-            completion="unknown",
-            snapshot={"entry_name": "historical entry"},
-            device_snapshot={"flux": {"value": 0.25}},
-            provenance={
-                "software_versions": {"synthetic": "1.0"},
-                "git_dirty": None,
-                "git_commit": None,
-                "qick_version": None,
-                "soc_fingerprint": None,
-                "hostname": None,
-                "simulation_id": None,
-            },
-        )
     assert datafile.read_doc(document_file, "metadata") == expected
 
 
@@ -103,7 +64,7 @@ def test_read_doc_rejects_nonobject_or_nonfinite_json(
     document_file: Path, text: str
 ) -> None:
     with h5py.File(document_file, "r+") as file:
-        cfg_path = "docs/cfg" if "docs" in file else "cfg"
+        cfg_path = "docs/cfg"
         del file[cfg_path]
         file.create_dataset(cfg_path, data=text)
     with pytest.raises(datafile.FormatError) as caught:

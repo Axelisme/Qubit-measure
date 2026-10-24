@@ -181,7 +181,6 @@ def test_historical_parameters_remain_evidence_and_unresolved_sources_stay_pendi
     if origin == "manual":
         assert len(report.converted_files) == 1
         stored = read_migrated(report.converted_files[0].destination)
-        assert stored.metadata.snapshot.entry_name == evidence.snapshot.entry_name
         assert stored.cfg == evidence.cfg
         assert len(report.moved_labber_files) == 1
     else:

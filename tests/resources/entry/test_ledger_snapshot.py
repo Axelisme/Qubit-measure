@@ -17,7 +17,6 @@ def event() -> LedgerEvent:
         origin="notebook",
         payload=AcquiredPayload(
             run_id="20261023T000000Z-aaaaaa",
-            tab="Synthetic",
             experiment="mux/readout",
             point="p1",
             roles={"qubit": "Q1"},

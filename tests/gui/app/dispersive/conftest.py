@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import save_labber_data
+from zcu_tools.datafile import LabberData
 from zcu_tools.resources.entry import ResultEntry, component_registry
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.predictor_file import (
@@ -43,14 +43,13 @@ def onetone_hdf5(tmp_path):
     # The migrated loader sets dev=axes[0] (x), freq=axes[1] (y), signals=z.T,
     # so we store dev as the inner axis, freq as the outer axis, and z=signals.T
     # with shape (Nfreq, Ndev) — z.T then yields device-major (Ndev, Nfreq).
-    save_labber_data(
-        filepath,
-        z=("Signal", "a.u.", signals.T),
-        axes=[
-            ("Flux device value", "a.u.", dev_values),  # inner axis (x)
-            ("Frequency", "Hz", freqs_ghz * 1e9),  # outer axis (y)
+    LabberData(
+        ("Signal", "a.u.", signals.T),
+        [
+            ("Flux device value", "a.u.", dev_values),
+            ("Frequency", "Hz", freqs_ghz * 1000000000.0),
         ],
-    )
+    ).save(filepath)
     return filepath + ".hdf5", dev_values, freqs_ghz, signals
 
 

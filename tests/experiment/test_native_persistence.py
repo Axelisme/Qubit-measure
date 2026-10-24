@@ -1,5 +1,6 @@
 """Typed native mapping and data-first configuration restoration contracts."""
 
+import json
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -15,8 +16,6 @@ from zcu_tools.datafile import (
 from zcu_tools.datafile import (
     Container,
     DataVariable,
-    LabberMetadata,
-    decode_labber_comment,
     encode_labber_comment,
     load,
     load_labber_data,
@@ -295,9 +294,9 @@ def test_prepare_single_data_feeds_both_formats_with_same_cfg_and_comment(
             comment=encode_labber_comment(prepared.cfg.values, comment),
         ),
     )
-    decoded = decode_labber_comment(load_labber_data(str(labber)).metadata.comment)
-    assert load(native).docs["cfg"]["values"] == decoded.cfg == prepared.cfg.values
-    assert decoded.comment == comment
+    decoded = json.loads(load_labber_data(str(labber)).metadata.comment)
+    assert load(native).docs["cfg"]["values"] == decoded["cfg"] == prepared.cfg.values
+    assert decoded["comment"] == comment
     record.cfg.nested.count = 99
     assert prepared.cfg.values["nested"] == {"count": 3}
 
@@ -410,31 +409,6 @@ def test_full_metadata_load_preserves_historical_evidence(
     with pytest.raises(ValueError, match="experiment") as caught:
         load_run_with_metadata(path, spec=replace(SINGLE, tag="wrong"))
     assert str(path) in str(caught.value)
-
-
-@pytest.mark.parametrize("entry", ["load_run", "load_run_with_metadata", "restore_run"])
-def test_typed_readers_keep_optional_labber_input_metadata(
-    tmp_path: Path, entry: str
-) -> None:
-    labber = LabberMetadata(
-        comment="original handwritten note",
-        tags=["calibration", "offline"],
-        project="synthetic project",
-        user="synthetic user",
-        creation_time=1759276800.0,
-    )
-    metadata = native_metadata(SINGLE.tag).model_copy(update={"labber": labber})
-    record = replace(single_record(), metadata=metadata)
-    path = tmp_path / "native.h5"
-    save_run(record, path, spec=SINGLE)
-    if entry == "load_run":
-        loaded, _ = load_run(path, spec=SINGLE)
-    elif entry == "load_run_with_metadata":
-        loaded = load_run_with_metadata(path, spec=SINGLE)
-    else:
-        loaded = restore_run(load(path), spec=SingleExperiment.AXES_SPEC).record
-    assert loaded.metadata is not None
-    assert loaded.metadata.labber == labber
 
 
 @pytest.fixture(params=[False, True], ids=["single", "grouped"])

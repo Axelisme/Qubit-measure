@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.datafile import save_labber_data
+from zcu_tools.datafile import LabberData
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.event_bus import SpectrumAddedPayload
 from zcu_tools.gui.app.fluxdep.state import FluxDepState, SpectrumEntry
@@ -199,11 +199,10 @@ def test_raw_load_keeps_nominal_owner_errors_and_unexpected_io_failures(
     if failure == "unknown_inheritance":
         params["inherit_from"] = "unknown"
     elif failure == "non_2d":
-        filepath = save_labber_data(
-            str(tmp_path / "trace"),
-            z=("Signal", "a.u.", np.ones(3, dtype=np.complex128)),
-            axes=[("Device", "native", np.arange(3))],
-        )
+        filepath = LabberData(
+            ("Signal", "a.u.", np.ones(3, dtype=np.complex128)),
+            [("Device", "native", np.arange(3))],
+        ).save(str(tmp_path / "trace"))
     else:
         filepath = str(tmp_path / "missing.hdf5")
     client = route_harness.client()

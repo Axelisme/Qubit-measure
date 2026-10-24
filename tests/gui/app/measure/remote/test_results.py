@@ -97,7 +97,6 @@ def _native_run(root: Path, entry: str, point: str, run_id: str) -> Path:
             "experiment": "mux/scan",
             "snapshot": replace(
                 metadata.snapshot,
-                entry_name=entry,
                 point=point,
                 roles={"qubit": "Q1"},
             ),
@@ -138,7 +137,6 @@ def saved_runs(tmp_path: Path) -> tuple[Path, Path, Path]:
             origin="gui",
             payload=AcquiredPayload(
                 run_id="20261008T000000Z-aaaaaa",
-                tab="Mux",
                 experiment="mux/scan",
                 point="p1",
                 roles={"qubit": "Q1"},

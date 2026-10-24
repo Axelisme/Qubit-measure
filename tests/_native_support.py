@@ -45,9 +45,7 @@ def native_metadata(tag: str = "test/native") -> RunMetadata:
         completion="complete",
         snapshot=RunSnapshot(
             entry_id=UUID("12345678-1234-5678-1234-567812345678"),
-            entry_name="test_entry",
             point="sweet",
-            description="Historical snapshot",
             roles={"qubit": "Q1"},
         ),
         provenance=SoftwareProvenance(
