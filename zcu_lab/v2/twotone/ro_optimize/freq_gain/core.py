@@ -114,17 +114,16 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         # Prepare both readout axes on the pulse generator's hardware grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
         # Retain one separation score per frequency/gain pair.
@@ -142,14 +141,13 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
             freq_sweep = sched.cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules.readout.set_param("freq", freq_param)
+            sched.cfg.readout.set_param("freq", freq_param)
 
             gain_sweep = sched.cfg.gain
             gain_param = sweep2param("gain", gain_sweep)
-            modules.readout.set_param("gain", gain_param)
+            sched.cfg.readout.set_param("gain", gain_param)
             tracker = MomentTracker()
 
             _ = (
@@ -157,9 +155,9 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", cfg=modules.reset),
-                    Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                    Readout("readout", cfg=modules.readout),
+                    Reset("reset", cfg=sched.cfg.reset),
+                    Branch("ge", [], Pulse("qub_pulse", cfg=sched.cfg.qub_pulse)),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("ge", 2)
                 .declare_sweep("freq", freq_sweep)

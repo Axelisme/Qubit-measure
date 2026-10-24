@@ -177,20 +177,19 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         # 1. Quantize durations without changing the caller's pulse settings.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
         if cfg.uniform:
             length_sweep = cfg.length
             assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
             lengths = sweep2array(
                 length_sweep,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+                {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
             )
         else:
             lengths = materialize_nonuniform_t1_pulse_lengths(
                 cfg.length,
                 soccfg=soccfg,
-                gen_ch=modules.probe_pulse.ch,
+                gen_ch=cfg.probe_pulse.ch,
             )
 
         init_g, init_e = self._make_viewers(context.plots)
@@ -205,12 +204,11 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                 (len(lengths), 2, 2), dtype=np.float64, on_update=plot_fn
             )
             with Schedule(cfg, buffer, scope=context.scope) as sched:
-                modules = sched.cfg
                 inner_length_sweep = sched.cfg.length
                 assert isinstance(inner_length_sweep, SweepCfg), (
                     "uniform mode requires SweepCfg"
                 )
-                modules.probe_pulse.set_param(
+                sched.cfg.probe_pulse.set_param(
                     "length", sweep2param("length", inner_length_sweep)
                 )
 
@@ -223,11 +221,11 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                         relax_delay=sched.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        Pulse("probe_pulse", modules.probe_pulse),
-                        Readout("readout", modules.readout),
+                        Reset("reset", sched.cfg.reset),
+                        Pulse("init_pulse", sched.cfg.init_pulse),
+                        Branch("ge", [], Pulse("pi_pulse", sched.cfg.pi_pulse)),
+                        Pulse("probe_pulse", sched.cfg.probe_pulse),
+                        Readout("readout", sched.cfg.readout),
                     )
                     .declare_sweep("length", inner_length_sweep)
                     .declare_sweep("ge", 2)
@@ -254,26 +252,25 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             with Schedule(run_cfg, round_buffer, scope=context.scope) as sched:
                 for _, rep in sched.repeat("round", rounds):
                     for length, step in rep.scan("length", lengths.tolist()):
-                        modules = step.cfg
-                        modules.probe_pulse.set_param("length", length)
+                        step.cfg.probe_pulse.set_param("length", length)
                         builder = step.prog_builder(
                             soc,
                             soccfg,
                             reps=step.cfg.reps,
                             relax_delay=step.cfg.relax_delay,
                         ).add(
-                            Reset("reset", modules.reset),
-                            Pulse("init_pulse", modules.init_pulse),
-                            Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                            Reset("reset", step.cfg.reset),
+                            Pulse("init_pulse", step.cfg.init_pulse),
+                            Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
                         )
                         # A zero-duration point still prepares and reads out, but
                         # must not create a zero-cycle generator pulse.
                         if length > 0.0:
                             builder = builder.add(
-                                Pulse("probe_pulse", modules.probe_pulse)
+                                Pulse("probe_pulse", step.cfg.probe_pulse)
                             )
                         builder = builder.add(
-                            Readout("readout", modules.readout)
+                            Readout("readout", step.cfg.readout)
                         ).declare_sweep("ge", 2)
                         length_key = float(length)
                         if length_key not in programs:

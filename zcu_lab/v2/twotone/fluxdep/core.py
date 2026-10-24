@@ -107,14 +107,13 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         # Prepare the device-value axis and the probe's hardware frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         value_sweep = cfg.flux
         freq_sweep = cfg.freq
 
         dev_values = sweep2array(value_sweep, allow_array=True)
         freqs = sweep2array(
-            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
         viewer = live_heatmap_with_line(
@@ -143,11 +142,10 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                     stop=context.scope.stop,
                     progress=False,
                 )
-                modules = cfg
 
                 # Reset and initialize before each frequency-swept probe and readout.
                 freq_sweep = cfg.freq
-                modules.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+                cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
                 _ = (
                     step.prog_builder(
@@ -156,10 +154,10 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                         reps=step.cfg.reps,
                         relax_delay=step.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    .add_reset("reset", cfg.reset)
+                    .add_pulse("init_pulse", cfg.init_pulse)
+                    .add_pulse("qubit_pulse", cfg.qub_pulse)
+                    .add_readout("readout", cfg.readout)
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(
                         options=AcquireOptions(retry=cfg.fail_retry), rounds=cfg.rounds

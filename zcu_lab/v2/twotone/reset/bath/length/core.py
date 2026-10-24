@@ -97,12 +97,11 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Prepare qubit-tone lengths while preserving the cavity-tone duration offset.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         rounds = cfg.rounds  # round loop is driven by Schedule.repeat below
 
         length_sweep = cfg.length
-        tested_reset = modules.tested_reset
+        tested_reset = cfg.tested_reset
         qub_lengths = sweep2array(
             length_sweep,
             "time",
@@ -141,8 +140,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             for _, rep in sched.repeat("rounds", rounds):
                 for length, step in rep.scan("length", length_values):
                     step.cfg.rounds = 1
-                    modules = step.cfg
-                    tested_reset = modules.tested_reset
+                    tested_reset = step.cfg.tested_reset
                     tested_reset.set_param("qub_length", length)
                     tested_reset.set_param("res_length", length + length_diff)
                     tested_reset.set_param(
@@ -160,10 +158,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     if program is None:
                         program = (
                             builder.add(
-                                Reset("reset", modules.reset),
-                                Pulse("init_pulse", modules.init_pulse),
+                                Reset("reset", step.cfg.reset),
+                                Pulse("init_pulse", step.cfg.init_pulse),
                                 BathReset("tested_reset", tested_reset),
-                                Readout("readout", modules.readout),
+                                Readout("readout", step.cfg.readout),
                             )
                             .declare_sweep("phase", 4)
                             .build()

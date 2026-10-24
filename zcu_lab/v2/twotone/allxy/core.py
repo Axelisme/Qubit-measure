@@ -227,12 +227,10 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             ),
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-
             # Derive Y rotations from X calibrations and retain an identity time slot.
-            I_pulse = modules.I_pulse
-            X180_pulse = modules.X180_pulse
-            X90_pulse = modules.X90_pulse
+            I_pulse = sched.cfg.I_pulse
+            X180_pulse = sched.cfg.X180_pulse
+            X90_pulse = sched.cfg.X90_pulse
             Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
             Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
@@ -260,10 +258,10 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
                         idx_reg="allxy_idx",
                         val_reg="gate_idx2",
                     ),
-                    Reset("reset", cfg=modules.reset),
+                    Reset("reset", cfg=sched.cfg.reset),
                     ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
                     ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
-                    Readout("readout", cfg=modules.readout),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("allxy_idx", len(ALLXY_SEQUENCE))
                 .build_and_acquire(rounds=cfg.rounds)

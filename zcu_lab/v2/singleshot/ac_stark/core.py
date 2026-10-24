@@ -163,14 +163,13 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        modules = cfg
 
         gain_sweep = cfg.gain
 
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.stark_pulse2.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.stark_pulse2.ch},
         )
         gains = np.sqrt(
             np.linspace(gain_sweep.start**2, gain_sweep.stop**2, gain_sweep.expts)
@@ -178,7 +177,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         gains = sweep2array(
             gains,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.stark_pulse1.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.stark_pulse1.ch},
             allow_array=True,
         )
 
@@ -245,8 +244,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             for gain_idx, (gain, step) in enumerate(
                 sched.scan("resonator gain", gains.tolist())
             ):
-                modules = step.cfg
-                modules.stark_pulse1.set_param("gain", gain)
+                step.cfg.stark_pulse1.set_param("gain", gain)
                 current_index = gain_idx
 
                 # Start the cavity tone nonblocking so the qubit probe can overlap.
@@ -257,15 +255,15 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                         reps=step.cfg.reps,
                         relax_delay=step.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
+                    .add_reset("reset", step.cfg.reset)
+                    .add_pulse("init_pulse", step.cfg.init_pulse)
                     .add_pulse(
                         "stark_pulse1",
-                        modules.stark_pulse1,
+                        step.cfg.stark_pulse1,
                         block_mode=False,
                     )
-                    .add_pulse("stark_pulse2", modules.stark_pulse2)
-                    .add_readout("readout", modules.readout)
+                    .add_pulse("stark_pulse2", step.cfg.stark_pulse2)
+                    .add_readout("readout", step.cfg.readout)
                     .declare_sweep("freq", step.cfg.freq)
                     .build_and_acquire(
                         # Classify shots before averaging; do not classify mean IQ.

@@ -89,12 +89,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         # Resolve flux gain and duration coordinates on the hardware grid.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gain_sweep = cfg.gain
         length_sweep = cfg.length
 
-        lf_ch = modules.flux_pulse.ch
+        lf_ch = cfg.flux_pulse.ch
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
@@ -108,9 +107,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-            modules.flux_pulse.set_param(
+            sched.cfg.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.flux_pulse.set_param(
                 "length", sweep2param("length", sched.cfg.length)
             )
 
@@ -120,10 +118,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi_pulse", modules.pi_pulse),
-                    Pulse("flux_pulse", modules.flux_pulse),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("pi_pulse", sched.cfg.pi_pulse),
+                    Pulse("flux_pulse", sched.cfg.flux_pulse),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("gain", sched.cfg.gain)
                 .declare_sweep("length", sched.cfg.length)

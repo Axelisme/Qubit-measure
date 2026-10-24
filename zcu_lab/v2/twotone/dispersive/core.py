@@ -160,14 +160,12 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        modules = cfg
-
         freq_sweep = cfg.freq
 
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         viewer = live_line(
@@ -181,19 +179,18 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         # Sweep readout frequency for both preparations in the same FPGA program.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg
             freq_sweep = cfg.freq
-            modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+            cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
             _ = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Branch("ge", [], Pulse("qub_pulse", modules.qub_pulse)),
-                    PulseReadout("readout", modules.readout),
+                    Reset("reset", cfg.reset),
+                    Pulse("init_pulse", cfg.init_pulse),
+                    Branch("ge", [], Pulse("qub_pulse", cfg.qub_pulse)),
+                    PulseReadout("readout", cfg.readout),
                 )
                 .declare_sweep("ge", 2)
                 .declare_sweep("freq", freq_sweep)

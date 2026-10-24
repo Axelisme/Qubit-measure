@@ -38,7 +38,6 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
     )
     # Execute the pulse sequence using schedule-local modules and sweeps.
     with Schedule(cfg, buffer, scope=context.scope) as sched:
-        modules = sched.cfg
         length_sweep = cfg.length
         length_param = sweep2param("length", length_sweep)
         (
@@ -46,16 +45,17 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
                 soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
             )
             .add(
-                Reset("reset", modules.reset),
-                Pulse("pi2_pulse1", modules.pi2_pulse),
+                Reset("reset", sched.cfg.reset),
+                Pulse("pi2_pulse1", sched.cfg.pi2_pulse),
                 Delay("t2r_delay", delay=length_param),
                 Pulse(
                     "pi2_pulse2",
-                    modules.pi2_pulse.with_updates(
-                        phase=modules.pi2_pulse.phase + 360 * cfg.detune * length_param
+                    sched.cfg.pi2_pulse.with_updates(
+                        phase=sched.cfg.pi2_pulse.phase
+                        + 360 * cfg.detune * length_param
                     ),
                 ),
-                Readout("readout", modules.readout),
+                Readout("readout", sched.cfg.readout),
             )
             .declare_sweep("length", length_sweep)
             .build_and_acquire(rounds=cfg.rounds)

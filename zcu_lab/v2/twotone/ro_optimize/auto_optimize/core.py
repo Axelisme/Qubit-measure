@@ -363,10 +363,9 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                     break
 
                 params[idx, :] = cur_params
-                modules = step.cfg
-                modules.readout.set_param("freq", cur_params[0])
-                modules.readout.set_param("gain", cur_params[1])
-                modules.readout.set_param("length", cur_params[2])
+                step.cfg.readout.set_param("freq", cur_params[0])
+                step.cfg.readout.set_param("gain", cur_params[1])
+                step.cfg.readout.set_param("length", cur_params[2])
                 tracker = MomentTracker()
 
                 # Compare pulse-off/on preparations at this candidate's readout settings.
@@ -378,9 +377,9 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", cfg=modules.reset),
-                        Branch("ge", [], Pulse("qub_pulse", cfg=modules.qub_pulse)),
-                        Readout("readout", cfg=modules.readout),
+                        Reset("reset", cfg=step.cfg.reset),
+                        Branch("ge", [], Pulse("qub_pulse", cfg=step.cfg.qub_pulse)),
+                        Readout("readout", cfg=step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .build_and_acquire(

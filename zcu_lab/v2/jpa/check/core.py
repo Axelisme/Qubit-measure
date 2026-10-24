@@ -92,13 +92,12 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         # 1. Prepare a shared hardware frequency grid for both pump states.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         outputs = np.array([0, 1])
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
         viewer = live_line(
@@ -117,8 +116,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                 )
 
                 # 3. Reset before each frequency-swept readout pulse.
-                modules = step.cfg
-                modules.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
+                step.cfg.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
                 _ = (
                     step.prog_builder(
                         soc,
@@ -127,8 +125,8 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        PulseReadout("readout", modules.readout),
+                        Reset("reset", step.cfg.reset),
+                        PulseReadout("readout", step.cfg.readout),
                     )
                     .declare_sweep("freq", step.cfg.freq)
                     .build_and_acquire(rounds=cfg.rounds)

@@ -115,7 +115,6 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         # Prepare the device coordinates and the matched generator/ADC grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
-        modules = cfg
         freq_sweep = cfg.freq
         flux_sweep = cfg.flux
 
@@ -125,8 +124,8 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             "freq",
             {
                 "soccfg": soccfg,
-                "gen_ch": modules.readout.gen_ch,
-                "ro_ch": modules.readout.ro_ch,
+                "gen_ch": cfg.readout.gen_ch,
+                "ro_ch": cfg.readout.ro_ch,
             },
         )
 
@@ -167,10 +166,9 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     stop=context.scope.stop,
                     progress=False,
                 )
-                modules = cfg
 
                 freq_sweep = cfg.freq
-                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+                cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
 
                 # Reset at each frequency, then excite and measure the resonator.
                 _ = (
@@ -180,8 +178,8 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                         reps=step.cfg.reps,
                         relax_delay=step.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add(PulseReadout("readout", modules.readout))
+                    .add_reset("reset", cfg.reset)
+                    .add(PulseReadout("readout", cfg.readout))
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(**(acquire_kwargs or {}), rounds=cfg.rounds)
                 )

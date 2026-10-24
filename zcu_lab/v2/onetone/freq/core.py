@@ -144,11 +144,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
     )
 
     def _round_info(self, cfg: FreqCfg, soccfg) -> dict[str, Any]:
-        modules = cfg
         return {
             "soccfg": soccfg,
-            "gen_ch": modules.readout.gen_ch,
-            "ro_ch": modules.readout.ro_ch,
+            "gen_ch": cfg.readout.gen_ch,
+            "ro_ch": cfg.readout.ro_ch,
         }
 
     def run(self, config: FreqCfg, *, context: RunContext) -> FreqResult:
@@ -179,12 +178,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg
 
             # 2. Reset, read out and sweep frequencies on the FPGA.
             if cfg.sampling_mode == "linear":
                 freq_sweep = cfg.freq
-                modules.readout.set_param("freq", sweep2param("freq", freq_sweep))
+                cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
                 _ = (
                     sched.prog_builder(
                         soc,
@@ -192,15 +190,15 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                         reps=sched.cfg.reps,
                         relax_delay=sched.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add(PulseReadout("readout", modules.readout))
+                    .add_reset("reset", cfg.reset)
+                    .add(PulseReadout("readout", cfg.readout))
                     .declare_sweep("freq", freq_sweep)
                     .build_and_acquire(rounds=cfg.rounds)
                 )
             else:
                 # Homophasal sampling uses the calibrated DDS table.
-                modules.readout.set_param("freq", float(freqs[0]))
-                readout_cfg = modules.readout
+                cfg.readout.set_param("freq", float(freqs[0]))
+                readout_cfg = cfg.readout
                 freq_words, ro_freq_words = readout_freq_words(
                     soccfg,
                     freqs,
@@ -219,11 +217,11 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                         reps=sched.cfg.reps,
                         relax_delay=sched.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
+                    .add_reset("reset", cfg.reset)
                     .add(
                         TablePulseReadout(
                             "readout",
-                            modules.readout,
+                            cfg.readout,
                             idx_reg="freq",
                             freq_words=freq_words,
                             ro_freq_words=ro_freq_words,

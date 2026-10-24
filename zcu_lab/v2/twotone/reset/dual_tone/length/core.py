@@ -87,11 +87,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Check both channel grids and keep the configured pulse-duration difference.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         length_sweep = cfg.length
 
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         pulse1_cfg = reset_cfg.pulse1_cfg
         pulse2_cfg = reset_cfg.pulse2_cfg
         length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
@@ -124,8 +123,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # Sweep both durations together before reading out the reset response.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            tested_reset_cfg = modules.tested_reset
+            tested_reset_cfg = sched.cfg.tested_reset
             pulse1_cfg = tested_reset_cfg.pulse1_cfg
             pulse2_cfg = tested_reset_cfg.pulse2_cfg
 
@@ -139,10 +137,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
                     TwoPulseReset("tested_reset", tested_reset_cfg),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("length", sched.cfg.length)
                 .build_and_acquire(rounds=cfg.rounds)

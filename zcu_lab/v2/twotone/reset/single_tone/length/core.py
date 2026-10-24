@@ -84,11 +84,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         # Quantize the tested reset duration on its generator channel.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         length_sweep = cfg.length
 
-        pulse_cfg = modules.tested_reset.pulse_cfg
+        pulse_cfg = cfg.tested_reset.pulse_cfg
 
         lengths = sweep2array(
             length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg.ch)
@@ -105,8 +104,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # Sweep only the tested reset length after the optional preparation.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.tested_reset.set_param(
+            sched.cfg.tested_reset.set_param(
                 "length", sweep2param("length", sched.cfg.length)
             )
             _ = (
@@ -114,10 +112,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    PulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    PulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("length", sched.cfg.length)
                 .build_and_acquire(rounds=cfg.rounds)

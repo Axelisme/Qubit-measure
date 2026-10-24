@@ -112,15 +112,13 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         soc, soccfg = context.soc, context.soccfg
         detune = cfg.detune
 
-        modules = cfg
-
         length_sweep = cfg.length
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
         true_detune = actual_detune(
             cfg.length,
             detune=detune,
-            gen_ch=modules.pi2_pulse.ch,
+            gen_ch=cfg.pi2_pulse.ch,
             soccfg=soccfg,
             time_scaler=1.0,
         )
@@ -136,7 +134,6 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            modules = cfg
 
             length_sweep = cfg.length
             length_param = sweep2param("length", length_sweep)
@@ -148,16 +145,16 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("pi2_pulse1", modules.pi2_pulse),
+                    Reset("reset", cfg.reset),
+                    Pulse("pi2_pulse1", cfg.pi2_pulse),
                     Delay("t2_delay", delay=length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg=modules.pi2_pulse.with_updates(
-                            phase=modules.pi2_pulse.phase + detune_param
+                        cfg=cfg.pi2_pulse.with_updates(
+                            phase=cfg.pi2_pulse.phase + detune_param
                         ),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", cfg.readout),
                 )
                 .declare_sweep("length", length_sweep)
                 .build_and_acquire(rounds=cfg.rounds)

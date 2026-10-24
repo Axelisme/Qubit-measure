@@ -126,7 +126,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 set_rf_power(context.devices[step.cfg.jpa_rf_dev], jpa_power)
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
-                modules = step.cfg
                 tracker = MomentTracker()
                 _ = (
                     step.prog_builder(
@@ -136,9 +135,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        Readout("readout", modules.readout),
+                        Reset("reset", step.cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
+                        Readout("readout", step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .build_and_acquire(

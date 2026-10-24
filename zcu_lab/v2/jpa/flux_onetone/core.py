@@ -100,14 +100,13 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
         # 1. Prepare host flux values and the board's readout-frequency grid.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
         jpa_flux_sweep = cfg.jpa_flux
 
         jpa_fluxs = sweep2array(jpa_flux_sweep, allow_array=True)
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.readout.gen_ch},
+            {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
             allow_array=True,
         )
 
@@ -136,8 +135,7 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
                 )
 
                 # 3. Reset, then read out at each board-swept frequency.
-                modules = step.cfg
-                modules.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
+                step.cfg.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
                 _ = (
                     step.prog_builder(
                         soc,
@@ -146,8 +144,8 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        PulseReadout("readout", modules.readout),
+                        Reset("reset", step.cfg.reset),
+                        PulseReadout("readout", step.cfg.readout),
                     )
                     .declare_sweep("freq", step.cfg.freq)
                     .build_and_acquire(rounds=cfg.rounds)

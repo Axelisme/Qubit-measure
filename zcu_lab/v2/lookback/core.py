@@ -92,16 +92,16 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         viewer = live_line(context.plots, "measurement", "Time (us)", "Amplitude")
         # Compile reset→optional preparation→readout before acquisition so an
         # interrupted trace still has its fixed sample-time axis and buffer.
-        modules = deepcopy(run_cfg)
+        program_cfg = deepcopy(run_cfg)
         program = ModularProgramV2(
             context.soccfg,
             reps=1,
             initial_delay=run_cfg.initial_delay,
             relax_delay=run_cfg.relax_delay,
             modules=[
-                Reset("reset", cfg=modules.reset),
-                Pulse("init_pulse", cfg=modules.init_pulse),
-                Readout("readout", cfg=modules.readout),
+                Reset("reset", cfg=program_cfg.reset),
+                Pulse("init_pulse", cfg=program_cfg.init_pulse),
+                Readout("readout", cfg=program_cfg.readout),
             ],
         )
         times = program.get_time_axis(ro_index=0) + run_cfg.readout.trig_offset

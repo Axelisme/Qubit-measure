@@ -208,7 +208,6 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
     def _resolve_outer_sweep(
         self, cfg: T1WithToneSweepCfg, soccfg
     ) -> tuple[str, NDArray[np.float64]]:
-        modules = cfg
         sweep_dict = cfg.model_dump(exclude_none=True)
         sweep_keys = [name for name in sweep_dict if name != "length"]
         if len(sweep_keys) != 1:
@@ -224,7 +223,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         xs = sweep2array(
             x_sweep,
             sweep_name,
-            round_info={"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            round_info={"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
             allow_array=True,
         )
         return sweep_name, xs
@@ -291,7 +290,6 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
         if cfg.uniform:
             length_sweep = cfg.length
             assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
@@ -299,14 +297,14 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             lengths = sweep2array(
                 length_sweep,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+                {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
             )
         else:
             sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
             lengths = materialize_nonuniform_t1_pulse_lengths(
                 cfg.length,
                 soccfg=soccfg,
-                gen_ch=modules.probe_pulse.ch,
+                gen_ch=cfg.probe_pulse.ch,
             )
         _require_positive_lengths(lengths)
 
@@ -340,13 +338,12 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             for value_idx, (value, step) in enumerate(
                 sched.scan(sweep_name, xs.tolist())
             ):
-                modules = step.cfg
                 if cfg.uniform:
                     inner_length_sweep = step.cfg.length
                     assert isinstance(inner_length_sweep, SweepCfg), (
                         "uniform mode requires SweepCfg"
                     )
-                modules.probe_pulse.set_param(sweep_name, value)
+                step.cfg.probe_pulse.set_param(sweep_name, value)
                 current_index = value_idx
 
                 # Read out at each actual probe end, without longest-point padding.
@@ -358,15 +355,15 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                        Reset("reset", step.cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
                         TableLengthPulse(
                             "probe_pulse",
-                            modules.probe_pulse,
+                            step.cfg.probe_pulse,
                             lengths=lengths,
                             idx_reg="length",
                         ),
-                        Readout("readout", modules.readout),
+                        Readout("readout", step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .declare_sweep("length", len(lengths))

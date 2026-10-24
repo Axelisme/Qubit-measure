@@ -116,9 +116,8 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         # Prepare cavity-drive coordinates and four relative tomography phases.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
-        reset_cfg = modules.tested_reset
+        reset_cfg = cfg.tested_reset
         phases = _default_phase_values()
         gains = sweep2array(
             cfg.gain,
@@ -147,8 +146,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         # Sweep both cavity knobs and the final pi/2 phase in one program.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            tested_reset = modules.tested_reset
+            tested_reset = sched.cfg.tested_reset
             tested_reset.set_param("res_gain", sweep2param("gain", sched.cfg.gain))
             tested_reset.set_param("res_freq", sweep2param("freq", sched.cfg.freq))
             phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
@@ -159,10 +157,10 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
                     BathReset("tested_reset", tested_reset),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("phase", 4)
                 .declare_sweep("gain", sched.cfg.gain)

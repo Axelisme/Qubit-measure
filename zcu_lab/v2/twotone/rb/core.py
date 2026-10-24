@@ -145,7 +145,6 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 )
 
                 # 2. Map the seed's physical gate IDs to calibrated pulses.
-                modules = step.cfg
                 (
                     rand_gate_seq,
                     prefix_len_by_depth,
@@ -154,9 +153,9 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 ) = tables
                 max_rand_len = max(prefix_len_by_depth, default=0)
 
-                Id_pulse = modules.I_pulse
-                X90_pulse = modules.X90_pulse
-                X180_pulse = modules.X180_pulse
+                Id_pulse = step.cfg.I_pulse
+                X90_pulse = step.cfg.X90_pulse
+                X180_pulse = step.cfg.X180_pulse
                 MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
                 Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
                 Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
@@ -196,7 +195,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                             idx_reg="depth_idx",
                             val_reg="recovery_gate_1",
                         ),
-                        Reset("reset", cfg=modules.reset),
+                        Reset("reset", cfg=step.cfg.reset),
                         Repeat(
                             "rand_gate_idx",
                             "rand_len",
@@ -228,7 +227,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                             val_reg="recovery_gate_1",
                             pulses=gate_pulses,
                         ),
-                        Readout("readout", cfg=modules.readout),
+                        Readout("readout", cfg=step.cfg.readout),
                     )
                     .declare_sweep("depth_idx", len(prefix_len_by_depth))
                     .build()

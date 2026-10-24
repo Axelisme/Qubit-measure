@@ -97,12 +97,11 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         # Quantize wait and projection-phase axes on the configured hardware.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         length_sweep = cfg.length
         phase_sweep = cfg.phase
 
-        pi2_pulse = modules.pi2_pulse
+        pi2_pulse = cfg.pi2_pulse
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         phases = sweep2array(
@@ -119,7 +118,6 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
             length_param = sweep2param("length", sched.cfg.length)
             phase_param = sweep2param("phase", sched.cfg.phase)
 
@@ -129,20 +127,20 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
+                    Reset("reset", sched.cfg.reset),
                     Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
+                        Pulse("flux_pulse", sched.cfg.flux_pulse),
                         [
                             SoftDelay("wait_time", delay=length_param),
-                            Pulse("pi2_pulse1", modules.pi2_pulse),
+                            Pulse("pi2_pulse1", sched.cfg.pi2_pulse),
                         ],
                         SoftDelay("readout_t", sched.cfg.readout_t),
                     ),
                     Pulse(
                         "pi2_pulse2",
-                        modules.pi2_pulse.with_updates(phase=phase_param),
+                        sched.cfg.pi2_pulse.with_updates(phase=phase_param),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("length", sched.cfg.length)
                 .declare_sweep("phase", sched.cfg.phase)
@@ -170,10 +168,9 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Analysis requires source.cfg")
-        modules = cfg
 
-        flux_pulse = modules.flux_pulse
-        pi2_len = float(modules.pi2_pulse.waveform.length)
+        flux_pulse = cfg.flux_pulse
+        pi2_len = float(cfg.pi2_pulse.waveform.length)
 
         lengths, phases, signals2D = result.lengths, result.phases, result.signals
 

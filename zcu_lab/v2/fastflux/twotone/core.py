@@ -81,17 +81,16 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         # Quantize flux gain and probe frequency for their own generators.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.flux_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.flux_pulse.ch},
         )
         freqs = sweep2array(
             cfg.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         # Keep one averaged spectrum per flux gain.
@@ -106,9 +105,8 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         )
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-            modules.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
+            sched.cfg.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
 
             # Schedule flux and spectroscopy in parallel, then acquire mean IQ.
             _ = (
@@ -116,12 +114,12 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
+                    Reset("reset", sched.cfg.reset),
                     Join(
-                        Pulse("flux_pulse", modules.flux_pulse),
-                        Pulse("qub_pulse", modules.qub_pulse),
+                        Pulse("flux_pulse", sched.cfg.flux_pulse),
+                        Pulse("qub_pulse", sched.cfg.qub_pulse),
                     ),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("gain", sched.cfg.gain)
                 .declare_sweep("freq", sched.cfg.freq)

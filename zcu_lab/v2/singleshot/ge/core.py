@@ -335,8 +335,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
-                modules = step.cfg
-                probe_cfg = modules.probe_pulse if with_probe else None
+                probe_cfg = step.cfg.probe_pulse if with_probe else None
 
                 # Compare identical preparations with the probe omitted/applied.
                 program = (
@@ -348,10 +347,10 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                         relax_delay=cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
+                        Reset("reset", step.cfg.reset),
+                        Pulse("init_pulse", step.cfg.init_pulse),
                         Pulse("probe_pulse", probe_cfg),
-                        PulseReadout("readout", modules.readout),
+                        PulseReadout("readout", step.cfg.readout),
                     )
                     .build()
                 )

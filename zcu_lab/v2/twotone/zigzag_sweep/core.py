@@ -134,8 +134,6 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         soc, soccfg = context.soc, context.soccfg
         repeat_on = cfg.repeat_on
 
-        modules = cfg
-
         times = np.arange(0, cfg.n_times + 1)
 
         if cfg.freq is not None:
@@ -148,7 +146,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             raise ValueError("No sweep parameter found in cfg")
         x_info = ZigZagScanExp.SWEEP_MAP[x_key]
 
-        repeat_pulse = getattr(modules, repeat_on)
+        repeat_pulse = getattr(cfg, repeat_on)
         if repeat_pulse is None:
             raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
@@ -178,11 +176,9 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             ),
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-
             # Preserve the preparation pulse before changing the repeated pulse.
-            X90_pulse = deepcopy(modules.X90_pulse)
-            repeat_pulse = getattr(modules, repeat_on)
+            X90_pulse = deepcopy(sched.cfg.X90_pulse)
+            repeat_pulse = getattr(sched.cfg, repeat_on)
             if repeat_pulse is None:
                 raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
@@ -209,7 +205,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
-                    Reset("reset", cfg=modules.reset),
+                    Reset("reset", cfg=sched.cfg.reset),
                     Pulse("X90_pulse", cfg=X90_pulse),
                     Repeat(
                         "zigzag_loop",
@@ -217,7 +213,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
                         # int() cast: numpy scalar types are not plain int to pyright.
                         range_hint=(int(min(times)), int(max(times))),
                     ).add_content(Pulse(f"loop_{repeat_on}", cfg=repeat_pulse)),
-                    Readout("readout", cfg=modules.readout),
+                    Readout("readout", cfg=sched.cfg.readout),
                 )
                 .declare_sweep("times", len(times))
                 .declare_sweep(x_key, x_sweep)

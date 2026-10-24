@@ -93,12 +93,11 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         # 1. Prepare both hardware axes using the probe's generator channel.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         freq_sweep = cfg.freq
         gain_sweep = cfg.gain
 
-        probe_pulse = modules.probe_pulse
+        probe_pulse = cfg.probe_pulse
         freqs = sweep2array(
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
@@ -118,9 +117,8 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
-            modules.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
+            sched.cfg.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
+            sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
 
             # 3. Reset and initialize before each probe/readout sequence.
             _ = (
@@ -128,10 +126,10 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    Pulse("probe_pulse", modules.probe_pulse),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Pulse("probe_pulse", sched.cfg.probe_pulse),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("freq", sched.cfg.freq)
                 .declare_sweep("gain", sched.cfg.gain)

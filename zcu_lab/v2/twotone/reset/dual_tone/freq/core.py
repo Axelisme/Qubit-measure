@@ -146,9 +146,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             )
             with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
                 for freq2, step in sched.scan("freq2", freqs2.tolist()):
-                    modules = step.cfg
-                    modules.tested_reset.set_param("freq2", freq2)
-                    modules.tested_reset.set_param(
+                    step.cfg.tested_reset.set_param("freq2", freq2)
+                    step.cfg.tested_reset.set_param(
                         "freq1", sweep2param("freq1", step.cfg.freq1)
                     )
 
@@ -161,10 +160,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                             relax_delay=step.cfg.relax_delay,
                         )
                         .add(
-                            Reset("reset", modules.reset),
-                            Pulse("init_pulse", modules.init_pulse),
-                            TwoPulseReset("tested_reset", modules.tested_reset),
-                            Readout("readout", modules.readout),
+                            Reset("reset", step.cfg.reset),
+                            Pulse("init_pulse", step.cfg.init_pulse),
+                            TwoPulseReset("tested_reset", step.cfg.tested_reset),
+                            Readout("readout", step.cfg.readout),
                         )
                         .declare_sweep("freq1", step.cfg.freq1)
                         .build_and_acquire(rounds=cfg.rounds)
@@ -184,11 +183,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             ),
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            modules = sched.cfg
-            modules.tested_reset.set_param(
+            sched.cfg.tested_reset.set_param(
                 "freq1", sweep2param("freq1", sched.cfg.freq1)
             )
-            modules.tested_reset.set_param(
+            sched.cfg.tested_reset.set_param(
                 "freq2", sweep2param("freq2", sched.cfg.freq2)
             )
 
@@ -198,10 +196,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add(
-                    Reset("reset", modules.reset),
-                    Pulse("init_pulse", modules.init_pulse),
-                    TwoPulseReset("tested_reset", modules.tested_reset),
-                    Readout("readout", modules.readout),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    TwoPulseReset("tested_reset", sched.cfg.tested_reset),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("freq1", sched.cfg.freq1)
                 .declare_sweep("freq2", sched.cfg.freq2)

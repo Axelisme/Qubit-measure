@@ -21,7 +21,7 @@
 - [JPA 校準 family](#jpa-校準-familyjpa)
 - [Reset 校準實驗群](#reset-校準實驗群twotonereset)
 
-`zcu_lab/v2/<實驗>/gui.py` 把同資料夾的 core 包成 GUI adapter，供框架層 `zcu_tools.gui.app.measure` 驅動。Adapter 依賴框架契約 `ExpAdapterProtocol`。框架不 import 使用者套件，也不含實驗領域知識。
+`zcu_lab/v2/<實驗>/gui.py` 以具名參數宣告框架的 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` 值，接上同資料夾的 core，供 `zcu_tools.gui.app.measure` 驅動。框架不 import 使用者套件，也不含實驗領域知識。
 
 ---
 

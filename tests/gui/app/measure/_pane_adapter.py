@@ -49,7 +49,7 @@ class PostResult(PostAnalyzeResultBase):
 SavingRun = RunRecord[SavingCfg, SavingResult]
 
 
-def PaneAdapter_make_form(ctx: FormContext) -> Form[SavingCfg]:
+def saving_form(ctx: FormContext) -> Form[SavingCfg]:
     del ctx
     return Form(SavingCfg, {})
 
@@ -109,7 +109,7 @@ def PaneAdapter_get_post_writeback_items(
     ]
 
 
-def SavingCore_run(
+def saving_run(
     cfg: SavingCfg, *, context: RunContext
 ) -> RunRecord[SavingCfg, SavingResult]:
     return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
@@ -117,8 +117,8 @@ def SavingCore_run(
 
 PaneAdapter = Adapter(
     spec=replace(SavingCore.AXES_SPEC, tag="test/saving"),
-    make_form=PaneAdapter_make_form,
-    run=SavingCore_run,
+    make_form=saving_form,
+    run=saving_run,
     guide=None,
     analysis=Analysis(
         fn=PaneAdapter_analyze,

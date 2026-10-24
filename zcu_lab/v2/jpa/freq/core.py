@@ -130,7 +130,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     )
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
-                modules = step.cfg
                 tracker = MomentTracker()
                 _ = (
                     step.prog_builder(
@@ -140,9 +139,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
-                        Readout("readout", modules.readout),
+                        Reset("reset", step.cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
+                        Readout("readout", step.cfg.readout),
                     )
                     .declare_sweep("ge", 2)
                     .build_and_acquire(

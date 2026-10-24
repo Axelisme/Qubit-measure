@@ -111,23 +111,21 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         # 1. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
         lengths = sweep2array(
             cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        if modules.qub_pulse.waveform.style in ["const", "flat_top"]:
+        if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
             viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
             signals_buffer = SignalBuffer(
                 (len(lengths),),
                 on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
             )
             with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                modules = sched.cfg
                 length_sweep = sched.cfg.length
-                modules.qub_pulse.set_param(
+                sched.cfg.qub_pulse.set_param(
                     "length", sweep2param("length", length_sweep)
                 )
 
@@ -139,10 +137,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                         reps=sched.cfg.reps,
                         relax_delay=sched.cfg.relax_delay,
                     )
-                    .add_reset("reset", modules.reset)
-                    .add_pulse("init_pulse", modules.init_pulse)
-                    .add_pulse("qubit_pulse", modules.qub_pulse)
-                    .add_readout("readout", modules.readout)
+                    .add_reset("reset", sched.cfg.reset)
+                    .add_pulse("init_pulse", sched.cfg.init_pulse)
+                    .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
+                    .add_readout("readout", sched.cfg.readout)
                     .declare_sweep("length", length_sweep)
                     .build_and_acquire(rounds=cfg.rounds)
                 )
@@ -175,8 +173,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for length, step in rep.scan("length", length_values):
-                    modules = step.cfg
-                    modules.qub_pulse.set_param("length", length)
+                    step.cfg.qub_pulse.set_param("length", length)
 
                     # 3. Reset -> init -> shaped drive -> readout at this length.
                     builder = (
@@ -186,10 +183,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                             reps=step.cfg.reps,
                             relax_delay=step.cfg.relax_delay,
                         )
-                        .add_reset("reset", modules.reset)
-                        .add_pulse("init_pulse", modules.init_pulse)
-                        .add_pulse("qubit_pulse", modules.qub_pulse)
-                        .add_readout("readout", modules.readout)
+                        .add_reset("reset", step.cfg.reset)
+                        .add_pulse("init_pulse", step.cfg.init_pulse)
+                        .add_pulse("qubit_pulse", step.cfg.qub_pulse)
+                        .add_readout("readout", step.cfg.readout)
                     )
                     length_key = float(length)
                     if length_key not in programs:

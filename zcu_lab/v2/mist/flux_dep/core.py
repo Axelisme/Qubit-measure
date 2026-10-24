@@ -119,13 +119,12 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         # 1. Prepare external flux values and the board's probe-gain coordinates.
         cfg = deepcopy(config)
         soc, soccfg = context.soc, context.soccfg
-        modules = cfg
 
         values = sweep2array(cfg.flux, allow_array=True)
         gains = sweep2array(
             cfg.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
         viewer = live_heatmap_with_line(
@@ -154,8 +153,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                 )
 
                 # 3. Reset, initialize, perturb with the probe, then measure IQ.
-                modules = step.cfg
-                modules.probe_pulse.set_param(
+                step.cfg.probe_pulse.set_param(
                     "gain", sweep2param("gain", step.cfg.gain)
                 )
                 _ = (
@@ -166,10 +164,10 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                         relax_delay=step.cfg.relax_delay,
                     )
                     .add(
-                        Reset("reset", modules.reset),
-                        Pulse("init_pulse", modules.init_pulse),
-                        Pulse("probe_pulse", modules.probe_pulse),
-                        Readout("readout", modules.readout),
+                        Reset("reset", step.cfg.reset),
+                        Pulse("init_pulse", step.cfg.init_pulse),
+                        Pulse("probe_pulse", step.cfg.probe_pulse),
+                        Readout("readout", step.cfg.readout),
                     )
                     .declare_sweep("gain", step.cfg.gain)
                     .build_and_acquire(rounds=cfg.rounds)

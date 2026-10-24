@@ -134,8 +134,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             # 2. Count X90 gates in pairs so each step adds a nominal pi rotation.
-            modules = sched.cfg
-            repeat_pulse = getattr(modules, sched.cfg.repeat_on)
+            repeat_pulse = getattr(sched.cfg, sched.cfg.repeat_on)
             if repeat_pulse is None:
                 raise ValueError(f"Repeat on pulse {sched.cfg.repeat_on} not found")
             counts = [
@@ -155,12 +154,12 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
-                    Reset("reset", modules.reset),
-                    Pulse("X90_pulse", modules.X90_pulse),
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("X90_pulse", sched.cfg.X90_pulse),
                     Repeat(
                         "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
                     ).add_content(Pulse(f"loop_{sched.cfg.repeat_on}", repeat_pulse)),
-                    Readout("readout", modules.readout),
+                    Readout("readout", sched.cfg.readout),
                 )
                 .declare_sweep("times", len(times))
             )
