@@ -1,6 +1,6 @@
 """Concrete lifetime acquisition, acceptance and independent delay histories."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -47,6 +47,8 @@ class LifetimeResult:
     Partial saves then returns rejected/stopped without fitting or acceptance.
     Expected fit failures return failed/reason after saving. Unexpected fit/
     adapter/writer/plot exceptions propagate, not a status.
+    detune_mhz is accepted Ramsey's physical frequency offset after subtracting
+    the artificial phase ramp, or None for other/nonaccepted measurements.
     """
 
     kind: LifetimeKind
@@ -55,6 +57,7 @@ class LifetimeResult:
     lifetime_us: float | None
     error_us: float | None
     file: str | None
+    detune_mhz: float | None = None
 
 
 def history_guess(initial_us: float, history: LifetimeHistory) -> float:
@@ -175,8 +178,14 @@ async def measure_t1(
         and fit.error_us / fit.lifetime_us < tun.max_rel_err
         and residual is not None
         and residual < tun.max_fit_residual
+        and fit.lifetime_us <= 2.0 * float(np.max(outcome.value.result.times))
+        and np.mean(np.abs(fit.observed - fit.fitted)) <= 0.1 * np.ptp(fit.fitted)
     )
-    reason = None if accepted else "T1 fit rejected"
+    reason = (
+        None
+        if accepted
+        else "T1 fit rejected: error/RMS, twice-window or 10% span gate"
+    )
     return _finish(plots, "t1", fit, outcome.value.result.times, reason)
 
 
@@ -199,7 +208,8 @@ async def measure_ramsey(
     failed with the raw filename. Unexpected errors propagate. History updates
     belong to the caller. Fitted pi2 is not pi/2.
     Detune remains detune_ratio/length_step; native actual detune is retained.
-    Relax remains relax_factor*tun.guess_us, not the current T1 or delay EWMA.
+    Relax timing is already resolved in cfg from T1 feedback or fixed tunables.
+    Accepted physical detune subtracts the actual artificial phase ramp.
     Original overlong/mean-absolute-error gates apply, with rejected raw retained.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
@@ -224,12 +234,15 @@ async def measure_ramsey(
         return LifetimeResult(
             "t2ramsey", "failed", fit.reason, None, None, "t2ramsey.h5"
         )
-    return _finish(
+    result = _finish(
         plots,
         "t2ramsey",
         fit,
         outcome.value.result.times,
         _t2_rejection(fit, float(np.max(outcome.value.result.times))),
+    )
+    return replace(
+        result, detune_mhz=fit.detune_mhz if result.status == "accepted" else None
     )
 
 
@@ -244,13 +257,14 @@ async def measure_echo(
     """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
-    supplies averaging and fixed relaxation timing. cal contains this point's
-    accepted frequency/pi/pi2 and retained legal readout. guess_us is Echo's
+    supplies averaging and T1-derived or fixed relaxation timing. cal contains
+    this point's accepted frequency/pi/pi2 and retained legal readout. guess_us is Echo's
     positive microsecond delay estimate. directory is this point's allocated
     commit path. Partial saves then returns rejected/stopped without fitting.
     Schedule failures return failed without a file; expected fit failures return
     failed with the raw filename. Unexpected errors propagate.
-    Whole-trace fluxdep projection and T2 gates remain unchanged.
+    Whole-trace fluxdep projection and T2 gates remain unchanged. Nonzero
+    artificial detune selects a fringe fit; zero selects pure decay.
     No extra T1 measurement or fallback is made; history belongs to the caller.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
@@ -269,7 +283,7 @@ async def measure_echo(
     if outcome.partial_result:
         return LifetimeResult("t2echo", "rejected", "stopped", None, None, "t2echo.h5")
     plot.update(outcome.value.result.times, outcome.value.result.signals.real)
-    fit = analyze_t2echo_fluxdep(outcome.value.result)
+    fit = analyze_t2echo_fluxdep(outcome.value.result, fit_fringe=cfg.detune != 0.0)
     if isinstance(fit, Failed):
         return LifetimeResult("t2echo", "failed", fit.reason, None, None, "t2echo.h5")
     return _finish(
