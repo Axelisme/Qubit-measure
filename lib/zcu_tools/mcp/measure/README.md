@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-23（analysis updates 由 RecipeTab 略過 KEEP）
+**Last updated:** 2026-10-24
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -91,7 +91,7 @@ Predictor 透過 `rpc_call(method="predictor.predict"|"predictor.calibrate"|"pre
 
 filename 與 inline params 必須恰一個非 null。省略與 null 都視為未給。皆未給或皆給非 null 回 `invalid_params/invalid_predictor_source`。檔名或內容無效回 `invalid_params/invalid_predictor_file`。檔案無法讀取回 `precondition_failed/predictor_file_unavailable`；未開 entry 回 `precondition_failed/no_entry`。直接參數格式或物理值無效回 `invalid_predictor_params`。計算缺欄位回 `missing_predictor_params`，message 與 data.missing 列出缺項。工具沿 GUI 的 live catalog 描述與錯誤傳遞，不另建參數或寫回邏輯。沒有 target、load/set/clear 或 installed model。
 
-Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.connect` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
+Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.setup` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
 
 ## Recipe 與 execution
 
@@ -537,7 +537,7 @@ Reserved 不代表已保存，run_id 存在也不代表任一輸出成功。
 參數、Library 與 aliases 的日常操作依上方「Point 檔案讀寫」直接讀檔、編輯並 reload。
 需要 owner 命令時，既有 context.ml_edit、context.aliases_set、context.set_parameter
 與 value.list／value.read 仍經 rpc_call 可達，不開 Inspect、不切頁，也不改既有 Form／Run 的 capture。
-Aliases 在 Inspect 第三頁，dialog.screenshot 只拍目前頁，不接受 tab selector。
+Aliases 在 Inspect 第三頁。
 GUI 在每次 dispatch 檢查 holder、source 與 readiness，preview 不取代這些檢查。
 
 ## 連線與觀察

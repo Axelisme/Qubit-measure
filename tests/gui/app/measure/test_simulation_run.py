@@ -140,7 +140,9 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
     if outcome == "stopped":
         # The accepted run reaches the held second round through real owner delivery.
         qt_until(entered.is_set, label="held simulation round")
-        assert call(sock, "tab.run_cancel")["result"]["cancelled"]
+        assert call(sock, "operation.cancel", {"operation_id": started})["result"][
+            "status"
+        ] in ("cancelling", "cancelled")
         release.set()
     # The started run completes (or fails) after release; this deadline only guards hangs.
     terminal = call(sock, "operation.await", {"operation_id": started, "timeout": 30})[

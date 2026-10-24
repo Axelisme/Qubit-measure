@@ -134,7 +134,7 @@ Preview 不回 revision，`tab.writeback_accept` 不帶 `expected_revision`，�
 Recipe 將全部 Primary／Post 選定 IDs 一次交給這個 RPC。GUI owner 在同一次提交檢查全部 IDs，
 unknown／duplicate 在第一筆寫入前拒絕。通過後按 Primary、Post、各 pane 的候選順序寫入，
 首錯停止，收據保留成功前綴與診斷，不 retry／rollback。
-單 pane L1 `writeback_set`／`writeback_write` 繼續編輯並寫入當前 draft。
+單 pane L1 `writeback_write` 繼續編輯並寫入當前 draft。
 
 收據用 owner item ID 關聯確認項目，不將 authored alias 名稱與 concrete target 比較。
 `WritebackReceipt.items` 是成功 ID 對應的原捕捉候選，不是實際寫入值快照。

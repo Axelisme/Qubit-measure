@@ -114,8 +114,6 @@ def test_dispatch_nullable_base_distinguishes_absence_null_and_wrong_type() -> N
                     )
                 },
             ),
-            event_serializers={},
-            wire_event_name=str,
         ),
         owner_scheduler=ImmediateOwnerScheduler(),
     )

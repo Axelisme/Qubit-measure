@@ -162,7 +162,15 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
             assert caught.value.reason_code == "no_context"
         else:
             reply = application.rpc(
-                "tab.writeback_apply", {"tab_id": tab_id, "subtab_id": "analysis"}
+                "tab.writeback_write",
+                {
+                    "tab_id": tab_id,
+                    "subtab_id": "analysis",
+                    "submission_id": application.result(
+                        "tab.writeback_begin", {"tab_id": tab_id}
+                    )["submission_id"],
+                    "write": [{"id": "param-1"}],
+                },
             )
             assert reply["ok"] is False
             error = reply["error"]
@@ -238,64 +246,3 @@ def parameter_writeback_pane(
     finally:
         service.teardown_draft(draft)
         application.state.get_tab(tab_id).analysis.writeback_draft = None
-
-
-@pytest.mark.parametrize(
-    "selection",
-    ["omitted", "null", "explicit", "empty", "string", "empty-id", "number", "object"],
-)
-def test_writeback_rpc_uses_gui_selection_or_explicit_ids_without_changing_selection(
-    application: PointApplication,
-    parameter_writeback_pane: tuple[str, ParameterContext],
-    selection: str,
-) -> None:
-    tab_id, captured = parameter_writeback_pane
-    pane: dict[str, object] = {"tab_id": tab_id, "subtab_id": "analysis"}
-    preview = application.result("tab.writeback_preview", pane)
-    items = preview["items"]
-    assert isinstance(items, list)
-    first_item, second_item = items
-    assert isinstance(first_item, dict)
-    assert isinstance(second_item, dict)
-    first, second = first_item["id"], second_item["id"]
-    application.result("tab.writeback_set", {**pane, "id": second, "selected": False})
-    params = dict(pane)
-    inputs = {
-        "null": None,
-        "explicit": [second],
-        "empty": [],
-        "string": first,
-        "empty-id": [""],
-        "number": [1],
-        "object": {},
-    }
-    if selection != "omitted":
-        params["ids"] = inputs[selection]
-    before = entry_resource(application).ledger.events()
-    reply = application.rpc("tab.writeback_apply", params)
-    if selection in {"omitted", "null", "explicit", "empty"}:
-        assert reply["ok"] is True, reply
-        expected_ids = [second] if selection == "explicit" else [first]
-        if selection == "empty":
-            expected_ids = []
-        result = reply["result"]
-        assert isinstance(result, dict)
-        assert result["applied_ids"] == expected_ids
-    else:
-        assert reply["ok"] is False, reply
-        error = reply["error"]
-        assert isinstance(error, dict)
-        assert error["code"] == ErrorCode.INVALID_PARAMS
-    control = application.controller.context_control
-    assert control.read_target(captured.target).value("general.ext.a") == (
-        11.0 if selection in {"omitted", "null"} else 1.0
-    )
-    assert control.read_target(captured.target).value("general.ext.b") == (
-        22.0 if selection == "explicit" else 2.0
-    )
-    if selection not in {"omitted", "null", "explicit"}:
-        assert entry_resource(application).ledger.events() == before
-    after = application.result("tab.writeback_preview", pane)
-    after_items = after["items"]
-    assert isinstance(after_items, list)
-    assert [item["selected"] for item in after_items] == [True, False]

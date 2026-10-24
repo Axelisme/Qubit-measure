@@ -155,10 +155,9 @@ def test_controller_interactive_mount_is_visible_from_run_or_data(
         if terminal == "done":
             assert interact(sock, tab_id, {"command": "done"})["ok"] is True
         else:
-            assert (
-                rpc(sock, "analyze.cancel", {"tab_id": tab_id})["result"]["cancelled"]
-                is True
-            )
+            assert rpc(sock, "operation.cancel", {"operation_id": token})["result"][
+                "status"
+            ] in ("cancelling", "cancelled")
         assert rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
             "result"
         ]["status"] == ("finished" if terminal == "done" else "cancelled")
@@ -340,10 +339,9 @@ def test_interactive_submitted_params_replace_previous_pane_only_on_done(
             assert fx.ctrl.get_tab_analyze_result(tab_id) is committed.result
             assert committed.plots is not old_plots
         else:
-            assert (
-                rpc(sock, "analyze.cancel", {"tab_id": tab_id})["result"]["cancelled"]
-                is True
-            )
+            assert rpc(sock, "operation.cancel", {"operation_id": token})["result"][
+                "status"
+            ] in ("cancelling", "cancelled")
             cancelled = fx.state.get_tab(tab_id).analysis
             assert cancelled.params is old_params
             assert cancelled.result is old_result
@@ -591,7 +589,9 @@ def test_two_mounted_tabs_unmount_one_without_retiring_other(mounted_fx, qapp) -
     assert window.interactive_presentation(second_id)[0] is second_widget.figure
     with open_client(fx.service.port) as sock:
         before = interact(sock, second_id)["result"]["state"]
-        assert rpc(sock, "analyze.cancel", {"tab_id": first_id})["result"]["cancelled"]
+        assert rpc(sock, "operation.cancel", {"operation_id": first_token})["result"][
+            "status"
+        ] in ("cancelling", "cancelled")
         assert window.interactive_presentation(first_id) is None
         qapp.processEvents()
         assert window.interactive_presentation(second_id)[0] is second_widget.figure

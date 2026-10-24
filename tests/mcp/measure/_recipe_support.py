@@ -312,17 +312,6 @@ class LookbackGui:
                         for path, message in (errors.messages.items() if errors else ())
                     ],
                 }
-        if method == "tab.select_recipe_module":
-            with recipe_form_errors():
-                path = tuple(params["path"])
-                changed = self.owner.select_recipe_module(
-                    path, params["action"], key=params.get("key")
-                )
-                self.publication = dict(observe_form(self.owner))
-                return {
-                    "changed": changed,
-                    "field": recipe_field_wire(self.owner.read_recipe_field(path)),
-                }
         raise ValueError(f"Unknown recipe method: {method}")
 
     def __call__(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -331,7 +320,6 @@ class LookbackGui:
             "tab.describe_cfg",
             "tab.read_recipe_field",
             "tab.edit_recipe_fields",
-            "tab.select_recipe_module",
         ):
             observations[method] = self._recipe_rpc(method, params)
         if method == "tab.parameter_read":

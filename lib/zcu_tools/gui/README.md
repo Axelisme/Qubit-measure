@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -231,18 +231,10 @@ boundaries use `subscribe_with_meta()`. The per-bus origin is a nested
 `OperationHandles` captures the origin at creation and `OperationRunner` restores
 it with the string operation id around terminal delivery. Remote dispatch declares
 an opaque per-connection `agent` origin; persistence restore declares `system`.
-Remote bridges subscribe their EventBus push callbacks before opening the socket;
-startup subscription failure is fatal and rolls back partial subscriptions, while
-runtime subscriber exceptions remain isolated by the EventBus.
-Remote payload materialization and encoding are lazy: the shared endpoint first
-selects matching live subscribers, calls the main-thread factory once outside its
-registry lock, then revalidates before using the existing per-client queues. Zero
-matches perform no serializer/encode work; multiple matches share one encoded
-line while preserving independent ordering, backpressure, and drop isolation.
-EventBus wire pushes carry the unchanged `event` / `payload` plus `seq` and
-`origin={kind, operation_id}`; RPC-only `client_id` never crosses the wire.
-Diagnostics and editor pushes are separate channels and retain their existing
-two-field envelope.
+Remote clients observe snapshots and bounded operation waits instead of EventBus
+subscriptions. Controller diagnostics retain their independent two-field
+`event` / `payload` envelope, per-client queues and backpressure. RPC attribution
+still uses the app EventBus; no remote business-event serializers are installed.
 
 Views hold render caches only and never apply optimistic domain updates. Pending
 state is broadcast by core so every attached view renders the same authoritative

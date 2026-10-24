@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-24, recipe Form options and readiness
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -25,7 +25,6 @@ not declare MCP tools and does not own stdio transport.
   `MethodSpec`, agent exposure, readonly and operation policy and `ParamSpec` shorthands. The
   `rpc.catalog` projection uses those same entries; handler refs are resolved
   only by dispatch.
-- [`events.py`](events.py)：domain payload type to wire event serializer mapping.
 - [`form_observation.py`](form_observation.py)：tab Form input/values/errors、全表 diagnostics 投影，以及共用 path-array edit decoder。
 - [`form_description.py`](form_description.py)：single-layer Form description and field observation。
 - [`form_errors.py`](form_errors.py)：將 measure 的 CfgPreconditionError 轉譯為 remote 錯誤；
@@ -81,7 +80,7 @@ Destination 是固定的 `{kind: "saved_point", entry_id, point}`，value 是 ow
 10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。
 GUI／MCP 的所有權模型允許問答期間的 draft 編輯與替換，見 ADR-0075 的 2026-10-23 使用者裁定。
-第一次寫入失敗就停止，不 retry／rollback。單 pane `tab.writeback_set`／`tab.writeback_write` 仍編輯當前 draft。
+第一次寫入失敗就停止，不 retry／rollback。單 pane `tab.writeback_write` 仍編輯當前 draft。
 
 ## Workflow namespace
 
@@ -239,13 +238,13 @@ unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races
 `tab.check_recipe_ready(tab_id)` 是 readonly 呼叫，以固定來源驗證完整 Form 與 lowered cfg。它回全部 logical path/message errors，不 mutation、不 Run、不重捕捉來源。Recipe 層把 errors 轉為 needs_parameters，不把這個檢查做成空 mutation batch。
 
 
-`tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。真實的 modules 容器不省略，例如 mux readout 的 selector 是 `["modules", "readout"]`，與 recipe 相同。Edit 拒絕時列出目前的 canonical editable_paths 與 selection_paths。Ref 的子欄位要先 use_inline 才可編輯。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 解析 typed paths。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
+`tab.read_recipe_field` 與 `tab.edit_recipe_fields` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。真實的 modules 容器不省略，例如 mux readout 的 selector 是 `["modules", "readout"]`，與 recipe 相同。Edit 拒絕時列出目前的 canonical editable_paths 與 selection_paths。Ref 的子欄位要先用 `tab.run_recipe_command` 的 to_inline 才可編輯。
 
 `tab.read_elements(path)` 在一次 readonly owner turn 回傳全部元素的 index、name、canonical path、authored input、可用 preview values 與定向 errors。Values 使用完整 canonical typed paths，不是 lowered native cfg。完整 Form errors 另列在最外層，包含 participants 錯誤。某個元素 invalid 不會隱藏其他元素。RPC 只序列化 owner 的 aggregate，不逐元素 describe/read 拼接，不改 picker、focus、capture 或草稿。Busy 與 observer reads 仍可用。可選 `fields` 是元素相對 logical typed paths，例如 `[["drive", "gain"], ["sweep", "start"]]`。每個 row 的 `fields` 按請求順序回同一 owner turn 的 RecipeFieldObservation，包含 FixedElements identity、ref source、value_status 與 errors。省略 fields 保留原 aggregate。錯誤 carrier/path 沿既有 Form 錯誤投影。
 
 Read 使用一次 owner turn 的目前 input 與固定 capture。Value_status 區分 available、missing 與 unavailable，input_present/input 只觀察 authored draft。Selector 描述目標本身，source 識別最近 captured ref。`RecipeFieldObservation.readonly` 在 wire 上仍名為 `readonly`，表示穿過 ref 祖先，不表示宣告唯讀。公開 Recipe helper 的屬性命名由 MCP 層負責，wire 不改名。讀取不改 input、base、cfg version 或通知，也不授權寫入。
 
-Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。`require_valid=true` 先以固定來源驗證 detached candidate 與 native cfg，錯誤回 changed=false 與完整 logical errors，不安裝或發布候選。省略或 false 保留一般 invalid draft 行為。空 batch 也可要求驗證目前 cfg。Select 回 changed 與同 turn 的 fresh field。Use_library 必須帶非空 actual key，其他 action 必須省略 key；explicit null 不等於省略。
+Edit 保留 ordered list 與原始 index，owner 一次檢查路徑與 admission。結構、source、宣告 readonly、ref ancestor 或 guard 拒絕不提交前綴。一般 invalid draft 可回 changed=true 加 logical preview errors。`require_valid=true` 先以固定來源驗證 detached candidate 與 native cfg，錯誤回 changed=false 與完整 logical errors，不安裝或發布候選。省略或 false 保留一般 invalid draft 行為。空 batch 也可要求驗證目前 cfg。Select 回 changed 與同 turn 的 fresh field。
 
 Handler 將 LogicalEditError 投影為 invalid_params 與原 reason，保留 path、edit_index、selector_path、available_keys。FormPathError 保留 form_path，LogicalSourceError 回 precondition_failed/library_source，並帶 consuming path 與來源身分。Cfg/control 失敗沿既有投影。ParamSpec primitive/required/enum 失敗維持原生 reason；handler carrier 與 action/key 語義失敗才回 form_errors。Unexpected provider/declaration failures 不重分類。
 
@@ -301,10 +300,10 @@ reason. A stale installed base returns `precondition_failed` with
 rejection before domain effects. Failures preserve the installed state.
 Existing tabs keep their fixed captures until an explicit Refresh or Reset.
 
-`context.set_parameter`, `context.aliases_set`, `context.ml_edit`,
-`context.ml_create_from_role`, and the module/waveform delete/rename methods
-accept optional `expected_revision`. If supplied, the session owner compares it
-with that document's current disk hash before writing. Explicit null checks for
+`context.set_parameter`, `context.aliases_set`, `context.ml_edit` and
+`context.ml_create_from_role` accept optional `expected_revision`.
+If supplied, the session owner compares it with that document's current disk hash
+before writing. Explicit null checks for
 a missing aliases file; parameters and library reject null. Omission keeps the
 original unguarded writer contract. These checks are optimistic, without a
 cross-process lock or a multi-file transaction.
@@ -326,9 +325,7 @@ Reconnect to change identity. Label is a trusted LAN identity, not a credential.
 
 Unmarked methods require holder at owner-loop execution, before domain effects and existing domain guards. `tab.interact` remains unmarked, including reads.
 A `not_holder` error includes `{holder, locked, online}`. `operation.await` is
-readonly; a new holder can cancel accepted work. Subscription methods only
-change connection-local observation subscriptions and remain available to
-observers. Measure and Fluxdep share this authority; Dispersive stays readonly.
+readonly; a new holder can cancel accepted work. Measure and Fluxdep share this authority; Dispersive stays readonly.
 Cfg commands use current inputs without refs. See ADR-0070 for authority and GUI gates.
 
 Normal handlers run on the State owner thread through the injected `OwnerScheduler`.

@@ -64,7 +64,6 @@ class SyntheticGui:
         if method in {
             "tab.reset_cfg",
             "tab.edit_recipe_fields",
-            "tab.select_recipe_module",
             "tab.select_recipe_option",
             "tab.run_recipe_command",
         }:

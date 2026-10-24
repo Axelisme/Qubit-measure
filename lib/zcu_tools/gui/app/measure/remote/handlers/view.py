@@ -68,28 +68,6 @@ def h_view_snapshot(
     return render_view(adapter).get_view_snapshot()
 
 
-def h_dialog_screenshot(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    from ..dialogs import parse_dialog_name
-
-    name_str = str(params["name"])
-    dialog_name = parse_dialog_name(name_str)
-    png = render_view(adapter).take_dialog_screenshot(dialog_name)
-    return _png_reply(png, params)
-
-
-def h_view_screenshot(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    # Not off_main_thread → MainWindow.grab() is auto-marshalled to the Qt main
-    # thread, the same path as dialog.screenshot. The whole window always exists
-    # (headless is already fast-failed by _render_view), so there is no
-    # PRECONDITION branch like the per-dialog grab.
-    png = render_view(adapter).take_window_screenshot()
-    return _png_reply(png, params, description="window screenshot")
-
-
 def _png_reply(
     png: object, params: Mapping[str, object], *, description: str = "screenshot"
 ) -> dict[str, object]:

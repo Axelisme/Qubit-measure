@@ -86,8 +86,6 @@ def test_owner_handler_latency_warns_without_changing_replies(
             gui_version=1,
             server_name="HandlerLatencyTest",
             method_registry=registry,
-            event_serializers={},
-            wire_event_name=str,
         ),
         owner_scheduler=OwnerScheduler(clock),
     )

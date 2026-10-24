@@ -48,7 +48,7 @@ Label 是信任 LAN 上的控制身份，不是 authentication credential。同�
 
 RPC 預設要求 holder。Method 明確宣告 `readonly=True` 才允許 observer 呼叫；`control.*` 與 `rpc.catalog` 是管理例外。讀寫混合的 `tab.interact` 包含純讀在內仍要求 holder。通過 authority 後，命令才進入既有 domain、busy、capability 與輸入檢查。
 
-Remote 時，GUI 停用欄位與寫入容器，不改變子元件原本的 busy／valid／input-open gate。純檢視、縮放、捲動、截圖、Log Browser 及 Inspect 只讀照常可用。Fluxdep spectrum 清單與 readonly 的 `spectrum.set_active` 只切換顯示，非 holder 也能使用。切換不建立、提交或取消 context，也不改業務輸入版本。已有草稿顯示同一份 context，非 holder 只能讀；沒有草稿則顯示已發布資料。本機 holder 點譜的開 picker 意圖是另一步寫入，經既有 holder gate 執行。Observer RPC 即使發生在 Local 持有控制權時，也不能藉重建 view 開 picker。開 picker、Filter 切換、search cancel 與 interactive cancel 仍屬寫入，Remote 時須先收回。
+Remote 時，GUI 停用欄位與寫入容器，不改變子元件原本的 busy／valid／input-open gate。純檢視、縮放、捲動、截圖、Log Browser 及 Inspect 只讀照常可用。Fluxdep spectrum 清單只切換顯示，非 holder 也能使用。切換不建立、提交或取消 context，也不改業務輸入版本。已有草稿顯示同一份 context，非 holder 只能讀；沒有草稿則顯示已發布資料。本機 holder 點譜的開 picker 意圖是另一步寫入，經既有 holder gate 執行。Readonly render RPC 不建立 picker。開 picker、Filter 切換、search cancel 與 interactive cancel 仍屬寫入，Remote 時須先收回。
 
 主視窗是唯一的 Qt 控制狀態訂閱者。`set_writable(bool)` 設定主窗的寫入按鈕與選單，並推送給開著的 tab／view。Measure 同時推送給仍開著的 Setup、Devices、Inspect 與 ARB Waveforms。新 view 建立時套用當下狀態。Tab、interactive frontend、component tree 與 dialog 不訂閱 authority，也不為 authority 管理解除綁定或覆寫 `deleteLater`。
 

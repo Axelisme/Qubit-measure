@@ -365,8 +365,7 @@ def test_rpc_load_updates_the_list_without_opening_a_picker(
         assert isinstance(name, str)
         assert any(label.startswith(name) for label in list_labels(window))
         assert ctrl.interactive.inspect(name) is None
-        shown = route_harness.request(client, "spectrum.set_active", name=name)
-        assert shown["ok"] is True, shown
+        ctrl.set_active_spectrum(name)
         # Active only displays: the agent's spectrum shows its published preview.
         preview = editor(window)
         assert isinstance(preview, ResultPreviewWidget)

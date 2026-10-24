@@ -112,7 +112,6 @@ def test_status_indexes_gui_operations_and_session_executions(
                 }
             ],
         },
-        "state.has_context": {"value": True},
         "state.has_active_context": {"value": True},
         "context.active": {"label": "bias"},
         "state.has_soc": {"value": True},
@@ -385,14 +384,14 @@ def test_started_operation_and_gui_status_share_one_agent_handle(
     tmp_path: Path,
 ) -> None:
     client = make_client(tmp_path)
-    client.transport.replies["device.connect"] = {
+    client.transport.replies["device.setup"] = {
         "ok": True,
         "result": {"operation_id": 31},
     }
     reply = client.call(
         "rpc_call",
         {
-            "method": "device.connect",
+            "method": "device.setup",
             "params": {"type_name": "FakeDevice", "name": "flux", "address": "fake"},
         },
     )

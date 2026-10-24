@@ -72,24 +72,6 @@ def h_tab_load_data(
     return result
 
 
-def h_tab_run_cancel(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    # cancelled is best-effort: True when a live run was signalled, False on a
-    # no-op. The worker's true terminal is observed via the run handle (ADR-0066
-    # §8) — cancel only requests, it does not wait for the stop.
-    cancelled = adapter.run_analyze_control.cancel_run()
-    return {"ok": True, "cancelled": cancelled}
-
-
-def h_run_running_tab(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    return {"tab_id": adapter.run_analyze_control.get_running_tab_id()}
-
-
 def _operation_id(value: object, field: str) -> int | None:
     if value is None:
         return None
