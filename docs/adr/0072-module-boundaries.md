@@ -45,7 +45,8 @@ core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解
 分析計算包含擬合、逐 tone 迴圈、失敗隔離與結果型別。
 GUI 為 writeback 決策做的有限值檢查與摘要整理不算分析計算。
 使用者於 2026-10-24 裁決：「怎麼會有分析寫在gui ,這是違規吧」「分析修正可以做」。
-目前 mux/onetone 的逐 tone 計算仍在 gui.py，搬入 core 由獨立的分析層清理工作處理。
+mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core 擁有。
+gui.py 保留來源與 route prior 解析，以及 writeback。
 此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
 
 ### 即時圖工具與機制

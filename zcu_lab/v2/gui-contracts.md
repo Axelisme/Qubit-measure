@@ -21,7 +21,8 @@
 
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
 擬合、逐 tone 迴圈、失敗隔離與結果型別屬於 core。GUI 為 writeback 做的有限值檢查與摘要整理不算分析計算。
-目前 mux/onetone 的逐 tone 計算仍在 gui.py，搬家由獨立的分析層清理工作處理。
+mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core 擁有。
+gui.py 保留來源與 route prior 解析，以及 writeback。
 修改實驗前讀 core.py、form.py 與 gui.py，分工規則見 ADR-0072。
 
 每個 gui.py 宣告具名參數的 Adapter 值，form.py 提供 make_form(ctx)。
