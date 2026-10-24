@@ -60,7 +60,6 @@ class JpaAutoAnalyzeResult(AnalyzeResultBase):
 class JpaAutoOptimizeAdapter(
     BaseAdapter[JPAOptCfg, JpaAutoRunResult, JpaAutoAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = AutoOptimizeExp.persistence_tag()
     exp_cls = AutoOptimizeExp
 
     @staticmethod

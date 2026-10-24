@@ -32,7 +32,6 @@ class PhaseAnalyzeResult(AnalyzeResultBase):
 
 
 class PhaseAdapter(BaseAdapter[PhaseCfg, PhaseRunResult, PhaseAnalyzeResult]):
-    experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

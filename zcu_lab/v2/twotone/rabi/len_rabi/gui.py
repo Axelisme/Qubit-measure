@@ -110,7 +110,6 @@ class LenRabiAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = LenRabiExp.persistence_tag()
     exp_cls = LenRabiExp
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

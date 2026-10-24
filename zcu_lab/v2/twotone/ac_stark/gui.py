@@ -71,7 +71,6 @@ class AcStarkAdapter(
 ):
     """Acquire probe-frequency maps and propose the photon/gain-squared calibration."""
 
-    experiment_tag: ClassVar[str | None] = AcStarkExp.persistence_tag()
     exp_cls = AcStarkExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
@@ -131,7 +130,6 @@ class AcStarkRamseyAdapter(
 ):
     """Acquire Stark-driven Ramsey maps and display the core's normalized FFT."""
 
-    experiment_tag: ClassVar[str | None] = AcStarkRamseyExp.persistence_tag()
     exp_cls = AcStarkRamseyExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.ramsey.md")
 

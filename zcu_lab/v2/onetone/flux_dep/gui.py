@@ -49,7 +49,6 @@ OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
 class OneToneFluxDepAdapter(
     BaseAdapter[FluxDepCfg, OneToneFluxDepRunResult, FluxPickResult, FluxPickParams]
 ):
-    experiment_tag: ClassVar[str | None] = FluxDepExp.persistence_tag()
     exp_cls = FluxDepExp
 
     @staticmethod

@@ -102,7 +102,6 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form_gain(ctx)
 
-    experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe gain (a.u.)"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
@@ -114,7 +113,6 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form_freq(ctx)
 
-    experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

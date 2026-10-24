@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, PulseSpec
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -57,7 +58,7 @@ def _make_concrete_adapter() -> ExpAdapterProtocol:
         capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
             analysis=AnalysisMode.NONE
         )
-        exp_cls = MagicMock()
+        exp_cls = Experiment
 
     return _FakeAdapter()
 
@@ -90,7 +91,7 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
 
         class _(BaseAdapter[MagicMock, MagicMock, None, _RequiredParams]):
             capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-            exp_cls = MagicMock()
+            exp_cls = Experiment
 
             def analyze(self, req, *, plots: Plots):
                 return None
@@ -113,7 +114,7 @@ def test_analyze_params_cls_fallback_when_no_annotation():
 
     class _UnannotatedAdapter(BaseAdapter[ConfigBase, MagicMock]):
         capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-        exp_cls = MagicMock()
+        exp_cls = Experiment
 
         def get_analyze_params(self, result, ctx):
             return None

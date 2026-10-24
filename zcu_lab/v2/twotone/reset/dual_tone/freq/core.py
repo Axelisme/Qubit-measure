@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -76,13 +76,13 @@ class FreqAnalysis:
     freq2: float
 
 
-class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+class FreqExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
     # signals memory layout is (Nfreq1, Nfreq2) = (outer, inner); native save/load
     # expect z == (outer, inner) == reversed(axes lengths), so axes order is
     # (freqs2 inner, freqs1 outer). both axes store MHz on disk (disk Hz).
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs2", "Frequency2", "Hz", scale=1e6),
             AxesSpec.Axis("freqs1", "Frequency1", "Hz", scale=1e6),

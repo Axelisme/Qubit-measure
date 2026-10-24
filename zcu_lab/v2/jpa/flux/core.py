@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -78,9 +78,9 @@ class FluxCfg(ProgramExpCfg):
     ] = Field(default=0.0, ge=0.0)
 
 
-class FluxExp(PersistableExperiment[FluxResult, FluxCfg]):
+class FluxExp(Experiment[FluxResult, FluxCfg]):
     # jpa_flux stored as-is (a.u.) on disk -> scale=IDENTITY; signals are float64
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FluxResult, FluxCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("fluxes", "JPA Flux value", "a.u."),),
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=FluxResult,

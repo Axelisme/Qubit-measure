@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -66,11 +66,11 @@ class PowerAnalysis:
     gain2: float
 
 
-class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+class PowerExp(Experiment[PowerResult, PowerCfg]):
     Options: ClassVar[type[PowerAnalyzeOptions]] = PowerAnalyzeOptions
 
     # Both axes are gains in a.u. -> scale=IDENTITY (default)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("gains2", "Power2", "a.u."),  # inner
             AxesSpec.Axis("gains1", "Power1", "a.u."),  # outer

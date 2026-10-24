@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, RunRecord
+from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
@@ -300,11 +300,11 @@ class GE_Cfg(ExpCfgModel):
     shots: Annotated[int, FieldMeta(label="Shots")]
 
 
-class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
+class GE_Exp(Experiment[GE_Result, GE_Cfg]):
     Options: ClassVar[type[GEAnalyzeOptions]] = GEAnalyzeOptions
     PostOptions: ClassVar[type[GEPostAnalyzeOptions]] = GEPostAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[GE_Result, GE_Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
             AxesSpec.Axis("prepared_states", "Prepared State", "None", dtype=np.int64),

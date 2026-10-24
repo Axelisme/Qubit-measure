@@ -1,6 +1,9 @@
 """Independent local line DC scan with mux twotone spectra."""
 
-from zcu_tools.experiment import PersistableExperiment
+from typing import ClassVar
+
+from zcu_tools.experiment import Experiment
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 
 from zcu_lab.v2._support.mux_flux import (
@@ -20,10 +23,12 @@ class TwotoneFluxLocalCfg(LocalFluxCfg[FluxFrequencyCfg]):
     """
 
 
-class TwotoneFluxLocalExp(PersistableExperiment[MuxFluxResult, TwotoneFluxLocalCfg]):
+class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
     """Set DC, settle, acquire spectra and preserve completed flux points."""
 
-    AXES_SPEC = mux_flux_spec(TwotoneFluxLocalCfg, tag="mux/twotone_flux_local")
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxFluxResult, TwotoneFluxLocalCfg]] = (
+        mux_flux_spec(TwotoneFluxLocalCfg, tag="mux/twotone_flux_local")
+    )
 
     def run(self, config: TwotoneFluxLocalCfg, *, context: RunContext) -> MuxFluxResult:
         """Run config without mutation using context's drivers, board and Stop.

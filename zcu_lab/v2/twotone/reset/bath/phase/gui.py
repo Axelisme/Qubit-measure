@@ -35,7 +35,6 @@ class BathPhaseAnalyzeResult(AnalyzeResultBase):
 class BathPhaseAdapter(
     BaseAdapter[PhaseCfg, BathPhaseRunResult, BathPhaseAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = PhaseExp.persistence_tag()
     exp_cls = PhaseExp
 
     @staticmethod

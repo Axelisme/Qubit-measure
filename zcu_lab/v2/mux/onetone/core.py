@@ -7,13 +7,13 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, ValidationInfo, field_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -145,7 +145,7 @@ def _mux_signal(
     raise ValueError("Mux program is missing its named readout MuxReadout")
 
 
-class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
+class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
     """Measure several resonator spectra with a common frequency-offset scan.
 
     Each point applies the optional reset, then plays and acquires the selected
@@ -154,7 +154,7 @@ class MuxOnetoneExp(PersistableExperiment[MuxOnetoneResult, MuxOnetoneCfg]):
     indices and nominal offsets (MHz in memory, Hz on disk).
     """
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[MuxOnetoneResult, MuxOnetoneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
             AxesSpec.Axis("dfs", "Frequency offset", "Hz", scale=1e6),

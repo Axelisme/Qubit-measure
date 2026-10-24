@@ -73,14 +73,14 @@ def test_descendant_cancellation_is_saved_as_stopped(tmp_path: Path) -> None:
         identity=workflows.RunIdentity(
             "0123456789abcdef0123456789abcdef", history.provenance
         ),
-        experiment_tag=core.persistence_spec().tag,
+        experiment_tag=core.AXES_SPEC.tag,
         snapshot=history.snapshot,
     )
     assert record.metadata is not None
     assert record.metadata.completion == "stopped"
     path = tmp_path / "descendant.h5"
-    save_run(record, path, spec=core.persistence_spec())
-    restored = load_run_with_metadata(path, spec=core.persistence_spec())
+    save_run(record, path, spec=core.AXES_SPEC)
+    restored = load_run_with_metadata(path, spec=core.AXES_SPEC)
     assert restored.metadata == record.metadata
     assert restored.metadata is not None
     assert restored.metadata.run_id == "0123456789abcdef0123456789abcdef-000003-7"

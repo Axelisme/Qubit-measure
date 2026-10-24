@@ -14,7 +14,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -66,10 +66,10 @@ class PowerAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
 
 
-class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+class PowerExp(Experiment[PowerResult, PowerCfg]):
     Options: ClassVar[type[PowerAnalyzeOptions]] = PowerAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
             AxesSpec.Axis("gains", "Drive gain", "a.u.", dtype=np.float64),

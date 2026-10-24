@@ -24,7 +24,6 @@ DualToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
 class DualToneLengthAdapter(BaseAdapter[LengthCfg, DualToneLengthRunResult]):
-    experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
 
     @staticmethod

@@ -124,7 +124,8 @@ from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -180,10 +181,12 @@ class MuxT2RamseyCfg(ProgramExpCfg):
         return self
 
 
-class MuxT2RamseyExp(PersistableExperiment[MuxCoherenceResult, MuxT2RamseyCfg]):
+class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
     """Measure mux Ramsey fringes and fit each participating qubit's T2*."""
 
-    AXES_SPEC = coherence_spec(MuxT2RamseyCfg, tag="mux/time_domain/t2ramsey")
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxCoherenceResult, MuxT2RamseyCfg]] = (
+        coherence_spec(MuxT2RamseyCfg, tag="mux/time_domain/t2ramsey")
+    )
     Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
 
     def run(self, config: MuxT2RamseyCfg, *, context: RunContext) -> MuxCoherenceResult:

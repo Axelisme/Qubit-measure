@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -60,11 +60,11 @@ class OneToneFluxCfg(ProgramExpCfg):
     sweep: OneToneFluxSweepCfg
 
 
-class OneToneFluxExp(PersistableExperiment[OneToneFluxResult, OneToneFluxCfg]):
+class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
     # Axes are declared inner-first (ADR-0063): inner (fastest-varying) axis is
     # freqs (stored as Hz on disk, MHz in memory); outer axis is jpa flux (a.u.).
     # signals.shape == (len(fluxes), len(freqs)); non-square sweeps round-trip.
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[OneToneFluxResult, OneToneFluxCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Readout frequency", "Hz", scale=1e6),
             AxesSpec.Axis("fluxes", "JPA Flux value", "a.u."),

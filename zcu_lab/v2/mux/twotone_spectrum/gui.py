@@ -126,7 +126,6 @@ class MuxFreqAdapter(
 ):
     """Measure mux qubit spectra and propose frequency and linewidth updates."""
 
-    experiment_tag: ClassVar[str | None] = MuxFreqExp.persistence_tag()
     sample_device_alias: ClassVar[str | None] = "$mux.flux_source"
     exp_cls = MuxFreqExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

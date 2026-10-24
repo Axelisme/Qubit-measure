@@ -104,7 +104,8 @@ from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
@@ -230,7 +231,7 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
     return MuxLengthScan(indices, np.asarray(coordinates, dtype=np.float64))
 
 
-class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
+class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
     """Measure Rabi oscillations by sweeping simultaneous qubit pulse lengths.
 
     Each point resets, starts the selected drives together, waits for the longest
@@ -238,12 +239,14 @@ class MuxLenRabiExp(PersistableExperiment[MuxSweepResult, MuxLenRabiCfg]):
     length axis in us and average complex IQ; fits estimate pi and pi/2 lengths.
     """
 
-    AXES_SPEC = mux_sweep_spec(
-        MuxLenRabiCfg,
-        tag="mux/rabi/len",
-        coordinate_label="Pulse length",
-        unit="s",
-        scale=1e-6,
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxSweepResult, MuxLenRabiCfg]] = (
+        mux_sweep_spec(
+            MuxLenRabiCfg,
+            tag="mux/rabi/len",
+            coordinate_label="Pulse length",
+            unit="s",
+            scale=1e-6,
+        )
     )
 
     Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions

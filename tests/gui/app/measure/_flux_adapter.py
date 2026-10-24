@@ -12,7 +12,7 @@ from zcu_tools.experiment import (
     AxesSpec,
     Axis,
     ExpCfgModel,
-    PersistableExperiment,
+    Experiment,
     ZSpec,
 )
 from zcu_tools.experiment.records import RunRecord
@@ -63,8 +63,8 @@ class SpectrumCfg(ExpCfgModel):
     sweep: SpectrumSweep = Field(default_factory=SpectrumSweep)
 
 
-class SpectrumCore(PersistableExperiment[SpectrumResult, SpectrumCfg]):
-    AXES_SPEC = AxesSpec(
+class SpectrumCore(Experiment[SpectrumResult, SpectrumCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[SpectrumResult, SpectrumCfg]] = AxesSpec(
         axes=(Axis("freqs", "freqs", "Hz", scale=1e6), Axis("values", "values", "A")),
         z=ZSpec("signals", "signals", "V"),
         result_type=SpectrumResult,

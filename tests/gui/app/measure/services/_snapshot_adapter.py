@@ -21,7 +21,7 @@ class SnapshotAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]
         del ctx
         return Form(SavingCfg, {})
 
-    experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
+    experiment_tag: ClassVar[str | None] = SavingCore.AXES_SPEC.tag
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )

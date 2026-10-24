@@ -66,7 +66,6 @@ class IdleZZAdapter(BaseAdapter[IdleZZCfg, IdleZZRun, IdleZZAnalyzeResult]):
     """Fixed-capture Form, thermal Ramsey acquisition and native restore."""
 
     exp_cls = IdleZZExp
-    experiment_tag: ClassVar[str | None] = IdleZZExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

@@ -20,8 +20,9 @@ from zcu_tools.experiment.axes_spec import (
     Axis,
     ZSpec,
 )
-from zcu_tools.experiment.base import PersistableExperiment
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.native_persistence import save_labber
 from zcu_tools.experiment.records import RunRecord
 
 # --------------------------------------------------------------------------- #
@@ -53,8 +54,8 @@ class _Result1D:
     signals: np.ndarray  # complex z, shape (Nfreq,)
 
 
-class _Exp2D(PersistableExperiment[_Result2D, _TinyCfg]):
-    AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = AxesSpec(
+class _Exp2D(Experiment[_Result2D, _TinyCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[_Result2D, _TinyCfg]] = AxesSpec(
         axes=(
             Axis("freqs", "Frequency", "Hz", MHZ_TO_HZ, np.float64),  # inner
             Axis("lengths", "Pulse length", "s", US_TO_S, np.float64),  # outer
@@ -66,8 +67,8 @@ class _Exp2D(PersistableExperiment[_Result2D, _TinyCfg]):
     )
 
 
-class _Exp1D(PersistableExperiment[_Result1D, _TinyCfg]):
-    AXES_SPEC: ClassVar[AxesSpec[Any, Any] | None] = AxesSpec(
+class _Exp1D(Experiment[_Result1D, _TinyCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[_Result1D, _TinyCfg]] = AxesSpec(
         axes=(Axis("freqs", "Frequency", "Hz", MHZ_TO_HZ, np.float64),),
         z=ZSpec("signals", "S21", "", np.complex128),
         result_type=_Result1D,
@@ -97,7 +98,11 @@ def test_save_applies_scale_on_disk(tmp_path: Any) -> None:
     result = _Result2D(freqs, lengths, signals)
 
     exp = _Exp2D()
-    exp.save(RunRecord(cfg=cfg, result=result), tmp_path / "scaled")
+    from zcu_tools.experiment import native_persistence
+
+    native_persistence.save_labber(
+        RunRecord(cfg=cfg, result=result), tmp_path / "scaled", spec=exp.AXES_SPEC
+    )
     ld = load_labber_data(_saved_path(tmp_path, "scaled"))
 
     # on disk the inner axis is in Hz (MHz * 1e6), outer in s (us * 1e-6)
@@ -112,9 +117,9 @@ def test_experiment_save_rejects_existing_exact_path(tmp_path: Any) -> None:
     exp = _Exp1D()
     base = tmp_path / "scan1d"
 
-    exp.save(source, base)
+    save_labber(source, base, spec=exp.AXES_SPEC)
     with pytest.raises(FileExistsError):
-        exp.save(source, base)
+        save_labber(source, base, spec=exp.AXES_SPEC)
 
     assert os.path.exists(_saved_path(tmp_path, "scan1d"))
     assert not os.path.exists(os.path.join(str(tmp_path), "scan1d_1.hdf5"))
@@ -129,11 +134,12 @@ def test_save_preserves_comment_and_tag(tmp_path: Path, tag: str | None) -> None
         np.ones(2, dtype=np.complex128),
     )
     path = tmp_path / "metadata.hdf5"
-    _Exp1D().save(
+    save_labber(
         RunRecord(cfg=_TinyCfg(reps=17), result=result),
         path,
         comment="T1 observation",
         tag=tag,
+        spec=_Exp1D.AXES_SPEC,
     )
     data = load_labber_data(str(path))
     decoded = decode_labber_comment(data.comment)
@@ -162,7 +168,11 @@ def test_save_fast_fails_on_shape_mismatch(tmp_path: Any) -> None:
     exp = _Exp2D()
 
     with pytest.raises(ValueError, match="axis.*length.*z dim"):
-        exp.save(RunRecord(cfg=_TinyCfg(), result=result), tmp_path / "bad")
+        save_labber(
+            RunRecord(cfg=_TinyCfg(), result=result),
+            tmp_path / "bad",
+            spec=exp.AXES_SPEC,
+        )
 
 
 def test_save_fast_fails_without_record_cfg(tmp_path: Any) -> None:
@@ -173,6 +183,8 @@ def test_save_fast_fails_without_record_cfg(tmp_path: Any) -> None:
     )
     exp = _Exp1D()
     with pytest.raises(ValueError, match=r"RunRecord\.cfg is None"):
-        exp.save(
-            RunRecord[_TinyCfg, _Result1D](cfg=None, result=result), tmp_path / "nocfg"
+        save_labber(
+            RunRecord[_TinyCfg, _Result1D](cfg=None, result=result),
+            tmp_path / "nocfg",
+            spec=exp.AXES_SPEC,
         )

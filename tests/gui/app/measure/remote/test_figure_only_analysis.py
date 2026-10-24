@@ -23,7 +23,7 @@ from ._form_rpc import FormRpc, ImmediateScheduler
 
 class FiguresAdapter(BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult]]):
     exp_cls = SavingCore
-    experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
+    experiment_tag: ClassVar[str | None] = SavingCore.AXES_SPEC.tag
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, requires_soc=False, load_data=False
     )

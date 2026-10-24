@@ -25,7 +25,6 @@ class TwoToneAdapter(BaseAdapter[TwotoneCfg, TwoToneRunResult]):
     """Acquire and display frequency versus flux-pulse gain without a model fit."""
 
     exp_cls = TwoToneExp
-    experiment_tag: ClassVar[str | None] = TwoToneExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

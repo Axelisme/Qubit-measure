@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.program.v2 import LoadValue, Module, Pulse, Readout, Repeat, Reset
@@ -81,9 +81,9 @@ def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
     ]
 
 
-class ZigZagExp(PersistableExperiment[ZigZagResult, ZigZagCfg]):
+class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
     # times is an int counter (a.u.) -> Axis dtype int64, scale IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[ZigZagResult, ZigZagCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("times", "Times", "a.u.", dtype=np.int64),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ZigZagResult,

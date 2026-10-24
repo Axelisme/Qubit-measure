@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -49,9 +50,9 @@ class DriveFreqCfg(ProgramExpCfg):
     sweep: DriveFreqSweepCfg
 
 
-class DriveFreqExp(PersistableExperiment[DriveFreqResult, DriveFreqCfg]):
+class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[DriveFreqResult, DriveFreqCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Pulse frequency", "Hz", scale=1e6),
             AxesSpec.Axis("gains", "Pulse gain", "a.u."),

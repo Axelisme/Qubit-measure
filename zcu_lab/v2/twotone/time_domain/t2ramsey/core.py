@@ -14,7 +14,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay_fringe,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -75,11 +75,11 @@ class T2RamseyAnalysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
-class T2RamseyExp(PersistableExperiment[T2RamseyResult, T2RamseyCfg]):
+class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
     Options: ClassVar[type[T2RamseyAnalyzeOptions]] = T2RamseyAnalyzeOptions
 
     # times stored as seconds on disk -> scale=1e-6
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T2RamseyResult, T2RamseyCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T2RamseyResult,

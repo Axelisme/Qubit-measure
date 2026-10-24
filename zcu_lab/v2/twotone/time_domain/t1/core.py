@@ -16,7 +16,7 @@ from zcu_tools.analysis.fitting import (
     fit_dual_decay,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -77,7 +77,7 @@ class T1Analysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
-class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+class T1Exp(Experiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
@@ -87,7 +87,7 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
     # times stored as seconds on disk -> scale=1e-6
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
@@ -259,11 +259,11 @@ class T1WithToneAnalyzeOptions:
     dual_exp: bool = False
 
 
-class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
+class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
     Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
 
     # times stored as seconds on disk -> scale=1e-6
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1WithToneCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
@@ -400,9 +400,9 @@ class ScanT1WithToneAnalysis:
     t1errs: NDArray[np.float64]
 
 
-class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
+class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     # inner = times (result_shape, s on disk -> US_TO_S); outer = values (gain, a.u.)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[ScanT1WithToneResult, ScanT1WithToneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("times", "Time", "s", 1e-6),
             AxesSpec.Axis("values", "Readout Gain", "a.u."),

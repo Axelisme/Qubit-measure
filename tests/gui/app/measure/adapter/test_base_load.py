@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import Container, load
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -33,7 +34,7 @@ class _LoadedResult:
 _LoadedRecord: TypeAlias = RunRecord[_Cfg, _LoadedResult]
 
 
-class _LoadExp:
+class _LoadExp(Experiment[_LoadedResult, _Cfg]):
     pass
 
 
@@ -42,32 +43,6 @@ class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, None, None]):
         analysis=AnalysisMode.NONE
     )
     exp_cls = _LoadExp
-
-
-class _NeedsArgsExp:
-    def __init__(self, required: object) -> None:
-        del required
-
-
-class _NeedsArgsAdapter(_LoadAdapter):
-    exp_cls = _NeedsArgsExp
-
-
-class _NoLoadExp:
-    pass
-
-
-class _NoLoadAdapter(_LoadAdapter):
-    exp_cls = _NoLoadExp
-
-
-class _InternalTypeErrorExp:
-    def __init__(self) -> None:
-        raise TypeError("constructor bug")
-
-
-class _InternalTypeErrorAdapter(_LoadAdapter):
-    exp_cls = _InternalTypeErrorExp
 
 
 @pytest.fixture
@@ -94,16 +69,6 @@ def test_base_adapter_load_reads_native_record_and_full_history(
         assert restored.cfg_issue is None
 
 
-@pytest.mark.parametrize("adapter_cls", [_NeedsArgsAdapter, _NoLoadAdapter])
-def test_base_adapter_restore_raises_explicit_unsupported(
-    adapter_cls: type[_LoadAdapter], stored: Container
-) -> None:
+def test_base_adapter_restore_rejects_a_core_without_a_spec(stored: Container) -> None:
     with pytest.raises(NotImplementedError, match="does not support loading"):
-        adapter_cls().restore(stored)
-
-
-def test_base_adapter_restore_preserves_constructor_internal_type_error(
-    stored: Container,
-) -> None:
-    with pytest.raises(TypeError, match="constructor bug"):
-        _InternalTypeErrorAdapter().restore(stored)
+        _LoadAdapter().restore(stored)

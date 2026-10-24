@@ -22,7 +22,6 @@ AccPhaseRunResult: TypeAlias = RunRecord[AccPhaseCfg, AccPhaseResult]
 
 
 class AccPhaseAdapter(BaseAdapter[AccPhaseCfg, AccPhaseRunResult]):
-    experiment_tag: ClassVar[str | None] = AccPhaseExp.persistence_tag()
     exp_cls = AccPhaseExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

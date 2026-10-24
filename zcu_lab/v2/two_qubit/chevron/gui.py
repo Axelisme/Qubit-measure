@@ -26,7 +26,6 @@ class ChevronAdapter(BaseAdapter[ChevronCfg, ChevronRun, RabiAnalysis]):
     """Fixed-capture acquisition, saved-source analysis and native restore."""
 
     exp_cls = ChevronExp
-    experiment_tag: ClassVar[str | None] = ChevronExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

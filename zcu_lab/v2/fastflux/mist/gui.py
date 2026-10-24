@@ -37,7 +37,6 @@ class MistAnalyzeParams:
 
 class MistAdapter(BaseAdapter[MistCfg, MistRunResult, None, MistAnalyzeParams]):
     exp_cls = MistExp
-    experiment_tag: ClassVar[str | None] = MistExp.persistence_tag()
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @staticmethod

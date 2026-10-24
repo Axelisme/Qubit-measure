@@ -28,8 +28,6 @@ MistPowerFreqRunResult: TypeAlias = RunRecord[FreqPowerCfg, FreqPowerResult]
 
 
 class MistPowerFreqAdapter(BaseAdapter[FreqPowerCfg, MistPowerFreqRunResult]):
-    experiment_tag: ClassVar[str | None] = FreqPowerExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[FreqPowerCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

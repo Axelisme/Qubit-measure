@@ -14,9 +14,12 @@ from zcu_tools.datafile import (
     ContainerAttrs,
     JsonObject,
     LabberMetadata,
+    encode_labber_comment,
+    format_ext,
     load,
     read_doc,
     save,
+    write_labber,
 )
 
 from .axes_spec import (
@@ -149,6 +152,35 @@ def prepare_run_data(
         cfg,
         LabberMetadata(comment=comment, tags=spec.tag),
         spec.labber_layout if isinstance(spec, GroupedAxesSpec) else "common",
+    )
+
+
+def save_labber(
+    source: RunRecord[CfgT, ResultT],
+    destination: Path,
+    *,
+    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
+    comment: str | None = None,
+    tag: str | None = None,
+) -> None:
+    """Export a record to the caller's Labber-normalized local path.
+
+    cfg must be present. comment is appended to the cfg JSON envelope; tag
+    overrides spec.tag. Grouped exports follow spec.labber_layout, requiring a
+    common grid unless independent layout is declared. Invalid arrays or cfg
+    raise ValueError/TypeError; existing paths raise FileExistsError and I/O
+    errors propagate. No native file, path reservation or live capture occurs.
+    """
+    prepared = prepare_run_data(source, spec=spec, comment=comment or "")
+    write_labber(
+        Path(format_ext(str(destination))),
+        prepared.container,
+        metadata=replace(
+            prepared.labber_metadata,
+            comment=encode_labber_comment(prepared.cfg.values, comment),
+            tags=[tag] if tag is not None else prepared.labber_metadata.tags,
+        ),
+        grouped_layout=prepared.labber_layout,
     )
 
 

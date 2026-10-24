@@ -73,7 +73,6 @@ class CZAmplitudeAdapter(
     """
 
     exp_cls = CZAmplitudeExp
-    experiment_tag: ClassVar[str | None] = CZAmplitudeExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

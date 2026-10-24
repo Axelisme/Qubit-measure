@@ -77,7 +77,6 @@ class CPMGAdapter(
 ):
     """Acquire CPMG decay rows and fit their count dependence without writeback."""
 
-    experiment_tag: ClassVar[str | None] = CPMG_Exp.persistence_tag()
     exp_cls = CPMG_Exp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

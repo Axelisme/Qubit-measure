@@ -47,8 +47,6 @@ class SsAcStarkAnalyzeResult(AnalyzeResultBase):
 class SsAcStarkAdapter(
     BaseAdapter[AcStarkCfg, SsAcStarkRunResult, SsAcStarkAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = AcStarkExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

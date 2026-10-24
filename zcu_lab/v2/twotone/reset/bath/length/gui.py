@@ -20,7 +20,6 @@ BathLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
 class BathLengthAdapter(BaseAdapter[LengthCfg, BathLengthRunResult]):
-    experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
 
     @staticmethod

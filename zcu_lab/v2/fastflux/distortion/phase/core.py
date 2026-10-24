@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -59,9 +60,9 @@ class PhaseAnalysis:
     phases_deg: NDArray[np.float64]
 
 
-class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
+class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
     # inner phases raw deg (IDENTITY); outer lengths memory-us -> disk-s via US_TO_S
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("phases", "Phase", "deg"),
             AxesSpec.Axis("lengths", "Wait Time", "s", scale=1e-6),

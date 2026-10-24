@@ -282,9 +282,9 @@ owner 型別或分析參數，不必先修改基底。
 ## 執行與分析契約
 
 GUI Load 由 `LoadService.load_result` 讀取 native data，核對 adapter 的 `experiment_tag`，
-再呼叫 `restore(stored)`。`BaseAdapter.restore` 預設建構 `exp_cls()` 並委派
-`from_stored(stored)`，回傳含 record 與 cfg_issue 的 `RestoredRun`。Single 與 grouped spec
-共用此入口。需要 constructor 參數或自訂結果形式時，adapter 實作 `restore`；不支援 Load
+再呼叫 `restore(stored)`。`BaseAdapter.restore` 預設呼叫
+`restore_run(stored, spec=exp_cls.AXES_SPEC)`，回傳含 record 與 cfg_issue 的 `RestoredRun`。Single 與 grouped spec
+共用此入口，不需要建構 core。自訂結果形式時，adapter 實作 `restore`；不支援 Load
 則宣告 `load_data=False`。Hook 不做 I/O、不讀目前表單、不重捕 history，也不提供 legacy fallback。
 有效 native data 的 typed cfg 不相容時可保留資料與 cfg_issue；缺 cfg envelope 或壞資料仍拒絕。
 失敗在替換結果前回報，既有結果不變。
@@ -297,7 +297,7 @@ OneTone／TwoTone FluxDep 的互動分析由 frontend 擁有。
 
 GUI Save 呼叫 `data_item(key, result, *, comment)` 與
 `analysis_item(key, result, parameters, *, pane)` 取得保存內容，不呼叫 adapter load/save。
-Base 的 data producer 以明確 RunRecord 與 `exp_cls().persistence_spec()` 準備 DataItem；
+Base 的 data producer 以明確 RunRecord 與 `exp_cls.AXES_SPEC` 準備 DataItem；
 opaque 自訂結果須覆寫 producer。Analysis producer 只取已提交輸出與當次歷史輸入，不取編輯草稿。
 這些 hooks 不讀 live context、不選路徑或格式，也不寫檔。缺 cfg 不以目前表單補值，
 準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析。檔案寫入由 framework 保存流程負責。

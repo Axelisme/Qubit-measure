@@ -31,7 +31,6 @@ JpaFluxOneToneRunResult: TypeAlias = RunRecord[OneToneFluxCfg, OneToneFluxResult
 
 
 class JpaFluxOneToneAdapter(BaseAdapter[OneToneFluxCfg, JpaFluxOneToneRunResult]):
-    experiment_tag: ClassVar[str | None] = OneToneFluxExp.persistence_tag()
     exp_cls = OneToneFluxExp
 
     @staticmethod

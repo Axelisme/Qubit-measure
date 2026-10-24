@@ -15,7 +15,7 @@ from zcu_tools.analysis.fitting.singleshot_rabi import (
 )
 from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -83,10 +83,10 @@ class LenRabiAnalyzeOptions:
     max_calls: int | None = None
 
 
-class LenRabiExp(PersistableExperiment[LenRabiResult, LenRabiCfg]):
+class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
     Options: ClassVar[type[LenRabiAnalyzeOptions]] = LenRabiAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[LenRabiResult, LenRabiCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
             AxesSpec.Axis("lengths", "Length", "s", scale=1e-6, dtype=np.float64),

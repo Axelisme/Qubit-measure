@@ -26,8 +26,6 @@ CheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
 
 class CheckAdapter(BaseAdapter[CheckCfg, CheckRunResult]):
-    experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[CheckCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

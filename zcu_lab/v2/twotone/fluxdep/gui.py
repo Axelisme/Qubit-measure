@@ -55,7 +55,6 @@ class FluxDepAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = FreqFluxExp.persistence_tag()
     exp_cls = FreqFluxExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.INTERACTIVE, load_data=True

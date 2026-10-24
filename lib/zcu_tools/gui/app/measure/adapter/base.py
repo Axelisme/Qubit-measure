@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal
 
 from zcu_tools.datafile import Container
 from zcu_tools.experiment.artifacts import AnalysisDocument
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.native_persistence import RestoredRun, restore_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -66,6 +67,11 @@ def _analyze_params_generic_arg(cls: type) -> type:
             if isinstance(arg, type):
                 return arg
     return type(None)
+
+
+def _validate_experiment_class(exp_cls: type[object]) -> None:
+    if not issubclass(exp_cls, Experiment):
+        raise TypeError("exp_cls must be an Experiment subclass")
 
 
 def _can_construct_without_args(cls: type[Any]) -> bool:
@@ -128,9 +134,9 @@ class BaseAdapter(
     holds adapters only through that generic-free Protocol.
     """
 
-    exp_cls: ClassVar[type[Any]]
+    exp_cls: ClassVar[type[Experiment[Any, Any]]] = Experiment
     # Native acquisition evidence is explicit, not inferred from filename policy.
-    # Concrete adapters set the tag from their experiment's persistence spec.
+    # Default to the core declaration; adapters may override the public tag.
     # See ExpAdapterProtocol.run for the associated RunRecord envelope contract.
     experiment_tag: ClassVar[str | None] = None
     # Device alias supplying Sample writeback coordinates, e.g. "$bias_source".
@@ -139,7 +145,7 @@ class BaseAdapter(
     # None disables only Sample writeback. Alias resolution or missing evidence
     # omits the sample with a public unavailable reason; no live fallback occurs.
     sample_device_alias: ClassVar[str | None] = None
-    # Most registered adapters use the canonical PersistableExperiment loader;
+    # Most registered adapters use the canonical Experiment loader;
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
     # Explicit UTF-8 Markdown source. None returns the unwritten-guide notice;
@@ -158,6 +164,12 @@ class BaseAdapter(
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        _validate_experiment_class(cls.exp_cls)
+        if "experiment_tag" not in cls.__dict__ and (
+            "exp_cls" in cls.__dict__ or cls.experiment_tag is None
+        ):
+            spec = cls.exp_cls.AXES_SPEC
+            cls.experiment_tag = spec.tag if spec is not None else None
         cls._validate_capability_contract()
 
     @classmethod
@@ -279,24 +291,18 @@ class BaseAdapter(
     @classmethod
     def _validate_load_capability(cls, *, enabled: bool) -> None:
         """Require a declared loader, or forbid an override when loading is disabled."""
-        # Loading is a capability gate, not a runtime probe. A concrete adapter
-        # may provide its own loader, or it may opt into BaseAdapter.restore when the
-        # experiment class can be constructed without arguments and exposes a
-        # canonical callable loader. A disabled capability must not hide an
-        # accidental adapter override.
+        # An explicit adapter override may restore its own opaque result.
+        # The default loader needs only a typed declaration, never an instance.
         if enabled:
-            if not cls._is_method_implemented("restore"):
-                exp_cls = getattr(cls, "exp_cls", None)
-                has_canonical_loader = isinstance(exp_cls, type) and (
-                    _can_construct_without_args(exp_cls)
-                    and callable(getattr(exp_cls, "from_stored", None))
+            if (
+                not cls._is_method_implemented("restore")
+                and cls.exp_cls.AXES_SPEC is None
+            ):
+                raise TypeError(
+                    f"{cls.__name__} declares load_data=True but has neither "
+                    "a concrete restore() override nor an Experiment exp_cls "
+                    "with AXES_SPEC"
                 )
-                if not has_canonical_loader:
-                    raise TypeError(
-                        f"{cls.__name__} declares load_data=True but has neither "
-                        "a concrete restore() override nor a no-argument exp_cls with "
-                        "a callable from_stored"
-                    )
         else:
             cls._forbid_method(
                 "restore",
@@ -512,30 +518,19 @@ class BaseAdapter(
         return self.exp_cls().run(cfg, context=context)
 
     def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
-        """Restore already-read native data through the core's from_stored contract.
+        """Restore native history using exp_cls.AXES_SPEC without constructing it.
 
-        stored contains validated generic data and original history, not current
-        form inputs. Return the adapter-owned record and explicit cfg diagnostic.
-        Missing from_stored or required constructor arguments raise
-        NotImplementedError. Invalid data raises ValueError; core constructor
-        failures propagate. No I/O, Labber fallback or history recapture occurs.
+        Return a typed record and cfg diagnostic without I/O or live capture.
+        Missing AXES_SPEC raises NotImplementedError; invalid data raises
+        ValueError/TypeError. Incompatible typed cfg retains data with cfg=None
+        and emits CfgUnavailableWarning. No Labber fallback is attempted.
         """
-        if not _can_construct_without_args(self.exp_cls):
+        spec = self.exp_cls.AXES_SPEC
+        if spec is None:
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             )
-        exp = self.exp_cls()
-        from_stored = getattr(exp, "from_stored", None)
-        if not callable(from_stored):
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support loading native result files"
-            )
-        try:
-            return exp.from_stored(stored)
-        except NotImplementedError as exc:
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support loading native result files"
-            ) from exc
+        return restore_run(stored, spec=spec)
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
@@ -607,6 +602,7 @@ class BaseAdapter(
         """
         if not isinstance(result, RunRecord):
             raise TypeError("Native saving requires a RunRecord")
-        return DataItem.from_run(
-            key, result, spec=self.exp_cls().persistence_spec(), comment=comment
-        )
+        spec = self.exp_cls.AXES_SPEC
+        if spec is None:
+            raise NotImplementedError(f"{type(self).__name__} has no AXES_SPEC")
+        return DataItem.from_run(key, result, spec=spec, comment=comment)

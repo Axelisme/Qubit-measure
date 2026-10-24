@@ -64,7 +64,6 @@ class SpectroscopyAdapter(
     """Fixed-capture Form, full raw acquisition, diagnostic analysis and restore."""
 
     exp_cls = SpectroscopyExp
-    experiment_tag: ClassVar[str | None] = SpectroscopyExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

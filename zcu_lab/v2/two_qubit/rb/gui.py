@@ -58,7 +58,6 @@ class TwoQubitRBAdapter(BaseAdapter[RBCfg, RBRun, RBAnalyzeResult]):
     """
 
     exp_cls = RBExp
-    experiment_tag: ClassVar[str | None] = RBExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

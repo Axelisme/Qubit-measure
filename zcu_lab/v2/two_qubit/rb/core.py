@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -156,11 +156,11 @@ class RBResult:
     signals: NDArray[np.complex128]
 
 
-class RBExp(PersistableExperiment[RBResult, RBCfg]):
+class RBExp(Experiment[RBResult, RBCfg]):
     """Stateless paired RB definition, native IO and saved-GE joint00 analysis."""
 
     Options = RBOptions
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[RBResult, RBCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
             AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),

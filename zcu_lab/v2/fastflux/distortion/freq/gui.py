@@ -22,7 +22,6 @@ FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 class FastFluxFreqAdapter(BaseAdapter[FreqCfg, FreqRunResult]):
-    experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

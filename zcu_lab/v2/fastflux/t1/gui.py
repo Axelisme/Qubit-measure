@@ -50,7 +50,6 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult]):
     """Delegate the physical sequence, fit and native persistence to the core."""
 
     exp_cls = T1Exp
-    experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

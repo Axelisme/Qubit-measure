@@ -22,8 +22,6 @@ SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
 class SsT1Adapter(BaseAdapter[T1Cfg, SsT1RunResult]):
-    experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T1Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
