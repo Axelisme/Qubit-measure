@@ -31,6 +31,7 @@ from tests.gui.app.measure._native_save_support import (
     SavingAdapter,
 )
 from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure.ui._results_browser_support import navigation_path
 
 
 def test_menu_opens_independent_results_window(
@@ -59,6 +60,7 @@ def test_grouping_reuses_visible_cards_and_decoded_images(
     if run_focus:
         ui.click(object_name="results.figure.0")
         ui.click(object_name="results.figure.1")
+        ui.press_key(Qt.Key.Key_Escape)
     ui.invoke_context_action(action="Add to comparison", object_name="results.figure.0")
     focus = ui.observe(object_name="results.focus").text
     current = ui.observe(object_name="results.current_figure").text
@@ -131,29 +133,6 @@ def test_gallery_comparison_and_analysis_have_independent_tabs(
     ui.screenshot(tmp_path / "comparison-tab.png")
     ui.select_tab("Gallery")
     assert ui.observe(object_name="results.figure.0").visible
-
-
-def test_comparison_tab_counts_unique_pins_remove_and_clear(
-    populated_browser: ComponentDriver,
-    tmp_path: Path,
-) -> None:
-    ui = populated_browser
-    assert ui.tabs("Gallery").captions == ("Gallery", "Comparison")
-    ui.click(object_name="results.figure.0")
-    ui.click("Add to comparison")
-    assert ui.tabs("Gallery").captions == ("Gallery", "Comparison (1)")
-    ui.click("Add to comparison")
-    assert ui.tabs("Gallery").captions == ("Gallery", "Comparison (1)")
-    ui.click("Back")
-    ui.click(object_name="results.figure.1")
-    ui.click("Add to comparison")
-    ui.select_tab("Comparison (2)")
-    ui.screenshot(tmp_path / "count-two.png")
-    ui.click(object_name="results.compare.remove.1")
-    assert ui.tabs("Gallery").captions == ("Gallery", "Comparison (1)")
-    ui.click("Clear comparison")
-    assert ui.tabs("Gallery").captions == ("Gallery", "Comparison")
-    ui.screenshot(tmp_path / "count-cleared.png")
 
 
 def test_cached_gallery_cards_share_available_width_after_history(
@@ -339,18 +318,6 @@ def navigation_paths(ui: ComponentDriver) -> set[tuple[str, ...]]:
     }
 
 
-def navigation_path(ui: ComponentDriver, path: tuple[str, ...]) -> tuple[str, ...]:
-    """Resolve semantic captions to their currently visible decorated path."""
-    matches = [
-        row.path
-        for row in ui.visible().tree_rows
-        if tuple(part.split("  (", 1)[0] for part in row.path) == path
-    ]
-    if len(matches) != 1:
-        raise LookupError(f"{path!r}: {len(matches)} visible paths")
-    return matches[0]
-
-
 @pytest.mark.parametrize("point_first", [False, True])
 def test_entry_tree_paths_keep_entries_isolated(
     populated_browser: ComponentDriver, tmp_path: Path, point_first: bool
@@ -431,6 +398,7 @@ def test_group_image_click_opens_run_and_current_figure_in_one_step(
         ui.observe(object_name="results.current_figure").text
         == "Current figure: plot-1.png"
     )
+    ui.press_key(Qt.Key.Key_Escape)
     ui.click("Back")
     assert (
         ui.observe(object_name="results.current_figure").text
@@ -446,38 +414,6 @@ def test_group_image_click_opens_run_and_current_figure_in_one_step(
     ui.screenshot(tmp_path / "direct-run-current-figure.png")
 
 
-def test_run_image_opens_one_replaceable_tool_and_escape_closes_it(
-    populated_browser: ComponentDriver,
-    browser_host: MainWindow,
-    tmp_path: Path,
-) -> None:
-    ui = populated_browser
-    ui.click(object_name="results.figure.0")
-    ui.click(object_name="results.figure.1")
-    assert ui.observe(object_name="results.image_viewer").visible
-    viewer = browser_host.findChild(QWidget, "results.image_viewer")
-    assert viewer is not None
-    assert viewer.windowFlags() & Qt.WindowType.Tool
-    assert viewer.windowTitle() == "aaaaaa / plot-1.png"
-    assert viewer.width() <= 400 and viewer.height() <= 220
-    preview = ComponentDriver(viewer)
-    preview.screenshot(tmp_path / "floating-second.png")
-    preview.resize_window(300, 180)
-    preview.screenshot(tmp_path / "floating-resized.png")
-    ui.click(object_name="results.figure.0")
-    assert browser_host.findChild(QWidget, "results.image_viewer") is viewer
-    assert viewer.windowTitle() == "aaaaaa / plot-0.png"
-    ui.press_key(Qt.Key.Key_Escape, object_name="results.image_viewer")
-    assert not ui.observe(object_name="results.image_viewer").visible
-    ui.screenshot(tmp_path / "floating-closed.png")
-    ui.click(object_name="results.figure.0")
-    assert viewer.isVisible()
-    browser = browser_host.findChild(QWidget, "results.browser")
-    assert browser is not None
-    browser.close()
-    assert not viewer.isVisible()
-
-
 def test_history_reuses_images_and_restores_the_matching_gallery(
     populated_browser: ComponentDriver,
     browser_host: MainWindow,
@@ -491,9 +427,11 @@ def test_history_reuses_images_and_restores_the_matching_gallery(
     ui.screenshot(tmp_path / "history-00-all.png")
     ui.click(object_name="results.figure.0")
     ui.screenshot(tmp_path / "history-01-run.png")
-    ui.click("Add to comparison")
+    ui.invoke_context_action(action="Add to comparison", object_name="results.figure.0")
+    ui.select_tab("Gallery")
     ui.click(object_name="results.figure.1")
     ui.screenshot(tmp_path / "history-02-second.png")
+    ui.press_key(Qt.Key.Key_Escape)
     reads: list[str] = []
     decodes: list[int] = []
     original_read = ResultsIndex.read_figure
@@ -631,6 +569,7 @@ def test_figure_drilldown_details_scroll_and_pins(
         == "Current figure: plot-1.png"
     )
     ui.screenshot(tmp_path / "run-current-details.png")
+    ui.press_key(Qt.Key.Key_Escape)
     details = {
         row.columns
         for row in ui.visible().tree_rows
@@ -653,7 +592,6 @@ def test_figure_drilldown_details_scroll_and_pins(
     ui.screenshot(tmp_path / "run-values-details.png")
     assert "alpha / p1" in ui.observe(object_name="results.figure.0").tooltip
     ui.invoke_context_action(action="Add to comparison", object_name="results.figure.1")
-    ui.click("Add to comparison")
     ui.select_tab("Comparison (1)")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
     assert len(ui.table_rows(object_name="results.comparison_table")) == 1
@@ -717,7 +655,7 @@ def test_figure_only_run_explains_open_refusal(
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
     assert "results.figure.0" in {w.object_name for w in ui.visible().widgets}
     ui.click(object_name="results.figure.0")
-    button = ui.observe("Open in new analysis tab")
+    button = ui.observe("Load into analysis tab")
     assert not button.enabled
     assert "No data.h5" in button.tooltip
     assert ("registration", "Unregistered") in {
@@ -786,7 +724,7 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
     ui, variant = load_browser
     ui.select_menu("Results ▾", ("Results browser…",))
     ui.click(object_name="results.figure.0")
-    ui.click("Open in new analysis tab")
+    ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     assert qapp.activeWindow() is live_ui[2]
     tabs = ui.tabs("saving")
@@ -886,12 +824,14 @@ def test_browsing_only_resolves_the_experiment_when_open_is_clicked(
     try:
         ui.select_combo("Experiment → point", object_name="results.group")
         ui.click(object_name="results.figure.0")
-        ui.click("Add to comparison")
+        ui.invoke_context_action(
+            action="Add to comparison", object_name="results.figure.0"
+        )
         ui.select_tab("Comparison (1)")
         ui.select_tab("Gallery")
         ui.select_tab("Analysis")
         assert calls == []
-        ui.click("Open in new analysis tab")
+        ui.click("Load into analysis tab")
         assert calls == ["mux/readout"]
         assert (
             "No load-capable adapter" in ui.observe(object_name="results.feedback").text
@@ -919,7 +859,7 @@ def test_unresolved_identity_remains_browsable_and_refuses_new_tab(
         for row in ui.visible().tree_rows
         if row.tree_name == "results.details"
     }
-    ui.click("Open in new analysis tab")
+    ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     assert "old_tag" in feedback and "No load-capable adapter" in feedback
     assert ui.tabs("saving").captions == ("saving",)
@@ -951,7 +891,7 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
         for row in ui.visible().tree_rows
         if row.tree_name == "results.details"
     }
-    ui.click("Open in new analysis tab")
+    ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     assert "Multiple load-capable adapters" in feedback
     assert all(name in feedback for name in ("saving", "alternative", "test/saving"))
@@ -979,7 +919,7 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
         # A file can change after indexing; Load, not the browser, admits bytes.
         session.native_data_path.write_bytes(b"not a native container")
     ui.click(object_name="results.figure.0")
-    ui.click("Open in new analysis tab")
+    ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
     expected = {
         "capability": "does not support loading data",

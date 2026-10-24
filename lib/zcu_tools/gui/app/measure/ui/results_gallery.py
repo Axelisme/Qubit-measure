@@ -11,7 +11,6 @@ from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QPoint, QSize, Qt
 from qtpy.QtGui import QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
-    QDialog,
     QFrame,
     QGridLayout,
     QLabel,
@@ -30,7 +29,7 @@ class ResultImageAction(Enum):
     """Saved-image commands, independent of menu captions.
 
     COPY_PATH copies the exact member path; ADD_TO_COMPARISON pins its run and
-    selected member; COPY_IMAGE copies decoded PNG pixels to the clipboard.
+    reveals that PNG row; COPY_IMAGE copies decoded PNG pixels to the clipboard.
     Values are stable command identifiers, never presentation text.
     """
 
@@ -135,10 +134,6 @@ class ResultsGallery(QScrollArea):
             tuple[str, str, tuple[int, int, int, int, int] | None], ...
         ] = ()
         self._all_figures = False
-        self._viewer = QDialog(self, Qt.WindowType.Tool)
-        self._viewer.setObjectName("results.image_viewer")
-        self._viewer_layout = QVBoxLayout(self._viewer)
-        self._viewer_layout.setContentsMargins(0, 0, 0, 0)
         self.setObjectName("results.gallery")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -231,49 +226,19 @@ class ResultsGallery(QScrollArea):
         self._presentation = presentation
         self._all_figures = all_figures
 
-    def show_image(self, run: ResultRun, selector: str) -> None:
-        """Open or replace the single non-modal Tool preview for an indexed PNG.
+    def original_pixmap(self, run: ResultRun, selector: str) -> QPixmap:
+        """Return the indexed PNG's native raster, reusing an unchanged card.
 
-        The initial window fits the smaller of native image size and 80% of the
-        screen's available area. Reuse an unchanged decoded gallery image. Unknown
-        run/member raises KeyError; read/decode errors propagate to the caller.
-        Esc/close hides the preview; the gallery owns its lifetime.
+        Unknown run/member raises KeyError; read/decode errors propagate.
+        The caller owns presentation; this gallery never opens another window.
         """
         run = self._index.get_run(run.key)
         path = next((path for path in run.figure_paths if path.name == selector), None)
         if path is None:
             raise KeyError(selector)
-        saved = self._saved_card(run, path, self._signature(path))
-        raster = saved.image.original_pixmap()
-        image = ResultImage(raster)
-        image.setMinimumWidth(0)
-        image.setObjectName("results.image_viewer.image")
-        image.setToolTip(saved.image.toolTip())
-        image.action_requested.connect(
-            lambda command: self._action(run, selector, command)
-        )
-        old = self._viewer_layout.takeAt(0)
-        if old is not None and (widget := old.widget()) is not None:
-            widget.hide()
-            widget.setObjectName("")
-            widget.deleteLater()
-        self._viewer_layout.addWidget(image)
-        self._viewer.setWindowTitle(f"{run.run_path.name[-6:]} / {selector}")
-        if not self._viewer.isVisible():
-            screen = self.screen()
-            available = (
-                screen.availableGeometry() if screen is not None else self.rect()
-            )
-            self._viewer.resize(
-                min(raster.width(), round(available.width() * 0.8)),
-                min(raster.height(), round(available.height() * 0.8)),
-            )
-        self._viewer.show()
-        self._viewer.raise_()
-
-    def close_image(self) -> None:
-        """Hide the retained floating preview when its browser closes."""
-        self._viewer.close()
+        return self._saved_card(
+            run, path, self._signature(path)
+        ).image.original_pixmap()
 
     @staticmethod
     def _signature(path: Path) -> tuple[int, int, int, int, int] | None:
