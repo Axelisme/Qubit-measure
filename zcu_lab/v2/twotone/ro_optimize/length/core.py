@@ -15,10 +15,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
-from zcu_tools.plotting import live_line
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Reset, SweepCfg
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
+
+from zcu_lab.v2._support import live_line
 
 
 @dataclass(frozen=True)

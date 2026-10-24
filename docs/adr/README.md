@@ -64,7 +64,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Plotting
 
-Notebook liveplot 關閉與 backend 契約見 [liveplot README](../../lib/zcu_tools/plotting/liveplot/README.md)；GUI 的 worker／Qt 繪圖責任見 0067。
+具名圖與通用 owner 更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)。Live 工具與格式歸 lab，邊界見 [[0072]]；GUI 的 worker／Qt 繪圖責任見 [[0067]]。
 
 ## Agents
 
