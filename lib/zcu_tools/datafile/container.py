@@ -209,11 +209,11 @@ def read_doc(path: Path, name: str) -> JsonObject:
 
 
 def inspect(path: Path) -> ContainerInfo:
-    """Read header and var/doc names and schemas without loading any arrays.
+    """Read a major-3 container header and names/schemas without loading arrays.
 
     Coordinate arrays are empty in returned axes. Documents are not decoded, so
-    inspect is not a promise that load will succeed. Legacy headers and variable
-    schemas are supported. Malformed schema raises FormatError; I/O propagates.
+    inspect is not a promise that load will succeed. Same-major future minors
+    are accepted. Malformed headers or schemas raise FormatError; I/O propagates.
     """
     with h5.File(path, "r") as file:
         try:

@@ -84,7 +84,7 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 `RecordsLedger.find_many(event_ids)` 一次讀取 ledger，依首次出現順序回傳 ID 到 `LedgerEntry | None` 的 mapping。缺失事件回 None，已存在事件的附檔與 ledger 錯誤仍傳遞。`provenance.missing_sources` 忽略 manual 並回報全部缺失 ID，供 library 逐 root 清理。既有 `get`、`get_many` 與 `validate_sources` 仍在首個缺失 ID 拋錯。
 
-Acquired 只保存 run 身分、tab、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
+Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 
 `ResultEntry.read_events_snapshot(name, *, result_root)` 封裝歷史 entry 的身分、records 路徑與 ledger 讀取。它不解析 component，也不建立 entry、檔案或 lock。缺 entry、records 或 ledger 回空 tuple；已有 entry 的身分、ledger schema 與 I/O 錯誤傳遞，重導路徑的 symlink 拒絕。
 
