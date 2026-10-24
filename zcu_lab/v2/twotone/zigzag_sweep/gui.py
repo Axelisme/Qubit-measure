@@ -4,17 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -41,57 +40,49 @@ class ZigZagScanAnalyzeResult(AnalyzeResultBase):
     best_value: float
 
 
-class _ZigZagScanBase(
-    BaseAdapter[
-        ZigZagScanCfg,
-        ZigZagScanRunResult,
-        ZigZagScanAnalyzeResult,
-        ZigZagScanAnalyzeParams,
-    ]
-):
-    """Shared body; subclasses choose the single swept parameter."""
-
-    exp_cls = ZigZagScanExp
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: ZigZagScanCfg,
-        *,
-        context: RunContext,
-    ) -> ZigZagScanRunResult:
-        del req
-        result = ZigZagScanExp().run(cfg, context=context)
-        return RunRecord(cfg=cfg, result=result)
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[ZigZagScanRunResult, ZigZagScanAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> ZigZagScanAnalyzeResult:
-        params = req.analyze_params
-        analysis = ZigZagScanExp().analyze(
-            req.run_result,
-            ZigZagScanAnalyzeOptions(find_range=(params.find_min, params.find_max)),
-            plots=plots,
-        )
-        return ZigZagScanAnalyzeResult(best_value=analysis.min_value)
+def _ZigZagScanBase_analyze(
+    req: AnalyzeRequest[ZigZagScanRunResult, ZigZagScanAnalyzeParams],
+    *,
+    plots: Plots,
+) -> ZigZagScanAnalyzeResult:
+    params = req.analyze_params
+    analysis = ZigZagScanExp().analyze(
+        req.run_result,
+        ZigZagScanAnalyzeOptions(find_range=(params.find_min, params.find_max)),
+        plots=plots,
+    )
+    return ZigZagScanAnalyzeResult(best_value=analysis.min_value)
 
 
-class ZigZagScanGainAdapter(_ZigZagScanBase):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_gain_form(ctx)
-
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
+def _ZigZagScanGain_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_gain_form(ctx)
 
 
-class ZigZagScanFreqAdapter(_ZigZagScanBase):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_freq_form(ctx)
+GAIN_DEFINITION = Adapter(
+    spec=ZigZagScanExp.AXES_SPEC,
+    make_form=_ZigZagScanGain_make_form,
+    run=ZigZagScanExp().run,
+    guide=Path(__file__).with_name("guide.gain.md"),
+    analysis=Analysis(
+        fn=_ZigZagScanBase_analyze,
+        options=lambda source, env: ZigZagScanAnalyzeParams(),
+    ),
+)
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")
+
+def _ZigZagScanFreq_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_freq_form(ctx)
+
+
+FREQ_DEFINITION = Adapter(
+    spec=ZigZagScanExp.AXES_SPEC,
+    make_form=_ZigZagScanFreq_make_form,
+    run=ZigZagScanExp().run,
+    guide=Path(__file__).with_name("guide.freq.md"),
+    analysis=Analysis(
+        fn=_ZigZagScanBase_analyze,
+        options=lambda source, env: ZigZagScanAnalyzeParams(),
+    ),
+)

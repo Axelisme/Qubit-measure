@@ -2,17 +2,16 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -44,47 +43,31 @@ class DispersiveAnalyzeResult(AnalyzeResultBase):
     avg_fwhm: float
 
 
-class DispersiveAdapter(
-    BaseAdapter[
-        DispersiveCfg,
-        DispersiveRunResult,
-        DispersiveAnalyzeResult,
-        DispersiveAnalyzeParams,
-    ]
-):
-    """Acquire paired readout spectra and fit their dispersive shift."""
+def _Dispersive_make_form(ctx: FormContext) -> Form[DispersiveCfg]:
+    """Build fresh inputs from the fixed Open/Reset capture."""
+    return make_form(ctx)
 
-    exp_cls = DispersiveExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[DispersiveCfg]:
-        """Build fresh inputs from the fixed Open/Reset capture."""
-        return make_form(ctx)
+def _Dispersive_analyze(
+    req: AnalyzeRequest[DispersiveRunResult, DispersiveAnalyzeParams],
+    *,
+    plots: Plots,
+) -> DispersiveAnalyzeResult:
+    """Fit the source spectra, publish the fit figure, and return MHz values."""
+    analysis = DispersiveExp().analyze(
+        req.run_result,
+        DispersiveAnalyzeOptions(fit_bg_amp_slope=req.analyze_params.fit_bg_amp_slope),
+        plots=plots,
+    )
+    return DispersiveAnalyzeResult(chi=analysis.chi, avg_fwhm=analysis.avg_fwhm)
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: DispersiveCfg,
-        *,
-        context: RunContext,
-    ) -> DispersiveRunResult:
-        """Sweep readout with preparation off/on and retain this run's cfg."""
-        del req
-        return RunRecord(cfg=cfg, result=DispersiveExp().run(cfg, context=context))
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[DispersiveRunResult, DispersiveAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> DispersiveAnalyzeResult:
-        """Fit the source spectra, publish the fit figure, and return MHz values."""
-        analysis = DispersiveExp().analyze(
-            req.run_result,
-            DispersiveAnalyzeOptions(
-                fit_bg_amp_slope=req.analyze_params.fit_bg_amp_slope
-            ),
-            plots=plots,
-        )
-        return DispersiveAnalyzeResult(chi=analysis.chi, avg_fwhm=analysis.avg_fwhm)
+DEFINITION = Adapter(
+    spec=DispersiveExp.AXES_SPEC,
+    make_form=_Dispersive_make_form,
+    run=DispersiveExp().run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_Dispersive_analyze, options=lambda source, env: DispersiveAnalyzeParams()
+    ),
+)

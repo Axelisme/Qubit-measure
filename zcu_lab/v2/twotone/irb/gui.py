@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -41,43 +40,35 @@ class IRBAnalyzeResult(AnalyzeResultBase):
     warning: str
 
 
-class IRBAdapter(BaseAdapter[IRBCfg, IRBRunResult, IRBAnalyzeResult]):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[IRBCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
+def _IRB_make_form(ctx: FormContext) -> Form[IRBCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
-    """Run, persist and fit RB using calibrated X90/X180 and readout modules."""
 
-    exp_cls = IRB_Exp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _IRB_analyze(
+    req: AnalyzeRequest[IRBRunResult, None], *, plots: Plots
+) -> IRBAnalyzeResult:
+    """Fit the saved run's mean IQ decay and publish its fit figure."""
+    result = IRB_Exp().analyze(req.run_result, None, plots=plots)
+    return IRBAnalyzeResult(
+        p_reference=result.p_reference,
+        p_interleaved=result.p_interleaved,
+        reference_epc=result.reference_epc,
+        gate_error=result.gate_error,
+        gate_fidelity=result.gate_fidelity,
+        fidelity_ci_low=result.fidelity_ci_low,
+        fidelity_ci_high=result.fidelity_ci_high,
+        n_paired_seeds=result.n_paired_seeds,
+        n_paired_rounds=result.n_paired_rounds,
+        bootstrap_successes=result.bootstrap_successes,
+        warning=result.warning,
+    )
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: IRBCfg,
-        *,
-        context: RunContext,
-    ) -> IRBRunResult:
-        """Execute the accepted cfg; propagate acquisition failures to the GUI."""
-        del req
-        return RunRecord(cfg=cfg, result=IRB_Exp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[IRBRunResult, None], *, plots: Plots
-    ) -> IRBAnalyzeResult:
-        """Fit the saved run's mean IQ decay and publish its fit figure."""
-        result = IRB_Exp().analyze(req.run_result, None, plots=plots)
-        return IRBAnalyzeResult(
-            p_reference=result.p_reference,
-            p_interleaved=result.p_interleaved,
-            reference_epc=result.reference_epc,
-            gate_error=result.gate_error,
-            gate_fidelity=result.gate_fidelity,
-            fidelity_ci_low=result.fidelity_ci_low,
-            fidelity_ci_high=result.fidelity_ci_high,
-            n_paired_seeds=result.n_paired_seeds,
-            n_paired_rounds=result.n_paired_rounds,
-            bootstrap_successes=result.bootstrap_successes,
-            warning=result.warning,
-        )
+DEFINITION = Adapter(
+    spec=IRB_Exp.AXES_SPEC,
+    make_form=_IRB_make_form,
+    run=IRB_Exp().run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_IRB_analyze),
+)
