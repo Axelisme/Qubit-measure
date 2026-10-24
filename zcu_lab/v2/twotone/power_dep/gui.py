@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -21,9 +22,14 @@ def _PowerDep_make_form(ctx: FormContext) -> Form[PowerCfg]:
     return make_form(ctx)
 
 
+def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=PowerExp.AXES_SPEC,
     make_form=_PowerDep_make_form,
-    run=PowerExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
 )

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -96,10 +97,17 @@ def _RoOptFreqGain_get_writeback_items(
     return items
 
 
+def _run(
+    cfg: FreqGainCfg, *, context: RunContext
+) -> RunRecord[FreqGainCfg, FreqGainResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=FreqGainExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FreqGainExp.AXES_SPEC,
     make_form=_RoOptFreqGain_make_form,
-    run=FreqGainExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_RoOptFreqGain_analyze,

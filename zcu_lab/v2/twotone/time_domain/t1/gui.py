@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -149,10 +150,15 @@ def _T1_get_writeback_items(
     return items
 
 
+def _run(cfg: T1Cfg, *, context: RunContext) -> RunRecord[T1Cfg, T1Result]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=T1Exp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=T1Exp.AXES_SPEC,
     make_form=_T1_make_form,
-    run=T1Exp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_T1_analyze,

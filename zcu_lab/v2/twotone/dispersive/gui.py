@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -62,10 +63,17 @@ def _Dispersive_analyze(
     return DispersiveAnalyzeResult(chi=analysis.chi, avg_fwhm=analysis.avg_fwhm)
 
 
+def _run(
+    cfg: DispersiveCfg, *, context: RunContext
+) -> RunRecord[DispersiveCfg, DispersiveResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=DispersiveExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=DispersiveExp.AXES_SPEC,
     make_form=_Dispersive_make_form,
-    run=DispersiveExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_Dispersive_analyze, options=lambda source, env: DispersiveAnalyzeParams()

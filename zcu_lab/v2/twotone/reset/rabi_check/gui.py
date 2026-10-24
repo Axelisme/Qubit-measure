@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -67,10 +68,17 @@ def _RabiCheck_analyze(
     )
 
 
+def _run(
+    cfg: RabiCheckCfg, *, context: RunContext
+) -> RunRecord[RabiCheckCfg, RabiCheckResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=RabiCheckExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=RabiCheckExp.AXES_SPEC,
     make_form=_RabiCheck_make_form,
-    run=RabiCheckExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_RabiCheck_analyze),
 )

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, TypeAlias
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -100,10 +101,17 @@ def _FluxDep_get_writeback_items(
     ]
 
 
+def _run(
+    cfg: FreqFluxCfg, *, context: RunContext
+) -> RunRecord[FreqFluxCfg, FreqFluxResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=FreqFluxExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FreqFluxExp.AXES_SPEC,
     make_form=_FluxDep_make_form,
-    run=FreqFluxExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Interactive(
         plugin=_FluxDep_make_interactive_plugin,

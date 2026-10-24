@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -90,10 +91,15 @@ def _SingleToneFreq_get_writeback_items(
     return items
 
 
+def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=_SingleToneFreq_make_form,
-    run=FreqExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_SingleToneFreq_analyze, writeback=_SingleToneFreq_get_writeback_items

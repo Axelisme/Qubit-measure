@@ -33,7 +33,7 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoResult,
 )
 
-from .form import make_form
+from .form import T2EchoInput, make_form
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
     return reasons
 
 
-def _T2Echo_make_form(ctx: FormContext) -> Form[T2EchoCfg]:
+def _T2Echo_make_form(ctx: FormContext) -> Form[T2EchoInput]:
     """Build this adapter's definition using captured Open/Reset sources."""
     return make_form(ctx)
 
@@ -191,11 +191,37 @@ def _T2Echo_get_writeback_items(
     return items
 
 
-def _run(cfg: T2EchoCfg, *, context: RunContext) -> T2EchoResult:
-    """Acquire the source trace and log its realized detune in MHz."""
+def _run(
+    inp: T2EchoInput, *, context: RunContext
+) -> RunRecord[T2EchoCfg, T2EchoResult]:
+    """Convert fringes/step to MHz, acquire and record the actual detune cfg.
+
+    Zero ratio disables detune. Nonzero ratio on a zero-step delay sweep fails
+    before acquisition. The measured, hardware-rounded detune is logged in MHz.
+    """
+    if inp.detune_ratio == 0.0:
+        detune = 0.0
+    elif inp.length.step == 0.0:
+        raise ValueError(
+            "cannot apply a nonzero detune_ratio on a degenerate "
+            "length sweep (expts < 2, step == 0)"
+        )
+    else:
+        detune = inp.detune_ratio / inp.length.step
+    cfg = T2EchoCfg(
+        reps=inp.reps,
+        rounds=inp.rounds,
+        relax_delay=inp.relax_delay,
+        reset=inp.reset,
+        pi2_pulse=inp.pi2_pulse,
+        pi_pulse=inp.pi_pulse,
+        readout=inp.readout,
+        length=inp.length,
+        detune=detune,
+    )
     result = T2EchoExp().run(cfg, context=context)
     logger.info("T2Echo true detune: %s MHz", result.true_activate_detune)
-    return result
+    return RunRecord(cfg=cfg, result=result)
 
 
 DEFINITION = Adapter(

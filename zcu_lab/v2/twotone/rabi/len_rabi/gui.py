@@ -192,12 +192,14 @@ def _LenRabi_get_writeback_items(
     return items
 
 
-def _run(cfg: LenRabiCfg, *, context: RunContext) -> LenRabiResult:
+def _run(
+    cfg: LenRabiCfg, *, context: RunContext
+) -> RunRecord[LenRabiCfg, LenRabiResult]:
     """Reject an invalid length sweep before starting the core measurement."""
     sweep2array(
         cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
     )
-    return LenRabiExp().run(cfg, context=context)
+    return RunRecord(cfg=cfg, result=LenRabiExp().run(cfg, context=context))
 
 
 DEFINITION = Adapter(

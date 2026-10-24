@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -167,10 +168,17 @@ def _AmpRabi_get_writeback_items(
     return items
 
 
+def _run(
+    cfg: AmpRabiCfg, *, context: RunContext
+) -> RunRecord[AmpRabiCfg, AmpRabiResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=AmpRabiExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=AmpRabiExp.AXES_SPEC,
     make_form=_AmpRabi_make_form,
-    run=AmpRabiExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_AmpRabi_analyze,

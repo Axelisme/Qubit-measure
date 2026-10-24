@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -91,10 +92,15 @@ def _RoOptLength_get_writeback_items(
     return items
 
 
+def _run(cfg: LengthCfg, *, context: RunContext) -> RunRecord[LengthCfg, LengthResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=LengthExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=LengthExp.AXES_SPEC,
     make_form=_RoOptLength_make_form,
-    run=LengthExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_RoOptLength_analyze,

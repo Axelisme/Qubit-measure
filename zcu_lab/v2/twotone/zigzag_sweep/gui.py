@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -59,10 +60,17 @@ def _ZigZagScanGain_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
     return make_gain_form(ctx)
 
 
+def _run(
+    cfg: ZigZagScanCfg, *, context: RunContext
+) -> RunRecord[ZigZagScanCfg, ZigZagScanResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=ZigZagScanExp().run(cfg, context=context))
+
+
 GAIN_DEFINITION = Adapter(
     spec=ZigZagScanExp.AXES_SPEC,
     make_form=_ZigZagScanGain_make_form,
-    run=ZigZagScanExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.gain.md"),
     analysis=Analysis(
         fn=_ZigZagScanBase_analyze,
@@ -79,7 +87,7 @@ def _ZigZagScanFreq_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
 FREQ_DEFINITION = Adapter(
     spec=ZigZagScanExp.AXES_SPEC,
     make_form=_ZigZagScanFreq_make_form,
-    run=ZigZagScanExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.freq.md"),
     analysis=Analysis(
         fn=_ZigZagScanBase_analyze,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -36,10 +37,15 @@ def _DualToneLength_analyze(
     return
 
 
+def _run(cfg: LengthCfg, *, context: RunContext) -> RunRecord[LengthCfg, LengthResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=LengthExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=LengthExp.AXES_SPEC,
     make_form=_DualToneLength_make_form,
-    run=LengthExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_DualToneLength_analyze),
 )

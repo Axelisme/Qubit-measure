@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -65,10 +66,15 @@ def _IRB_analyze(
     )
 
 
+def _run(cfg: IRBCfg, *, context: RunContext) -> RunRecord[IRBCfg, IRBResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=IRB_Exp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=IRB_Exp.AXES_SPEC,
     make_form=_IRB_make_form,
-    run=IRB_Exp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_IRB_analyze),
 )

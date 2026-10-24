@@ -30,7 +30,6 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq1": Range.around("$qubit.ext.reset_f1", 50.0, expts=201),
             "freq2": Range.around("$qubit.ext.reset_f2", 50.0, expts=201),
-            "method": Hidden("hard"),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

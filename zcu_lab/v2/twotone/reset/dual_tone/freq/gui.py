@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -83,10 +84,16 @@ def _DualToneFreq_get_writeback_items(
     return items
 
 
+def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
+    """Use a hard sweep and record that actual mode with the measured trace."""
+    cfg = cfg.model_copy(update={"method": "hard"})
+    return RunRecord(cfg=cfg, result=FreqExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=FreqExp.AXES_SPEC,
     make_form=_DualToneFreq_make_form,
-    run=FreqExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_DualToneFreq_analyze,

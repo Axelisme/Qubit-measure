@@ -2,48 +2,49 @@
 
 from typing import Annotated
 
-from zcu_tools.cfg_model import Hidden, Range, Slot, Template
-from zcu_tools.gui.form import Display, FormModel
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
 from zcu_lab.v2._support.measure.pulse_readout_metadata import (
     pulse_readout_seed_metadata,
 )
 
-from .core import T2EchoCfg
 
+class T2EchoInput(ConfigBase):
+    """Captured pulses, delay sweep and phase advance in fringes per step."""
 
-class DetuneInput(FormModel):
-    """GUI phase-ramp input; ratio counts fringe periods per delay step."""
-
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     detune_ratio: Annotated[
-        float, Display(label="Detune ratio (fringes/step)", decimals=3)
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
     ] = 0.1
 
 
-def lower_detune(extras: DetuneInput, cfg: T2EchoCfg) -> T2EchoCfg:
-    """Set detune (MHz) to fringes/step divided by the delay step (us).
-
-    A zero ratio disables detune even on a zero-step sweep. A nonzero ratio
-    on a zero-step sweep raises ValueError.
-    """
-    if extras.detune_ratio == 0.0:
-        cfg.detune = 0.0
-    elif cfg.length.step == 0.0:
-        raise ValueError(
-            "cannot apply a nonzero detune_ratio on a degenerate "
-            "length sweep (expts < 2, step == 0)"
-        )
-    else:
-        cfg.detune = extras.detune_ratio / cfg.length.step
-    return cfg
-
-
-def make_form(ctx: FormContext) -> Form[T2EchoCfg]:
+def make_form(ctx: FormContext) -> Form[T2EchoInput]:
     """Build starting values and shape from the captured source availability."""
     return Form(
-        T2EchoCfg,
+        T2EchoInput,
         field_order=(
             "reset",
             "pi2_pulse",
@@ -69,10 +70,7 @@ def make_form(ctx: FormContext) -> Form[T2EchoCfg]:
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,
-            "detune": Hidden(),
         },
-        extras=DetuneInput,
-        lower=lower_detune,
     ).with_seed_metadata(
         (
             {}

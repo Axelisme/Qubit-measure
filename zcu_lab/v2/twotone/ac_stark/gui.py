@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -102,10 +103,24 @@ def _AcStark_get_writeback_items(
     ]
 
 
+def _run_acstark(
+    cfg: AcStarkCfg, *, context: RunContext
+) -> RunRecord[AcStarkCfg, AcStarkResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=AcStarkExp().run(cfg, context=context))
+
+
+def _run_acstarkramsey(
+    cfg: AcStarkRamseyCfg, *, context: RunContext
+) -> RunRecord[AcStarkRamseyCfg, AcStarkRamseyResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=AcStarkRamseyExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=AcStarkExp.AXES_SPEC,
     make_form=_AcStark_make_form,
-    run=AcStarkExp().run,
+    run=_run_acstark,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_AcStark_analyze,
@@ -148,7 +163,7 @@ def _AcStarkRamsey_analyze(
 RAMSEY_DEFINITION = Adapter(
     spec=AcStarkRamseyExp.AXES_SPEC,
     make_form=_AcStarkRamsey_make_form,
-    run=AcStarkRamseyExp().run,
+    run=_run_acstarkramsey,
     guide=Path(__file__).with_name("guide.ramsey.md"),
     analysis=Analysis(
         fn=_AcStarkRamsey_analyze, options=_AcStarkRamsey_get_analyze_params

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -99,10 +100,15 @@ def _BathPhase_get_writeback_items(
     return items
 
 
+def _run(cfg: PhaseCfg, *, context: RunContext) -> RunRecord[PhaseCfg, PhaseResult]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=PhaseExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=PhaseExp.AXES_SPEC,
     make_form=_BathPhase_make_form,
-    run=PhaseExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_BathPhase_analyze, writeback=_BathPhase_get_writeback_items),
 )

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -73,10 +74,15 @@ def _CKP_get_writeback_items(
     ]
 
 
+def _run(cfg: CKP_Cfg, *, context: RunContext) -> RunRecord[CKP_Cfg, CKP_Result]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=CKP_Exp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=CKP_Exp.AXES_SPEC,
     make_form=_CKP_make_form,
-    run=CKP_Exp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_CKP_analyze, writeback=_CKP_get_writeback_items),
 )
