@@ -10,7 +10,8 @@ _TAB = required_string(
     "tab_id", "Opened workflow owner, independent of current selection"
 )
 _RUN = required_string(
-    "run_id", "Native workflow run identity, not an operation handle"
+    "run_id",
+    "Native workflow root: 32 lowercase hexadecimal characters ([0-9a-f]{32}), not an operation handle",
 )
 _FORM = ParamSpec("form", JsonType.STRING, enum=("plan", "tunables"))
 _BATCH = ParamSpec("batch", JsonType.JSON, required=False)
@@ -57,7 +58,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     _entry(
         "start",
-        "Submit workflow Start under the shared RUN lease. Omitted/null batches use shared parsed drafts; explicit batches, including [], use fresh captured defaults. Returns pending operation_id, not native acceptance. No retry.",
+        "Submit workflow Start under the shared RUN lease. run_id is required and must be 32 lowercase hexadecimal characters (e.g. uuid4().hex); local GUI Start generates it. Invalid IDs are rejected before operation admission or hardware access. Omitted/null batches use shared parsed drafts; explicit batches, including [], use fresh captured defaults. Returns pending operation_id, not native acceptance. No retry.",
         (
             _TAB,
             _RUN,

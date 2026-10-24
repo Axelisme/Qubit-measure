@@ -204,7 +204,8 @@ class WorkflowControlFacet:
     ) -> int | FormErrors:
         """Submit fixed captured forms; return pending token or directed form errors.
 
-        run_id must be path-safe and unique across tabs. None batches read draft
+        run_id must be 32 lowercase hexadecimal characters and unique across tabs.
+        Invalid IDs raise ValueError before admission. None batches read draft
         plus optional renderer errors; explicit batches use fresh Start defaults.
         The same session RUN gate arbitrates experiments and every workflow tab.
         Native/source/admission failures propagate without accepting draft bases.

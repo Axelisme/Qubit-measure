@@ -21,6 +21,8 @@ from tests.mcp.measure._support import make_client
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 
+RUN_ID = "21ed5156dc9b441a8b5cda3cf26633f7"
+
 
 @pytest.fixture
 def answering_client(qapp, tmp_path):
@@ -63,10 +65,10 @@ def answering_client(qapp, tmp_path):
     client = make_client(tmp_path, respond)
     try:
         tab = client.call("workflow_open", {"name": "asking"})["tab_id"]
-        receipt = client.call("workflow_start", {"tab_id": tab, "run_id": "native"})
+        receipt = client.call("workflow_start", {"tab_id": tab, "run_id": RUN_ID})
         # Start submits the author, which reaches its Ask without another command.
         qt_until(
-            lambda: control.pending_question("native") is not None,
+            lambda: control.pending_question(RUN_ID) is not None,
             label="MCP pending request",
         )
         yield client, receipt, control
@@ -83,32 +85,32 @@ def test_missing_stale_and_replayed_ids_preserve_current_question(
     answering_client, tmp_path
 ):
     client, receipt, control = answering_client
-    before = client.call("workflow_status", {"run_id": "native"})
+    before = client.call("workflow_status", {"run_id": RUN_ID})
     pending = before["pending_question"]
     request = pending["request_id"]
     assert before["status"]["pending_request_id"] == request
     with pytest.raises(GuiRpcError) as missing:
-        client.call("workflow_answer", {"run_id": "native", "answer": {"value": 4}})
+        client.call("workflow_answer", {"run_id": RUN_ID, "answer": {"value": 4}})
     assert missing.value.code == "invalid_params"
     with pytest.raises(GuiRpcError) as stale:
         client.call(
             "workflow_answer",
-            {"run_id": "native", "request_id": "old", "answer": {"value": "bad"}},
+            {"run_id": RUN_ID, "request_id": "old", "answer": {"value": "bad"}},
         )
     assert stale.value.reason == "question_mismatch", (
         "ID matching precedes answer schema validation"
     )
     assert stale.value.data == {"pending_request_id": request}
-    assert client.call("workflow_status", {"run_id": "native"}) == before
+    assert client.call("workflow_status", {"run_id": RUN_ID}) == before
     with pytest.raises(GuiRpcError) as invalid:
         client.call(
             "workflow_answer",
-            {"run_id": "native", "request_id": request, "answer": {"value": "bad"}},
+            {"run_id": RUN_ID, "request_id": request, "answer": {"value": "bad"}},
         )
     assert invalid.value.reason == "answer_validation"
     accepted = client.call(
         "workflow_answer",
-        {"run_id": "native", "request_id": request, "answer": {"value": 4}},
+        {"run_id": RUN_ID, "request_id": request, "answer": {"value": 4}},
     )
     assert accepted["handle"] == receipt["handle"]
     # The accepted answer lets the author return; owner delivery releases busy.
@@ -116,7 +118,7 @@ def test_missing_stale_and_replayed_ids_preserve_current_question(
         lambda: not control.tabs()[0].busy,
         label="MCP answer terminal delivery",
     )
-    records = client.call("workflow_records", {"run_id": "native"})["records"]
+    records = client.call("workflow_records", {"run_id": RUN_ID})["records"]
     assert records[0].get("operations") == [], (
         "Wire records retain the native operation facts"
     )
@@ -125,7 +127,7 @@ def test_missing_stale_and_replayed_ids_preserve_current_question(
     with pytest.raises(GuiRpcError) as replay:
         client.call(
             "workflow_answer",
-            {"run_id": "native", "request_id": request, "answer": {"value": 5}},
+            {"run_id": RUN_ID, "request_id": request, "answer": {"value": 5}},
         )
     assert replay.value.reason == "question_mismatch"
     assert replay.value.data == {"pending_request_id": None}

@@ -16,6 +16,8 @@ from tests.gui.app.measure._workflow_ask import AskAuthor
 
 from ._workflow_harness import StartHarness
 
+RUN_ID = "21ed5156dc9b441a8b5cda3cf26633f7"
+
 
 @pytest.fixture
 def retained_ask(qapp, tmp_path):
@@ -34,7 +36,7 @@ def retained_ask(qapp, tmp_path):
     control = WorkflowControlFacet(harness.state, harness.services)
     control.configure((author.attachment(),))
     tab = control.open("asking")
-    token = control.start(tab, "question-run")
+    token = control.start(tab, RUN_ID)
     assert not isinstance(token, FormErrors)
     worker = Thread(target=harness.background.execute)
     worker.start()
@@ -42,14 +44,14 @@ def retained_ask(qapp, tmp_path):
         # The submitted author reaches Ask without any external release.
         qt_until(
             lambda: (
-                (status := control.status("question-run")) is not None
+                (status := control.status(RUN_ID)) is not None
                 and status.pending is not None
             ),
             label="author pending Ask",
         )
         yield control, harness, author, tab, token, worker
     finally:
-        control.stop("question-run")
+        control.stop(RUN_ID)
         worker.join(30)  # Stop releases the retained Ask and its author cleanup.
         assert not worker.is_alive()
         harness.owner.pump_all()
@@ -60,7 +62,7 @@ def retained_ask(qapp, tmp_path):
 
 def test_pending_request_is_answerable_before_worker_return(retained_ask, tmp_path):
     control, harness, author, tab, token, worker = retained_ask
-    question = control.pending_question("question-run")
+    question = control.pending_question(RUN_ID)
     assert question is not None, (
         "Ask must be answerable while execute retains its worker"
     )
@@ -70,15 +72,15 @@ def test_pending_request_is_answerable_before_worker_return(retained_ask, tmp_pa
     assert question["answer_schema"]["properties"]["value"]["type"] == "integer"
     assert control.tabs()[0].last_exchange.question == question
     with pytest.raises(QuestionMismatch) as stale:
-        control.answer("question-run", {"value": 23}, request_id="old-question")
+        control.answer(RUN_ID, {"value": 23}, request_id="old-question")
     assert stale.value.pending_request_id == question["request_id"]
-    assert control.pending_question("question-run") == question
+    assert control.pending_question(RUN_ID) == question
     assert author.deliveries == []
     assert worker.is_alive()
     assert control.tabs()[0].operation_id == token
     assert not control.close(tab)
     assert (
-        control.answer("question-run", {"value": 23}, request_id=question["request_id"])
+        control.answer(RUN_ID, {"value": 23}, request_id=question["request_id"])
         == token
     )
     worker.join(30)  # The accepted answer permits the submitted author to return.
@@ -90,9 +92,9 @@ def test_pending_request_is_answerable_before_worker_return(retained_ask, tmp_pa
     harness.background.deliver()
     assert control.tabs()[0].operation_id is None
     assert harness.handles.known_outcome(token).status == "finished"
-    assert control.records("question-run")[0].encoded_record.value == {"value": 23}
+    assert control.records(RUN_ID)[0].encoded_record.value == {"value": 23}
     with pytest.raises(QuestionMismatch) as terminal:
-        control.answer("question-run", {"value": 24}, request_id=question["request_id"])
+        control.answer(RUN_ID, {"value": 24}, request_id=question["request_id"])
     assert terminal.value.pending_request_id is None
     journal = next(tmp_path.rglob("journal.jsonl"))
     assert [

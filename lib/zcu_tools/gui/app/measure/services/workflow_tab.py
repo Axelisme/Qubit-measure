@@ -10,7 +10,7 @@ from qick import QickConfig
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot, validate_workflow_run_id
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.experiment.workflows import (
@@ -253,12 +253,15 @@ class WorkflowTab[C]:
     ) -> int | FormErrors:
         """Capture sources and lower forms once, then submit under the shared RUN lease.
 
+        run_id must be 32 lowercase hexadecimal characters. Invalid IDs raise
+        ValueError before source capture, operation admission or hardware access.
         None batches use parsed drafts and optional renderer-local errors. Explicit
         batches use fresh captured defaults. Invalid models return FormErrors;
         structure errors return FormErrors. Source, SoC, path and admission failures
         propagate. No draft is
         accepted on rejection. The operation token is not native acceptance.
         """
+        validate_workflow_run_id(run_id)
         self._ensure_idle()
         env = self._capture()
         parameters = env.parameters
