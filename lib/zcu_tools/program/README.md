@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -13,6 +13,7 @@
 ## 主要依賴面
 
 - `ImproveAcquireMixin` 直接擴充 `qick.qick_asm.AcquireMixin`，是 `program` 層最核心的 QICK 接點。
+- Accumulated acquire 在寫入 chunk 前拒絕超過預期的累計 shots，拋出 `program.acquisition.AcquisitionContractError`。訊息包含預期 shots、先前已收 shots、本次 shots、各 channel 的 IQ 列數與從 0 起算的 round index。錯誤 chunk 不寫入、不裁切，先前 raw chunks 保留，不發布未完成的 round。
 - 主要加值分成四類：
   - 型別友善封裝（`TypedAcquireMixin`）：補強 `acquire()` / `acquire_decimated()` / `get_raw()` 等回傳型別。
   - 統計追蹤（`TrackerMixin`）：在 `finish_round()` 內注入 tracker 更新流程。

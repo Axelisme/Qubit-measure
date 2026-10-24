@@ -7,7 +7,10 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.analysis.singleshot import classify_result
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.acquisition import (
+    AcquisitionContractError,
+    StoppedPartialAcquireError,
+)
 from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -207,32 +210,43 @@ def test_acquire_logs_size_mismatch_but_keeps_numpy_broadcasting(
     )
 
 
-@pytest.mark.parametrize("rows", [7, 8])
-def test_acquire_logs_overflow_before_propagating_slice_failure(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, rows: int
+@pytest.mark.parametrize("stepped", [False, True])
+@pytest.mark.parametrize("rows", [5, 6])
+def test_acquire_rejects_shot_overrun_before_writing_chunk(
+    monkeypatch: pytest.MonkeyPatch, stepped: bool, rows: int
 ) -> None:
     soc, program = _make_chunk_acquisition(reps=3)
-    monkeypatch.setattr(
-        soc,
-        "poll_data",
-        lambda: [(4, ([np.full((rows, 2), 17, dtype=np.int64)], {}))],
+    first = np.array([[11, -11], [12, -12]], dtype=np.int64)
+    batches = iter(
+        [
+            [(1, ([first], {}))],
+            [(3, ([np.full((rows, 2), 17, dtype=np.int64)], {}))],
+        ]
     )
-    with (
-        caplog.at_level(logging.ERROR, logger="qick.qick_asm"),
-        pytest.raises(
-            ValueError,
-            match=rf"could not broadcast input array from shape \({rows},2\) into shape \(6,2\)",
-        ),
-    ):
-        program.acquire(soc, progress=False)
-    expected = []
-    if rows == 7:
-        expected.append("data size mismatch: new_points=4, nreads=2, data shape (7, 2)")
-    expected.append("got too much data: count=0, new_points=4, total_count=3")
-    assert caplog.messages == expected
+    monkeypatch.setattr(soc, "poll_data", lambda: next(batches))
+    completed_rounds: list[int] = []
+    options = dict(
+        progress=False,
+        round_hook=lambda count, data, stop: completed_rounds.append(count),
+    )
+    message = (
+        r"expected_shots=3, received_shots=1, chunk_shots=3, "
+        rf"chunk_rows=\[{rows}\], round_index=0"
+    )
+    if stepped:
+        program.acquire(soc, step_rounds=True, **options)
+        with pytest.raises(AcquisitionContractError, match=message):
+            program.finish_round()
+    else:
+        with pytest.raises(AcquisitionContractError, match=message):
+            program.acquire(soc, **options)
     captured = program.get_raw()
     assert captured is not None
-    np.testing.assert_array_equal(captured[0], np.zeros((3, 2, 2), dtype=np.int64))
+    np.testing.assert_array_equal(
+        captured[0], [[[11, -11], [12, -12]], [[0, 0], [0, 0]], [[0, 0], [0, 0]]]
+    )
+    assert program.get_rounds() == []
+    assert completed_rounds == []
 
 
 @pytest.mark.parametrize("completed_round", [False, True])
