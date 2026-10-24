@@ -235,8 +235,10 @@ class CalibrationTunables(BaseModel):
         default="auto_pi_product",
         description="Predict/control gain or retain template gain",
     )
-    target_pi_length_us: float = Field(
-        default=1.0, gt=0, description="Drive gain pi-duration setpoint in us"
+    target_pi_length_us: float | None = Field(
+        default=None,
+        gt=0,
+        description="Pi-duration setpoint in us; None uses the host pi seed",
     )
     rabi_min_start_us: float = Field(
         default=0.05, ge=0, description="Minimum Rabi sweep start in us"
@@ -644,10 +646,15 @@ async def calibrate_rabi(
     drive = inputs.qub_pulse.model_copy(deep=True)
     drive.set_param("freq", f01)
     gain = float(drive.gain)
+    target_pi_us = (
+        carry.seed.pi_length_us
+        if inputs.tun.target_pi_length_us is None
+        else inputs.tun.target_pi_length_us
+    )
     if inputs.tun.drive_gain_mode == "auto_pi_product":
         gain = carry.rabi_drive.select_gain(
             carry.seed.pi_length_us * float(inputs.qub_pulse.gain),
-            inputs.tun.target_pi_length_us,
+            target_pi_us,
         )
         drive.set_param("gain", gain)
     ro = inputs.readout.model_copy(deep=True)
@@ -737,7 +744,7 @@ async def calibrate_rabi(
         inputs.point_index,
         fit.pi_length_us,
         gain,
-        inputs.tun.target_pi_length_us,
+        target_pi_us,
         control=inputs.tun.drive_gain_mode == "auto_pi_product",
     )
     pi2 = (
