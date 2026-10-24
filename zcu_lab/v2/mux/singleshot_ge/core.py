@@ -274,8 +274,8 @@ class MuxGECfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
-    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
     shots: StrictInt

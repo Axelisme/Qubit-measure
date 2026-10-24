@@ -50,8 +50,8 @@ class OneToneFluxCfg(ConfigBase):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     jpa_flux_dev: Annotated[
         str,
         FieldMeta(
@@ -64,10 +64,9 @@ class OneToneFluxCfg(ConfigBase):
         FieldMeta(
             label="JPA flux device value",
             description="Flux bounds in flux_unit coordinates.",
-            group="Sweep",
         ),
     ]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz", group="Sweep")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):

@@ -59,16 +59,12 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init pulse", group="Modules")
-    ] = None
-    tested_reset: Annotated[
-        TwoPulseReset.Cfg, FieldMeta(label="Tested reset", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz", group="Sweep")]
-    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz", group="Sweep")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
+    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
     method: Literal["soft", "hard"] = "soft"
 
 

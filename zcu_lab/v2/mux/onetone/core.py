@@ -100,7 +100,7 @@ class MuxOnetoneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
@@ -116,12 +116,9 @@ class MuxOnetoneCfg(ConfigBase):
                 "capability checks run at Run. With a slot, keep its mixer and "
                 "ADC window, add ringup to its trigger and extend pulse coverage."
             ),
-            group="Modules",
         ),
     ]
-    df: Annotated[
-        SweepCfg, FieldMeta(label="Frequency offset", unit="MHz", group="Sweep")
-    ]
+    df: Annotated[SweepCfg, FieldMeta(label="Frequency offset", unit="MHz")]
 
     @field_validator("df")
     @classmethod

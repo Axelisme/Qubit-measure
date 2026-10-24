@@ -67,15 +67,14 @@ class FluxCfg(ConfigBase):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     jpa_flux: Annotated[
         SweepCfg,
         FieldMeta(
             label="JPA flux device value",
             description="Flux bounds in flux_unit coordinates.",
-            group="Sweep",
         ),
     ]
     skew_penalty: Annotated[

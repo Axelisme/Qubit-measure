@@ -114,20 +114,20 @@ class AutoOptCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse", group="Modules")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout freq", unit="MHz", group="Sweep"),
+        FieldMeta(label="Readout freq", unit="MHz"),
     ]
     gain: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout gain", unit="a.u.", group="Sweep"),
+        FieldMeta(label="Readout gain", unit="a.u."),
     ]
     length: Annotated[
         SweepCfg,
-        FieldMeta(label="Readout length", unit="us", group="Sweep"),
+        FieldMeta(label="Readout length", unit="us"),
     ]
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0

@@ -70,7 +70,6 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="F1 Xπ",
             description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-            group="Modules",
         ),
     ]
     x180_f2: Annotated[
@@ -78,7 +77,6 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="F2 Xπ",
             description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-            group="Modules",
         ),
     ]
     x90_f1: Annotated[
@@ -86,7 +84,6 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="F1 Xπ/2",
             description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-            group="Modules",
         ),
     ]
     x90_f2: Annotated[
@@ -94,7 +91,6 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="F2 Xπ/2",
             description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-            group="Modules",
         ),
     ]
     readout: Annotated[
@@ -102,7 +98,6 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
-            group="Modules",
         ),
     ]
     roles: JointRoles
@@ -116,7 +111,7 @@ class IdleZZCfg(ConfigBase):
             description="填入 signed artificial phase ramp。先做 twotone frequency 與 T2 Ramsey；magnitude 必須大於預期 |ζ| 加 frequency error。",
         ),
     ]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us", group="Sweep")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     dc_device: Annotated[
         str | None,
         FieldMeta(
@@ -132,7 +127,6 @@ class IdleZZCfg(ConfigBase):
         FieldMeta(
             label="DC source values",
             description="Inactive when source is None; no conversion or F1/F2 compensation.",
-            group="Sweep",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
 

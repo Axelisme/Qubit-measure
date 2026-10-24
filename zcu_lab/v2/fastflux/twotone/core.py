@@ -46,12 +46,12 @@ class TwotoneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    flux_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(group="Sweep")]
-    freq: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: SweepCfg
+    freq: SweepCfg
 
 
 class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):

@@ -43,12 +43,10 @@ class ZigZagCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse", group="Modules")]
-    X180_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="X180 Pulse", group="Modules")
-    ] = None
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     n_times: Annotated[
         int,
         FieldMeta(

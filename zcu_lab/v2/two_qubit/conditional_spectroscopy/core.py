@@ -71,7 +71,6 @@ class SpectroscopyCfg(ConfigBase):
         FieldMeta(
             label="F1 Xπ",
             description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-            group="Modules",
         ),
     ]
     x180_f2: Annotated[
@@ -79,7 +78,6 @@ class SpectroscopyCfg(ConfigBase):
         FieldMeta(
             label="F2 Xπ",
             description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
-            group="Modules",
         ),
     ]
     readout: Annotated[
@@ -87,7 +85,6 @@ class SpectroscopyCfg(ConfigBase):
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
-            group="Modules",
         ),
     ]
     roles: JointRoles
@@ -104,7 +101,6 @@ class SpectroscopyCfg(ConfigBase):
             unit="MHz",
             label="Frequency",
             description="填入 common probe frequency 起訖值，單位 MHz。先用 twotone frequency 定位 F1/F2，再由操作者確認高能階掃描範圍。",
-            group="Sweep",
         ),
     ]
     contrast: Annotated[bool, FieldMeta(label="Double Xπ contrast")] = True
@@ -117,7 +113,6 @@ class SpectroscopyCfg(ConfigBase):
         FieldMeta(
             label="DC source values",
             description="Inactive when source is None; no F1/F2 compensation.",
-            group="Sweep",
         ),
     ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
 

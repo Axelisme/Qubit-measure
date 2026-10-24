@@ -150,13 +150,11 @@ class AllXYCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    I_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Identity Pulse", group="Modules")
-    ] = None
-    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse", group="Modules")]
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
+    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 @dataclass(frozen=True)

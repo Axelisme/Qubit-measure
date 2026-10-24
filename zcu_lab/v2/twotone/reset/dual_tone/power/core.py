@@ -51,16 +51,12 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init pulse", group="Modules")
-    ] = None
-    tested_reset: Annotated[
-        TwoPulseReset.Cfg, FieldMeta(label="Tested reset", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.", group="Sweep")]
-    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.", group="Sweep")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
+    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
 
 
 @dataclass(frozen=True)

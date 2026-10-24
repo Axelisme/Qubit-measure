@@ -57,11 +57,11 @@ class RabiCheckCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse", group="Modules")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
 
 class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):

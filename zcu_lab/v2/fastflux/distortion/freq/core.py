@@ -74,13 +74,13 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    flux_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
     readout_t: float
-    length: Annotated[SweepCfg, FieldMeta(group="Sweep")]
-    freq: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    length: SweepCfg
+    freq: SweepCfg
 
 
 @dataclass(frozen=True)

@@ -60,12 +60,10 @@ class FreqCfg(ConfigBase):
             description="Connected RF device name; None skips RF control.",
         ),
     ] = ""
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    jpa_freq: Annotated[
-        SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz", group="Sweep")
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
     skew_penalty: Annotated[
         float,
         FieldMeta(

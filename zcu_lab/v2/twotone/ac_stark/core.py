@@ -131,18 +131,12 @@ class AcStarkCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    stark_pulse1: Annotated[
-        Pulse.Cfg, FieldMeta(label="Stark resonator tone", group="Modules")
-    ]
-    stark_pulse2: Annotated[
-        Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.", group="Sweep")]
-    freq: Annotated[
-        SweepCfg, FieldMeta(label="Probe frequency", unit="MHz", group="Sweep")
-    ]
+    reset: Reset.Cfg | None = None
+    stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
+    readout: Readout.Cfg
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
@@ -382,19 +376,13 @@ class AcStarkRamseyCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    pi2_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse", group="Modules")
-    ]
-    stark_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="Stark resonator tone", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    reset: Reset.Cfg | None = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
+    stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    readout: Readout.Cfg
     wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.", group="Sweep")]
-    length: Annotated[
-        SweepCfg, FieldMeta(label="Ramsey delay", unit="us", group="Sweep")
-    ]
+    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 

@@ -54,13 +54,13 @@ class PhaseCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    flux_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    pi2_pulse: Pulse.Cfg
+    readout: Readout.Cfg
     readout_t: float
-    length: Annotated[SweepCfg, FieldMeta(group="Sweep")]
-    phase: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    length: SweepCfg
+    phase: SweepCfg
 
 
 @dataclass(frozen=True)

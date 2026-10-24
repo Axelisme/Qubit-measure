@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-24，mux alias participant capture
+**Last updated:** 2026-10-24，實驗表單平鋪與 pulse Advanced
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -86,7 +86,9 @@ Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux 
 外層以軟體設值並等待 settle，內層重用既有 onetone host sweep 或 twotone hardware sweep。
 Local 每 tone 有自己的 Start／Stop，共用 `flux_expts`。Global 使用一個 `flux` 範圍。
 四份 cfg 與 native 保存形狀都是 flat：`reset`、`readout`、`reps`、`rounds`、`initial_delay`、`relax_delay` 在 top-level。
-Module 欄位以 `FieldMeta(group="Modules")` 分組，不增加 cfg 或 Form 路徑。
+Module 與掃描欄位依 `field_order` 平鋪，不宣告 Modules／Sweep group。
+模組仍有 selector 與子表單，掃描仍有 `SweepCfg` 子表單。
+Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。
 Schema 為 3.0。Load 舊 major 時保留資料與 metadata，cfg 為 None，不轉換舊巢狀設定。
 Onetone 的 `frequency.df` 是共用 MHz offset；twotone 的 `frequency.tones` 保存各 Q 的 drive 與 MHz 範圍，
 `frequency.expts` 是共用硬體點數。四張表單依 participants、tones、modules、frequency／DC scan、averaging、timing 排列。

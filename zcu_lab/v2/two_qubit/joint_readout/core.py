@@ -102,7 +102,6 @@ class JointReadoutCfg(ConfigBase):
         FieldMeta(
             label="F1 Xπ",
             description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-            group="Modules",
         ),
     ]
     x180_f2: Annotated[
@@ -110,7 +109,6 @@ class JointReadoutCfg(ConfigBase):
         FieldMeta(
             label="F2 Xπ",
             description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-            group="Modules",
         ),
     ]
     readout: Annotated[
@@ -118,7 +116,6 @@ class JointReadoutCfg(ConfigBase):
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
-            group="Modules",
         ),
     ]
     roles: JointRoles

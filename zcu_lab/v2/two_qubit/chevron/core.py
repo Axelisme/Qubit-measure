@@ -39,7 +39,6 @@ class ChevronCfg(DurationScanCfg):
             unit="MHz",
             label="Frequency",
             description="填入 common drive frequency 起訖值，單位 MHz。先用 conditional spectroscopy 選定掃描範圍。",
-            group="Sweep",
         ),
     ]
 

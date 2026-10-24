@@ -63,13 +63,11 @@ class AmpRabiCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
-    ] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized", group="Sweep")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
 
 
 class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):

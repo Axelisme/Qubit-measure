@@ -29,7 +29,7 @@ cp -R zcu_lab/v2/twotone/power_dep zcu_lab/v2/twotone/power_map
 ## 2. 在 core.py 定義資料與量測
 
 把 `PowerResult`、`PowerCfg`、`PowerExp` 改名為 `PowerMapResult`、`PowerMapCfg`、`PowerMapExp`。
-Cfg 繼承 `ConfigBase`。Module 與掃描欄位放在頂層，group 只控制表單分組，不加入路徑：
+Cfg 繼承 `ConfigBase`。Module 與掃描欄位放在頂層，不加 Modules／Sweep group：
 
 ```python
 from typing import Annotated
@@ -38,17 +38,17 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
 
 class PowerMapCfg(ConfigBase):
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(group="Sweep", unit="normalized")]
-    freq: Annotated[SweepCfg, FieldMeta(group="Sweep", unit="MHz")]
+    reset: Reset.Cfg | None = None
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: Annotated[SweepCfg, FieldMeta(unit="normalized")]
+    freq: Annotated[SweepCfg, FieldMeta(unit="MHz")]
     reps: int = 1
     rounds: int = 1
     relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
 ```
 
-這段示範型別與分組，複製的 power map 仍需保留其他實驗欄位。
+這段示範頂層型別與單位，複製的 power map 仍需保留其他實驗欄位。
 Run 明傳 builder 的 reps／relax_delay，acquire 明傳 rounds。
 完整組合方式見 [v2 cfg 慣例](../v2/experiment-authoring.md#v2-cfg-組合慣例)。
 
@@ -88,6 +88,9 @@ frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬�
   不要為了開表單而建立假的 library reference。
 
 新增欄位時，先在 core cfg 定義型別與 FieldMeta，再在 tree 指定初值或顯示方式。
+用 `field_order=("reset", "qub_pulse", "readout", "gain", "freq", "reps", "rounds", "relax_delay")` 排列表單。
+模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單，不再包 Modules／Sweep group。
+Pulse 的 Advanced group 仍將 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 放在可摺疊區塊。
 Tree 不另定義一份 cfg shape。Expression、Slot／Template 與 Reset 的契約見
 [Form 與固定來源](../v2/measure-authoring.md#目錄佈局)。
 

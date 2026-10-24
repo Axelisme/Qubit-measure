@@ -256,21 +256,13 @@ class CKP_Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse", group="Modules")]
-    res_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse", group="Modules")
-    ]
-    qub_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    res_freq: Annotated[
-        SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz", group="Sweep")
-    ]
-    qub_freq: Annotated[
-        SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz", group="Sweep")
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    res_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse")]
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    res_freq: Annotated[SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz")]
+    qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
 
 
 class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):

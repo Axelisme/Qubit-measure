@@ -49,8 +49,8 @@ class CheckCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     jpa_rf_dev: Annotated[
         str,
         FieldMeta(
@@ -58,7 +58,7 @@ class CheckCfg(ConfigBase):
             description="Connected RF device whose output is toggled off then on.",
         ),
     ] = ""
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz", group="Sweep")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class CheckExp(Experiment[CheckResult, CheckCfg]):

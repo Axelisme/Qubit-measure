@@ -54,15 +54,11 @@ class LengthCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init pulse", group="Modules")
-    ] = None
-    tested_reset: Annotated[
-        PulseReset.Cfg, FieldMeta(label="Tested reset", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us", group="Sweep")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):

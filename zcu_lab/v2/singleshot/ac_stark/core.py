@@ -85,19 +85,15 @@ class AcStarkCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
-    ] = None
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     stark_pulse1: Annotated[
-        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)", group="Modules")
+        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
     ]
-    stark_pulse2: Annotated[
-        Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.", group="Sweep")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz", group="Sweep")]
+    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]

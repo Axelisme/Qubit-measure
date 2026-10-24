@@ -79,26 +79,22 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
-    ] = None
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="Probe Pulse",
             description="Qubit drive; its frequency is set by the sweep.",
-            group="Modules",
         ),
     ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[
         SweepCfg,
         FieldMeta(
             label="Frequency",
             unit="MHz",
             description="Qubit drive frequency sweep.",
-            group="Sweep",
         ),
     ]
 

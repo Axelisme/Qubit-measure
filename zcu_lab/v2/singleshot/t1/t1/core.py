@@ -75,12 +75,10 @@ class T1Cfg(ConfigBase):
         ),
     ] = 1.0
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    length: Annotated[
-        SweepCfg | list[float], FieldMeta(label="Delay", unit="us", group="Sweep")
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]

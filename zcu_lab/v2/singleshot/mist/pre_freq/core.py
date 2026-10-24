@@ -54,20 +54,12 @@ class PreFreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="Preparation pulse", group="Modules")
-    ]
-    pi_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Pi pulse", group="Modules")
-    ] = None
-    probe_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="MIST probe pulse", group="Modules")
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    freq: Annotated[
-        SweepCfg, FieldMeta(label="Preparation freq", unit="MHz", group="Sweep")
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Preparation pulse")]
+    pi_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Pi pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="MIST probe pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]

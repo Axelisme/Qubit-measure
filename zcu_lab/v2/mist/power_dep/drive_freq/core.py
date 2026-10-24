@@ -51,12 +51,12 @@ class DriveFreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(group="Modules")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
-    freq: Annotated[SweepCfg, FieldMeta(group="Sweep")]
-    gain: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    freq: SweepCfg
+    gain: SweepCfg
 
 
 class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):

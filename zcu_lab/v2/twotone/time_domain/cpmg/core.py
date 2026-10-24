@@ -81,16 +81,16 @@ class CPMG_Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    reset: Reset.Cfg | None = None
+    pi2_pulse: Pulse.Cfg
+    pi_pulse: Pulse.Cfg
+    readout: Readout.Cfg
     times: Annotated[
         list[Annotated[int, Field(strict=True, ge=1)]],
         Field(min_length=1),
-        FieldMeta(label="Pi pulse counts", group="Sweep"),
+        FieldMeta(label="Pi pulse counts"),
     ]
-    length: Annotated[SweepCfg | None, FieldMeta(group="Sweep")] = None
+    length: SweepCfg | None = None
     length_range: list[tuple[float, float]] | tuple[float, float]
     length_expts: int
     detune_ratio: Annotated[

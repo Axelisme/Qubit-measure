@@ -45,8 +45,8 @@ class FluxDepCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     flux_dev: Annotated[
         str,
         FieldMeta(
@@ -67,7 +67,6 @@ class FluxDepCfg(ConfigBase):
             label="Frequency",
             unit="MHz",
             description="Readout frequency sweep.",
-            group="Sweep",
         ),
     ]
     flux: Annotated[
@@ -75,7 +74,6 @@ class FluxDepCfg(ConfigBase):
         FieldMeta(
             label="Flux device value",
             description="Flux device sweep in flux_unit coordinates.",
-            group="Sweep",
         ),
     ]
 

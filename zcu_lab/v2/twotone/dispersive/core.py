@@ -69,17 +69,11 @@ class DispersiveCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Initial pulse", group="Modules")
-    ] = None
-    qub_pulse: Annotated[
-        Pulse.Cfg, FieldMeta(label="Qubit preparation pulse", group="Modules")
-    ]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    freq: Annotated[
-        SweepCfg, FieldMeta(label="Readout freq", unit="MHz", group="Sweep")
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Initial pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit preparation pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
 
 
 @dataclass(frozen=True)

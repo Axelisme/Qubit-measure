@@ -61,18 +61,12 @@ class ZigZagScanCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse", group="Modules")]
-    X180_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="X180 Pulse", group="Modules")
-    ] = None
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    gain: Annotated[
-        SweepCfg | None, FieldMeta(label="Gain", unit="a.u.", group="Sweep")
-    ] = None
-    freq: Annotated[
-        SweepCfg | None, FieldMeta(label="Freq", unit="MHz", group="Sweep")
-    ] = None
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    freq: Annotated[SweepCfg | None, FieldMeta(label="Freq", unit="MHz")] = None
     n_times: Annotated[
         int,
         FieldMeta(

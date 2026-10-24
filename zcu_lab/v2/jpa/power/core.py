@@ -53,9 +53,9 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     jpa_rf_dev: Annotated[
         str,
         FieldMeta(
@@ -63,9 +63,7 @@ class PowerCfg(ConfigBase):
             description="Connected RF device driven by the pump-power sweep.",
         ),
     ] = ""
-    jpa_power: Annotated[
-        SweepCfg, FieldMeta(label="JPA pump power", unit="dBm", group="Sweep")
-    ]
+    jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
     skew_penalty: Annotated[
         float,
         FieldMeta(

@@ -65,7 +65,6 @@ class DurationScanCfg(ConfigBase):
         FieldMeta(
             label="F1 Xπ",
             description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-            group="Modules",
         ),
     ]
     x180_f2: Annotated[
@@ -73,7 +72,6 @@ class DurationScanCfg(ConfigBase):
         FieldMeta(
             label="F2 Xπ",
             description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
-            group="Modules",
         ),
     ]
     readout: Annotated[
@@ -81,7 +79,6 @@ class DurationScanCfg(ConfigBase):
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot，先用 lookback 取得 timing us，再做 mux onetone。",
-            group="Modules",
         ),
     ]
     roles: JointRoles
@@ -98,7 +95,6 @@ class DurationScanCfg(ConfigBase):
             unit="us",
             label="Duration",
             description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
-            group="Sweep",
         ),
     ]
     f1_centers: Annotated[

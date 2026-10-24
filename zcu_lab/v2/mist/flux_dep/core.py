@@ -69,10 +69,10 @@ class FluxDepCfg(ConfigBase):
         ),
     ] = 1.0
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(group="Modules")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
     flux_dev: Annotated[
         str,
         FieldMeta(
@@ -80,8 +80,8 @@ class FluxDepCfg(ConfigBase):
             description="Connected flux device driven by the sweep.",
         ),
     ]
-    flux: Annotated[SweepCfg, FieldMeta(group="Sweep")]
-    gain: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    flux: SweepCfg
+    gain: SweepCfg
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):

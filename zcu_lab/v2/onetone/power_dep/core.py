@@ -56,10 +56,10 @@ class PowerDepCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized", group="Sweep")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz", group="Sweep")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     earlystop_snr: Annotated[
         float | None,
         AfterValidator(_positive_snr_or_none),

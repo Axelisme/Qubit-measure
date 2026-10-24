@@ -64,12 +64,10 @@ class T1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
-    length: Annotated[
-        SweepCfg | list[float], FieldMeta(label="Delay", unit="us", group="Sweep")
-    ]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
 
@@ -276,11 +274,11 @@ class T1WithToneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    test_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
-    length: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    test_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    length: SweepCfg
 
 
 @dataclass(frozen=True)
@@ -435,12 +433,12 @@ class ScanT1WithToneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    test_pulse: Annotated[Pulse.Cfg, FieldMeta(group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(group="Modules")]
-    gain: Annotated[SweepCfg | list[float], FieldMeta(group="Sweep")]
-    length: Annotated[SweepCfg, FieldMeta(group="Sweep")]
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    test_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: SweepCfg | list[float]
+    length: SweepCfg
 
 
 @dataclass(frozen=True)

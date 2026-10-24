@@ -152,10 +152,10 @@ class T1WithToneSweepCfg(ConfigBase):
         ),
     ] = 1.0
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse", group="Modules")]
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[
         SweepCfg | list[float],
         FieldMeta(
@@ -165,15 +165,10 @@ class T1WithToneSweepCfg(ConfigBase):
                 "Enter the probe length range (us); "
                 "every point must be finite and strictly positive."
             ),
-            group="Sweep",
         ),
     ]
-    gain: Annotated[
-        SweepCfg | None, FieldMeta(label="Gain", unit="a.u.", group="Sweep")
-    ] = None
-    freq: Annotated[
-        SweepCfg | None, FieldMeta(label="Frequency", unit="MHz", group="Sweep")
-    ] = None
+    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]

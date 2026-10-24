@@ -181,8 +181,8 @@ class MuxLenRabiCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
-    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
     expts: int = Field(
         strict=True,

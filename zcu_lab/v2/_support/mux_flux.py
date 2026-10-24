@@ -129,8 +129,8 @@ class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCf
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
-    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     frequency: S
     tones: Annotated[list[T], FieldMeta(element_label="name")]
     participants: list[StrictInt]

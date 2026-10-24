@@ -209,11 +209,11 @@ class MuxT1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[ResetCfg | None, FieldMeta(group="Modules")] = None
-    readout: Annotated[MuxReadoutCfg, FieldMeta(group="Modules")]
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
     tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
     participants: list[StrictInt]
-    delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us", group="Sweep")]
+    delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:

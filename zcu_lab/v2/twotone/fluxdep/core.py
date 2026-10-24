@@ -59,12 +59,10 @@ class FreqFluxCfg(ConfigBase):
             description="Working unit for the selected driver; no conversion.",
         ),
     ]  # External flux driver unit; no conversion.
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", group="Modules")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None, FieldMeta(label="Init Pulse", group="Modules")
-    ] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse", group="Modules")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout", group="Modules")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     flux_dev: Annotated[
         str,
         FieldMeta(
@@ -72,10 +70,8 @@ class FreqFluxCfg(ConfigBase):
             description="Name of the connected flux-bias device driven by the sweep.",
         ),
     ]
-    flux: Annotated[
-        SweepCfg, FieldMeta(label="Flux device value", decimals=6, group="Sweep")
-    ]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz", group="Sweep")]
+    flux: Annotated[SweepCfg, FieldMeta(label="Flux device value", decimals=6)]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     fail_retry: int = 0
 
 
