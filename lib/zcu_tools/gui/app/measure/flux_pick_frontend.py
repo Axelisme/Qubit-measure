@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from math import isfinite
-from typing import Any, cast
+from typing import cast
 
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.analysis.fluxdep.line_picker import TwoLinePicker
 from zcu_tools.analysis.fluxdep.line_state import FluxPickState
 from zcu_tools.gui.app.measure.flux_pick_plugin import FluxPickPlugin
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.gui.app.measure.ui.interactive_frontend import (
     InteractiveFrontend,
     InteractiveFrontendEnv,
@@ -36,7 +37,7 @@ from zcu_tools.plotting.plots import Plots
 logger = logging.getLogger(__name__)
 
 
-class FluxPickFrontend(InteractiveFrontend):
+class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
     """Render committed picker state with disposable click-follow line previews.
 
     plugin supplies spectrum/actions; session is an open owner-loop Session;
@@ -48,7 +49,7 @@ class FluxPickFrontend(InteractiveFrontend):
 
     def __init__(
         self,
-        plugin: FluxPickPlugin,
+        plugin: FluxPickPlugin[R],
         session: Session[FluxPickState],
         env: InteractiveFrontendEnv,
         request_finish: Callable[[], bool],
@@ -300,9 +301,9 @@ class FluxPickFrontend(InteractiveFrontend):
         super().hideEvent(a0)
 
 
-def make_flux_pick_frontend(
-    plugin: PluginDefinition[Any, Any],
-    session: Session[Any],
+def make_flux_pick_frontend[R: FluxPickResult](
+    plugin: PluginDefinition[FluxPickState, R],
+    session: Session[FluxPickState],
     env: InteractiveFrontendEnv,
     request_finish: Callable[[], bool],
     request_cancel: Callable[[], bool],

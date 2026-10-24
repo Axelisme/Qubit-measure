@@ -1,13 +1,12 @@
 """Registered author shared by native pane and MCP figure-contract scenarios."""
 
-from collections.abc import Sequence
-
-from matplotlib.figure import Figure
+import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.workflows import Failed, Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
-from zcu_tools.plotting.plots import Plots
+
+from tests._plotting import create_trace
 
 from ._workflow_ask import Choose, Native, Values
 
@@ -16,43 +15,18 @@ class PlotCfg(ConfigBase):
     stage: int
 
 
-def draw_line(
-    plots: Plots,
-    name: str,
-    xlabel: str,
-    ylabel: str,
-    xs: Sequence[float],
-    ys: Sequence[float],
-) -> None:
-    """Present one synthetic trace through the generic owner-thread drawing seam."""
-    plots.subplots(name)
-
-    def draw(figure: Figure) -> None:
-        axes = figure.axes[0]
-        axes.set_xlabel(xlabel)
-        axes.set_ylabel(ylabel)
-        axes.plot(xs, ys)
-
-    plots.draw(name, draw)
-
-
 def acquire(cfg: PlotCfg, *, context: RunContext) -> int:
-    draw_line(
-        context.plots,
-        "measurement",
-        "Delay",
-        f"Attempt {cfg.stage}",
-        [0.0, 1.0],
-        [1.0, float(cfg.stage)],
-    )
+    viewer = create_trace(context.plots, "measurement", "Delay", f"Attempt {cfg.stage}")
+    viewer.update((np.array([0.0, 1.0]), np.array([1.0, float(cfg.stage)])))
     if cfg.stage == 1:
-        draw_line(context.plots, "diagnostic", "Frequency", "Diagnostic", [], [])
+        create_trace(context.plots, "diagnostic", "Frequency", "Diagnostic")
     return cfg.stage
 
 
 @workflow("operation-plots", "Replace operation figures without losing workflow trends")
 async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
-    draw_line(env.plots, "trend", "Iteration", "Workflow trend", [0.0, 1.0], [1.0, 2.0])
+    trend = create_trace(env.plots, "trend", "Iteration", "Workflow trend")
+    trend.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
     for stage, iteration in zip((1, 2), env.iterations(), strict=False):
         outcome = await iteration.run(acquire, PlotCfg(stage=stage))
         if isinstance(outcome, Failed):

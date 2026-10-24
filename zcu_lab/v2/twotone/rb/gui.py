@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -32,31 +32,28 @@ class RBAnalyzeResult(AnalyzeResultBase):
     fidelity: float
 
 
-class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult]):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[RBCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
+def _RB_make_form(ctx: FormContext) -> Form[RBCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
-    """Run, persist and fit RB using calibrated X90/X180 and readout modules."""
 
-    exp_cls = RB_Exp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _RB_analyze(
+    req: AnalyzeRequest[RBRunResult, None], *, plots: Plots
+) -> RBAnalyzeResult:
+    """Fit the saved run's mean IQ decay and publish its fit figure."""
+    result = RB_Exp().analyze(req.run_result, None, plots=plots)
+    return RBAnalyzeResult(epc=result.epc, fidelity=result.fidelity)
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: RBCfg,
-        *,
-        context: RunContext,
-    ) -> RBRunResult:
-        """Execute the accepted cfg; propagate acquisition failures to the GUI."""
-        del req
-        return RunRecord(cfg=cfg, result=RB_Exp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[RBRunResult, None], *, plots: Plots
-    ) -> RBAnalyzeResult:
-        """Fit the saved run's mean IQ decay and publish its fit figure."""
-        result = RB_Exp().analyze(req.run_result, None, plots=plots)
-        return RBAnalyzeResult(epc=result.epc, fidelity=result.fidelity)
+def _run(cfg: RBCfg, *, context: RunContext) -> RunRecord[RBCfg, RB_Result]:
+    """Acquire a trace and retain the experiment configuration with its result."""
+    return RunRecord(cfg=cfg, result=RB_Exp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=RB_Exp.AXES_SPEC,
+    make_form=_RB_make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_RB_analyze),
+)

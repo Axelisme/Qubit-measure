@@ -3,20 +3,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_shared import (
@@ -44,57 +43,47 @@ class SsAcStarkAnalyzeResult(AnalyzeResultBase):
     ac_stark_coeff: float
 
 
-class SsAcStarkAdapter(
-    BaseAdapter[AcStarkCfg, SsAcStarkRunResult, SsAcStarkAnalyzeResult]
-):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
+def _analyze(
+    req: AnalyzeRequest[SsAcStarkRunResult, None], *, plots: Plots
+) -> SsAcStarkAnalyzeResult:
+    # Required chi/kappa and optional readout correction/cutoff use this
+    # Run's fixed capture. The core derives eta and owns fit defaults.
+    chi, kappa = read_chi_kappa(req.parameters)
+    confusion = read_confusion_matrix(req.parameters)
+    cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
+    analysis = AcStarkExp().analyze(
+        req.run_result,
+        AcStarkAnalyzeOptions(
+            chi=chi, kappa=kappa, confusion_matrix=confusion, cutoff=cutoff
+        ),
+        plots=plots,
+    )
+    return SsAcStarkAnalyzeResult(ac_stark_coeff=analysis.ac_stark_coeff)
 
-    exp_cls = AcStarkExp
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _writeback(
+    req: WritebackRequest[SsAcStarkRunResult, SsAcStarkAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    # Key ``ac_stark_coeff`` per single_qubit.md:3329.
+    return [
+        ParameterWriteback(
+            target_name="$qubit.ext.ac_stark_coeff",
+            description="AC-Stark coefficient (photon number per gain²)",
+            proposed_value=req.analyze_result.ac_stark_coeff,
+        ),
+    ]
 
-    # No get_analyze_params override: None (4th generic arg).
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: AcStarkCfg,
-        *,
-        context: RunContext,
-    ) -> SsAcStarkRunResult:
-        del req
-        result = AcStarkExp().run(cfg, context=context)
-        return RunRecord(cfg=cfg, result=result)
+def _run(
+    cfg: AcStarkCfg, *, context: RunContext
+) -> RunRecord[AcStarkCfg, AcStarkResult]:
+    return RunRecord(cfg=cfg, result=AcStarkExp().run(cfg, context=context))
 
-    def analyze(
-        self, req: AnalyzeRequest[SsAcStarkRunResult, None], *, plots: Plots
-    ) -> SsAcStarkAnalyzeResult:
-        # Required chi/kappa and optional readout correction/cutoff use this
-        # Run's fixed capture. The core derives eta and owns fit defaults.
-        chi, kappa = read_chi_kappa(req.parameters)
-        confusion = read_confusion_matrix(req.parameters)
-        cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
-        analysis = AcStarkExp().analyze(
-            req.run_result,
-            AcStarkAnalyzeOptions(
-                chi=chi, kappa=kappa, confusion_matrix=confusion, cutoff=cutoff
-            ),
-            plots=plots,
-        )
-        return SsAcStarkAnalyzeResult(ac_stark_coeff=analysis.ac_stark_coeff)
 
-    def get_writeback_items(
-        self,
-        req: WritebackRequest[SsAcStarkRunResult, SsAcStarkAnalyzeResult],
-    ) -> Sequence[WritebackItem]:
-        # Key ``ac_stark_coeff`` per single_qubit.md:3329.
-        return [
-            ParameterWriteback(
-                target_name="$qubit.ext.ac_stark_coeff",
-                description="AC-Stark coefficient (photon number per gain²)",
-                proposed_value=req.analyze_result.ac_stark_coeff,
-            ),
-        ]
+DEFINITION = Adapter(
+    spec=AcStarkExp.AXES_SPEC,
+    make_form=make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, writeback=_writeback),
+)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 import numpy as np
 from pydantic import BaseModel
@@ -14,21 +14,19 @@ from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
+    PostAnalysis,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     PostWritebackRequest,
-    RunRequest,
     T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.analyze_results import fit_quality_models
@@ -180,183 +178,167 @@ class MuxGEPostAnalyzeResult(PostAnalyzeResultBase):
         return self.summary().model_dump(mode="json")
 
 
-class MuxGEAdapter(
-    BaseAdapter[
-        MuxGECfg,
-        MuxGERunResult,
-        MuxGEAnalyzeResult,
-        GEAnalyzeParams,
-        MuxGEPostAnalyzeResult,
-    ]
-):
-    """Acquire paired mux shots, analyze via GE owner and propose without Apply."""
-
-    exp_cls = MuxGEExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+def _analyze(
+    req: AnalyzeRequest[MuxGERunResult, GEAnalyzeParams],
+    *,
+    plots: Plots,
+) -> MuxGEAnalyzeResult:
+    """Use core GE options on the explicit source, publishing fit_i figures."""
+    params = req.analyze_params
+    outcomes = MuxGEExp().analyze(
+        req.run_result,
+        MuxGEAnalyzeOptions(
+            default=GEAnalyzeOptions(
+                initial_state=params.initial_state,
+                backend=params.backend,
+                logscale=params.logscale,
+                align_t1=params.align_t1,
+                length_ratio=params.length_ratio,
+            )
+        ),
+        plots=plots,
     )
+    snapshot = req.run_result.cfg
+    names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
+    return MuxGEAnalyzeResult(outcomes, names)
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[MuxGECfg]:
-        """Build the native list Form using the fixed Open/Reset capture."""
-        return make_form(ctx)
 
-    def run(
-        self, req: RunRequest, cfg: MuxGECfg, *, context: RunContext
-    ) -> MuxGERunResult:
-        """Pair the original validated controls with this operation's raw result."""
-        del req
-        return RunRecord(cfg, MuxGEExp().run(cfg, context=context))
+def _post_analyze(
+    req: PostAnalyzeRequest[MuxGERunResult, MuxGEAnalyzeResult, None],
+    *,
+    plots: Plots,
+) -> MuxGEPostAnalyzeResult:
+    """Apply the same-source adopted primary via GE owner, publishing post_i."""
+    outcomes = MuxGEExp().post_analyze(
+        req.run_result,
+        req.analyze_result.outcomes,
+        MuxGEPostOptions(default=GEPostAnalyzeOptions()),
+        plots=plots,
+    )
+    return MuxGEPostAnalyzeResult(outcomes, req.analyze_result.names)
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[MuxGERunResult, GEAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> MuxGEAnalyzeResult:
-        """Use core GE options on the explicit source, publishing fit_i figures."""
-        params = req.analyze_params
-        outcomes = MuxGEExp().analyze(
-            req.run_result,
-            MuxGEAnalyzeOptions(
-                default=GEAnalyzeOptions(
-                    initial_state=params.initial_state,
-                    backend=params.backend,
-                    logscale=params.logscale,
-                    align_t1=params.align_t1,
-                    length_ratio=params.length_ratio,
-                )
-            ),
-            plots=plots,
-        )
-        snapshot = req.run_result.cfg
-        names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
-        return MuxGEAnalyzeResult(outcomes, names)
 
-    def analysis_result_tone_count(self, result: MuxGERunResult) -> int:
-        """Budget Post result reads for the measured original tone positions."""
-        return len(result.result.tone_indices)
+def _get_writeback_items(
+    req: WritebackRequest[MuxGERunResult, MuxGEAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    """Propose complete successful tones' primary IQ calibrations, never Apply.
 
-    def post_analyze(
-        self,
-        req: PostAnalyzeRequest[MuxGERunResult, MuxGEAnalyzeResult, None],
-        *,
-        plots: Plots,
-    ) -> MuxGEPostAnalyzeResult:
-        """Apply the same-source adopted primary via GE owner, publishing post_i."""
-        outcomes = MuxGEExp().post_analyze(
-            req.run_result,
-            req.analyze_result.outcomes,
-            MuxGEPostOptions(default=GEPostAnalyzeOptions()),
-            plots=plots,
-        )
-        return MuxGEPostAnalyzeResult(outcomes, req.analyze_result.names)
-
-    def get_writeback_items(
-        self, req: WritebackRequest[MuxGERunResult, MuxGEAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        """Propose complete successful tones' primary IQ calibrations, never Apply.
-
-        Resolve destinations only from this Run/Load capture; no capture means
-        no proposals. Validate the binding against any source cfg. Preserve GE's
-        calibration validity gate. Failed/partial rows contribute no items.
-        GE model-review gates control initial selection with a note; manual draft
-        changes remain possible. Low joint r2 is not calibration evidence.
-        """
-        snapshot = req.run_result.cfg
-        names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
-        qubits = captured_qubits(req.ctx.parameters, names)
-        if qubits is None:
-            return []
-        items: list[WritebackItem] = []
-        for row, outcome in enumerate(req.analyze_result.outcomes):
-            if (
-                isinstance(outcome, MuxFitFailure)
-                or not np.isfinite(req.run_result.result.signals[row]).all()
-            ):
-                continue
-            primary = outcome.primary
-            primary.validate_calibration()
-            note = ge_calibration_review_note(primary)
-            qubit = qubits[outcome.index]
-            row_items: list[WritebackItem] = []
-            for field, value, description in (
-                ("fidelity", primary.fidelity, "Prepared-label assignment fidelity"),
-                ("sigma", primary.ge_s, "Single-shot IQ cluster width (ADC units)"),
-                ("g_center", primary.g_center, "Single-shot ground IQ center"),
-                ("e_center", primary.e_center, "Single-shot excited IQ center"),
-            ):
-                row_items.append(
-                    ParameterWriteback(
-                        target_name=f"{qubit}.ext.readout_cal.{field}",
-                        description=description,
-                        proposed_value=value,
-                        selected=note is None,
-                        note=note,
-                    )
-                )
-            for item in row_items:
-                item.element = ElementIdentity(index=outcome.index, name=qubit)
-            items.extend(row_items)
-        return items
-
-    def get_post_writeback_items(
-        self,
-        req: PostWritebackRequest[
-            MuxGERunResult, MuxGEAnalyzeResult, T_PostAnalyzeResult
-        ],
-    ) -> Sequence[WritebackItem]:
-        """Propose only same-source successful GE radius/confusion diagnostics.
-
-        Missing capture returns no items. Invalid binding or wrong post result
-        raises; failed/partial rows contribute nothing. Targets retain GE's 3x3
-        diagnostic policy. Preselection requires primary GE review gates and a
-        finite post condition number <=10. Failed gates keep candidates with notes
-        for manual selection. No current Form/library lookup or Apply occurs here.
-        """
-        result = req.post_analyze_result
-        if not isinstance(result, MuxGEPostAnalyzeResult):
-            raise TypeError("Mux GE post proposals require MuxGEPostAnalyzeResult")
-        snapshot = req.run_result.cfg
-        names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
-        qubits = captured_qubits(req.ctx.parameters, names)
-        if qubits is None:
-            return []
-        items: list[WritebackItem] = []
-        for row, (outcome, primary) in enumerate(
-            zip(result.outcomes, req.analyze_result.outcomes, strict=True)
+    Resolve destinations only from this Run/Load capture; no capture means
+    no proposals. Validate the binding against any source cfg. Preserve GE's
+    calibration validity gate. Failed/partial rows contribute no items.
+    GE model-review gates control initial selection with a note; manual draft
+    changes remain possible. Low joint r2 is not calibration evidence.
+    """
+    snapshot = req.run_result.cfg
+    names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
+    qubits = captured_qubits(req.ctx.parameters, names)
+    if qubits is None:
+        return []
+    items: list[WritebackItem] = []
+    for row, outcome in enumerate(req.analyze_result.outcomes):
+        if (
+            isinstance(outcome, MuxFitFailure)
+            or not np.isfinite(req.run_result.result.signals[row]).all()
         ):
-            if (
-                isinstance(outcome, MuxFitFailure)
-                or isinstance(primary, MuxFitFailure)
-                or not np.isfinite(req.run_result.result.signals[row]).all()
-            ):
-                continue
-            qubit = qubits[outcome.index]
-            note = ge_post_review_note(
-                primary.primary, outcome.post.confusion.condition_number
+            continue
+        primary = outcome.primary
+        primary.validate_calibration()
+        note = ge_calibration_review_note(primary)
+        qubit = qubits[outcome.index]
+        row_items: list[WritebackItem] = []
+        for field, value, description in (
+            ("fidelity", primary.fidelity, "Prepared-label assignment fidelity"),
+            ("sigma", primary.ge_s, "Single-shot IQ cluster width (ADC units)"),
+            ("g_center", primary.g_center, "Single-shot ground IQ center"),
+            ("e_center", primary.e_center, "Single-shot excited IQ center"),
+        ):
+            row_items.append(
+                ParameterWriteback(
+                    target_name=f"{qubit}.ext.readout_cal.{field}",
+                    description=description,
+                    proposed_value=value,
+                    selected=note is None,
+                    note=note,
+                )
             )
-            row_items: list[WritebackItem] = []
-            row_items.extend(
-                [
-                    ParameterWriteback(
-                        target_name=f"{qubit}.ext.readout_cal.radius",
-                        description="Single-shot classification radius",
-                        proposed_value=outcome.post.confusion.radius,
-                        selected=note is None,
-                        note=note,
-                    ),
-                    ParameterWriteback(
-                        target_name=f"{qubit}.ext.readout_cal.confusion_matrix",
-                        description="Single-shot 3x3 confusion matrix",
-                        proposed_value=outcome.post.confusion.matrix.tolist(),
-                        selected=note is None,
-                        note=note,
-                    ),
-                ]
-            )
-            for item in row_items:
-                item.element = ElementIdentity(index=outcome.index, name=qubit)
-            items.extend(row_items)
-        return items
+        for item in row_items:
+            item.element = ElementIdentity(index=outcome.index, name=qubit)
+        items.extend(row_items)
+    return items
+
+
+def _get_post_writeback_items(
+    req: PostWritebackRequest[MuxGERunResult, MuxGEAnalyzeResult, T_PostAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    """Propose only same-source successful GE radius/confusion diagnostics.
+
+    Missing capture returns no items. Invalid binding or wrong post result
+    raises; failed/partial rows contribute nothing. Targets retain GE's 3x3
+    diagnostic policy. Preselection requires primary GE review gates and a
+    finite post condition number <=10. Failed gates keep candidates with notes
+    for manual selection. No current Form/library lookup or Apply occurs here.
+    """
+    result = req.post_analyze_result
+    if not isinstance(result, MuxGEPostAnalyzeResult):
+        raise TypeError("Mux GE post proposals require MuxGEPostAnalyzeResult")
+    snapshot = req.run_result.cfg
+    names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
+    qubits = captured_qubits(req.ctx.parameters, names)
+    if qubits is None:
+        return []
+    items: list[WritebackItem] = []
+    for row, (outcome, primary) in enumerate(
+        zip(result.outcomes, req.analyze_result.outcomes, strict=True)
+    ):
+        if (
+            isinstance(outcome, MuxFitFailure)
+            or isinstance(primary, MuxFitFailure)
+            or not np.isfinite(req.run_result.result.signals[row]).all()
+        ):
+            continue
+        qubit = qubits[outcome.index]
+        note = ge_post_review_note(
+            primary.primary, outcome.post.confusion.condition_number
+        )
+        row_items: list[WritebackItem] = []
+        row_items.extend(
+            [
+                ParameterWriteback(
+                    target_name=f"{qubit}.ext.readout_cal.radius",
+                    description="Single-shot classification radius",
+                    proposed_value=outcome.post.confusion.radius,
+                    selected=note is None,
+                    note=note,
+                ),
+                ParameterWriteback(
+                    target_name=f"{qubit}.ext.readout_cal.confusion_matrix",
+                    description="Single-shot 3x3 confusion matrix",
+                    proposed_value=outcome.post.confusion.matrix.tolist(),
+                    selected=note is None,
+                    note=note,
+                ),
+            ]
+        )
+        for item in row_items:
+            item.element = ElementIdentity(index=outcome.index, name=qubit)
+        items.extend(row_items)
+    return items
+
+
+def run(cfg: MuxGECfg, *, context: RunContext) -> RunRecord[MuxGECfg, MuxGEResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=MuxGEExp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=MuxGEExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_analyze,
+        options=lambda source, env: GEAnalyzeParams(),
+        writeback=_get_writeback_items,
+    ),
+    post_analysis=PostAnalysis(fn=_post_analyze, writeback=_get_post_writeback_items),
+)

@@ -12,15 +12,16 @@ from zcu_tools.plotting.plots import Plots
 from .types import AnalyzeRequest, AnalyzeResult, PostAnalyzeRequest
 
 
-class RunHook[C: ConfigBase, R](Protocol):
-    """Acquire raw data; the host retains accepted cfg and acquisition evidence."""
+class RunHook[I: ConfigBase, C: ConfigBase, R](Protocol):
+    """Adapt admitted input and return the actual experiment cfg and result."""
 
-    def __call__(self, cfg: C, /, *, context: RunContext) -> R:
-        """Acquire using admitted cfg and keyword-only operation context.
+    def __call__(self, inp: I, /, *, context: RunContext) -> RunRecord[C, R]:
+        """Convert input to experiment cfg and acquire with keyword-only context.
 
-        Return raw R, not RunRecord. context supplies acquisition resources and
-        cancellation/progress. Hardware/I/O and callback failures propagate to
-        the operation host, which owns evidence, partial results and settlement.
+        Return a RunRecord containing the actual cfg passed to the experiment,
+        or cfg=None when unavailable. context supplies acquisition resources and
+        cancellation/progress. Failures propagate to the operation host, which
+        attaches acquisition evidence and owns partial results and settlement.
         """
         ...
 

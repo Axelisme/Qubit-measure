@@ -1,6 +1,6 @@
 # `zcu_tools.plotting.fluxdep` — Fluxdep diagnostic figures
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。通量頻譜搜尋與選點診斷圖的 builder 契約。
 
@@ -72,6 +72,10 @@ sky blue. `transition_color(i)` cycles the eight Okabe–Ito colours for the fit
 compiled transitions, so Show's model lines and attributed points match. Half/integer flux lines use `HALF_FLUX_COLOR`/`INTEGER_FLUX_COLOR`
 from `analysis.fluxdep.line_picker`, the line picker's own red and blue, in
 pickers, previews and the spectrum PNG.
+
+OneTone and TwoTone share this package's private sample-centered background
+renderer. It keeps descending and nonuniform coordinates with their signal data;
+it does not depend on lab live tools or a standalone liveplot backend.
 
 This package does not own Qt canvas attachment, backend selection, interactive
 `TwoLinePicker` gestures, or analysis state. Importing the root `plotting` package

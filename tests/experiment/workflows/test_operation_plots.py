@@ -6,11 +6,13 @@ from threading import Event
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
-from zcu_tools import plotting
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.workflows import Completed, Failed, Live, WorkflowEnv
-from zcu_tools.plotting.plots import LinePlot, NonPresentingHost, Plots
+from zcu_tools.plotting import LiveUpdate
+from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from tests._plotting import TraceData, create_trace
 
 from ._engine_fakes import (
     Cfg,
@@ -50,19 +52,19 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
-        viewer = plotting.live_line(context.plots, "measurement", "Delay", "Signal")
-        viewer.update(np.array([0.0, 1.0]), np.array([1.0, 2.0]))
+        viewer = create_trace(context.plots, "measurement", "Delay", "Signal")
+        viewer.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
         return cfg.value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            trend = plotting.live_line(env.plots, "trend", "Iteration", "Value")
+            trend = create_trace(env.plots, "trend", "Iteration", "Value")
             for index in range(2):
                 outcome = completed(await iteration.run(acquire, Cfg(value=7)))
                 delivered.append(outcome.value.result)
-                trend.update(np.array([0.0]), np.array([float(index)]))
+                trend.update((np.array([0.0]), np.array([float(index)])))
                 iteration.commit(Point(value=index))
                 iteration = next(iterations)
         finally:
@@ -99,7 +101,7 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
         configs.append(cfg.model_copy(deep=True))
-        plotting.live_line(context.plots, "measurement", "Delay", "Signal")
+        create_trace(context.plots, "measurement", "Delay", "Signal")
         if len(attempts) == 1:
             entered.set()
             assert context.scope.stop.event.wait(10), "Pause must stop acquisition"
@@ -111,7 +113,7 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            plotting.live_line(env.plots, "trend", "Iteration", "Value")
+            create_trace(env.plots, "trend", "Iteration", "Value")
             result = completed(await iteration.run(acquire, Cfg(value=9)))
             delivered.append(result.value.result)
             iteration.commit(Point(value=result.value.result))
@@ -149,14 +151,14 @@ def test_operation_finishes_before_return_or_failure_delivery(
     tmp_path: Path, outcome: str
 ) -> None:
     rig = Rig(tmp_path, native=True)
-    handles: list[LinePlot] = []
+    handles: list[LiveUpdate[TraceData]] = []
     attempts: list[Plots] = []
     delivered: list[Completed[RunRecord[Cfg, int]] | Failed] = []
     errors: list[str] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
-        handles.append(plotting.live_line(context.plots, "measurement", "x", "y"))
+        handles.append(create_trace(context.plots, "measurement", "x", "y"))
         if outcome == "raised":
             raise ValueError("core failed")
         if outcome == "failed":
@@ -175,8 +177,8 @@ def test_operation_finishes_before_return_or_failure_delivery(
                 errors.append(str(error))
             # The old producer is no longer allowed to update even before run ends.
             with pytest.raises(RuntimeError, match="finished"):
-                handles[0].update(np.array([0.0]), np.array([1.0]))
-            plotting.live_line(env.plots, "trend", "x", "y")
+                handles[0].update((np.array([0.0]), np.array([1.0])))
+            create_trace(env.plots, "trend", "x", "y")
         finally:
             iterations.close()
 
@@ -210,7 +212,7 @@ def test_workflow_registration_rejects_operation_namespace(
                 env.plots.subplots("operation/measurement")
         else:
             with pytest.raises(ValueError, match="operation/"):
-                plotting.live_line(env.plots, "operation/measurement", "x", "y")
+                create_trace(env.plots, "operation/measurement", "x", "y")
         env.plots.subplots("trend")
 
     try:
@@ -239,7 +241,7 @@ def test_finish_failure_propagates_without_masking_core_error(
     deliveries: list[object] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        plotting.live_line(context.plots, "measurement", "x", "y")
+        create_trace(context.plots, "measurement", "x", "y")
         if core_raises:
             raise ValueError("core failed")
         return 1

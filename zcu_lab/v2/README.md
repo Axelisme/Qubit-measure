@@ -25,6 +25,22 @@
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
+## 即時圖工具
+
+從 `zcu_lab.v2._support` import `live_line`、`live_scatter`、`live_heatmap` 與
+`live_heatmap_with_line`，以 `live_line(context.plots, name, xlabel, ylabel, ...)`
+建立 typed handle。工具與格式直接放在支援套件，不另建 plotting 子套件。
+`_support/live.py` 選擇格式與 scan-line 呈現，私有格式及 handle 檔保存 artists 與輸入檢查。
+作者要改 ticks、顏色、最近掃描線或增添工具時，從這裡修改。
+
+四工具保留既有 defaults、數值、具名圖及既有 axes 接入。Line 的 configure_axes 在 owner
+初始化後、呈現前執行。Handle 更新實數資料，保留 NaN 未測點與可選 title；
+`refresh=False` 可批次更新。Lib 的通用 LiveUpdate 負責複製資料、owner 執行與 refresh，
+finish／release 後拒絕更新。Reference marker 與動畫錄影不在這些工具中。
+
+Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`，joint-fit population／histogram／
+confusion 圖在 `singleshot/plot_rabi.py`。它們保留既有用途，分析計算仍由原分析 owner 負責。
+
 ## Mux readout 與表單初值
 
 有 reps／rounds 欄位的表單在 Open／Reset 時填入 1000／10，初值可編輯。

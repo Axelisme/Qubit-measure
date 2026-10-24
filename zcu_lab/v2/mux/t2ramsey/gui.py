@@ -6,23 +6,22 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 import numpy as np
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParameterWriteback,
-    RunRequest,
     SampleWriteback,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.mux_results import (
@@ -92,126 +91,119 @@ def _frequency_review_note(outcome: MuxCoherenceFit, t2_note: str | None) -> str
     return "; ".join(reasons) if reasons else None
 
 
-class MuxT2RamseyAdapter(
-    BaseAdapter[
-        MuxT2RamseyCfg,
-        MuxT2RamseyRunResult,
-        MuxT2RamseyAnalyzeResult,
-        T2RamseyAnalyzeParams,
-    ]
-):
-    """Run explicit sources and propose captured destinations without applying them."""
+def _analyze(
+    req: AnalyzeRequest[MuxT2RamseyRunResult, T2RamseyAnalyzeParams],
+    *,
+    plots: Plots,
+) -> MuxT2RamseyAnalyzeResult:
+    """Analyze the explicit Run/Load source, retaining each original-index outcome."""
+    params = req.analyze_params
+    outcomes = MuxT2RamseyExp().analyze(
+        req.run_result,
+        T2RamseyAnalyzeOptions(
+            fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
+        ),
+        plots=plots,
+    )
+    snapshot = req.run_result.cfg
+    return MuxT2RamseyAnalyzeResult(
+        outcomes,
+        None if snapshot is None else tuple(t.name for t in snapshot.tones),
+    )
 
-    sample_device_alias: ClassVar[str | None] = "$mux.flux_source"
-    exp_cls = MuxT2RamseyExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
-        """Build the native list Form using the fixed Open/Reset capture."""
-        return make_form(ctx)
+def _get_writeback_items(
+    req: WritebackRequest[MuxT2RamseyRunResult, MuxT2RamseyAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    """Propose only complete, successful tones using the same Run/Load capture.
 
-    def run(
-        self, req: RunRequest, cfg: MuxT2RamseyCfg, *, context: RunContext
-    ) -> MuxT2RamseyRunResult:
-        """Pair the validated cfg with the core result using this operation's context."""
-        del req
-        return RunRecord(cfg, MuxT2RamseyExp().run(cfg, context=context))
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[MuxT2RamseyRunResult, T2RamseyAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> MuxT2RamseyAnalyzeResult:
-        """Analyze the explicit Run/Load source, retaining each original-index outcome."""
-        params = req.analyze_params
-        outcomes = MuxT2RamseyExp().analyze(
-            req.run_result,
-            T2RamseyAnalyzeOptions(
-                fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
-            ),
-            plots=plots,
+    Missing capture returns no items. Captured bindings must match any source
+    cfg names/count; errors propagate. Partial/nonfinite rows and failed fits
+    produce no calibration items. Pulse proposals copy source cfg only, never
+    current library values. T2/sample require the coherence review gate;
+    frequency additionally requires adequate sampling and relative error <=0.5.
+    Failed gates retain unselected candidates with notes for manual review.
+    This method neither writes nor applies proposals.
+    """
+    snapshot = req.run_result.cfg
+    names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
+    qubits = captured_qubits(req.ctx.parameters, names)
+    if qubits is None:
+        return []
+    items: list[WritebackItem] = []
+    for row, outcome in enumerate(req.analyze_result.outcomes):
+        if (
+            isinstance(outcome, MuxFitFailure)
+            or not np.isfinite(req.run_result.result.signals[row]).all()
+        ):
+            continue
+        qubit = qubits[outcome.index]
+        t2_note = coherence_review_note(outcome.t2, outcome.t2_err, outcome.quality)
+        row_items: list[WritebackItem] = []
+        row_items.extend(
+            [
+                ParameterWriteback(
+                    target_name=f"{qubit}.t2r",
+                    description="t2r coherence time (us)",
+                    proposed_value=outcome.t2,
+                    selected=t2_note is None,
+                    note=t2_note,
+                ),
+                SampleWriteback(
+                    coordinate_device="$mux.flux_source",
+                    target_name=qubit,
+                    description="t2r sample at captured bias",
+                    proposed_value={
+                        "t2r_us": outcome.t2,
+                        "t2r_err_us": outcome.t2_err,
+                    },
+                    selected=t2_note is None,
+                    note=t2_note,
+                ),
+            ]
         )
-        snapshot = req.run_result.cfg
-        return MuxT2RamseyAnalyzeResult(
-            outcomes,
-            None if snapshot is None else tuple(t.name for t in snapshot.tones),
-        )
-
-    def get_writeback_items(
-        self, req: WritebackRequest[MuxT2RamseyRunResult, MuxT2RamseyAnalyzeResult]
-    ) -> Sequence[WritebackItem]:
-        """Propose only complete, successful tones using the same Run/Load capture.
-
-        Missing capture returns no items. Captured bindings must match any source
-        cfg names/count; errors propagate. Partial/nonfinite rows and failed fits
-        produce no calibration items. Pulse proposals copy source cfg only, never
-        current library values. T2/sample require the coherence review gate;
-        frequency additionally requires adequate sampling and relative error <=0.5.
-        Failed gates retain unselected candidates with notes for manual review.
-        This method neither writes nor applies proposals.
-        """
-        snapshot = req.run_result.cfg
-        names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
-        qubits = captured_qubits(req.ctx.parameters, names)
-        if qubits is None:
-            return []
-        items: list[WritebackItem] = []
-        for row, outcome in enumerate(req.analyze_result.outcomes):
-            if (
-                isinstance(outcome, MuxFitFailure)
-                or not np.isfinite(req.run_result.result.signals[row]).all()
-            ):
-                continue
-            qubit = qubits[outcome.index]
-            t2_note = coherence_review_note(outcome.t2, outcome.t2_err, outcome.quality)
-            row_items: list[WritebackItem] = []
-            row_items.extend(
-                [
-                    ParameterWriteback(
-                        target_name=f"{qubit}.t2r",
-                        description="t2r coherence time (us)",
-                        proposed_value=outcome.t2,
-                        selected=t2_note is None,
-                        note=t2_note,
-                    ),
-                    SampleWriteback(
-                        target_name=qubit,
-                        description="t2r sample at captured bias",
-                        proposed_value={
-                            "t2r_us": outcome.t2,
-                            "t2r_err_us": outcome.t2_err,
-                        },
-                        selected=t2_note is None,
-                        note=t2_note,
-                    ),
-                ]
+        data = req.run_result.result
+        if (
+            snapshot is not None
+            and outcome.fit_fringe
+            and np.isfinite(data.actual_detunes[row])
+            and np.isfinite(data.source_frequencies[row])
+            and np.isfinite(outcome.detune)
+        ):
+            frequency = (
+                data.source_frequencies[row] + data.actual_detunes[row] - outcome.detune
             )
-            data = req.run_result.result
-            if (
-                snapshot is not None
-                and outcome.fit_fringe
-                and np.isfinite(data.actual_detunes[row])
-                and np.isfinite(data.source_frequencies[row])
-                and np.isfinite(outcome.detune)
-            ):
-                frequency = (
-                    data.source_frequencies[row]
-                    + data.actual_detunes[row]
-                    - outcome.detune
+            frequency_note = _frequency_review_note(outcome, t2_note)
+            row_items.append(
+                ParameterWriteback(
+                    target_name=f"{qubit}.freq",
+                    description="Qubit frequency from sourced Ramsey fringe (MHz)",
+                    proposed_value=float(frequency),
+                    selected=frequency_note is None,
+                    note=frequency_note,
                 )
-                frequency_note = _frequency_review_note(outcome, t2_note)
-                row_items.append(
-                    ParameterWriteback(
-                        target_name=f"{qubit}.freq",
-                        description="Qubit frequency from sourced Ramsey fringe (MHz)",
-                        proposed_value=float(frequency),
-                        selected=frequency_note is None,
-                        note=frequency_note,
-                    )
-                )
-            for item in row_items:
-                item.element = ElementIdentity(index=outcome.index, name=qubit)
-            items.extend(row_items)
-        return items
+            )
+        for item in row_items:
+            item.element = ElementIdentity(index=outcome.index, name=qubit)
+        items.extend(row_items)
+    return items
+
+
+def run(
+    cfg: MuxT2RamseyCfg, *, context: RunContext
+) -> RunRecord[MuxT2RamseyCfg, MuxCoherenceResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=MuxT2RamseyExp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=MuxT2RamseyExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_analyze,
+        options=lambda source, env: T2RamseyAnalyzeParams(),
+        writeback=_get_writeback_items,
+    ),
+)

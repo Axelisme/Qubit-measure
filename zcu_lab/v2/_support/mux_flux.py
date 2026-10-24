@@ -18,13 +18,13 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.plotting import live_heatmap_with_line
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import ResetCfg, SweepCfg
 from zcu_tools.program.v2.modules import (
     MuxReadoutCfg,
 )
 
+from zcu_lab.v2._support import live_heatmap_with_line
 from zcu_lab.v2._support.device import check_flux_unit, set_flux
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxToneCfg,

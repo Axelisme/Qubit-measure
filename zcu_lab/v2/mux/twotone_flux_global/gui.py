@@ -1,29 +1,38 @@
-"""Measure registration for mux twotone versus global DC bias."""
-
-from dataclasses import replace
+from functools import partial
 from pathlib import Path
-from typing import ClassVar
 
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
-from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter, Interactive
+from zcu_tools.gui.app.measure.flux_pick_frontend import make_flux_pick_frontend
 
-from zcu_lab.v2._support.measure.mux_flux_adapter import MuxFluxAdapter
+from zcu_lab.v2._support.measure.mux_flux_adapter import (
+    get_analyze_params,
+    get_writeback_items,
+    make_interactive_plugin,
+)
+from zcu_lab.v2._support.mux_flux import MuxFluxResult
 
 from .core import TwotoneFluxGlobalCfg, TwotoneFluxGlobalExp
 from .form import make_form
 
 
-class TwotoneFluxGlobalAdapter(MuxFluxAdapter[TwotoneFluxGlobalCfg]):
-    """Acquire mux maps and calibrate one original participant per Analyze."""
+def run(
+    cfg: TwotoneFluxGlobalCfg, *, context: RunContext
+) -> RunRecord[TwotoneFluxGlobalCfg, MuxFluxResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=TwotoneFluxGlobalExp().run(cfg, context=context))
 
-    capabilities: ClassVar[AdapterCapabilities] = replace(
-        MuxFluxAdapter.capabilities, load_data=True
-    )
-    exp_cls = TwotoneFluxGlobalExp
-    force_magnitude: ClassVar[bool] = False
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TwotoneFluxGlobalCfg]:
-        """Prepare full mux identities, spectrum and global DC range candidates."""
-        return make_form(ctx)
+DEFINITION = Adapter(
+    spec=TwotoneFluxGlobalExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Interactive(
+        plugin=partial(make_interactive_plugin, force_magnitude=False),
+        frontend=make_flux_pick_frontend,
+        options=get_analyze_params,
+        writeback=get_writeback_items,
+    ),
+)

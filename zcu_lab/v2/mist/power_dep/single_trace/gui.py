@@ -2,17 +2,16 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     ParamMeta,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import (
@@ -42,46 +41,39 @@ class MistTraceAnalyzeParams:
     ] = None
 
 
-class MistTraceAdapter(
-    BaseAdapter[PowerDepCfg, MistTraceRunResult, None, MistTraceAnalyzeParams]
-):
-    """Acquire averaged MIST IQ and plot displacement without population fitting."""
+def _analyze(
+    req: AnalyzeRequest[MistTraceRunResult, MistTraceAnalyzeParams],
+    *,
+    plots: Plots,
+) -> None:
+    """Plot source IQ displacement using the submitted reference/axis options.
 
-    exp_cls = PowerDepExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+    Accept loaded sources without cfg. Invalid complex reference strings
+    raise ValueError; analysis does not read the current measurement form.
+    """
+    params = req.analyze_params
+    options = PowerDepAnalyzeOptions(
+        g0=None if params.g0 is None else complex(params.g0),
+        e0=None if params.e0 is None else complex(params.e0),
+        ac_coeff=params.ac_coeff,
+    )
+    PowerDepExp().analyze(req.run_result, options, plots=plots)
+    return
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
-        """Create initial cfg from the fixed Open/Reset source capture."""
-        return make_form(ctx)
 
-    def run(
-        self, req: RunRequest, cfg: PowerDepCfg, *, context: RunContext
-    ) -> MistTraceRunResult:
-        """Reset, optionally initialize, probe and read out at each gain.
+def run(
+    cfg: PowerDepCfg, *, context: RunContext
+) -> RunRecord[PowerDepCfg, PowerDepResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=PowerDepExp().run(cfg, context=context))
 
-        Return hardware gain coordinates and averaged complex IQ with the exact
-        accepted cfg. Acquisition errors follow the shared RunContext contract.
-        """
-        del req
-        return RunRecord(cfg, PowerDepExp().run(cfg, context=context))
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[MistTraceRunResult, MistTraceAnalyzeParams],
-        *,
-        plots: Plots,
-    ) -> None:
-        """Plot source IQ displacement using the submitted reference/axis options.
-
-        Accept loaded sources without cfg. Invalid complex reference strings
-        raise ValueError; analysis does not read the current measurement form.
-        """
-        params = req.analyze_params
-        options = PowerDepAnalyzeOptions(
-            g0=None if params.g0 is None else complex(params.g0),
-            e0=None if params.e0 is None else complex(params.e0),
-            ac_coeff=params.ac_coeff,
-        )
-        PowerDepExp().analyze(req.run_result, options, plots=plots)
-        return
+DEFINITION = Adapter(
+    spec=PowerDepExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_analyze, options=lambda source, env: MistTraceAnalyzeParams()
+    ),
+)

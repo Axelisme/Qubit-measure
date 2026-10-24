@@ -2,20 +2,17 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import Annotated, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     AnalyzeResultBase,
     ParamMeta,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .core import FluxDepAnalyzeOptions, FluxDepCfg, FluxDepExp, FluxDepResult
@@ -49,50 +46,42 @@ class MistFluxDepAnalysis(AnalyzeResultBase):
     """Figure-only MIST analysis; no calibration or writeback is inferred."""
 
 
-class MistFluxDepAdapter(
-    BaseAdapter[FluxDepCfg, MistFluxDepRun, MistFluxDepAnalysis, MistFluxDepParams]
-):
-    """Acquire flux rows of gain-swept IQ and display their baseline difference."""
+def _analyze(
+    req: AnalyzeRequest[MistFluxDepRun, MistFluxDepParams],
+    *,
+    plots: Plots,
+) -> MistFluxDepAnalysis:
+    """Publish fit from the explicit source; missing historical cfg is allowed.
 
-    exp_cls = FluxDepExp
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, requires_soc=True, load_data=True
+    Display calibration is entered in the analysis pane, never borrowed from
+    the current aliases. The core rejects an uncalibrated secondary axis.
+    """
+    params = req.analyze_params
+    FluxDepExp().analyze(
+        req.run_result,
+        FluxDepAnalyzeOptions(
+            flux_half=params.flux_half,
+            flux_period=params.flux_period,
+            ac_coeff=params.ac_coeff,
+            secondary_xaxis=params.secondary_xaxis,
+            auto_range=params.auto_range,
+        ),
+        plots=plots,
     )
+    return MistFluxDepAnalysis()
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
-        """Build a fresh form using only the fixed Open/Reset capture."""
-        return make_form(ctx)
 
-    def run(
-        self, req: RunRequest, cfg: FluxDepCfg, *, context: RunContext
-    ) -> MistFluxDepRun:
-        """Acquire mean IQ with the accepted cfg and this Run's device snapshot."""
-        del req
-        return RunRecord(cfg, FluxDepExp().run(cfg, context=context))
+def run(
+    cfg: FluxDepCfg, *, context: RunContext
+) -> RunRecord[FluxDepCfg, FluxDepResult]:
+    """Acquire with cfg and retain it as the analysis and save source."""
+    return RunRecord(cfg=cfg, result=FluxDepExp().run(cfg, context=context))
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[MistFluxDepRun, MistFluxDepParams],
-        *,
-        plots: Plots,
-    ) -> MistFluxDepAnalysis:
-        """Publish fit from the explicit source; missing historical cfg is allowed.
 
-        Display calibration is entered in the analysis pane, never borrowed from
-        the current aliases. The core rejects an uncalibrated secondary axis.
-        """
-        params = req.analyze_params
-        FluxDepExp().analyze(
-            req.run_result,
-            FluxDepAnalyzeOptions(
-                flux_half=params.flux_half,
-                flux_period=params.flux_period,
-                ac_coeff=params.ac_coeff,
-                secondary_xaxis=params.secondary_xaxis,
-                auto_range=params.auto_range,
-            ),
-            plots=plots,
-        )
-        return MistFluxDepAnalysis()
+DEFINITION = Adapter(
+    spec=FluxDepExp.AXES_SPEC,
+    make_form=make_form,
+    run=run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze, options=lambda source, env: MistFluxDepParams()),
+)
