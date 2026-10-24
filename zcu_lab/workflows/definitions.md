@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 coherence、MIST 與 overnight workflow 的校準、分析和保存契約。
 
-**Last updated:** 2026-10-22，partial 保存與分析失敗收尾
+**Last updated:** 2026-10-25，MIST preparation 與依賴時態
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、區域 history 與 point record。
 每個 workflow 是一個 async 函式。Engine 執行 await operations，記錄 tunables revision，並保存作者明確提交的 record。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
@@ -42,10 +42,12 @@ Pi2 使用 Length-Rabi 的 phase-aware fitted duration，不取 pi duration 除�
 Helper 收 Scope，需要 workflow 圖時明收 plots: Plots，不另收 env。
 三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
 Frequency 在接受時立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時更新 pi/pi2。
-Readout 只在本點 Rabi 接受後執行。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
+Readout 用最近 accepted pi pulse 與其配對頻率。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
 Index 0 自然先掃。失敗／拒絕不增加掃描，也不改下一個 due index。
 Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
-任何 dependent acquisition 都不能借 prior frequency 或 pi pulse 取代本點依賴。
+Rabi 的頻率與 T1 的 pi pulse 要求 NOW，只接受本點產出。Ramsey、Echo、MIST 與 readout 使用 LATEST，可借最近 accepted pi/pi2，沒有跨點步數上限。
+回退保留產出 pi pulse 時的配對頻率，不用本點 spectroscopy 頻率重新調諧舊脈衝。
+Point 的 calibration_sources 記 consumer、need、source_index、source_flux 與 fallback。readout_source 記沿用的 readout 來源，source_index=None 代表固定 host seed。
 
 `CoherencePoint` 保存 frequency、rabi、readout、singleshot 與 enabled `measurements` tuple。
 `singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
@@ -67,11 +69,14 @@ Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿�
 
 ## MIST 與 overnight
 
-`mist_fluxdep` 使用相同獨立校準 stage 與本點依賴。Plan 固定 reset、pi preparation、MIST disturbance pulse 與 gain grid。
-`MISTPoint` 保留三份 stage 結果、success、reason 與 gain_file；raw IQ 留 native `mist/gain`。
-Live trace/map 保留 centred magnitude／spread projection，不推 threshold。
+`mist_fluxdep` 使用相同獨立校準 stage。Plan 固定 reset、drive、MIST disturbance pulse 與 gain grid。
+measure_mode 預設 excited，可選 ground 或 both。Ground 省略 pi preparation，不要求 Rabi 成功；both 在同一 flux 點先量 excited 再量 ground。
+表單從固定 capture 的 $qubit.t1 取微秒 T1 放入 plan.t1_us。有值時 relax=5*T1，無值時用 tun.relax_factor*tun.guess_us，不另量 T1。Point 的 relax_source 與 relax_delay_us 記來源與實際等待時間。
+`MISTPoint.traces` 分別保留每種 preparation 的 success、reason 與 gain_file。頂層 success 要求全部 requested modes 完成，gain_file 指向第一種 preparation。
+Raw IQ 保存為 mist-excited.h5、mist-ground.h5。Partial 也先保存，再記 success=False、reason=stopped，不更新 map 成功列或完整 gain 圖。
+單列投影為 centred magnitude/(std+1e-12)，常數 trace 得零，不推 threshold。Map 再扣全域中位數、取絕對值並截斷於三倍標準差，保留 raw IQ。
 Map 使用 native 實際 gain 與有單位的 flux sample centres，不用 requested extent 或 flux index 替代。
-MIST partial 先保存 mist.h5，再回 success=False、reason=stopped，gain_file 保留檔名。不更新 map 的成功 trace，也不保存完整 gain 圖。
+Export 的 --mode excited/ground 選要匯出的 preparation；預設選 ground-only plan 的 ground，其餘選 excited。
 
 `overnight` 維持固定 flux、有限 T1→Hahn-echo pair、固定開始間隔與無 feedback。
 Tunables 的 `uniform` 預設 true，控制 T1 的線性 delay sweep。設 false 時，native T1 在同一 start/stop 視窗內把 delay 集中在衰減段，Echo 不變。
@@ -150,7 +155,7 @@ Coherence 的 `t1`、`t2ramsey`、`t2echo` 各一張，取代分開的 decay 與
 上 panel 從 accepted history 畫 lifetime 對 flux 的 scatter 與 error bar，下 panel 從 Completed.value.result 的 times/signals 重畫目前 decay 與同座標的 fit。
 Rejected fit 標示 rejected，不增加上方 accepted 點。只建立 enabled lifetime 的圖。
 每個 point 提交後更新 history panel，合併圖保存為 `<kind>-decay.png`，不另存 summary PNG。
-MIST 圖為 `mist/gain` 與 `mist/vs_flux`。gain.png 從 Result 的實際 gains/signals 重畫，map.png 從本次 run 保留的 traces 重畫。
+MIST 圖為 `mist/<mode>/gain` 與 `mist/<mode>/vs_flux`。gain-<mode>.png 從 Result 的實際 gains/signals 重畫，map-<mode>.png 從本次 run 保留的 traces 重畫。
 所有 PNG 都不取 operation live 圖。Native raw／export 格式不變，overnight 圖不變。
 GUI forms、measure headless owner、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
 行為比對使用 measure GUI 的 workflow tabs 與離線來源，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。

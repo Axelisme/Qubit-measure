@@ -27,6 +27,7 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 
+from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.workflows.common.calibration_form import CalibrationTunablesForm
 from zcu_lab.workflows.common.calibration_modules import (
     DRIVE_MODULE_FIELD,
@@ -93,6 +94,9 @@ class MISTPlanForm(FormModel):
     mist_pulse: Annotated[MistModuleInput, Display(label="MIST pulse")] = Field(
         description="Required native MIST disturbance pulse"
     )
+    measure_mode: Annotated[
+        Literal["excited", "ground", "both"], Display(label="Preparation")
+    ] = Field(default="excited", description="Excited pi, ground without pi, or both")
     gain_start: Annotated[float, Display(label="Gain start", unit="a.u.")] = Field(
         description="Fixed sweep start gain (a.u.)"
     )
@@ -198,6 +202,12 @@ class MISTPlanForm(FormModel):
             gain_stop=self.gain_stop,
             gain_points=self.gain_points,
             snapshot=snapshot,
+            measure_mode=self.measure_mode,
+            t1_us=(
+                optional_parameter_float(env.parameters, "$qubit.t1")
+                if env.parameters is not None
+                else None
+            ),
         )
 
 

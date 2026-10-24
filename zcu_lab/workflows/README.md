@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 - `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
@@ -64,18 +64,20 @@ Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap
 | `calibration/len_rabi` | Flux × pulse-length heatmap，紅線連各點 accepted pi duration，側欄目前 trace/fit。 | `len-rabi.png` |
 | `calibration/readout` | 最近一次 readout freq × gain SNR landscape，紅叉標有限 SNR 最大點。 | `readout.png` |
 | `t1`、`t2ramsey`、`t2echo` | 各一張，上方 accepted lifetime 對 flux 的 error bar 點圖，下方目前 decay/fit。只建立 enabled lifetime 的圖。 | `<kind>-decay.png` |
-| `mist/gain` | 目前 MIST gain trace。 | `gain.png` |
-| `mist/vs_flux` | MIST gain 對 flux map。 | `map.png` |
+| `mist/<mode>/gain` | excited 或 ground 的 MIST gain trace。 | `gain-<mode>.png` |
+| `mist/<mode>/vs_flux` | 各 preparation 的背景扣除及 3σ 截斷 map。 | `map-<mode>.png` |
 
 Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校準之後、lifetimes 之前執行。
 GE 要求本點 Rabi 已接受。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
 預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
 
-Readout 只在 cadence 到期且本點 Rabi 接受後更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
+Readout 在 cadence 到期且有 LATEST accepted pi pulse 時更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
 每個 point 提交後更新上方 accepted history，保存含上下兩個 panel 的 `<kind>-decay.png`，不另存 summary PNG。
-MIST 的 gain.png 使用 Result 的實際 gains/signals 與既有 mist_signal2real，map.png 使用保留的 traces。
+MIST 的 measure_mode 可選 excited、ground 或 both，預設 excited。Ground 不加 pi preparation。Both 在每個 flux 點量兩種，分別保存 native 與 PNG。
+MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 使用保留的 traces，扣中位數背景並截斷於 3σ。
+T1 的 pi 依賴為 NOW；Ramsey、Echo、MIST 與 readout 可用 LATEST。Point 的 calibration_sources 記回退與來源點。
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的圖維持原樣。
 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，

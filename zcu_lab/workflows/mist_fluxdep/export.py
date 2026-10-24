@@ -3,6 +3,7 @@
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from zcu_tools.datafile import (
@@ -44,7 +45,10 @@ class MISTExportReport:
 
 
 def prepare_export(
-    plan: MISTPlan, points: tuple[SavedRecord[MISTPoint], ...]
+    plan: MISTPlan,
+    points: tuple[SavedRecord[MISTPoint], ...],
+    *,
+    mode: Literal["excited", "ground"] | None = None,
 ) -> PreparedRunData:
     """Assemble raw MIST response across flux and gain for offline analysis.
 
@@ -54,6 +58,8 @@ def prepare_export(
     states reject.
 
     Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
+    mode selects a preparation; None selects ground for a ground-only plan and
+    excited otherwise. Historical single-trace records retain their native file.
 
     plan is the fixed manifest plan; points are structured saved commits. Only
     named final mist/gain files enter the payload. Missing rows retain NaN.
@@ -61,6 +67,13 @@ def prepare_export(
     interpolation. No usable trace, bad index/reference or schema mismatch raises
     before outputs are allocated; the source record/native path is diagnosed.
     """
+    mode = (
+        ("ground" if plan.measure_mode == "ground" else "excited")
+        if mode is None
+        else mode
+    )
+    if plan.measure_mode != "both" and mode != plan.measure_mode:
+        raise ValueError(f"Preparation {mode!r} was not requested by the MIST plan")
     gains = np.linspace(plan.gain_start, plan.gain_stop, plan.gain_points)
     fluxes = np.array(plan.fluxes)
     signal = np.full((len(fluxes), len(gains)), complex(np.nan, np.nan))
@@ -80,14 +93,19 @@ def prepare_export(
                     "MIST index must be unique/inside plan and flux finite"
                 )
             seen.add(point.index)
-            if point.success and point.gain_file is None:
+            selected = point.traces.get(mode)
+            gain_file = selected.gain_file if selected is not None else point.gain_file
+            completed = selected.success if selected is not None else point.success
+            if point.traces and selected is None:
+                continue
+            if completed and gain_file is None:
                 raise ValueError("MIST success must identify its Completed acquisition")
             fluxes[point.index] = point.flux
-            if point.gain_file is None:
+            if gain_file is None:
                 continue
             trace = load_trace(
                 saved.directory,
-                point.gain_file,
+                gain_file,
                 PowerDepExp.AXES_SPEC,
                 allow_stopped=True,
             )
@@ -95,7 +113,7 @@ def prepare_export(
                 raise ValueError("MIST gain grid differs from the fixed plan")
             usable = True
             signal[point.index] = trace.z
-            if point.success:
+            if completed:
                 success[point.index] = 1.0
         except ValueError as error:
             raise ValueError(f"{saved.record_path}: {error}") from error
@@ -120,20 +138,27 @@ def prepare_export(
             schema_version="1.0",
         ),
         LabberMetadata(
-            comment="Committed MIST raw gain traces and acquisition success"
+            comment=f"Committed MIST {mode} raw gain traces and acquisition success"
         ),
         "independent",
     )
 
 
 def export_run(
-    run: Path, *, outputs: tuple[str, ...] = ("merged",), database: Path | None = None
+    run: Path,
+    *,
+    outputs: tuple[str, ...] = ("merged",),
+    database: Path | None = None,
+    mode: Literal["excited", "ground"] | None = None,
 ) -> MISTExportReport:
     """Export raw MIST response across flux and gain for offline analysis.
 
     run is the metadata directory. Select merged and/or labber; samples and all
     other selections reject. Labber requires explicit --database before any
     write. Merged replaces data_root/merged.h5 with no external destination.
+    mode selects excited/ground; None selects ground only for a ground-only plan.
+    Exporting both modes requires separate calls and retaining each output before
+    the next call replaces merged.h5.
     Fixed manifest and each record.json provide input, not journal or leftover
     files. Missing records are not reconstructed or listed; malformed inputs
     name their source.
@@ -148,7 +173,7 @@ def export_run(
     except ValueError as error:
         raise ValueError(f"{run}/manifest.json: {error}") from error
     points = read_records(run, MISTPoint)
-    prepared = prepare_export(plan, points)
+    prepared = prepare_export(plan, points, mode=mode)
     outputs_written = write_outputs(
         manifest,
         prepared,
@@ -173,11 +198,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--merged", action="store_true")
     parser.add_argument("--labber", action="store_true")
     parser.add_argument("--database", type=Path)
+    parser.add_argument("--mode", choices=("excited", "ground"))
     args = parser.parse_args(argv)
     outputs = tuple(name for name in ("merged", "labber") if getattr(args, name))
     if not outputs:
         parser.error("Select --merged and/or --labber")
-    report = export_run(args.run, outputs=outputs, database=args.database)
+    report = export_run(
+        args.run, outputs=outputs, database=args.database, mode=args.mode
+    )
     for source in report.missing_records:
         print(f"Missing record: {source}")
     for out in report.outputs:
