@@ -72,6 +72,14 @@ class T1Tunables(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     reps: int = Field(default=100, ge=1, description="T1 averages")
     rounds: int = Field(default=10, ge=1, description="T1 averaging rounds")
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    earlystop_snr: float | None = Field(
+        default=20.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     guess_us: float = Field(default=20.0, gt=0, description="Initial lifetime in us")
     sweep_factor: float = Field(
         default=5.0, gt=0, description="Sweep end divided by lifetime guess"
@@ -164,6 +172,8 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     return T1Cfg(
         reps=tun.reps,
         rounds=tun.rounds,
+        acquire_retry=tun.acquire_retry,
+        earlystop_snr=tun.earlystop_snr,
         relax_delay=relax,
         uniform=tun.uniform,
         pi_pulse=pi_pulse,

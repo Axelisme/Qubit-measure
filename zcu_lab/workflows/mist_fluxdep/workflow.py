@@ -104,6 +104,9 @@ class MISTTunables(BaseModel):
     cal: CalibrationTunables = Field(default_factory=CalibrationTunables)
     reps: int = Field(default=100, ge=1)
     rounds: int = Field(default=10, ge=1)
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
     guess_us: float = Field(default=20.0, gt=0)
     relax_factor: float = Field(default=3.0, gt=0)
 
@@ -177,6 +180,7 @@ def mist_cfg(
     return PowerDepCfg(
         reps=tun.reps,
         rounds=tun.rounds,
+        acquire_retry=tun.acquire_retry,
         relax_delay=(
             5.0 * plan.t1_us
             if plan.t1_us is not None

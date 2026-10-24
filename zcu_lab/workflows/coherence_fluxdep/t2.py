@@ -59,6 +59,14 @@ class T2EchoTunables(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     reps: int = Field(default=100, ge=1)
     rounds: int = Field(default=10, ge=1)
+    acquire_retry: int = Field(
+        default=3, ge=0, description="Retries after a transient acquisition failure"
+    )
+    earlystop_snr: float | None = Field(
+        default=20.0,
+        gt=0,
+        description="Completed-round trace SNR threshold; None disables early stop",
+    )
     guess_us: float = Field(default=20.0, gt=0)
     sweep_factor: float = Field(default=5.0, gt=0)
     relax_factor: float = Field(default=3.0, gt=0)
@@ -163,6 +171,8 @@ def t2echo_cfg(
     return T2EchoCfg(
         reps=tun.reps,
         rounds=tun.rounds,
+        acquire_retry=tun.acquire_retry,
+        earlystop_snr=tun.earlystop_snr,
         relax_delay=_relax(tun, t1_estimate_us),
         detune=tun.detune_ratio / sweep.step,
         pi_pulse=pi,
@@ -195,6 +205,8 @@ def t2ramsey_cfg(
     return T2RamseyCfg(
         reps=tun.reps,
         rounds=tun.rounds,
+        acquire_retry=tun.acquire_retry,
+        earlystop_snr=tun.earlystop_snr,
         relax_delay=_relax(tun, t1_estimate_us),
         detune=tun.detune_ratio / sweep.step,
         pi2_pulse=pi2,

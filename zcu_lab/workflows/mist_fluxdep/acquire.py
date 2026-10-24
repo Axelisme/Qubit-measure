@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
@@ -53,6 +54,8 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
                 Readout("readout", sched.cfg.readout),
             )
             .declare_sweep("gain", gain_sweep)
-            .build_and_acquire(rounds=cfg.rounds)
+            .build_and_acquire(
+                rounds=cfg.rounds, options=AcquireOptions(retry=cfg.acquire_retry)
+            )
         )
     return PowerDepResult(gains, buffer.array)

@@ -7,13 +7,16 @@ from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
@@ -56,6 +59,20 @@ class LenRabiCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop averaging after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -142,7 +159,15 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
                     .add_readout("readout", sched.cfg.readout)
                     .declare_sweep("length", length_sweep)
-                    .build_and_acquire(rounds=cfg.rounds)
+                    .build_and_acquire(
+                        rounds=cfg.rounds,
+                        options=AcquireOptions(
+                            retry=cfg.acquire_retry,
+                            stop_condition=snr_checker(
+                                signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
+                            ),
+                        ),
+                    )
                 )
 
             # 3. The program acquisition supplies the completed-round mean IQ.
@@ -170,6 +195,11 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                 lengths, rabi_signal2real(average_round(data))
             ),
         )
+        check_snr = snr_checker(
+            signals_buffer.at(),
+            cfg.earlystop_snr,
+            lambda data: rabi_signal2real(average_round(data)),
+        )
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for length, step in rep.scan("length", length_values):
@@ -191,7 +221,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     length_key = float(length)
                     if length_key not in programs:
                         programs[length_key] = builder.build()
-                    _ = builder.run_program(programs[length_key], rounds=cfg.rounds)
+                    _ = builder.run_program(
+                        programs[length_key],
+                        rounds=cfg.rounds,
+                        options=AcquireOptions(retry=cfg.acquire_retry),
+                    )
+                # A shaped-pulse round is a full host-side length scan.
+                if check_snr():
+                    break
 
         # 4. Average available rounds per length, keeping partial scans and NaNs.
         return LenRabiResult(

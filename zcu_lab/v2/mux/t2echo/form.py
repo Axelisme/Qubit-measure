@@ -73,6 +73,8 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
             "delay",
             "reps",
             "rounds",
+            "acquire_retry",
+            "earlystop_snr",
             "relax_delay",
             "initial_delay",
         ),
