@@ -4,24 +4,24 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
     ParameterWriteback,
     ParamMeta,
+    PostAnalysis,
     PostAnalyzeRequest,
     PostWritebackRequest,
-    RunRequest,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
@@ -33,10 +33,6 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEPostAnalyzeOptions,
 )
 from zcu_lab.v2.singleshot.ge.form import make_form
-
-if TYPE_CHECKING:
-    from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.plotting.plots import Plots
 
 GERunResult: TypeAlias = RunRecord[GE_Cfg, GE_Result]
 
@@ -145,116 +141,104 @@ def ge_post_review_note(primary: GEAnalysis, condition_number: float) -> str | N
     return "; ".join(reasons) if reasons else None
 
 
-class GEAdapter(
-    BaseAdapter[GE_Cfg, GERunResult, GEAnalysis, GEAnalyzeParams, GEPostAnalysis]
-):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[GE_Cfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
-
-    exp_cls = GE_Exp
-    # FIT primary analysis + a confusion-diagnostic post-analysis layer.
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+def _analyze(
+    req: AnalyzeRequest[GERunResult, GEAnalyzeParams], *, plots: Plots
+) -> GEAnalysis:
+    params = req.analyze_params
+    return GE_Exp().analyze(
+        req.run_result,
+        GEAnalyzeOptions(
+            initial_state=params.initial_state,
+            backend=params.backend,
+            logscale=params.logscale,
+            align_t1=params.align_t1,
+            length_ratio=params.length_ratio,
+        ),
+        plots=plots,
     )
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: GE_Cfg,
-        *,
-        context: RunContext,
-    ) -> GERunResult:
-        del req
-        result = GE_Exp().run(cfg, context=context)
-        return RunRecord(cfg=cfg, result=result)
+def _post_analyze(
+    req: PostAnalyzeRequest[GERunResult, GEAnalysis, None], *, plots: Plots
+) -> GEPostAnalysis:
+    return GE_Exp().post_analyze(
+        req.run_result, req.analyze_result, GEPostAnalyzeOptions(), plots=plots
+    )
 
-    def analyze(
-        self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams], *, plots: Plots
-    ) -> GEAnalysis:
-        params = req.analyze_params
-        return GE_Exp().analyze(
-            req.run_result,
-            GEAnalyzeOptions(
-                initial_state=params.initial_state,
-                backend=params.backend,
-                logscale=params.logscale,
-                align_t1=params.align_t1,
-                length_ratio=params.length_ratio,
-            ),
-            plots=plots,
-        )
 
-    def post_analyze(
-        self,
-        req: PostAnalyzeRequest[GERunResult, GEAnalysis, None],
-        *,
-        plots: Plots,
-    ) -> GEPostAnalysis:
-        return GE_Exp().post_analyze(
-            req.run_result, req.analyze_result, GEPostAnalyzeOptions(), plots=plots
-        )
+def _writeback(
+    req: WritebackRequest[GERunResult, GEAnalysis],
+) -> Sequence[WritebackItem]:
+    result = req.analyze_result
+    result.validate_calibration()
+    note = ge_calibration_review_note(result)
+    # AcceptedWrite owns native complex conversion; producers keep numbers.
+    return [
+        ParameterWriteback(
+            target_name="$qubit.ext.readout_cal.fidelity",
+            description="Prepared-label assignment fidelity",
+            proposed_value=result.fidelity,
+            selected=note is None,
+            note=note,
+        ),
+        ParameterWriteback(
+            target_name="$qubit.ext.readout_cal.sigma",
+            description="Single-shot IQ cluster width (ADC units)",
+            proposed_value=result.ge_s,
+            selected=note is None,
+            note=note,
+        ),
+        ParameterWriteback(
+            target_name="$qubit.ext.readout_cal.g_center",
+            description="Single-shot |g> IQ cluster centre (complex)",
+            proposed_value=result.g_center,
+            selected=note is None,
+            note=note,
+        ),
+        ParameterWriteback(
+            target_name="$qubit.ext.readout_cal.e_center",
+            description="Single-shot |e> IQ cluster centre (complex)",
+            proposed_value=result.e_center,
+            selected=note is None,
+            note=note,
+        ),
+    ]
 
-    def get_writeback_items(
-        self, req: WritebackRequest[GERunResult, GEAnalysis]
-    ) -> Sequence[WritebackItem]:
-        result = req.analyze_result
-        result.validate_calibration()
-        note = ge_calibration_review_note(result)
-        # AcceptedWrite owns native complex conversion; producers keep numbers.
-        return [
-            ParameterWriteback(
-                target_name="$qubit.ext.readout_cal.fidelity",
-                description="Prepared-label assignment fidelity",
-                proposed_value=result.fidelity,
-                selected=note is None,
-                note=note,
-            ),
-            ParameterWriteback(
-                target_name="$qubit.ext.readout_cal.sigma",
-                description="Single-shot IQ cluster width (ADC units)",
-                proposed_value=result.ge_s,
-                selected=note is None,
-                note=note,
-            ),
-            ParameterWriteback(
-                target_name="$qubit.ext.readout_cal.g_center",
-                description="Single-shot |g> IQ cluster centre (complex)",
-                proposed_value=result.g_center,
-                selected=note is None,
-                note=note,
-            ),
-            ParameterWriteback(
-                target_name="$qubit.ext.readout_cal.e_center",
-                description="Single-shot |e> IQ cluster centre (complex)",
-                proposed_value=result.e_center,
-                selected=note is None,
-                note=note,
-            ),
-        ]
 
-    def get_post_writeback_items(
-        self,
-        req: PostWritebackRequest[GERunResult, GEAnalysis, GEPostAnalysis],
-    ) -> Sequence[WritebackItem]:
-        result = req.post_analyze_result.confusion
-        note = ge_post_review_note(req.analyze_result, result.condition_number)
-        return [
-            ParameterWriteback(
-                target_name="$qubit.ext.readout_cal.radius",
-                description="Single-shot classification radius",
-                proposed_value=result.radius,
-                selected=note is None,
-                note=note,
-            ),
-            ParameterWriteback(
-                target_name="$qubit.ext.readout_cal.confusion_matrix",
-                description="Single-shot 3x3 confusion matrix (prepared->measured)",
-                proposed_value=result.matrix.tolist(),
-                selected=note is None,
-                note=note,
-            ),
-        ]
+def _post_writeback(
+    req: PostWritebackRequest[GERunResult, GEAnalysis, GEPostAnalysis],
+) -> Sequence[WritebackItem]:
+    result = req.post_analyze_result.confusion
+    note = ge_post_review_note(req.analyze_result, result.condition_number)
+    return [
+        ParameterWriteback(
+            target_name="$qubit.ext.readout_cal.radius",
+            description="Single-shot classification radius",
+            proposed_value=result.radius,
+            selected=note is None,
+            note=note,
+        ),
+        ParameterWriteback(
+            target_name="$qubit.ext.readout_cal.confusion_matrix",
+            description="Single-shot 3x3 confusion matrix (prepared->measured)",
+            proposed_value=result.matrix.tolist(),
+            selected=note is None,
+            note=note,
+        ),
+    ]
+
+
+def _run(cfg: GE_Cfg, *, context: RunContext) -> RunRecord[GE_Cfg, GE_Result]:
+    return RunRecord(cfg=cfg, result=GE_Exp().run(cfg, context=context))
+
+
+DEFINITION = Adapter(
+    spec=GE_Exp.AXES_SPEC,
+    make_form=make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_analyze, options=lambda source, env: GEAnalyzeParams(), writeback=_writeback
+    ),
+    post_analysis=PostAnalysis(fn=_post_analyze, writeback=_post_writeback),
+)

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.singleshot_shared import (
@@ -27,36 +26,26 @@ from zcu_lab.v2.singleshot.mist.freq.form import make_form
 MistFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-class MistFreqAdapter(BaseAdapter[FreqCfg, MistFreqRunResult]):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[FreqCfg]:
-        """Build this adapter's definition using captured Open/Reset sources."""
-        return make_form(ctx)
+def _analyze(
+    req: AnalyzeRequest[MistFreqRunResult, None],
+    *,
+    plots: Plots,
+) -> None:
+    options = FreqAnalyzeOptions(
+        confusion_matrix=read_confusion_matrix(req.parameters),
+    )
+    FreqDepExp().analyze(req.run_result, options, plots=plots)
+    return
 
-    exp_cls = FreqDepExp
 
-    guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
+def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:
+    return RunRecord(cfg=cfg, result=FreqDepExp().run(cfg, context=context))
 
-    # No get_analyze_params override: None (4th generic arg).
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: FreqCfg,
-        *,
-        context: RunContext,
-    ) -> MistFreqRunResult:
-        del req
-        return RunRecord(cfg, FreqDepExp().run(cfg, context=context))
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[MistFreqRunResult, None],
-        *,
-        plots: Plots,
-    ) -> None:
-        options = FreqAnalyzeOptions(
-            confusion_matrix=read_confusion_matrix(req.parameters),
-        )
-        FreqDepExp().analyze(req.run_result, options, plots=plots)
-        return
+DEFINITION = Adapter(
+    spec=FreqDepExp.AXES_SPEC,
+    make_form=make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(fn=_analyze),
+)
