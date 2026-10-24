@@ -14,7 +14,10 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.mux.onetone.gui import MuxOnetoneSummary
+from zcu_lab.v2.mux.onetone.gui import (
+    MuxOnetoneFailureSummary,
+    MuxOnetoneSummary,
+)
 
 from .mux_helpers import ToneRangeInputs
 
@@ -151,7 +154,7 @@ async def mux_onetone(
             applied = bool(receipt.items)
 
         tones: list[MuxOnetoneToneReport] = []
-        for tone in fit.result.tones:
+        for tone in fit.result.outcomes:
             name = None
             if (
                 names is not None
@@ -159,15 +162,25 @@ async def mux_onetone(
                 and 0 <= tone.index < len(names)
             ):
                 name = names[tone.index]
+            if isinstance(tone, MuxOnetoneFailureSummary):
+                tones.append(
+                    MuxOnetoneToneReport(
+                        index=tone.index,
+                        label=tone.label,
+                        status="failed",
+                        reason=tone.reason,
+                        name=name,
+                    )
+                )
+                continue
             tones.append(
                 MuxOnetoneToneReport(
                     index=tone.index,
                     label=tone.label,
-                    status=tone.status,
-                    fit_quality=tone.fit_quality,
-                    reason=tone.reason,
-                    freq=report_number(tone.freq),
-                    kappa=report_number(tone.kappa),
+                    status="success",
+                    fit_quality=tone.fit.fit_quality,
+                    freq=report_number(tone.fit.freq),
+                    kappa=report_number(tone.fit.fwhm),
                     name=name,
                 )
             )
