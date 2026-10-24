@@ -70,22 +70,38 @@ class _PrimaryStage[C: ConfigBase, R, O, A: AnalyzeResult | None](ABC):
 
 @dataclass(frozen=True, kw_only=True)
 class Analysis[C: ConfigBase, R, O, A: AnalyzeResult | None](_PrimaryStage[C, R, O, A]):
-    """Synchronous analysis and optional source-dependent editable inputs.
+    """Frozen synchronous primary analysis declaration.
 
-    options runs once when preparing a new source, never on analysis clicks or
-    schema queries. None means an empty form, not a missing analysis capability.
-    fn receives the user's edited object in its historical request. writeback
-    proposes items only after successful adoption; failures remain isolated by
-    the writeback owner.
+    fn receives AnalyzeRequest with the retained RunRecord, edited options and
+    fixed parameters, plus keyword-only plots. It returns an AnalyzeResult or
+    None for figures-only output. Callback failures propagate to the caller;
+    the host owns result adoption and preservation of previous output on failure.
+
+    options, inherited from the primary stage, is an optional (source, env)
+    generator. The host calls it once when preparing a successful Run/Load
+    source and retains the returned editable object for form/schema generation.
+    None means no generator and an empty form, not no analysis capability.
+    The value does not cache or rerun it on clicks or schema queries.
+
+    writeback, also inherited, receives WritebackRequest after successful
+    adoption and returns proposal items, not applied resource changes. None
+    means no proposals. Generator and writeback failures propagate unchanged;
+    the preparation and writeback owners isolate them from committed output.
     """
 
     fn: AnalyzeHook[C, R, O, A]
 
     @property
     def mode(self) -> AnalysisMode:
+        """Return FIT, identifying synchronous primary analysis."""
         return AnalysisMode.FIT
 
     def analyze(self, req: AnalyzeRequest[RunRecord[C, R], O], *, plots: Plots) -> A:
+        """Call fn with retained request inputs and plots; propagate its failures.
+
+        Return its numeric result or None for figures-only output. This call
+        neither commits the result nor generates options or writeback proposals.
+        """
         return self.fn(req, plots=plots)
 
 
@@ -93,11 +109,27 @@ class Analysis[C: ConfigBase, R, O, A: AnalyzeResult | None](_PrimaryStage[C, R,
 class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
     _PrimaryStage[C, R, O, A]
 ):
-    """Pair a Qt-free plugin with its frontend without exposing S to Adapter.
+    """Frozen interactive primary declaration, with state S hidden from Adapter.
 
-    The host's generic factory opens and owns the session. Only this method
-    connects its typed session to the matching frontend. The returned mount
-    callback creates no state and leaves widget validation/cleanup to the UI.
+    plugin receives the retained AnalyzeRequest and keyword-only plots and
+    returns PluginDefinition[S, A]. Its terminal result may be None for
+    figures-only output. frontend receives that plugin, its matching Session[S],
+    the background environment and finish/cancel callbacks, plus plots. It
+    returns an object for the UI to validate, mount and clean up.
+
+    options, inherited from the primary stage, is an optional (source, env)
+    generator. The host invokes it once when preparing a successful Run/Load
+    source and retains the editable object for form/schema generation. None
+    gives an empty form without disabling interactive analysis.
+
+    writeback, also inherited, receives WritebackRequest after successful result
+    adoption and returns proposal items without applying them. None means no
+    proposals. All callbacks propagate failures to their caller; preparation
+    and writeback isolation belong to their respective host owners.
+
+    The host's generic SessionFactory opens and owns the session, including
+    cleanup if mounting fails. This value only pairs plugin/session/frontend;
+    it does not settle operations, dispose sessions or own widgets.
     """
 
     plugin: PluginHook[C, R, O, S, A]
@@ -105,6 +137,7 @@ class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
 
     @property
     def mode(self) -> AnalysisMode:
+        """Return INTERACTIVE, identifying deferred primary analysis."""
         return AnalysisMode.INTERACTIVE
 
     def prepare_interactive(
@@ -114,6 +147,17 @@ class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
         *,
         plots: Plots,
     ) -> FrontendMount:
+        """Prepare a plugin/session pair now and return its deferred UI mount.
+
+        req retains source, edited options and fixed parameters; plots belongs
+        to this operation. Invoke plugin, then create_session, exactly once.
+        The returned (env, finish, cancel) callback invokes frontend with that
+        pair on the UI owner thread. It does not create another session.
+
+        Plugin/factory failures propagate now; frontend failures propagate when
+        mounted. There is no rollback here. The host owns session disposal and
+        operation settlement, including cleanup after a failed frontend call.
+        """
         plugin = self.plugin(req, plots=plots)
         session = create_session(plugin)
         return lambda env, finish, cancel: self.frontend(
@@ -129,10 +173,22 @@ class PostAnalysis[
     O,
     P: AnalyzeResult | None,
 ]:
-    """Independent second-stage inputs/result tied to a committed primary.
+    """Frozen second-stage declaration tied to an adopted primary result.
 
-    options also receives the adopted primary. None gives an empty form.
-    Failed execution does not replace the previous committed pane.
+    fn receives PostAnalyzeRequest with the retained RunRecord, adopted primary,
+    edited post options and fixed parameters, plus keyword-only plots. It returns
+    an AnalyzeResult or None for figures-only output. Callback failures propagate;
+    the host preserves the previous committed pane when execution fails.
+
+    options is an optional (source, primary, env) generator. The host invokes it
+    once when preparing the form after the corresponding primary succeeds.
+    Retain its returned editable object and use its type for form/schema
+    generation. None means an empty form, not no post-analysis capability.
+
+    writeback receives PostWritebackRequest after successful adoption and returns
+    proposal items without applying them. None means no proposals. Generator and
+    writeback failures propagate to the preparation/writeback owners, which
+    isolate failures from committed output. This value performs no caching.
     """
 
     fn: PostAnalyzeHook[C, R, A, O, P]
@@ -155,12 +211,18 @@ T_PostAnalysis = TypeVar("T_PostAnalysis", bound=AnalyzeResult | None, default=N
 class Adapter(
     Generic[T_Cfg, T_Result, T_Options, T_Analysis, T_PostOptions, T_PostAnalysis]
 ):
-    """Caller-owned wiring, with no mutable per-tab state or construction I/O.
+    """Frozen caller-owned wiring, without per-tab state or construction I/O.
 
-    spec owns native persistence and identity. make_form builds fresh captured
-    input. run returns raw data; the operation host builds the RunRecord.
-    guide is a Markdown path or None; guide() reads it on demand. The explicit
-    initializer keeps that author input separate from the existing host method.
+    spec declares native persistence and experiment identity. make_form accepts
+    FormContext and builds a fresh captured Form. run(cfg, *, context) returns
+    raw data; the operation host wraps admitted cfg and evidence in RunRecord.
+    Form/run callback failures propagate to the calling owner.
+
+    guide is a required Markdown Path or None, read only by guide(). analysis
+    is Analysis, Interactive or None, selecting one primary mode or none.
+    post_analysis is PostAnalysis or None, independently enabling the second
+    stage. The host owns preparation, retained options, result adoption, failure
+    isolation and all session/widget lifetimes.
     """
 
     spec: AxesSpec[T_Result, T_Cfg] | GroupedAxesSpec[T_Result, T_Cfg]
@@ -185,6 +247,12 @@ class Adapter(
         ]
         | None = None,
     ) -> None:
+        """Store the keyword-only declarations without invoking callbacks or I/O.
+
+        See the class docstring for each input. None for spec, make_form or run
+        raises TypeError. guide must be supplied but may be None; both analysis
+        stages default to None. No guide existence or callback result is checked.
+        """
         for name, value in (("spec", spec), ("make_form", make_form), ("run", run)):
             if value is None:
                 raise TypeError(f"Adapter {name} is required")
@@ -197,6 +265,11 @@ class Adapter(
 
     @property
     def capabilities(self) -> AdapterCapabilities:
+        """Derive primary mode and post presence without executing callbacks.
+
+        Every value requires SoC for Run and permits a Load attempt. load_data
+        does not promise compatibility with any particular stored Container.
+        """
         return AdapterCapabilities(
             analysis=AnalysisMode.NONE if self.analysis is None else self.analysis.mode,
             post_analysis=self.post_analysis is not None,
@@ -205,9 +278,16 @@ class Adapter(
 
     @property
     def experiment_tag(self) -> str:
+        """Return spec.tag as the persistence identity, without constructing core."""
         return self.spec.tag
 
     def guide(self) -> AdapterGuide:
+        """Read the declared UTF-8 Markdown and return text/resource directory.
+
+        A None guide returns an unwritten-guide notice and resource_dir=None.
+        Each call reads afresh. File I/O and decoding failures propagate; no
+        images are read and no fallback replaces a failed declared guide.
+        """
         if self._guide is None:
             return AdapterGuide(markdown="(no guide written yet)", resource_dir=None)
         return AdapterGuide(
@@ -216,11 +296,26 @@ class Adapter(
         )
 
     def restore(self, stored: Container) -> RestoredRun[RunRecord[T_Cfg, T_Result]]:
+        """Restore an already-read Container with this spec, without I/O.
+
+        Return the typed record and optional cfg_issue. Invalid metadata/tag,
+        variables or cfg envelope raise ValueError/TypeError; spec callback
+        failures propagate. Incompatible typed cfg emits CfgUnavailableWarning
+        and returns cfg=None plus cfg_issue, retaining valid data and metadata.
+        No live configuration substitutes for historical values.
+        """
         return restore_run(stored, spec=self.spec)
 
     def get_analyze_params(
         self, source: RunRecord[T_Cfg, T_Result], env: SessionEnv
     ) -> T_Options | None:
+        """Generate primary inputs from retained source and captured session env.
+
+        Return the options object, or None when no primary/generator is declared.
+        The host calls once while preparing each successful Run/Load source,
+        retains the object for schema queries and passes edited inputs to analysis.
+        This method does not cache. Generator failures propagate unchanged.
+        """
         if self.analysis is None or self.analysis.options is None:
             return None
         return self.analysis.options(source, env)
@@ -231,6 +326,13 @@ class Adapter(
         *,
         plots: Plots,
     ) -> T_Analysis:
+        """Run synchronous primary analysis on req using the operation's plots.
+
+        req contains retained source, edited options and fixed parameters.
+        Return the callback result, including None for figures-only output.
+        Raise NotImplementedError for no primary or an Interactive declaration.
+        Callback failures propagate; this method does not adopt results.
+        """
         if self.analysis is None:
             raise NotImplementedError("No analysis declared")
         return self.analysis.analyze(req, plots=plots)
@@ -242,6 +344,18 @@ class Adapter(
         *,
         plots: Plots,
     ) -> FrontendMount:
+        """Prepare interactive analysis and return a deferred UI mount callback.
+
+        req carries retained source, edited options and fixed parameters; plots
+        is the operation's plot host. create_session opens/owns the plugin's
+        matching session. The returned (env, finish, cancel) callback creates
+        the frontend, not another session. The UI validates/mounts its object.
+
+        Raise NotImplementedError for no primary or synchronous Analysis.
+        Plugin/factory failures propagate now, frontend failures at mount time.
+        The host must dispose sessions and settle operations on every terminal
+        path, including mount failure; this value performs no cleanup.
+        """
         if self.analysis is None:
             raise NotImplementedError("No analysis declared")
         return self.analysis.prepare_interactive(req, create_session, plots=plots)
@@ -249,6 +363,13 @@ class Adapter(
     def get_post_analyze_params(
         self, source: RunRecord[T_Cfg, T_Result], primary: T_Analysis, env: SessionEnv
     ) -> T_PostOptions | None:
+        """Generate post inputs from retained source, adopted primary and env.
+
+        Return the options object, or None when no post stage/generator exists.
+        The host calls once when preparing the corresponding successful primary's
+        form, retains the object for schema queries and passes edited inputs to
+        post_analyze. No caching occurs; generator failures propagate unchanged.
+        """
         if self.post_analysis is None or self.post_analysis.options is None:
             return None
         return self.post_analysis.options(source, primary, env)
@@ -259,6 +380,13 @@ class Adapter(
         *,
         plots: Plots,
     ) -> T_PostAnalysis:
+        """Run post fn with req's source, adopted primary and edited post inputs.
+
+        plots belongs to this operation. Return the callback result, including
+        None for figures-only output. Missing post_analysis raises
+        NotImplementedError. Callback failures propagate without result adoption;
+        the host owns preservation of the previous committed pane.
+        """
         if self.post_analysis is None:
             raise NotImplementedError("No post-analysis declared")
         return self.post_analysis.fn(req, plots=plots)
@@ -266,6 +394,13 @@ class Adapter(
     def get_writeback_items(
         self, req: WritebackRequest[RunRecord[T_Cfg, T_Result], T_Analysis]
     ) -> Sequence[WritebackItem]:
+        """Propose primary writeback from req's adopted result and fixed context.
+
+        Call after successful adoption. Return the callback's proposal sequence,
+        or an empty list when no primary/writeback callback exists. No resource
+        changes are applied here. Callback failures propagate to the writeback
+        owner, which isolates them from the already committed analysis.
+        """
         if self.analysis is None or self.analysis.writeback is None:
             return []
         return self.analysis.writeback(req)
@@ -276,6 +411,13 @@ class Adapter(
             RunRecord[T_Cfg, T_Result], T_Analysis, T_PostAnalysis
         ],
     ) -> Sequence[WritebackItem]:
+        """Propose post writeback from req's source, primary, post result and ctx.
+
+        Call after successful post adoption. Return the callback's proposal
+        sequence, or an empty list when no post/writeback callback exists.
+        No resource changes are applied. Callback failures propagate to the
+        writeback owner, which isolates them from committed pane output.
+        """
         if self.post_analysis is None or self.post_analysis.writeback is None:
             return []
         return self.post_analysis.writeback(req)

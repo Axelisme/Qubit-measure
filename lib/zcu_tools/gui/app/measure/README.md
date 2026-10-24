@@ -51,8 +51,9 @@ is decided by the declared spec. `restore`, `data_item` and `analysis_item`
 provide framework projections without I/O. Guide reads its declared Markdown
 only when called. Sample proposals declare `coordinate_device` on each item.
 
-Ticket 05 fixes this contract. The legacy BaseAdapter/protocol and host calls
-below remain until ticket 07 migrates them; no class/value runtime bridge is added.
+The legacy BaseAdapter/protocol and host calls below describe the pre-migration
+host. Host migration replaces them with these value contracts; the registry
+does not provide a class/value runtime bridge.
 
 ## Owners
 

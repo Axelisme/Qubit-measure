@@ -37,7 +37,15 @@ class Registry:
         name: str,
         adapter: object,
     ) -> None:
-        """Register an immutable value without invoking user factories."""
+        """Store adapter under name; return None without invoking factories.
+
+        name must be nonempty, have no surrounding whitespace and be unique in
+        this registry. adapter must be an Adapter value, not an adapter class.
+        Invalid or duplicate names raise ValueError; a non-Adapter raises
+        TypeError. Rejection leaves the mapping unchanged. Registration performs
+        no I/O, form construction or capability callback checks. create(name)
+        returns this same immutable value.
+        """
         if not name or name.strip() != name:
             raise ValueError(f"Invalid adapter name: {name!r}")
         if name in self._mapping:
