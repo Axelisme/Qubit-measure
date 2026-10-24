@@ -10,6 +10,7 @@ import pytest
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
+    QGroupBox,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -106,6 +107,49 @@ def entry_selector(dialog: SetupDialog) -> QComboBox:
     combo = dialog.findChild(QComboBox, "result_entry")
     assert combo is not None
     return combo
+
+
+def test_taller_dialog_gives_extra_height_only_to_point_list(
+    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    driver.resize_window(620, 640)
+    driver.enter_text(value="bias-a", object_name="point_label", commit=False)
+    driver.enter_text(
+        value="Near sweet spot", object_name="point_description", commit=False
+    )
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == ["● bias-a"]
+    assert driver.observe(object_name="selected_point_description").text == (
+        "Description: Near sweet spot"
+    )
+    driver.screenshot(tmp_path / "setup-620x640.png")
+
+    groups = {group.title(): group for group in dialog.findChildren(QGroupBox)}
+    entry = groups["Result entry"]
+    points = groups["Working points"]
+    new_point = groups["New working point"]
+    entry_pos = entry.mapTo(dialog, entry.rect().topLeft())
+    points_pos = points.mapTo(dialog, points.rect().topLeft())
+    new_point_pos = new_point.mapTo(dialog, new_point.rect().topLeft())
+    assert entry_pos.y() + entry.height() <= points_pos.y()
+    assert points_pos.y() + points.height() <= new_point_pos.y()
+    assert entry_pos.x() == points_pos.x() == new_point_pos.x()
+    assert entry.width() == points.width() == new_point.width()
+    form_heights = (entry.height(), new_point.height())
+    list_height = point_list(dialog).height()
+    window_height = driver.window_size().height()
+
+    driver.resize_window(620, 900)
+    driver.screenshot(tmp_path / "setup-620x900.png")
+    assert (entry.height(), new_point.height()) == form_heights
+    assert point_list(dialog).height() > list_height
+    assert point_list(dialog).height() - list_height == (
+        driver.window_size().height() - window_height
+    )
+    assert driver.observe("Create").fully_visible
+    assert driver.observe("Close").fully_visible
 
 
 def test_entry_show_and_reopen_prefill_without_changing_active_point(
