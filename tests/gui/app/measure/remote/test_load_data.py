@@ -7,8 +7,8 @@ from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -39,11 +39,11 @@ class StoredAdapter(DummyAdapter):
 
     def __init__(self) -> None:
         self.received: list[Container] = []
-        self.record = RunRecord[ExpCfgModel, OpaqueRecord](None, OpaqueRecord())
+        self.record = RunRecord[ConfigBase, OpaqueRecord](None, OpaqueRecord())
 
     def restore(
         self, stored: Container
-    ) -> RestoredRun[RunRecord[ExpCfgModel, OpaqueRecord]]:
+    ) -> RestoredRun[RunRecord[ConfigBase, OpaqueRecord]]:
         self.received.append(stored)
         self.record = RunRecord(
             None, self.record.result, metadata_from_container(stored)

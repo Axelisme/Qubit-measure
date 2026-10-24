@@ -5,8 +5,8 @@ from typing import ClassVar
 
 import pytest
 from pydantic import TypeAdapter
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
@@ -28,7 +28,7 @@ from ._helpers import Fixture, call, open_client, reset_inbox
 pytestmark = pytest.mark.uses_wall_clock
 
 
-class LoadedCfg(ExpCfgModel):
+class LoadedCfg(ConfigBase):
     knob: int = 42
 
 

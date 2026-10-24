@@ -7,9 +7,9 @@ from typing import ClassVar, TypeAlias
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container, load
 from zcu_tools.experiment.base import Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -22,7 +22,7 @@ from tests.gui.app.measure._native_save_support import (
 )
 
 
-class _Cfg(ExpCfgModel):
+class _Cfg(ConfigBase):
     pass
 
 

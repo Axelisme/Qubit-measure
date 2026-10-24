@@ -1,6 +1,6 @@
 """Run owner scope identity shares the operation's cooperative stop bit."""
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 
@@ -12,7 +12,7 @@ def test_gui_stop_reaches_already_active_descendants() -> None:
     service, _gate, background, _handles = make_run_service(state)
     observed: list[bool] = []
 
-    def run(*_args: object, context: RunContext) -> RunRecord[ExpCfgModel, object]:
+    def run(*_args: object, context: RunContext) -> RunRecord[ConfigBase, object]:
         with (
             context.scope.branch("schedule") as schedule,
             schedule.branch("acquire") as acquire,

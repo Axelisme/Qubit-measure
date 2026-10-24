@@ -35,7 +35,6 @@ from zcu_tools.gui.form import (
     Option,
     static_defaults,
 )
-from zcu_tools.program.v2.base import ProgramV2Cfg
 from zcu_tools.program.v2.sweep import SweepCfg
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
@@ -255,12 +254,11 @@ def _module_converters(
 
 
 def _core_field_names(core: type[BaseModel], field_order: tuple[str, ...]) -> list[str]:
-    """Keep core order, defer program base fields, then promote field_order stably."""
-    program_fields = ProgramV2Cfg.model_fields if issubclass(core, ProgramV2Cfg) else {}
-    names = [name for name in core.model_fields if name not in program_fields] + [
-        name for name in core.model_fields if name in program_fields
+    """Keep the declared core order, then promote field_order stably."""
+    return [
+        *field_order,
+        *(name for name in core.model_fields if name not in field_order),
     ]
-    return [*field_order, *(name for name in names if name not in field_order)]
 
 
 class Section:

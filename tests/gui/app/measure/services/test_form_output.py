@@ -4,7 +4,6 @@ from typing import ClassVar
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -33,7 +32,7 @@ class ChoiceCfg(ConfigBase):
     choice: str = "visible"
 
 
-class ChoiceAdapter(BaseAdapter[ChoiceCfg, RunRecord[ExpCfgModel, str]]):
+class ChoiceAdapter(BaseAdapter[ChoiceCfg, RunRecord[ConfigBase, str]]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, analysis=AnalysisMode.NONE, load_data=False
     )
@@ -53,7 +52,7 @@ class ChoiceAdapter(BaseAdapter[ChoiceCfg, RunRecord[ExpCfgModel, str]]):
 
     def run(
         self, req: RunRequest, cfg: ChoiceCfg, *, context: RunContext
-    ) -> RunRecord[ExpCfgModel, str]:
+    ) -> RunRecord[ConfigBase, str]:
         del req, context
         self.executed.append(cfg)
         return RunRecord(None, "complete")

@@ -6,6 +6,7 @@ from threading import Event
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools import plotting
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.workflows import Completed, Failed, Live, WorkflowEnv
@@ -49,7 +50,7 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
-        viewer = context.plots.liveplot_1d("measurement", "Delay", "Signal")
+        viewer = plotting.live_line(context.plots, "measurement", "Delay", "Signal")
         viewer.update(np.array([0.0, 1.0]), np.array([1.0, 2.0]))
         return cfg.value
 
@@ -57,7 +58,7 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            trend = env.plots.liveplot_1d("trend", "Iteration", "Value")
+            trend = plotting.live_line(env.plots, "trend", "Iteration", "Value")
             for index in range(2):
                 outcome = completed(await iteration.run(acquire, Cfg(value=7)))
                 delivered.append(outcome.value.result)
@@ -98,7 +99,7 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
         configs.append(cfg.model_copy(deep=True))
-        context.plots.liveplot_1d("measurement", "Delay", "Signal")
+        plotting.live_line(context.plots, "measurement", "Delay", "Signal")
         if len(attempts) == 1:
             entered.set()
             assert context.scope.stop.event.wait(10), "Pause must stop acquisition"
@@ -110,7 +111,7 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            env.plots.liveplot_1d("trend", "Iteration", "Value")
+            plotting.live_line(env.plots, "trend", "Iteration", "Value")
             result = completed(await iteration.run(acquire, Cfg(value=9)))
             delivered.append(result.value.result)
             iteration.commit(Point(value=result.value.result))
@@ -155,7 +156,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
-        handles.append(context.plots.liveplot_1d("measurement", "x", "y"))
+        handles.append(plotting.live_line(context.plots, "measurement", "x", "y"))
         if outcome == "raised":
             raise ValueError("core failed")
         if outcome == "failed":
@@ -175,7 +176,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
             # The old producer is no longer allowed to update even before run ends.
             with pytest.raises(RuntimeError, match="finished"):
                 handles[0].update(np.array([0.0]), np.array([1.0]))
-            env.plots.liveplot_1d("trend", "x", "y")
+            plotting.live_line(env.plots, "trend", "x", "y")
         finally:
             iterations.close()
 
@@ -209,7 +210,7 @@ def test_workflow_registration_rejects_operation_namespace(
                 env.plots.subplots("operation/measurement")
         else:
             with pytest.raises(ValueError, match="operation/"):
-                env.plots.liveplot_1d("operation/measurement", "x", "y")
+                plotting.live_line(env.plots, "operation/measurement", "x", "y")
         env.plots.subplots("trend")
 
     try:
@@ -238,7 +239,7 @@ def test_finish_failure_propagates_without_masking_core_error(
     deliveries: list[object] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        context.plots.liveplot_1d("measurement", "x", "y")
+        plotting.live_line(context.plots, "measurement", "x", "y")
         if core_raises:
             raise ValueError("core failed")
         return 1

@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope
@@ -27,17 +26,17 @@ class MeasurementCfg(ConfigBase):
     amount: float = 1.0
 
 
-class RecordingCore(Experiment[RunRecord[ExpCfgModel, MeasurementCfg], Any]):
+class RecordingCore(Experiment[RunRecord[ConfigBase, MeasurementCfg], Any]):
     """Expose the exact cfg received through the synchronous core boundary."""
 
     def run(
         self, cfg: MeasurementCfg, *, context: RunContext
-    ) -> RunRecord[ExpCfgModel, MeasurementCfg]:
+    ) -> RunRecord[ConfigBase, MeasurementCfg]:
         del context
         return RunRecord(None, cfg)
 
 
-class FormAdapter(BaseAdapter[MeasurementCfg, RunRecord[ExpCfgModel, MeasurementCfg]]):
+class FormAdapter(BaseAdapter[MeasurementCfg, RunRecord[ConfigBase, MeasurementCfg]]):
     exp_cls = RecordingCore
     capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE, load_data=False)
 

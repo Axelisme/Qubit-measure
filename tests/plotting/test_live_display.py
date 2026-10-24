@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from zcu_tools import plotting
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
 @pytest.mark.parametrize("uniform", [False, True])
 def test_heatmap_is_blank_until_first_update(uniform: bool) -> None:
     plots = Plots(NonPresentingHost())
-    viewer = plots.liveplot_2d_with_line(
-        "scan", "Flux (A)", "Frequency (MHz)", uniform=uniform
+    viewer = plotting.live_heatmap_with_line(
+        plots, "scan", "Flux (A)", "Frequency (MHz)", uniform=uniform
     )
     image = plots["scan"].axes[0].images[0]
     initial = image.get_array()
@@ -33,7 +34,8 @@ def test_heatmap_is_blank_until_first_update(uniform: bool) -> None:
 def test_narrow_mhz_scan_line_ticks_are_readable_without_changing_data() -> None:
     plots = Plots(NonPresentingHost())
     figure, _ = plots.subplots("scan", ncols=2, figsize=(11.0, 4.8), dpi=100)
-    viewer = plots.liveplot_2d_with_line(
+    viewer = plotting.live_heatmap_with_line(
+        plots,
         "scan",
         "Flux (A)",
         "Frequency (MHz)",

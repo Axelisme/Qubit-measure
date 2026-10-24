@@ -10,6 +10,7 @@ from threading import Event
 import numpy as np
 import pytest
 from qick import QickConfig
+from zcu_tools import plotting
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
@@ -293,7 +294,7 @@ def test_plots_and_named_bar_are_retained_across_commits(rig: Rig) -> None:
             iteration = next(iterations)
             bar = env.pbar("points", 10)
             bar.set_progress(3)
-            viewer = env.plots.liveplot_1d("main", "x", "y")
+            viewer = plotting.live_line(env.plots, "main", "x", "y")
             viewer.update(np.array([0.0, 1.0]), np.array([2.0, 3.0]))
             iteration.commit(Point(value=3))
             iteration = next(iterations)

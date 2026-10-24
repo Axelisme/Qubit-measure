@@ -5,7 +5,6 @@ from typing import ClassVar
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, Expr, PulseCfg, Template
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -24,7 +23,7 @@ from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
-class TraceCfg(ExpCfgModel):
+class TraceCfg(ConfigBase):
     """One concrete cfg field is both displayed and executed."""
 
     amount: float = 1.0

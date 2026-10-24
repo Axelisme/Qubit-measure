@@ -6,7 +6,8 @@ from typing import ClassVar
 
 import numpy as np
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
-from zcu_tools.experiment import ExpCfgModel, RunRecord
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -36,7 +37,7 @@ class PickParams:
     integer: float = -0.5
 
 
-class PickCfg(ExpCfgModel):
+class PickCfg(ConfigBase):
     pass
 
 

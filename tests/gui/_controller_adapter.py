@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 from unittest.mock import MagicMock
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -25,7 +25,7 @@ class AnalyzeParams:
     threshold: float = 0.0
 
 
-class RecordingCfg(ExpCfgModel):
+class RecordingCfg(ConfigBase):
     reps: int = 100
 
 
@@ -64,7 +64,7 @@ class RecordingAdapter(
         return None
 
 
-class InteractiveAdapter(BaseAdapter[ExpCfgModel, object, None, None]):
+class InteractiveAdapter(BaseAdapter[ConfigBase, object, None, None]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         requires_soc=False, load_data=False, analysis=AnalysisMode.INTERACTIVE
     )

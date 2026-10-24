@@ -8,13 +8,13 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import decode_labber_comment, load, load_labber_data, save
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
     CfgUnavailableWarning,
-    ExpCfgModel,
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
@@ -36,7 +36,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from tests._native_support import native_metadata
 
 
-class NativeCfg(ExpCfgModel):
+class NativeCfg(ConfigBase):
     gain: float = 1.0
 
 

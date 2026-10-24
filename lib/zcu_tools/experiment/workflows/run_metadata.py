@@ -2,14 +2,14 @@
 
 from dataclasses import replace
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
 from zcu_tools.experiment.records import RunRecord
 
 from .models import Completed, RunIdentity
 
 
-def record_with_metadata[Cfg: ExpCfgModel, Result](
+def record_with_metadata[Cfg: ConfigBase, Result](
     completed: Completed[RunRecord[Cfg, Result]],
     *,
     identity: RunIdentity,

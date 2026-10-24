@@ -5,9 +5,9 @@ from datetime import timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import workflows as w
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.simulation import white_noise
@@ -25,7 +25,7 @@ class Tunables(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Cfg(ExpCfgModel):
+class Cfg(ConfigBase):
     value: int = 3
 
 

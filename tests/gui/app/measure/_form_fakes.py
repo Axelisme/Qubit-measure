@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from unittest.mock import MagicMock
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
 from zcu_tools.gui.app.measure.services.form_contracts import source_basis
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
@@ -60,7 +59,7 @@ def make_form[C: ConfigBase](form: Form[C], *, state: State) -> TabFormResource:
     return resource
 
 
-class LookupCfg(ExpCfgModel):
+class LookupCfg(ConfigBase):
     """Three plain scalars a measure tab view can display and edit."""
 
     reps: int = 100

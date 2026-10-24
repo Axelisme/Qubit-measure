@@ -16,7 +16,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTabWidget,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -347,7 +347,7 @@ def test_long_status_message_stays_within_window_with_full_tooltip(
 def footer_form_window(tmp_path: Path, qapp: QApplication) -> Iterator[MainWindow]:
     """Show a synthetic form whose input selects a short or long diagnostic."""
 
-    class DiagnosticCfg(ExpCfgModel):
+    class DiagnosticCfg(ConfigBase):
         message: str = ""
 
         @field_validator("message")

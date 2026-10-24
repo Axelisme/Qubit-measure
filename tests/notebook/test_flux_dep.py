@@ -16,7 +16,7 @@ from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
     FluxPickState,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.notebook.flux_dep import (
     FluxDepAnalysisRecord,
@@ -44,11 +44,11 @@ def make_result() -> Spectrum:
     return Spectrum(values, freqs, signals)
 
 
-def make_source() -> RunRecord[ExpCfgModel, Spectrum]:
+def make_source() -> RunRecord[ConfigBase, Spectrum]:
     return RunRecord(cfg=None, result=make_result())
 
 
-def picker_inputs(source: RunRecord[ExpCfgModel, Spectrum]) -> FluxPickInputs:
+def picker_inputs(source: RunRecord[ConfigBase, Spectrum]) -> FluxPickInputs:
     data = source.result
     return FluxPickInputs(data.signals, data.values, data.freqs)
 
@@ -61,7 +61,7 @@ def suppress_notebook_display(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def expect_analysis_plots(analyzer: FluxDepAnalyzer[ExpCfgModel, Spectrum]) -> Plots:
+def expect_analysis_plots(analyzer: FluxDepAnalyzer[ConfigBase, Spectrum]) -> Plots:
     plots = analyzer.analysis_plots
     assert plots is not None
     return plots
@@ -70,11 +70,11 @@ def expect_analysis_plots(analyzer: FluxDepAnalyzer[ExpCfgModel, Spectrum]) -> P
 def completed_analyzer(
     host: PlotHost | None = None,
 ) -> tuple[
-    FluxDepAnalyzer[ExpCfgModel, Spectrum],
-    FluxDepAnalysisRecord[ExpCfgModel, Spectrum],
+    FluxDepAnalyzer[ConfigBase, Spectrum],
+    FluxDepAnalysisRecord[ConfigBase, Spectrum],
     Plots,
 ]:
-    analyzer = FluxDepAnalyzer[ExpCfgModel, Spectrum](host)
+    analyzer = FluxDepAnalyzer[ConfigBase, Spectrum](host)
     record = analyzer.start(
         make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.2, 0.3)
     ).done()
@@ -84,7 +84,7 @@ def completed_analyzer(
 def test_done_publishes_source_options_numeric_result_and_named_figure(
     tmp_path,
 ) -> None:
-    analyzer = FluxDepAnalyzer[ExpCfgModel, Spectrum](NonPresentingHost())
+    analyzer = FluxDepAnalyzer[ConfigBase, Spectrum](NonPresentingHost())
     source = make_source()
     original_signals = source.result.signals.copy()
     control = analyzer.start(
@@ -127,15 +127,15 @@ def test_done_publishes_source_options_numeric_result_and_named_figure(
 
 def test_twotone_pick_keeps_captured_source_and_retains_figure(tmp_path: Path) -> None:
     data = make_result()
-    source: RunRecord[ExpCfgModel, Spectrum] = RunRecord(
+    source: RunRecord[ConfigBase, Spectrum] = RunRecord(
         cfg=None,
         result=Spectrum(data.values, data.freqs, data.signals),
     )
-    analyzer = FluxDepAnalyzer[ExpCfgModel, Spectrum](NonPresentingHost())
+    analyzer = FluxDepAnalyzer[ConfigBase, Spectrum](NonPresentingHost())
     first = analyzer.start(
         source, picker_inputs(source), FluxDepPickerOptions(-0.2, 0.3)
     )
-    other: RunRecord[ExpCfgModel, Spectrum] = RunRecord(
+    other: RunRecord[ConfigBase, Spectrum] = RunRecord(
         cfg=None,
         result=Spectrum(data.values, data.freqs + 10.0, data.signals * 2),
     )
@@ -167,7 +167,7 @@ def test_twotone_pick_keeps_captured_source_and_retains_figure(tmp_path: Path) -
 
 
 def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> None:
-    analyzer = FluxDepAnalyzer[ExpCfgModel, Spectrum](NonPresentingHost())
+    analyzer = FluxDepAnalyzer[ConfigBase, Spectrum](NonPresentingHost())
     first = analyzer.start(
         make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.2, 0.3)
     )
@@ -200,7 +200,7 @@ def test_invalid_done_and_cancel_leave_old_analysis_and_editable_control() -> No
 def test_failed_notebook_publication_cleans_up_widgets_and_keeps_record(
     monkeypatch: pytest.MonkeyPatch, fail_on: int
 ) -> None:
-    exp = FluxDepAnalyzer[ExpCfgModel, Spectrum]()
+    exp = FluxDepAnalyzer[ConfigBase, Spectrum]()
     source = make_source()
     existing_widgets = set(widgets.Widget.widgets)
     calls = 0
@@ -293,7 +293,7 @@ def test_default_notebook_host_drags_and_releases_preview_widgets(
     displayed: list[object] = []
     monkeypatch.setattr("IPython.display.display", displayed.append)
     existing_widgets = set(widgets.Widget.widgets)
-    exp = FluxDepAnalyzer[ExpCfgModel, Spectrum]()
+    exp = FluxDepAnalyzer[ConfigBase, Spectrum]()
     control = exp.start(
         make_source(), picker_inputs(make_source()), FluxDepPickerOptions(-0.2, 0.3)
     )

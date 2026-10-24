@@ -100,17 +100,17 @@ physical models, evolution and sampling.
 
 ## Cfg 與父層支援
 
-- zcu_lab 的程式型實驗從 package root import `ProgramExpCfg`，以 `class T1Cfg(ProgramExpCfg)` 宣告輸入。
-  它組合 `ProgramV2Cfg` 與 `ExpCfgModel`，保留 reps、rounds、initial_delay、relax_delay 的預設值與驗證。
-  不含這些 program 欄位的 cfg 仍繼承 `ExpCfgModel`，例如在 run 內另建 program cfg 的 raw-shot 實驗。
-- `cfg_model.py` 的 `ExpCfgModel` 繼承 package-root `zcu_tools.cfg_model.ConfigBase`，不宣告 `dev`。
+- 實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`，直接繼承它宣告輸入。
+  Cfg 自行宣告用到的 reps、rounds、initial_delay、relax_delay 與驗證，不繼承 program 設定。
+  Core 將執行控制參數明確交給 program builder 與 acquire。
+- `ConfigBase` 不宣告 `dev`。
   需要 device 的實驗 cfg 自行宣告角色到 device 名稱的 mapping；只有確實可選的實驗才宣告 optional dev。Dev 不保存 DeviceInfo、設定 patch 或 snapshot。
   使用 flux 的實驗 cfg 必填 `flux_unit`，值為 A、V 或 native，core 不提供隱含 default。
   Run 不預查 cfg.dev 名稱是否存在。Core 實際取 `context.devices[cfg.dev[role]]` 時，缺名即報錯並指名 device，不設定未使用的 device。Cfg 格式與必填 unit 的驗證仍保留。
   `ConfigBase` 提供欄位驗證、`with_updates` 和 `to_dict`；native restore 集中處理歷史 cfg 不相容的 warning 與 cfg=None。
 - `cfg_assembler.py` 提供 `ExperimentScalar` 與 `ExperimentCfgValue`，描述 Run 接縫的 mapping 值型別。GUI Form 在 accept 前完成 module materialization 與 sweep 轉換；BaseAdapter 使用 Form 的 core cfg 型別驗證 accept 的 dump。Notebook caller 直接提供 typed cfg。
 - `config.py` 提供繪圖尺寸 `figsize`；cfg model 與組裝由各自 owner 負責。
-- `utils/` 提供 cfg 到 datafile comment codec 的 mapping 與單一 sweep 格式整理。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。儀器角色與單位政策由使用者套件的 helpers 擁有。Sweep helper 使用 program/v2 的 `SweepCfg`。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
+- `utils/` 提供 cfg 到 datafile comment codec 的 mapping 與單一 sweep 格式整理。Comment envelope 的 JSON 編解碼與 Labber reader 的 labels／units／shape／numeric container 驗證由 datafile 擁有；experiment 保留 typed cfg validation、memory units 與 generated coordinate 語意。儀器角色與單位政策由使用者套件的 helpers 擁有。Sweep helper 使用 program/v2 的 `SweepCfg`。`get_single_sweep_name(type[ConfigBase])` 只辨識頂層 SweepCfg 型別欄位，包含 nullable 與 subclass。恰好一個才回傳欄位名，零個或多個回 None；不讀固定欄位名，也不遍歷 nested model 或 tone list。`experiment.utils.make_sweep` 是 core 與 Notebook 共用的 sweep 建構入口。它與 [v2/utils](v2/README.md#v2-工具與實驗輔助) 的硬體量化、SNR 和 tracker 工具分開。
 
 ## Device 操作邊界
 

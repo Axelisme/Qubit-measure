@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     DataVariable,
     load_grouped_labber_data,
@@ -17,7 +18,6 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 
 from tests.experiment._grouped_layout_support import (
@@ -27,7 +27,7 @@ from tests.experiment._grouped_layout_support import (
 )
 
 
-class _GroupedCfg(ExpCfgModel):
+class _GroupedCfg(ConfigBase):
     name: str = "grouped"
 
 

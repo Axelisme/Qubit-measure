@@ -7,10 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import JsonObject
 from zcu_tools.experiment.metadata import SoftwareProvenance
-
-from .cfg_model import ExpCfgModel
 
 if TYPE_CHECKING:
     from .context import RunContext
@@ -42,7 +41,7 @@ class MissingCapability(RuntimeError):
         super().__init__(f"Missing workflow capability: {capability}")
 
 
-class RunFunction[Cfg: ExpCfgModel, Result](Protocol):
+class RunFunction[Cfg: ConfigBase, Result](Protocol):
     """Core experiment callable, including bound Experiment.run methods.
 
     cfg is an owned, mutable experiment configuration passed positionally; its

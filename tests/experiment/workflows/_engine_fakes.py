@@ -9,8 +9,8 @@ from threading import Event
 from time import monotonic
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import FakeDevice
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.script_host import PendingQuestion
 from zcu_tools.experiment.simulation import white_noise
@@ -61,7 +61,7 @@ class Point(BaseModel):
     value: int
 
 
-class Cfg(ExpCfgModel):
+class Cfg(ConfigBase):
     """Minimal core-compatible input, with optional device roles."""
 
     value: int = 1

@@ -10,6 +10,7 @@ import pytest
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from zcu_tools import plotting
 from zcu_tools.plotting.figures import FigureCollection
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -50,7 +51,7 @@ def collect_plot_cycles():
 def test_scatter_copies_phase_colors_and_retains_native_figures_after_release() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    viewer = plots.liveplot_scatter("samples", "Flux", "SNR")
+    viewer = plotting.live_scatter(plots, "samples", "Flux", "SNR")
     figure = plots["samples"]
     assert host.presented == [figure]
     xs = np.array([1.0, 2.0, 3.0])
@@ -101,7 +102,7 @@ def test_scatter_copies_phase_colors_and_retains_native_figures_after_release() 
 def test_invalid_scatter_update_preserves_points_and_colors(xs, ys, colors) -> None:
     host = RecordingHost()
     plots = Plots(host)
-    viewer = plots.liveplot_scatter("samples", "x", "y")
+    viewer = plotting.live_scatter(plots, "samples", "x", "y")
     viewer.update(np.array([1.0]), np.array([2.0]), colors=np.array([3.0]))
     scatter = plots["samples"].axes[0].collections[0]
     with pytest.raises(ValueError, match="Scatter"):
@@ -115,7 +116,7 @@ def test_invalid_scatter_update_preserves_points_and_colors(xs, ys, colors) -> N
 
 def test_live_updates_and_native_save_work_without_presentation() -> None:
     plots = Plots(NonPresentingHost())
-    viewer = plots.liveplot_1d("measurement", "Time", "Signal", title="T1")
+    viewer = plotting.live_line(plots, "measurement", "Time", "Signal", title="T1")
     xs, ys = np.array([0.0, 1.0]), np.array([2.0, 3.0])
     viewer.update(xs, ys, "last frame", refresh=False)
     xs[:] = 99
@@ -156,7 +157,9 @@ def test_live_axes_configuration_runs_on_owner_before_presenting() -> None:
         axes.lines[0].set_marker("x")
         axes.lines[0].set_linestyle("None")
 
-    viewer = plots.liveplot_1d("gates", "Gate", "Signal", configure_axes=configure)
+    viewer = plotting.live_line(
+        plots, "gates", "Gate", "Signal", configure_axes=configure
+    )
     axes = plots["gates"].axes[0]
     assert configured == [axes]
     assert host.presented == [plots["gates"]]
@@ -179,7 +182,7 @@ def test_live_axes_configuration_failure_is_not_presented() -> None:
         raise ValueError("invalid configuration")
 
     with pytest.raises(ValueError, match="invalid configuration"):
-        plots.liveplot_1d("failed", "x", "y", configure_axes=configure)
+        plotting.live_line(plots, "failed", "x", "y", configure_axes=configure)
     assert host.presented == []
     figures = plots.finish(present=False)
     assert figures["failed"].axes[0].get_title() == "incomplete"
@@ -192,7 +195,7 @@ def test_normal_figures_wait_for_finish_and_last_live_frame_refreshes() -> None:
     plots = Plots(host)
     regular, _ = plots.subplots("fit")
     assert host.presented == []
-    viewer = plots.liveplot_1d("measurement", "x", "y")
+    viewer = plotting.live_line(plots, "measurement", "x", "y")
     live = plots["measurement"]
     assert host.presented == [live]
     viewer.update(np.array([1.0]), np.array([2.0]), refresh=False)
@@ -234,7 +237,7 @@ def test_finished_figures_keep_ownership_without_the_presentation_handle() -> No
 def test_data_is_copied_before_host_dispatch() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    viewer = plots.liveplot_1d("live", "x", "y")
+    viewer = plotting.live_line(plots, "live", "x", "y")
     xs, ys = np.array([0.0, 1.0]), np.array([2.0, 3.0])
 
     def mutate_source() -> None:
@@ -255,7 +258,7 @@ def test_data_is_copied_before_host_dispatch() -> None:
 )
 def test_invalid_update_keeps_every_existing_line(bad_data) -> None:
     plots = Plots(NonPresentingHost())
-    viewer = plots.liveplot_1d("live", "x", "y", num_lines=2)
+    viewer = plotting.live_line(plots, "live", "x", "y", num_lines=2)
     xs = np.array([0.0, 1.0])
     viewer.update(xs, np.array([[2.0, 3.0], [4.0, 5.0]]))
     with pytest.raises(ValueError, match="real-valued|line count"):
@@ -302,7 +305,7 @@ def test_failed_live_presentation_can_finish_diagnostics_and_release() -> None:
     host = FailingHost()
     plots = Plots(host)
     with pytest.raises(OSError, match="present failed"):
-        plots.liveplot_1d("failed", "x", "y")
+        plotting.live_line(plots, "failed", "x", "y")
     figures = plots.finish(present=False)
     assert list(figures) == ["failed"]
     assert host.refreshed == []
@@ -315,7 +318,7 @@ def test_live_name_conflict_does_not_present_another_figure() -> None:
     plots = Plots(host)
     figure, _ = plots.subplots("same")
     with pytest.raises(ValueError, match="already belongs"):
-        plots.liveplot_1d("same", "x", "y")
+        plotting.live_line(plots, "same", "x", "y")
     assert host.presented == []
     assert plots["same"] is figure
     plots.finish()
@@ -325,8 +328,8 @@ def test_live_name_conflict_does_not_present_another_figure() -> None:
 def test_heatmap_fixed_color_limits_survive_updates(uniform: bool) -> None:
     plots = Plots(NonPresentingHost())
     try:
-        viewer = plots.liveplot_2d(
-            "population", "x", "y", uniform=uniform, clim=(0.0, 1.0)
+        viewer = plotting.live_heatmap(
+            plots, "population", "x", "y", uniform=uniform, clim=(0.0, 1.0)
         )
         xs, ys = np.array([0.0, 1.0]), np.array([2.0, 3.0])
         for value in (0.2, 0.8):
@@ -345,7 +348,7 @@ def test_plain_heatmap_preserves_data_and_native_figure_across_lifecycle(
 ) -> None:
     host = RecordingHost()
     plots = Plots(host)
-    viewer = plots.liveplot_2d("scan", "Time", "Phase", uniform=uniform)
+    viewer = plotting.live_heatmap(plots, "scan", "Time", "Phase", uniform=uniform)
     figure = plots["scan"]
     assert host.presented == [figure]
     (axes,) = figure.axes
@@ -384,7 +387,7 @@ def test_plain_heatmap_preserves_data_and_native_figure_across_lifecycle(
         np.asarray(axes.images[0].get_array()), expected, equal_nan=True
     )
     with pytest.raises(ValueError, match="already belongs"):
-        plots.liveplot_2d("scan", "x", "y")
+        plotting.live_heatmap(plots, "scan", "x", "y")
     assert host.presented == [figure]
 
     host.before_call = None
@@ -403,8 +406,8 @@ def test_plain_heatmap_preserves_data_and_native_figure_across_lifecycle(
 
 def test_heatmap_line_plot_keeps_partial_scan_lines_and_native_figure() -> None:
     plots = Plots(NonPresentingHost())
-    viewer = plots.liveplot_2d_with_line(
-        "measurement", "Flux device value", "Frequency (MHz)", num_lines=2
+    viewer = plotting.live_heatmap_with_line(
+        plots, "measurement", "Flux device value", "Frequency (MHz)", num_lines=2
     )
     values = np.array([0.0, 1.0, 2.0])
     freqs = np.array([10.0, 20.0])
@@ -437,7 +440,7 @@ def test_2d_update_copies_all_arrays_before_owner_dispatch_and_refreshes_on_fini
 ):
     host = RecordingHost()
     plots = Plots(host)
-    viewer = plots.liveplot_2d_with_line("scan", "x", "y")
+    viewer = plotting.live_heatmap_with_line(plots, "scan", "x", "y")
     figure = plots["scan"]
     assert host.presented == [figure]
     xs, ys = np.array([0.0, 1.0]), np.array([10.0, 20.0])
@@ -467,8 +470,8 @@ def test_2d_update_copies_all_arrays_before_owner_dispatch_and_refreshes_on_fini
 def test_nonuniform_2d_column_lines_and_invalid_update_preserve_artists() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    viewer = plots.liveplot_2d_with_line(
-        "nonuniform", "x", "y", line_axis=0, num_lines=2, uniform=False
+    viewer = plotting.live_heatmap_with_line(
+        plots, "nonuniform", "x", "y", line_axis=0, num_lines=2, uniform=False
     )
     xs, ys = np.array([0.0, 1.0, 5.0]), np.array([10.0, 13.0])
     data = np.array([[1.0, 2.0], [3.0, np.nan], [5.0, np.nan]])
@@ -527,8 +530,8 @@ def test_nonuniform_heatmap_renders_descending_coordinates_during_scan(
     reverse_x: bool, reverse_y: bool
 ) -> None:
     plots = Plots(NonPresentingHost())
-    viewer = plots.liveplot_2d_with_line(
-        "scan", "Flux", "Frequency", line_axis=1, num_lines=2, uniform=False
+    viewer = plotting.live_heatmap_with_line(
+        plots, "scan", "Flux", "Frequency", line_axis=1, num_lines=2, uniform=False
     )
     xs = np.array([-1.0, -0.6, 0.0, 0.3, 1.0])
     ys = np.array([10.0, 13.0, 19.0])
@@ -581,14 +584,14 @@ def test_invalid_2d_factory_options_or_duplicate_name_never_present() -> None:
     host = RecordingHost()
     plots = Plots(host)
     with pytest.raises(ValueError, match="Line count"):
-        plots.liveplot_2d_with_line("scan", "x", "y", num_lines=0)
+        plotting.live_heatmap_with_line(plots, "scan", "x", "y", num_lines=0)
     with pytest.raises(ValueError, match="line_axis"):
         # tolerated(cast): 2 bypasses Literal[0, 1] to test rejection before registration/presentation.
-        plots.liveplot_2d_with_line("scan", "x", "y", line_axis=cast(Any, 2))
+        plotting.live_heatmap_with_line(plots, "scan", "x", "y", line_axis=cast(Any, 2))
     assert list(plots) == []
     existing, _ = plots.subplots("scan")
     with pytest.raises(ValueError, match="already belongs"):
-        plots.liveplot_2d_with_line("scan", "x", "y")
+        plotting.live_heatmap_with_line(plots, "scan", "x", "y")
     assert host.presented == []
     assert plots["scan"] is existing
     plots.finish()
@@ -599,11 +602,11 @@ def test_typed_plots_share_one_named_frame_and_preserve_it_after_release() -> No
     plots = Plots(host)
     figure, _ = plots.subplots("workflow", ncols=5)
     axes = figure.axes
-    line = plots.liveplot_1d("workflow", "flux", "value", axes=axes[0])
-    samples = plots.liveplot_scatter("workflow", "flux", "snr", axes=axes[4])
-    heatmap = plots.liveplot_2d("workflow", "flux", "time", axes=axes[1])
-    scan = plots.liveplot_2d_with_line(
-        "workflow", "flux", "frequency", axes=(axes[2], axes[3])
+    line = plotting.live_line(plots, "workflow", "flux", "value", axes=axes[0])
+    samples = plotting.live_scatter(plots, "workflow", "flux", "snr", axes=axes[4])
+    heatmap = plotting.live_heatmap(plots, "workflow", "flux", "time", axes=axes[1])
+    scan = plotting.live_heatmap_with_line(
+        plots, "workflow", "flux", "frequency", axes=(axes[2], axes[3])
     )
     xs = np.array([1.0, 2.0])
     ys = np.array([3.0, 4.0, 5.0])
@@ -654,22 +657,26 @@ def test_live_axes_reject_foreign_reused_and_removed_axes_before_mutation() -> N
     first, second, removed = figure.axes
     figure.delaxes(removed)
     with pytest.raises(ValueError, match="named figure"):
-        plots.liveplot_1d("workflow", "x", "y", axes=other_ax)
+        plotting.live_line(plots, "workflow", "x", "y", axes=other_ax)
     with pytest.raises(ValueError, match="named figure"):
-        plots.liveplot_2d("workflow", "x", "y", axes=removed)
+        plotting.live_heatmap(plots, "workflow", "x", "y", axes=removed)
     with pytest.raises(ValueError, match="distinct"):
-        plots.liveplot_2d_with_line("workflow", "x", "y", axes=(first, first))
+        plotting.live_heatmap_with_line(
+            plots, "workflow", "x", "y", axes=(first, first)
+        )
     with pytest.raises(ValueError, match="named figure"):
-        plots.liveplot_2d_with_line("workflow", "x", "y", axes=(second, other_ax))
+        plotting.live_heatmap_with_line(
+            plots, "workflow", "x", "y", axes=(second, other_ax)
+        )
     assert not first.lines and not second.images and not other.axes[0].lines
     assert host.presented == []
-    plots.liveplot_1d("workflow", "x", "y", axes=first)
+    plotting.live_line(plots, "workflow", "x", "y", axes=first)
     with pytest.raises(ValueError, match="already belong"):
-        plots.liveplot_2d("workflow", "x", "y", axes=first)
+        plotting.live_heatmap(plots, "workflow", "x", "y", axes=first)
     with pytest.raises(ValueError, match="already belong"):
-        plots.liveplot_scatter("workflow", "x", "y", axes=first)
+        plotting.live_scatter(plots, "workflow", "x", "y", axes=first)
     with pytest.raises(ValueError, match="named figure"):
-        plots.liveplot_scatter("workflow", "x", "y", axes=other_ax)
+        plotting.live_scatter(plots, "workflow", "x", "y", axes=other_ax)
     assert len(first.lines) == 1
     assert not first.images
     plots.finish()
@@ -722,7 +729,7 @@ def test_movie_captures_updated_frame_and_closes_on_owner(
 
     monkeypatch.setattr("matplotlib.animation.FFMpegWriter", Writer)
     plots = Plots(host)
-    viewer = plots.liveplot_1d("workflow", "x", "y")
+    viewer = plotting.live_line(plots, "workflow", "x", "y")
     recorder = plots.record_animation("workflow", "unused.mp4")
     recorder.grab_frame()
     viewer.update(np.array([1.0, 2.0]), np.array([4.0, 9.0]), refresh=False)
@@ -749,10 +756,10 @@ def test_movie_captures_updated_frame_and_closes_on_owner(
 def test_fork_shares_host_but_has_independent_membership_and_lifetime() -> None:
     host = RecordingHost()
     parent = Plots(host)
-    parent.liveplot_1d("measurement", "x", "y")
+    plotting.live_line(parent, "measurement", "x", "y")
     child = parent.fork()
-    viewer = child.liveplot_1d("measurement", "x", "y")
-    child.liveplot_1d("operation/nested", "x", "y")
+    viewer = plotting.live_line(child, "measurement", "x", "y")
+    plotting.live_line(child, "operation/nested", "x", "y")
     assert child["measurement"] is not parent["measurement"]
     assert host.presented == [
         parent["measurement"],
@@ -763,9 +770,9 @@ def test_fork_shares_host_but_has_independent_membership_and_lifetime() -> None:
     with pytest.raises(RuntimeError, match="finished"):
         viewer.update(np.array([0.0]), np.array([1.0]))
     child.release()
-    parent.liveplot_1d("trend", "x", "y")
+    plotting.live_line(parent, "trend", "x", "y")
     with pytest.raises(ValueError, match="another figure"):
-        parent.liveplot_1d("measurement", "x", "y")
+        plotting.live_line(parent, "measurement", "x", "y")
     assert host.released == [child["measurement"], child["operation/nested"]]
     parent.finish()
     parent.release()

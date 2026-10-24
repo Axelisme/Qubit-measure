@@ -3,14 +3,14 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
 
 
-class Cfg(ExpCfgModel):
+class Cfg(ConfigBase):
     """Run input; scale is the scalar value plotted and returned by the fake."""
 
     scale: float = 1.0

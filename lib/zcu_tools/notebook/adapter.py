@@ -11,6 +11,7 @@ from typing import Any, Generic, TypeVar
 
 from matplotlib.figure import Figure
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import format_ext, reserve_labber_filepath
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.acquisition import (
@@ -22,7 +23,6 @@ from zcu_tools.experiment.acquisition import (
 from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.base import Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_labber
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
@@ -33,7 +33,7 @@ from zcu_tools.plotting.plots import PlotHost, Plots
 from zcu_tools.resources.entry import PointView, RoleView
 
 CoreT = TypeVar("CoreT", bound=Experiment[Any, Any], covariant=True)
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
 OptionsT = TypeVar("OptionsT")
 

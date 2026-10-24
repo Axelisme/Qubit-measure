@@ -1,6 +1,6 @@
 """Convert core metadata and preview values to one layer of Qt row data."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -109,44 +109,27 @@ def _control_presentation(
 
 def present_fields(
     fields: tuple[FormFieldDescription, ...],
-    children: Callable[[FormWritePath], tuple[FormFieldDescription, ...]],
 ) -> tuple[FormFieldDescription, ...]:
-    """Apply Sweep layout and initial folds without changing canonical paths.
+    """Apply group layout hints to one visible layer, keeping canonical paths.
 
-    fields is one visible model layer. children reads the current direct child
-    metadata at a canonical path. Only an ordinary nonnullable sweep container
-    is inspected eagerly: one expandable axis replaces its container row, with
-    a combined title; multiple axes keep both levels. Axis commands and selector
-    metadata remain attached to the axis path. Sweep containers and axes start
-    open, modules start closed, and other rows retain their collapsed hint.
+    Sweep members start open. A sole nonnullable expandable Sweep member uses
+    one combined title instead of a group wrapper. Its commands and selector
+    stay on the same axis path. Other fields retain their presentation hints;
+    no field name or descendant schema determines these layout rules.
     """
+    axes = tuple(field for field in fields if field.group == "Sweep")
     result: list[FormFieldDescription] = []
     for field in fields:
-        if field.name == "modules":
-            field = replace(field, collapsed=True)
-        elif len(field.path) >= 2 and field.path[-2] == "sweep":
+        if field.group == "Sweep":
             field = replace(field, collapsed=False)
-        if (
-            field.name == "sweep"
-            and field.kind == "model"
-            and field.can_expand
-            and not field.nullable
-            and field.options is None
-            and not field.commands
-        ):
-            axes = tuple(child for child in children(field.path) if not child.hidden)
-            if axes and all(axis.can_expand and not axis.nullable for axis in axes):
-                field = replace(field, collapsed=False)
-                if len(axes) == 1:
-                    axis = axes[0]
-                    unit = f" ({axis.unit})" if axis.unit else ""
-                    field = replace(
-                        axis,
-                        title=f"{field.title} · {axis.title}{unit}",
-                        unit=None,
-                        group=field.group,
-                        collapsed=False,
-                    )
+            if len(axes) == 1 and field.can_expand and not field.nullable:
+                unit = f" ({field.unit})" if field.unit else ""
+                field = replace(
+                    field,
+                    title=f"Sweep · {field.title}{unit}",
+                    unit=None,
+                    group=None,
+                )
         result.append(field)
     return tuple(result)
 
