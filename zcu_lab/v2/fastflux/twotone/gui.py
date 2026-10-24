@@ -1,6 +1,5 @@
 """Measure GUI adapter for flux-pulsed qubit spectroscopy."""
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -10,8 +9,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -24,18 +21,10 @@ from .form import make_form
 TwoToneRunResult: TypeAlias = RunRecord[TwotoneCfg, TwoToneResult]
 
 
-@dataclass
-class TwoToneAnalyzeResult(AnalyzeResultBase):
-    """The projected spectroscopy map has no fitted scalars or writeback."""
-
-
-class TwoToneAdapter(
-    BaseAdapter[TwotoneCfg, TwoToneRunResult, TwoToneAnalyzeResult, NoAnalyzeParams]
-):
+class TwoToneAdapter(BaseAdapter[TwotoneCfg, TwoToneRunResult]):
     """Acquire and display frequency versus flux-pulse gain without a model fit."""
 
     exp_cls = TwoToneExp
-    experiment_tag: ClassVar[str | None] = TwoToneExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -53,7 +42,7 @@ class TwoToneAdapter(
         return RunRecord(cfg=cfg, result=TwoToneExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[TwoToneRunResult, NoAnalyzeParams], *, plots: Plots
-    ) -> TwoToneAnalyzeResult:
+        self, req: AnalyzeRequest[TwoToneRunResult, None], *, plots: Plots
+    ) -> None:
         TwoToneExp().analyze(req.run_result, None, plots=plots)
-        return TwoToneAnalyzeResult()
+        return

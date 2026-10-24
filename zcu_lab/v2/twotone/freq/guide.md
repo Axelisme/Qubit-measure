@@ -40,5 +40,5 @@ Standard flow at a fresh `$qubit.flux_int`: first run a wide survey over the use
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `twotone_spectrum` after inspecting the same Form errors.
    center_mhz, span_mhz and points are required. points maps to frequency Expts. model_type selects lor/sinc; plot_fit controls the existing fit overlay.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

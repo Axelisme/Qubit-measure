@@ -20,6 +20,16 @@ from tests.gui.app.measure._native_save_support import (
     native_save_session,
 )
 from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._workflow_window import (
+    workflow_window as make_workflow_window,
+)
+
+
+@pytest.fixture
+def workflow_window(
+    qapp: QApplication, tmp_path: Path
+) -> Iterator[tuple[Controller, MainWindow]]:
+    yield from make_workflow_window(qapp, tmp_path)
 
 
 @pytest.fixture

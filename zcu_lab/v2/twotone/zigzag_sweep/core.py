@@ -8,14 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -23,14 +16,10 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     LoadValue,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Repeat,
     Reset,
-    ResetCfg,
     SweepCfg,
     sweep2param,
 )
@@ -55,10 +44,10 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagScanModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
-    X180_pulse: Annotated[PulseCfg | None, FieldMeta(label="X180 Pulse")] = None
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class ZigZagScanSweepCfg(ConfigBase):
@@ -66,7 +55,7 @@ class ZigZagScanSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg | None, FieldMeta(label="Freq", unit="MHz")] = None
 
 
-class ZigZagScanCfg(ProgramV2Cfg, ExpCfgModel):
+class ZigZagScanCfg(ProgramExpCfg):
     modules: ZigZagScanModuleCfg
     sweep: ZigZagScanSweepCfg
     n_times: Annotated[
@@ -95,7 +84,7 @@ class ZigZagScanAnalysis:
     min_value: float
 
 
-class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
+class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
     Options: ClassVar[type[ZigZagScanAnalyzeOptions]] = ZigZagScanAnalyzeOptions
 
     SWEEP_MAP = {
@@ -105,12 +94,12 @@ class ZigZagScanExp(PersistableExperiment[ZigZagScanResult, ZigZagScanCfg]):
 
     # inner-first: signals are (times, values), so values is inner and times
     # (int64) outer; both a.u. -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[ZigZagScanResult, ZigZagScanCfg]] = AxesSpec(
         axes=(
-            Axis("values", "Sweep value", "a.u."),
-            Axis("times", "Times", "a.u.", IDENTITY, np.int64),
+            AxesSpec.Axis("values", "Sweep value", "a.u."),
+            AxesSpec.Axis("times", "Times", "a.u.", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ZigZagScanResult,
         cfg_type=ZigZagScanCfg,
         cfg_schema_version="2.0",

@@ -23,6 +23,7 @@ from ._script_recipe_support import (
     MappingWritebackGui,
     Report,
     SyntheticGui,
+    answer_writeback,
     start,
 )
 from ._support import make_client
@@ -46,14 +47,14 @@ def test_recipe_timeout_retains_owner_submission_for_receipt_query(
         tab = session.open_tab("synthetic")
         await tab.run()
         await tab.analyze("primary", result=Fit)
-        proposal = tab.writeback_proposal()
+        proposal = await tab.ask_writeback()
         receipts.append(tab.accept_writeback(proposal.items))
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
+        answer_writeback(execution)
         assert len(receipts) == 1
         receipt = receipts[0]
         assert getattr(receipt, "submission_id", None) == "wb-recipe"
@@ -372,7 +373,7 @@ def test_mutated_nested_proposal_is_rejected_without_owner_write(
         tab = session.open_tab("synthetic")
         await tab.run()
         await tab.analyze("primary", result=Fit)
-        proposal = tab.writeback_proposal()
+        proposal = await tab.ask_writeback()
         change_gain(proposal.items[0].value, 0.9)
         try:
             tab.accept_writeback(proposal.items)
@@ -383,7 +384,7 @@ def test_mutated_nested_proposal_is_rejected_without_owner_write(
     client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
+        answer_writeback(execution)
         assert gui.writes == 0
         assert rejected == ["Unknown, duplicate or modified writeback candidate"]
         snapshot = execution.snapshot()
@@ -409,7 +410,7 @@ def test_receipt_mapping_cannot_mutate_retained_candidates_or_details(
         tab = session.open_tab("synthetic")
         await tab.run()
         await tab.analyze("primary", result=Fit)
-        proposal = tab.writeback_proposal()
+        proposal = await tab.ask_writeback()
         receipt = tab.accept_writeback(proposal.items)
         change_gain(receipt.items[0].value, 0.9)
         try:
@@ -421,7 +422,7 @@ def test_receipt_mapping_cannot_mutate_retained_candidates_or_details(
     client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
+        answer_writeback(execution)
         snapshot = execution.snapshot()
         assert snapshot.status == "completed"
         assert failures == []
@@ -466,14 +467,14 @@ def test_alias_receipt_confirms_by_item_id_not_authored_target(tmp_path: Path) -
         tab = session.open_tab("synthetic")
         await tab.run()
         await tab.analyze("primary", result=Fit)
-        proposal = tab.writeback_proposal()
+        proposal = await tab.ask_writeback()
         receipts.append(tab.accept_writeback(proposal.items))
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
+        answer_writeback(execution)
         assert execution.snapshot().status == "completed"
         assert receipts[0].status == "completed"
         assert len(receipts[0].items) == 1

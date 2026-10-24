@@ -55,8 +55,6 @@ class SsAmpRabiAdapter(
         AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
     ]
 ):
-    experiment_tag: ClassVar[str | None] = AmpRabiExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

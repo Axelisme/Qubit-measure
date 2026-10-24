@@ -11,7 +11,7 @@ from zcu_tools.datafile import Container
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, NoAnalyzeParams
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -140,7 +140,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     analysis_plots.adopt("fit", Figure())
     analysis_plots.finish()
     tab.analysis.plots = analysis_plots
-    tab.analysis.params = NoAnalyzeParams()
+    tab.analysis.params = None
     tab.analysis.writeback_draft = MagicMock(is_active=True)
     tab.post_analysis.result = object()
     post_plots = Plots(NonPresentingHost())

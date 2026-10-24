@@ -9,27 +9,13 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
 
 
@@ -64,23 +50,23 @@ class AmpRabiSweepCfg(ConfigBase):
 
 
 class AmpRabiModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Rabi Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
-class AmpRabiCfg(ProgramV2Cfg, ExpCfgModel):
+class AmpRabiCfg(ProgramExpCfg):
     modules: AmpRabiModuleCfg
     sweep: AmpRabiSweepCfg
 
 
-class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
+class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("amps", "Gain", ""),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    AXES_SPEC: ClassVar[AxesSpec[AmpRabiResult, AmpRabiCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("amps", "Gain", ""),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
         cfg_schema_version="2.0",

@@ -2,18 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -21,13 +15,9 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SoftDelay,
     SweepCfg,
     sweep2param,
@@ -47,10 +37,10 @@ def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PhaseModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    flux_pulse: PulseCfg
-    pi2_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    pi2_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class PhaseSweepCfg(ConfigBase):
@@ -58,7 +48,7 @@ class PhaseSweepCfg(ConfigBase):
     phase: SweepCfg
 
 
-class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
+class PhaseCfg(ProgramExpCfg):
     modules: PhaseModuleCfg
     readout_t: float
     sweep: PhaseSweepCfg
@@ -70,14 +60,14 @@ class PhaseAnalysis:
     phases_deg: NDArray[np.float64]
 
 
-class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
+class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
     # inner phases raw deg (IDENTITY); outer lengths memory-us -> disk-s via US_TO_S
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
         axes=(
-            Axis("phases", "Phase", "deg"),
-            Axis("lengths", "Wait Time", "s", scale=US_TO_S),
+            AxesSpec.Axis("phases", "Phase", "deg"),
+            AxesSpec.Axis("lengths", "Wait Time", "s", scale=1e-6),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PhaseResult,
         cfg_type=PhaseCfg,
         cfg_schema_version="2.0",

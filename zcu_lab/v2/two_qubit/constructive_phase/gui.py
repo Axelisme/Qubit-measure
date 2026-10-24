@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -32,17 +31,11 @@ ConstructivePhaseRun: TypeAlias = RunRecord[ConstructivePhaseCfg, RabiScanResult
 
 
 class ConstructivePhaseAdapter(
-    BaseAdapter[
-        ConstructivePhaseCfg,
-        ConstructivePhaseRun,
-        ConstructivePhaseAnalysis,
-        NoAnalyzeParams,
-    ]
+    BaseAdapter[ConstructivePhaseCfg, ConstructivePhaseRun, ConstructivePhaseAnalysis]
 ):
     """Fixed-capture acquisition, saved-source analysis and native restore."""
 
     exp_cls = ConstructivePhaseExp
-    experiment_tag: ClassVar[str | None] = ConstructivePhaseExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -64,7 +57,7 @@ class ConstructivePhaseAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[ConstructivePhaseRun, NoAnalyzeParams],
+        req: AnalyzeRequest[ConstructivePhaseRun, None],
         *,
         plots: Plots,
     ) -> ConstructivePhaseAnalysis:

@@ -51,5 +51,5 @@ without writeback. Save retains raw data and completed analysis artifacts.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `twotone_flux_dep` after inspecting the same Form errors.
    center_mhz, span_mhz, freq_points, flux_device, flux_unit, flux_range and flux_points are required. Both counts map to their sweep Expts. The interactive picker uses the existing GUI parameters.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

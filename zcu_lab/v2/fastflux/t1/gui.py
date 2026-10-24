@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -47,11 +46,10 @@ class T1AnalyzeResult:
         }
 
 
-class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, NoAnalyzeParams]):
+class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult]):
     """Delegate the physical sequence, fit and native persistence to the core."""
 
     exp_cls = T1Exp
-    experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -66,7 +64,7 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, NoAnalyzeParams
         return RunRecord(cfg=cfg, result=T1Exp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[T1RunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[T1RunResult, None], *, plots: Plots
     ) -> T1AnalyzeResult:
         source = req.run_result
         return T1AnalyzeResult(

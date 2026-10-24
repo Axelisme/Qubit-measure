@@ -15,7 +15,7 @@ from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import AnalysisDocument
 from zcu_tools.experiment.metadata import CfgSnapshot
-from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.experiment.native_persistence import load_run, metadata_from_container
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.format_version import YamlMap
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
@@ -201,7 +201,7 @@ def test_interrupted_acquisition_preserves_saveable_partial(
     loaded = load(native)
     loaded_metadata = metadata_from_container(loaded)
     assert loaded_metadata.completion == "stopped"
-    restored, _ = core.load_run(native)
+    restored, _ = load_run(native, spec=core.AXES_SPEC)
     np.testing.assert_allclose(restored.result.signal, expected, equal_nan=True)
     np.testing.assert_allclose(
         load_labber_data(str(labber)).z, expected, equal_nan=True

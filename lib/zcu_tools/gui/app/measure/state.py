@@ -208,10 +208,13 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
         return self.run.result is not None
 
     def has_analyze_result(self) -> bool:
-        return self.analysis.result is not None
+        return self.analysis.result is not None or self.analysis.plots is not None
 
     def has_post_analyze_result(self) -> bool:
-        return self.post_analysis.result is not None
+        return (
+            self.post_analysis.result is not None
+            or self.post_analysis.plots is not None
+        )
 
     def has_figure(self) -> bool:
         return self.analysis.plots is not None and bool(self.analysis.plots)
@@ -307,7 +310,7 @@ class State(SessionState):
         self._assert_owner()
         tab = self.tabs[tab_id]
         pane = tab.analysis if subtab_id == "analysis" else tab.post_analysis
-        if pane.result is None or pane.source_operation_id != operation_id:
+        if pane.source_operation_id != operation_id:
             raise FailedPreconditionError(
                 f"{subtab_id} no longer contains operation {operation_id}'s result",
                 reason_code="result_superseded",
@@ -744,7 +747,7 @@ class State(SessionState):
         | PostAnalysisPaneState[T_AnalyzeResult, T_AnalyzeParams],
     ) -> tuple[ArtifactDeclaration, ...]:
         """Declare successful pane figures and JSON, including JSON-only results."""
-        if pane.result is None:
+        if pane.result is None and pane.plots is None:
             return ()
         ref = ArtifactRef(section, "results")
         figures = (

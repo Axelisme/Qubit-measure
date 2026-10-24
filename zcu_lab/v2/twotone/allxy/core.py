@@ -10,29 +10,12 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ComputedPulse,
-    LoadValue,
-    ProgramV2Cfg,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-)
+from zcu_tools.program.v2 import ComputedPulse, LoadValue, Pulse, Readout, Reset
 from zcu_tools.utils.process import rotate2real
 
 
@@ -150,14 +133,14 @@ def _configure_allxy_axes(ax: Axes) -> None:
 
 
 class AllXYModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
-    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
-    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
+    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
-class AllXYCfg(ProgramV2Cfg, ExpCfgModel):
+class AllXYCfg(ProgramExpCfg):
     modules: AllXYModuleCfg
 
 
@@ -190,12 +173,12 @@ class AllXYAnalysis:
     residual_rms: float
 
 
-class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
+class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("gate_idxs", "Gate Pair Index", "", IDENTITY, np.int64),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    AXES_SPEC: ClassVar[AxesSpec[AllXY_Result, AllXYCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("gate_idxs", "Gate Pair Index", "", dtype=np.int64),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AllXY_Result,
         cfg_type=AllXYCfg,
         cfg_schema_version="2.0",

@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -46,9 +45,7 @@ class RabiCheckAnalyzeResult(AnalyzeResultBase):
 
 
 class RabiCheckAdapter(
-    BaseAdapter[
-        RabiCheckCfg, RabiCheckRunResult, RabiCheckAnalyzeResult, NoAnalyzeParams
-    ]
+    BaseAdapter[RabiCheckCfg, RabiCheckRunResult, RabiCheckAnalyzeResult]
 ):
     """Rabi-amplitude check for any reset type (single-tone / two-pulse / bath).
 
@@ -57,8 +54,6 @@ class RabiCheckAdapter(
     fitting relative Rabi contrast and residual input dependence. Averaged IQ
     diagnostics do not determine reset fidelity or a unique reset channel.
     """
-
-    experiment_tag: ClassVar[str | None] = RabiCheckExp.persistence_tag()
 
     exp_cls = RabiCheckExp
 
@@ -85,7 +80,7 @@ class RabiCheckAdapter(
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[RabiCheckRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[RabiCheckRunResult, None], *, plots: Plots
     ) -> RabiCheckAnalyzeResult:
         fit = RabiCheckExp().analyze(req.run_result, None, plots=plots)
         return RabiCheckAnalyzeResult(

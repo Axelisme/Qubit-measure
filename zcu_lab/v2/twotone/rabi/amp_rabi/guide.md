@@ -37,5 +37,5 @@ Analysis takes a 'Skip points' count (default 0) to drop leading low-gain sweep 
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `amplitude_rabi` after inspecting the same Form errors.
    points maps to gain Expts; gain_range supplies native endpoints. frequency_mhz and pulse_length_us override the fixed drive. skip changes only the existing analysis fit.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

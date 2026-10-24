@@ -82,7 +82,6 @@ class FreqAnalyzeResult(AnalyzeResultBase):
 class FreqAdapter(
     BaseAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, FreqAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
     exp_cls = FreqExp
 

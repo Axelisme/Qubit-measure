@@ -10,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -34,14 +33,8 @@ class SingleToneFreqAnalyzeResult(AnalyzeResultBase):
 
 
 class SingleToneFreqAdapter(
-    BaseAdapter[
-        FreqCfg,
-        SingleToneFreqRunResult,
-        SingleToneFreqAnalyzeResult,
-        NoAnalyzeParams,
-    ]
+    BaseAdapter[FreqCfg, SingleToneFreqRunResult, SingleToneFreqAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
 
     @staticmethod
@@ -51,7 +44,7 @@ class SingleToneFreqAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # No get_analyze_params override: None (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
     def run(
@@ -67,7 +60,7 @@ class SingleToneFreqAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[SingleToneFreqRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[SingleToneFreqRunResult, None],
         *,
         plots: Plots,
     ) -> SingleToneFreqAnalyzeResult:

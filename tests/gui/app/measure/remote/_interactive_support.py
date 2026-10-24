@@ -72,7 +72,7 @@ def load_native_spectrum(
         step=float((result.values[-1] - result.values[0]) / (len(result.values) - 1)),
         expts=len(result.values),
     )
-    spec = SpectrumCore().persistence_spec()
+    spec = SpectrumCore.AXES_SPEC
     metadata = RunMetadata(
         run_id="20261008T000000Z-a1b2c3",
         experiment=spec.tag,

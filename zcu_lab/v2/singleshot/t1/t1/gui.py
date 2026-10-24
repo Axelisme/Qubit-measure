@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -8,8 +7,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -24,16 +21,7 @@ from zcu_lab.v2.singleshot.t1.t1.form import make_form
 SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
-@dataclass
-class SsT1AnalyzeResult(AnalyzeResultBase):
-    pass
-
-
-class SsT1Adapter(
-    BaseAdapter[T1Cfg, SsT1RunResult, SsT1AnalyzeResult, NoAnalyzeParams]
-):
-    experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
-
+class SsT1Adapter(BaseAdapter[T1Cfg, SsT1RunResult]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T1Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -54,8 +42,8 @@ class SsT1Adapter(
         return RunRecord(cfg, T1Exp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[SsT1RunResult, NoAnalyzeParams], *, plots: Plots
-    ) -> SsT1AnalyzeResult:
+        self, req: AnalyzeRequest[SsT1RunResult, None], *, plots: Plots
+    ) -> None:
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
         # ``skip`` is not exposed as a user knob — users can re-run with a shorter
         # sweep instead.
@@ -63,4 +51,4 @@ class SsT1Adapter(
         T1Exp().analyze(
             req.run_result, T1AnalyzeOptions(confusion_matrix=confusion), plots=plots
         )
-        return SsT1AnalyzeResult()
+        return

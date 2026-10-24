@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.figure import Figure
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-from zcu_tools.experiment import MHZ_TO_HZ, AxesSpec, Axis, PersistableExperiment, ZSpec
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule
@@ -88,14 +89,14 @@ class ResonatorDip:
     depth: float
 
 
-class RangeFindExp(PersistableExperiment[RangeFindResult, RangeFindCfg]):
+class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
     """Acquire absolute MHz spectra and find optionally named dips."""
 
     Options = RangeFindOptions
 
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    AXES_SPEC: ClassVar[AxesSpec[RangeFindResult, RangeFindCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=RangeFindResult,
         cfg_type=RangeFindCfg,
         cfg_schema_version="1.0",

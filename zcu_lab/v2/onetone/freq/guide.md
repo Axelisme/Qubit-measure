@@ -34,7 +34,7 @@ The `resonator.ext.edelay` proposal keeps delay and route together. It requires 
 
 ## MCP recipe
 
-`onetone_spectrum` can omit `center_mhz` and `span_mhz`. Omitted center uses current `$resonator.freq`; omitted span uses 3 times current `$resonator.kappa` for the full frequency span. The recipe reads these values during preparation and sets fixed numeric endpoints at center ± span/2. Omitted `points` retains the GUI count.
+Supply `center_mhz` and `span_mhz` together to set numeric endpoints at center ± span/2. Omitting both retains the Form's captured sweep. Supplying only one returns `needs_parameters` naming the other; the recipe does not infer it from calibration. Explicit null clears the endpoints. Omitting the sample count retains the Form count.
 
 ## Recommended use
 
@@ -58,6 +58,6 @@ Leave the delay blank to use a finite route-matched calibration as the branch se
 3. With a readout slot, Reset and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `onetone_spectrum` after inspecting the same Form errors.
-   points maps to frequency Expts. Optional center_mhz/span_mhz use resonator frequency/linewidth. Analysis controls are model_type, fit_bg_amp_slope, fit_bg_phase_curvature and edelay.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   points maps to frequency Expts. Supply center_mhz/span_mhz together or omit both to retain the Form sweep. Analysis controls are model_type, fit_bg_amp_slope, fit_bg_phase_curvature and edelay.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

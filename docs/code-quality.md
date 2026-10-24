@@ -175,7 +175,8 @@ Review 以「新人多久能看懂這個 recipe／core」裁決。請 reviewer �
 把量測動作放回主體。以下六項用來找出閱讀障礙，不以 class 數或型別完整性取代閱讀判斷：
 
 1. Recipe 主體是一串量測步驟。只讀函式就能知道開了哪張表單、改了什麼、量測與分析的順序、
-   何時問答、寫回及保存。共用的開 tab、選來源與套 overrides 管線由 lib 擁有。
+   何時問答、寫回及保存。主體直接 select／command／set，逐筆套 overrides 後 check_ready，
+   lib 只轉送 Form 操作，不替 recipe 選來源。
 2. Recipe 不宣告分析結果的鏡像 model。直接引用分析 owner 匯出的型別，不重宣告
    FitQuality、QualityIssue 或 summary 的同名欄位，也不在 recipe 重驗 owner 輸出。
 3. Recipe 的 class 只用於實驗輸入與報告。不要為串接幾個步驟增加 runner、policy 或 pipeline class。
@@ -184,7 +185,7 @@ Review 以「新人多久能看懂這個 recipe／core」裁決。請 reviewer �
    何時重測或接受寫回，留在 recipe 主體。
 5. Core 的 class 數與每個抽象都納入 review，逐項說明它代表的實驗概念或隱藏的複雜度。
    不能說明用途就改成直接寫法，但不為降低數字拆檔或搬走脈衝序列。
-6. Docstring 用使用者術語交代輸入、動作、結果與失敗。寫明單位、null 的保留語意、
+6. Docstring 用使用者術語交代輸入、動作、結果與失敗。寫明單位、省略保留與 null 原樣交 owner、
    `n → expts` 或 `points → expts` 對應及分析參數的效果，不以「typed pipeline」等實作詞代替說明。
 
 撰寫方式與目標骨架見 [Measure authoring](../zcu_lab/v2/measure-authoring.md#recipe-撰寫)。

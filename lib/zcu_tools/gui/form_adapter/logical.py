@@ -119,6 +119,7 @@ class LogicalFieldObservation:
 
 type LogicalEditReason = Literal[
     "form_path",
+    "form_option",
     "ref_ancestor",
     "module_selector",
     "library_key",
@@ -131,7 +132,7 @@ type LogicalEditReason = Literal[
 class LogicalEditError(InvalidInputError):
     """Rejected logical mutation; no prefix of a batch has been installed.
 
-    reason_code classifies path/ref ancestry/selector/key/state/structure/source
+    reason_code classifies path/option/ref ancestry/selector/key/state/structure/source
     admission. path is the full request; edit_index is its original zero-based
     batch index, or None for selector operations. selector_path identifies the
     blocking selector, or None. available_keys is None when irrelevant; an empty

@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-24（recipe 最後覆寫與 owner admission）
+**Last updated:** 2026-10-23（analysis updates 由 RecipeTab 略過 KEEP）
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -102,28 +102,39 @@ Inputs 與 Report 是作者選擇的 `BaseModel`，可分別繼承 `RecipeInputs
 Recipe inputs 只驗 JSON schema 與 pydantic，不渲染 GUI Form。
 Adapter tab 的 Form 仍由 GUI owner 產生與驗證。
 
-`session.open_tab(adapter, aliases=..., reuse=...)` 開 tab 或驗證 reuse，再 Reset 捕捉來源。
-省略 aliases、None 或 {} 使用 Reset 當時的全域表。
-非空 mapping 只覆寫這次固定 capture，不寫全域 aliases 或 memento。
+`session.open_tab(adapter, target=..., reuse=...)` 開 tab 或驗證 reuse，再 Reset 捕捉來源。
+target 是 alias 到 concrete target 的 mapping，例如 `{"qubit": inputs.target}`。
+省略、KEEP 或 null 的 mapping 項目保留全域 alias，只對這次 Reset 生效。
+reuse 是 idle matching tab ID；省略、KEEP 或 null 開新 tab。
 Recipe 不自動選重用 tab，也不自動關閉 tab；關閉用 `tab_close`。
-`session.context.read(source_path)` 直接讀 session 層的 `value.read`，不需先開 tab。
-明填 `missing_ok=True` 只把 owner 回覆的 `unregistered_source` 轉成 None；其他來源與連線錯誤照常拋出。
-`tab.read(path)` 讀該 tab 固定 Form capture，回 detached `FormField`。
-Structured value 保留 owner 的 `YamlValue` mapping，作者需要 model 時自行 TypeAdapter 解碼。
+
+`session.context.read(source_path)` 讀 session 層的 `value.read`，不需先開 tab。
+`missing_ok=True` 只把 owner 的 `unregistered_source` 轉成 None，其他錯誤照常拋出。
+`tab.read_parameter(path, missing_ok=False)` 讀 tab 固定 Open／Reset 的參數，例如 `$qubit.freq`。
+缺葉拋 `GuiRpcError(reason="parameter_missing")`；missing_ok 只放行這種缺值。
+明確 null 回 None，來源故障與格式錯誤仍拋出。
+`session.device_unit(name)` 讀裝置快取的 flux 單位，不讀硬體或更新快取。
+它保留 owner 的 A、V、native 或 none 字串。
+
+`tab.read(path)` 使用 dotted string，例如 `"tones.2.drive"`，回 detached `FormField`。
+Structured value 保留 owner 的 `YamlValue` mapping，需要 model 時由作者 TypeAdapter 解碼。
 Value_status 區分 available、missing、unavailable；available null 是有效觀察，不證明整份 cfg 有效。
 
-Form path 是非空 tuple，str 是原始欄位名，int 是完整 list 的原始位置。
-不拆 dotted string，不按 name 或 participants 順序重編位置。
-`tab.set`、`select`、`apply`、`call` 同步交給 GUI owner。
-寫入接受 FormValue 與 Expr，讀取側不回 Expr。
-`set(path, None)` 保留 GUI input，停用 module 用明確的 `"off"`。
-Readonly、ref、selector、來源與 cfg admission 都由 Form owner 檢查，讀取不授權寫入。
+寫入路徑是非空 dotted string，例如 `"tones.2.sweep.start"`。
+十進位段是完整 list 的原始位置，不按名稱或 participants 順序重編。
+空段、負索引與 tuple 寫入路徑會被拒絕。
+`tab.set(path, value)` 原樣替換欄位，不選來源或執行 converter。
+`tab.select(path, option)` 選 owner 的精確 option label 或 captured module key。
+`"Inline"` 或 `"Inline: const"` 等選項沿 owner 的同名同型繼承政策切換。
+`tab.command(path, "to_inline")` 複製固定來源並保留 child keys。Owner 在入口判斷 selector，已 inline 時成功、不改草稿，也不發通知。這不依賴 Inline 選項宣告 command；GUI 只在 ref 選項列出 Convert to inline。
+未知、歧義、readonly、來源與 ref 祖先錯誤立即拋出，MCP 不重建 Form 內部資料。
 
-`tab.apply(edits, require_valid=False)` 一次送完整有序 batch，不逐欄提交。
-結構或來源拒絕不留下成功前綴。預設保留一般 invalid draft，再拋 invalid_cfg。
-`require_valid=True` 先驗證 detached candidate 與完整 native cfg，無效時不安裝欄位。
-空 batch 可驗證目前 cfg。先前 open、Reset、library 與 inline 操作不回滾。
-八個 mux recipe 在最後一批 participants／overrides 明填 require_valid=True。
+set／select 收到 KEEP 就跳過 mutation。None 原樣交 Form，表示清空／關閉 nullable 欄位。
+非 nullable selector 收 None 會被 owner 拒絕。
+每次操作可保留結構合法但尚未完整的草稿。
+`tab.check_ready()` 唯讀驗證完整 Form 與 lowered cfg，不 Run、不捕捉新來源。
+無效時拋 `RecipeNeedsParameters`，保留全部 owner path 與 reason。
+先前編輯不回滾，Run admission 仍會再次驗證。
 
 Lab 新增 `mux_onetone`、`onetone_range_find`、`twotone_flux_dep` 三個工具，
 由注入的 `RECIPES` 產生 schema 與註冊，不在 framework 硬編工具表。
@@ -140,8 +151,8 @@ Analyze 用 TypeAdapter 將 owner summary 驗證為 T，不補欄位或修資料
 `interactive=True` 明確開啟互動交接，公開 `PendingAnalysis(tab, stage, op)`。
 Status／wait 提前回 `status="interactive"`，GUI 完成同一 operation 後原 await 繼續，不建第二個 runner。
 
-`tab.writeback_proposal()` 捕捉 completed stages 的候選。
-`ask_writeback()` 等待經 evidence 驗證的 `WritebackAnswer`，回答不寫入。
+`ask_writeback()` 捕捉 completed stages 的候選，再等待經 evidence 驗證的 `WritebackAnswer`。
+回答不寫入。
 只有 `tab.accept_writeback(decision.items)` 寫入選定 IDs 對應的 owner 當下 draft 值與目的地。
 Unknown、重複或經作者修改的 captured 項目在第一筆寫入前拒絕。
 Recipe 將選定 IDs 一次交給 `tab.writeback_accept`，不帶 `expected_revision`，preview 也不回 revision。
@@ -171,45 +182,39 @@ Run 未成功取得來源前不要進 Save finalizer，避免 Save 蓋掉原錯�
 
 ### 共用輸入與自訂步驟
 
-`RecipeInputs` 提供 target、reuse_tab_id、library、inline、overrides，實驗輸入模型只加自己的欄位。
-`LibrarySelection(path, key)` 指定捕捉的 module key，key=null 保留目前選擇。
-`InlineSelection(path)` 指定要複製成 inline 的 selector。兩種模型都用 keyword arguments 建立。
-Path 使用原始 list index，inline 清單先列祖先再列子項。
+`RecipeInputs` 提供 target、reuse_tab_id 與 overrides，實驗輸入模型加自己的欄位。
+可省略的 Form 欄位使用 `T | None | Keep = KEEP`。
+JSON schema 不列 Keep、不輸出 KEEP default，欄位可省略。
+描述區分省略保留與 null 清空／關閉。數字仍拒絕非有限值。
+target／reuse_tab_id 是 Open／Reset 控制，不是 Form 欄位，null 語意依上節。
 
-`session.prepare_tab(adapter, inputs, target_alias=..., values=...)` 依序開 tab／Reset、
-選 library、複製 inline，最後將非 None 的 values 與 overrides 交同一批 apply。
-values 的 key 是 FormPath tuple，value 使用該欄位的原生單位。
-None 保留 Form 輸入，overrides 排在實驗值之後。
-分拆路徑的 `tab.apply_inputs(inputs, values, edits=...)` 可接收已具名的 FieldEdit 清單。
-它依序提交非 None values、保留 path/value/source 的 edits、最後是 inputs.overrides。
-同一 exact path 只送最後一個非 None 值，保留該項 source；所有 authored path/source 仍先驗證。
-祖先與子路徑不合併，重疊或不可達路徑仍由 Form owner 整批拒絕。
-三組共用一次完整候選驗證。edits 的 None 也保留 Form，不先提交不完整欄位。
-prepare_tab 不接 edits；有校準來源標記或中途自訂操作時用分拆步驟。
-預設 require_valid=True，回 tab 前會驗完整 cfg，不會 Run、Analyze、Save 或寫回。
-捷徑的 values 必須補齊本次量測所需的欄位。
-require_valid=False 沿用 apply 的 invalid draft 提交後拋錯語意，不保證無效輸入能繼續執行。
-
-需要讀 Form 或插入自己的脈衝編輯時，拆開步驟，等自訂操作完成才驗完整 cfg。
-以下合成 recipe 的 gain 編輯不屬於預設流程，也不需要 hook class：
+`FieldEdit(path=..., value=...)` 只攜帶 dotted path 與原生值，供 overrides 使用。
+JSON object 保留 expression tag、structured sweep 與巢狀內容，直接交 owner 驗證。
+set 不接受以 object 替換 generated selector，選來源仍用 select。
+overrides 省略為空 list，不接受 null。主體在實驗值之後依序呼叫 set，
+重複路徑不去重，null 也會套用。全部操作完成後才 check_ready：
 
 ```python
 from zcu_tools.mcp.measure.recipe_api import (
-    RecipeInputs, RecipeReport, RecipeSession, recipe,
+    KEEP, Keep, RecipeInputs, RecipeReport, RecipeSession, recipe,
 )
 
 
 class PulseInputs(RecipeInputs):
-    gain: float = 0.25
+    gain: float | None | Keep = KEEP
 
 
 @recipe("synthetic_pulse", "Set a pulse gain and acquire the current form")
 async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> RecipeReport:
-    tab = session.open_recipe_tab("synthetic", inputs, target_alias="qubit")
-    tab.select_sources(inputs)
-    tab.select(("modules", "pulse"), inline=True)
-    tab.set(("modules", "pulse", "gain"), inputs.gain)
-    tab.apply_inputs(inputs, {})
+    tab = session.open_tab(
+        "synthetic", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
+    )
+    if not isinstance(inputs.gain, Keep):
+        tab.command("modules.pulse", "to_inline")
+    tab.set("modules.pulse.gain", inputs.gain)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
     await tab.run()
     try:
         return RecipeReport()
@@ -217,8 +222,12 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
         tab.save()
 ```
 
-作者也可直接用 open_tab、select、apply 替換上述操作，不必繼承流程。
-Reset、來源選擇與先前自訂編輯不隨最後一批驗證失敗而回滾。
+來源選擇、編輯、驗證與 Run 都由主體明寫。分析、問答、寫回與保存仍是各自獨立的操作。
+明填 scalar 前直接 command to_inline，再 set。已 inline 時 command 不改值。
+單 kind module 與巢狀 waveform 同規則，不以選 Inline 或固定 const 改掉原 family。
+全部 scalar 省略時不切來源，來源故障不 fallback。
+Center／span 必須成對提供或省略，缺一個就回 needs_parameters 指名另一欄。
+不從現有 endpoints 或校準推算，null 原樣交 owner、不參與算術。
 
 `RecipeReport` 提供 writeback_applied、analysis_failure、fit_quality 與 diagnostics。
 作者填入 owner 的事實，基底不決定 fit 是否可接受，也不自動寫回。
@@ -471,9 +480,11 @@ Post 結果讀取失敗時，execution 回覆保留同一份 `recovery`；依上
 這個自動保存是 standalone 工具契約，不適用 recipe 的 `await tab.analyze()`；
 recipe 作者另外明確 `tab.save()`。
 
-`RecipeTab.analyze(stage, result=T, updates=...)` 接受 `Mapping[str, YamlValue]`。
+`RecipeTab.analyze(stage, result=T, updates=...)` 接受 `Mapping[str, YamlValue | Keep]`。
+Recipe 直接傳 dict，例如 `updates={"dual_exp": inputs.dual_exp, "skip": inputs.skip}`。
 Key 是 adapter 的具名分析參數，value 使用該欄位的原生單位，不求值 Form Expr 或換算單位。
-省略或空 mapping 保留 owner 參數，明填 null 原樣傳給 owner。
+RecipeTab 送 owner 前略過 KEEP 項，明填 null 原樣傳給 owner。
+省略、空 mapping 或全 KEEP 都保留 owner 參數。
 Owner 在同一個 tracked Primary／Post operation 驗證並套用更新，不先開另一個分析 operation。
 `interactive=True` 仍交付 PendingAnalysis，由 `tab_interact` 的 done 完成原 operation，恢復原 recipe await。
 `answer` 只回答 recipe 明確提出的問題，不控制 picker，也不直接寫回。

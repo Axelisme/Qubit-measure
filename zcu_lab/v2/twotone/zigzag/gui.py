@@ -28,7 +28,6 @@ class ZigZagAdapter(BaseAdapter[ZigZagCfg, ZigZagRunResult]):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = ZigZagExp.persistence_tag()
     exp_cls = ZigZagExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=True

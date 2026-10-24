@@ -18,15 +18,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -38,13 +30,9 @@ from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
     LoadValue,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     sweep2param,
 )
@@ -69,16 +57,16 @@ class T1Result:
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class T1SweepCfg(ConfigBase):
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
 
 
-class T1Cfg(ProgramV2Cfg, ExpCfgModel):
+class T1Cfg(ProgramExpCfg):
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
     modules: T1ModuleCfg
     sweep: T1SweepCfg
@@ -97,30 +85,18 @@ class T1AnalyzeOptions:
     skip: int = 0
 
 
-class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+class T1Exp(Experiment[T1Result, T1Cfg]):
     """Measure I/pi-prepared relaxation and fit G/E/Other transition rates."""
 
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(
-            Axis(
-                "population_states",
-                "GE Population",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis(
-                "initial_states",
-                "Initial State",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis("lengths", "Time", "s", scale=US_TO_S, dtype=np.float64),
+            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
+            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
         ),
-        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=T1Result,
         cfg_type=T1Cfg,
         cfg_schema_version="2.0",

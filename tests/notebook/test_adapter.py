@@ -11,7 +11,7 @@ from matplotlib.figure import Figure
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment import AcquisitionEvidence
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.records import AnalysisRecord, RunRecord
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment
 from zcu_tools.notebook import adapter as adapter_module
@@ -139,34 +139,6 @@ def test_nullable_analysis_options_are_delegated_and_retained() -> None:
     assert adapter.last_run is None
 
 
-def test_successful_load_clears_analysis_but_old_source_stays_explicit() -> None:
-    adapter = NotebookAdapter(host=NonPresentingHost())(_Core())
-    source = RunRecord[_Cfg, float](cfg=None, result=3.0)
-    previous = adapter.analyze(_Options(weights=[2.0]), source=source)
-
-    loaded = adapter.load(Path("loaded"))
-
-    assert adapter.last_run is loaded
-    assert adapter.analysis is None
-    assert adapter.analysis_presentation is None
-    np.testing.assert_array_equal(
-        previous.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
-    )
-    selected = adapter.analyze(_Options(weights=[3.0]), source=source)
-    assert selected.source is source
-    assert selected.result == 9.0
-    assert adapter.last_run is loaded
-
-    with pytest.raises(FileNotFoundError):
-        adapter.load(Path("missing"))
-    assert adapter.last_run is loaded
-    assert adapter.analysis is selected
-
-    latest = adapter.analyze(_Options(weights=[2.0]))
-    assert latest.source is loaded
-    assert latest.result == 10.0
-
-
 def test_analyze_requires_a_source_before_starting_operation() -> None:
     adapter = NotebookAdapter(host=_Host())(_Core())
 
@@ -227,37 +199,6 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     np.testing.assert_array_equal(
         previous.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
     )
-
-
-def test_save_uses_explicit_source_and_returns_exact_or_unique_path(
-    tmp_path: Path,
-) -> None:
-    core = _Core()
-    adapter = NotebookAdapter(host=_Host())(core)
-    source = RunRecord[_Cfg, float](cfg=None, result=3.0)
-    current = adapter.load(Path("loaded"))
-    analysis = adapter.analyze(_Options(weights=[2.0]))
-    destination = tmp_path / "data.hdf5"
-    destination.write_text("existing", encoding="utf-8")
-
-    with pytest.raises(FileExistsError):
-        adapter.save(destination, source=source)
-    assert destination.read_text(encoding="utf-8") == "existing"
-
-    unique = adapter.save(
-        destination, source=source, unique=True, comment="measurement A", tag="trial"
-    )
-    assert unique == tmp_path / "data_1.hdf5"
-    assert unique.read_text(encoding="utf-8") == "3.0"
-    assert core.saved == [(source, unique)]
-    assert core.metadata == ("measurement A", "trial")
-
-    exact = adapter.save(tmp_path / "exact.h5", source=source)
-    assert exact == tmp_path / "exact.hdf5"
-    assert exact.read_text(encoding="utf-8") == "3.0"
-    assert core.saved[-1] == (source, exact)
-    assert adapter.last_run is current
-    assert adapter.analysis is analysis
 
 
 @pytest.mark.parametrize("operation", ["run", "analyze"])
@@ -363,7 +304,7 @@ def test_stopped_partial_run_is_committed(outcome: str) -> None:
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
     )(core)
-    previous = adapter.load(Path("loaded"))
+    previous = adapter.run(_Cfg(scale=5.0))
     core.signal_outcome = "stopped" if outcome == "stopped" else "interrupted"
 
     partial = adapter.run(_Cfg(scale=9.0))
@@ -419,13 +360,12 @@ def test_factory_keeps_each_experiment_records_independent() -> None:
     first_run = first.run(_Cfg(scale=2.0))
     assert_type(first_run, RunRecord[_Cfg, float])
     first_analysis = first.analyze(_Options(weights=[3.0]))
-    assert_type(first_analysis, AnalysisRecord[_Cfg, float, _Options, float])
     assert second.last_run is None
     assert second.analysis is None
 
     second_run = second.run(_Cfg(scale=7.0))
     second_analysis = second.analyze(_Options(weights=[2.0]))
-    first.load(Path("loaded"))
+    first.run(_Cfg(scale=5.0))
 
     assert first.last_run is not first_run
     assert first.analysis is None
@@ -436,22 +376,6 @@ def test_factory_keeps_each_experiment_records_independent() -> None:
     assert second_analysis.result == 14.0
     assert first_core.contexts[0].plots is not second_core.contexts[0].plots
     assert first_core.contexts[0].scope.stop is not second_core.contexts[0].scope.stop
-
-
-def test_binding_and_offline_operations_do_not_query_devices(tmp_path: Path) -> None:
-    manager = Mock(spec=DeviceManager)
-    manager.get_all_devices.side_effect = AssertionError("Offline device query")
-    manager.get_all_info.side_effect = AssertionError("Offline device query")
-    factory = NotebookAdapter(device_manager=manager, host=_Host())
-    first, second = factory(_Core()), factory(_Core())
-    loaded = first.load(Path("loaded"))
-    analysis = first.analyze(_Options(weights=[2.0]))
-    saved = first.save(tmp_path / "offline")
-
-    assert analysis.source is loaded
-    assert saved.read_text(encoding="utf-8") == "5.0"
-    assert second.last_run is None
-    assert second.analysis is None
 
 
 def test_run_refreshes_driver_mapping_and_keeps_it_fixed_until_return() -> None:
@@ -529,30 +453,6 @@ def test_mapping_failure_preserves_successful_records() -> None:
     assert len(core.contexts) == 1
 
 
-def test_save_defaults_to_last_run_not_explicit_historical_analysis(
-    tmp_path: Path,
-) -> None:
-    core = _Core()
-    entry = NotebookAdapter(
-        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
-    )(core)
-    first = entry.run(_Cfg(scale=2.0))
-    assert entry.save(tmp_path / "run").read_text(encoding="utf-8") == "2.0"
-    loaded = entry.load(Path("loaded"))
-    analysis = entry.analyze(_Options(weights=[3.0]), source=first)
-
-    latest_path = entry.save(tmp_path / "latest")
-    old_path = entry.save(tmp_path / "historical", source=first)
-
-    assert latest_path.read_text(encoding="utf-8") == "5.0"
-    assert old_path.read_text(encoding="utf-8") == "2.0"
-    assert core.saved[-2][0] is loaded
-    assert core.saved[-1][0] is first
-    assert entry.last_run is loaded
-    assert entry.analysis is analysis
-    assert analysis.source is first
-
-
 def test_acquisition_boundaries_exclude_presentation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -597,7 +497,7 @@ def test_acquisition_boundaries_exclude_presentation(
     assert adapter.acquisition_for(record) == evidence
 
 
-def test_acquisition_identity_rejects_foreign_handmade_and_loaded_sources() -> None:
+def test_acquisition_identity_rejects_foreign_and_handmade_sources() -> None:
     factory = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=_Host()
     )
@@ -610,16 +510,6 @@ def test_acquisition_identity_rejects_foreign_handmade_and_loaded_sources() -> N
     handmade = RunRecord(cfg=record.cfg, result=record.result)
     assert handmade == record
     for invalid in (foreign, handmade):
-        with pytest.raises(ValueError, match="acquisition"):
-            adapter.acquisition_for(invalid)
-
-    evidence = adapter.acquisition_for(record)
-    with pytest.raises(FileNotFoundError):
-        adapter.load(Path("missing"))
-    assert adapter.acquisition_for(record) == evidence
-
-    loaded = adapter.load(Path("loaded"))
-    for invalid in (record, loaded):
         with pytest.raises(ValueError, match="acquisition"):
             adapter.acquisition_for(invalid)
 
@@ -670,8 +560,4 @@ def test_save_without_a_record_fails_before_creating_a_file(
         entry.save(tmp_path / "missing", unique=unique)
 
     assert list(tmp_path.iterdir()) == []
-    assert core.saved == []
-    source = RunRecord[_Cfg, float](cfg=None, result=3.0)
-    saved = entry.save(tmp_path / "explicit", source=source)
-    assert saved.read_text(encoding="utf-8") == "3.0"
     assert entry.last_run is None

@@ -19,7 +19,6 @@ class TwotoneFluxLocalAdapter(MuxFluxAdapter[TwotoneFluxLocalCfg]):
     capabilities: ClassVar[AdapterCapabilities] = replace(
         MuxFluxAdapter.capabilities, load_data=True
     )
-    experiment_tag: ClassVar[str | None] = TwotoneFluxLocalExp.persistence_tag()
     exp_cls = TwotoneFluxLocalExp
     force_magnitude: ClassVar[bool] = False
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

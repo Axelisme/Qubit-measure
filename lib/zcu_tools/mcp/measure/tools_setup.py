@@ -240,6 +240,7 @@ def recipe_guide(
     arguments contains only adapter, its nonblank catalog name. Returns adapter
     and guide with markdown/resource_dir. No recipe-to-adapter mapping is inferred:
     a recipe can operate several adapters. Images are not read or attached.
+    Recipe Form inputs distinguish omission (retain) from null (clear/disable).
     Invalid arguments fail before GUI access; native lookup errors propagate.
     """
     adapter = arguments.get("adapter")
@@ -423,7 +424,7 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
         },
         "recipe_guide": {
             "handler": partial(recipe_guide, ctx),
-            "description": "Read the named adapter's complete Markdown guide and resource_dir. Images remain relative to that directory and are not attached. Does not run a recipe, infer an adapter mapping or mutate the GUI. For point parameter/library/aliases edits, follow the server instructions' direct-file read/edit/context.reload contract.",
+            "description": "Read the named adapter's complete Markdown guide and resource_dir. Recipe Form fields may be omitted to retain values; null clears/disables nullable fields. Ordered overrides use dotted paths after experiment values, before check_ready. Images remain relative to that directory and are not attached. Does not run a recipe, infer an adapter mapping or mutate the GUI. For point parameter/library/aliases edits, follow the server instructions' direct-file read/edit/context.reload contract.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"adapter": {"type": "string", "minLength": 1}},

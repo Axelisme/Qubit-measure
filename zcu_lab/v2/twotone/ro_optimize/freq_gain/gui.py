@@ -54,7 +54,6 @@ class RoOptFreqGainAdapter(
         RoOptFreqGainAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = FreqGainExp.persistence_tag()
     exp_cls = FreqGainExp
 
     @staticmethod

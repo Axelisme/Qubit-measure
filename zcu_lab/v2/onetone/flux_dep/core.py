@@ -2,30 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
 
 from zcu_lab.v2._support.device import set_flux
 
@@ -42,8 +28,8 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FluxDepModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class FluxDepSweepCfg(ConfigBase):
@@ -62,7 +48,7 @@ class FluxDepSweepCfg(ConfigBase):
     ]
 
 
-class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
+class FluxDepCfg(ProgramExpCfg):
     modules: FluxDepModuleCfg
     flux_dev: Annotated[
         str,
@@ -81,15 +67,15 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FluxDepSweepCfg
 
 
-class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
     # inner axis (fastest-varying) = freqs (MHz in memory, Hz on disk);
     # outer axis = flux device values (a.u.).
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FluxDepResult, FluxDepCfg]] = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("values", "Flux device value", "a.u."),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("values", "Flux device value", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="onetone/flux_dep",

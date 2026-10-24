@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
@@ -23,20 +24,20 @@ from .mux_helpers import (
 
 
 class MuxT2EchoInputs(RecipeInputs):
-    """Experiment inputs; null retains captured Form values, overrides apply last."""
+    """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
-    participants: list[StrictInt] | None = Field(
-        default=None,
-        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
+    participants: list[StrictInt] | None | Keep = Field(
+        default=KEEP,
+        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
     )
 
-    fit_method: Literal["fringe", "decay"] | None = Field(
-        None,
-        description="Fit fringes or a pure decay envelope. Null retains analysis settings.",
+    fit_method: Literal["fringe", "decay"] | None | Keep = Field(
+        default=KEEP,
+        description="Fit fringes or a pure decay envelope. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
-    fit_phase: bool | None = Field(
-        None,
-        description="Fit the phase offset in fringe mode. Null retains analysis settings.",
+    fit_phase: bool | None | Keep = Field(
+        default=KEEP,
+        description="Fit the phase offset in fringe mode. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
 
 
@@ -78,7 +79,7 @@ async def mux_t2echo(
 ) -> MuxT2EchoReport:
     """Measure mux Hahn Echo, save the results and review coherence writeback.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     Shared sweep n is set through overrides; indices are original tone positions.
@@ -86,32 +87,21 @@ async def mux_t2echo(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/t2echo", inputs, target_alias="mux")
-
-    tab.select_sources(inputs)
-    tab.apply_inputs(
-        inputs,
-        {},
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            )
-        ],
+    tab = session.open_tab(
+        "mux/t2echo", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
+    tab.set("participants", inputs.participants)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
-    # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()
     try:
         fit = await tab.analyze(
             "primary",
             updates={
-                key: value
-                for key, value in {
-                    "fit_method": inputs.fit_method,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if value is not None
+                "fit_method": inputs.fit_method,
+                "fit_phase": inputs.fit_phase,
             },
             result=MuxCoherenceSummary,
         )

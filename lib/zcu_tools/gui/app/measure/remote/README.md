@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-24, recipe Form options and readiness
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -233,6 +233,11 @@ unchanged. Qt's deferred close turn avoids reentrancy, not socket delivery races
 方法列在 live catalog，由 `rpc_call` 呼叫。to_inline 專用入口保持原契約。
 
 ## Recipe 欄位
+
+`tab.select_recipe_option(tab_id, path, option)` 讓 owner 依精確 Form option label 或 captured module key 選擇。option 必填，null 只可選 nullable 欄位。Inline labels 走既有 converter。`tab.run_recipe_command(tab_id, path, name)` 在 logical path 執行可用命令，to_inline 明確複製固定來源。兩者回 changed，合法不完整草稿仍可保留；readonly、來源、ref 祖先、holder 與 busy 限制仍生效。未知或歧義選項不 fallback。
+
+`tab.check_recipe_ready(tab_id)` 是 readonly 呼叫，以固定來源驗證完整 Form 與 lowered cfg。它回全部 logical path/message errors，不 mutation、不 Run、不重捕捉來源。Recipe 層把 errors 轉為 needs_parameters，不把這個檢查做成空 mutation batch。
+
 
 `tab.read_recipe_field`、`tab.edit_recipe_fields` 與 `tab.select_recipe_module` 明確使用 typed logical path arrays，str 保留欄位名，int 保留完整 list 的原始位置。數字字串不轉 index，名稱不作位置查找。Handler 只解碼 carrier，由 owner 決定路徑是否可達。`form_description.py` 擁有 RecipeFieldObservation、RecipeEditResult 與 RecipeSelectionResult。所有 description、errors 與 source paths 都是 logical。通用 describe_cfg/edit_cfg/get_cfg/reset_cfg 保持 canonical 契約。真實的 modules 容器不省略，例如 mux readout 的 selector 是 `["modules", "readout"]`，與 recipe 相同。Edit 拒絕時列出目前的 canonical editable_paths 與 selection_paths。Ref 的子欄位要先 use_inline 才可編輯。`tab.read_module` 保留明確 materialization，與專用 `tab.use_inline` 的 field 都使用非空 typed array，str 是欄位名，int 是原始 model-list 位置。兩者經共同 Form owner 解析 typed paths。Unknown、越界或非 index 的數字字串保留完整請求路徑，回 form_path。
 

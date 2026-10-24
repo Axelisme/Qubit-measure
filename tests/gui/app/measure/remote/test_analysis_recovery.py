@@ -31,7 +31,7 @@ class TonePostAnalysis(PostAnalyzeResultBase):
     peak: float
 
 
-class ToneAdapter(SampleAdapter):
+class ToneAdapter(SampleAdapter[TonePostAnalysis, EmptyParams]):
     """Declare a synthetic per-tone read cost without any lab definition."""
 
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

@@ -55,7 +55,6 @@ class MistFluxDepAdapter(
     """Acquire flux rows of gain-swept IQ and display their baseline difference."""
 
     exp_cls = FluxDepExp
-    experiment_tag: ClassVar[str | None] = FluxDepExp.persistence_tag()
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, requires_soc=True, load_data=True

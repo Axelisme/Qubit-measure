@@ -3,80 +3,68 @@
 Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
-from math import isfinite
-from typing import Literal
+from typing import Annotated
 
 from pydantic import Field
-from zcu_tools.gui.form_adapter.sweep import LinRange
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
-from zcu_tools.mcp.measure.recipe_contracts import (
-    MissingParameter,
-    RecipeNeedsParameters,
-)
 
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmplitudeRabiSummary
-
-from .helpers import (
-    FrequencyCalibration,
-    choose_frequency,
-    select_or_disable,
-)
-
-
-def _check_gain_endpoints(gain_range: list[float] | None) -> None:
-    """Require two finite native gain endpoints when a range is supplied."""
-    if gain_range is not None and (
-        len(gain_range) != 2 or not all(isfinite(value) for value in gain_range)
-    ):
-        raise ValueError("gain_range must contain exactly two finite endpoints")
 
 
 class AmplitudeRabiInputs(RecipeInputs):
     """Inputs for amplitude rabi; all units and null policies are declared per
     field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
     )
-    drive_ref: str | None = Field(
-        None,
-        description="Drive library key; null keeps the GUI selection. No pi calibration is required for this sweep.",
+    drive_ref: str | None | Keep = Field(
+        KEEP,
+        description="Drive library key; omission retains the Form value; null clears/disables it. No pi calibration is required for this sweep.",
     )
-    use_reset: str | Literal["off"] = Field(
-        "off",
-        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    use_reset: str | None | Keep = Field(
+        KEEP,
+        description="Reset module option; omission retains the Form selection, null disables it.",
     )
-    frequency_mhz: float | None = Field(
-        None,
-        description="Fixed pulse frequency in MHz. Explicit value wins, then a valid captured library frequency, then calibration.",
+    frequency_mhz: float | None | Keep = Field(
+        KEEP,
+        description="Fixed pulse frequency in MHz. Omission retains the Form value; null clears it.",
     )
-    pulse_length_us: float | None = Field(
-        None, description="Fixed drive pulse duration in us; null keeps the GUI value."
+    pulse_length_us: float | None | Keep = Field(
+        KEEP,
+        description="Fixed drive pulse duration in us; omission retains the Form value; null clears/disables it.",
     )
-    gain_range: list[float] | None = Field(
-        None, description="Two native gain endpoints; null keeps the GUI range."
+    gain_range: (
+        Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
+    ) = Field(
+        KEEP,
+        description="Two native gain endpoints; omission retains the Form value; null clears/disables it.",
     )
-    points: int | None = Field(
-        None, description="Sweep sample count; null keeps the GUI count when optional."
+    points: int | None | Keep = Field(
+        KEEP,
+        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
     )
-    reps: int | None = Field(
-        None, description="Acquisition repetition count; null keeps the GUI value."
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
     )
-    rounds: int | None = Field(
-        None, description="Averaging round count; null keeps the GUI value."
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value; null clears/disables it.",
     )
 
-    skip: int | None = Field(
-        None,
-        description="Skip points; null keeps the GUI analysis value. Analysis only.",
+    skip: int | None | Keep = Field(
+        KEEP,
+        description="Skip points; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -111,89 +99,44 @@ async def amplitude_rabi(
     and ask before applying the proposed calibration; skipping writes nothing.
 
     points → expts sets the sweep sample count.
-    Analysis controls: skip. Null keeps each GUI value.
+    Analysis controls: skip. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    _check_gain_endpoints(inputs.gain_range)
-    tab = session.open_recipe_tab("twotone/rabi/amp_rabi", inputs, target_alias="qubit")
-    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select(("modules", "qub_pulse"), ref=inputs.drive_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    missing: list[MissingParameter] = []
-    frequency = choose_frequency(
-        tab,
-        ("modules", "qub_pulse", "freq"),
-        inputs.frequency_mhz,
-        calibration=FrequencyCalibration(path="$qubit.freq", required="frequency_mhz"),
+    tab = session.open_tab(
+        "twotone/rabi/amp_rabi",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    missing.extend(frequency.missing)
-    if frequency.edit is not None:
-        tab.select(("modules", "qub_pulse"), inline=True)
-        edits.append(frequency.edit)
-    frequency = choose_frequency(
-        tab,
-        ("modules", "readout", "freq"),
-        calibration=FrequencyCalibration(
-            path="$resonator.freq", required="readout_ref"
-        ),
-    )
-    missing.extend(frequency.missing)
-    if frequency.edit is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(frequency.edit)
-    if missing:
-        raise RecipeNeedsParameters(tuple(missing))
-    if inputs.gain_range is not None and inputs.points is not None:
-        edits.append(
-            FieldEdit(
-                path=("sweep", "gain"),
-                value=LinRange(
-                    start=inputs.gain_range[0],
-                    stop=inputs.gain_range[1],
-                    n=inputs.points,
-                ),
-            )
-        )
-    else:
-        edits.append(
-            FieldEdit(
-                path=("sweep", "gain", "start"),
-                value=inputs.gain_range[0] if inputs.gain_range is not None else None,
-            )
-        )
-        edits.append(
-            FieldEdit(
-                path=("sweep", "gain", "stop"),
-                value=inputs.gain_range[1] if inputs.gain_range is not None else None,
-            )
-        )
-        edits.append(FieldEdit(path=("sweep", "gain", "n"), value=inputs.points))
-    if inputs.pulse_length_us is not None:
-        tab.select(("modules", "qub_pulse"), inline=True)
-        tab.select(("modules", "qub_pulse", "waveform"), inline=True)
-        edits.append(
-            FieldEdit(
-                path=("modules", "qub_pulse", "waveform", "length"),
-                value=inputs.pulse_length_us,
-            )
-        )
-    tab.apply_inputs(
-        inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
-    )
+    tab.select("modules.reset", inputs.use_reset)
+    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("modules.qub_pulse", inputs.drive_ref)
+    if not isinstance(inputs.frequency_mhz, Keep) or not isinstance(
+        inputs.pulse_length_us, Keep
+    ):
+        tab.command("modules.qub_pulse", "to_inline")
+    if not isinstance(inputs.pulse_length_us, Keep):
+        tab.command("modules.qub_pulse.waveform", "to_inline")
+    tab.set("modules.qub_pulse.freq", inputs.frequency_mhz)
+    tab.set("modules.qub_pulse.waveform.length", inputs.pulse_length_us)
+    if inputs.gain_range is None:
+        tab.set("sweep.gain.start", None)
+        tab.set("sweep.gain.stop", None)
+    elif not isinstance(inputs.gain_range, Keep):
+        tab.set("sweep.gain.start", inputs.gain_range[0])
+        tab.set("sweep.gain.stop", inputs.gain_range[1])
+    tab.set("sweep.gain.n", inputs.points)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
         analysis = await tab.analyze(
             "primary",
             result=AmplitudeRabiSummary,
-            updates={
-                key: value
-                for key, value in {"skip": inputs.skip}.items()
-                if value is not None
-            },
+            updates={"skip": inputs.skip},
         )
         if analysis.result is None:
             return AmplitudeRabiReport(

@@ -9,23 +9,23 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal
 
 from zcu_tools.datafile import Container
 from zcu_tools.experiment.artifacts import AnalysisDocument
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import RestoredRun
+from zcu_tools.experiment.native_persistence import RestoredRun, restore_run
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     PostAnalyzeRequest,
-    PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
     SessionEnv,
     T_AnalyzeParams,
     T_AnalyzeResult,
     T_Cfg,
+    T_PostAnalyzeParams,
     T_PostAnalyzeResult,
     T_Result,
     WritebackRequest,
@@ -54,7 +54,7 @@ def _analyze_params_generic_arg(cls: type) -> type:
 
     Used when ``get_analyze_params`` is not overridden (its annotation is the
     unbound TypeVar): the concrete type is whatever the adapter wrote as
-    ``BaseAdapter[..., AnalyzeParams]``. Falls back to ``NoAnalyzeParams`` when the
+    ``BaseAdapter[..., AnalyzeParams]``. Falls back to NoneType when the
     arg is absent (PEP 696 default — adapters that omit the last two generic args)
     or not a plain class (e.g. still a TypeVar).
     """
@@ -66,10 +66,17 @@ def _analyze_params_generic_arg(cls: type) -> type:
             arg = args[_ANALYZE_PARAMS_GENERIC_INDEX]
             if isinstance(arg, type):
                 return arg
-    return NoAnalyzeParams
+    return type(None)
+
+
+def _validate_experiment_class(exp_cls: type[object]) -> None:
+    if not issubclass(exp_cls, Experiment):
+        raise TypeError("exp_cls must be an Experiment subclass")
 
 
 def _can_construct_without_args(cls: type[Any]) -> bool:
+    if cls is type(None):
+        return True
     try:
         signature(cls).bind()
     except TypeError:
@@ -98,7 +105,15 @@ def _validated_capabilities(value: object, adapter_name: str) -> AdapterCapabili
 
 
 class BaseAdapter(
-    ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams, T_PostAnalyzeResult]
+    ABC,
+    Generic[
+        T_Cfg,
+        T_Result,
+        T_AnalyzeResult,
+        T_AnalyzeParams,
+        T_PostAnalyzeResult,
+        T_PostAnalyzeParams,
+    ],
 ):
     """Shared implementation for experiment adapters.
 
@@ -107,11 +122,10 @@ class BaseAdapter(
     ``get_analyze_params``/``analyze``). Run delegation and persistence payload
     preparation are provided here once.
 
-    The first four generic parameters describe the experiment's cfg, result,
-    analysis result and analysis params. The optional fifth parameter types the
-    post-analysis writeback result and defaults to ``NoAnalysisResult``.
-    Adapters without analysis omit the analysis parameters (PEP 696 defaults fill
-    in ``NoAnalysisResult`` / ``NoAnalyzeParams``) and inherit the raising no-op
+    Generic parameters describe cfg, Run result, Analysis result/params and
+    Post result/params. The last four default to None: no numeric payload or
+    user inputs. Figures-only adapters can omit these slots and return None.
+    Adapters without analysis inherit the raising no-op
     analysis below; they declare
     ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
     framework never routes analysis to them.
@@ -120,9 +134,9 @@ class BaseAdapter(
     holds adapters only through that generic-free Protocol.
     """
 
-    exp_cls: ClassVar[type[Any]]
+    exp_cls: ClassVar[type[Experiment[Any, Any]]] = Experiment
     # Native acquisition evidence is explicit, not inferred from filename policy.
-    # Concrete adapters set the tag from their experiment's persistence spec.
+    # Default to the core declaration; adapters may override the public tag.
     # See ExpAdapterProtocol.run for the associated RunRecord envelope contract.
     experiment_tag: ClassVar[str | None] = None
     # Device alias supplying Sample writeback coordinates, e.g. "$bias_source".
@@ -131,7 +145,7 @@ class BaseAdapter(
     # None disables only Sample writeback. Alias resolution or missing evidence
     # omits the sample with a public unavailable reason; no live fallback occurs.
     sample_device_alias: ClassVar[str | None] = None
-    # Most registered adapters use the canonical PersistableExperiment loader;
+    # Most registered adapters use the canonical Experiment loader;
     # concrete no-load adapters declare ``load_data=False`` explicitly.
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
     # Explicit UTF-8 Markdown source. None returns the unwritten-guide notice;
@@ -150,6 +164,12 @@ class BaseAdapter(
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        _validate_experiment_class(cls.exp_cls)
+        if "experiment_tag" not in cls.__dict__ and (
+            "exp_cls" in cls.__dict__ or cls.experiment_tag is None
+        ):
+            spec = cls.exp_cls.AXES_SPEC
+            cls.experiment_tag = spec.tag if spec is not None else None
         cls._validate_capability_contract()
 
     @classmethod
@@ -238,11 +258,12 @@ class BaseAdapter(
                     f"{cls.__name__} declares post_analysis=True with analysis={analysis.name}; "
                     "post_analysis requires analysis=AnalysisMode.FIT"
                 )
-            cls._require_method(
-                "get_post_analyze_params",
-                "declares post_analysis=True",
-                "override get_post_analyze_params() or set post_analysis=False",
-            )
+            if not _can_construct_without_args(cls.post_analyze_params_cls()):
+                cls._require_method(
+                    "get_post_analyze_params",
+                    "declares post_analysis=True with params that require values",
+                    "override get_post_analyze_params() or give every param field a default",
+                )
             cls._require_method(
                 "post_analyze",
                 "declares post_analysis=True",
@@ -270,24 +291,18 @@ class BaseAdapter(
     @classmethod
     def _validate_load_capability(cls, *, enabled: bool) -> None:
         """Require a declared loader, or forbid an override when loading is disabled."""
-        # Loading is a capability gate, not a runtime probe. A concrete adapter
-        # may provide its own loader, or it may opt into BaseAdapter.restore when the
-        # experiment class can be constructed without arguments and exposes a
-        # canonical callable loader. A disabled capability must not hide an
-        # accidental adapter override.
+        # An explicit adapter override may restore its own opaque result.
+        # The default loader needs only a typed declaration, never an instance.
         if enabled:
-            if not cls._is_method_implemented("restore"):
-                exp_cls = getattr(cls, "exp_cls", None)
-                has_canonical_loader = isinstance(exp_cls, type) and (
-                    _can_construct_without_args(exp_cls)
-                    and callable(getattr(exp_cls, "from_stored", None))
+            if (
+                not cls._is_method_implemented("restore")
+                and cls.exp_cls.AXES_SPEC is None
+            ):
+                raise TypeError(
+                    f"{cls.__name__} declares load_data=True but has neither "
+                    "a concrete restore() override nor an Experiment exp_cls "
+                    "with AXES_SPEC"
                 )
-                if not has_canonical_loader:
-                    raise TypeError(
-                        f"{cls.__name__} declares load_data=True but has neither "
-                        "a concrete restore() override nor a no-argument exp_cls with "
-                        "a callable from_stored"
-                    )
         else:
             cls._forbid_method(
                 "restore",
@@ -342,7 +357,8 @@ class BaseAdapter(
         """Build the analyze parameter instance presented to the user.
 
         An adapter whose analyze-params are all-default-constructible (including
-        ``NoAnalyzeParams``) inherits this default, which returns ``params_cls()``.
+        None) inherits this default, which returns ``params_cls()``.
+        None means this analysis has no user inputs.
         An adapter whose params need values (a field without a default) must override;
         otherwise this Fast-Fails — a forgotten override, not a normal code path.
         Adapters with ``analysis=AnalysisMode.NONE`` are never routed here.
@@ -362,6 +378,7 @@ class BaseAdapter(
     ) -> T_AnalyzeResult:
         """Run analysis on a completed run result.
 
+        Return None for figures only, with an empty summary and no writeback.
         Default raises — see ``get_analyze_params`` for the rationale.
         """
         del req, plots
@@ -399,8 +416,8 @@ class BaseAdapter(
         """Return the post-analysis param dataclass type (static, no instance).
 
         Reflected from the concrete ``get_post_analyze_params`` return annotation,
-        mirroring ``analyze_params_cls``. Falls back to ``NoAnalyzeParams`` when
-        the return is not annotated.
+        mirroring ``analyze_params_cls``. NoneType means no user inputs.
+        An inherited hook recovers the sixth generic argument.
         """
         import typing
 
@@ -408,33 +425,43 @@ class BaseAdapter(
             hints = typing.get_type_hints(cls.get_post_analyze_params)
         # tolerated: Adapter annotation evaluation can raise any error; keep the empty post schema.
         except Exception:  # noqa: BLE001
-            return NoAnalyzeParams
-        return hints.get("return", NoAnalyzeParams)
+            hints = {}
+        ret = hints.get("return", T_PostAnalyzeParams)
+        if isinstance(ret, typing.TypeVar):
+            for base in getattr(cls, "__orig_bases__", ()):
+                args = typing.get_args(base)
+                if len(args) > 5 and isinstance(args[5], type):
+                    return args[5]
+            return type(None)
+        return ret
 
     def get_post_analyze_params(
         self, analyze_result: T_AnalyzeResult, ctx: SessionEnv
-    ) -> Any:
-        """Build the post-analysis param instance presented to the user.
+    ) -> T_PostAnalyzeParams:
+        """Build Post inputs from the primary result and historical environment.
 
-        Default raises — an adapter declaring ``capabilities.post_analysis`` must
-        override this (Fast-Fail guard; adapters without post-analysis are never
-        routed here). Mirrors ``get_analyze_params`` but receives the primary
-        analyze result (the post params may seed from the primary fit).
+        None means no user inputs. Default-constructible params need no override;
+        params requiring values must be supplied by an override. Adapters without
+        post-analysis are never routed here.
         """
         del analyze_result, ctx
+        params_cls = type(self).post_analyze_params_cls()
+        if _can_construct_without_args(params_cls):
+            return params_cls()
         raise NotImplementedError(
-            f"{type(self).__name__} declares post-analysis support but does not "
-            "override get_post_analyze_params"
+            f"{type(self).__name__} declares post-analysis params requiring values "
+            "but does not override get_post_analyze_params"
         )
 
     def post_analyze(
         self,
-        req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, Any],
+        req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, T_PostAnalyzeParams],
         *,
         plots: Plots,
-    ) -> PostAnalyzeResultBase:
+    ) -> T_PostAnalyzeResult:
         """Run a second analysis on top of the primary analyze result.
 
+        Return None for figures only, with an empty summary and no writeback.
         Default raises — see ``get_post_analyze_params`` for the rationale. The
         request carries both the raw ``run_result`` and the primary
         ``analyze_result`` so the post-analysis can refine/recompute from either.
@@ -457,8 +484,8 @@ class BaseAdapter(
         annotation, which is read here directly. An adapter with no params does NOT
         override it (no boilerplate); its base annotation is the unbound
         ``T_AnalyzeParams`` TypeVar, so the type is instead recovered from the 4th
-        generic arg (``BaseAdapter[..., NoAnalyzeParams]``), falling back to
-        ``NoAnalyzeParams`` when absent (PEP 696 default) or unreadable.
+        generic arg, falling back to NoneType when absent (PEP 696 default)
+        or unreadable.
         """
         import typing
 
@@ -491,30 +518,19 @@ class BaseAdapter(
         return self.exp_cls().run(cfg, context=context)
 
     def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
-        """Restore already-read native data through the core's from_stored contract.
+        """Restore native history using exp_cls.AXES_SPEC without constructing it.
 
-        stored contains validated generic data and original history, not current
-        form inputs. Return the adapter-owned record and explicit cfg diagnostic.
-        Missing from_stored or required constructor arguments raise
-        NotImplementedError. Invalid data raises ValueError; core constructor
-        failures propagate. No I/O, Labber fallback or history recapture occurs.
+        Return a typed record and cfg diagnostic without I/O or live capture.
+        Missing AXES_SPEC raises NotImplementedError; invalid data raises
+        ValueError/TypeError. Incompatible typed cfg retains data with cfg=None
+        and emits CfgUnavailableWarning. No Labber fallback is attempted.
         """
-        if not _can_construct_without_args(self.exp_cls):
+        spec = self.exp_cls.AXES_SPEC
+        if spec is None:
             raise NotImplementedError(
                 f"{type(self).__name__} does not support loading native result files"
             )
-        exp = self.exp_cls()
-        from_stored = getattr(exp, "from_stored", None)
-        if not callable(from_stored):
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support loading native result files"
-            )
-        try:
-            return exp.from_stored(stored)
-        except NotImplementedError as exc:
-            raise NotImplementedError(
-                f"{type(self).__name__} does not support loading native result files"
-            ) from exc
+        return restore_run(stored, spec=spec)
 
     def get_writeback_items(
         self, req: WritebackRequest[T_Result, T_AnalyzeResult]
@@ -545,13 +561,14 @@ class BaseAdapter(
     ) -> AnalysisItem:
         """Hand over one pane's historical inputs and summary under its assigned key.
 
-        result must implement AnalyzeResult.to_summary_dict. parameters is the
+        result is None for figures-only analysis, producing an empty summary,
+        or implements AnalyzeResult.to_summary_dict. parameters is the
         dataclass instance used for that result, or None for no inputs, never
         the next edited draft. Unsupported input/result types raise TypeError;
         invalid/non-finite JSON raises ValueError. The datafile model isolates
         containers once; this hook neither reads live context nor writes files.
         """
-        if not isinstance(result, AnalyzeResult):
+        if result is not None and not isinstance(result, AnalyzeResult):
             raise TypeError("Analysis result must implement to_summary_dict")
         if parameters is None:
             inputs: dict[str, object] = {}
@@ -565,7 +582,11 @@ class BaseAdapter(
                 "Historical analysis parameters must be a dataclass or None"
             )
         document = AnalysisDocument.model_validate(
-            {"pane": pane, "parameters": inputs, "summary": result.to_summary_dict()}
+            {
+                "pane": pane,
+                "parameters": inputs,
+                "summary": {} if result is None else result.to_summary_dict(),
+            }
         )
         return AnalysisItem(key, document)
 
@@ -581,6 +602,7 @@ class BaseAdapter(
         """
         if not isinstance(result, RunRecord):
             raise TypeError("Native saving requires a RunRecord")
-        return DataItem.from_run(
-            key, result, spec=self.exp_cls().persistence_spec(), comment=comment
-        )
+        spec = self.exp_cls.AXES_SPEC
+        if spec is None:
+            raise NotImplementedError(f"{type(self).__name__} has no AXES_SPEC")
+        return DataItem.from_run(key, result, spec=spec, comment=comment)

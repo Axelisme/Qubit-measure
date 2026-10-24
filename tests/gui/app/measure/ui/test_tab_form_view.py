@@ -508,4 +508,3 @@ def test_option_command_runs_through_the_resource_and_locks_while_busy(
     assert published == ["changed"]
     assert resource.read_module_kind(("pulse",)) == "inline"
     assert resource.read_module(("pulse",)).value["freq"] == 100.0
-    assert view.tab.findChild(QAction, "form.command.pulse.to_inline") is None

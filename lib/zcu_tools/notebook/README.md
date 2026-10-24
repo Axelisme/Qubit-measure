@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -20,13 +20,15 @@ _ = exp.analyze(T1Exp.Options(skip=3))
 saved = exp.save(destination, unique=True)
 ```
 
+核心的 `AXES_SPEC=None` 時，存讀入口 raise `NotImplementedError`。Analyze 與 post-analyze 的基底簽名只宣告參數，未實作時同樣拒絕。
+
 Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.PostOptions(...)`。Options 由核心實驗類別提供。
 
 每次包裝產生獨立的 `NotebookExperiment[CoreT]` 與 records。建構只綁定呼叫端提供的環境；裝置操作在 Run 或明確命令時執行。Run 需要 soc、soccfg 與 manager，無裝置時明確提供空 DeviceManager。每次 run 從綁定的 manager 取得一次 driver mapping，該次執行固定使用；同一 manager 的 registry 更新在下一次 run 生效。重新賦值 Notebook 變數不會重綁入口，換用另一組環境時由 caller 重建。
 
-`NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；cfg 要求與禁止覆寫由核心 saver 守住。
+`NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；`Experiment[Result, Cfg]` 宣告核心契約。包裝層將 `core.AXES_SPEC` 交給外部 `save_labber`；cfg 要求與禁止覆寫由 persistence 函式守住。
 
-`load(Path(...))` 透過核心 native loader 讀取與 GUI 相同的 `data.h5`，回傳 `RunRecord`。Single 與 grouped 資料共用 restore；歷史 cfg 不相容時保留有效資料、回傳 cfg=None 並發出 `CfgUnavailableWarning`。成功載入會清除目前分析與 acquisition evidence，失敗保留舊成果。只有 Labber 的舊資料必須先用既有 `migrations/` 工具離線轉成 native，不提供執行期 fallback。本機單檔 `save` 仍是明示的 Labber 匯出，不與 `load` 構成格式對稱。
+`load(Path(...))` 透過 `load_run_with_metadata(path, spec=core.AXES_SPEC)` 讀取與 GUI 相同的 `data.h5`，回傳 `RunRecord`。Single 與 grouped 資料共用 restore；歷史 cfg 不相容時保留有效資料、回傳 cfg=None 並發出 `CfgUnavailableWarning`。成功載入會清除目前分析與 acquisition evidence，失敗保留舊成果。只有 Labber 的舊資料必須先用既有 `migrations/` 工具離線轉成 native，不提供執行期 fallback。本機單檔 `save` 仍是明示的 Labber 匯出，不與 `load` 構成格式對稱。
 
 `save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 

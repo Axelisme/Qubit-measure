@@ -85,8 +85,6 @@ class ZigZagScanGainAdapter(_ZigZagScanBase):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_gain_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
-
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
 
 
@@ -95,7 +93,5 @@ class ZigZagScanFreqAdapter(_ZigZagScanBase):
     def make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_freq_form(ctx)
-
-    experiment_tag: ClassVar[str | None] = ZigZagScanExp.persistence_tag()
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

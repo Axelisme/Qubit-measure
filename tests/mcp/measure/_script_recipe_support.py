@@ -54,6 +54,8 @@ class SyntheticGui:
                 "source": None,
                 "readonly": False,
             }
+        if method == "tab.check_recipe_ready":
+            return {"errors": []}
         if method == "tab.writeback_begin":
             self.submissions += 1
             return {"submission_id": f"wb-{self.submissions}", "status": "pending"}
@@ -63,6 +65,8 @@ class SyntheticGui:
             "tab.reset_cfg",
             "tab.edit_recipe_fields",
             "tab.select_recipe_module",
+            "tab.select_recipe_option",
+            "tab.run_recipe_command",
         }:
             return {"errors": [], "changed": True}
         return self._operation(method, params)
@@ -198,6 +202,23 @@ class MappingWritebackGui(SyntheticGui):
                 ],
             }
         return reply
+
+
+def answer_writeback(execution: ScriptRecipeExecution) -> None:
+    """Accept the current public writeback question and await its continuation."""
+    execution.wait(3)
+    pending = execution.snapshot().pending_question
+    assert pending is not None
+    execution.answer(
+        {
+            "request_id": pending.request_id,
+            "answer": {
+                "accepted": True,
+                "items": pending.question.model_dump(mode="json")["proposal"]["items"],
+            },
+        }
+    )
+    execution.wait(3)
 
 
 def start(client: MeasureClient, name: str, count: int = 9) -> ScriptRecipeExecution:

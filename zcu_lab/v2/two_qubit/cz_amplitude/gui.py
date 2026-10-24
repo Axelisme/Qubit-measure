@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -65,9 +64,7 @@ class CZAmplitudeAnalyzeResult:
 
 
 class CZAmplitudeAdapter(
-    BaseAdapter[
-        CZAmplitudeCfg, CZAmplitudeRun, CZAmplitudeAnalyzeResult, NoAnalyzeParams
-    ]
+    BaseAdapter[CZAmplitudeCfg, CZAmplitudeRun, CZAmplitudeAnalyzeResult]
 ):
     """Acquire full-tone raw, restore native source and propose first-cycle pulses.
 
@@ -76,7 +73,6 @@ class CZAmplitudeAdapter(
     """
 
     exp_cls = CZAmplitudeExp
-    experiment_tag: ClassVar[str | None] = CZAmplitudeExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -95,7 +91,7 @@ class CZAmplitudeAdapter(
         return RunRecord(cfg=cfg, result=CZAmplitudeExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[CZAmplitudeRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[CZAmplitudeRun, None], *, plots: Plots
     ) -> CZAmplitudeAnalyzeResult:
         """Use only saved cfg/raw for joint return, fixed-phase fit and named plots."""
         return CZAmplitudeAnalyzeResult(

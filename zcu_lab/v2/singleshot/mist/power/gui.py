@@ -8,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
 )
@@ -32,11 +31,6 @@ MistPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 
 @dataclass
-class MistPowerAnalyzeResult(AnalyzeResultBase):
-    pass
-
-
-@dataclass
 class MistPowerAnalyzeParams:
     """MIST plot settings; log_scale uses a logarithmic gain/photon-number axis."""
 
@@ -44,12 +38,8 @@ class MistPowerAnalyzeParams:
 
 
 class MistPowerAdapter(
-    BaseAdapter[
-        PowerCfg, MistPowerRunResult, MistPowerAnalyzeResult, MistPowerAnalyzeParams
-    ]
+    BaseAdapter[PowerCfg, MistPowerRunResult, None, MistPowerAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[PowerCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -59,7 +49,7 @@ class MistPowerAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
+    # No get_analyze_params override: None (4th generic arg).
 
     def run(
         self,
@@ -76,11 +66,11 @@ class MistPowerAdapter(
         req: AnalyzeRequest[MistPowerRunResult, MistPowerAnalyzeParams],
         *,
         plots: Plots,
-    ) -> MistPowerAnalyzeResult:
+    ) -> None:
         options = PowerAnalyzeOptions(
             ac_coeff=read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff"),
             log_scale=req.analyze_params.log_scale,
             confusion_matrix=read_confusion_matrix(req.parameters),
         )
         PowerExp().analyze(req.run_result, options, plots=plots)
-        return MistPowerAnalyzeResult()
+        return

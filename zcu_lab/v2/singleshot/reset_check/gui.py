@@ -9,7 +9,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -38,12 +37,8 @@ class SsResetCheckAnalyzeResult(AnalyzeResultBase):
 
 
 class SsResetCheckAdapter(
-    BaseAdapter[
-        ResetCheckCfg, SsResetCheckRunResult, SsResetCheckAnalyzeResult, NoAnalyzeParams
-    ]
+    BaseAdapter[ResetCheckCfg, SsResetCheckRunResult, SsResetCheckAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = ResetCheckExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -65,7 +60,7 @@ class SsResetCheckAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[SsResetCheckRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[SsResetCheckRunResult, None],
         *,
         plots: Plots,
     ) -> SsResetCheckAnalyzeResult:

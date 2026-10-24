@@ -20,13 +20,11 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.artifacts import AnalysisDocument
+from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.interfaces import (
-    PersistableRecordExperiment,
-    RecordExperiment,
-    SynchronousExperiment,
-)
+from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_labber
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
@@ -34,11 +32,10 @@ from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
 from zcu_tools.resources.entry import PointView, RoleView
 
-CoreT = TypeVar("CoreT", bound=RecordExperiment[Any, Any], covariant=True)
+CoreT = TypeVar("CoreT", bound=Experiment[Any, Any], covariant=True)
 CfgT = TypeVar("CfgT", bound=ExpCfgModel)
 ResultT = TypeVar("ResultT")
 OptionsT = TypeVar("OptionsT")
-AnalysisT = TypeVar("AnalysisT")
 
 
 class NotebookAdapter:
@@ -75,7 +72,7 @@ class NotebookAdapter:
 class NotebookExperiment(Generic[CoreT]):
     """Retain successful records for one experiment in a bound environment.
 
-    Analyze is statically available only for SynchronousExperiment instances.
+    Analyze delegates to the experiment's optional synchronous operation.
     Load and analysis work without hardware. Run requires handles and a manager
     before starting an operation. Run and analyze own fresh plots; retaining a
     prior record does not let later operations close its figures.
@@ -103,20 +100,18 @@ class NotebookExperiment(Generic[CoreT]):
 
     @property
     def last_run(
-        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
     ) -> RunRecord[CfgT, ResultT] | None:
         return self._last_run
 
     @property
     def analysis(
-        self: NotebookExperiment[
-            SynchronousExperiment[CfgT, ResultT, OptionsT, AnalysisT]
-        ],
-    ) -> AnalysisRecord[CfgT, ResultT, OptionsT, AnalysisT] | None:
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
+    ) -> AnalysisRecord[CfgT, ResultT, Any, Any] | None:
         return self._analysis
 
     def acquisition_for(
-        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
         source: RunRecord[CfgT, ResultT],
     ) -> AcquisitionEvidence:
         """Return isolated facts for this adapter's most recent successful run.
@@ -135,7 +130,7 @@ class NotebookExperiment(Generic[CoreT]):
         return replace(evidence)
 
     def run(
-        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
         cfg: CfgT,
     ) -> RunRecord[CfgT, ResultT]:
         """Acquire a copied cfg and publish its record/evidence after plots finish.
@@ -206,13 +201,11 @@ class NotebookExperiment(Generic[CoreT]):
         return record
 
     def analyze(
-        self: NotebookExperiment[
-            SynchronousExperiment[CfgT, ResultT, OptionsT, AnalysisT]
-        ],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
         options: OptionsT,
         *,
         source: RunRecord[CfgT, ResultT] | None = None,
-    ) -> AnalysisRecord[CfgT, ResultT, OptionsT, AnalysisT]:
+    ) -> AnalysisRecord[CfgT, ResultT, OptionsT, Any]:
         selected = self.last_run if source is None else source
         if selected is None:
             raise ValueError("No run record to analyze")
@@ -240,7 +233,7 @@ class NotebookExperiment(Generic[CoreT]):
         return record
 
     def load(
-        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
         source: Path,
     ) -> RunRecord[CfgT, ResultT]:
         """Load a native Path through the core and publish only after success.
@@ -251,7 +244,7 @@ class NotebookExperiment(Generic[CoreT]):
         failure retains all prior results. Labber-only files must be converted
         offline with the migrations tools before using the default core loader.
         """
-        record = self._core.load(source)
+        record = load_run_with_metadata(source, spec=self._declared_spec())
         self._last_run = record
         self._acquisition_evidence = None
         self._analysis = None
@@ -259,8 +252,16 @@ class NotebookExperiment(Generic[CoreT]):
         self.analysis_presentation = None
         return record
 
+    def _declared_spec(
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
+    ) -> AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT]:
+        spec = self._core.AXES_SPEC
+        if spec is None:
+            raise NotImplementedError(f"{type(self._core).__name__} has no AXES_SPEC")
+        return spec
+
     def save_run(
-        self: NotebookExperiment[PersistableRecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
         ctx: PointView,
         *,
         source: RunRecord[CfgT, ResultT],
@@ -286,7 +287,7 @@ class NotebookExperiment(Generic[CoreT]):
         saved = SavedRun(
             ctx,
             source=source,
-            spec=self._core.persistence_spec(),
+            spec=self._declared_spec(),
             acquisition=self.acquisition_for(source),
             roles=roles,
         )
@@ -294,7 +295,7 @@ class NotebookExperiment(Generic[CoreT]):
         return saved
 
     def save(
-        self: NotebookExperiment[RecordExperiment[CfgT, ResultT]],
+        self: NotebookExperiment[Experiment[ResultT, CfgT]],
         destination: str | Path,
         *,
         source: RunRecord[CfgT, ResultT] | None = None,
@@ -310,9 +311,10 @@ class NotebookExperiment(Generic[CoreT]):
             if unique
             else format_ext(str(destination))
         )
-        self._core.save(
+        save_labber(
             selected,
             path,
+            spec=self._declared_spec(),
             comment=comment,
             tag=tag,
         )

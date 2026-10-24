@@ -2,31 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
 
@@ -49,25 +34,25 @@ class PowerSweepCfg(ConfigBase):
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
-class PowerCfg(ProgramV2Cfg, ExpCfgModel):
+class PowerCfg(ProgramExpCfg):
     modules: PowerModuleCfg
     sweep: PowerSweepCfg
 
 
-class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
-    # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ; outer gains -> IDENTITY
-    AXES_SPEC = AxesSpec(
+class PowerExp(Experiment[PowerResult, PowerCfg]):
+    # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
+    AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("gains", "Power", "a.u.", scale=IDENTITY),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("gains", "Power", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         cfg_schema_version="2.0",

@@ -21,7 +21,7 @@ from zcu_tools.gui.form import (
     FormModel,
     FormState,
 )
-from zcu_tools.gui.form_adapter import Form
+from zcu_tools.gui.form_adapter import Form, module_form
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.resources.context.library import (
     ComponentLibrary,
@@ -164,6 +164,33 @@ def test_module_key_command_copies_captured_content_in_one_write() -> None:
     assert env.library is not None
     assert env.library.module_spec("Q.pulses.probe").desc == "stored"
     assert observed.value["desc"] is None
+
+
+@pytest.mark.parametrize("scope", ["core", "spec"])
+def test_inline_copy_preserves_draft_without_sources_or_notifications(
+    scope: str,
+) -> None:
+    form = Form(ModuleSection, {}) if scope == "core" else module_form(PulseSpec)
+    path = ("probe",) if scope == "core" else ("waveform",)
+    inline: JsonValue = (
+        {"kind": "inline", "module": {"type": "pulse", "freq": {"expr": "bad"}}}
+        if scope == "core"
+        else {"kind": "inline", "module": {"style": "const", "length": -1}}
+    )
+    env = FormEnv()
+    state = FormState(FormInput(form.model, {path[0]: inline}))
+    before = state.input
+    notifications: list[str] = []
+    state.subscribe(lambda: notifications.append("changed"))
+
+    candidate = form.prepare_inline_copy(state.input, path, env)
+    repeated = form.prepare_inline_copy(candidate.input, path, env)
+
+    assert not candidate.changed and not repeated.changed
+    assert candidate.input.same_as(before)
+    assert repeated.input.same_as(before)
+    assert state.input.same_as(before)
+    assert notifications == []
 
 
 def test_generated_inline_selection_preserves_same_type_draft_and_copies_fixed_ref() -> (

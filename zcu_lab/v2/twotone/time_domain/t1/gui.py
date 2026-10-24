@@ -100,7 +100,6 @@ class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult, T1AnalyzeParams
         return make_form(ctx)
 
     exp_cls = T1Exp
-    experiment_tag: ClassVar[str | None] = T1Exp.persistence_tag()
     sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

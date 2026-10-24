@@ -31,7 +31,7 @@ def save_mist(
     save_native(
         source,
         destination,
-        spec=PowerDepExp().persistence_spec(),
+        spec=PowerDepExp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )

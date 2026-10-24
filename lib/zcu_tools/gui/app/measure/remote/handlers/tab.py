@@ -680,6 +680,61 @@ def h_tab_edit_recipe_fields(
     return dict(result)
 
 
+def h_tab_check_recipe_ready(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Return complete logical Form/cfg errors without editing or recapturing."""
+    from ..form_errors import recipe_form_errors
+
+    with recipe_form_errors():
+        errors = adapter.cfg_lookup(str(params["tab_id"])).recipe_ready_errors()
+        return {
+            "errors": [
+                {"path": list(path), "message": message}
+                for path, message in (errors.messages.items() if errors else ())
+            ]
+        }
+
+
+def h_tab_select_recipe_option(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Select an exact owner option label/key or nullable None at a logical path."""
+    from ..form_errors import recipe_form_errors
+
+    path = _recipe_path(params["path"])
+    option = params["option"]
+    if option is not None and not isinstance(option, str):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "option must be a string or null",
+            reason="form_errors",
+        )
+    tab_id = str(params["tab_id"])
+    with recipe_form_errors():
+        changed = adapter.cfg_lookup(tab_id).select_recipe_option(path, option)
+    if changed:
+        follow_tab(adapter, tab_id, "run")
+    return {"changed": changed}
+
+
+def h_tab_run_recipe_command(
+    adapter: RemoteControlAdapter, params: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Run a declared command through the guarded logical Form owner."""
+    from ..form_errors import recipe_form_errors
+
+    path = _recipe_path(params["path"])
+    tab_id = str(params["tab_id"])
+    with recipe_form_errors():
+        changed = adapter.cfg_lookup(tab_id).run_recipe_command(
+            path, str(params["name"])
+        )
+    if changed:
+        follow_tab(adapter, tab_id, "run")
+    return {"changed": changed}
+
+
 def h_tab_select_recipe_module(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:

@@ -18,6 +18,8 @@ from zcu_tools.gui.app.measure.adapter import (
     ParameterWriteback,
     ParamMeta,
     RunRequest,
+    T_PostAnalyzeParams,
+    T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
@@ -60,7 +62,16 @@ class SampleAnalysis(AnalyzeResultBase):
     peak: float
 
 
-class SampleAdapter(BaseAdapter[SampleCfg, SampleRun, SampleAnalysis, SampleParams]):
+class SampleAdapter(
+    BaseAdapter[
+        SampleCfg,
+        SampleRun,
+        SampleAnalysis,
+        SampleParams,
+        T_PostAnalyzeResult,
+        T_PostAnalyzeParams,
+    ]
+):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[SampleCfg]:
         del ctx

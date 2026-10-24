@@ -9,7 +9,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -23,13 +22,10 @@ from .form import make_form
 ChevronRun: TypeAlias = RunRecord[ChevronCfg, RabiScanResult]
 
 
-class ChevronAdapter(
-    BaseAdapter[ChevronCfg, ChevronRun, RabiAnalysis, NoAnalyzeParams]
-):
+class ChevronAdapter(BaseAdapter[ChevronCfg, ChevronRun, RabiAnalysis]):
     """Fixed-capture acquisition, saved-source analysis and native restore."""
 
     exp_cls = ChevronExp
-    experiment_tag: ClassVar[str | None] = ChevronExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -48,7 +44,7 @@ class ChevronAdapter(
         return RunRecord(cfg=cfg, result=ChevronExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[ChevronRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[ChevronRun, None], *, plots: Plots
     ) -> RabiAnalysis:
         """Analyze only saved source cfg/raw, never the current Form or library."""
         return ChevronExp().analyze(req.run_result, None, plots=plots)

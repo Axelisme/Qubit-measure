@@ -1,4 +1,5 @@
 import pytest
+from pydantic import BaseModel
 from zcu_tools.program.v2.modules.readout import (
     AbsReadoutCfg,
     PulseReadout,
@@ -25,6 +26,18 @@ def _make_pulse_ro_cfg(ch=3, ro_ch=None):
             "ro_length": 1.0,
         }
     )
+
+
+def test_readout_cfg_namespace_dispatches_nested_pulse():
+    class Modules(BaseModel):
+        readout: Readout.Cfg
+        pulse: PulseReadout.Cfg
+
+    cfg = _make_pulse_ro_cfg()
+    modules = Modules.model_validate({"readout": cfg.to_dict(), "pulse": cfg.to_dict()})
+    assert modules.readout == cfg
+    assert modules.pulse == cfg
+    assert isinstance(Readout("readout", modules.readout), PulseReadout)
 
 
 class TestReadoutFactory:

@@ -351,7 +351,7 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     assert record.cfg == cfg
     assert record.result is result
     assert metadata is not None
-    assert metadata.experiment == SavingCore().persistence_spec().tag
+    assert metadata.experiment == SavingCore.AXES_SPEC.tag
     assert metadata.completion == "complete"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"

@@ -29,7 +29,7 @@ Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `
 
 新型別的每個欄位若在舊型別有同名且相同的可編輯 Form 型別，就沿用原始輸入；否則用目標初值。比較沿生成器去除 QickParam 的規則，不依 raw 值的 Python 型別或有效性判斷。各次生成的同一持久 model 視為同型，巢狀逐層套用。Waveform 與 Pulse、PulseReadout、MuxReadout、各 Reset 都用這條規則。Expression、缺席與 invalid 值原樣保留，超出目標限制由一般驗證報錯，不求值或修正。同型 ref→inline 與 inline→inline 保留全部可編輯欄位，ref 讀固定 Spec，inline 不重新讀來源。Gauss 切 FlatTop 保留 length，raise_waveform 用初值，不把舊 waveform 包進去。Pulse 切 PulseReadout 保留 freq／gain／waveform，但 ch 與 gen_ch 不同名，不搬移。Core 不加入 domain 規則或補 defaults，converter 提供完整目標 input。
 
-每個 key 選項帶 `to_inline` 指令，label 是 Convert to inline。`FormState.run_command` 用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製或缺來源 fallback。
+只有 key 選項帶 `to_inline` 指令，label 是 Convert to inline。Inline 選項不宣告這個選單動作。`Form.prepare_command` 與 `Form.prepare_logical_command` 在 owner 入口判斷 selector；已 inline 時回 changed=False，保留完整草稿，host 不安裝也不發通知。`FormState.run_command` 執行 ref 選項的指令時，用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 owner 的 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製或缺來源 fallback。
 
 持久 Spec 與範本 seed 路徑仍使用原欄位名稱，不含 wrapper。生成器在 input 邊界加入 wrapper，`to_cfg` 去掉 wrapper，保留 child key 字串。Nested ref 使用本 package 的 `KeyRef`，不限制 choices，也不新增 captured source 檢查。Core module ref 仍使用 `ModuleRef` 並檢查固定 library。兩種 ref 的 name 都只接受 literal key，不求 Expr。
 
@@ -156,7 +156,7 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 `Form.read_logical_field(input, path, env)` 回 `LogicalFieldObservation`。Description、children 與 errors 使用 logical paths。Authored input、普通值、available/missing/unavailable、selector mode/key、最近 captured source 與 `readonly` 各自有欄位。`LogicalFieldObservation.readonly` 表示穿過 ref 祖先，不表示宣告唯讀，也不授予寫入權限。穿 ref 只讀 captured Spec，以 core 的 field-local preview 求值，不轉 native cfg、不載 asset samples，也不寫 input/base/library。目標 ref 缺來源時仍可觀察選擇與 unavailable errors。穿 ref 祖先讀 descendants 或執行 copy 缺來源時，raise `LogicalSourceError`，不補 defaults。
 
-`prepare_logical_edits` 先按呼叫開始時的 active structure 解析整批 paths，再經 core prepare_write 一次產生候選。重複、重疊、不可達路徑與 ref 祖先整批拒絕，`LogicalEditError` 保留原 edit index。普通 model-invalid 值仍是可安裝的 draft。Generated selector 本身只接受專用的 `prepare_library_selection`、`prepare_inline_copy` 與 `prepare_module_disable`。Library selection 檢查 actual key/family 與宣告限制；copy 保留 child keys；disable 只允許 nullable selector。Inline copy 的 no-op 回 changed=False。Read 不會讓 ref descendants 變成可寫。
+`prepare_logical_edits` 先按呼叫開始時的 active structure 解析整批 paths，再經 core prepare_write 一次產生候選。重複、重疊、不可達路徑與 ref 祖先整批拒絕，`LogicalEditError` 保留原 edit index。普通 model-invalid 值仍是可安裝的 draft。Generated selector 透過專用的 `prepare_library_selection`、`prepare_inline_copy` 與 `prepare_module_disable` 檢查 key、copy 與 null。`prepare_logical_selection` 依精確 option label 或 captured module key 選擇，未知或歧義選項立即拒絕。Inline label 沿宣告 converter 與同名同型繼承政策，不等於強制重設。`prepare_logical_command` 在 logical path 執行目前可用的宣告指令。兩者都沿 Form owner 的 ancestry、readonly 與來源檢查。Library selection 檢查 actual key/family 與宣告限制；copy 保留 child keys；disable 只允許 nullable selector。Inline copy 的 no-op 回 changed=False。Read 不會讓 ref descendants 變成可寫。
 
 候選保留範本的 input projection／model、requiredness 與唯讀宣告，不以單值 Literal 實作 lock。Adapter 不取得 host 控制權，也不 install 或發布 state。Host 在同一 guarded turn 以目前 input/env prepare，再 install。`logical_errors` 只翻譯已有 directed errors，保留真實同名欄位與 container indexes，不求值或新增診斷。
 

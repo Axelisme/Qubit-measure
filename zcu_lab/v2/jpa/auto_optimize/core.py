@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from matplotlib import colormaps
@@ -13,32 +13,21 @@ from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
-    MHZ_TO_HZ,
+    Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    PersistableExperiment,
+    ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
 
 from zcu_lab.v2._support.device import set_flux, set_rf_frequency, set_rf_power
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
@@ -65,9 +54,9 @@ class JPAOptimizeAnalysis:
 
 
 class JPAOptModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class JPAOptSweepCfg(ConfigBase):
@@ -82,7 +71,7 @@ class JPAOptSweepCfg(ConfigBase):
     jpa_power: Annotated[SweepCfg, FieldMeta(label="JPA pump power", unit="dBm")]
 
 
-class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
+class JPAOptCfg(ProgramExpCfg):
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
@@ -252,7 +241,7 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
                 field_name="params",
                 label="JPA Frequency",
                 unit="Hz",
-                scale=MHZ_TO_HZ,
+                scale=1e6,
                 dtype=np.float64,
                 index=1,
                 index_axis=1,
@@ -300,8 +289,10 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
-    AXES_SPEC = JPA_AUTO_GROUPED_AXES_SPEC
+class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
+    AXES_SPEC: ClassVar[GroupedAxesSpec[JPAOptimizeResult, JPAOptCfg]] = (
+        JPA_AUTO_GROUPED_AXES_SPEC
+    )
 
     def run(self, cfg: JPAOptCfg, *, context: RunContext) -> JPAOptimizeResult:
         """Search JPA flux, pump frequency, and pump power for high readout SNR.
@@ -433,7 +424,7 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
     def analyze(
         self,
         source: RunRecord[JPAOptCfg, JPAOptimizeResult],
-        # tolerated: SynchronousExperiment requires the options keyword even without analysis options.
+        # tolerated: Experiment requires options even when this analysis has no options.
         options: None,  # noqa: ARG002
         *,
         plots: Plots,

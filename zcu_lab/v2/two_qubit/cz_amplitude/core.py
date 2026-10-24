@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ProgramV2Cfg, SweepCfg
+from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
 from .._drive import DualLineCfg, dual_line_drive
@@ -26,7 +25,7 @@ from ..joint_readout.core import GECenters, JointReadoutModules
 from .analysis import CZAmplitudeAnalysis, analyze_return
 
 
-class CZAmplitudeCfg(ProgramV2Cfg, ExpCfgModel):
+class CZAmplitudeCfg(ProgramExpCfg):
     """B11 → simultaneous CZ → Xπ⊗Xπ → full-tone mux, without heralding.
 
     modules contains calibrated preparation/contrast pulses and the complete mux.
@@ -109,16 +108,16 @@ class CZAmplitudeResult:
     signals: NDArray[np.complex128]
 
 
-class CZAmplitudeExp(PersistableExperiment[CZAmplitudeResult, CZAmplitudeCfg]):
+class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
     """Stateless amplitude scan with native raw/cfg persistence."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[CZAmplitudeResult, CZAmplitudeCfg]] = AxesSpec(
         axes=(
-            Axis("tone_indices", "Tone", "", IDENTITY, dtype=np.int64),
-            Axis("shot_indices", "Shot", "", IDENTITY, dtype=np.int64),
-            Axis("scales", "Common gain scale", "", IDENTITY),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
+            AxesSpec.Axis("scales", "Common gain scale", ""),
         ),
-        z=ZSpec("signals", "Raw IQ", "a.u."),
+        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=CZAmplitudeResult,
         cfg_type=CZAmplitudeCfg,
         cfg_schema_version="1.0",

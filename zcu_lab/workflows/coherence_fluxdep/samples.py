@@ -104,15 +104,13 @@ def _last_completed(saved: SavedRecord[CoherencePoint]) -> str:
     references: list[str] = []
     # Validate every explicit reference, not just the snapshot chosen for the row.
     for file in point.frequency.files if point.frequency is not None else ():
-        load_trace(saved.directory, file, FreqExp().persistence_spec())
+        load_trace(saved.directory, file, FreqExp.AXES_SPEC)
         references.append(file)
     if point.rabi is not None and point.rabi.file is not None:
-        load_trace(saved.directory, point.rabi.file, LenRabiExp().persistence_spec())
+        load_trace(saved.directory, point.rabi.file, LenRabiExp.AXES_SPEC)
         references.append(point.rabi.file)
     if point.readout is not None and point.readout.file is not None:
-        load_trace(
-            saved.directory, point.readout.file, FreqGainExp().persistence_spec()
-        )
+        load_trace(saved.directory, point.readout.file, FreqGainExp.AXES_SPEC)
         references.append(point.readout.file)
     for item in point.measurements:
         if item.file is not None:

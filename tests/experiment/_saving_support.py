@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -10,7 +11,7 @@ from zcu_tools.experiment import (
     AxesSpec,
     Axis,
     ExpCfgModel,
-    PersistableExperiment,
+    Experiment,
     ZSpec,
 )
 from zcu_tools.experiment.context import RunContext
@@ -31,10 +32,10 @@ class SavingResult:
     signal: NDArray[np.complex128]
 
 
-class SavingCore(PersistableExperiment[SavingResult, SavingCfg]):
+class SavingCore(Experiment[SavingResult, SavingCfg]):
     """Acquire a typed three-point signal without consulting hardware."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[SavingResult, SavingCfg]] = AxesSpec(
         axes=(Axis("frequency", "frequency", "Hz", scale=1e6),),
         z=ZSpec("signal", "signal", "V"),
         result_type=SavingResult,

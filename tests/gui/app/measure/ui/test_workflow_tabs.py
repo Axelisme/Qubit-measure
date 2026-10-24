@@ -3,14 +3,11 @@
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import timedelta
 from pathlib import Path
 from threading import Event
 
 import pytest
-from pydantic import BaseModel, ConfigDict
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -22,19 +19,11 @@ from zcu_tools.gui.app.measure.ui.workflow_pane import WorkflowPane
 from zcu_tools.gui.app.measure.ui.workflow_tabs import WorkflowTabs
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.form import FormModel
-from zcu_tools.gui.session.context_types import (
-    CommandOrigin,
-    EntryRequest,
-    PointCreateRequest,
-)
 from zcu_tools.gui.session.types import SessionEnv
 
-from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.app.measure._workflow_ask import (
     AskAuthor,
     Choose,
@@ -42,92 +31,13 @@ from tests.gui.app.measure._workflow_ask import (
     OtherAnswer,
     Values,
 )
-
-
-class Plan(FormModel):
-    cycles: int = 1
-
-
-class Tunables(FormModel):
-    gain: float = 0.25
-
-
-class NativePlan(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    cycles: int
-
-
-class NativeTunables(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    gain: float
-
-
-@workflow("synthetic", "Synthetic retained-worker wait")
-async def _waiting(
-    env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
-) -> None:
-    # A public wait keeps this invocation live until the scenario requests Stop.
-    await env.wait_until(env.started_at + timedelta(days=1))
-
-
-@pytest.fixture
-def workflow_window(
-    qapp: QApplication, tmp_path: Path
-) -> Iterator[tuple[Controller, MainWindow]]:
-    registry = Registry()
-    registry.register("experiment", SampleAdapter)
-    ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=None, soccfg=None)),
-        registry,
-        None,
-        BaseEventBus(),
-        project_root=str(tmp_path),
-        progress_transport=DirectProgressTransport(),
-    )
-    yield from _host_window(qapp, ctrl)
-
-
-def _host_window(
-    qapp: QApplication, ctrl: Controller
-) -> Iterator[tuple[Controller, MainWindow]]:
-    ctrl.workflow_control().configure(
-        (
-            WorkflowAttachment(
-                script=_waiting,
-                plan_model=Plan,
-                knobs_model=Tunables,
-                plan_to_cfg=lambda form, env, snapshot: NativePlan(cycles=form.cycles),
-                knobs_to_cfg=lambda form: NativeTunables(gain=form.gain),
-                seed=lambda plan, form: None,
-            ),
-        )
-    )
-    ctrl.setup_control.new_entry(EntryRequest("workflow-ui"))
-    ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
-    board = white_noise()
-    ctrl.install_soc(board.soc, board.soccfg)
-    window = MainWindow(
-        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
-    )
-    ctrl.add_view(window)
-    window.refresh_context_panel()
-    window.show()
-    qapp.processEvents()
-    destroyed = Event()
-    window.destroyed.connect(destroyed.set)
-    try:
-        yield ctrl, window
-    finally:
-        # close() drains but does not cancel a retained Ask/wait after an assertion
-        # failure. Release each live invocation before waiting for owner delivery.
-        control = ctrl.workflow_control()
-        for tab in control.tabs():
-            if tab.busy and tab.run_id is not None:
-                control.stop(tab.run_id)
-        ctrl.close()
-        if not destroyed.is_set():
-            window.deleteLater()
-        qapp.processEvents()
+from tests.gui.app.measure._workflow_window import (
+    NativePlan,
+    NativeTunables,
+    Plan,
+    Tunables,
+    host_window,
+)
 
 
 @dataclass
@@ -184,7 +94,7 @@ def cleanup_window(
     qapp: QApplication, tmp_path: Path
 ) -> Iterator[tuple[CleanupFacet, MainWindow]]:
     ctrl = CleanupController(tmp_path)
-    for _, window in _host_window(qapp, ctrl):
+    for _, window in host_window(qapp, ctrl):
         ctrl.workflow.open("synthetic")
         yield ctrl.workflow, window
 
@@ -366,7 +276,7 @@ def test_toggle_same_name_tabs_forms_and_idle_close(workflow_window, tmp_path):
     assert driver.observe(object_name="empty_tabs_hint").visible
 
 
-def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tmp_path):
+def test_workflow_pane_shows_single_active_leaf_once(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
     driver.click(object_name="workflow.toggle")
@@ -377,13 +287,57 @@ def test_workflow_pane_displays_active_chain_and_live_leaves(workflow_window, tm
     active = driver.observe(object_name="workflow.active_path")
     leaves = driver.observe(object_name="workflow.live_paths")
     assert active.visible and active.text == "workflow:synthetic/operation#1"
-    assert leaves.visible and leaves.text == "workflow:synthetic/operation#1"
+    assert not leaves.visible
     driver.click("Stop")
     qt_until(lambda: _status(driver, "cancelled"), label="scope root cancelled")
     _shot(driver, tmp_path, "scope-03-cancelled")
     assert (
         driver.observe(object_name="workflow.active_path").text == "workflow:synthetic"
     )
+    assert not driver.observe(object_name="workflow.live_paths").visible
+
+
+def test_workflow_pane_keeps_active_chain_and_two_live_leaves(
+    workflow_window, tmp_path
+):
+    ctrl, window = workflow_window
+
+    @workflow("forked", "Synthetic simultaneous live leaves")
+    async def forked(
+        env: WorkflowEnv[None], plan: NativePlan, tun: Live[NativeTunables]
+    ) -> None:
+        with env.child("left"), env.child("right"):
+            await env.ask(Choose(point=1))
+
+    ctrl.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                script=forked,
+                plan_model=Plan,
+                knobs_model=Tunables,
+                plan_to_cfg=lambda form, env, snapshot: NativePlan(cycles=form.cycles),
+                knobs_to_cfg=lambda form: NativeTunables(gain=form.gain),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    driver = ComponentDriver(window)
+    driver.click(object_name="workflow.toggle")
+    driver.select_menu("New Tab ▾", ("forked",))
+    _shot(driver, tmp_path, "fork-opened")
+    driver.click("Start")
+    # Ask retains both authored children until the scenario sends Stop.
+    qt_until(lambda: _status(driver, "paused"), label="forked Ask accepted")
+    _shot(driver, tmp_path, "fork-two-leaves")
+    active = driver.observe(object_name="workflow.active_path")
+    leaves = driver.observe(object_name="workflow.live_paths")
+    assert active.visible and active.text == "workflow:forked"
+    assert leaves.visible and leaves.text == (
+        "workflow:forked/left#1\nworkflow:forked/right#1"
+    )
+    driver.click("Stop")
+    qt_until(lambda: _status(driver, "cancelled"), label="forked workflow cancelled")
+    _shot(driver, tmp_path, "fork-cancelled")
 
 
 def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):

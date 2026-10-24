@@ -2,38 +2,20 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    IDENTITY,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
 
 
@@ -49,10 +31,10 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    flux_pulse: PulseCfg
-    pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    pi_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class T1SweepCfg(ConfigBase):
@@ -60,7 +42,7 @@ class T1SweepCfg(ConfigBase):
     length: SweepCfg
 
 
-class T1Cfg(ProgramV2Cfg, ExpCfgModel):
+class T1Cfg(ProgramExpCfg):
     modules: T1ModuleCfg
     sweep: T1SweepCfg
 
@@ -71,15 +53,15 @@ class T1Analysis:
     t1errs: NDArray[np.float64]
 
 
-class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
-    # inner lengths stores memory us on disk (disk seconds) -> scale=US_TO_S;
+class T1Exp(Experiment[T1Result, T1Cfg]):
+    # inner lengths stores memory us on disk (disk seconds) -> scale=1e-6;
     # outer gains -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(
-            Axis("lengths", "Time", "s", scale=US_TO_S),
-            Axis("gains", "Flux Pulse Gain", "a.u.", scale=IDENTITY),
+            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6),
+            AxesSpec.Axis("gains", "Flux Pulse Gain", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
         cfg_schema_version="2.0",

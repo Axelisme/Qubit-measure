@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import IDENTITY, AxesSpec, Axis, PersistableExperiment, ZSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg, PulseCfg
-from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
+from zcu_tools.program.v2 import ModularProgramV2, Pulse
+from zcu_tools.program.v2.modules import MuxReadout
 
 from .._drive import DualLineCfg
 from .._readout import JointRoles, collect_joint_shots
@@ -49,21 +48,21 @@ class RBModules(ConfigBase):
     """
 
     x90_f1: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ/2",
             description="填入 F1 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
         ),
     ]
     x90_f2: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ/2",
             description="填入 F2 calibrated x90 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain normalized 與 duration us。",
         ),
     ]
     readout: Annotated[
-        MuxReadoutCfg,
+        MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
             description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
@@ -71,7 +70,7 @@ class RBModules(ConfigBase):
     ]
 
 
-class RBCfg(ProgramV2Cfg, ExpCfgModel):
+class RBCfg(ProgramExpCfg):
     """Thermal B00 → paired random Clifford + own recovery → one mux read.
 
     modules/drive are captured calibrated inputs, never simulator fallbacks.
@@ -157,20 +156,20 @@ class RBResult:
     signals: NDArray[np.complex128]
 
 
-class RBExp(PersistableExperiment[RBResult, RBCfg]):
+class RBExp(Experiment[RBResult, RBCfg]):
     """Stateless paired RB definition, native IO and saved-GE joint00 analysis."""
 
     Options = RBOptions
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[RBResult, RBCfg]] = AxesSpec(
         axes=(
-            Axis("tone_indices", "Tone", "", IDENTITY, dtype=np.int64),
-            Axis("shot_indices", "Shot", "", IDENTITY, dtype=np.int64),
-            Axis("rounds", "Round", "", IDENTITY, dtype=np.int64),
-            Axis("arms", "Arm", "", IDENTITY, dtype=np.int64),
-            Axis("seeds", "Seed", "", IDENTITY, dtype=np.int64),
-            Axis("depths", "Clifford depth", "", IDENTITY, dtype=np.int64),
+            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
+            AxesSpec.Axis("rounds", "Round", "", dtype=np.int64),
+            AxesSpec.Axis("arms", "Arm", "", dtype=np.int64),
+            AxesSpec.Axis("seeds", "Seed", "", dtype=np.int64),
+            AxesSpec.Axis("depths", "Clifford depth", "", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Raw IQ", "a.u."),
+        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=RBResult,
         cfg_type=RBCfg,
         cfg_schema_version="1.0",

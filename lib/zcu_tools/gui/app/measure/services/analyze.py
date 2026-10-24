@@ -410,7 +410,7 @@ class AnalyzeService(StagedAnalyzeService):
         plots = captured_inputs.plots
 
         proposal_items: list[Any] = []
-        if run_result is not None:
+        if run_result is not None and analyze_result is not None:
             proposal_items = list(
                 adapter.get_writeback_items(
                     WritebackRequest(

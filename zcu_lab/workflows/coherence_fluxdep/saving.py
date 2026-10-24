@@ -31,7 +31,7 @@ def save_t2ramsey(
     save_native(
         source,
         destination,
-        spec=T2RamseyExp().persistence_spec(),
+        spec=T2RamseyExp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )

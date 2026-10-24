@@ -3,38 +3,25 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     TwoPulseReset,
     sweep2param,
 )
-from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.process import rotate2real
 
 
@@ -51,26 +38,26 @@ def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class LengthSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
-class LengthCfg(ProgramV2Cfg, ExpCfgModel):
+class LengthCfg(ProgramExpCfg):
     modules: LengthModuleCfg
     sweep: LengthSweepCfg
 
 
-class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
-    # Length stores seconds on disk; Result holds us -> scale=US_TO_S
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("lengths", "Length", "s", US_TO_S),),
-        z=ZSpec("signals", "Signal", "a.u."),
+class LengthExp(Experiment[LengthResult, LengthCfg]):
+    # Length stores seconds on disk; Result holds us -> scale=1e-6
+    AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("lengths", "Length", "s", 1e-6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="2.0",

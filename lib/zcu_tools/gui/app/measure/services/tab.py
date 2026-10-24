@@ -366,7 +366,7 @@ class TabService:
         the stored params. Missing primary result or adapter failure raises.
         """
         tab = self._state.get_tab(tab_id)
-        if tab.analysis.result is None:
+        if not tab.has_analyze_result():
             raise RuntimeError(
                 "No primary analyze result available to build post-analysis params"
             )

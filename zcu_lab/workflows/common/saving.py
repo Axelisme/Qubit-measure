@@ -66,7 +66,7 @@ def save_frequency(
     save_native(
         source,
         destination,
-        spec=FreqExp().persistence_spec(),
+        spec=FreqExp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )
@@ -89,7 +89,7 @@ def save_rabi(
     save_native(
         source,
         destination,
-        spec=LenRabiExp().persistence_spec(),
+        spec=LenRabiExp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )
@@ -112,7 +112,7 @@ def save_readout(
     save_native(
         source,
         destination,
-        spec=FreqGainExp().persistence_spec(),
+        spec=FreqGainExp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )
@@ -135,7 +135,7 @@ def save_t1(
     save_native(
         source,
         destination,
-        spec=T1Exp().persistence_spec(),
+        spec=T1Exp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )
@@ -158,7 +158,7 @@ def save_t2echo(
     save_native(
         source,
         destination,
-        spec=T2EchoExp().persistence_spec(),
+        spec=T2EchoExp.AXES_SPEC,
         snapshot=snapshot,
         identity=identity,
     )

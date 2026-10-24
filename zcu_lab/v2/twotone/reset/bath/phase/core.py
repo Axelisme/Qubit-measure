@@ -2,37 +2,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.base import cosfunc, fitcos
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    BathReset,
-    BathResetCfg,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
 
 
@@ -55,25 +37,25 @@ class PhaseAnalysis:
 
 
 class PhaseModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class PhaseSweepCfg(ConfigBase):
     phase: Annotated[SweepCfg, FieldMeta(label="Phase", unit="deg")]
 
 
-class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
+class PhaseCfg(ProgramExpCfg):
     modules: PhaseModuleCfg
     sweep: PhaseSweepCfg
 
 
-class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("phases", "Phase", "deg"),),
-        z=ZSpec("signals", "Signal", "a.u."),
+class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("phases", "Phase", "deg"),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PhaseResult,
         cfg_type=PhaseCfg,
         cfg_schema_version="2.0",

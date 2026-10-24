@@ -2,36 +2,18 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Join,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Join, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
 
 
@@ -47,10 +29,10 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class TwoToneModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    flux_pulse: PulseCfg
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class TwoToneSweepCfg(ConfigBase):
@@ -58,19 +40,19 @@ class TwoToneSweepCfg(ConfigBase):
     freq: SweepCfg
 
 
-class TwotoneCfg(ProgramV2Cfg, ExpCfgModel):
+class TwotoneCfg(ProgramExpCfg):
     modules: TwoToneModuleCfg
     sweep: TwoToneSweepCfg
 
 
-class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
-    # inner freqs stores MHz on disk (disk Hz) -> scale=MHZ_TO_HZ; outer gains -> IDENTITY
-    AXES_SPEC = AxesSpec(
+class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
+    # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
+    AXES_SPEC: ClassVar[AxesSpec[TwoToneResult, TwotoneCfg]] = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("gains", "Flux Pulse Gain", "a.u.", scale=IDENTITY),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("gains", "Flux Pulse Gain", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=TwoToneResult,
         cfg_type=TwotoneCfg,
         cfg_schema_version="2.0",

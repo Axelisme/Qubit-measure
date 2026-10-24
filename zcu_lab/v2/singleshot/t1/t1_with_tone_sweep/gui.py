@@ -21,7 +21,6 @@ only in which outer sweep they declare + its default.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -29,8 +28,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -55,19 +52,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
 SsT1ToneSweepRunResult: TypeAlias = RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]
 
 
-@dataclass
-class SsT1ToneSweepAnalyzeResult(AnalyzeResultBase):
-    pass
-
-
-class _SsT1ToneSweepBase(
-    BaseAdapter[
-        T1WithToneSweepCfg,
-        SsT1ToneSweepRunResult,
-        SsT1ToneSweepAnalyzeResult,
-        NoAnalyzeParams,
-    ]
-):
+class _SsT1ToneSweepBase(BaseAdapter[T1WithToneSweepCfg, SsT1ToneSweepRunResult]):
     """Shared body for the two T1-with-tone-sweep adapters.
 
     Subclasses declare the single outer sweep axis (gain XOR freq) so the lowered
@@ -91,10 +76,10 @@ class _SsT1ToneSweepBase(
 
     def analyze(
         self,
-        req: AnalyzeRequest[SsT1ToneSweepRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[SsT1ToneSweepRunResult, None],
         *,
         plots: Plots,
-    ) -> SsT1ToneSweepAnalyzeResult:
+    ) -> None:
         # ``ac_coeff`` (= md 'ac_stark_coeff') rescales the outer x-axis to photon
         # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
         # user knobs. ``xlabel`` labels the rate plots with this adapter's outer
@@ -108,7 +93,7 @@ class _SsT1ToneSweepBase(
             ),
             plots=plots,
         )
-        return SsT1ToneSweepAnalyzeResult()
+        return
 
 
 class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
@@ -117,7 +102,6 @@ class SsT1ToneSweepGainAdapter(_SsT1ToneSweepBase):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form_gain(ctx)
 
-    experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe gain (a.u.)"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.gain.md")
@@ -129,7 +113,6 @@ class SsT1ToneSweepFreqAdapter(_SsT1ToneSweepBase):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form_freq(ctx)
 
-    experiment_tag: ClassVar[str | None] = T1WithToneSweepExp.persistence_tag()
     outer_label: ClassVar[str] = "Probe frequency (MHz)"
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.freq.md")

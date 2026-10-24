@@ -5,10 +5,15 @@ Recipe n → frequency.df Expts; flux_n → flux_expts.
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeSession,
     recipe,
     report_number,
+)
+from zcu_tools.mcp.measure.recipe_contracts import (
+    MissingParameter,
+    RecipeNeedsParameters,
 )
 
 from zcu_lab.v2._support.measure.mux_flux_adapter import MuxFluxPickSummary
@@ -17,9 +22,7 @@ from .mux_flux_helpers import (
     MuxFluxReport,
     MuxFluxToneReport,
     MuxOnetoneFluxInputs,
-    flux_range_edits,
     mux_flux_analysis_updates,
-    onetone_flux_edits,
 )
 from .mux_helpers import ToneRangeInputs
 
@@ -27,13 +30,13 @@ from .mux_helpers import ToneRangeInputs
 class MuxOnetoneFluxLocalInputs(MuxOnetoneFluxInputs):
     """Native DC ranges for every original tone, including nonparticipants.
 
-    flux_sweeps must cover the complete list; null keeps Form bounds.
+    flux_sweeps must cover the complete list; omission keeps Form bounds; null clears them.
     flux_n is shared by zipped local lines, not a Cartesian product.
     """
 
-    flux_sweeps: list[ToneRangeInputs] | None = Field(
-        None,
-        description="Native local DC start/stop for every tone in original order; null retains ranges. No per-tone point count.",
+    flux_sweeps: list[ToneRangeInputs] | None | Keep = Field(
+        default=KEEP,
+        description="Native local DC start/stop for every tone in original order; omission keeps ranges; null clears their bounds. No per-tone point count.",
     )
 
 
@@ -46,7 +49,7 @@ async def mux_onetone_flux_local(
 ) -> MuxFluxReport:
     """Onetone spectroscopy across zipped local DC lines, with one native picker per Q.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared frequency Expts; flux_n sets DC Expts (zipped for local lines).
@@ -55,24 +58,46 @@ async def mux_onetone_flux_local(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/onetone_flux_local", inputs, target_alias="mux")
-    tab.select_sources(inputs)
-    edits = onetone_flux_edits(inputs)
-    edits.extend(flux_range_edits(tab, inputs.flux_sweeps, ("tones",)))
-    edits.append(FieldEdit(path=("flux_expts",), value=inputs.flux_n))
-    tab.apply_inputs(
-        inputs,
-        {
-            ("flux_unit",): inputs.flux_unit,
-        },
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            ),
-            *edits,
-        ],
+    tab = session.open_tab(
+        "mux/onetone_flux_local",
+        target={"mux": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
+    tab.set("participants", inputs.participants)
+    if isinstance(inputs.df, ToneRangeInputs):
+        tab.set("frequency.df.start", inputs.df.start)
+        tab.set("frequency.df.stop", inputs.df.stop)
+    elif inputs.df is None:
+        tab.set("frequency.df.start", None)
+        tab.set("frequency.df.stop", None)
+    tab.set("frequency.df.n", inputs.n)
+    if not isinstance(inputs.flux_sweeps, Keep):
+        input_tones = tab.read("tones").value
+        if not isinstance(input_tones, list):
+            raise RecipeNeedsParameters(
+                (MissingParameter("tones", "Full tone list is unavailable."),)
+            )
+        if inputs.flux_sweeps is not None and len(inputs.flux_sweeps) != len(
+            input_tones
+        ):
+            raise RecipeNeedsParameters(
+                (
+                    MissingParameter(
+                        "flux_sweeps",
+                        f"Expected {len(input_tones)} ranges in original tone order; missing indices {list(range(len(inputs.flux_sweeps), len(input_tones)))}; extra indices {list(range(len(input_tones), len(inputs.flux_sweeps)))}.",
+                    ),
+                )
+            )
+        for index in range(len(input_tones)):
+            tab.set(
+                f"tones.{index}.sweep",
+                None if inputs.flux_sweeps is None else inputs.flux_sweeps[index],
+            )
+    tab.set("flux_expts", inputs.flux_n)
+    tab.set("flux_unit", inputs.flux_unit)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     updates = mux_flux_analysis_updates(tab, inputs)
 

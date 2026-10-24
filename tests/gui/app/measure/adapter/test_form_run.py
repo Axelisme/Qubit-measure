@@ -1,7 +1,10 @@
 """BaseAdapter passes its validated Form output directly to the core."""
 
+from typing import Any
+
 import pytest
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -24,7 +27,7 @@ class MeasurementCfg(ConfigBase):
     amount: float = 1.0
 
 
-class RecordingCore:
+class RecordingCore(Experiment[RunRecord[ExpCfgModel, MeasurementCfg], Any]):
     """Expose the exact cfg received through the synchronous core boundary."""
 
     def run(

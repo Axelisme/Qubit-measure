@@ -54,7 +54,6 @@ class DispersiveAdapter(
 ):
     """Acquire paired readout spectra and fit their dispersive shift."""
 
-    experiment_tag: ClassVar[str | None] = DispersiveExp.persistence_tag()
     exp_cls = DispersiveExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

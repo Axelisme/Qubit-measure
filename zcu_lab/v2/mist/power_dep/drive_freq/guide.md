@@ -73,5 +73,5 @@ measurement.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `mist_drive_frequency` after inspecting the same Form errors.
    freq_range and gain_range are required pairs. points maps to Expts on both axes. Analysis has no operator parameters.
-   Common library/inline inputs select sources; overrides apply last. Null optional inputs retain Form values.
+   The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

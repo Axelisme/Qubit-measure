@@ -4,68 +4,62 @@ from typing import Literal
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
-from zcu_tools.mcp.measure.recipe_contracts import (
-    MissingParameter,
-    RecipeNeedsParameters,
-)
 
 from zcu_lab.v2.singleshot.ge.gui import GEPostSummary, GESummary
-
-from .helpers import (
-    FrequencyCalibration,
-    choose_frequency,
-    require_pi,
-    select_or_disable,
-)
 
 
 class SingleshotGEInputs(RecipeInputs):
     """Inputs for singleshot ge; all units and null policies are declared per
     field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value, null clears/disables it.",
     )
-    pi_ref: str | None = Field(
-        None,
-        description="Calibrated pi-pulse library key; null keeps the GUI selection, which must be a valid reference.",
+    pi_ref: str | None | Keep = Field(
+        KEEP,
+        description="Calibrated pi-pulse library key; omission retains the Form value, null clears/disables it.",
     )
-    use_reset: str | Literal["off"] = Field(
-        "off",
-        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    use_reset: str | None | Keep = Field(
+        KEEP,
+        description="Preparation module option; omission retains the Form value, null clears/disables it.",
     )
-    init_pulse_ref: str | Literal["off"] = Field(
-        "off",
-        description="Initialization library key, or off to disable preparation. Omission disables it; null is rejected.",
+    init_pulse_ref: str | None | Keep = Field(
+        KEEP,
+        description="Preparation module option; omission retains the Form value, null clears/disables it.",
     )
-    shots: int | None = Field(
-        None, description="Probe-off/on shot count; null keeps the GUI value."
+    shots: int | None | Keep = Field(
+        KEEP,
+        description="Probe-off/on shot count; omission retains the Form value, null clears/disables it.",
     )
 
-    initial_state: Literal["ground", "excited"] | None = Field(
-        None,
-        description="Initial State; null keeps the GUI analysis value. Analysis only.",
+    initial_state: Literal["ground", "excited"] | None | Keep = Field(
+        KEEP,
+        description="Initial State; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    backend: Literal["pca", "center"] | None = Field(
-        None, description="Backend; null keeps the GUI analysis value. Analysis only."
+    backend: Literal["pca", "center"] | None | Keep = Field(
+        KEEP,
+        description="Backend; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    logscale: bool | None = Field(
-        None, description="Log Scale; null keeps the GUI analysis value. Analysis only."
+    logscale: bool | None | Keep = Field(
+        KEEP,
+        description="Log Scale; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    align_t1: bool | None = Field(
-        None, description="Align T1; null keeps the GUI analysis value. Analysis only."
+    align_t1: bool | None | Keep = Field(
+        KEEP,
+        description="Align T1; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    length_ratio: float | None = Field(
-        None,
-        description="Length Ratio; null keeps the GUI analysis value. Analysis only.",
+    length_ratio: float | None | Keep = Field(
+        KEEP,
+        description="Length Ratio; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -105,37 +99,22 @@ async def singleshot_ge(
     proposals in Primary-to-Post order, then save raw shots and both analyses.
 
     No n → expts input: shots sets the probe-off/on cloud size.
-    Analysis controls: initial_state, backend, logscale, align_t1, length_ratio. Null keeps each GUI value.
+    Analysis controls: initial_state, backend, logscale, align_t1, length_ratio. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    tab = session.open_recipe_tab("singleshot/ge", inputs, target_alias="qubit")
-    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
-    select_or_disable(tab, ("modules", "init_pulse"), inputs.init_pulse_ref)
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    missing: list[MissingParameter] = []
-    frequency = choose_frequency(
-        tab,
-        ("modules", "readout", "freq"),
-        calibration=FrequencyCalibration(
-            path="$resonator.freq", required="readout_ref"
-        ),
+    tab = session.open_tab(
+        "singleshot/ge",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    missing.extend(frequency.missing)
-    if frequency.edit is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(frequency.edit)
-    if (
-        parameter := require_pi(
-            tab, ("modules", "probe_pulse"), inputs.pi_ref, required="pi_ref"
-        )
-    ) is not None:
-        missing.append(parameter)
-    if missing:
-        raise RecipeNeedsParameters(tuple(missing))
-    tab.apply_inputs(inputs, {("shots",): inputs.shots}, edits=edits)
+    tab.select("modules.reset", inputs.use_reset)
+    tab.select("modules.init_pulse", inputs.init_pulse_ref)
+    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("modules.probe_pulse", inputs.pi_ref)
+    tab.set("shots", inputs.shots)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
@@ -143,15 +122,11 @@ async def singleshot_ge(
             "primary",
             result=GESummary,
             updates={
-                key: value
-                for key, value in {
-                    "initial_state": inputs.initial_state,
-                    "backend": inputs.backend,
-                    "logscale": inputs.logscale,
-                    "align_t1": inputs.align_t1,
-                    "length_ratio": inputs.length_ratio,
-                }.items()
-                if value is not None
+                "initial_state": inputs.initial_state,
+                "backend": inputs.backend,
+                "logscale": inputs.logscale,
+                "align_t1": inputs.align_t1,
+                "length_ratio": inputs.length_ratio,
             },
         )
         if primary.result is None:

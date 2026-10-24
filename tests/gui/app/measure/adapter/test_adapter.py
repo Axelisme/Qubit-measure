@@ -11,18 +11,17 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, PulseSpec
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeResultBase,
     ExpAdapterProtocol,
     ModuleWriteback,
-    NoAnalysisResult,
     ParameterWriteback,
     require_soc_handles,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
-from zcu_tools.gui.app.measure.adapter.protocol import NoAnalyzeParams
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
@@ -59,23 +58,21 @@ def _make_concrete_adapter() -> ExpAdapterProtocol:
         capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
             analysis=AnalysisMode.NONE
         )
-        exp_cls = MagicMock()
+        exp_cls = Experiment
 
     return _FakeAdapter()
 
 
 def test_base_adapter_get_analyze_params_returns_noparams_when_no_params():
-    # A NoAnalyzeParams adapter (the 4th generic arg defaults to it) inherits the
-    # base get_analyze_params, which returns the empty params instance — no
-    # per-adapter boilerplate override needed.
+    # Omitted params use None without a per-adapter override.
     adapter = _make_concrete_adapter()
     from zcu_tools.gui.app.measure.adapter import SessionEnv
 
-    assert isinstance(
+    assert (
         adapter.get_analyze_params(
             MagicMock(), SessionEnv(parameters=None, soc=None, soccfg=None)
-        ),
-        NoAnalyzeParams,
+        )
+        is None
     )
 
 
@@ -92,12 +89,12 @@ def test_base_adapter_validates_forgotten_real_analyze_params_override():
 
     with pytest.raises(TypeError, match="get_analyze_params"):
 
-        class _(BaseAdapter[MagicMock, MagicMock, NoAnalysisResult, _RequiredParams]):
+        class _(BaseAdapter[MagicMock, MagicMock, None, _RequiredParams]):
             capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-            exp_cls = MagicMock()
+            exp_cls = Experiment
 
             def analyze(self, req, *, plots: Plots):
-                return NoAnalysisResult()
+                return None
 
 
 def test_base_adapter_analyze_raises_by_default():
@@ -106,7 +103,7 @@ def test_base_adapter_analyze_raises_by_default():
     adapter = _make_concrete_adapter()
     req = AnalyzeRequest(
         run_result=MagicMock(),
-        analyze_params=NoAnalyzeParams(),
+        analyze_params=None,
         parameters=None,
     )
     with pytest.raises(NotImplementedError, match="analyze"):
@@ -117,17 +114,17 @@ def test_analyze_params_cls_fallback_when_no_annotation():
 
     class _UnannotatedAdapter(BaseAdapter[ConfigBase, MagicMock]):
         capabilities = AdapterCapabilities(analysis=AnalysisMode.FIT)
-        exp_cls = MagicMock()
+        exp_cls = Experiment
 
         def get_analyze_params(self, result, ctx):
-            return NoAnalyzeParams()
+            return None
 
         def analyze(self, req, *, plots: Plots):
-            return NoAnalysisResult()
+            return None
 
     # The overridden get_analyze_params has no type annotation → fallback
     cls = _UnannotatedAdapter.analyze_params_cls()
-    assert cls is NoAnalyzeParams
+    assert cls is type(None)
 
 
 def test_analysis_summary_retains_degenerate_fit_reasons() -> None:

@@ -3,20 +3,21 @@
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.datafile import load, save
+from zcu_tools.datafile import decode_labber_comment, load, load_labber_data, save
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
     CfgUnavailableWarning,
     ExpCfgModel,
+    Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    PersistableExperiment,
     RunRecord,
     VariableAxisSpec,
     VariableSpec,
@@ -24,7 +25,11 @@ from zcu_tools.experiment import (
     ZSpec,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.experiment.native_persistence import (
+    metadata_from_container,
+    restore_run,
+    save_run,
+)
 from zcu_tools.notebook import NotebookAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -43,8 +48,8 @@ class NativeResult:
     decay: NDArray[np.float64] = field(default_factory=lambda: np.array([]))
 
 
-class NativeCore(PersistableExperiment[NativeResult, NativeCfg]):
-    AXES_SPEC: ClassVar = AxesSpec(
+class NativeCore(Experiment[NativeResult, NativeCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[NativeResult, NativeCfg]] = AxesSpec(
         axes=(Axis("frequency", "Frequency", "Hz", scale=1e6),),
         z=ZSpec("signal", "Signal", "V", scale=1e-3),
         result_type=NativeResult,
@@ -70,7 +75,7 @@ def build_grouped(data: GroupedLoadData[NativeCfg]) -> NativeResult:
 
 
 class GroupedCore(NativeCore):
-    AXES_SPEC: ClassVar = GroupedAxesSpec(
+    AXES_SPEC: ClassVar[GroupedAxesSpec[NativeResult, NativeCfg]] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 "signal",
@@ -121,8 +126,10 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
     analysis = adapter.analyze(None)
     evidence = adapter.acquisition_for(previous)
     path = tmp_path / "data.h5"
-    core.save_run(
-        replace(previous, metadata=native_metadata(core.persistence_spec().tag)), path
+    save_run(
+        replace(previous, metadata=native_metadata(core.AXES_SPEC.tag)),
+        path,
+        spec=core.AXES_SPEC,
     )
     stored = load(path)
     if cfg_unavailable:
@@ -140,7 +147,7 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
 
     if cfg_unavailable:
         with pytest.warns(CfgUnavailableWarning) as core_warning:
-            expected = core.from_stored(stored).record
+            expected = restore_run(stored, spec=core.AXES_SPEC).record
         with pytest.warns(CfgUnavailableWarning) as notebook_warning:
             try:
                 loaded = adapter.load(path)
@@ -149,7 +156,7 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
         assert str(notebook_warning[0].message) == str(core_warning[0].message)
         assert loaded.cfg is None
     else:
-        expected = core.from_stored(stored).record
+        expected = restore_run(stored, spec=core.AXES_SPEC).record
         try:
             loaded = adapter.load(path)
         except ValueError as error:
@@ -187,11 +194,11 @@ def test_unknown_historical_evidence_loads_without_inventing_acquisition(
         cfg=NativeCfg(gain=2.0),
         result=NativeResult(np.array([4000.0, 5000.0]), np.array([4 + 6j, 8 - 10j])),
     )
-    metadata = native_metadata(core.persistence_spec().tag).model_copy(
+    metadata = native_metadata(core.AXES_SPEC.tag).model_copy(
         update={"started_at": None, "completion": "unknown"}
     )
     try:
-        core.save_run(replace(source, metadata=metadata), path)
+        save_run(replace(source, metadata=metadata), path, spec=core.AXES_SPEC)
         adapter = NotebookAdapter(host=NonPresentingHost())(core)
         loaded = adapter.load(path)
     except ValueError as error:
@@ -205,6 +212,70 @@ def test_unknown_historical_evidence_loads_without_inventing_acquisition(
     with pytest.raises(ValueError, match="No acquisition evidence"):
         adapter.acquisition_for(loaded)
     assert metadata_from_container(load(path)) == metadata
+
+
+def test_labber_save_selects_explicit_or_latest_source_and_exact_or_unique_path(
+    tmp_path: Path,
+) -> None:
+    adapter = NotebookAdapter(
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
+    )(NativeCore())
+    first = adapter.run(NativeCfg(gain=2.0))
+    current = adapter.run(NativeCfg(gain=3.0))
+    analysis = adapter.analyze(None, source=first)
+    destination = tmp_path / "data.hdf5"
+    destination.write_text("existing", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        adapter.save(destination, source=first)
+    assert destination.read_text(encoding="utf-8") == "existing"
+
+    unique = adapter.save(
+        destination, source=first, unique=True, comment="measurement A", tag="trial"
+    )
+    assert unique == tmp_path / "data_1.hdf5"
+    exported = load_labber_data(str(unique))
+    np.testing.assert_allclose(exported.z, [0.004 + 0.006j, 0.008 - 0.010j])
+    assert decode_labber_comment(exported.comment).comment == "measurement A"
+    assert exported.tags == ["trial"]
+
+    exact = adapter.save(tmp_path / "exact.h5")
+    assert exact == tmp_path / "exact.hdf5"
+    np.testing.assert_allclose(
+        load_labber_data(str(exact)).z, [0.006 + 0.009j, 0.012 - 0.015j]
+    )
+    assert adapter.last_run is current
+    assert adapter.analysis is analysis
+    assert analysis.source is first
+
+
+def test_offline_load_analyze_save_do_not_query_devices(tmp_path: Path) -> None:
+    manager = Mock(spec=DeviceManager)
+    manager.get_all_devices.side_effect = AssertionError("Offline device query")
+    manager.get_all_info.side_effect = AssertionError("Offline device query")
+    factory = NotebookAdapter(device_manager=manager, host=NonPresentingHost())
+    first, second = factory(NativeCore()), factory(NativeCore())
+    source = RunRecord(
+        NativeCfg(gain=2.0),
+        NativeResult(np.array([4000.0, 5000.0]), np.array([4 + 6j, 8 - 10j])),
+    )
+    path = tmp_path / "data.h5"
+    save_run(
+        replace(source, metadata=native_metadata(NativeCore.AXES_SPEC.tag)),
+        path,
+        spec=NativeCore.AXES_SPEC,
+    )
+    loaded = first.load(path)
+    analysis = first.analyze(None)
+    exported = first.save(tmp_path / "offline")
+    assert analysis.source is loaded
+    np.testing.assert_allclose(
+        load_labber_data(str(exported)).z, [0.004 + 0.006j, 0.008 - 0.010j]
+    )
+    assert second.last_run is None
+    assert second.analysis is None
 
 
 def test_labber_only_export_is_rejected_without_replacing_notebook_results(

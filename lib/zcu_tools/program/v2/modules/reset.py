@@ -103,14 +103,26 @@ class AbsReset(Module):
         return True
 
 
-def Reset(name: str, cfg: AbsResetCfg | None) -> AbsReset:
-    """Factory: dispatch a reset cfg to its concrete impl. None → NoneReset."""
-    if cfg is None:
-        cfg = NoneResetCfg(desc="Auto derived from None")
-    return cfg.build(name)
+class Reset:
+    """Dispatch cfg to its reset module; zcu_lab uses ``Reset.Cfg`` fields.
+
+    Calling Reset(name, cfg) returns cfg.build(name), not a Reset instance.
+    name labels the module. None selects NoneReset with an automatic description.
+    """
+
+    Cfg: TypeAlias = ResetCfg
+
+    def __new__(cls, name: str, cfg: AbsResetCfg | None) -> AbsReset:
+        if cfg is None:
+            cfg = NoneResetCfg(desc="Auto derived from None")
+        return cfg.build(name)
 
 
 class NoneReset(AbsReset):
+    """Build this reset variant with settings declared as ``NoneReset.Cfg``."""
+
+    Cfg: TypeAlias = NoneResetCfg
+
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
@@ -129,6 +141,10 @@ class NoneReset(AbsReset):
 
 
 class PulseReset(AbsReset):
+    """Build this reset variant with settings declared as ``PulseReset.Cfg``."""
+
+    Cfg: TypeAlias = PulseResetCfg
+
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
@@ -147,6 +163,10 @@ class PulseReset(AbsReset):
 
 
 class TwoPulseReset(AbsReset):
+    """Build this reset variant with settings declared as ``TwoPulseReset.Cfg``."""
+
+    Cfg: TypeAlias = TwoPulseResetCfg
+
     def __init__(self, name: str, cfg: TwoPulseResetCfg) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
@@ -171,6 +191,10 @@ class TwoPulseReset(AbsReset):
 
 
 class BathReset(AbsReset):
+    """Build this reset variant with settings declared as ``BathReset.Cfg``."""
+
+    Cfg: TypeAlias = BathResetCfg
+
     def __init__(self, name: str, cfg: BathResetCfg) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)

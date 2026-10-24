@@ -16,15 +16,7 @@ from zcu_tools.analysis.fitting import (
     fit_dual_decay,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -35,13 +27,9 @@ from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
     LoadValue,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     sweep2param,
 )
@@ -59,16 +47,16 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T1ModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class T1SweepCfg(ConfigBase):
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
 
 
-class T1Cfg(ProgramV2Cfg, ExpCfgModel):
+class T1Cfg(ProgramExpCfg):
     modules: T1ModuleCfg
     sweep: T1SweepCfg
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
@@ -89,7 +77,7 @@ class T1Analysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
-class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+class T1Exp(Experiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
@@ -98,10 +86,10 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
 
-    # times stored as seconds on disk -> scale=US_TO_S
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("times", "Time", "s", US_TO_S),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    # times stored as seconds on disk -> scale=1e-6
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
         cfg_schema_version="2.0",
@@ -251,17 +239,17 @@ class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
 
 
 class T1WithToneModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi_pulse: PulseCfg
-    test_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    test_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class T1WithToneSweepAxisCfg(ConfigBase):
     length: SweepCfg
 
 
-class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
+class T1WithToneCfg(ProgramExpCfg):
     modules: T1WithToneModuleCfg
     sweep: T1WithToneSweepAxisCfg
 
@@ -271,13 +259,13 @@ class T1WithToneAnalyzeOptions:
     dual_exp: bool = False
 
 
-class T1WithToneExp(PersistableExperiment[T1Result, T1WithToneCfg]):
+class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
     Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
 
-    # times stored as seconds on disk -> scale=US_TO_S
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("times", "Time", "s", US_TO_S),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    # times stored as seconds on disk -> scale=1e-6
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1WithToneCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T1Result,
         cfg_type=T1WithToneCfg,
         cfg_schema_version="2.0",
@@ -400,7 +388,7 @@ class ScanT1WithToneSweepCfg(ConfigBase):
     length: SweepCfg
 
 
-class ScanT1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
+class ScanT1WithToneCfg(ProgramExpCfg):
     modules: T1WithToneModuleCfg
     sweep: ScanT1WithToneSweepCfg
 
@@ -412,14 +400,14 @@ class ScanT1WithToneAnalysis:
     t1errs: NDArray[np.float64]
 
 
-class ScanT1WithToneExp(PersistableExperiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
+class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     # inner = times (result_shape, s on disk -> US_TO_S); outer = values (gain, a.u.)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[ScanT1WithToneResult, ScanT1WithToneCfg]] = AxesSpec(
         axes=(
-            Axis("times", "Time", "s", US_TO_S),
-            Axis("values", "Readout Gain", "a.u."),
+            AxesSpec.Axis("times", "Time", "s", 1e-6),
+            AxesSpec.Axis("values", "Readout Gain", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=ScanT1WithToneResult,
         cfg_type=ScanT1WithToneCfg,
         cfg_schema_version="2.0",

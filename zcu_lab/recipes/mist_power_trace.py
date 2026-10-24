@@ -2,39 +2,39 @@
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
 )
 
-from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAnalyzeResult
-
 
 class MistPowerTraceInputs(RecipeInputs):
     """Inputs for mist power trace; all units and null policies are declared per
     field."""
 
-    probe_ref: str | None = Field(
-        None, description="Probe library key; null keeps the GUI selection."
+    probe_ref: str | None | Keep = Field(
+        KEEP,
+        description="Probe library key; omission retains the Form value, null clears/disables it.",
     )
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value, null clears/disables it.",
     )
 
-    g0: str | None = Field(
-        None,
-        description="Ground IQ (empty = first point); null keeps the GUI analysis value. Analysis only.",
+    g0: str | None | Keep = Field(
+        KEEP,
+        description="Ground IQ (empty = first point); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    e0: str | None = Field(
-        None,
-        description="Excited IQ (optional y-limit); null keeps the GUI analysis value. Analysis only.",
+    e0: str | None | Keep = Field(
+        KEEP,
+        description="Excited IQ (optional y-limit); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    ac_coeff: float | None = Field(
-        None,
-        description="Photon number / gain squared; null keeps the GUI analysis value. Analysis only.",
+    ac_coeff: float | None | Keep = Field(
+        KEEP,
+        description="Photon number / gain squared; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -58,44 +58,29 @@ async def mist_power_trace(
     """Probe across gain, save mean complex IQ and plot its displacement.
 
     No n → expts input: the captured Form supplies the gain grid.
-    Analysis controls: g0, e0, ac_coeff. Null keeps each GUI value.
+    Analysis controls: g0, e0, ac_coeff. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    for name, value in (
-        ("target", inputs.target),
-        ("reuse_tab_id", inputs.reuse_tab_id),
-        ("probe_ref", inputs.probe_ref),
-        ("readout_ref", inputs.readout_ref),
-    ):
-        if value is not None and (not value.strip()):
-            raise ValueError(f"{name} must be a non-empty string or null")
-    tab = session.open_recipe_tab(
-        "mist/power_dep/single_trace", inputs, target_alias="qubit"
+    tab = session.open_tab(
+        "mist/power_dep/single_trace",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    tab.select(("modules", "probe_pulse"), ref=inputs.probe_ref)
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    tab.apply_inputs(
-        inputs,
-        {("sweep", "gain"): None, ("reps",): None, ("rounds",): None},
-        edits=edits,
-    )
+    tab.select("modules.probe_pulse", inputs.probe_ref)
+    tab.select("modules.readout", inputs.readout_ref)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
         analysis = await tab.analyze(
             "primary",
-            result=MistTraceAnalyzeResult,
+            result=dict,
             updates={
-                key: value
-                for key, value in {
-                    "g0": inputs.g0,
-                    "e0": inputs.e0,
-                    "ac_coeff": inputs.ac_coeff,
-                }.items()
-                if value is not None
+                "g0": inputs.g0,
+                "e0": inputs.e0,
+                "ac_coeff": inputs.ac_coeff,
             },
         )
         if analysis.result is None:

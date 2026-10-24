@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, QickRawParam
@@ -59,6 +59,10 @@ class PulseCfg(AbsModuleCfg):
 
 
 class Pulse(Module):
+    """Emit a generator pulse; zcu_lab declares its settings as ``Pulse.Cfg``."""
+
+    Cfg: TypeAlias = PulseCfg
+
     def __init__(
         self,
         name: str,
