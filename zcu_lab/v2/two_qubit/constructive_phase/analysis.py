@@ -29,19 +29,6 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
     reason: str | None
     interference_quality: FitQuality | None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Expose the selected maximum-rate branch and its model limitations."""
-        summary = super().to_summary_dict()
-        summary.update(
-            relative_phase_deg=self.relative_phase_deg,
-            phase_reason=self.reason,
-            interference_fit_quality=self.interference_quality.to_summary_dict()
-            if self.interference_quality
-            else None,
-            phase_model="rate² = A + B cos(relative phase) + C sin(relative phase); maximum rate at atan2(C,B). Fixed signed gains; not a gate-fidelity estimate.",
-        )
-        return summary
-
 
 def analyze_constructive_phase(
     data: RabiScanResult, returns: ReturnData, *, plots: Plots

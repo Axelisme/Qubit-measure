@@ -72,8 +72,12 @@ class T2EchoCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class T2EchoAnalyzeOptions:
-    fit_method: Literal["fringe", "decay"] = "decay"
-    fit_phase: bool = False
+    fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
+        "decay"
+    )
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = (
+        False
+    )
 
 
 @dataclass(frozen=True)

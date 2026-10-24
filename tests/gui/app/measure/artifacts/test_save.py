@@ -772,14 +772,14 @@ def test_initial_all_failed_save_does_not_confirm_run_identity(
     assert session.state.get_tab("tab").run.confirmed_run_id is None
 
 
-def test_invalid_analysis_json_rejects_before_annotation_or_files(
+def test_unsupported_analysis_field_rejects_before_annotation_or_files(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
     session.state.update_tab_analyze(
-        "tab", PaneSummary(float("nan")), None, analyze_params_instance=PaneParams()
+        "tab", {"unsupported": object()}, None, analyze_params_instance=PaneParams()
     )
-    with pytest.raises(ValueError, match="strict JSON"):
+    with pytest.raises(TypeError, match=r"summary\.unsupported.*object"):
         session.control.save_artifacts("tab", comment="rejected", origin=GUI_ORIGIN)
     assert session.state.get_tab("tab").save.comment == ""
     assert not session.state.is_tab_busy("tab")

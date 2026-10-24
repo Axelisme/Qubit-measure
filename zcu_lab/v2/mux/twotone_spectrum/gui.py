@@ -17,15 +17,14 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     SampleWriteback,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_models
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
@@ -33,7 +32,6 @@ from zcu_lab.v2.support.measure.mux_results import (
 )
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
-from zcu_lab.v2.twotone.freq.gui import FreqAnalyzeParams
 
 from .analysis import MuxFreqFit
 from .core import MuxFreqCfg, MuxFreqExp
@@ -43,7 +41,7 @@ MuxFreqRunResult: TypeAlias = RunRecord[MuxFreqCfg, MuxSweepResult]
 
 
 class MuxTwotoneSpectrumFitSummary(MuxSummaryTone):
-    """Native fit estimates in experiment units and qualified owner quality."""
+    """Decode native per-tone JSON estimates and the fitting owner diagnostics."""
 
     freq: float | None = Field(
         description="Owner freq in MHz; null retains an unavailable estimate."
@@ -61,17 +59,18 @@ class MuxTwotoneSpectrumFitSummary(MuxSummaryTone):
         description="Owner fwhm_err in MHz; null retains an unavailable estimate."
     )
 
-    fit_quality: dict[str, FitQuality] | None
+    quality: FitQuality
 
 
 class MuxTwotoneSpectrumSummary(BaseModel):
-    """Owner tone rows in analysis order, retaining successes and failures."""
+    """Decode ordered native outcomes and the complete captured name list."""
 
-    tones: list[MuxTwotoneSpectrumFitSummary | MuxSummaryFailure]
+    outcomes: list[MuxTwotoneSpectrumFitSummary | MuxSummaryFailure]
+    names: list[str] | None
 
 
 @dataclass(frozen=True)
-class MuxFreqAnalyzeResult(AnalyzeResultBase):
+class MuxFreqAnalyzeResult:
     """Frequency fits or failures for each measured original tone position.
 
     outcomes contains per-tone estimates or failure reasons. names is the full
@@ -81,53 +80,20 @@ class MuxFreqAnalyzeResult(AnalyzeResultBase):
     outcomes: tuple[MuxFreqFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def summary(self) -> MuxTwotoneSpectrumSummary:
-        """Return native tone estimates/failures with fixed identities and owner quality."""
-        summaries: list[MuxTwotoneSpectrumFitSummary | MuxSummaryFailure] = []
-        for outcome in self.outcomes:
-            name = None if self.names is None else self.names[outcome.index]
-            element = (
-                None
-                if name is None
-                else ElementIdentity(index=outcome.index, name=name)
-            )
-            if isinstance(outcome, MuxFitFailure):
-                row = MuxSummaryFailure(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    failure=outcome.reason,
-                )
-            else:
-                row = MuxTwotoneSpectrumFitSummary(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    freq=outcome.freq,
-                    freq_err=outcome.freq_err,
-                    fwhm=outcome.fwhm,
-                    fwhm_err=outcome.fwhm_err,
-                    fit_quality=fit_quality_models(
-                        {"fit": outcome.quality},
-                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
-                    ),
-                )
-            summaries.append(row)
-        return MuxTwotoneSpectrumSummary(tones=summaries)
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the same owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
+def _MuxFreq_options(result: MuxFreqRunResult, ctx: SessionEnv) -> FreqAnalyzeOptions:
+    """Seed the analysis controls without changing the core defaults."""
+    del result, ctx
+    return FreqAnalyzeOptions(model_type="lor", plot_fit=True)
 
 
 def _analyze(
-    req: AnalyzeRequest[MuxFreqRunResult, FreqAnalyzeParams], *, plots: Plots
+    req: AnalyzeRequest[MuxFreqRunResult, FreqAnalyzeOptions], *, plots: Plots
 ) -> MuxFreqAnalyzeResult:
     """Fit the Run/Load spectra using req.analyze_params and draw them in plots."""
-    params = req.analyze_params
     outcomes = MuxFreqExp().analyze(
         req.run_result,
-        FreqAnalyzeOptions(model_type=params.model_type, plot_fit=params.plot_fit),
+        req.analyze_params,
         plots=plots,
     )
     snapshot = req.run_result.cfg
@@ -176,9 +142,9 @@ def _get_writeback_items(
                     proposed_value=outcome.fwhm,
                 ),
                 SampleWriteback(
-                    coordinate_device="$mux.flux_source",
                     target_name=qubit,
                     description="Qubit frequency sample at captured bias",
+                    coordinate_device="$mux.flux_source",
                     proposed_value={
                         "freq_mhz": outcome.freq,
                         "freq_err_mhz": outcome.freq_err,
@@ -205,8 +171,6 @@ DEFINITION = Adapter(
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze,
-        options=lambda source, env: FreqAnalyzeParams(),
-        writeback=_get_writeback_items,
+        fn=_analyze, options=_MuxFreq_options, writeback=_get_writeback_items
     ),
 )

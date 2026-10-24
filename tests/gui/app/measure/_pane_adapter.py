@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     PostAnalysis,
     PostAnalyzeRequest,
@@ -19,10 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     SessionEnv,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.types import (
-    PostAnalyzeResultBase,
-    T_PostAnalyzeResult,
-)
+from zcu_tools.gui.app.measure.adapter.types import T_PostAnalyzeResult
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
@@ -37,12 +33,12 @@ class PaneParams:
 
 
 @dataclass
-class PaneResult(AnalyzeResultBase):
+class PaneResult:
     initial_state: str
 
 
 @dataclass
-class PostResult(PostAnalyzeResultBase):
+class PostResult:
     confusion: NDArray[np.float64]
 
 

@@ -20,9 +20,6 @@ class DummyResult:
 class DummyAnalyzeResult:
     figure: None = None
 
-    def to_summary_dict(self) -> dict[str, object]:
-        return {}
-
 
 @dataclass
 class DummyAnalyzeParams:

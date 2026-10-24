@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -21,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.lookback.core import (
+    LookbackAnalysis,
     LookbackAnalyzeOptions,
     LookbackCfg,
     LookbackExp,
@@ -39,34 +39,18 @@ class LookbackAnalyzeParams:
 
 
 class LookbackSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Decode consumed scalar JSON fields; null retains an unavailable estimate."""
 
     predict_offset: float | None = Field(
         description="Owner predict_offset in us; null retains an unavailable estimate."
     )
 
 
-@dataclass
-class LookbackAnalyzeResult(AnalyzeResultBase):
-    predict_offset: float
-
-    def summary(self) -> LookbackSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return LookbackSummary(
-            predict_offset=self.predict_offset,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
-
-
 def _analyze(
-    req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
-    *,
-    plots: Plots,
-) -> LookbackAnalyzeResult:
+    req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams], *, plots: Plots
+) -> LookbackAnalysis:
     params = req.analyze_params
-    answer = LookbackExp().analyze(
+    return LookbackExp().analyze(
         req.run_result,
         LookbackAnalyzeOptions(
             ratio=params.ratio,
@@ -75,11 +59,10 @@ def _analyze(
         ),
         plots=plots,
     )
-    return LookbackAnalyzeResult(predict_offset=answer.predict_offset)
 
 
 def _writeback(
-    req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult],
+    req: WritebackRequest[LookbackRunResult, LookbackAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose detected arrival time in us at captured resonator.time_of_fly.
 

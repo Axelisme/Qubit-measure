@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -11,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
@@ -19,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.singleshot.ac_stark.core import (
+    AcStarkAnalysis,
     AcStarkAnalyzeOptions,
     AcStarkCfg,
     AcStarkExp,
@@ -38,33 +37,24 @@ from zcu_lab.v2.support.measure.singleshot_shared import (
 SsAcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
 
 
-@dataclass
-class SsAcStarkAnalyzeResult(AnalyzeResultBase):
-    ac_stark_coeff: float
-
-
 def _analyze(
     req: AnalyzeRequest[SsAcStarkRunResult, None], *, plots: Plots
-) -> SsAcStarkAnalyzeResult:
-    # Required chi/kappa and optional readout correction/cutoff use this
-    # Run's fixed capture. The core derives eta and owns fit defaults.
+) -> AcStarkAnalysis:
     chi, kappa = read_chi_kappa(req.parameters)
     confusion = read_confusion_matrix(req.parameters)
     cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
-    analysis = AcStarkExp().analyze(
+    return AcStarkExp().analyze(
         req.run_result,
         AcStarkAnalyzeOptions(
             chi=chi, kappa=kappa, confusion_matrix=confusion, cutoff=cutoff
         ),
         plots=plots,
     )
-    return SsAcStarkAnalyzeResult(ac_stark_coeff=analysis.ac_stark_coeff)
 
 
 def _writeback(
-    req: WritebackRequest[SsAcStarkRunResult, SsAcStarkAnalyzeResult],
+    req: WritebackRequest[SsAcStarkRunResult, AcStarkAnalysis],
 ) -> Sequence[WritebackItem]:
-    # Key ``ac_stark_coeff`` per single_qubit.md:3329.
     return [
         ParameterWriteback(
             target_name="$qubit.ext.ac_stark_coeff",

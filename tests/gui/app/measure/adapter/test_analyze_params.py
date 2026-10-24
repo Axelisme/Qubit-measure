@@ -4,11 +4,40 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 import pytest
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.adapter.analyze_params import (
     describe_analyze_params,
     reconstruct_params,
 )
+
+
+@dataclass
+class _CoreOptions:
+    mode: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+    cutoff: Annotated[float | None, FieldMeta(label="Gain cutoff", decimals=3)] = None
+    enabled: Annotated[bool, FieldMeta()] = True
+
+
+def test_describe_core_options_uses_field_metadata():
+    assert describe_analyze_params(_CoreOptions) == [
+        {
+            "name": "mode",
+            "type": "str",
+            "label": "Model type",
+            "choices": ["lor", "sinc"],
+            "default": "lor",
+        },
+        {
+            "name": "cutoff",
+            "type": "float",
+            "label": "Gain cutoff",
+            "decimals": 3,
+            "optional": True,
+            "default": None,
+        },
+        {"name": "enabled", "type": "bool", "label": "enabled", "default": True},
+    ]
 
 
 def test_describe_bool_field():

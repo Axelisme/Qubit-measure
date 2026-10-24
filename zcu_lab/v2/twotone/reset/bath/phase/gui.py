@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -11,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
@@ -20,36 +18,25 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
-from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg, PhaseExp, PhaseResult
+from zcu_lab.v2.twotone.reset.bath.phase.core import (
+    PhaseAnalysis,
+    PhaseCfg,
+    PhaseExp,
+    PhaseResult,
+)
 from zcu_lab.v2.twotone.reset.bath.phase.form import make_form
 
 BathPhaseRunResult: TypeAlias = RunRecord[PhaseCfg, PhaseResult]
 
 
-@dataclass
-class BathPhaseAnalyzeResult(AnalyzeResultBase):
-    max_phase: float
-    min_phase: float
-
-
-def _BathPhase_make_form(ctx: FormContext) -> Form[PhaseCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _BathPhase_analyze(
-    req: AnalyzeRequest[BathPhaseRunResult, None],
-    *,
-    plots: Plots,
-) -> BathPhaseAnalyzeResult:
-    analysis = PhaseExp().analyze(req.run_result, None, plots=plots)
-    return BathPhaseAnalyzeResult(
-        max_phase=analysis.max_phase, min_phase=analysis.min_phase
-    )
+    req: AnalyzeRequest[BathPhaseRunResult, None], *, plots: Plots
+) -> PhaseAnalysis:
+    return PhaseExp().analyze(req.run_result, None, plots=plots)
 
 
 def _BathPhase_get_writeback_items(
-    req: WritebackRequest[BathPhaseRunResult, BathPhaseAnalyzeResult],
+    req: WritebackRequest[BathPhaseRunResult, PhaseAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose ext phases, independent tested variants and a ground slot.
 
@@ -98,6 +85,11 @@ def _BathPhase_get_writeback_items(
     )
 
     return items
+
+
+def _BathPhase_make_form(ctx: FormContext) -> Form[PhaseCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: PhaseCfg, *, context: RunContext) -> RunRecord[PhaseCfg, PhaseResult]:

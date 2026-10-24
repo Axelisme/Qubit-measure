@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -13,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
@@ -21,38 +19,21 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result
+from zcu_lab.v2.twotone.ckp.core import CKP_Cfg, CKP_Exp, CKP_Result, CKPAnalysis
 
 from .form import make_form
 
 CKPRunResult: TypeAlias = RunRecord[CKP_Cfg, CKP_Result]
 
 
-@dataclass
-class CKPAnalyzeResult(AnalyzeResultBase):
-    chi: float
-    kappa: float
-    res_freq: float
-
-
-def _CKP_make_form(ctx: FormContext) -> Form[CKP_Cfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _CKP_analyze(
     req: AnalyzeRequest[CKPRunResult, None], *, plots: Plots
-) -> CKPAnalyzeResult:
-    analysis = CKP_Exp().analyze(req.run_result, None, plots=plots)
-    return CKPAnalyzeResult(
-        chi=analysis.chi,
-        kappa=analysis.kappa,
-        res_freq=analysis.res_freq,
-    )
+) -> CKPAnalysis:
+    return CKP_Exp().analyze(req.run_result, None, plots=plots)
 
 
 def _CKP_get_writeback_items(
-    req: WritebackRequest[CKPRunResult, CKPAnalyzeResult],
+    req: WritebackRequest[CKPRunResult, CKPAnalysis],
 ) -> Sequence[WritebackItem]:
     result = req.analyze_result
     return [
@@ -72,6 +53,11 @@ def _CKP_get_writeback_items(
             proposed_value=result.res_freq,
         ),
     ]
+
+
+def _CKP_make_form(ctx: FormContext) -> Form[CKP_Cfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: CKP_Cfg, *, context: RunContext) -> RunRecord[CKP_Cfg, CKP_Result]:

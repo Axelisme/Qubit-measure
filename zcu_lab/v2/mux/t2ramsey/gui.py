@@ -16,25 +16,20 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     SampleWriteback,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.mux_results import (
-    MuxCoherenceSummary,
-    captured_qubits,
-    coherence_summary,
-)
+from zcu_lab.v2.support.measure.mux_results import captured_qubits
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2.support.mux_coherence_analysis import MuxCoherenceFit
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import coherence_review_note
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
-from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeParams
 
 from .core import MuxT2RamseyCfg, MuxT2RamseyExp
 from .form import make_form
@@ -43,19 +38,11 @@ MuxT2RamseyRunResult: TypeAlias = RunRecord[MuxT2RamseyCfg, MuxCoherenceResult]
 
 
 @dataclass(frozen=True)
-class MuxT2RamseyAnalyzeResult(AnalyzeResultBase):
+class MuxT2RamseyAnalyzeResult:
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
 
     outcomes: tuple[MuxCoherenceFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
-
-    def summary(self) -> MuxCoherenceSummary:
-        """Return native coherence outcomes with fixed original tone identities."""
-        return coherence_summary(self.outcomes, self.names)
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
 
 
 def _frequency_review_note(outcome: MuxCoherenceFit, t2_note: str | None) -> str | None:
@@ -91,18 +78,21 @@ def _frequency_review_note(outcome: MuxCoherenceFit, t2_note: str | None) -> str
     return "; ".join(reasons) if reasons else None
 
 
+def _MuxT2Ramsey_options(
+    result: MuxT2RamseyRunResult, ctx: SessionEnv
+) -> T2RamseyAnalyzeOptions:
+    """Seed the analysis controls without changing the core defaults."""
+    del result, ctx
+    return T2RamseyAnalyzeOptions(fit_fringe=True, fit_phase=True)
+
+
 def _analyze(
-    req: AnalyzeRequest[MuxT2RamseyRunResult, T2RamseyAnalyzeParams],
-    *,
-    plots: Plots,
+    req: AnalyzeRequest[MuxT2RamseyRunResult, T2RamseyAnalyzeOptions], *, plots: Plots
 ) -> MuxT2RamseyAnalyzeResult:
     """Analyze the explicit Run/Load source, retaining each original-index outcome."""
-    params = req.analyze_params
     outcomes = MuxT2RamseyExp().analyze(
         req.run_result,
-        T2RamseyAnalyzeOptions(
-            fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
-        ),
+        req.analyze_params,
         plots=plots,
     )
     snapshot = req.run_result.cfg
@@ -150,9 +140,9 @@ def _get_writeback_items(
                     note=t2_note,
                 ),
                 SampleWriteback(
-                    coordinate_device="$mux.flux_source",
                     target_name=qubit,
                     description="t2r sample at captured bias",
+                    coordinate_device="$mux.flux_source",
                     proposed_value={
                         "t2r_us": outcome.t2,
                         "t2r_err_us": outcome.t2_err,
@@ -202,8 +192,6 @@ DEFINITION = Adapter(
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze,
-        options=lambda source, env: T2RamseyAnalyzeParams(),
-        writeback=_get_writeback_items,
+        fn=_analyze, options=_MuxT2Ramsey_options, writeback=_get_writeback_items
     ),
 )

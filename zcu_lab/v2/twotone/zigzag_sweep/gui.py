@@ -12,13 +12,13 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.zigzag_sweep.core import (
+    ZigZagScanAnalysis,
     ZigZagScanAnalyzeOptions,
     ZigZagScanCfg,
     ZigZagScanExp,
@@ -36,23 +36,15 @@ class ZigZagScanAnalyzeParams:
     find_max: Annotated[float | None, ParamMeta(label="Search to")] = None
 
 
-@dataclass
-class ZigZagScanAnalyzeResult(AnalyzeResultBase):
-    best_value: float
-
-
 def _ZigZagScanBase_analyze(
-    req: AnalyzeRequest[ZigZagScanRunResult, ZigZagScanAnalyzeParams],
-    *,
-    plots: Plots,
-) -> ZigZagScanAnalyzeResult:
+    req: AnalyzeRequest[ZigZagScanRunResult, ZigZagScanAnalyzeParams], *, plots: Plots
+) -> ZigZagScanAnalysis:
     params = req.analyze_params
-    analysis = ZigZagScanExp().analyze(
+    return ZigZagScanExp().analyze(
         req.run_result,
         ZigZagScanAnalyzeOptions(find_range=(params.find_min, params.find_max)),
         plots=plots,
     )
-    return ZigZagScanAnalyzeResult(best_value=analysis.min_value)
 
 
 def _ZigZagScanGain_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
@@ -67,6 +59,11 @@ def _run(
     return RunRecord(cfg=cfg, result=ZigZagScanExp().run(cfg, context=context))
 
 
+def _ZigZagScanFreq_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_freq_form(ctx)
+
+
 GAIN_DEFINITION = Adapter(
     spec=ZigZagScanExp.AXES_SPEC,
     make_form=_ZigZagScanGain_make_form,
@@ -77,11 +74,6 @@ GAIN_DEFINITION = Adapter(
         options=lambda source, env: ZigZagScanAnalyzeParams(),
     ),
 )
-
-
-def _ZigZagScanFreq_make_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_freq_form(ctx)
 
 
 FREQ_DEFINITION = Adapter(

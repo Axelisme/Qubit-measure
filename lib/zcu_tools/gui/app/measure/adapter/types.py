@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Generic,
-    Protocol,
-    runtime_checkable,
 )
 
 from typing_extensions import TypeVar
@@ -73,45 +71,8 @@ class AdapterGuide:
     resource_dir: Path | None
 
 
-def _is_json_safe(val: object) -> bool:
-    """Return True if val can be serialized to JSON without loss."""
-    if isinstance(val, (int, float, str, bool, type(None))):
-        return True
-    if isinstance(val, dict):
-        return all(isinstance(k, str) and _is_json_safe(v) for k, v in val.items())
-    if isinstance(val, (list, tuple)):
-        return all(_is_json_safe(v) for v in val)
-    return False
-
-
-class AnalyzeResultBase:
-    """Mixin providing a default to_summary_dict() via dataclass reflection.
-
-    Automatically skips fields whose values are not JSON-safe (Figure, ndarray,
-    etc.). Adapter authors may override for custom formatting.
-    """
-
-    def to_summary_dict(self) -> dict[str, object]:
-        import dataclasses
-
-        result: dict[str, object] = {}
-        # tolerated: Result subclasses are dataclasses; this mixin reflects their declared fields.
-        for f in dataclasses.fields(self):  # pyright: ignore[reportArgumentType]
-            val = getattr(self, f.name)
-            if _is_json_safe(val):
-                result[f.name] = val
-        return result
-
-
-@runtime_checkable
-class AnalyzeResult(Protocol):
-    """Numeric analysis payload; figures belong to the operation's plots."""
-
-    def to_summary_dict(self) -> dict[str, object]: ...
-
-
 # None means no numeric result or no parameters; omitted slots use it too.
-T_AnalyzeResult = TypeVar("T_AnalyzeResult", bound=AnalyzeResult | None, default=None)
+T_AnalyzeResult = TypeVar("T_AnalyzeResult", default=None)
 T_AnalyzeParams = TypeVar("T_AnalyzeParams", default=None)
 
 
@@ -152,19 +113,11 @@ class AnalyzeRequest(Generic[T_Result, T_AnalyzeParams]):
 # ---------------------------------------------------------------------------
 
 
-class PostAnalyzeResultBase(AnalyzeResultBase):
-    """Mixin for post-analysis results — same JSON-safe ``to_summary_dict`` as
-    :class:`AnalyzeResultBase`. A distinct type so the framework / adapters never
-    confuse a post-analysis result with a primary analyze result, even though the
-    summary projection is identical."""
-
-
 # Post-analysis result / params type vars, mirroring T_AnalyzeResult /
 # T_AnalyzeParams. Both carry PEP 696 defaults so they may trail the
 # default-bearing T_AnalyzeResult in PostAnalyzeRequest's parameter list.
 T_PostAnalyzeResult = TypeVar(
     "T_PostAnalyzeResult",
-    bound=AnalyzeResult | None,
     default=None,
 )
 T_PostAnalyzeParams = TypeVar("T_PostAnalyzeParams", default=None)

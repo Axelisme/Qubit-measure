@@ -41,6 +41,8 @@ def diagnostic_window(
         BaseEventBus(),
         project_root=str(tmp_path),
     )
+    soccfg = make_mock_soccfg()
+    ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )

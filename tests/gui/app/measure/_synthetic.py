@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ModuleWriteback,
     ParameterWriteback,
     ParamMeta,
@@ -55,7 +54,7 @@ class SampleParams:
 
 
 @dataclass
-class SampleAnalysis(AnalyzeResultBase):
+class SampleAnalysis:
     peak: float
 
 

@@ -17,14 +17,13 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_models
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
@@ -33,7 +32,6 @@ from zcu_lab.v2.support.measure.mux_results import (
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
-from zcu_lab.v2.twotone.rabi.amp_rabi.gui import AmpRabiAnalyzeParams
 
 from .analysis import MuxAmpRabiFit
 from .core import MuxAmpRabiCfg, MuxAmpRabiExp
@@ -43,7 +41,7 @@ MuxAmpRabiRunResult: TypeAlias = RunRecord[MuxAmpRabiCfg, MuxSweepResult]
 
 
 class MuxAmpRabiFitSummary(MuxSummaryTone):
-    """Native fit estimates in experiment units and qualified owner quality."""
+    """Decode native per-tone JSON estimates and the fitting owner diagnostics."""
 
     pi_gain: float | None = Field(
         description="Owner pi_gain in gain; null retains an unavailable estimate."
@@ -61,71 +59,37 @@ class MuxAmpRabiFitSummary(MuxSummaryTone):
         description="Owner pi2_gain_err in gain; null retains an unavailable estimate."
     )
 
-    fit_quality: dict[str, FitQuality] | None
+    quality: FitQuality
 
 
 class MuxAmpRabiSummary(BaseModel):
-    """Owner tone rows in analysis order, retaining successes and failures."""
+    """Decode ordered native outcomes and the complete captured name list."""
 
-    tones: list[MuxAmpRabiFitSummary | MuxSummaryFailure]
+    outcomes: list[MuxAmpRabiFitSummary | MuxSummaryFailure]
+    names: list[str] | None
 
 
 @dataclass(frozen=True)
-class MuxAmpRabiAnalyzeResult(AnalyzeResultBase):
+class MuxAmpRabiAnalyzeResult:
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
 
     outcomes: tuple[MuxAmpRabiFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def summary(self) -> MuxAmpRabiSummary:
-        """Return native tone estimates/failures with fixed identities and owner quality."""
-        summaries: list[MuxAmpRabiFitSummary | MuxSummaryFailure] = []
-        for outcome in self.outcomes:
-            name = None if self.names is None else self.names[outcome.index]
-            element = (
-                None
-                if name is None
-                else ElementIdentity(index=outcome.index, name=name)
-            )
-            if isinstance(outcome, MuxFitFailure):
-                row = MuxSummaryFailure(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    failure=outcome.reason,
-                )
-            else:
-                row = MuxAmpRabiFitSummary(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    pi_gain=outcome.pi_gain,
-                    pi_gain_err=outcome.pi_gain_err,
-                    pi2_gain=outcome.pi2_gain,
-                    pi2_gain_err=outcome.pi2_gain_err,
-                    fit_quality=fit_quality_models(
-                        {"fit": outcome.quality},
-                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
-                    ),
-                )
-            summaries.append(row)
-        return MuxAmpRabiSummary(tones=summaries)
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the same owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
+def _MuxAmpRabi_options(
+    result: MuxAmpRabiRunResult, ctx: SessionEnv
+) -> AmpRabiAnalyzeOptions:
+    """Seed the analysis controls without changing the core defaults."""
+    del result, ctx
+    return AmpRabiAnalyzeOptions(skip=0)
 
 
 def _analyze(
-    req: AnalyzeRequest[MuxAmpRabiRunResult, AmpRabiAnalyzeParams],
-    *,
-    plots: Plots,
+    req: AnalyzeRequest[MuxAmpRabiRunResult, AmpRabiAnalyzeOptions], *, plots: Plots
 ) -> MuxAmpRabiAnalyzeResult:
     """Analyze the explicit Run/Load source, retaining each original-index outcome."""
-    params = req.analyze_params
-    outcomes = MuxAmpRabiExp().analyze(
-        req.run_result, AmpRabiAnalyzeOptions(skip=params.skip), plots=plots
-    )
+    outcomes = MuxAmpRabiExp().analyze(req.run_result, req.analyze_params, plots=plots)
     snapshot = req.run_result.cfg
     return MuxAmpRabiAnalyzeResult(
         outcomes,
@@ -212,8 +176,6 @@ DEFINITION = Adapter(
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze,
-        options=lambda source, env: AmpRabiAnalyzeParams(),
-        writeback=_get_writeback_items,
+        fn=_analyze, options=_MuxAmpRabi_options, writeback=_get_writeback_items
     ),
 )

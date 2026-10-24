@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
+    FreqGainAnalysis,
     FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
@@ -40,36 +40,21 @@ class RoOptFreqGainAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class RoOptFreqGainAnalyzeResult(AnalyzeResultBase):
-    best_freq: float
-    best_gain: float
-
-
-def _RoOptFreqGain_make_form(ctx: FormContext) -> Form[FreqGainCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _RoOptFreqGain_analyze(
     req: AnalyzeRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeParams],
     *,
     plots: Plots,
-) -> RoOptFreqGainAnalyzeResult:
+) -> FreqGainAnalysis:
     params = req.analyze_params
     options = FreqGainAnalyzeOptions(
         smooth=params.smooth,
         smooth_method=params.smooth_method,
     )
-    result = FreqGainExp().analyze(req.run_result, options, plots=plots)
-    return RoOptFreqGainAnalyzeResult(
-        best_freq=result.best_freq,
-        best_gain=result.best_gain,
-    )
+    return FreqGainExp().analyze(req.run_result, options, plots=plots)
 
 
 def _RoOptFreqGain_get_writeback_items(
-    req: WritebackRequest[RoOptFreqGainRunResult, RoOptFreqGainAnalyzeResult],
+    req: WritebackRequest[RoOptFreqGainRunResult, FreqGainAnalysis],
 ) -> Sequence[WritebackItem]:
     result = req.analyze_result
     items: list[WritebackItem] = [
@@ -95,6 +80,11 @@ def _RoOptFreqGain_get_writeback_items(
         )
     )
     return items
+
+
+def _RoOptFreqGain_make_form(ctx: FormContext) -> Form[FreqGainCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(

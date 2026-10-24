@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-24，實驗表單平鋪與 pulse Advanced
+**Last updated:** 2026-10-25，native 分析摘要與 mux/onetone core 分工
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -21,9 +21,18 @@
 
 ## 套件邊界
 
-每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。`gui.py` 以具名參數宣告可選的 measure-gui Adapter 值，接上 Form、run、guide 與 Analysis／Interactive／PostAnalysis。Core 擁有 run 與 analyze 的計算，GUI 只接線、解析來源與決定 writeback。Mux/onetone 的既有分析搬家另行處理，尚未完成。Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
+每個實驗有自己的資料夾。`core.py` 擁有 cfg、Result、量測與分析政策。
+`gui.py` 以具名參數宣告可選的 measure-gui Adapter 值，接上 Form、run、guide 與 Analysis／Interactive／PostAnalysis。
+Core 擁有 run 與 analyze 的計算，GUI 只接線、解析來源與決定 writeback。
+Mux/onetone core 也擁有逐 tone 數值 outcomes 與擬合失敗隔離。
+GUI 只接線、解析固定 capture 的 route prior／resonator 來源與提出 writeback。
+Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
+
+Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已退休的實驗 serializer 或結果 base。
+結果根為 dataclass、pydantic model 或字串 key 的 Mapping，summary 是 strict JSON object，key 沿用原生欄位名。
+非有限數值轉為 null，Live RPC 另以 `invalid` 回報路徑。保存文件只含 pane、parameters、summary，不保存 invalid。
 
 ## 即時圖工具
 

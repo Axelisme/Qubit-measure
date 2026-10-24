@@ -1,6 +1,6 @@
 # Measure GUI contracts
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** lab-author、framework-dev、agent。查閱 concrete adapter 的來源、分析、writeback 與 capability 契約。
 
@@ -52,7 +52,7 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
   已定案且供多個 Form 共用的初值政策也可集中在具名 domain helper，目前限 T1 時間尺度選源與 Rabi 的來源、有效性及首次初值。
   各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
   本 package 不擁有 registry order，也不 import concrete adapter。
-- `support/resonator.py` 不依賴 GUI，供 onetone/freq core 與 mux adapter 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `support/measure/` 載入 GUI。
+- `support/resonator.py` 不依賴 GUI，供 onetone/freq 與 mux/onetone core 共用模型／畫圖 mechanics。Selection、delay mode 與 writeback policy 留 caller，不讓 core 經 `support/measure/` 載入 GUI。
 - `../definitions.py` 明確列出可重載的 adapter catalog；`../components/` 擁有 startup-only component schema 註冊。
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `Adapter` 與 `support/measure/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
@@ -78,7 +78,10 @@ Primary options 在成功 Run／Load 後建立表單時生成一次，post 在 p
 Schema 查詢、JSON 重建與分析點擊不重跑生成函式。使用者編輯後的物件交給 fn。
 無 options 時表單為空但分析仍可用。既有三個歷史預設生成器已接入；
 16 個分析執行時讀歷史的 wrapper 尚保留，後續清理才會移到 options 生成階段。
-Save／MCP 仍使用現行 to_summary_dict；新增的通用 converter 尚未接入 consumer。
+Save／MCP 將 native 分析結果交給單一 `summarize_analysis`，不再呼叫實驗 serializer，也不要求結果 base。
+結果根須為 dataclass、pydantic model 或字串 key 的 Mapping，summary 固定為 strict JSON object。
+Converter 依原生欄位名轉換，非有限數值轉為 null。Live RPC 的 `invalid` 回報對應路徑，
+保存文件只含 pane、parameters、summary，不保存 invalid；重開存檔只看得到 null。
 
 [`LoadService`](../../lib/zcu_tools/gui/app/measure/services/load.py) 保留目前表單與其固定來源，
 不從 loaded record.cfg 回填。分析與 WB 的來源另依檔案 history 固定；同 entry 有 point 時讀取
@@ -88,6 +91,10 @@ Save／MCP 仍使用現行 to_summary_dict；新增的通用 converter 尚未接
 [experiment artifacts owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料) 負責。
 
 ## Mux OneTone
+
+`MuxOnetoneExp.analyze` 擁有逐 tone 數值計算、失敗隔離與 `MuxOnetoneAnalysis.outcomes`。
+GUI 只接線、解析固定 capture 的 route prior／resonator 來源及提出 writeback，不重建 fit。
+Route prior 查詢錯誤使整次分析失敗，只有數值擬合例外按 tone 隔離。
 
 MuxGroup 的必填 resonators 保存有序 resonator 名稱。選填 qubits 由 model 檢查等長與重複 qubit。提供時，Mux OneTone 的 Form 在 Open／Reset 以固定 ParameterContext 逐項檢查 component 存在、qubit／resonator kind 和 qubit.resonator 對應，缺失或 null 同樣拒絕。錯誤指名欄位、index 與實際值，不另加 framework 外部反紅機制。無 qubits 時不套這些跨 component 檢查，也不額外拒絕重複 resonator。
 

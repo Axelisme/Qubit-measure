@@ -157,18 +157,18 @@ async def mux_twotone_spectrum(
             writeback_applied = bool(receipt.items)
 
         tones: list[MuxTwotoneSpectrumToneReport] = []
-        for outcome in fit.result.tones:
-            name = outcome.name
+        for outcome in fit.result.outcomes:
+            name = None if fit.result.names is None else fit.result.names[outcome.index]
             if isinstance(outcome, MuxSummaryFailure):
                 tones.append(
                     MuxTwotoneSpectrumToneReport(
-                        index=outcome.position, name=name, failure=outcome.failure
+                        index=outcome.index, name=name, failure=outcome.reason
                     )
                 )
             else:
                 tones.append(
                     MuxTwotoneSpectrumToneReport(
-                        index=outcome.position,
+                        index=outcome.index,
                         name=name,
                         freq=report_number(outcome.freq),
                         freq_err=report_number(outcome.freq_err),

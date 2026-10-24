@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -21,6 +20,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.reset.bath.freq.core import (
+    FreqGainAnalysis,
     FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
@@ -39,35 +39,23 @@ class BathFreqGainAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class BathFreqGainAnalyzeResult(AnalyzeResultBase):
-    gain: float
-    freq: float
-
-
-def _BathFreqGain_make_form(ctx: FormContext) -> Form[FreqGainCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _BathFreqGain_analyze(
     req: AnalyzeRequest[BathFreqGainRunResult, BathFreqGainAnalyzeParams],
     *,
     plots: Plots,
-) -> BathFreqGainAnalyzeResult:
+) -> FreqGainAnalysis:
     params = req.analyze_params
-    analysis = FreqGainExp().analyze(
+    return FreqGainExp().analyze(
         req.run_result,
         FreqGainAnalyzeOptions(
             smooth=params.smooth, smooth_method=params.smooth_method
         ),
         plots=plots,
     )
-    return BathFreqGainAnalyzeResult(gain=analysis.gain, freq=analysis.freq)
 
 
 def _BathFreqGain_get_writeback_items(
-    req: WritebackRequest[BathFreqGainRunResult, BathFreqGainAnalyzeResult],
+    req: WritebackRequest[BathFreqGainRunResult, FreqGainAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose this analysis's cavity gain then frequency to qubit ext."""
     result = req.analyze_result
@@ -84,6 +72,11 @@ def _BathFreqGain_get_writeback_items(
         ),
     ]
     return items
+
+
+def _BathFreqGain_make_form(ctx: FormContext) -> Form[FreqGainCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(

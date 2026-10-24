@@ -11,7 +11,6 @@ from zcu_tools.mcp.measure.recipe_api import (
     RecipeReport,
     RecipeSession,
     recipe,
-    report_number,
 )
 
 from zcu_lab.v2.onetone.range_find.gui import RangeFindSummary, ResonatorDipSummary
@@ -130,16 +129,9 @@ async def onetone_range_find(
                 receipt.raise_for_error()
                 applied = bool(receipt.items)
         return OnetoneRangeFindReport(
-            resonators=[
-                ResonatorDipSummary(
-                    name=dip.name,
-                    freq=report_number(dip.freq),
-                    depth=report_number(dip.depth),
-                )
-                for dip in fit.result.resonators
-            ],
+            resonators=list(fit.result.dips),
             identity_diagnostic=fit.result.identity_diagnostic,
-            writeback_diagnostic=fit.result.writeback_diagnostic,
+            writeback_diagnostic=fit.result.diagnostic,
             writeback_applied=applied,
         )
     finally:

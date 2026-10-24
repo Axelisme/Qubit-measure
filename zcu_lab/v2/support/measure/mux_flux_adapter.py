@@ -86,20 +86,6 @@ class MuxFluxPickResult(FluxPickResult):
     tone: int
     qubit: str
 
-    def summary(self) -> MuxFluxPickSummary:
-        """Return picked native DC lines without changing calibration or identity."""
-        return MuxFluxPickSummary(
-            tone=self.tone,
-            qubit=self.qubit,
-            flx_half=self.flx_half,
-            flx_int=self.flx_int,
-            flx_period=self.flx_period,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the named picker summary for GUI and recipe consumers."""
-        return self.summary().model_dump()
-
 
 type MuxFluxCfg = (
     GlobalFluxCfg[MuxFrequencyOffsetCfg]

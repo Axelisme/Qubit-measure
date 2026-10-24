@@ -20,6 +20,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.resources.entry import ArtifactKey
 
+from ..summary import summarize_analysis
 from ..writeback import WritebackItem
 from .hooks import (
     AnalyzeHook,
@@ -35,7 +36,6 @@ from .types import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResult,
     PostAnalyzeRequest,
     PostWritebackRequest,
     WritebackRequest,
@@ -43,7 +43,7 @@ from .types import (
 
 
 @dataclass(frozen=True, kw_only=True)
-class _PrimaryStage[C: ConfigBase, R, O, A: AnalyzeResult | None](ABC):
+class _PrimaryStage[C: ConfigBase, R, O, A](ABC):
     """Hide only interactive state S, retaining source/options/result linkage."""
 
     options: Callable[[RunRecord[C, R], SessionEnv], O] | None = None
@@ -69,13 +69,13 @@ class _PrimaryStage[C: ConfigBase, R, O, A: AnalyzeResult | None](ABC):
 
 
 @dataclass(frozen=True, kw_only=True)
-class Analysis[C: ConfigBase, R, O, A: AnalyzeResult | None](_PrimaryStage[C, R, O, A]):
+class Analysis[C: ConfigBase, R, O, A](_PrimaryStage[C, R, O, A]):
     """Frozen synchronous primary analysis declaration.
 
     fn receives AnalyzeRequest with the retained RunRecord, edited options and
-    fixed parameters, plus keyword-only plots. It returns an AnalyzeResult or
-    None for figures-only output. Callback failures propagate to the caller;
-    the host owns result adoption and preservation of previous output on failure.
+    fixed parameters, plus keyword-only plots. It returns a dataclass instance,
+    pydantic model or Mapping, or None for figures-only output. Callback failures
+    propagate; the host adopts results and preserves previous output on failure.
 
     options, inherited from the primary stage, is an optional (source, env)
     generator. The host calls it once when preparing a successful Run/Load
@@ -106,9 +106,7 @@ class Analysis[C: ConfigBase, R, O, A: AnalyzeResult | None](_PrimaryStage[C, R,
 
 
 @dataclass(frozen=True, kw_only=True)
-class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
-    _PrimaryStage[C, R, O, A]
-):
+class Interactive[C: ConfigBase, R, O, A, S](_PrimaryStage[C, R, O, A]):
     """Frozen interactive primary declaration, with state S hidden from Adapter.
 
     plugin receives the retained AnalyzeRequest and keyword-only plots and
@@ -169,16 +167,17 @@ class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
 class PostAnalysis[
     C: ConfigBase,
     R,
-    A: AnalyzeResult | None,
+    A,
     O,
-    P: AnalyzeResult | None,
+    P,
 ]:
     """Frozen second-stage declaration tied to an adopted primary result.
 
     fn receives PostAnalyzeRequest with the retained RunRecord, adopted primary,
     edited post options and fixed parameters, plus keyword-only plots. It returns
-    an AnalyzeResult or None for figures-only output. Callback failures propagate;
-    the host preserves the previous committed pane when execution fails.
+    a dataclass instance, pydantic model or Mapping, or None for figures-only
+    output. Callback failures propagate; the host preserves the previous
+    committed pane when execution fails.
 
     options is an optional (source, primary, env) generator. The host invokes it
     once when preparing the form after the corresponding primary succeeds.
@@ -202,9 +201,9 @@ class PostAnalysis[
 T_Cfg = TypeVar("T_Cfg", bound=ConfigBase)
 T_Result = TypeVar("T_Result")
 T_Options = TypeVar("T_Options", default=None)
-T_Analysis = TypeVar("T_Analysis", bound=AnalyzeResult | None, default=None)
+T_Analysis = TypeVar("T_Analysis", default=None)
 T_PostOptions = TypeVar("T_PostOptions", default=None)
-T_PostAnalysis = TypeVar("T_PostAnalysis", bound=AnalyzeResult | None, default=None)
+T_PostAnalysis = TypeVar("T_PostAnalysis", default=None)
 T_Input = TypeVar("T_Input", bound=ConfigBase, default=T_Cfg)
 
 
@@ -436,15 +435,14 @@ class Adapter(
     ) -> AnalysisItem:
         """Hand over one pane's historical inputs and summary under its assigned key.
 
-        result is None for figures-only analysis, producing an empty summary,
-        or implements AnalyzeResult.to_summary_dict. parameters is the
-        dataclass instance used for that result, or None for no inputs, never
-        the next edited draft. Unsupported input/result types raise TypeError;
-        invalid/non-finite JSON raises ValueError. The datafile model isolates
-        containers once; this projection neither reads live context nor writes files.
+        result is the committed native result, or None for figures-only output.
+        The framework converter retains declared fields and replaces non-finite
+        numbers with null. Invalid-number paths belong to live RPC, not this
+        historical document. parameters is the dataclass used for that result,
+        or None for no inputs, never the next edited draft. Unsupported inputs
+        or result fields raise TypeError with the converter's field path.
+        This projection neither reads live context nor writes files.
         """
-        if result is not None and not isinstance(result, AnalyzeResult):
-            raise TypeError("Analysis result must implement to_summary_dict")
         if parameters is None:
             inputs: dict[str, object] = {}
         elif dataclasses.is_dataclass(parameters) and not isinstance(parameters, type):
@@ -460,7 +458,7 @@ class Adapter(
             {
                 "pane": pane,
                 "parameters": inputs,
-                "summary": {} if result is None else result.to_summary_dict(),
+                "summary": summarize_analysis({} if result is None else result).summary,
             }
         )
         return AnalysisItem(key, document)

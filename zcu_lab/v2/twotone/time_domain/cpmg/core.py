@@ -102,9 +102,11 @@ class CPMG_Cfg(ConfigBase):
 
 @dataclass(frozen=True)
 class CPMGAnalyzeOptions:
-    fit_fringe: bool = True
-    t2r: float | None = None
-    t1: float | None = None
+    """Fringe fitting and optional reference coherence times in us."""
+
+    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringes")] = True
+    t2r: Annotated[float | None, FieldMeta(label="Ramsey T2 reference (us)")] = None
+    t1: Annotated[float | None, FieldMeta(label="T1 reference (us)")] = None
 
 
 @dataclass(frozen=True)

@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, TypeAlias
+from typing import TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
-    ParamMeta,
     SampleWriteback,
     WritebackItem,
     WritebackRequest,
@@ -23,7 +22,6 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyAnalyzeOptions,
     T2RamseyCfg,
@@ -39,14 +37,8 @@ logger = logging.getLogger(__name__)
 T2RamseyRunResult: TypeAlias = RunRecord[T2RamseyCfg, T2RamseyResult]
 
 
-@dataclass
-class T2RamseyAnalyzeParams:
-    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = True
-
-
 class T2RamseySummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     t2r: float | None = Field(
         description="Owner t2r in us; null retains an unavailable estimate."
@@ -64,50 +56,29 @@ class T2RamseySummary(BaseModel):
 
 
 @dataclass
-class T2RamseyAnalyzeResult(AnalyzeResultBase):
+class T2RamseyAnalyzeResult:
     t2r: float
     t2r_err: float
     # ``detune`` is the fitted fringe frequency (MHz); meaningful only when the
     # fringe fit ran (``fit_fringe`` True). Decay-only fits report 0.0.
     detune: float
     fit_fringe: bool
-    fit_quality: dict[str, dict[str, object]] | None = None
-
-    def summary(self) -> T2RamseySummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return T2RamseySummary(
-            t2r=self.t2r,
-            t2r_err=self.t2r_err,
-            detune=self.detune,
-            fit_fringe=self.fit_fringe,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
-
-
-def _T2Ramsey_make_form(ctx: FormContext) -> Form[T2RamseyInput]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 def _T2Ramsey_analyze(
-    req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeParams],
-    *,
-    plots: Plots,
+    req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeOptions], *, plots: Plots
 ) -> T2RamseyAnalyzeResult:
     params = req.analyze_params
     analysis = T2RamseyExp().analyze(
         req.run_result,
-        T2RamseyAnalyzeOptions(
-            fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
-        ),
+        req.analyze_params,
         plots=plots,
     )
     return T2RamseyAnalyzeResult(
         t2r=analysis.t2r,
         t2r_err=analysis.t2r_err,
-        fit_quality=fit_quality_summary(analysis.fit_quality),
+        fit_quality=analysis.fit_quality,
         detune=analysis.detune,
         fit_fringe=params.fit_fringe,
     )
@@ -164,9 +135,9 @@ def _T2Ramsey_get_writeback_items(
     if parameters is not None:
         items.append(
             SampleWriteback(
-                coordinate_device="$qubit.flux_source",
                 target_name=parameters.resolve_path("$qubit"),
                 description="T2 Ramsey sample at the captured bias",
+                coordinate_device="$qubit.flux_source",
                 proposed_value={
                     "t2r_us": result.t2r,
                     "t2r_err_us": result.t2r_err,
@@ -174,6 +145,11 @@ def _T2Ramsey_get_writeback_items(
             )
         )
     return items
+
+
+def _T2Ramsey_make_form(ctx: FormContext) -> Form[T2RamseyInput]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(
@@ -215,7 +191,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_T2Ramsey_analyze,
-        options=lambda source, env: T2RamseyAnalyzeParams(),
+        options=lambda source, env: T2RamseyAnalyzeOptions(),
         writeback=_T2Ramsey_get_writeback_items,
     ),
 )

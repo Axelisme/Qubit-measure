@@ -7,7 +7,6 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -17,33 +16,26 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.jpa.freq.core import FreqCfg, FreqExp, FreqResult
+from zcu_lab.v2.jpa.freq.core import FreqAnalysis, FreqCfg, FreqExp, FreqResult
 from zcu_lab.v2.jpa.freq.form import make_form
 
 JpaFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-@dataclass
-class JpaFreqAnalyzeResult(AnalyzeResultBase):
-    best_freq: float
-
-
 def _analyze(
     req: AnalyzeRequest[JpaFreqRunResult, None], *, plots: Plots
-) -> JpaFreqAnalyzeResult:
-    answer = FreqExp().analyze(req.run_result, None, plots=plots)
-    return JpaFreqAnalyzeResult(best_freq=answer.best_freq)
+) -> FreqAnalysis:
+    return FreqExp().analyze(req.run_result, None, plots=plots)
 
 
 def _get_writeback_items(
-    req: WritebackRequest[JpaFreqRunResult, JpaFreqAnalyzeResult],
+    req: WritebackRequest[JpaFreqRunResult, FreqAnalysis],
 ) -> Sequence[WritebackItem]:
     return [
         ParameterWriteback(

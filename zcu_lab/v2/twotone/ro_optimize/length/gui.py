@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.length.core import (
+    LengthAnalysis,
     LengthAnalyzeOptions,
     LengthCfg,
     LengthExp,
@@ -44,35 +44,20 @@ class RoOptLengthAnalyzeParams:
     duration_t0: Annotated[float | None, ParamMeta(label="Duration t0 (us)")] = None
 
 
-@dataclass
-class RoOptLengthAnalyzeResult(AnalyzeResultBase):
-    best_length: float
-
-
-def _RoOptLength_make_form(ctx: FormContext) -> Form[LengthCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _RoOptLength_analyze(
-    req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams],
-    *,
-    plots: Plots,
-) -> RoOptLengthAnalyzeResult:
+    req: AnalyzeRequest[RoOptLengthRunResult, RoOptLengthAnalyzeParams], *, plots: Plots
+) -> LengthAnalysis:
     params = req.analyze_params
     options = LengthAnalyzeOptions(
         t0=params.duration_t0,
         smooth=params.smooth,
         smooth_method=params.smooth_method,
     )
-    result = LengthExp().analyze(req.run_result, options, plots=plots)
-    return RoOptLengthAnalyzeResult(
-        best_length=result.best_length,
-    )
+    return LengthExp().analyze(req.run_result, options, plots=plots)
 
 
 def _RoOptLength_get_writeback_items(
-    req: WritebackRequest[RoOptLengthRunResult, RoOptLengthAnalyzeResult],
+    req: WritebackRequest[RoOptLengthRunResult, LengthAnalysis],
 ) -> Sequence[WritebackItem]:
     result = req.analyze_result
     items: list[WritebackItem] = [
@@ -90,6 +75,11 @@ def _RoOptLength_get_writeback_items(
         )
     )
     return items
+
+
+def _RoOptLength_make_form(ctx: FormContext) -> Form[LengthCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: LengthCfg, *, context: RunContext) -> RunRecord[LengthCfg, LengthResult]:

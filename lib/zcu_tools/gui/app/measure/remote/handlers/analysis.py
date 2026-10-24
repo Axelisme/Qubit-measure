@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
-from math import isfinite
 from typing import TYPE_CHECKING, Literal, cast
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
@@ -12,6 +11,7 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
     describe_analyze_params,
     reconstruct_params,
 )
+from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ..analysis_types import AnalysisPresentation
@@ -25,31 +25,12 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 
-def _summary_to_wire(summary: object) -> dict[str, object]:
-    if not isinstance(summary, Mapping):
-        raise RemoteError(ErrorCode.INTERNAL, "analysis summary must be an object")
-    invalid: list[dict[str, str]] = []
-
-    def project(value: object, path: str) -> object:
-        if isinstance(value, float) and not isfinite(value):
-            invalid.append({"path": path, "reason": "non_finite"})
-            return None
-        if isinstance(value, Mapping):
-            projected: dict[str, object] = {}
-            for key, item in value.items():
-                if not isinstance(key, str):
-                    raise RemoteError(
-                        ErrorCode.INTERNAL, "analysis summary keys must be strings"
-                    )
-                projected[key] = project(item, f"{path}.{key}")
-            return projected
-        if isinstance(value, (list, tuple)):
-            return [
-                project(item, f"{path}[{index}]") for index, item in enumerate(value)
-            ]
-        return value
-
-    return {"summary": project(summary, "summary"), "invalid": invalid}
+def _summary_to_wire(result: object) -> dict[str, object]:
+    projected = summarize_analysis(result)
+    return {
+        "summary": projected.summary,
+        "invalid": [asdict(issue) for issue in projected.invalid],
+    }
 
 
 def _params_to_wire(params: object) -> dict[str, object] | None:
@@ -107,16 +88,7 @@ def h_tab_get_analyze_result(
         snap.interaction is None or not snap.interaction.has_analyze_result
     ):
         return {"summary": None, "invalid": []}
-    if result is None:
-        reply = _summary_to_wire({})
-    else:
-        to_summary = getattr(result, "to_summary_dict", None)
-        if not callable(to_summary):
-            raise RemoteError(
-                ErrorCode.INTERNAL,
-                "analyze result does not implement to_summary_dict()",
-            )
-        reply = _summary_to_wire(to_summary())
+    reply = _summary_to_wire({} if result is None else result)
     if operation_id is not None:
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.analysis
@@ -205,16 +177,7 @@ def h_tab_get_post_analyze_result(
         snap.interaction is None or not snap.interaction.has_post_analyze_result
     ):
         return {"summary": None, "invalid": []}
-    if result is None:
-        reply = _summary_to_wire({})
-    else:
-        to_summary = getattr(result, "to_summary_dict", None)
-        if not callable(to_summary):
-            raise RemoteError(
-                ErrorCode.INTERNAL,
-                "post-analysis result does not implement to_summary_dict()",
-            )
-        reply = _summary_to_wire(to_summary())
+    reply = _summary_to_wire({} if result is None else result)
     if operation_id is not None:
         snap = control.get_tab_snapshot(tab_id)
         pane = snap.post_analysis

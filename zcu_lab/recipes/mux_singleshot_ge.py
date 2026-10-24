@@ -174,23 +174,21 @@ async def mux_singleshot_ge(
 def _primary_tone_reports(result: MuxGESummary) -> list[MuxGEToneReport]:
     """Project native Primary outcomes in order, keeping identities and failures."""
     tones: list[MuxGEToneReport] = []
-    for outcome in result.tones:
-        name = outcome.name
+    for outcome in result.outcomes:
+        name = None if result.names is None else result.names[outcome.index]
         if isinstance(outcome, MuxSummaryFailure):
             tones.append(
-                MuxGEToneReport(
-                    index=outcome.position, name=name, failure=outcome.failure
-                )
+                MuxGEToneReport(index=outcome.index, name=name, failure=outcome.reason)
             )
         else:
             tones.append(
                 MuxGEToneReport(
-                    index=outcome.position,
+                    index=outcome.index,
                     name=name,
-                    fidelity=report_number(outcome.fidelity),
-                    theta=report_number(outcome.theta),
-                    threshold=report_number(outcome.threshold),
-                    ge_s=report_number(outcome.ge_s),
+                    fidelity=report_number(outcome.primary.fidelity),
+                    theta=report_number(outcome.primary.theta),
+                    threshold=report_number(outcome.primary.threshold),
+                    ge_s=report_number(outcome.primary.ge_s),
                 )
             )
     return tones
@@ -199,20 +197,20 @@ def _primary_tone_reports(result: MuxGESummary) -> list[MuxGEToneReport]:
 def _post_tone_reports(result: MuxGEPostSummary) -> list[MuxGEPostToneReport]:
     """Project native Post radii separately, without pairing them to Primary rows."""
     post_tones: list[MuxGEPostToneReport] = []
-    for outcome in result.tones:
-        name = outcome.name
+    for outcome in result.outcomes:
+        name = None if result.names is None else result.names[outcome.index]
         if isinstance(outcome, MuxSummaryFailure):
             post_tones.append(
                 MuxGEPostToneReport(
-                    index=outcome.position, name=name, failure=outcome.failure
+                    index=outcome.index, name=name, failure=outcome.reason
                 )
             )
         else:
             post_tones.append(
                 MuxGEPostToneReport(
-                    index=outcome.position,
+                    index=outcome.index,
                     name=name,
-                    ge_radius=report_number(outcome.ge_radius),
+                    ge_radius=report_number(outcome.post.confusion.radius),
                 )
             )
     return post_tones

@@ -8,7 +8,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     PostAnalysis,
     PostAnalyzeRequest,
-    PostAnalyzeResultBase,
     SessionEnv,
 )
 from zcu_tools.plotting.plots import Plots
@@ -26,7 +25,7 @@ from ._helpers import Fixture, call, open_client
 
 
 @dataclass
-class TonePostAnalysis(PostAnalyzeResultBase):
+class TonePostAnalysis:
     peak: float
 
 

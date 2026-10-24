@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Literal, TypeAlias
+from typing import TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
@@ -15,9 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
-    ParamMeta,
     SampleWriteback,
     WritebackItem,
     WritebackRequest,
@@ -25,8 +22,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
+    T2EchoAnalysis,
     T2EchoAnalyzeOptions,
     T2EchoCfg,
     T2EchoExp,
@@ -37,21 +34,12 @@ from .form import T2EchoInput, make_form
 
 logger = logging.getLogger(__name__)
 
+
 T2EchoRunResult: TypeAlias = RunRecord[T2EchoCfg, T2EchoResult]
 
 
-@dataclass
-class T2EchoAnalyzeParams:
-    fit_method: Annotated[Literal["fringe", "decay"], ParamMeta(label="Fit method")] = (
-        "decay"
-    )
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = (
-        False
-    )
-
-
 class T2EchoSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     t2e: float | None = Field(
         description="Owner t2e in us; null retains an unavailable estimate."
@@ -60,26 +48,6 @@ class T2EchoSummary(BaseModel):
     t2e_err: float | None = Field(
         description="Owner t2e_err in us; null retains an unavailable estimate."
     )
-
-
-@dataclass
-class T2EchoAnalyzeResult(AnalyzeResultBase):
-    t2e: float
-    t2e_err: float
-    fit_quality: Mapping[str, FitQuality] | None = None
-
-    def summary(self) -> T2EchoSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return T2EchoSummary(
-            t2e=self.t2e,
-            t2e_err=self.t2e_err,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {
-            **self.summary().model_dump(),
-            "fit_quality": fit_quality_summary(self.fit_quality),
-        }
 
 
 def coherence_review_note(
@@ -124,31 +92,18 @@ def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
     return reasons
 
 
-def _T2Echo_make_form(ctx: FormContext) -> Form[T2EchoInput]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _T2Echo_analyze(
-    req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeParams],
-    *,
-    plots: Plots,
-) -> T2EchoAnalyzeResult:
-    params = req.analyze_params
-    analysis = T2EchoExp().analyze(
+    req: AnalyzeRequest[T2EchoRunResult, T2EchoAnalyzeOptions], *, plots: Plots
+) -> T2EchoAnalysis:
+    return T2EchoExp().analyze(
         req.run_result,
-        T2EchoAnalyzeOptions(fit_method=params.fit_method, fit_phase=params.fit_phase),
+        req.analyze_params,
         plots=plots,
-    )
-    return T2EchoAnalyzeResult(
-        t2e=analysis.t2e,
-        t2e_err=analysis.t2e_err,
-        fit_quality=analysis.fit_quality,
     )
 
 
 def _T2Echo_get_writeback_items(
-    req: WritebackRequest[T2EchoRunResult, T2EchoAnalyzeResult],
+    req: WritebackRequest[T2EchoRunResult, T2EchoAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose fitted T2E in us and a sample for the Run's resolved $qubit.
 
@@ -177,9 +132,9 @@ def _T2Echo_get_writeback_items(
     if parameters is not None:
         items.append(
             SampleWriteback(
-                coordinate_device="$qubit.flux_source",
                 target_name=parameters.resolve_path("$qubit"),
                 description="T2 Echo sample at the captured bias",
+                coordinate_device="$qubit.flux_source",
                 proposed_value={
                     "t2e_us": result.t2e,
                     "t2e_err_us": result.t2e_err,
@@ -189,6 +144,11 @@ def _T2Echo_get_writeback_items(
             )
         )
     return items
+
+
+def _T2Echo_make_form(ctx: FormContext) -> Form[T2EchoInput]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(
@@ -231,7 +191,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_T2Echo_analyze,
-        options=lambda source, env: T2EchoAnalyzeParams(),
+        options=lambda source, env: T2EchoAnalyzeOptions(),
         writeback=_T2Echo_get_writeback_items,
     ),
 )

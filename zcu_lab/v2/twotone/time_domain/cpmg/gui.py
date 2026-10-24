@@ -1,36 +1,19 @@
 """CPMG measurement, saved-source coherence fitting and operator guide."""
 
-from dataclasses import dataclass
-from math import isfinite
 from pathlib import Path
-from typing import Annotated, TypeAlias
+from typing import TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    Adapter,
-    Analysis,
-    AnalyzeRequest,
-    AnalyzeResultBase,
-    ParamMeta,
-)
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from .core import CPMG_Cfg, CPMG_Exp, CPMG_Result, CPMGAnalyzeOptions
+from .core import CPMG_Cfg, CPMG_Exp, CPMG_Result, CPMGAnalysis, CPMGAnalyzeOptions
 from .form import CPMGInput, make_form
 
 CPMGRunResult: TypeAlias = RunRecord[CPMG_Cfg, CPMG_Result]
-
-
-@dataclass
-class CPMGAnalyzeParams:
-    """Fringe fitting and optional reference coherence times in us."""
-
-    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringes")] = True
-    t2r: Annotated[float | None, ParamMeta(label="Ramsey T2 reference (us)")] = None
-    t1: Annotated[float | None, ParamMeta(label="T1 reference (us)")] = None
 
 
 class CPMGSummary(BaseModel):
@@ -48,53 +31,24 @@ class CPMGSummary(BaseModel):
     )
 
     t2errs: list[float | None] = Field(
-        description="T2 fit uncertainty in us, aligned with ns and t2s; null when unavailable."
+        description="Native T2 fit uncertainty in us, aligned with ns and t2s; nonfinite values are null. A rejected T2 row may retain zero uncertainty."
     )
 
 
-@dataclass
-class CPMGAnalyzeResult(AnalyzeResultBase):
-    """Pi-pulse counts and fitted T2/error in us; rejected rows are null."""
-
-    ns: list[int]
-    t2s: list[float | None]
-    t2errs: list[float | None]
-
-    def summary(self) -> CPMGSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return CPMGSummary(
-            ns=self.ns,
-            t2s=self.t2s,
-            t2errs=self.t2errs,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
+def _CPMG_analyze(
+    req: AnalyzeRequest[CPMGRunResult, CPMGAnalyzeOptions], *, plots: Plots
+) -> CPMGAnalysis:
+    """Fit the saved run and publish T2 per count, without changing calibration."""
+    return CPMG_Exp().analyze(
+        req.run_result,
+        req.analyze_params,
+        plots=plots,
+    )
 
 
 def _CPMG_make_form(ctx: FormContext) -> Form[CPMGInput]:
     """Build shared time-window controls and captured module selections."""
     return make_form(ctx)
-
-
-def _CPMG_analyze(
-    req: AnalyzeRequest[CPMGRunResult, CPMGAnalyzeParams], *, plots: Plots
-) -> CPMGAnalyzeResult:
-    """Fit the saved run and publish T2 per count, without changing calibration."""
-    params = req.analyze_params
-    result = CPMG_Exp().analyze(
-        req.run_result,
-        CPMGAnalyzeOptions(fit_fringe=params.fit_fringe, t2r=params.t2r, t1=params.t1),
-        plots=plots,
-    )
-    return CPMGAnalyzeResult(
-        ns=result.ns.tolist(),
-        t2s=[float(value) if isfinite(value) else None for value in result.t2s],
-        t2errs=[
-            float(error) if isfinite(value) else None
-            for value, error in zip(result.t2s, result.t2errs, strict=True)
-        ],
-    )
 
 
 def _run(inp: CPMGInput, *, context: RunContext) -> RunRecord[CPMG_Cfg, CPMG_Result]:
@@ -122,6 +76,6 @@ DEFINITION = Adapter(
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_CPMG_analyze, options=lambda source, env: CPMGAnalyzeParams()
+        fn=_CPMG_analyze, options=lambda source, env: CPMGAnalyzeOptions()
     ),
 )

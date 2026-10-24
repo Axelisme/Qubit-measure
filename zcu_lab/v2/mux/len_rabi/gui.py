@@ -17,14 +17,13 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_models
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
@@ -33,7 +32,6 @@ from zcu_lab.v2.support.measure.mux_results import (
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
-from zcu_lab.v2.twotone.rabi.len_rabi.gui import LenRabiAnalyzeParams
 
 from .analysis import MuxLenRabiFit
 from .core import MuxLenRabiCfg, MuxLenRabiExp
@@ -43,7 +41,7 @@ MuxLenRabiRunResult: TypeAlias = RunRecord[MuxLenRabiCfg, MuxSweepResult]
 
 
 class MuxLenRabiFitSummary(MuxSummaryTone):
-    """Native fit estimates in experiment units and qualified owner quality."""
+    """Decode native per-tone JSON estimates and the fitting owner diagnostics."""
 
     pi_len: float | None = Field(
         description="Owner pi_len in us; null retains an unavailable estimate."
@@ -69,73 +67,39 @@ class MuxLenRabiFitSummary(MuxSummaryTone):
         description="Owner rabi_f_err in MHz; null retains an unavailable estimate."
     )
 
-    fit_quality: dict[str, FitQuality] | None
+    quality: FitQuality
 
 
 class MuxLenRabiSummary(BaseModel):
-    """Owner tone rows in analysis order, retaining successes and failures."""
+    """Decode ordered native outcomes and the complete captured name list."""
 
-    tones: list[MuxLenRabiFitSummary | MuxSummaryFailure]
+    outcomes: list[MuxLenRabiFitSummary | MuxSummaryFailure]
+    names: list[str] | None
 
 
 @dataclass(frozen=True)
-class MuxLenRabiAnalyzeResult(AnalyzeResultBase):
+class MuxLenRabiAnalyzeResult:
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
 
     outcomes: tuple[MuxLenRabiFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def summary(self) -> MuxLenRabiSummary:
-        """Return native tone estimates/failures with fixed identities and owner quality."""
-        summaries: list[MuxLenRabiFitSummary | MuxSummaryFailure] = []
-        for outcome in self.outcomes:
-            name = None if self.names is None else self.names[outcome.index]
-            element = (
-                None
-                if name is None
-                else ElementIdentity(index=outcome.index, name=name)
-            )
-            if isinstance(outcome, MuxFitFailure):
-                row = MuxSummaryFailure(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    failure=outcome.reason,
-                )
-            else:
-                row = MuxLenRabiFitSummary(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    pi_len=outcome.pi_len,
-                    pi_len_err=outcome.pi_len_err,
-                    pi2_len=outcome.pi2_len,
-                    pi2_len_err=outcome.pi2_len_err,
-                    rabi_f=outcome.rabi_f,
-                    rabi_f_err=outcome.rabi_f_err,
-                    fit_quality=fit_quality_models(
-                        {"fit": outcome.quality},
-                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
-                    ),
-                )
-            summaries.append(row)
-        return MuxLenRabiSummary(tones=summaries)
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the same owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
+def _MuxLenRabi_options(
+    result: MuxLenRabiRunResult, ctx: SessionEnv
+) -> LenRabiAnalyzeOptions:
+    """Seed the analysis controls without changing the core defaults."""
+    del result, ctx
+    return LenRabiAnalyzeOptions(decay=True, fit_phase=False)
 
 
 def _analyze(
-    req: AnalyzeRequest[MuxLenRabiRunResult, LenRabiAnalyzeParams],
-    *,
-    plots: Plots,
+    req: AnalyzeRequest[MuxLenRabiRunResult, LenRabiAnalyzeOptions], *, plots: Plots
 ) -> MuxLenRabiAnalyzeResult:
     """Analyze the explicit Run/Load source, retaining each original-index outcome."""
-    params = req.analyze_params
     outcomes = MuxLenRabiExp().analyze(
         req.run_result,
-        LenRabiAnalyzeOptions(decay=params.decay, fit_phase=params.fit_phase),
+        req.analyze_params,
         plots=plots,
     )
     snapshot = req.run_result.cfg
@@ -232,8 +196,6 @@ DEFINITION = Adapter(
     run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
-        fn=_analyze,
-        options=lambda source, env: LenRabiAnalyzeParams(),
-        writeback=_get_writeback_items,
+        fn=_analyze, options=_MuxLenRabi_options, writeback=_get_writeback_items
     ),
 )

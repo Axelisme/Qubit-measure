@@ -7,7 +7,6 @@ operator guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 from matplotlib.figure import Figure
@@ -17,7 +16,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
@@ -27,6 +25,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
+    JPAOptimizeAnalysis,
     JPAOptimizeResult,
 )
 from zcu_lab.v2.jpa.auto_optimize.form import make_form
@@ -48,27 +47,16 @@ def _relabel_auto_figure(fig: Figure) -> None:
             ax.set_xlabel("JPA flux device value")
 
 
-@dataclass
-class JpaAutoAnalyzeResult(AnalyzeResultBase):
-    best_flux: float
-    best_freq: float
-    best_power: float
-
-
 def _analyze(
     req: AnalyzeRequest[JpaAutoRunResult, None], *, plots: Plots
-) -> JpaAutoAnalyzeResult:
+) -> JPAOptimizeAnalysis:
     analysis = AutoOptimizeExp().analyze(req.run_result, None, plots=plots)
     _relabel_auto_figure(plots["fit"])
-    return JpaAutoAnalyzeResult(
-        best_flux=analysis.best_flux,
-        best_freq=analysis.best_freq,
-        best_power=analysis.best_power,
-    )
+    return analysis
 
 
 def _get_writeback_items(
-    req: WritebackRequest[JpaAutoRunResult, JpaAutoAnalyzeResult],
+    req: WritebackRequest[JpaAutoRunResult, JPAOptimizeAnalysis],
 ) -> Sequence[WritebackItem]:
     result = req.analyze_result
     return [

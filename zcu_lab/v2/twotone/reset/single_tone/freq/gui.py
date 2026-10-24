@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -11,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
@@ -20,34 +18,25 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
-from zcu_lab.v2.twotone.reset.single_tone.freq.core import FreqCfg, FreqExp, FreqResult
+from zcu_lab.v2.twotone.reset.single_tone.freq.core import (
+    FreqAnalysis,
+    FreqCfg,
+    FreqExp,
+    FreqResult,
+)
 from zcu_lab.v2.twotone.reset.single_tone.freq.form import make_form
 
 SingleToneFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-@dataclass
-class SingleToneFreqAnalyzeResult(AnalyzeResultBase):
-    freq: float
-    fwhm: float
-
-
-def _SingleToneFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _SingleToneFreq_analyze(
-    req: AnalyzeRequest[SingleToneFreqRunResult, None],
-    *,
-    plots: Plots,
-) -> SingleToneFreqAnalyzeResult:
-    result = FreqExp().analyze(req.run_result, None, plots=plots)
-    return SingleToneFreqAnalyzeResult(freq=result.freq, fwhm=result.fwhm)
+    req: AnalyzeRequest[SingleToneFreqRunResult, None], *, plots: Plots
+) -> FreqAnalysis:
+    return FreqExp().analyze(req.run_result, None, plots=plots)
 
 
 def _SingleToneFreq_get_writeback_items(
-    req: WritebackRequest[SingleToneFreqRunResult, SingleToneFreqAnalyzeResult],
+    req: WritebackRequest[SingleToneFreqRunResult, FreqAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose ext scalars and the Run-tested reset with fitted frequency.
 
@@ -89,6 +78,11 @@ def _SingleToneFreq_get_writeback_items(
         )
     )
     return items
+
+
+def _SingleToneFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:

@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import (
+    PowerAnalysis,
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
@@ -40,33 +40,21 @@ class DualTonePowerAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class DualTonePowerAnalyzeResult(AnalyzeResultBase):
-    gain1: float
-    gain2: float
-
-
-def _DualTonePower_make_form(ctx: FormContext) -> Form[PowerCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _DualTonePower_analyze(
     req: AnalyzeRequest[DualTonePowerRunResult, DualTonePowerAnalyzeParams],
     *,
     plots: Plots,
-) -> DualTonePowerAnalyzeResult:
+) -> PowerAnalysis:
     params = req.analyze_params
-    result = PowerExp().analyze(
+    return PowerExp().analyze(
         req.run_result,
         PowerAnalyzeOptions(smooth=params.smooth, smooth_method=params.smooth_method),
         plots=plots,
     )
-    return DualTonePowerAnalyzeResult(gain1=result.gain1, gain2=result.gain2)
 
 
 def _DualTonePower_get_writeback_items(
-    req: WritebackRequest[DualTonePowerRunResult, DualTonePowerAnalyzeResult],
+    req: WritebackRequest[DualTonePowerRunResult, PowerAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose ext gains and the Run-tested reset with those fitted gains.
 
@@ -111,6 +99,11 @@ def _DualTonePower_get_writeback_items(
         )
     )
     return items
+
+
+def _DualTonePower_make_form(ctx: FormContext) -> Form[PowerCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:

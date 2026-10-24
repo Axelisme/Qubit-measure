@@ -9,7 +9,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.plotting.plots import Plots
 
-from .types import AnalyzeRequest, AnalyzeResult, PostAnalyzeRequest
+from .types import AnalyzeRequest, PostAnalyzeRequest
 
 
 class RunHook[I: ConfigBase, C: ConfigBase, R](Protocol):
@@ -26,7 +26,7 @@ class RunHook[I: ConfigBase, C: ConfigBase, R](Protocol):
         ...
 
 
-class AnalyzeHook[C: ConfigBase, R, O, A: AnalyzeResult | None](Protocol):
+class AnalyzeHook[C: ConfigBase, R, O, A](Protocol):
     """Analyze one retained source with the edited generated options."""
 
     def __call__(
@@ -34,9 +34,10 @@ class AnalyzeHook[C: ConfigBase, R, O, A: AnalyzeResult | None](Protocol):
     ) -> A:
         """Compute from req's retained source, edited options and fixed parameters.
 
-        plots is the operation's figure host. Return an AnalyzeResult or None
-        for figures-only output. Failures propagate to the caller; the host
-        adopts successful output and preserves previous output on failure.
+        plots is the operation's figure host. Return a dataclass instance,
+        pydantic model or Mapping, or None for figures-only output. Failures
+        propagate; the host adopts successful output and preserves previous
+        output on failure.
         """
         ...
 
@@ -44,9 +45,9 @@ class AnalyzeHook[C: ConfigBase, R, O, A: AnalyzeResult | None](Protocol):
 class PostAnalyzeHook[
     C: ConfigBase,
     R,
-    A: AnalyzeResult | None,
+    A,
     O,
-    P: AnalyzeResult | None,
+    P,
 ](Protocol):
     """Analyze the committed primary result and its retained raw source."""
 
@@ -56,8 +57,9 @@ class PostAnalyzeHook[
         """Compute from req's retained source, primary and edited post options.
 
         req also carries fixed parameters; plots belongs to this operation.
-        Return an AnalyzeResult or None for figures-only output. Callback
-        failures propagate; adoption and previous-output retention are host-owned.
+        Return a dataclass instance, pydantic model or Mapping, or None for
+        figures-only output. Callback failures propagate; adoption and
+        previous-output retention are host-owned.
         """
         ...
 

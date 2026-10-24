@@ -17,13 +17,10 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     PostAnalysis,
     PostAnalyzeRequest,
-    PostAnalyzeResultBase,
     PostWritebackRequest,
-    T_PostAnalyzeResult,
     WritebackItem,
     WritebackRequest,
 )
@@ -32,10 +29,10 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions, GEPostAnalyzeOptions
 from zcu_lab.v2.singleshot.ge.gui import (
     GEAnalyzeParams,
+    GEPostSummary,
     ge_calibration_review_note,
     ge_post_review_note,
 )
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_models
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
@@ -55,133 +52,66 @@ from .form import make_form
 MuxGERunResult: TypeAlias = RunRecord[MuxGECfg, MuxGEResult]
 
 
-class MuxGEFitSummary(MuxSummaryTone):
+class MuxGEPrimarySummary(BaseModel):
     """Native state, fidelity, radian rotation and normalized-ADC GE estimates.
 
-    init_pops holds initial state populations. fit_quality retains core metrics
-    with diagnostic paths rooted at this output row.
+    init_pops holds initial state populations. Null retains nonfinite estimates.
+    fit_quality retains the fitting owner's metrics and native diagnostic paths.
     """
 
     initial_state: str
-    fidelity: float
-    theta: float
-    threshold: float
-    ge_s: float
-    init_pops: list[float]
+    fidelity: float | None
+    theta: float | None
+    threshold: float | None
+    ge_s: float | None
+    init_pops: list[list[float | None]]
     fit_quality: dict[str, FitQuality] | None
+
+
+class MuxGEFitSummary(MuxSummaryTone):
+    """Decode the native indexed primary result."""
+
+    primary: MuxGEPrimarySummary
 
 
 class MuxGESummary(BaseModel):
     """Primary GE outcomes in native order, preserving failures and identities."""
 
-    tones: list[MuxGEFitSummary | MuxSummaryFailure]
+    outcomes: list[MuxGEFitSummary | MuxSummaryFailure]
+    names: list[str] | None
 
 
 class MuxGEPostFitSummary(MuxSummaryTone):
     """Normalized-ADC radius and single-qubit confusion matrix, not a joint matrix."""
 
-    ge_radius: float
-    confusion: list[list[float]]
+    post: GEPostSummary
 
 
 class MuxGEPostSummary(BaseModel):
     """Post GE outcomes in their own native order with original tone identities."""
 
-    tones: list[MuxGEPostFitSummary | MuxSummaryFailure]
+    outcomes: list[MuxGEPostFitSummary | MuxSummaryFailure]
+    names: list[str] | None
 
 
 @dataclass(frozen=True)
-class MuxGEAnalyzeResult(AnalyzeResultBase):
+class MuxGEAnalyzeResult:
     """Primary per-index outcomes and full source names, absent without cfg."""
 
     outcomes: tuple[MuxGEAnalysis | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def summary(self) -> MuxGESummary:
-        """Return native GE outcomes with fixed identities and owner diagnostics."""
-        summaries: list[MuxGEFitSummary | MuxSummaryFailure] = []
-        for outcome in self.outcomes:
-            name = None if self.names is None else self.names[outcome.index]
-            element = (
-                None
-                if name is None
-                else ElementIdentity(index=outcome.index, name=name)
-            )
-            if isinstance(outcome, MuxFitFailure):
-                row = MuxSummaryFailure(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    failure=outcome.reason,
-                )
-            else:
-                row = MuxGEFitSummary(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    initial_state=outcome.primary.initial_state,
-                    fidelity=outcome.primary.fidelity,
-                    theta=outcome.primary.theta,
-                    threshold=outcome.primary.threshold,
-                    ge_s=outcome.primary.ge_s,
-                    init_pops=outcome.primary.init_pops.tolist(),
-                    fit_quality=fit_quality_models(
-                        outcome.primary.fit_quality,
-                        summary_path=f"summary.tones[{len(summaries)}].fit_quality",
-                    ),
-                )
-            summaries.append(row)
-        return MuxGESummary(tones=summaries)
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the same owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
-
 
 @dataclass(frozen=True)
-class MuxGEPostAnalyzeResult(PostAnalyzeResultBase):
+class MuxGEPostAnalyzeResult:
     """Per-index single-qubit post diagnostics and names from the adopted primary."""
 
     outcomes: tuple[MuxGEPostAnalysis | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def summary(self) -> MuxGEPostSummary:
-        """Return native GE outcomes with fixed identities and owner diagnostics."""
-        summaries: list[MuxGEPostFitSummary | MuxSummaryFailure] = []
-        for outcome in self.outcomes:
-            name = None if self.names is None else self.names[outcome.index]
-            element = (
-                None
-                if name is None
-                else ElementIdentity(index=outcome.index, name=name)
-            )
-            if isinstance(outcome, MuxFitFailure):
-                row = MuxSummaryFailure(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    failure=outcome.reason,
-                )
-            else:
-                row = MuxGEPostFitSummary(
-                    position=outcome.index,
-                    name=name,
-                    element=element,
-                    ge_radius=outcome.post.confusion.radius,
-                    confusion=outcome.post.confusion.matrix.tolist(),
-                )
-            summaries.append(row)
-        return MuxGEPostSummary(tones=summaries)
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the same owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
-
 
 def _analyze(
-    req: AnalyzeRequest[MuxGERunResult, GEAnalyzeParams],
-    *,
-    plots: Plots,
+    req: AnalyzeRequest[MuxGERunResult, GEAnalyzeParams], *, plots: Plots
 ) -> MuxGEAnalyzeResult:
     """Use core GE options on the explicit source, publishing fit_i figures."""
     params = req.analyze_params
@@ -204,9 +134,7 @@ def _analyze(
 
 
 def _post_analyze(
-    req: PostAnalyzeRequest[MuxGERunResult, MuxGEAnalyzeResult, None],
-    *,
-    plots: Plots,
+    req: PostAnalyzeRequest[MuxGERunResult, MuxGEAnalyzeResult, None], *, plots: Plots
 ) -> MuxGEPostAnalyzeResult:
     """Apply the same-source adopted primary via GE owner, publishing post_i."""
     outcomes = MuxGEExp().post_analyze(
@@ -268,19 +196,19 @@ def _get_writeback_items(
 
 
 def _get_post_writeback_items(
-    req: PostWritebackRequest[MuxGERunResult, MuxGEAnalyzeResult, T_PostAnalyzeResult],
+    req: PostWritebackRequest[
+        MuxGERunResult, MuxGEAnalyzeResult, MuxGEPostAnalyzeResult
+    ],
 ) -> Sequence[WritebackItem]:
     """Propose only same-source successful GE radius/confusion diagnostics.
 
-    Missing capture returns no items. Invalid binding or wrong post result
-    raises; failed/partial rows contribute nothing. Targets retain GE's 3x3
+    Missing capture returns no items. Invalid bindings raise; failed/partial
+    rows contribute nothing. Targets retain GE's 3x3
     diagnostic policy. Preselection requires primary GE review gates and a
     finite post condition number <=10. Failed gates keep candidates with notes
     for manual selection. No current Form/library lookup or Apply occurs here.
     """
     result = req.post_analyze_result
-    if not isinstance(result, MuxGEPostAnalyzeResult):
-        raise TypeError("Mux GE post proposals require MuxGEPostAnalyzeResult")
     snapshot = req.run_result.cfg
     names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
     qubits = captured_qubits(req.ctx.parameters, names)

@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -21,6 +20,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.twotone.reset.dual_tone.freq.core import (
+    FreqAnalysis,
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
@@ -39,33 +39,21 @@ class DualToneFreqAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
 
 
-@dataclass
-class DualToneFreqAnalyzeResult(AnalyzeResultBase):
-    freq1: float
-    freq2: float
-
-
-def _DualToneFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _DualToneFreq_analyze(
     req: AnalyzeRequest[DualToneFreqRunResult, DualToneFreqAnalyzeParams],
     *,
     plots: Plots,
-) -> DualToneFreqAnalyzeResult:
+) -> FreqAnalysis:
     params = req.analyze_params
-    result = FreqExp().analyze(
+    return FreqExp().analyze(
         req.run_result,
         FreqAnalyzeOptions(smooth=params.smooth, smooth_method=params.smooth_method),
         plots=plots,
     )
-    return DualToneFreqAnalyzeResult(freq1=result.freq1, freq2=result.freq2)
 
 
 def _DualToneFreq_get_writeback_items(
-    req: WritebackRequest[DualToneFreqRunResult, DualToneFreqAnalyzeResult],
+    req: WritebackRequest[DualToneFreqRunResult, FreqAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose this analysis's two frequencies to captured qubit ext."""
     result = req.analyze_result
@@ -82,6 +70,11 @@ def _DualToneFreq_get_writeback_items(
         ),
     ]
     return items
+
+
+def _DualToneFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:

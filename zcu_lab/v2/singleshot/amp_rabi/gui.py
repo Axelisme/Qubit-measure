@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     WritebackItem,
     WritebackRequest,
@@ -38,42 +37,20 @@ class SsAmpRabiAnalyzeParams:
     ] = "ground"
 
 
-@dataclass
-class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
-    pi_gain: float
-    pi_gain_error: float
-    pi2_gain: float
-    pi2_gain_error: float
-    frequency: float
-    amplitude: float
-    fit_result: AmpRabiFit
-
-
 def _analyze(
-    req: AnalyzeRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeParams],
-    *,
-    plots: Plots,
-) -> SsAmpRabiAnalyzeResult:
-    fit = AmpRabiExp().analyze(
+    req: AnalyzeRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeParams], *, plots: Plots
+) -> AmpRabiFit:
+    return AmpRabiExp().analyze(
         req.run_result,
         AmpRabiAnalyzeOptions(initial_state=req.analyze_params.initial_state),
         plots=plots,
     )
-    return SsAmpRabiAnalyzeResult(
-        fit.pi_gain,
-        fit.pi_gain_error,
-        fit.pi2_gain,
-        fit.pi2_gain_error,
-        fit.frequency,
-        fit.amplitude,
-        fit,
-    )
 
 
 def _writeback(
-    req: WritebackRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeResult],
+    req: WritebackRequest[SsAmpRabiRunResult, AmpRabiFit],
 ) -> Sequence[WritebackItem]:
-    return rabi_calibration_writeback(req.analyze_result.fit_result.joint_fit)
+    return rabi_calibration_writeback(req.analyze_result.joint_fit)
 
 
 def _run(

@@ -111,8 +111,7 @@ def test_start_invalid_update_field_rejected():
 
 def test_get_result_summarizes():
     ctrl = _ctrl()
-    result = MagicMock()
-    result.to_summary_dict.return_value = {
+    result = {
         "ge_radius": 0.37,
         "confusion": [[1.0, 0.0], [0.0, 1.0]],
     }

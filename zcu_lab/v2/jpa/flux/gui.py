@@ -7,7 +7,6 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
@@ -18,22 +17,16 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.jpa.flux.core import FluxCfg, FluxExp, FluxResult
+from zcu_lab.v2.jpa.flux.core import FluxAnalysis, FluxCfg, FluxExp, FluxResult
 from zcu_lab.v2.jpa.flux.form import make_form
 
 JpaFluxRunResult: TypeAlias = RunRecord[FluxCfg, FluxResult]
-
-
-@dataclass
-class JpaFluxAnalyzeResult(AnalyzeResultBase):
-    best_flux: float
 
 
 def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
@@ -58,14 +51,14 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
 
 def _analyze(
     req: AnalyzeRequest[JpaFluxRunResult, None], *, plots: Plots
-) -> JpaFluxAnalyzeResult:
+) -> FluxAnalysis:
     answer = FluxExp().analyze(req.run_result, None, plots=plots)
     _relabel_flux_figure(plots["fit"], answer.best_flux)
-    return JpaFluxAnalyzeResult(best_flux=answer.best_flux)
+    return answer
 
 
 def _get_writeback_items(
-    req: WritebackRequest[JpaFluxRunResult, JpaFluxAnalyzeResult],
+    req: WritebackRequest[JpaFluxRunResult, FluxAnalysis],
 ) -> Sequence[WritebackItem]:
     return [
         ParameterWriteback(

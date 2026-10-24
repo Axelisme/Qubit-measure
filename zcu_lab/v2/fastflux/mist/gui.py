@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, TypeAlias
+from typing import TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    Adapter,
-    Analysis,
-    AnalyzeRequest,
-    ParamMeta,
-)
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.fastflux.mist.core import (
@@ -27,22 +21,13 @@ from zcu_lab.v2.fastflux.mist.form import make_form
 MistRunResult: TypeAlias = RunRecord[MistCfg, MistResult]
 
 
-@dataclass
-class MistAnalyzeParams:
-    ac_coeff: Annotated[
-        float | None, ParamMeta(label="Photon number / gain squared")
-    ] = None
-
-
 def _analyze(
-    req: AnalyzeRequest[MistRunResult, MistAnalyzeParams],
-    *,
-    plots: Plots,
+    req: AnalyzeRequest[MistRunResult, MistAnalyzeOptions], *, plots: Plots
 ) -> None:
     """Plot the stored map, optionally scaling gain squared to photons."""
     MistExp().analyze(
         req.run_result,
-        MistAnalyzeOptions(ac_coeff=req.analyze_params.ac_coeff),
+        req.analyze_params,
         plots=plots,
     )
     return
@@ -58,5 +43,5 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(fn=_analyze, options=lambda source, env: MistAnalyzeParams()),
+    analysis=Analysis(fn=_analyze, options=lambda source, env: MistAnalyzeOptions()),
 )

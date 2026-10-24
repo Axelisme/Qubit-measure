@@ -199,10 +199,8 @@ def test_both_projections_seed_and_publish_named_result_figure(
     result = plugin.finish(session)
     assert tuple(plots) == ("pick",)
     assert isinstance(plots["pick"], Figure)
-    assert result.to_summary_dict() == {
-        "flx_half": state.flux_half,
-        "flx_int": state.flux_int,
-        "flx_period": 2 * abs(state.flux_int - state.flux_half),
-    }
+    assert result.flx_half == state.flux_half
+    assert result.flx_int == state.flux_int
+    assert result.flx_period == 2 * abs(state.flux_int - state.flux_half)
     plots.finish()
     plots.release()

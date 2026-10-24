@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, TypeAlias
+from typing import TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
@@ -13,18 +12,16 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
-    ParamMeta,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
+    LenRabiAnalysis,
     LenRabiAnalyzeOptions,
     LenRabiCfg,
     LenRabiExp,
@@ -36,14 +33,8 @@ from .form import make_form
 LenRabiRunResult: TypeAlias = RunRecord[LenRabiCfg, LenRabiResult]
 
 
-@dataclass
-class LenRabiAnalyzeParams:
-    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
-
-
 class TimeRabiSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Recipe JSON inputs in native units; null means an unavailable estimate."""
 
     pi_len: float | None = Field(
         description="Owner pi_len in us; null retains an unavailable estimate."
@@ -70,61 +61,18 @@ class TimeRabiSummary(BaseModel):
     )
 
 
-@dataclass
-class LenRabiAnalyzeResult(AnalyzeResultBase):
-    pi_len: float
-    pi_len_err: float
-    pi2_len: float
-    pi2_len_err: float
-    # Rabi oscillation frequency in MHz (1/us), proposed at qubit.ext.rabi_freq.
-    rabi_f: float
-    rabi_f_err: float
-    fit_quality: dict[str, dict[str, object]] | None = None
-
-    def summary(self) -> TimeRabiSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return TimeRabiSummary(
-            pi_len=self.pi_len,
-            pi_len_err=self.pi_len_err,
-            pi2_len=self.pi2_len,
-            pi2_len_err=self.pi2_len_err,
-            rabi_f=self.rabi_f,
-            rabi_f_err=self.rabi_f_err,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
-
-
-def _LenRabi_make_form(ctx: FormContext) -> Form[LenRabiCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _LenRabi_analyze(
-    req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeParams],
-    *,
-    plots: Plots,
-) -> LenRabiAnalyzeResult:
-    params = req.analyze_params
-    analysis = LenRabiExp().analyze(
+    req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeOptions], *, plots: Plots
+) -> LenRabiAnalysis:
+    return LenRabiExp().analyze(
         req.run_result,
-        LenRabiAnalyzeOptions(decay=params.decay, fit_phase=params.fit_phase),
+        req.analyze_params,
         plots=plots,
-    )
-    return LenRabiAnalyzeResult(
-        pi_len=analysis.pi_len,
-        pi_len_err=analysis.pi_len_err,
-        pi2_len=analysis.pi2_len,
-        pi2_len_err=analysis.pi2_len_err,
-        rabi_f=analysis.rabi_f,
-        rabi_f_err=analysis.rabi_f_err,
-        fit_quality=fit_quality_summary(analysis.fit_quality),
     )
 
 
 def _LenRabi_get_writeback_items(
-    req: WritebackRequest[LenRabiRunResult, LenRabiAnalyzeResult],
+    req: WritebackRequest[LenRabiRunResult, LenRabiAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose independent calibrations from the source and captured roles.
 
@@ -192,6 +140,11 @@ def _LenRabi_get_writeback_items(
     return items
 
 
+def _LenRabi_make_form(ctx: FormContext) -> Form[LenRabiCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
+
+
 def _run(
     cfg: LenRabiCfg, *, context: RunContext
 ) -> RunRecord[LenRabiCfg, LenRabiResult]:
@@ -209,7 +162,7 @@ DEFINITION = Adapter(
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_LenRabi_analyze,
-        options=lambda source, env: LenRabiAnalyzeParams(),
+        options=lambda source, env: LenRabiAnalyzeOptions(),
         writeback=_LenRabi_get_writeback_items,
     ),
 )

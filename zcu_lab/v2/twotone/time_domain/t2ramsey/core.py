@@ -71,8 +71,8 @@ class T2RamseyCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class T2RamseyAnalyzeOptions:
-    fit_fringe: bool = True
-    fit_phase: bool = True
+    fit_fringe: Annotated[bool, FieldMeta(label="Fit fringe")] = True
+    fit_phase: Annotated[bool, FieldMeta(label="Fit phase offset (fringe only)")] = True
 
 
 @dataclass(frozen=True)

@@ -1,11 +1,9 @@
 """Measure adapter for a compound, source-bound local-Z correction pair."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
-import numpy as np
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -25,59 +23,13 @@ from .form import make_form
 LocalZRun: TypeAlias = RunRecord[LocalZCfg, LocalZResult]
 
 
-@dataclass(frozen=True)
-class LocalZAnalyzeResult:
-    """JSON-safe phase and linear-fit summary; figures remain named artifacts."""
-
-    analysis: LocalZAnalysis
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Expose both targets' phases, fit diagnostics and missing-value reasons."""
-        return {
-            "targets": [
-                {
-                    "target": role,
-                    "points": [
-                        {
-                            "gate_count": n,
-                            "contrast": p.contrast if np.isfinite(p.contrast) else None,
-                            "logical_phase_deg": p.logical_phase_deg,
-                            "reason": p.reason,
-                        }
-                        for n, p in zip(
-                            self.analysis.gate_counts,
-                            self.analysis.phases[t],
-                            strict=True,
-                        )
-                    ],
-                    "intercept_deg": fit.intercept_deg,
-                    "slope_deg": fit.slope_deg,
-                    "correction_deg": fit.correction_deg,
-                    "slope_error_deg": fit.slope_error_deg,
-                    "reason": fit.reason,
-                    "fit_quality": None
-                    if fit.fit_quality is None
-                    else fit.fit_quality.to_summary_dict(),
-                }
-                for t, (role, fit) in enumerate(
-                    zip(("f1", "f2"), self.analysis.fits, strict=True)
-                )
-            ],
-            "acquired_shots": self.analysis.acquired_shots.tolist(),
-            "model": "Complete-row adjacent principal-value unwrap; OLS phase_deg = intercept + slope*n. correction=-slope, not rewrapped. Covariance uses residual variance, not a shot-noise model. No automatic statistical gate.",
-            "interpretation": "B00 thermal ensemble, other qubit not flipped. Assumes adjacent true phase increments have magnitude <180 deg; extra 360 deg per gate is unidentifiable. Linear mixture estimate, not purified local phase or fidelity. No heralding or shot exclusion.",
-        }
-
-
-def _analyze(
-    req: AnalyzeRequest[LocalZRun, None], *, plots: Plots
-) -> LocalZAnalyzeResult:
+def _analyze(req: AnalyzeRequest[LocalZRun, None], *, plots: Plots) -> LocalZAnalysis:
     """Fit only saved cfg/raw, never current Form, aliases or library."""
-    return LocalZAnalyzeResult(LocalZExp().analyze(req.run_result, None, plots=plots))
+    return LocalZExp().analyze(req.run_result, None, plots=plots)
 
 
 def _get_writeback_items(
-    req: WritebackRequest[LocalZRun, LocalZAnalyzeResult],
+    req: WritebackRequest[LocalZRun, LocalZAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose one component-named pair only when both target fits are valid.
 
@@ -98,7 +50,7 @@ def _get_writeback_items(
             raise ValueError(
                 "Local-Z source F1/F2/coupler identities differ from writeback capture; Reset and remeasure for changed roles"
             )
-    first, second = req.analyze_result.analysis.fits
+    first, second = req.analyze_result.fits
     if first.correction_deg is None or second.correction_deg is None:
         return []
     return [

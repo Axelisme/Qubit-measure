@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.freq.core import (
+    FreqAnalysis,
     FreqAnalyzeOptions,
     FreqCfg,
     FreqExp,
@@ -40,34 +40,19 @@ class RoOptFreqAnalyzeParams:
     smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 2.0
 
 
-@dataclass
-class RoOptFreqAnalyzeResult(AnalyzeResultBase):
-    best_freq: float
-
-
-def _RoOptFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _RoOptFreq_analyze(
-    req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams],
-    *,
-    plots: Plots,
-) -> RoOptFreqAnalyzeResult:
+    req: AnalyzeRequest[RoOptFreqRunResult, RoOptFreqAnalyzeParams], *, plots: Plots
+) -> FreqAnalysis:
     params = req.analyze_params
     options = FreqAnalyzeOptions(
         smooth=params.smooth,
         smooth_method=params.smooth_method,
     )
-    result = FreqExp().analyze(req.run_result, options, plots=plots)
-    return RoOptFreqAnalyzeResult(
-        best_freq=result.best_freq,
-    )
+    return FreqExp().analyze(req.run_result, options, plots=plots)
 
 
 def _RoOptFreq_get_writeback_items(
-    req: WritebackRequest[RoOptFreqRunResult, RoOptFreqAnalyzeResult],
+    req: WritebackRequest[RoOptFreqRunResult, FreqAnalysis],
 ) -> Sequence[WritebackItem]:
     result = req.analyze_result
     items: list[WritebackItem] = [
@@ -85,6 +70,11 @@ def _RoOptFreq_get_writeback_items(
         )
     )
     return items
+
+
+def _RoOptFreq_make_form(ctx: FormContext) -> Form[FreqCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: FreqCfg, *, context: RunContext) -> RunRecord[FreqCfg, FreqResult]:

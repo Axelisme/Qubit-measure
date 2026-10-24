@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -22,6 +21,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.power.core import (
+    PowerAnalysis,
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
@@ -43,35 +43,20 @@ class RoOptPowerAnalyzeParams:
     ] = 0.5
 
 
-@dataclass
-class RoOptPowerAnalyzeResult(AnalyzeResultBase):
-    best_gain: float
-
-
-def _RoOptPower_make_form(ctx: FormContext) -> Form[PowerCfg]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _RoOptPower_analyze(
-    req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams],
-    *,
-    plots: Plots,
-) -> RoOptPowerAnalyzeResult:
+    req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams], *, plots: Plots
+) -> PowerAnalysis:
     params = req.analyze_params
     options = PowerAnalyzeOptions(
         penalty_ratio=params.penalty_ratio,
         smooth=params.smooth,
         smooth_method=params.smooth_method,
     )
-    result = PowerExp().analyze(req.run_result, options, plots=plots)
-    return RoOptPowerAnalyzeResult(
-        best_gain=result.best_gain,
-    )
+    return PowerExp().analyze(req.run_result, options, plots=plots)
 
 
 def _RoOptPower_get_writeback_items(
-    req: WritebackRequest[RoOptPowerRunResult, RoOptPowerAnalyzeResult],
+    req: WritebackRequest[RoOptPowerRunResult, PowerAnalysis],
 ) -> Sequence[WritebackItem]:
     result = req.analyze_result
     items: list[WritebackItem] = [
@@ -89,6 +74,11 @@ def _RoOptPower_get_writeback_items(
         )
     )
     return items
+
+
+def _RoOptPower_make_form(ctx: FormContext) -> Form[PowerCfg]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:

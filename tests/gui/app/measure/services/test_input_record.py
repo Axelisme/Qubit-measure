@@ -14,7 +14,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
 )
 from zcu_tools.gui.app.measure.artifacts import SaveService
 from zcu_tools.gui.app.measure.registry import Registry
@@ -51,7 +50,7 @@ def input_form(context: FormContext) -> Form[OperatorInput]:
 
 
 @dataclass(frozen=True)
-class ObservedGain(AnalyzeResultBase):
+class ObservedGain:
     value: float | None
 
 

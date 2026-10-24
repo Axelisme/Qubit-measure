@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     WritebackItem,
@@ -26,6 +25,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2.support.measure.singleshot_shared import read_chi_kappa
 
 from .core import (
+    AcStarkAnalysis,
     AcStarkAnalyzeOptions,
     AcStarkCfg,
     AcStarkExp,
@@ -38,6 +38,8 @@ from .core import (
 from .form import make_form, make_ramsey_form
 
 AcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
+
+
 AcStarkRamseyRunResult: TypeAlias = RunRecord[AcStarkRamseyCfg, AcStarkRamseyResult]
 
 
@@ -49,49 +51,26 @@ class AcStarkAnalyzeParams:
     cutoff: Annotated[float | None, ParamMeta(label="Gain cutoff (a.u.)")] = None
 
 
-@dataclass
-class AcStarkAnalyzeResult(AnalyzeResultBase):
-    """Mean photon number coefficient: n = ac_coeff * Stark gain squared."""
-
-    ac_coeff: float
-
-
-@dataclass
-class AcStarkRamseyAnalyzeParams:
-    """FFT center in MHz (subtracted from the axis) and exclusive gain cutoff."""
-
-    detune: Annotated[float, ParamMeta(label="FFT detune (MHz)")] = 0.0
-    cutoff: Annotated[float | None, ParamMeta(label="Gain cutoff (a.u.)")] = None
-
-
-def _AcStark_make_form(ctx: FormContext) -> Form[AcStarkCfg]:
-    """Build the spectroscopy form from captured Open/Reset sources."""
-    return make_form(ctx)
-
-
 def _AcStark_analyze(
-    req: AnalyzeRequest[AcStarkRunResult, AcStarkAnalyzeParams],
-    *,
-    plots: Plots,
-) -> AcStarkAnalyzeResult:
+    req: AnalyzeRequest[AcStarkRunResult, AcStarkAnalyzeParams], *, plots: Plots
+) -> AcStarkAnalysis:
     """Fit the Stark slope with chi/kappa from this Run/Load capture in MHz.
 
     Missing calibration fails explicitly. The core publishes the fit figure.
     """
     chi, kappa = read_chi_kappa(req.parameters)
     params = req.analyze_params
-    analysis = AcStarkExp().analyze(
+    return AcStarkExp().analyze(
         req.run_result,
         AcStarkAnalyzeOptions(
             chi=chi, kappa=kappa, deg=params.deg, cutoff=params.cutoff
         ),
         plots=plots,
     )
-    return AcStarkAnalyzeResult(ac_coeff=analysis.ac_coeff)
 
 
 def _AcStark_get_writeback_items(
-    req: WritebackRequest[AcStarkRunResult, AcStarkAnalyzeResult],
+    req: WritebackRequest[AcStarkRunResult, AcStarkAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose the photon calibration; Apply remains an explicit user action."""
     return [
@@ -101,6 +80,35 @@ def _AcStark_get_writeback_items(
             proposed_value=req.analyze_result.ac_coeff,
         )
     ]
+
+
+def _AcStarkRamsey_get_analyze_params(
+    result: AcStarkRamseyRunResult, ctx: SessionEnv
+) -> AcStarkRamseyAnalyzeOptions:
+    """Seed the FFT center from the acquired cfg, or zero for cfg-free data."""
+    del ctx
+    return AcStarkRamseyAnalyzeOptions(
+        detune=result.cfg.detune if result.cfg is not None else 0.0
+    )
+
+
+def _AcStarkRamsey_analyze(
+    req: AnalyzeRequest[AcStarkRamseyRunResult, AcStarkRamseyAnalyzeOptions],
+    *,
+    plots: Plots,
+) -> None:
+    """Publish contrast/FFT maps, without fitting or proposing calibration."""
+    AcStarkRamseyExp().analyze(
+        req.run_result,
+        req.analyze_params,
+        plots=plots,
+    )
+    return
+
+
+def _AcStark_make_form(ctx: FormContext) -> Form[AcStarkCfg]:
+    """Build the spectroscopy form from captured Open/Reset sources."""
+    return make_form(ctx)
 
 
 def _run_acstark(
@@ -117,6 +125,11 @@ def _run_acstarkramsey(
     return RunRecord(cfg=cfg, result=AcStarkRamseyExp().run(cfg, context=context))
 
 
+def _AcStarkRamsey_make_form(ctx: FormContext) -> Form[AcStarkRamseyCfg]:
+    """Build the Ramsey form from captured Open/Reset sources."""
+    return make_ramsey_form(ctx)
+
+
 DEFINITION = Adapter(
     spec=AcStarkExp.AXES_SPEC,
     make_form=_AcStark_make_form,
@@ -128,36 +141,6 @@ DEFINITION = Adapter(
         writeback=_AcStark_get_writeback_items,
     ),
 )
-
-
-def _AcStarkRamsey_make_form(ctx: FormContext) -> Form[AcStarkRamseyCfg]:
-    """Build the Ramsey form from captured Open/Reset sources."""
-    return make_ramsey_form(ctx)
-
-
-def _AcStarkRamsey_get_analyze_params(
-    result: AcStarkRamseyRunResult, ctx: SessionEnv
-) -> AcStarkRamseyAnalyzeParams:
-    """Seed the FFT center from the acquired cfg, or zero for cfg-free data."""
-    del ctx
-    return AcStarkRamseyAnalyzeParams(
-        detune=result.cfg.detune if result.cfg is not None else 0.0
-    )
-
-
-def _AcStarkRamsey_analyze(
-    req: AnalyzeRequest[AcStarkRamseyRunResult, AcStarkRamseyAnalyzeParams],
-    *,
-    plots: Plots,
-) -> None:
-    """Publish contrast/FFT maps, without fitting or proposing calibration."""
-    params = req.analyze_params
-    AcStarkRamseyExp().analyze(
-        req.run_result,
-        AcStarkRamseyAnalyzeOptions(detune=params.detune, cutoff=params.cutoff),
-        plots=plots,
-    )
-    return
 
 
 RAMSEY_DEFINITION = Adapter(

@@ -74,8 +74,8 @@ class T1Cfg(ConfigBase):
 
 @dataclass(frozen=True)
 class T1AnalyzeOptions:
-    dual_exp: bool = False
-    skip: int = 0
+    dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
+    skip: Annotated[int, FieldMeta(label="Skip leading points")] = 0
 
 
 @dataclass(frozen=True)

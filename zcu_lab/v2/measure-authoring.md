@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -313,8 +313,12 @@ Figures-only 分析回 None，仍保存具名圖與空摘要，不提出 writeba
 Framework 依 RunRecord/spec 提供 `data_item` 與 `analysis_item`，作者不覆寫 artifact hooks。
 只保存已提交輸出與歷史分析輸入，不取草稿或目前表單。缺 cfg 不補值；
 準備失敗只使該 data output 失敗，不阻塞獨立的圖與分析，檔案寫入由保存流程負責。
-本次 host 仍使用結果的 `to_summary_dict`。通用 converter 已提供 API，但尚未啟用於 Save／MCP。
-實驗 serializer、結果 base、summary keys 與 recipe／workflow consumers 的遷移另行處理。
+Host 將 native 分析結果交給 `summarize_analysis`，Save／MCP 共用這個入口。
+實驗端不再提供 `to_summary_dict` 或 summary 投影，也不繼承已退休的結果 base。
+結果根須為 dataclass、pydantic model 或字串 key 的 Mapping，summary 固定為 strict JSON object。
+Key 使用原生結果欄位名，recipe／workflow 依這些欄位讀取，不提供舊 key alias，也不重寫舊存檔。
+Converter 將非有限數值轉為 null，Live RPC 的 `invalid` 列出路徑。
+保存文件只含 pane、parameters、summary，不保存 invalid；重開存檔只看得到 null。
 
 `SampleWriteback(..., coordinate_device="$qubit.flux_source")` 在 proposal 原地宣告座標來源；
 mux 使用 `"$mux.flux_source"`。Writeback owner 只以固定 parameters 與 Run device snapshot 解析，

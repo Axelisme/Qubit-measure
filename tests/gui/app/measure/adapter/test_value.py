@@ -33,7 +33,7 @@ class Options:
 
 
 @dataclass(frozen=True)
-class Numeric(adapter.AnalyzeResultBase):
+class Numeric:
     value: float
 
 
