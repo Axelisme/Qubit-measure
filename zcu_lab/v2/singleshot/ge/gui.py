@@ -13,11 +13,9 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     PostAnalyzeRequest,
-    PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
     WritebackItem,
@@ -25,13 +23,13 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
-from zcu_lab.v2._support.measure.analyze_results import fit_quality_summary
 from zcu_lab.v2.singleshot.ge.core import (
     GE_Cfg,
     GE_Exp,
     GE_Result,
     GEAnalysis,
     GEAnalyzeOptions,
+    GEPostAnalysis,
     GEPostAnalyzeOptions,
 )
 from zcu_lab.v2.singleshot.ge.form import make_form
@@ -59,7 +57,7 @@ class GEAnalyzeParams:
 
 
 class GESummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Decode consumed scalar JSON fields; null retains an unavailable estimate."""
 
     fidelity: float | None = Field(
         description="Owner fidelity in dimensionless; null retains an unavailable estimate."
@@ -74,55 +72,26 @@ class GESummary(BaseModel):
     )
 
 
-class GEPostSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+class GEConfusionSummary(BaseModel):
+    """Consumed post-calibration JSON fields; nonfinite estimates arrive as null."""
 
-    ge_radius: float | None = Field(
-        description="Owner ge_radius in ADC units; null retains an unavailable estimate."
+    radius: float | None = Field(
+        description="Classification radius in ADC units; null means unavailable."
+    )
+    matrix: list[list[float | None]] = Field(
+        description="Prepared-to-measured confusion fractions; nonfinite entries are null."
+    )
+    condition_number: float | None = Field(
+        description="Dimensionless matrix condition number; null means unavailable."
     )
 
-    confusion: list[list[float]] = Field(description="Owner confusion values.")
 
+class GEPostSummary(BaseModel):
+    """Decode the consumed fields of the core post-analysis JSON object."""
 
-@dataclass(frozen=True)
-class GEAnalyzeResult(GEAnalysis, AnalyzeResultBase):
-    """Fit calibration, with a JSON-safe GUI projection of the core result."""
-
-    def summary(self) -> GESummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return GESummary(
-            fidelity=self.fidelity,
-            theta=self.theta,
-            threshold=self.threshold,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {
-            **self.summary().model_dump(),
-            "initial_state": self.initial_state,
-            "ge_s": self.ge_s,
-            "init_pops": self.init_pops.tolist(),
-            "fit_quality": fit_quality_summary(self.fit_quality),
-        }
-
-
-@dataclass(frozen=True)
-class GEPostAnalyzeResult(PostAnalyzeResultBase):
-    """Radius in normalized ADC units, 3x3 matrix and dimensionless condition."""
-
-    ge_radius: float
-    confusion: list[list[float]]
-    condition_number: float
-
-    def summary(self) -> GEPostSummary:
-        """Return the named radius and confusion summary in native ADC units."""
-        return GEPostSummary(ge_radius=self.ge_radius, confusion=self.confusion)
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {
-            **self.summary().model_dump(),
-            "condition_number": self.condition_number,
-        }
+    confusion: GEConfusionSummary = Field(
+        description="Radius, confusion matrix and condition diagnostic from the core."
+    )
 
 
 def ge_calibration_review_note(primary: GEAnalysis) -> str | None:
@@ -177,9 +146,7 @@ def ge_post_review_note(primary: GEAnalysis, condition_number: float) -> str | N
 
 
 class GEAdapter(
-    BaseAdapter[
-        GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams, GEPostAnalyzeResult
-    ]
+    BaseAdapter[GE_Cfg, GERunResult, GEAnalysis, GEAnalyzeParams, GEPostAnalysis]
 ):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[GE_Cfg]:
@@ -207,9 +174,9 @@ class GEAdapter(
 
     def analyze(
         self, req: AnalyzeRequest[GERunResult, GEAnalyzeParams], *, plots: Plots
-    ) -> GEAnalyzeResult:
+    ) -> GEAnalysis:
         params = req.analyze_params
-        analysis = GE_Exp().analyze(
+        return GE_Exp().analyze(
             req.run_result,
             GEAnalyzeOptions(
                 initial_state=params.initial_state,
@@ -220,35 +187,19 @@ class GEAdapter(
             ),
             plots=plots,
         )
-        return GEAnalyzeResult(
-            initial_state=analysis.initial_state,
-            fidelity=analysis.fidelity,
-            theta=analysis.theta,
-            threshold=analysis.threshold,
-            ge_s=analysis.ge_s,
-            g_center=analysis.g_center,
-            e_center=analysis.e_center,
-            init_pops=analysis.init_pops,
-            fit_quality=analysis.fit_quality,
-        )
 
     def post_analyze(
         self,
-        req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, None],
+        req: PostAnalyzeRequest[GERunResult, GEAnalysis, None],
         *,
         plots: Plots,
-    ) -> GEPostAnalyzeResult:
-        analysis = GE_Exp().post_analyze(
+    ) -> GEPostAnalysis:
+        return GE_Exp().post_analyze(
             req.run_result, req.analyze_result, GEPostAnalyzeOptions(), plots=plots
-        )
-        return GEPostAnalyzeResult(
-            ge_radius=analysis.confusion.radius,
-            confusion=analysis.confusion.matrix.tolist(),
-            condition_number=analysis.confusion.condition_number,
         )
 
     def get_writeback_items(
-        self, req: WritebackRequest[GERunResult, GEAnalyzeResult]
+        self, req: WritebackRequest[GERunResult, GEAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         result.validate_calibration()
@@ -287,22 +238,22 @@ class GEAdapter(
 
     def get_post_writeback_items(
         self,
-        req: PostWritebackRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeResult],
+        req: PostWritebackRequest[GERunResult, GEAnalysis, GEPostAnalysis],
     ) -> Sequence[WritebackItem]:
-        result = req.post_analyze_result
+        result = req.post_analyze_result.confusion
         note = ge_post_review_note(req.analyze_result, result.condition_number)
         return [
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.radius",
                 description="Single-shot classification radius",
-                proposed_value=result.ge_radius,
+                proposed_value=result.radius,
                 selected=note is None,
                 note=note,
             ),
             ParameterWriteback(
                 target_name="$qubit.ext.readout_cal.confusion_matrix",
                 description="Single-shot 3x3 confusion matrix (prepared->measured)",
-                proposed_value=result.confusion,
+                proposed_value=result.matrix.tolist(),
                 selected=note is None,
                 note=note,
             ),

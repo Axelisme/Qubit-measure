@@ -10,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
     WritebackItem,
@@ -44,17 +43,9 @@ class SsLenRabiAnalyzeParams:
     fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
 
 
-@dataclass
-class SsLenRabiAnalyzeResult(AnalyzeResultBase):
-    # The full numeric fit is intentionally non-JSON-safe and therefore omitted
-    # from the GUI summary. The operator reviews the population/fit Figure while
-    # writeback projection reads the typed domain result directly.
-    fit_result: RabiJointFitResult
-
-
 class SsLenRabiAdapter(
     BaseAdapter[
-        LenRabiCfg, SsLenRabiRunResult, SsLenRabiAnalyzeResult, SsLenRabiAnalyzeParams
+        LenRabiCfg, SsLenRabiRunResult, RabiJointFitResult, SsLenRabiAnalyzeParams
     ]
 ):
     @staticmethod
@@ -82,8 +73,8 @@ class SsLenRabiAdapter(
         req: AnalyzeRequest[SsLenRabiRunResult, SsLenRabiAnalyzeParams],
         *,
         plots: Plots,
-    ) -> SsLenRabiAnalyzeResult:
-        fit_result = LenRabiExp().analyze(
+    ) -> RabiJointFitResult:
+        return LenRabiExp().analyze(
             req.run_result,
             LenRabiAnalyzeOptions(
                 decay=req.analyze_params.decay,
@@ -92,9 +83,8 @@ class SsLenRabiAdapter(
             ),
             plots=plots,
         )
-        return SsLenRabiAnalyzeResult(fit_result=fit_result)
 
     def get_writeback_items(
-        self, req: WritebackRequest[SsLenRabiRunResult, SsLenRabiAnalyzeResult]
+        self, req: WritebackRequest[SsLenRabiRunResult, RabiJointFitResult]
     ) -> Sequence[WritebackItem]:
-        return rabi_calibration_writeback(req.analyze_result.fit_result)
+        return rabi_calibration_writeback(req.analyze_result)
