@@ -14,7 +14,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Concurrency / Lifecycle
 
-- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
+- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任，SaveService 單一擁有保存前置檢查；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
 - [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：typed Permit proof 已由 0066 的 checks／RunInputs 取代，保留 guard 與 lease 的責任分界。
 - [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：owner resource counters 與 RPC off-main handler 的局部契約仍有效；Remote 權限由 0070 的 holder 取代版本 guard，operation handle 分界由 0066 承接。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。

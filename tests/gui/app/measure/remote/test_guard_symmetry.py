@@ -59,8 +59,9 @@ def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> ob
         ctrl=ctrl,
         run_analyze_control=ctrl.run_analyze_control,
         render_view=None,
-        operation_control=ctrl,
+        operation_control=ctrl.operation_control,
         save_control=ctrl.save_control,
+        tab_control=ctrl.tab_control,
     )
     try:
         return spec.handler(adapter, handler_params)

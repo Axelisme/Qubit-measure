@@ -84,7 +84,6 @@ def test_default_analysis_params_retain_result_source(
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
     )
     preparation = service.prepare_result_analysis("tab")
     assert preparation.has_params and preparation.error is None

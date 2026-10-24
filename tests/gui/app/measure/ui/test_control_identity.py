@@ -709,9 +709,10 @@ def test_inspect_delete_confirmation_uses_live_library_owner(
         qapp, lambda: button(inspect, "Delete").click(), [(QMessageBox, choose)]
     )
     assert failures == [], "legal deletion must use the current library owner"
-    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse") is (
-        decision != "local"
-    )
+    assert (
+        "Q1.waveforms.pulse"
+        in ui.controller.context_control.read_context().library.waveform_keys()
+    ) is (decision != "local")
     assert inspect.close()
 
 
@@ -773,12 +774,14 @@ def test_inspect_dirty_save_and_cancel(control_ui, qapp, decision):
         selected.click()
 
     modal_action(qapp, inspect.close, [(QMessageBox, choose)])
-    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse") is (
-        decision != "local"
-    )
-    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.renamed") is (
-        decision == "local"
-    )
+    assert (
+        "Q1.waveforms.pulse"
+        in ui.controller.context_control.read_context().library.waveform_keys()
+    ) is (decision != "local")
+    assert (
+        "Q1.waveforms.renamed"
+        in ui.controller.context_control.read_context().library.waveform_keys()
+    ) is (decision == "local")
     if DialogName.INSPECT in ui.window.list_open_dialogs():
         name.setText("Q1.waveforms.pulse")
         assert inspect.close()
@@ -890,10 +893,16 @@ def test_inspect_delete_confirmation_pins_the_original_saved_point(control_ui, q
         qapp, lambda: button(inspect, "Delete").click(), [(QMessageBox, choose)]
     )
     assert failures == []
-    assert ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse")
+    assert (
+        "Q1.waveforms.pulse"
+        in ui.controller.context_control.read_context().library.waveform_keys()
+    )
     assert ui.controller.get_session_env().active_label == "other"
     ui.controller.context_control.use_point(PointUseRequest("point"))
-    assert not ui.controller.has_ml_entry("waveform", "Q1.waveforms.pulse")
+    assert (
+        "Q1.waveforms.pulse"
+        not in ui.controller.context_control.read_context().library.waveform_keys()
+    )
     assert inspect.close()
 
 

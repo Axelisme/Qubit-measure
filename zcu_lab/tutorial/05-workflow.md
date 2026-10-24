@@ -35,12 +35,13 @@ async def run_t1(
 ## 每點先建 record，再逐步填入
 
 Record 用可變的 Pydantic model。未取得的欄位預設為 `None`，不能用零冒充資料。
-以下片段放在已有 plan、cfg 與 saver 的 workflow 內。`save_t1` 是 lab 的 exact-path native writer。
+以下片段放在已有 plan、cfg 與 saver 的 workflow 內。`save_native` 是 lab 的 exact-path native writer。
 
 ```python
 from typing import Literal
 from pydantic import BaseModel
-from zcu_lab.workflows.common.saving import save_t1
+from zcu_lab.v2.twotone.time_domain.t1 import T1Exp
+from zcu_lab.workflows.common.saving import save_native
 
 
 class PointRecord(BaseModel):
@@ -60,9 +61,10 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
             point_record.status = "failed"
             point_record.reason = t1_record.reason
             continue
-        save_t1(
+        save_native(
             t1_record,
             iteration.dir / "t1.h5",
+            spec=T1Exp.AXES_SPEC,
             snapshot=plan.snapshot,
             identity=iteration.identity,
         )
@@ -76,9 +78,10 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
             point_record.status = "failed"
             point_record.reason = repeat_record.reason
             continue
-        save_t1(
+        save_native(
             repeat_record,
             iteration.dir / "t1-repeat.h5",
+            spec=T1Exp.AXES_SPEC,
             snapshot=plan.snapshot,
             identity=iteration.identity,
         )

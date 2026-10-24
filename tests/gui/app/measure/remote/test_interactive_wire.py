@@ -64,9 +64,9 @@ def test_socket_discovery_commands_done_and_headless_figure(fx) -> None:
         assert base64.b64decode(done["result"]["figure"]["png_b64"]).startswith(
             b"\x89PNG"
         )
-        assert fx.ctrl.get_tab_analyze_result(tab_id).flx_half == pytest.approx(
-            committed["flux_half"]
-        )
+        assert fx.ctrl.run_analyze_control.get_tab_analyze_result(
+            tab_id
+        ).flx_half == pytest.approx(committed["flux_half"])
         settled = rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})
         assert settled["result"]["status"] == "finished"
         assert interact(sock, tab_id)["error"]["code"] == "precondition_failed"
@@ -241,7 +241,10 @@ def test_auto_align_busy_failure_and_terminal_delivery_use_same_command(
         )
         compute, on_done, _ = deferred.pending[1]
         on_done(compute())
-        assert fx.ctrl.get_tab_analyze_result(tab_id).flx_half == original["flux_half"]
+        assert (
+            fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id).flx_half
+            == original["flux_half"]
+        )
         assert (
             rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
                 "result"
@@ -260,7 +263,7 @@ def test_cancel_during_remote_alignment_ignores_late_delivery(fx) -> None:
         assert cancelled["result"]["cancelled"] is True
         compute, on_done, _ = deferred.pending[0]
         on_done(compute())
-        assert fx.ctrl.get_tab_analyze_result(tab_id) is None
+        assert fx.ctrl.run_analyze_control.get_tab_analyze_result(tab_id) is None
         assert interact(sock, tab_id)["error"]["code"] == "precondition_failed"
         assert (
             rpc(sock, "operation.await", {"operation_id": token, "timeout": 0.1})[
