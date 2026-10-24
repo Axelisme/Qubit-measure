@@ -43,7 +43,9 @@ def diagnostic_window(
     )
     soccfg = make_mock_soccfg()
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
-    window = MainWindow(ctrl, dialog_presenter=RecordingDialogPresenter())
+    window = MainWindow(
+        ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+    )
     ctrl.add_view(window)
     ctrl.setup_control.new_entry(EntryRequest("diagnostics"))
     ctrl.setup_control.new_point(PointCreateRequest("point", "", CommandOrigin("gui")))

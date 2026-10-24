@@ -1,6 +1,7 @@
 """Registered native analysis results reach the public RPC and artifact seams."""
 
 import json
+import os
 from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from pydantic import BaseModel, JsonValue
+from qtpy.QtCore import Qt
 from zcu_tools.experiment.artifacts import ArtifactRef, encode_analysis_document
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
@@ -25,6 +27,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.measure.services.results_comparison import build_comparison
+from zcu_tools.gui.app.measure.services.results_index import scan_results
 from zcu_tools.gui.app.measure.state import SessionEnv, State
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -44,6 +48,8 @@ from zcu_tools.resources.entry import ArtifactKey
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure.ui._results_browser_support import navigation_path
 
 
 class OwnerScheduler:
@@ -235,6 +241,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
     window = (
         MainWindow(
             controller,
+            templates=lambda: {},
             dialog_presenter=RecordingDialogPresenter(),
         )
         if interactive
@@ -257,9 +264,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
         completion="complete",
         snapshot=RunSnapshot(
             entry_id=storage.entry_id,
-            entry_name=storage.entry_name,
             point=storage.point,
-            description=storage.description,
             roles=storage.roles,
         ),
         provenance=SoftwareProvenance(
@@ -295,7 +300,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
 
 @pytest.mark.parametrize("post", [False, True])
 def test_native_analysis_is_identical_in_rpc_and_historical_document(
-    host: Host, post: bool
+    host: Host, post: bool, tmp_path: Path
 ):
     primary = host.invoke("tab.analyze")["operation_id"]
     host.wait(primary)
@@ -338,6 +343,103 @@ def test_native_analysis_is_identical_in_rpc_and_historical_document(
     assert saved.status == "saved", saved.error
     reopened = json.loads(saved.output.path.read_text(encoding="utf-8"))
     assert reopened == document
+    index = scan_results(tmp_path)
+    indexed = next(run for run in index.runs if saved.output.path in run.analysis_paths)
+    assert index.read_analysis(indexed.key, saved.output.path.name) == document
+    comparison = build_comparison(index, (indexed.key,))
+    cells = dict(zip(comparison.columns, comparison.rows[0].cells, strict=True))
+    assert {
+        key: cells[key] for key in ("pi_amp", "errors", "center.real", "center.imag")
+    } == {
+        "pi_amp": "2.0" if post else "1.0",
+        "errors": "[0.0, null]",
+        "center.real": "2.0" if post else "1.0",
+        "center.imag": "3.0" if post else "2.0",
+    }
+
+
+def test_native_saved_analysis_is_visible_in_browser_and_comparison(
+    host: Host, tmp_path: Path, qapp
+) -> None:
+    # Public host setup produces the saved data; UI observations start at More.
+    token = host.invoke("tab.analyze")["operation_id"]
+    host.wait(token)
+    report = host.controller.save_control.save_artifacts(
+        host.tab,
+        artifacts=(
+            ArtifactRef("run", "measurement_data"),
+            ArtifactRef("analysis", "results"),
+        ),
+        origin=CommandOrigin("gui"),
+    )
+    assert all(output.status == "saved" for output in report.outputs), report.outputs
+    window = MainWindow(
+        host.controller,
+        templates=lambda: {},
+        dialog_presenter=RecordingDialogPresenter(),
+    )
+    host.controller.add_view(window)
+    window.resize(1600, 1000)
+    window.show()
+    qapp.processEvents()
+    ui = ComponentDriver(window)
+    evidence = Path(os.environ.get("NATIVE_BROWSER_EVIDENCE", str(tmp_path)))
+    try:
+        ui.screenshot(evidence / "01-main-window.png")
+        ui.select_menu("More ▾", ("Results browser…",))
+        assert ui.observe(object_name="results.browser").visible
+        ui.screenshot(evidence / "02-browser.png")
+        branch = ("native",)
+        for caption in ("p", "test/saving", "a1b2c3  ·  Unknown time"):
+            ui.expand_tree(
+                navigation_path(ui, branch), object_name="results.navigation"
+            )
+            branch = (*branch, caption)
+        selected = navigation_path(ui, branch)
+        ui.select_tree_row(selected, object_name="results.navigation")
+        ui.screenshot(evidence / "03-run.png")
+        ui.select_tab("Analysis")
+        rows = {
+            row.columns
+            for row in ui.visible().tree_rows
+            if row.tree_name == "results.analysis"
+        }
+        assert {
+            ("pi_amp", "1.0"),
+            ("errors", ""),
+            ("[0]", "0.0"),
+            ("[1]", "—"),
+            ("real", "1.0"),
+            ("imag", "2.0"),
+        } <= rows
+        ui.screenshot(evidence / "04-native-analysis.png")
+        ui.invoke_context_action(
+            action="Add to comparison",
+            object_name="results.navigation",
+            tree_path=selected,
+            evidence=evidence / "05-pin-menu.png",
+        )
+        ui.select_tab("Comparison (1)")
+        assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 1"
+        rows = ui.table_rows(object_name="results.comparison_table")
+        assert len(rows) == 1
+        assert rows[0].columns[-4:-1] == ("1.0", "[0.0, null]", "1.0")
+        ui.screenshot(evidence / "06-native-comparison.png")
+        ui.select_table_row("native", object_name="results.comparison_table")
+        ui.press_key(
+            Qt.Key.Key_End,
+            object_name="results.comparison_table",
+            modifiers=Qt.KeyboardModifier.ControlModifier,
+        )
+        assert (
+            ui.table_rows(object_name="results.comparison_table")[0].columns[-1]
+            == "2.0"
+        )
+        ui.screenshot(evidence / "07-native-comparison-imag.png")
+    finally:
+        host.controller.close()
+        window.dispose()
+        qapp.processEvents()
 
 
 @pytest.mark.parametrize("host", ["interactive"], indirect=True)
