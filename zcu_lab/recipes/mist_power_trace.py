@@ -10,8 +10,6 @@ from zcu_tools.mcp.measure.recipe_api import (
     recipe,
 )
 
-from zcu_lab.v2.mist.power_dep.single_trace.gui import MistTraceAnalyzeResult
-
 
 class MistPowerTraceInputs(RecipeInputs):
     """Inputs for mist power trace; all units and null policies are declared per
@@ -78,7 +76,7 @@ async def mist_power_trace(
     try:
         analysis = await tab.analyze(
             "primary",
-            result=MistTraceAnalyzeResult,
+            result=dict,
             updates={
                 "g0": inputs.g0,
                 "e0": inputs.e0,

@@ -16,7 +16,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -37,9 +36,7 @@ class JpaFreqAnalyzeResult(AnalyzeResultBase):
     best_freq: float
 
 
-class JpaFreqAdapter(
-    BaseAdapter[FreqCfg, JpaFreqRunResult, JpaFreqAnalyzeResult, NoAnalyzeParams]
-):
+class JpaFreqAdapter(BaseAdapter[FreqCfg, JpaFreqRunResult, JpaFreqAnalyzeResult]):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
 
@@ -61,7 +58,7 @@ class JpaFreqAdapter(
         return RunRecord(cfg, FreqExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JpaFreqRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[JpaFreqRunResult, None], *, plots: Plots
     ) -> JpaFreqAnalyzeResult:
         answer = FreqExp().analyze(req.run_result, None, plots=plots)
         return JpaFreqAnalyzeResult(best_freq=answer.best_freq)

@@ -74,8 +74,10 @@ class InvalidAnalysisValue(TypedDict):
 
 @dataclass(frozen=True)
 class AnalysisResult:
+    """Captured owner output; params=None means this analysis has no inputs."""
+
     summary: Any
-    params: dict[str, Any]
+    params: dict[str, Any] | None
     operation_state: dict[str, Any]
     invalid: list[InvalidAnalysisValue]
     # Owner-captured Run/stage/figure facts; None when no projection was supplied.
@@ -195,7 +197,8 @@ def _analysis_result(
     params = reply.get("params")
     if (
         "summary" not in reply
-        or not isinstance(params, dict)
+        or "params" not in reply
+        or (params is not None and not isinstance(params, dict))
         or not isinstance(state, dict)
     ):
         raise GuiRpcError("invalid analysis result reply", reason="incompatible_wire")

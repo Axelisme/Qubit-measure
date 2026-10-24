@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     RunRequest,
     WritebackItem,
     WritebackRequest,
@@ -79,9 +78,7 @@ class JointReadoutAnalyzeResult:
 
 
 class JointReadoutAdapter(
-    BaseAdapter[
-        JointReadoutCfg, JointReadoutRun, JointReadoutAnalyzeResult, NoAnalyzeParams
-    ]
+    BaseAdapter[JointReadoutCfg, JointReadoutRun, JointReadoutAnalyzeResult]
 ):
     """Open, acquire, load and classify joint raw shots without calibration writes."""
 
@@ -109,7 +106,7 @@ class JointReadoutAdapter(
         return RunRecord(cfg=cfg, result=JointReadoutExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JointReadoutRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[JointReadoutRun, None], *, plots: Plots
     ) -> JointReadoutAnalyzeResult:
         """Classify complete branches using saved cfg; never current parameters."""
         return JointReadoutAnalyzeResult(

@@ -12,7 +12,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -79,12 +78,7 @@ class ConditionalPhaseAnalyzeResult:
 
 
 class ConditionalPhaseAdapter(
-    BaseAdapter[
-        ConditionalPhaseCfg,
-        ConditionalPhaseRun,
-        ConditionalPhaseAnalyzeResult,
-        NoAnalyzeParams,
-    ]
+    BaseAdapter[ConditionalPhaseCfg, ConditionalPhaseRun, ConditionalPhaseAnalyzeResult]
 ):
     """Fixed-capture Form, full raw acquisition, diagnostic analysis and restore."""
 
@@ -110,7 +104,7 @@ class ConditionalPhaseAdapter(
         )
 
     def analyze(
-        self, req: AnalyzeRequest[ConditionalPhaseRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[ConditionalPhaseRun, None], *, plots: Plots
     ) -> ConditionalPhaseAnalyzeResult:
         """Use only source cfg/raw; never fill missing quadratures from current inputs."""
         return ConditionalPhaseAnalyzeResult(

@@ -37,15 +37,3 @@ def test_default_capability_has_no_post_analysis() -> None:
 def test_base_post_analyze_raises() -> None:
     with pytest.raises(NotImplementedError, match="post-analysis"):
         _FakeAdapter().post_analyze(MagicMock(), plots=Plots(NonPresentingHost()))
-
-
-def test_base_get_post_analyze_params_raises() -> None:
-    with pytest.raises(NotImplementedError, match="post-analysis"):
-        _FakeAdapter().get_post_analyze_params(MagicMock(), MagicMock())
-
-
-def test_base_post_analyze_params_cls_reflects_base_return() -> None:
-    # The base ``get_post_analyze_params`` is annotated ``-> Any``; reflection
-    # surfaces that. A non-opt-in adapter is never routed to post-analysis, so
-    # this reflected type is only a Fast-Fail-adjacent default, not load-bearing.
-    assert _FakeAdapter.post_analyze_params_cls() is Any

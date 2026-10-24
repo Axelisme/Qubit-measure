@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -8,8 +7,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -22,19 +19,7 @@ from zcu_lab.v2.twotone.reset.bath.length.form import make_form
 BathLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
-@dataclass
-class BathLengthAnalyzeResult(AnalyzeResultBase):
-    """The length analysis publishes a figure without fitted scalars."""
-
-
-class BathLengthAdapter(
-    BaseAdapter[
-        LengthCfg,
-        BathLengthRunResult,
-        BathLengthAnalyzeResult,
-        NoAnalyzeParams,
-    ]
-):
+class BathLengthAdapter(BaseAdapter[LengthCfg, BathLengthRunResult]):
     experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
 
@@ -45,7 +30,7 @@ class BathLengthAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # No get_analyze_params override: None (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
     def run(
@@ -61,9 +46,9 @@ class BathLengthAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[BathLengthRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[BathLengthRunResult, None],
         *,
         plots: Plots,
-    ) -> BathLengthAnalyzeResult:
+    ) -> None:
         LengthExp().analyze(req.run_result, None, plots=plots)
-        return BathLengthAnalyzeResult()
+        return

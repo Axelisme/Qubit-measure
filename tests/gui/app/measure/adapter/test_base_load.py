@@ -10,12 +10,7 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import Container, load
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
-    NoAnalysisResult,
-    NoAnalyzeParams,
-)
+from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -42,7 +37,7 @@ class _LoadExp:
     pass
 
 
-class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, NoAnalysisResult, NoAnalyzeParams]):
+class _LoadAdapter(BaseAdapter[_Cfg, _LoadedRecord, None, None]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE
     )

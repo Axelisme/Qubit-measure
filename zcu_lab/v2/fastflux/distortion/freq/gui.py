@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -10,8 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -24,14 +21,7 @@ from zcu_lab.v2.fastflux.distortion.freq.form import make_form
 FreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-@dataclass
-class FreqAnalyzeResult(AnalyzeResultBase):
-    """The resonance trace is published in the fit figure, without writeback."""
-
-
-class FastFluxFreqAdapter(
-    BaseAdapter[FreqCfg, FreqRunResult, FreqAnalyzeResult, NoAnalyzeParams]
-):
+class FastFluxFreqAdapter(BaseAdapter[FreqCfg, FreqRunResult]):
     experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
@@ -48,7 +38,7 @@ class FastFluxFreqAdapter(
         return RunRecord(cfg, FreqExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[FreqRunResult, NoAnalyzeParams], *, plots: Plots
-    ) -> FreqAnalyzeResult:
+        self, req: AnalyzeRequest[FreqRunResult, None], *, plots: Plots
+    ) -> None:
         FreqExp().analyze(req.run_result, None, plots=plots)
-        return FreqAnalyzeResult()
+        return

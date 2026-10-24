@@ -1,6 +1,5 @@
 """Measure GUI attachment for the native MIST frequency/gain experiment."""
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -10,8 +9,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -24,16 +21,7 @@ from .form import make_form
 DriveFreqRunResult: TypeAlias = RunRecord[DriveFreqCfg, DriveFreqResult]
 
 
-@dataclass
-class DriveFreqAnalyzeResult(AnalyzeResultBase):
-    """The baseline-subtracted map has no fitted scalars or writeback."""
-
-
-class DriveFreqAdapter(
-    BaseAdapter[
-        DriveFreqCfg, DriveFreqRunResult, DriveFreqAnalyzeResult, NoAnalyzeParams
-    ]
-):
+class DriveFreqAdapter(BaseAdapter[DriveFreqCfg, DriveFreqRunResult]):
     """Acquire native complex IQ and publish the core's MIST response map."""
 
     exp_cls = DriveFreqExp
@@ -57,10 +45,10 @@ class DriveFreqAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[DriveFreqRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[DriveFreqRunResult, None],
         *,
         plots: Plots,
-    ) -> DriveFreqAnalyzeResult:
+    ) -> None:
         """Publish the saved source's baseline-subtracted magnitude as `fit`."""
         DriveFreqExp().analyze(req.run_result, None, plots=plots)
-        return DriveFreqAnalyzeResult()
+        return

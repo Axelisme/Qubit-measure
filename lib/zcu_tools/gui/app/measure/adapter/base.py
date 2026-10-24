@@ -17,15 +17,14 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     PostAnalyzeRequest,
-    PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
     SessionEnv,
     T_AnalyzeParams,
     T_AnalyzeResult,
     T_Cfg,
+    T_PostAnalyzeParams,
     T_PostAnalyzeResult,
     T_Result,
     WritebackRequest,
@@ -54,7 +53,7 @@ def _analyze_params_generic_arg(cls: type) -> type:
 
     Used when ``get_analyze_params`` is not overridden (its annotation is the
     unbound TypeVar): the concrete type is whatever the adapter wrote as
-    ``BaseAdapter[..., AnalyzeParams]``. Falls back to ``NoAnalyzeParams`` when the
+    ``BaseAdapter[..., AnalyzeParams]``. Falls back to NoneType when the
     arg is absent (PEP 696 default — adapters that omit the last two generic args)
     or not a plain class (e.g. still a TypeVar).
     """
@@ -66,10 +65,12 @@ def _analyze_params_generic_arg(cls: type) -> type:
             arg = args[_ANALYZE_PARAMS_GENERIC_INDEX]
             if isinstance(arg, type):
                 return arg
-    return NoAnalyzeParams
+    return type(None)
 
 
 def _can_construct_without_args(cls: type[Any]) -> bool:
+    if cls is type(None):
+        return True
     try:
         signature(cls).bind()
     except TypeError:
@@ -98,7 +99,15 @@ def _validated_capabilities(value: object, adapter_name: str) -> AdapterCapabili
 
 
 class BaseAdapter(
-    ABC, Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams, T_PostAnalyzeResult]
+    ABC,
+    Generic[
+        T_Cfg,
+        T_Result,
+        T_AnalyzeResult,
+        T_AnalyzeParams,
+        T_PostAnalyzeResult,
+        T_PostAnalyzeParams,
+    ],
 ):
     """Shared implementation for experiment adapters.
 
@@ -107,11 +116,10 @@ class BaseAdapter(
     ``get_analyze_params``/``analyze``). Run delegation and persistence payload
     preparation are provided here once.
 
-    The first four generic parameters describe the experiment's cfg, result,
-    analysis result and analysis params. The optional fifth parameter types the
-    post-analysis writeback result and defaults to ``NoAnalysisResult``.
-    Adapters without analysis omit the analysis parameters (PEP 696 defaults fill
-    in ``NoAnalysisResult`` / ``NoAnalyzeParams``) and inherit the raising no-op
+    Generic parameters describe cfg, Run result, Analysis result/params and
+    Post result/params. The last four default to None: no numeric payload or
+    user inputs. Figures-only adapters can omit these slots and return None.
+    Adapters without analysis inherit the raising no-op
     analysis below; they declare
     ``capabilities = AdapterCapabilities(analysis=AnalysisMode.NONE)`` so the
     framework never routes analysis to them.
@@ -238,11 +246,12 @@ class BaseAdapter(
                     f"{cls.__name__} declares post_analysis=True with analysis={analysis.name}; "
                     "post_analysis requires analysis=AnalysisMode.FIT"
                 )
-            cls._require_method(
-                "get_post_analyze_params",
-                "declares post_analysis=True",
-                "override get_post_analyze_params() or set post_analysis=False",
-            )
+            if not _can_construct_without_args(cls.post_analyze_params_cls()):
+                cls._require_method(
+                    "get_post_analyze_params",
+                    "declares post_analysis=True with params that require values",
+                    "override get_post_analyze_params() or give every param field a default",
+                )
             cls._require_method(
                 "post_analyze",
                 "declares post_analysis=True",
@@ -342,7 +351,8 @@ class BaseAdapter(
         """Build the analyze parameter instance presented to the user.
 
         An adapter whose analyze-params are all-default-constructible (including
-        ``NoAnalyzeParams``) inherits this default, which returns ``params_cls()``.
+        None) inherits this default, which returns ``params_cls()``.
+        None means this analysis has no user inputs.
         An adapter whose params need values (a field without a default) must override;
         otherwise this Fast-Fails — a forgotten override, not a normal code path.
         Adapters with ``analysis=AnalysisMode.NONE`` are never routed here.
@@ -362,6 +372,7 @@ class BaseAdapter(
     ) -> T_AnalyzeResult:
         """Run analysis on a completed run result.
 
+        Return None for figures only, with an empty summary and no writeback.
         Default raises — see ``get_analyze_params`` for the rationale.
         """
         del req, plots
@@ -399,8 +410,8 @@ class BaseAdapter(
         """Return the post-analysis param dataclass type (static, no instance).
 
         Reflected from the concrete ``get_post_analyze_params`` return annotation,
-        mirroring ``analyze_params_cls``. Falls back to ``NoAnalyzeParams`` when
-        the return is not annotated.
+        mirroring ``analyze_params_cls``. NoneType means no user inputs.
+        An inherited hook recovers the sixth generic argument.
         """
         import typing
 
@@ -408,33 +419,43 @@ class BaseAdapter(
             hints = typing.get_type_hints(cls.get_post_analyze_params)
         # tolerated: Adapter annotation evaluation can raise any error; keep the empty post schema.
         except Exception:  # noqa: BLE001
-            return NoAnalyzeParams
-        return hints.get("return", NoAnalyzeParams)
+            hints = {}
+        ret = hints.get("return", T_PostAnalyzeParams)
+        if isinstance(ret, typing.TypeVar):
+            for base in getattr(cls, "__orig_bases__", ()):
+                args = typing.get_args(base)
+                if len(args) > 5 and isinstance(args[5], type):
+                    return args[5]
+            return type(None)
+        return ret
 
     def get_post_analyze_params(
         self, analyze_result: T_AnalyzeResult, ctx: SessionEnv
-    ) -> Any:
-        """Build the post-analysis param instance presented to the user.
+    ) -> T_PostAnalyzeParams:
+        """Build Post inputs from the primary result and historical environment.
 
-        Default raises — an adapter declaring ``capabilities.post_analysis`` must
-        override this (Fast-Fail guard; adapters without post-analysis are never
-        routed here). Mirrors ``get_analyze_params`` but receives the primary
-        analyze result (the post params may seed from the primary fit).
+        None means no user inputs. Default-constructible params need no override;
+        params requiring values must be supplied by an override. Adapters without
+        post-analysis are never routed here.
         """
         del analyze_result, ctx
+        params_cls = type(self).post_analyze_params_cls()
+        if _can_construct_without_args(params_cls):
+            return params_cls()
         raise NotImplementedError(
-            f"{type(self).__name__} declares post-analysis support but does not "
-            "override get_post_analyze_params"
+            f"{type(self).__name__} declares post-analysis params requiring values "
+            "but does not override get_post_analyze_params"
         )
 
     def post_analyze(
         self,
-        req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, Any],
+        req: PostAnalyzeRequest[T_Result, T_AnalyzeResult, T_PostAnalyzeParams],
         *,
         plots: Plots,
-    ) -> PostAnalyzeResultBase:
+    ) -> T_PostAnalyzeResult:
         """Run a second analysis on top of the primary analyze result.
 
+        Return None for figures only, with an empty summary and no writeback.
         Default raises — see ``get_post_analyze_params`` for the rationale. The
         request carries both the raw ``run_result`` and the primary
         ``analyze_result`` so the post-analysis can refine/recompute from either.
@@ -457,8 +478,8 @@ class BaseAdapter(
         annotation, which is read here directly. An adapter with no params does NOT
         override it (no boilerplate); its base annotation is the unbound
         ``T_AnalyzeParams`` TypeVar, so the type is instead recovered from the 4th
-        generic arg (``BaseAdapter[..., NoAnalyzeParams]``), falling back to
-        ``NoAnalyzeParams`` when absent (PEP 696 default) or unreadable.
+        generic arg, falling back to NoneType when absent (PEP 696 default)
+        or unreadable.
         """
         import typing
 
@@ -545,13 +566,14 @@ class BaseAdapter(
     ) -> AnalysisItem:
         """Hand over one pane's historical inputs and summary under its assigned key.
 
-        result must implement AnalyzeResult.to_summary_dict. parameters is the
+        result is None for figures-only analysis, producing an empty summary,
+        or implements AnalyzeResult.to_summary_dict. parameters is the
         dataclass instance used for that result, or None for no inputs, never
         the next edited draft. Unsupported input/result types raise TypeError;
         invalid/non-finite JSON raises ValueError. The datafile model isolates
         containers once; this hook neither reads live context nor writes files.
         """
-        if not isinstance(result, AnalyzeResult):
+        if result is not None and not isinstance(result, AnalyzeResult):
             raise TypeError("Analysis result must implement to_summary_dict")
         if parameters is None:
             inputs: dict[str, object] = {}
@@ -565,7 +587,11 @@ class BaseAdapter(
                 "Historical analysis parameters must be a dataclass or None"
             )
         document = AnalysisDocument.model_validate(
-            {"pane": pane, "parameters": inputs, "summary": result.to_summary_dict()}
+            {
+                "pane": pane,
+                "parameters": inputs,
+                "summary": {} if result is None else result.to_summary_dict(),
+            }
         )
         return AnalysisItem(key, document)
 

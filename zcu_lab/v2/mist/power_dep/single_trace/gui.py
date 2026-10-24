@@ -8,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
 )
@@ -28,11 +27,6 @@ MistTraceRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 
 
 @dataclass
-class MistTraceAnalyzeResult(AnalyzeResultBase):
-    """Figure-only response analysis; no fitted scalars or writeback."""
-
-
-@dataclass
 class MistTraceAnalyzeParams:
     """IQ references as Python complex strings (e.g. 1+2j), or None to omit.
 
@@ -49,9 +43,7 @@ class MistTraceAnalyzeParams:
 
 
 class MistTraceAdapter(
-    BaseAdapter[
-        PowerDepCfg, MistTraceRunResult, MistTraceAnalyzeResult, MistTraceAnalyzeParams
-    ]
+    BaseAdapter[PowerDepCfg, MistTraceRunResult, None, MistTraceAnalyzeParams]
 ):
     """Acquire averaged MIST IQ and plot displacement without population fitting."""
 
@@ -80,7 +72,7 @@ class MistTraceAdapter(
         req: AnalyzeRequest[MistTraceRunResult, MistTraceAnalyzeParams],
         *,
         plots: Plots,
-    ) -> MistTraceAnalyzeResult:
+    ) -> None:
         """Plot source IQ displacement using the submitted reference/axis options.
 
         Accept loaded sources without cfg. Invalid complex reference strings
@@ -93,4 +85,4 @@ class MistTraceAdapter(
             ac_coeff=params.ac_coeff,
         )
         PowerDepExp().analyze(req.run_result, options, plots=plots)
-        return MistTraceAnalyzeResult()
+        return

@@ -316,9 +316,14 @@ opaque 自訂結果須覆寫 producer。Analysis producer 只取已提交輸出�
 analyze hooks。兩個 flux_dep adapters 共用 `zcu_tools.gui.app.measure.flux_pick_plugin` 的 state/actions/commands，
 以及 Qt-only `zcu_tools.gui.app.measure.flux_pick_frontend` 的 artists 與 preview；adapter 傳 FluxPickInputs 與初始數值，service 建立 session，
 adapter 不持有分析 operation 或 writeback draft。`get_analyze_params()` 只在 analyze-params **無法全 default 建構**（有欄位無 default）
-時才必須覆寫；params 每欄位都有 default（含 `NoAnalyzeParams`、及把常數折進欄位 default 的 adapter）時
-沿用 base default（回 `params_cls()`）。`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作
-`get_post_analyze_params()` / `post_analyze()`；post-analysis 是第二層 CPU-only 探索/比較視圖，
+時才必須覆寫；params 是 None 或每欄位都有 default 時沿用 base default。
+`BaseAdapter[Cfg, RunResult, AnalyzeResult, AnalyzeParams, PostResult, PostParams]` 的後四槽
+預設為 None。沒有參數時省略槽位或填 None，不宣告空 dataclass。只出圖的 `analyze()`／
+`post_analyze()` 回 None，summary 為空 dict、writeback 無候選，圖與空摘要照常保存。
+有數值結果時才宣告結果型別；後面的槽位有值時保留前面的 None 佔位。
+`post_analysis=True` 僅允許搭配 primary FIT analyze，並必須實作 `post_analyze()`。
+`get_post_analyze_params()` 和 primary 一樣，只在 params 需要值時覆寫。
+Post-analysis 是第二層 CPU-only 探索/比較視圖，
 可選地透過 `get_post_writeback_items()` 提出獨立 writeback。`validate_run_request` 不受
 capabilities 控制：Base 提供 no-op default，Protocol/Base exact signature 與 registry
 conformance tests 共同鎖定 framework mandatory surface。

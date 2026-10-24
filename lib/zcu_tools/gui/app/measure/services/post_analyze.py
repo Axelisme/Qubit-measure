@@ -96,7 +96,7 @@ class PostAnalyzeService(StagedAnalyzeService):
 
         tab = self._state.get_tab(tab_id)
         analyze_result = tab.analysis.result
-        if analyze_result is None:
+        if not tab.has_analyze_result():
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no primary analyze result to post-analyze"
             )
@@ -184,13 +184,17 @@ class PostAnalyzeService(StagedAnalyzeService):
         writeback = self._writeback
         draft: Any | None = None
         try:
-            proposal_items = list(
-                adapter.get_post_writeback_items(
-                    PostWritebackRequest(
-                        run_result=run_result,
-                        analyze_result=analyze_result,
-                        post_analyze_result=post_result,
-                        ctx=ctx,
+            proposal_items = (
+                []
+                if post_result is None
+                else list(
+                    adapter.get_post_writeback_items(
+                        PostWritebackRequest(
+                            run_result=run_result,
+                            analyze_result=analyze_result,
+                            post_analyze_result=post_result,
+                            ctx=ctx,
+                        )
                     )
                 )
             )

@@ -89,6 +89,9 @@ from .core import PowerMapCfg, PowerMapExp, PowerMapResult
 本篇保留 `analysis=AnalysisMode.NONE, load_data=True`，不加 analyze 或 writeback hooks。
 
 若你新增 core fit，把 capability 改成 FIT，並在 adapter 提供 `analyze`。
+若分析只出圖，省略 BaseAdapter 的分析結果／參數槽位，讓 `analyze` 回 None。
+沒有輸入參數時不覆寫 `get_analyze_params`，也不宣告空 class。
+Framework 會保存圖與空 summary，不產生 writeback 候選。
 需要寫回時，由 adapter 的 `get_writeback_items()` 提出具體 target 與值，
 讓 operator 審閱後套用。沒有 fit 的 power map 不提出校準。
 Hook 與 capability 必須一致，import 時就會檢查，見

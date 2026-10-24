@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -8,8 +7,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -26,21 +23,7 @@ from zcu_lab.v2.twotone.reset.single_tone.length.form import make_form
 SingleToneLengthRunResult: TypeAlias = RunRecord[LengthCfg, LengthResult]
 
 
-@dataclass
-class SingleToneLengthAnalyzeResult(AnalyzeResultBase):
-    """Length analysis publishes a curve without fitted scalar output."""
-
-    pass
-
-
-class SingleToneLengthAdapter(
-    BaseAdapter[
-        LengthCfg,
-        SingleToneLengthRunResult,
-        SingleToneLengthAnalyzeResult,
-        NoAnalyzeParams,
-    ]
-):
+class SingleToneLengthAdapter(BaseAdapter[LengthCfg, SingleToneLengthRunResult]):
     experiment_tag: ClassVar[str | None] = LengthExp.persistence_tag()
     exp_cls = LengthExp
 
@@ -51,7 +34,7 @@ class SingleToneLengthAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (the 4th generic arg) makes
+    # No get_analyze_params override: None (the 4th generic arg) makes
     # BaseAdapter return the empty params instance and reflect the type.
 
     def run(
@@ -67,9 +50,9 @@ class SingleToneLengthAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[SingleToneLengthRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[SingleToneLengthRunResult, None],
         *,
         plots: Plots,
-    ) -> SingleToneLengthAnalyzeResult:
+    ) -> None:
         LengthExp().analyze(req.run_result, None, plots=plots)
-        return SingleToneLengthAnalyzeResult()
+        return
