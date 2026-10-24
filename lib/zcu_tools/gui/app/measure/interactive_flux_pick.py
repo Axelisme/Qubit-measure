@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from zcu_tools.gui.app.measure.adapter import AnalyzeResultBase
-
 
 @dataclass
 class FluxPickParams:
@@ -13,12 +11,12 @@ class FluxPickParams:
 
 
 @dataclass
-class FluxPickResult(AnalyzeResultBase):
+class FluxPickResult:
     """Accepted device-axis line positions and period for measure analysis.
 
     flx_half is the half-flux position, flx_int the integer-flux position, and
     flx_period is twice their absolute distance, all in input device-axis units.
-    AnalyzeResultBase provides the summary projection; no context is retained."""
+    No context is retained."""
 
     flx_half: float
     flx_int: float

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AnalyzeResult,
     PostAnalyzeRequest,
     PostWritebackRequest,
 )
@@ -37,7 +36,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class _PostAnalyzeCapture:
     run_result: RunRecord[ConfigBase, object]
-    analyze_result: AnalyzeResult | None
+    analyze_result: object
     run_id: str | None
     experiment_name: str
     device_snapshot: Mapping[str, JsonObject] | None

@@ -36,7 +36,6 @@ from .types import (
     AdapterGuide,
     AnalysisMode,
     AnalyzeRequest,
-    AnalyzeResult,
     PostAnalyzeRequest,
     PostWritebackRequest,
     WritebackRequest,
@@ -44,7 +43,7 @@ from .types import (
 
 
 @dataclass(frozen=True, kw_only=True)
-class _PrimaryStage[C: ConfigBase, R, O, A: AnalyzeResult | None](ABC):
+class _PrimaryStage[C: ConfigBase, R, O, A](ABC):
     """Hide only interactive state S, retaining source/options/result linkage."""
 
     options: Callable[[RunRecord[C, R], SessionEnv], O] | None = None
@@ -70,13 +69,13 @@ class _PrimaryStage[C: ConfigBase, R, O, A: AnalyzeResult | None](ABC):
 
 
 @dataclass(frozen=True, kw_only=True)
-class Analysis[C: ConfigBase, R, O, A: AnalyzeResult | None](_PrimaryStage[C, R, O, A]):
+class Analysis[C: ConfigBase, R, O, A](_PrimaryStage[C, R, O, A]):
     """Frozen synchronous primary analysis declaration.
 
     fn receives AnalyzeRequest with the retained RunRecord, edited options and
-    fixed parameters, plus keyword-only plots. It returns an AnalyzeResult or
-    None for figures-only output. Callback failures propagate to the caller;
-    the host owns result adoption and preservation of previous output on failure.
+    fixed parameters, plus keyword-only plots. It returns a dataclass instance,
+    pydantic model or Mapping, or None for figures-only output. Callback failures
+    propagate; the host adopts results and preserves previous output on failure.
 
     options, inherited from the primary stage, is an optional (source, env)
     generator. The host calls it once when preparing a successful Run/Load
@@ -107,9 +106,7 @@ class Analysis[C: ConfigBase, R, O, A: AnalyzeResult | None](_PrimaryStage[C, R,
 
 
 @dataclass(frozen=True, kw_only=True)
-class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
-    _PrimaryStage[C, R, O, A]
-):
+class Interactive[C: ConfigBase, R, O, A, S](_PrimaryStage[C, R, O, A]):
     """Frozen interactive primary declaration, with state S hidden from Adapter.
 
     plugin receives the retained AnalyzeRequest and keyword-only plots and
@@ -170,16 +167,17 @@ class Interactive[C: ConfigBase, R, O, A: AnalyzeResult | None, S](
 class PostAnalysis[
     C: ConfigBase,
     R,
-    A: AnalyzeResult | None,
+    A,
     O,
-    P: AnalyzeResult | None,
+    P,
 ]:
     """Frozen second-stage declaration tied to an adopted primary result.
 
     fn receives PostAnalyzeRequest with the retained RunRecord, adopted primary,
     edited post options and fixed parameters, plus keyword-only plots. It returns
-    an AnalyzeResult or None for figures-only output. Callback failures propagate;
-    the host preserves the previous committed pane when execution fails.
+    a dataclass instance, pydantic model or Mapping, or None for figures-only
+    output. Callback failures propagate; the host preserves the previous
+    committed pane when execution fails.
 
     options is an optional (source, primary, env) generator. The host invokes it
     once when preparing the form after the corresponding primary succeeds.
@@ -203,9 +201,9 @@ class PostAnalysis[
 T_Cfg = TypeVar("T_Cfg", bound=ConfigBase)
 T_Result = TypeVar("T_Result")
 T_Options = TypeVar("T_Options", default=None)
-T_Analysis = TypeVar("T_Analysis", bound=AnalyzeResult | None, default=None)
+T_Analysis = TypeVar("T_Analysis", default=None)
 T_PostOptions = TypeVar("T_PostOptions", default=None)
-T_PostAnalysis = TypeVar("T_PostAnalysis", bound=AnalyzeResult | None, default=None)
+T_PostAnalysis = TypeVar("T_PostAnalysis", default=None)
 T_Input = TypeVar("T_Input", bound=ConfigBase, default=T_Cfg)
 
 

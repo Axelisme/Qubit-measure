@@ -61,10 +61,17 @@ that record through spec and never fills Form from historical cfg. Analysis and
 writeback do not read current Form input. No adapter class compatibility path
 is provided.
 
-`summary.summarize_analysis(result)` projects fields, arrays and complex numbers
-into JSON and reports non-finite number paths in `AnalysisSummary.invalid`.
-It does not call result serializers. This API is not active in Save, MCP or the
-results browser yet. Those consumers still use `to_summary_dict`.
+Analysis results are dataclass instances, pydantic models or string-keyed mappings.
+They need no serializer or result base class. `summary.summarize_analysis(result)`
+uses declared field names and converts arrays to lists and complex values to
+`{real, imag}` objects. Non-finite values become null. Unsupported fields or root
+values raise TypeError with their summary path.
+
+Save, live RPC and MCP use this converter without translating keys. Live RPC
+reports non-finite paths in its existing `invalid` envelope. Historical analysis
+documents retain only pane, parameters and the object summary; reopening saved
+results shows null without the live invalid list. A completed figures-only None
+result has an empty object summary. Before completion, RPC returns summary=null.
 
 ## Owners
 
