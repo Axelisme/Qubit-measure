@@ -32,6 +32,7 @@ from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFact
 from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.workflows.common.calibration import Calibrated
+from zcu_lab.workflows.common.frequency_form import FrequencyModelForm
 
 DRIVE_MODULE_FIELD = ModuleInputField(ModuleSpec, ref_family=PulseSpec)
 READOUT_MODULE_FIELD = ModuleInputField(ModuleSpec, ref_family=PulseReadoutSpec)
@@ -110,13 +111,14 @@ def resolve_calibration_modules(
 def calibration_defaults(
     data: dict[str, JsonValue], env: FormEnv
 ) -> dict[str, JsonValue]:
-    """Seed the qubit's captured flux device and x180 pi estimate.
+    """Seed captured fluxonium physics, flux device and x180 pi estimate.
 
     data is caller-owned and changed in place. flux_dev is a direct, editable
     name from $qubit.flux_source; absent sources leave it required and blank.
     pi_length_us uses the captured x180 length when available. No live lookups,
     device connections or simulator constants supply missing values.
     """
+    data["predictor"] = FrequencyModelForm.defaults(env)
     data["flux_dev"] = None
     if env.parameters is None:
         return data

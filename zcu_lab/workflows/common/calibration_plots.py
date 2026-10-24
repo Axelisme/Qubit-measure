@@ -9,6 +9,7 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from zcu_tools.experiment.v2.utils import estimate_snr
 from zcu_tools.plotting.plots import Plots
 
 
@@ -20,7 +21,8 @@ class CalibrationTrace:
     flux uses the plan's device unit. x is detune in MHz for spectroscopy or
     pulse duration in us for Rabi. observed/fitted share x's coordinates;
     fitted is None when analysis failed (observed then shows raw I).
-    accepted is the accepted pi duration in us for Rabi, otherwise None.
+    accepted is the pi duration in us for Rabi or fitted detune in MHz for
+    spectroscopy, otherwise None.
     """
 
     point_index: int
@@ -79,7 +81,7 @@ def draw_frequency(
     flux_unit: str,
     directory: Path,
 ) -> None:
-    """Draw accepted f01 history above detune rows and the latest trace/fit.
+    """Draw f01 history, detune heatmap and latest three flux slices with fit/SNR.
 
     Rows contain at most one attempt per point; the caller replaces widened
     attempts. Save the combined figure as qubit-freq.png in this point directory.
@@ -103,13 +105,16 @@ def draw_frequency(
         trend.xaxis.set_major_locator(MaxNLocator(nbins=4))
         _heatmap(heatmap, rows)
         heatmap.set(xlabel="Detune (MHz)", ylabel=f"Flux ({flux_unit})")
-        trace.plot(current.x, current.observed, ".", label="observed")
+        for row in rows[-3:]:
+            trace.plot(row.x, row.observed, ".-", label=f"{row.flux:.6g} {flux_unit}")
         if current.fitted is not None:
             trace.plot(current.x, current.fitted, label="fit")
+        if current.accepted is not None:
+            trace.axvline(current.accepted, color="red", linestyle="--")
         trace.set(
             xlabel="Detune (MHz)",
             ylabel="Signal (a.u.)",
-            title=f"Current flux\n{current.flux:.6g} {flux_unit}",
+            title=f"Recent flux slices, SNR={estimate_snr(current.observed):.1f}",
         )
         trace.legend()
 
