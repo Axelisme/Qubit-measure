@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
+from .acquisition_facts import AcquisitionFacts
+
 ErrorStatus: TypeAlias = Literal["interrupted", "failed"]
 
 
@@ -58,11 +60,23 @@ class StopSignal:
     def __init__(self, event: threading.Event | None = None) -> None:
         self._boundary = True
         self._completed_partial = False
+        self._acquisitions: list[AcquisitionFacts] = []
         self._event = event if event is not None else threading.Event()
         self._error: ScheduleOutcomeError | None = None
         self._lock = threading.RLock()
         self._parent: StopSignal | None = None
         self._children: dict[StopSignal, None] = {}
+
+    @property
+    def acquisitions(self) -> tuple[AcquisitionFacts, ...]:
+        """Return ordered acquisition facts recorded here or released by children."""
+        with self._lock:
+            return tuple(self._acquisitions)
+
+    def record_acquisition(self, facts: AcquisitionFacts) -> None:
+        """Append a completed acquisition observation without changing stop state."""
+        with self._lock:
+            self._acquisitions.append(facts)
 
     @property
     def partial_result(self) -> bool:
@@ -117,6 +131,7 @@ class StopSignal:
                     if parent._error is None:
                         parent._error = self._error
                     parent._completed_partial |= self.partial_result
+                    parent._acquisitions.extend(self._acquisitions)
                 parent._children.pop(self)
                 self._parent = None
 

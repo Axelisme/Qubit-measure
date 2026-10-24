@@ -1,18 +1,57 @@
 """Completed exposes the attempt facts shared by journal and commit readers."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
+from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv, saved_run
+from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.workflows import (
+    Completed,
+    Failed,
+    Live,
+    WorkflowEnv,
+    saved_run,
+)
+from zcu_tools.program.acquisition import CancelFlagProtocol
 
 from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables
 from ._engine_ports import START
+
+
+class RoundProgram:
+    def __init__(self, *, always_fail: bool) -> None:
+        self.attempts = 0
+        self.always_fail = always_fail
+
+    def acquire(
+        self,
+        soc: object,
+        *,
+        rounds: int,
+        progress: bool,
+        round_hook: Callable[[int, NDArray[np.float64], CancelFlagProtocol], object],
+        cancel_flag: CancelFlagProtocol,
+        **kwargs: object,
+    ) -> NDArray[np.float64]:
+        self.attempts += 1
+        if self.always_fail or self.attempts == 1:
+            raise RuntimeError("injected acquisition failure")
+        raw = np.array([1.0])
+        for ir in range(1, rounds + 1):
+            if cancel_flag.is_set():
+                break
+            round_hook(ir, raw, cancel_flag)
+        return raw
+
+    acquire_decimated = acquire
 
 
 @pytest.fixture
@@ -23,6 +62,52 @@ def rig(tmp_path: Path) -> Iterator[Rig]:
         yield value
     finally:
         value.close()
+
+
+def test_acquisition_facts_reach_each_named_stage_including_failures(rig: Rig) -> None:
+    delivered = []
+
+    def acquire(cfg: Cfg, *, context: RunContext) -> int:
+        buffer = SignalBuffer((1,), dtype=np.float64)
+        with Schedule(cfg, buffer, scope=context.scope) as schedule:
+            schedule.prog_builder(context.soc, context.soccfg).run_program(
+                RoundProgram(always_fail=cfg.value == 0),
+                rounds=4,
+                raw2signal_fn=lambda raw: raw,
+                options=AcquireOptions(
+                    retry=1, stop_condition=lambda: StopDecision(True, 12.5)
+                ),
+            )
+        return 1
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        for iteration in env.iterations():
+            delivered.append(await iteration.run(acquire, Cfg(value=1), name="T1"))
+            delivered.append(await iteration.run(acquire, Cfg(value=0), name="Echo"))
+            iteration.commit(Point(value=1))
+            break
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    first, failed = delivered
+    assert isinstance(first, Completed)
+    assert isinstance(failed, Failed)
+    operations = saved_run.read_records(rig.paths.metadata_root, Point)[0].operations
+    assert operations[0] == first.facts
+    assert [op.name for op in operations] == ["T1", "Echo"]
+    success, failure = [op.acquisitions[0] for op in operations]
+    assert success.requested_rounds == 4
+    assert success.completed_rounds == 1
+    assert success.attempts == 2
+    assert success.early_stopped
+    assert success.stop_value == 12.5
+    assert operations[1].outcome == "failed"
+    assert failure.requested_rounds == 4
+    assert failure.completed_rounds == 0
+    assert failure.attempts == 2
+    assert not failure.early_stopped
+    assert failure.stop_value is None
 
 
 @pytest.mark.parametrize("kind", ["call", "run", "setup_device", "wait_until"])

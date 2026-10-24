@@ -48,6 +48,12 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 根 env.commit 寫 data root，也只能提交一次。Commit 不經 pause gate，取消 finally 可保存已有成果。
 Reader 走 nested 樹依 commit_seq 排序，不依目錄名排序。
 
+每個 point 的 `record.json` 在 `operations[]` 信封保存各 stage 的 `name` 與 `acquisitions[]`。
+`coherence_fluxdep`、`mist_fluxdep`、`overnight` 與 `overnight_mux` 都走這條路徑，不在 point payload 複製欄位。
+每筆 acquisition 記 `requested_rounds`、最後一次 attempt 的 `completed_rounds`、實際 acquire 呼叫數 `attempts`、`early_stopped` 與 `stop_value`。
+SNR 提前停止時 `stop_value` 是停止當下的 SNR，mux 是 active tones 的最小 SNR。非有限 SNR 存 None，early_stopped 仍保留 True。
+Failed stage 的已觀察 attempts 也保留。Native `docs/metadata.acquisitions` 使用同一資料，舊記錄缺少欄位時讀成空 tuple。
+
 `Completed.value` 是 core 的 RunRecord。`Completed.facts` 是同時寫入 journal 與信封的 operation 事實。
 Iteration 序號取自 iteration 物件，不取成功 commit 數，跳過未提交點也不重用序號。
 Saver 收 Completed、歷史 snapshot 與 scope.identity，不重新捕捉 evidence。

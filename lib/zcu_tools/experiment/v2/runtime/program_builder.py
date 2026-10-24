@@ -6,12 +6,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import TypeVar
 
+from zcu_tools.experiment.acquisition_facts import AcquisitionFacts, StopDecision
 from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
 from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.v2 import (
@@ -38,7 +40,7 @@ T_Raw = TypeVar("T_Raw")
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
-StopCondition: TypeAlias = Callable[[], bool]
+StopCondition: TypeAlias = Callable[[], bool | StopDecision]
 
 
 def _require_positive_rounds(rounds: object) -> None:
@@ -160,7 +162,9 @@ class AcquireOptions:
     overrides this display policy. Every bar closes before acquire returns.
     stop_condition=None disables data-driven early stop; otherwise the callback
     runs after each completed round is converted and written to the buffer.
-    Returning True requests acquire-local cancellation before the next round.
+    Returning True or StopDecision(met=True) requests acquire-local cancellation
+    before the next round. StopDecision additionally supplies a scalar observation
+    retained in acquisition facts if finite and acquisition actually ends early.
     """
 
     retry: int = 0
@@ -168,6 +172,33 @@ class AcquireOptions:
     progress_label: str = "rounds"
     progress_leave: bool | None = None
     stop_condition: StopCondition | None = None
+
+
+@dataclass
+class _AcquireProgress:
+    requested_rounds: int
+    pbar: BaseProgressBar
+    attempts: int = 0
+    completed_rounds: int = 0
+    decision: bool | StopDecision = False
+    succeeded: bool = False
+
+    def facts(self) -> AcquisitionFacts:
+        early = (
+            self.succeeded
+            and bool(self.decision)
+            and self.completed_rounds < self.requested_rounds
+        )
+        value = self.decision.value if isinstance(self.decision, StopDecision) else None
+        return AcquisitionFacts(
+            requested_rounds=self.requested_rounds,
+            completed_rounds=self.completed_rounds,
+            attempts=self.attempts,
+            early_stopped=early,
+            stop_value=value
+            if early and value is not None and isfinite(value)
+            else None,
+        )
 
 
 class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
@@ -402,11 +433,16 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             leave=self._resolve_progress_leave(progress_leave=options.progress_leave),
             disable=rounds == 1,
         )
+        observation = _AcquireProgress(rounds, pbar)
         try:
             for attempt in range(retry + 1):
                 if self._schedule.check_stop_requested():
                     break
                 pbar.reset()
+                observation.attempts += 1
+                observation.completed_rounds = 0
+                observation.decision = False
+                observation.succeeded = False
                 try:
                     raw = self._acquire_once(
                         acquire=acquire,
@@ -414,7 +450,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                         acquire_kwargs=dict(acquire_kwargs, rounds=rounds),
                         signal_fn=signal_fn,
                         slot=slot,
-                        pbar=pbar,
+                        observation=observation,
                     )
                 except _AcquireStopped:
                     self._schedule.check_stop_requested()
@@ -444,6 +480,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         except KeyboardInterrupt as exc:
             self._schedule.mark_interrupted(exc)
         finally:
+            self._schedule.stop.record_acquisition(observation.facts())
             pbar.close()
 
         return slot.view
@@ -479,18 +516,21 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         acquire_kwargs: dict[str, object],
         signal_fn: Callable[[T_Raw], SignalArray],
         slot: SignalSlot,
-        pbar: BaseProgressBar,
+        observation: _AcquireProgress,
     ) -> T_Raw:
         scope = self._schedule.scope.branch("acquire")
         token = scope.stop
         acquire_cancel_flag = AcquireCancelFlag(token)
 
         def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
+            observation.completed_rounds = ir
             try:
-                pbar.set_progress(ir)
+                observation.pbar.set_progress(ir)
                 slot.set(signal_fn(raw))
-                if options.stop_condition is not None and options.stop_condition():
-                    cancel_flag.set()
+                if options.stop_condition is not None:
+                    observation.decision = options.stop_condition()
+                    if observation.decision:
+                        cancel_flag.set()
             except Exception as exc:
                 raise _CallbackError(exc) from exc
 
@@ -509,6 +549,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                 raise
             if token.is_set():
                 raise _AcquireStopped
+            observation.succeeded = True
             return raw
         finally:
             scope.release()

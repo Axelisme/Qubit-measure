@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -115,7 +115,14 @@ Completed.partial_result 決定 complete 或 stopped，不用 facts.stopped 代�
 ## Facts 與讀取
 
 每次 executor attempt 追加 operation_finished event。
-OperationFacts 保存 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason、stopped。
+OperationFacts 保存 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason、stopped、name 與 acquisitions。
+Name 是作者傳給 run／call 的 operation label，未命名或舊記錄為 None。
+Acquisitions 是依完成順序排列的 AcquisitionFacts，包含 requested_rounds、completed_rounds、attempts、early_stopped 與 stop_value。
+Completed rounds 只計最後一次 producer attempt，attempts 計實際 acquire 呼叫數，與 OperationFacts.attempt 的 operation 序號不同。
+Early stopped 表示 data condition 在設定 rounds 前正常結束。Stop value 是條件命中時的有限 scalar，沒有提前停止、未提供或非有限時為 None。
+Failed、raised 與 Pause discarded operations 也保留已觀察的 acquisitions。沒有 program acquisition 或舊記錄沒有欄位時讀成空 tuple。
+在每個 point 的 record.json 看 `operations[].name` 與 `operations[].acquisitions`，即可按 stage 核對 rounds 與 retry。
+`record_with_metadata` 把同一組 acquisitions 放進 native `docs/metadata.acquisitions`，不重讀 cfg 或儀器。
 Kind 是 run、call、setup_device 或 wait_until。Iteration 取自最近 iteration 物件的 birth sequence，沒有 iteration 時為零。
 Attempt 在該 iteration 中從一開始，包含 Pause retries，不隨 commit 重置。
 Stopped 是完成時 operation 自己的 bit，partial_result 另含 descendant 取消。

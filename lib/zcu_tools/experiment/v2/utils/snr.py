@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import savgol_filter
 
+from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 
 DEFAULT_SKEW_PENALTY = 0.0
@@ -126,33 +127,39 @@ def snr_checker(
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
     after_check: Callable[[float], Any] | None = None,
     check_interval: float | None = 0.1,
-) -> Callable[[], bool]:
+) -> Callable[[], StopDecision]:
+    """Check a slot's projected completed-round curve against an SNR threshold.
+
+    ctx.value supplies cumulative IQ; signal2real_fn projects it to real values.
+    None disables stopping. Checks are throttled by check_interval seconds (None
+    checks every call). after_check receives each estimate. A met decision keeps
+    the first crossing SNR for subsequent calls; nonfinite estimates use None.
+    """
     if snr_threshold is None:
-        return lambda: False
+        return lambda: StopDecision(False)
 
     import time
 
-    _triggered = False
+    _decision = StopDecision(False)
     _last_check = 0.0
 
-    def check() -> bool:
-        nonlocal _triggered, _last_check
-        if _triggered:
-            return True
+    def check() -> StopDecision:
+        nonlocal _decision, _last_check
+        if _decision:
+            return _decision
         now = time.time()
         if check_interval is not None and now - _last_check < check_interval:
-            return False
+            return StopDecision(False)
         _last_check = now
         signals = np.asarray(ctx.value)
         if np.all(np.isnan(signals)):
-            return False
+            return StopDecision(False)
         snr = estimate_snr(signal2real_fn(signals))
         if after_check is not None:
             after_check(snr)
         if snr >= snr_threshold:
-            _triggered = True
-            return True
-        return False
+            _decision = StopDecision(True, snr if np.isfinite(snr) else None)
+        return _decision
 
     return check
 

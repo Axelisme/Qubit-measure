@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -149,6 +149,19 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
+- `Schedule.outcome.acquisitions` 按完成順序列出每次 program acquisition 的 `AcquisitionFacts`。
+  `requested_rounds` 是傳給 producer 的 rounds，`completed_rounds` 是最後一次 attempt 的已完成 round hook 數，不累加失敗 retry 的資料。
+  `attempts` 是實際 producer 呼叫次數，包含失敗；停止使 producer 未被呼叫時為零。
+  `early_stopped` 只在 data condition 讓最後一次 attempt 在設定 rounds 前正常結束時為 True，external stop、failure 與最後一輪才命中都不是 early stop。
+  `stop_value` 保留條件命中時的有限 scalar，單位與意義由 caller 定義。沒有提前停止、條件沒提供數值或數值非有限時為 None。
+  布林 condition 仍可使用。需要保留數值時，condition 回 `StopDecision(met=True, value=...)`，型別由 `experiment.acquisition_facts` 匯入。
+  SNR checker 回傳這個具名 decision，scalar trace 記 SNR，mux checker 記所有 active tones 的最小 SNR。
+- Acquisition facts 隨 Schedule child release 交到父 token，在 operation 邊界截止。
+  GUI、Notebook 與 workflow saver 將同一組 facts 放進 native `docs/metadata.acquisitions`。
+  Workflow 的 `Completed.facts.acquisitions`、journal 與 point record 的 `operations[].acquisitions` 也保留它們。
+  舊 native metadata 與 operation 記錄沒有此欄位時讀成空 tuple，不從 cfg 推測 rounds。
+- 這些 facts 記 program acquisition，不聚合 host loop。Shaped length Rabi 每個 length × round 的 acquisition 是一筆 1/1，完整 host-round 的 SNR early stop 不會標成 program early stop。
+  該路徑可以用 acquisition 筆數與每輪 length 點數計算完整 host rounds；中途停止時另有不足一輪的 acquisitions。
 - `Schedule.outcome` 記錄 run 結果（資料保留不等於 operation 成功）：`completed`、`stopped`、`interrupted` 或
   `failed`。stop、`KeyboardInterrupt` 或 acquire 失敗會設定 `StopSignal`。
   Program build、raw conversion 與 update callback 的一般例外直接向 caller 傳播，不標記為 acquire 失敗。
