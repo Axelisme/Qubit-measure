@@ -795,7 +795,7 @@ def _check_workflow_cancelled(
     assert ctrl.workflow_control().tabs()[0].run_id == run_id
     assert ctrl.workflow_control().tabs()[0].operation_id is None
     assert not any(p.kind == "run" for p in ctrl.get_hardware_gate_presence())
-    completed = ctrl.await_operation(token, 0)
+    completed = ctrl.operation_control.await_operation(token, 0)
     assert completed is not None and completed.reason == "completed"
     assert completed.outcome is not None
     assert completed.outcome.status == "cancelled"
@@ -870,7 +870,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
             )
             == lease
         )
-        pending = ctrl.await_operation(token, 0)
+        pending = ctrl.operation_control.await_operation(token, 0)
         assert pending is not None and pending.reason == "timeout"
         assert pending.outcome is None
         release_cleanup.set()

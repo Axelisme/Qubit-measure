@@ -27,7 +27,7 @@ class DiagnosticAdapter(SampleAdapter):
         return Form(
             DiagnosticCfg,
             {
-                "sweep": Range.between(1.0, 2.0, expts=3),
+                "sweep": Range(1.0, 2.0, expts=3),
                 "tones": [
                     {
                         "name": f"Q{i + 1}",
@@ -103,7 +103,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
             return Form(
                 DiagnosticCfg,
                 {
-                    "sweep": Range.between(1.0, 2.0, expts=3),
+                    "sweep": Range(1.0, 2.0, expts=3),
                     "tones": [
                         {"name": "A", "frequency": Expr("6000 + 1"), "gain": 0.1},
                         {"name": "B", "frequency": 6100.0, "gain": 0.2},
@@ -118,7 +118,6 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
                         description="Synthetic amplitude candidate",
                         calibration="uncalibrated",
                     ),
-                    ("tones", 1, "gain"): FieldMeta(calibration="measured"),
                 }
             )
 
@@ -133,7 +132,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
         assert (
             rows[("tones", 0, "gain")]["seed_source"] == "Synthetic amplitude candidate"
         )
-        assert rows[("tones", 1, "gain")]["uncalibrated"] is False
+        assert rows[("tones", 1, "gain")]["uncalibrated"] is None
         assert rows[("tones", 2, "frequency")]["seed_status"] == "missing"
         assert rows[("tones", 2, "frequency")]["uncalibrated"] is None
         assert rows[("tones", 2, "gain")]["uncalibrated"] is None
@@ -147,7 +146,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
         fixture.ctrl.tab_control.close_tab(tab)
 
 
-def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rpc):
+def test_single_read_elements_keeps_sibling_drafts(form_rpc):
     from tests.gui.form_adapter._indexed_models import indexed_env
 
     from ._form_rpc import IndexedRpcAdapter
@@ -167,15 +166,7 @@ def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rp
         owner = fixture.ctrl.cfg_resources.lookup(tab)
         owner.write({("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]})
         sibling = owner.input.data["tones"][0]
-        read = rpc.call(
-            "tab.read_module", {"tab_id": tab, "field": ["tones", 1, "drive"]}
-        )
-        assert read["ok"], read
-        assert read["result"]["value"]["gain"] == 0.2
-        copied = rpc.call(
-            "tab.use_inline", {"tab_id": tab, "field": ["tones", 1, "drive"]}
-        )
-        assert copied["ok"], copied
+        owner.use_inline(("tones", 1, "drive"))
         assert owner.input.data["tones"][0] == sibling
         edited = rpc.call(
             "tab.edit_recipe_fields",
@@ -206,14 +197,6 @@ def test_indexed_module_rpc_and_single_read_elements_keep_sibling_drafts(form_rp
         assert owner.input.same_as(before)
         fixture.state.set_tab_running(tab, running=True)
         assert rpc.call("tab.read_elements", {"tab_id": tab, "path": ["tones"]})["ok"]
-        for bad_path in (
-            ["tones", 5, "drive"],
-            ["tones", "1", "drive"],
-            ["tones", -1, "drive"],
-        ):
-            refused = rpc.call("tab.read_module", {"tab_id": tab, "field": bad_path})
-            assert not refused["ok"], refused
-            assert refused["error"]["data"]["form_path"] == bad_path
         assert owner.input.same_as(before)
         fixture.state.set_tab_running(tab, running=False)
     finally:
@@ -302,7 +285,7 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
             del ctx
             return Form(
                 core,
-                {"sweep": Range.between(1.0, 2.0, expts=3)},
+                {"sweep": Range(1.0, 2.0, expts=3)},
                 fixed_elements=model.fixed_elements,
             )
 

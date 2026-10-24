@@ -1,8 +1,8 @@
-"""Shared GUI-side dispatch, control authority and event subscriptions.
+"""Shared GUI-side dispatch and control authority.
 
 RemoteControlServiceBase routes parsed NDJSON requests to app-provided handlers.
 OwnerScheduler serializes State work; bounded readonly waits may run off-main.
-Apps inject method registries, wire metadata, event serializers and their optional
+Apps inject method registries, wire metadata and their optional
 control identity owner. Authority checks and commands share one owner turn.
 
 NdjsonRpcEndpoint owns socket lifecycle, framing, authentication, per-client
@@ -25,7 +25,7 @@ from typing import Any
 from uuid import uuid4
 
 from zcu_tools.gui.control_identity import ControlIdentity, ControlIdentityError
-from zcu_tools.gui.event_bus import EventMeta, EventOrigin, EventSubscriptions
+from zcu_tools.gui.event_bus import EventOrigin
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.control_methods import CONTROL_METHOD_SPECS
 from zcu_tools.gui.remote.errors import (
@@ -33,7 +33,6 @@ from zcu_tools.gui.remote.errors import (
     RemoteError,
     remote_error_from_expected,
 )
-from zcu_tools.gui.remote.framing import encode_line
 from zcu_tools.gui.remote.method_spec import BoundMethod
 from zcu_tools.gui.remote.param_spec import validate_params
 from zcu_tools.gui.remote.rpc_endpoint import (
@@ -48,16 +47,13 @@ from zcu_tools.gui.session.ports import OwnerScheduler
 
 logger = logging.getLogger(__name__)
 
-# An event serializer maps a domain payload to a wire payload (or None to drop).
-Serializer = Callable[[Any], Mapping[str, object] | None]
-
 
 @dataclass(frozen=True, kw_only=True)
 class RemoteAppSpec:
     """App-owned dispatch declarations and endpoint identity, shared by adapters.
 
     Versions and server_name retain the app's wire handshake identity. Registries
-    and serializers remain app-owned; this record does not grant control authority
+    remain app-owned; this record does not grant control authority
     or select an owner scheduler.
     """
 
@@ -69,10 +65,6 @@ class RemoteAppSpec:
     """App's published server identity in handshake replies."""
     method_registry: Mapping[str, BoundMethod]
     """Wire method names mapped to app handlers and their dispatch policies."""
-    event_serializers: Mapping[Any, Serializer]
-    """Domain event keys mapped to lazy payload projections; None drops an event."""
-    wire_event_name: Callable[[Any], str]
-    """Map the same domain event keys to their subscribed wire names."""
     reply_continuations: Mapping[str, Callable[[ReplyDelivery], None]] = field(
         default_factory=dict
     )
@@ -109,16 +101,14 @@ def _store_expected_error(
 class SubscriptionCtx:
     """Per-connection semantic state attached to ``link.app_ctx``.
 
-    ``client_id`` is a stable opaque connection identity; ``subscribed`` contains
-    wire event names. Subclasses add app-owned resources,
+    ``client_id`` is a stable opaque connection identity. Subclasses add app-owned resources,
     such as editor session ids, by declaring additional ``__slots__``.
     """
 
-    __slots__ = ("client_id", "subscribed")
+    __slots__ = ("client_id",)
 
     def __init__(self) -> None:
         self.client_id = uuid4().hex
-        self.subscribed: set[str] = set()
 
 
 def _ctx(link: ClientLink) -> SubscriptionCtx:
@@ -151,7 +141,7 @@ class RemoteControlServiceBase:
 
         controller exposes the app bus and commands used by app.method_registry.
         opts configures the socket; owner_scheduler serializes State work.
-        app supplies endpoint identity, dispatch methods and event projections.
+        app supplies endpoint identity and dispatch methods.
         control_identity is the application's optional write-authority owner;
         omit it for observe-only apps. When supplied, unmarked methods require
         the calling socket's holder identity, and off-main methods must declare
@@ -170,8 +160,6 @@ class RemoteControlServiceBase:
         self._wire_version = app.wire_version
         self._method_registry = app.method_registry
         self._reply_continuations = app.reply_continuations
-        self._event_serializers = app.event_serializers
-        self._wire_event_name = app.wire_event_name
         self._owner_scheduler = owner_scheduler
         self._endpoint = NdjsonRpcEndpoint(
             opts,
@@ -180,9 +168,6 @@ class RemoteControlServiceBase:
             server_name=app.server_name,
             router=self,
         )
-        # EventBus subscriptions registered in start(); unsubscribed in stop().
-        self._bus: Any = None
-        self._bus_subs = EventSubscriptions()
 
     # ------------------------------------------------------------------
     # Policy seams (overridable; defaults give the read-only behaviour)
@@ -235,15 +220,14 @@ class RemoteControlServiceBase:
     # ------------------------------------------------------------------
 
     def start(self) -> int:
-        """Hook EventBus (+ any extra listeners), then start the endpoint.
+        """Hook app listeners, then start the endpoint.
 
         Returns the bound port. App-side wiring happens before the socket opens
-        so no event is missed. Once the (possibly ephemeral-fallback) real port is
+        to enable app diagnostics. Once the (possibly ephemeral-fallback) real port is
         known, advertise it via session discovery so an agent can find this GUI
         without being told the port.
         """
         endpoint_started = False
-        self._subscribe_event_bus()
         try:
             self._extra_start()
             port = self._endpoint.start()
@@ -254,16 +238,12 @@ class RemoteControlServiceBase:
                 if endpoint_started:
                     self._endpoint.stop()
             finally:
-                try:
-                    self._extra_stop()
-                finally:
-                    self._unsubscribe_event_bus()
+                self._extra_stop()
             raise
         return port
 
     def stop(self) -> None:
         """Unwire listeners, then stop the endpoint. Idempotent. Owner thread."""
-        self._unsubscribe_event_bus()
         self._extra_stop()
         if self._opts.app_slug:
             clear_session(self._opts.app_slug)
@@ -328,29 +308,6 @@ class RemoteControlServiceBase:
         """
         assert isinstance(request, Request)
         req = request
-        # Subscription methods are state-owning (per-connection subscription
-        # set), so handled here, not via dispatch.
-        if req.method == "events.subscribe":
-            self._handle_subscribe(link, req.id, req.params)
-            return
-        if req.method == "events.unsubscribe":
-            self._handle_unsubscribe(link, req.id, req.params)
-            return
-        if req.method == "events.list":
-            subscribed = self._endpoint.client_state_transaction(
-                link, lambda: sorted(_ctx(link).subscribed)
-            )
-            self._endpoint.reply_ok(
-                link,
-                rid=req.id,
-                result={
-                    "events": sorted(
-                        self._wire_event_name(k) for k in self._event_serializers
-                    ),
-                    "subscribed": subscribed,
-                },
-            )
-            return
         # App-specific state-owning methods (e.g. measure-gui's editor.*).
         if self._route_extra(link, req):
             return
@@ -421,53 +378,7 @@ class RemoteControlServiceBase:
         }
 
     # ------------------------------------------------------------------
-    # events.* state-owning handlers
     # ------------------------------------------------------------------
-
-    def _handle_subscribe(self, link: ClientLink, rid: str, params) -> None:
-        events = params.get("events")
-        if not isinstance(events, list):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "'events' must be a list of event names"
-            )
-        whitelist = {self._wire_event_name(k) for k in self._event_serializers}
-        for ev in events:
-            if not isinstance(ev, str):
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS,
-                    f"event name must be a string, got {type(ev).__name__}",
-                )
-            if ev not in whitelist:
-                raise RemoteError(
-                    ErrorCode.INVALID_PARAMS, f"unknown event name: {ev!r}"
-                )
-
-        def _subscribe() -> list[str]:
-            ctx = _ctx(link)
-            for ev in events:
-                assert isinstance(ev, str)
-                ctx.subscribed.add(ev)
-            return sorted(ctx.subscribed)
-
-        subscribed = self._endpoint.client_state_transaction(link, _subscribe)
-        self._endpoint.reply_ok(link, rid=rid, result={"subscribed": subscribed})
-
-    def _handle_unsubscribe(self, link: ClientLink, rid: str, params) -> None:
-        events = params.get("events")
-        if not isinstance(events, list):
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS, "'events' must be a list of event names"
-            )
-
-        def _unsubscribe() -> list[str]:
-            ctx = _ctx(link)
-            for ev in events:
-                if isinstance(ev, str):
-                    ctx.subscribed.discard(ev)
-            return sorted(ctx.subscribed)
-
-        subscribed = self._endpoint.client_state_transaction(link, _unsubscribe)
-        self._endpoint.reply_ok(link, rid=rid, result={"subscribed": subscribed})
 
     # ------------------------------------------------------------------
     # Dispatch onto the State owner thread (marshal + off-main + policy seams)
@@ -584,73 +495,7 @@ class RemoteControlServiceBase:
             self._endpoint.reply_ok(link, rid=rid, result=result, on_complete=completed)
 
     # ------------------------------------------------------------------
-    # EventBus integration (subscribe on owner thread; push via broadcast)
     # ------------------------------------------------------------------
-
-    def _subscribe_event_bus(self) -> None:
-        """Subscribe one callback per serialised event key on the owner thread."""
-        bus = self._get_bus()
-        self._bus = bus
-        subscribed_keys: list[Any] = []
-        for key in self._event_serializers:
-            cb = self._make_bus_callback(key)
-            try:
-                self._bus_subs.subscribe_with_meta(bus, key, cb)
-            except Exception:  # pragma: no cover — bus.subscribe is straightforward
-                logger.exception("Failed to subscribe %s on EventBus", key)
-                self._bus_subs.unsubscribe_all()
-                raise
-            subscribed_keys.append(key)
-        logger.debug(
-            "event-flow: subscribed %d EventBus events for push: %s",
-            len(subscribed_keys),
-            [self._wire_event_name(k) for k in subscribed_keys],
-        )
-
-    def _unsubscribe_event_bus(self) -> None:
-        if self._bus is None:
-            return
-        self._bus_subs.unsubscribe_all()
-        self._bus = None
-
-    def _make_bus_callback(self, key: Any) -> Callable[[Any, EventMeta], None]:
-        serializer = self._event_serializers[key]
-        wire_name = self._wire_event_name(key)
-
-        def _on_event(payload: Any, meta: EventMeta) -> None:
-            # Runs on the State owner thread. The endpoint first selects recipients,
-            # then calls this factory on this same thread and revalidates before
-            # enqueue.
-            def _make_line() -> bytes | None:
-                try:
-                    wire_payload = serializer(payload)
-                except Exception:  # pragma: no cover — serializer must not raise
-                    logger.exception("Event serializer for %s raised", wire_name)
-                    return None
-                if wire_payload is None:
-                    return None
-                try:
-                    return encode_line(
-                        {
-                            "event": wire_name,
-                            "payload": wire_payload,
-                            "seq": meta.seq,
-                            "origin": {
-                                "kind": meta.origin.kind,
-                                "operation_id": meta.origin.operation_id,
-                            },
-                        }
-                    )
-                except Exception:
-                    logger.exception("Failed to encode push line for %s", wire_name)
-                    return None
-
-            self._endpoint.broadcast_lazy(
-                _make_line,
-                predicate=lambda link: wire_name in _ctx(link).subscribed,
-            )
-
-        return _on_event
 
 
 __all__ = [

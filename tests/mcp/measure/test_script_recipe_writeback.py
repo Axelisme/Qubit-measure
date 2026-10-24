@@ -204,15 +204,13 @@ def test_owner_submission_receipt_retains_prefix_and_rejects_duplicate_commit(
         assert not current.lookup("general.ext.rejected").present
         assert not current.lookup("general.ext.later").present
     assert all(row.item.destination["point"] == "point" for row in completed)
-    gui.respond(
-        "tab.writeback_set",
-        {
-            "tab_id": "tab-1",
-            "subtab_id": "analysis",
-            "id": "param-1",
-            "proposed_value": 999.0,
-        },
-    )
+    gui.owner.submit(
+        gui.writeback_control.set_writeback_item_for_pane,
+        "tab-1",
+        "analysis",
+        "param-1",
+        proposed_value=999.0,
+    ).result()
     assert gui.respond("tab.writeback_receipt", query) == receipt
     with pytest.raises(RemoteError, match="already submitted"):
         gui.respond("tab.writeback_accept", params)
@@ -263,7 +261,19 @@ def test_accept_writes_current_post_draft_after_question(
                 if edit == "target"
                 else {"proposed_value": 99.0}
             )
-            gui.respond("tab.writeback_set", params)
+            gui.owner.submit(
+                gui.writeback_control.set_writeback_item_for_pane,
+                "tab-1",
+                "post_analysis",
+                str(params["id"]),
+                **(
+                    {"edits": {("gain",): 0.9}}
+                    if edit == "module"
+                    else {"target_name": "general.ext.wrong"}
+                    if edit == "target"
+                    else {"proposed_value": 99.0}
+                ),
+            ).result()
         execution.answer(
             {
                 "request_id": pending.request_id,

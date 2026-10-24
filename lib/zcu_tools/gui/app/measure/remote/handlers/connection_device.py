@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.device.base import BaseDeviceInfo
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.remote.wire import optional_bool, require_int, require_str
+from zcu_tools.gui.remote.wire import require_int, require_str
 from zcu_tools.gui.session.device_models import (
-    ConnectDeviceRequest,
-    DisconnectDeviceRequest,
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.services.connection import (
@@ -36,26 +34,6 @@ def coerce_connect_request(params: Mapping[str, object]) -> ConnectRemoteRequest
     )
 
 
-def coerce_connect_device_request(
-    params: Mapping[str, object],
-) -> ConnectDeviceRequest:
-    return ConnectDeviceRequest(
-        type_name=require_str(params, "type_name"),
-        name=require_str(params, "name"),
-        address=require_str(params, "address"),
-        remember=optional_bool(params, "remember", default=True),
-    )
-
-
-def coerce_disconnect_device_request(
-    params: Mapping[str, object],
-) -> DisconnectDeviceRequest:
-    return DisconnectDeviceRequest(
-        name=require_str(params, "name"),
-        remember=optional_bool(params, "remember", default=True),
-    )
-
-
 def h_soc_connect(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -68,46 +46,6 @@ def h_soc_connect(
     # via soc.info (it is ~2 KB and rarely needed at connect time).
     info = adapter.ctrl.get_soc_info()
     return {"soc": {"description": info["description"], "is_mock": info["is_mock"]}}
-
-
-def h_device_connect(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    req = coerce_connect_device_request(params)
-    dev = adapter.device_control
-    operation_id = dev.start_connect_device(req)
-    return {"operation_id": operation_id}
-
-
-def h_device_disconnect(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    req = coerce_disconnect_device_request(params)
-    dev = adapter.device_control
-    operation_id = dev.start_disconnect_device(req)
-    return {"operation_id": operation_id}
-
-
-def h_device_reconnect(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    dev = adapter.device_control
-    operation_id = dev.start_reconnect_device(name)
-    # Reconnect runs asynchronously like connect/disconnect/setup; expose the
-    # operation_id so the MCP short-wait/handle path can track it (FC1).
-    return {"operation_id": operation_id}
-
-
-def h_device_forget(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    dev = adapter.device_control
-    dev.forget_device(name)
-    # Synchronous sync mutation: echo the forgotten name so the reply is
-    # self-verifying (no follow-up read needed to confirm what was dropped).
-    return {"forgotten": name}
 
 
 def h_device_setup(
@@ -178,55 +116,6 @@ def _device_fields(info: BaseDeviceInfo) -> list[dict[str, object]]:
             entry["choices"] = choices
         fields.append(entry)
     return fields
-
-
-def h_device_setup_spec(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    info = adapter.device_control.get_device_info(name)
-    if info is None:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            f"Device {name!r} has no live info (connect it first)",
-        )
-    return {"fields": _device_fields(info)}
-
-
-def h_device_cancel_operation(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    name = str(params["name"])
-    dev = adapter.device_control
-    dev.cancel_device_operation(name)
-    # Self-verifying echo: cancel succeeded (a non-cancellable / absent op raised
-    # above). The terminal outcome is observed via the operation handle.
-    return {"ok": True, "cancelled": True}
-
-
-def h_device_active_operations(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    del params
-    dev = adapter.device_control
-    # Phase C concurrency: enumerate *every* in-flight device operation (sorted
-    # by name), each tagged with its kind (connect / disconnect / setup) and its
-    # operation 'handle' so the agent can wait on each operation id.
-    # device_name is the SSOT key; the duplicate snapshot.name field is dropped.
-    return {
-        "operations": [
-            {
-                "handle": op.token,
-                "device_name": op.device_name,
-                "kind": op.kind.value,
-                "type_name": op.snapshot.type_name,
-                "address": op.snapshot.address,
-                "status": op.snapshot.status.value,
-                "error": op.snapshot.error,
-            }
-            for op in dev.get_active_device_operations()
-        ]
-    }
 
 
 def h_device_list(

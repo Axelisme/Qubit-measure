@@ -216,8 +216,6 @@ class LoopbackGui:
             result = {"reason": "completed", "status": "finished"}
         elif method == "operation.cancel":
             result = {"status": "finished"}
-        elif method in {"tab.run_cancel", "analyze.cancel", "device.cancel_operation"}:
-            result = {"ok": True, "cancelled": True}
         else:
             result = overview_rpc(method, params)
         return result
@@ -366,7 +364,6 @@ CATALOG = [
 def overview_rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
     replies: dict[str, dict[str, Any]] = {
         "state.has_project": {"value": False},
-        "state.has_context": {"value": False},
         "state.has_active_context": {"value": False},
         "state.has_soc": {"value": False},
         "tab.snapshot": {"tabs": []},
@@ -374,8 +371,6 @@ def overview_rpc(method: str, params: dict[str, Any]) -> dict[str, Any]:
         "device.list": {"devices": []},
         "predictor.info": {"loaded": False},
         "operation.active": {"operations": []},
-        "state.hardware_gate": {},
-        "run.running_tab": {"tab_id": None},
         "view.snapshot": {"active_tab_id": None},
     }
     return replies[method]
@@ -474,15 +469,6 @@ def test_unexpected_gui_eof_reconnects_same_port_without_replaying_mutation(
         with pytest.raises(RuntimeError) as error:
             client.call("cancel", {"op": old})
         assert getattr(error.value, "reason", None) == "unknown_op"
-        for method, params in (
-            ("tab.run_cancel", {}),
-            ("analyze.cancel", {"tab_id": "t"}),
-            ("device.cancel_operation", {"name": "bias"}),
-        ):
-            with pytest.raises(RuntimeError) as error:
-                client.call("rpc_call", {"method": method, "params": params})
-            assert getattr(error.value, "reason", None) == "unknown_method"
-            assert method not in gui_b.sent
         assert client.call("wait", {"op": new})["status"] == "finished"
         assert client.call("cancel", {"op": new})["status"] == "finished"
         assert gui_a.sent.count("tab.edit_cfg") == 1

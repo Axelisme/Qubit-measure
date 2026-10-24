@@ -367,7 +367,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
                 SampleCfg,
                 {
                     "gain": Expr("general.ext.amount"),
-                    "sweep": Range.between(1, 2, expts=3),
+                    "sweep": Range(1, 2, expts=3),
                 },
             )
 

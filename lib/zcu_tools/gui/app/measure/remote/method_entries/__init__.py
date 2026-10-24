@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ._registry import RemoteMethodEntry
 from .analysis import METHODS as ANALYSIS_METHODS
-from .arb_waveform import METHODS as ARB_WAVEFORM_METHODS
 from .catalog import METHODS as CATALOG_METHODS
 from .connection_device import METHODS as CONNECTION_DEVICE_METHODS
 from .context import METHODS as CONTEXT_METHODS
@@ -28,7 +27,6 @@ METHOD_ENTRIES: tuple[RemoteMethodEntry, ...] = (
     *CONTEXT_METHODS,
     *POINT_METHODS,
     *STATE_PROJECT_METHODS,
-    *ARB_WAVEFORM_METHODS,
     *CONNECTION_DEVICE_METHODS,
     *OPERATION_METHODS,
     *VIEW_METHODS,

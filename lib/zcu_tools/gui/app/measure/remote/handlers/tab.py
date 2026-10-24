@@ -10,7 +10,6 @@ from pydantic import JsonValue, TypeAdapter
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
-    CfgPreconditionReason,
 )
 from zcu_tools.gui.form import (
     FormCommandError,
@@ -457,8 +456,8 @@ def h_tab_edit_cfg(
             ErrorCode.INVALID_PARAMS,
             f"{exc}. Active editable paths: {hints['editable_paths']!r}. "
             f"Selection paths: {hints['selection_paths']!r}. "
-            "Use tab.select_recipe_module for module selection with logical paths; "
-            "ref descendants require use_inline first. "
+            "Use tab.select_recipe_option for module selection with logical paths; "
+            "ref descendants require the to_inline recipe command first. "
             "Use tab.describe_cfg to inspect canonical options and paths.",
             reason="form_errors",
             data=dict(hints),
@@ -482,84 +481,6 @@ def module_path(raw: object) -> tuple[str | int, ...]:
             ErrorCode.INVALID_PARAMS, "field must be a nonempty array of names/indexes"
         )
     return tuple(raw)
-
-
-def h_tab_read_module(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Read detached field-local module values, without source refresh or mutation."""
-    from ..form_errors import cfg_error_to_remote
-
-    path = module_path(params["field"])
-    try:
-        module = adapter.cfg_lookup(str(params["tab_id"])).read_module(path)
-    except FormPathError as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            str(exc),
-            reason="form_path",
-            data={"form_path": list(exc.path)},
-        ) from exc
-    except CfgPreconditionError as exc:
-        raise cfg_error_to_remote(exc) from exc
-    except ValueError as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, str(exc), reason="form_errors"
-        ) from exc
-    return {"value": module.value, "mode": module.mode, "source": module.source}
-
-
-def h_tab_use_inline(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Convert one module using the fixed capture and return its complete Form view.
-
-    params supplies tab_id and a typed field/index array for a core module field. Resource admission
-    runs before reading the public input tag at an exact core module path.
-    Ref invokes to_inline through the guarded command host; inline is a no-op
-    even for partial input or invalid expressions. Mode detection does not
-    evaluate the draft or read sources. Disabled, missing or untagged input and
-    unavailable ref commands reject without fallback.
-    Busy, revoked and notification-reentrant calls also reject inline no-ops.
-    Known form failures become directed RemoteError replies; unexpected failures
-    propagate. No source refresh, caller layout construction or retry occurs.
-    """
-    from ..form_errors import cfg_error_to_remote
-    from ..form_observation import observe_form
-
-    path = module_path(params["field"])
-    try:
-        resource = adapter.cfg_lookup(str(params["tab_id"]))
-        resource.use_inline(path)
-    except FormInputRejected as exc:
-        from ..form_errors import input_rejected_to_remote
-
-        raise input_rejected_to_remote(exc) from exc
-    except FormPathError as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            str(exc),
-            reason="form_path",
-            data={"form_path": list(exc.path)},
-        ) from exc
-    except CfgPreconditionError as exc:
-        if exc.reason is CfgPreconditionReason.NOT_VALID:
-            raise cfg_error_to_remote(
-                CfgPreconditionError(
-                    exc.reason,
-                    f"Cannot convert {path!r}: {exc}. "
-                    "Select an Inline option to edit this field.",
-                )
-            ) from exc
-        raise cfg_error_to_remote(exc) from exc
-    except ValueError as exc:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS,
-            f"Cannot convert {path!r}: {exc}. "
-            "Select an Inline option to edit this field.",
-            reason="form_errors",
-        ) from exc
-    return dict(observe_form(resource))
 
 
 def h_tab_read_elements(
@@ -733,51 +654,3 @@ def h_tab_run_recipe_command(
     if changed:
         follow_tab(adapter, tab_id, "run")
     return {"changed": changed}
-
-
-def h_tab_select_recipe_module(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Select an actual key, explicitly copy, or disable a logical selector.
-
-    use_library requires a nonblank key; other actions must omit it. Explicit
-    null is not omission. Owner admission precedes no-op detection; the reply
-    includes a fresh same-turn observation, never a second RPC or cached read.
-    """
-    from ..form_description import RecipeSelectionResult, recipe_field_wire
-    from ..form_errors import recipe_form_errors
-
-    path = _recipe_path(params["path"])
-    action = params["action"]
-    if action not in ("use_library", "use_inline", "disable"):
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "Unknown selector action", reason="form_errors"
-        )
-    key = params.get("key")
-    if action == "use_library":
-        if not isinstance(key, str) or not key.strip():
-            raise RemoteError(
-                ErrorCode.INVALID_PARAMS,
-                "use_library requires a key",
-                reason="form_errors",
-            )
-    elif "key" in params:
-        raise RemoteError(
-            ErrorCode.INVALID_PARAMS, "key must be omitted", reason="form_errors"
-        )
-    tab_id = str(params["tab_id"])
-    with recipe_form_errors():
-        resource = adapter.cfg_lookup(tab_id)
-        if action == "use_library" and isinstance(key, str):
-            changed = resource.select_recipe_module(path, "use_library", key=key)
-        elif action == "use_inline":
-            changed = resource.select_recipe_module(path, "use_inline")
-        else:
-            changed = resource.select_recipe_module(path, "disable")
-        result: RecipeSelectionResult = {
-            "changed": changed,
-            "field": recipe_field_wire(resource.read_recipe_field(path)),
-        }
-    if changed:
-        follow_tab(adapter, tab_id, "run")
-    return dict(result)

@@ -4,7 +4,7 @@ from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2._support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+from zcu_lab.v2._support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
 
@@ -35,7 +35,7 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "sweep": {"length": Range.between(0.0, relax_delay, expts=101)},
+            "sweep": {"length": Range(0.0, relax_delay, expts=101)},
             "relax_delay": relax_delay,
             "initial_delay": Hidden(),
             "uniform": True,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -120,8 +119,6 @@ class GuardService:
     def capture_run_inputs(
         self,
         tab_id: str,
-        *,
-        aliases: Mapping[str, str] | None = None,
     ) -> RunInputs:
         """Check tab_id and capture the current cfg and observed inputs.
 
@@ -129,18 +126,12 @@ class GuardService:
         SoC when declared. Unknown tab, readiness and adapter validation failures
         raise GuardError; invalid publications keep their cfg errors.
         Cached device settings do not participate in admission.
-        None and empty aliases accept current displayed values using the tab's
-        Open/Reset capture. Nonempty aliases fail before admission; Reset with
-        aliases first. No source is captured or expression re-resolved against
+        Accept current displayed values using the tab's Open/Reset capture.
+        No source is captured or expression re-resolved against
         current global parameters. The fixed captured saved-point storage supplies
         entry/point/description. No Run,
         lease, file or ledger write starts; source and alias errors propagate.
         """
-        if aliases:
-            raise GuardError(
-                "Run aliases are not supported; Reset the tab with aliases first",
-                reason_code="run_aliases_not_supported",
-            )
         tab = self._require_tab(tab_id)
         self._require_readiness(ContextReadiness.ACTIVE, "run")
 
@@ -177,11 +168,7 @@ class GuardService:
         ):
             storage = parameters.capture_storage()
             snapshot = RunSnapshot(
-                entry_id=storage.entry_id,
-                entry_name=storage.entry_name,
-                point=storage.point,
-                description=storage.description,
-                roles=storage.roles,
+                entry_id=storage.entry_id, point=storage.point, roles=storage.roles
             )
         logger.debug("capture_run_inputs: tab_id=%r", tab_id)
         return RunInputs(
@@ -195,19 +182,6 @@ class GuardService:
             storage=storage,
             parameters=parameters,
         )
-
-    def check_save(self, tab_id: str) -> None:
-        """Require an existing tab and a Run result, without live context reads.
-
-        Raise GuardError on rejection; return None without mutation on success.
-        Busy and native evidence checks remain at the Save service boundary.
-        """
-        tab = self._require_tab(tab_id)
-        if not tab.has_run_result():
-            raise GuardError(
-                "No run result available to save.", reason_code="no_run_result"
-            )
-        logger.debug("check_save: tab_id=%r", tab_id)
 
     @staticmethod
     def _supports_load_data(adapter: Any) -> bool:

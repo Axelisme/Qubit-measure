@@ -38,7 +38,6 @@ Updates helper 只把完整 tones 的原始位置與 Q 名對應到分析參數�
 開啟或 Reset tab。Range find 的 mapping key 是 `resonator`，mux 是 `mux`。
 Target mapping 的省略／KEEP／null 項目沿用全域 alias，只對這次 capture 生效。
 Reuse 是 idle matching tab ID，省略／KEEP／null 開新 tab。不改全域 aliases 或 GUI focus。
-`session.context.read(source_path)` 讀 session 值，不需要先開 tab。
 `tab.read_parameter(path, missing_ok=False)` 讀 tab 固定捕捉的參數。
 `session.device_unit(name)` 讀裝置快取的 flux 單位，不碰硬體或刷新快取。
 `tab.read(path)` 回 `FormField`，使用 dotted string，例如 `"tones.2.drive"`。
@@ -79,7 +78,7 @@ Analysis updates 直接傳 dict，例如 `updates={"dual_exp": inputs.dual_exp, 
 
 所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
 或靜態解析到 `zcu_lab` 內定義的 helper，定義可用 def 或 async def。
-Recipe 通常用 `tab.*` 與 `session.ask(...)`。
+Recipe 通常用 `tab.*`，寫回問答用 `tab.ask_writeback()`。
 Workflow 可寫 `await helper(env, cfg)`，helper 可再呼叫 helper，自己的 async def 本文也同樣受檢查。
 不要 await 外部 coroutine。在 async def 內，`asyncio.*`、`create_task`、`gather`、
 `wait_for`、`TaskGroup` 的直接呼叫即使不 await 也拒絕，包含 async with TaskGroup()。
@@ -149,7 +148,7 @@ Run scope cancel 只停止正在取得資料的 Run，回傳 partial，recipe �
 取消 recipe 根則讓下一個 call／ask await raise `ScriptCancelled`。
 進行中的 Run 先合作 drain，runtime 保留 run_id、partial 與完成事實，再 raise。
 這是普通例外，不是 `asyncio.CancelledError`。
-Analyze、ask_writeback、session.ask 都回非 Optional 物件，不用 None 表示根取消。
+`tab.analyze` 與 `tab.ask_writeback` 都回非 Optional 物件，不用 None 表示根取消。
 AnalysisResult.result 的 null 表示該分析沒有成功結果，與根取消的例外不同。
 作者不 catch 根取消。已進入 try 的 `finally` 仍在原 worker 同步 Save。
 本目錄的 `await tab.run()` 保持在 try 外，根取消在此 raise 時不進入 Save finalizer。

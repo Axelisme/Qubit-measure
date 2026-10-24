@@ -14,21 +14,6 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
-        "analyze.cancel",
-        "analysis:h_analyze_cancel",
-        MethodSpec(
-            5.0,
-            "Cancel the tab's in-flight interactive analyze and clear is_analyzing. "
-            "The generic operation.cancel handle path uses the same domain "
-            "cancellation hook and tears down the interactive View. Run "
-            "cancellation does not settle a separate analyze operation. Returns "
-            "{ok, cancelled}: cancelled is false when none was in flight; "
-            "true requests cancellation, not necessarily worker completion.",
-            (required_string("tab_id"),),
-        ),
-        agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
         "tab.get_analyze_result",
         "analysis:h_tab_get_analyze_result",
         MethodSpec(
@@ -45,17 +30,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "tab.get_analyze_params",
-        "analysis:h_tab_get_analyze_params",
-        MethodSpec(
-            5.0,
-            "Read primary analyze params as {analyze_params, definitions}. Values "
-            "are null before a result exists; definitions come from the live adapter.",
-            (required_string("tab_id"),),
-            readonly=True,
-        ),
-    ),
-    method_entry(
         "tab.analyze",
         "analysis:h_tab_analyze",
         MethodSpec(
@@ -68,8 +42,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "thread; the GUI returns a raw operation_id, which MCP exposes as a "
             "handle, not a completed result. Call wait(op=handle) for the terminal "
             "status, error and Stop feedback. 'updates' optionally overrides "
-            "analyze params (read current values with rpc_call on "
-            "tab.get_analyze_params). Makes the tab busy while it runs; a "
+            "analyze params. Makes the tab busy while it runs; a "
             "concurrent save/edit returns precondition_failed until it settles. "
             "Run completion does not save raw data; call tab.save_data explicitly. "
             "Analysis does not save raw data either. "
@@ -134,17 +107,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "tab.get_post_analyze_params",
-        "analysis:h_tab_get_post_analyze_params",
-        MethodSpec(
-            5.0,
-            "Read post-analysis params as {post_analyze_params, definitions}. Values "
-            "are null before post analysis; definitions come from the live adapter.",
-            (required_string("tab_id"),),
-            readonly=True,
-        ),
-    ),
-    method_entry(
         "tab.post_analyze",
         "analysis:h_tab_post_analyze",
         MethodSpec(
@@ -159,8 +121,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "to a handle. Call wait(op=handle) for the terminal status, error and "
             "Stop feedback; start alone does not mean completion. Fast-fails "
             "with precondition_failed when no primary result exists. 'updates' "
-            "overrides post params (read current values with rpc_call on "
-            "tab.get_post_analyze_params). Read the fit summary with rpc_call on "
+            "overrides post params. Read the fit summary with rpc_call on "
             "tab.get_post_analyze_result.",
             (
                 required_string("tab_id"),

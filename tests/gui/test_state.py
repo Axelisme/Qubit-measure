@@ -245,9 +245,7 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
         completion="complete",
         snapshot=RunSnapshot(
             entry_id=UUID("00000000-0000-0000-0000-000000000001"),
-            entry_name="historical-entry",
             point="historical-point",
-            description="Original measurement context",
             roles={"driver": "q1"},
         ),
         provenance=SoftwareProvenance(

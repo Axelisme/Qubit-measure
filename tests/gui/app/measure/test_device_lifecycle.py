@@ -51,7 +51,7 @@ def test_behavior_closes_runtime_registered_drivers_after_drain(assembled_app):
     ctrl = controller_of(assembly.controller)
     driver = ClosingDriver(fast_mode=True)
     soccfg = make_mock_soccfg()
-    ctrl.install_soc(soccfg, soccfg)
+    ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     ctrl.register_device("runtime", driver)
     assert ctrl.device_control.get_device_info("runtime") == driver.get_info()
     ctrl.close()
@@ -78,7 +78,7 @@ def test_close_hardware_isolates_driver_failure_and_still_uninstalls_soc(
     good = ClosingDriver(fast_mode=True)
     bad.fail_close = True
     soccfg = make_mock_soccfg()
-    ctrl.install_soc(soccfg, soccfg)
+    ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     ctrl.register_device("bad", bad)
     ctrl.register_device("good", good)
     try:

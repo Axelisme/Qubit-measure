@@ -80,11 +80,7 @@ def load_native_spectrum(
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=storage.entry_id,
-            entry_name=storage.entry_name,
-            point=storage.point,
-            description=storage.description,
-            roles=storage.roles,
+            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
         ),
         provenance=SoftwareProvenance(
             software_versions={},

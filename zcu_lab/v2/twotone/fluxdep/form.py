@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2._support.measure.pulse_readout_metadata import (
+from zcu_lab.v2._support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
 
@@ -48,8 +48,8 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
             "flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
-                "freq": Range.between(None, None, expts=1001),
-                "flux": Range.between(
+                "freq": Range(None, None, expts=1001),
+                "flux": Range(
                     "1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half",
                     "1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int",
                     expts=101,

@@ -27,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[TwotoneCfg]:
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
-                "gain": Range.between(0.0, 0.0, expts=1),
+                "gain": Range(0.0, 0.0, expts=1),
                 "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301),
             },
             "relax_delay": 1.0,

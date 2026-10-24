@@ -200,8 +200,8 @@ class FormEditor[F: FormModel](QWidget):
     shows a "Contains errors" note; a folded group stays folded.
     Groups start folded. Sweep containers and their axes start open; a single
     axis replaces its container row with a combined title and unchanged paths.
-    Modules start folded. Other model rows start folded unless collapsed=False
-    or their subtree has errors on the editor's first publication. Saved user
+    Modules start folded. Other model rows start folded unless their subtree
+    has errors on the editor's first publication. Saved user
     folds take precedence, and later refreshes keep the established folds.
     Folds the user sets on groups and model rows survive rebuilds of this
     editor (option or activation changes), remembered by path.

@@ -272,11 +272,7 @@ class WorkflowTab[C]:
         if isinstance(knobs, FormErrors):
             return knobs
         snapshot = RunSnapshot(
-            entry_id=storage.entry_id,
-            entry_name=storage.entry_name,
-            point=storage.point,
-            description=storage.description,
-            roles=storage.roles,
+            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
         )
         prepared = self._attachment.prepare(
             plan[0], knobs[0], knobs[1].input, env, snapshot

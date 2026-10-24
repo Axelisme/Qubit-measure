@@ -29,7 +29,6 @@ from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
 )
-from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -199,11 +198,7 @@ def native_save_session(
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=storage.entry_id,
-            entry_name=storage.entry_name,
-            point=storage.point,
-            description=storage.description,
-            roles=storage.roles,
+            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
         ),
         provenance=SoftwareProvenance(
             software_versions={},
@@ -230,7 +225,6 @@ def native_save_session(
     service = SaveService(state, bus)
     control = SaveControlFacet(
         state=state,
-        guard=GuardService(state),
         save=service,
         context=context,
     )

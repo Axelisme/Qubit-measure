@@ -71,7 +71,7 @@ Gain 是 drive amplitude，不是 dBm。之後改量測時，直接在 `run` 寫
 ## 3. 在 form.py 設定初值樹
 
 把 `.core` 的 import、回傳 annotation 與 `Form(...)` 的 cfg 換成 `PowerMapCfg`。
-這次把 gain 初值改為 `Range.between(0.001, 0.2, expts=31)`，
+這次把 gain 初值改為 `Range(0.001, 0.2, expts=31)`，
 frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬體安全範圍。
 
 逐項核對原本的初值樹：

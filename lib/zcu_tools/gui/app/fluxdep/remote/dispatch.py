@@ -39,7 +39,6 @@ from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
 
 from ..database import read_fluxdep_database_info
 from .dto import (
-    ActiveSpectrumReply,
     AxisSnapshot,
     DatabaseInfoReply,
     FigureReply,
@@ -53,10 +52,8 @@ from .dto import (
     OperationCancelledReply,
     OperationOutcomeReply,
     OperationStartedReply,
-    OperationStatusReply,
     ParamsExportedReply,
     PngImage,
-    PointcloudReply,
     ProjectSetupReply,
     SelectionSnapshotReply,
     SpectrumListItem,
@@ -64,7 +61,6 @@ from .dto import (
     SpectrumRemovedReply,
     SpectrumsExportedReply,
     SpectrumSnapshotReply,
-    StateCheckReply,
     TransitionWire,
 )
 from .interactive import (
@@ -237,33 +233,6 @@ def _h_spectrum_remove(
     return {"name": name, "removed": True}
 
 
-def _h_spectrum_set_active(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> ActiveSpectrumReply:
-    name = params["name"]
-    assert name is None or isinstance(name, str)  # ParamSpec applied null/default.
-    adapter.ctrl.set_active_spectrum(name)
-    return {"active_spectrum": adapter.ctrl.state.active_spectrum}
-
-
-def _h_spectrum_reset_alignment(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> NameReply:
-    name = params["name"]
-    assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
-    adapter.ctrl.reset_alignment(name)
-    return {"name": name}
-
-
-def _h_spectrum_reset_points(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> NameReply:
-    name = params["name"]
-    assert isinstance(name, str)  # ParamSpec validated the nonempty literal name.
-    adapter.ctrl.reset_points(name)
-    return {"name": name}
-
-
 def _h_selection_snapshot(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> SelectionSnapshotReply:
@@ -285,14 +254,6 @@ def _h_selection_render(
     adapter.ctrl.render_selection(figure)
     png = render_figure_png(figure)
     return {"png_b64": base64.b64encode(png).decode("ascii"), "bytes": len(png)}
-
-
-def _h_selection_pointcloud(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> PointcloudReply:
-    del params
-    fluxs, freqs = adapter.ctrl.derive_pointcloud()
-    return {"fluxs": fluxs.tolist(), "freqs": freqs.tolist()}
 
 
 def _h_fit_result(
@@ -474,35 +435,6 @@ def _h_fit_search(
     return {"token": adapter.ctrl.search.start()}
 
 
-def _h_operation_status(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> OperationStatusReply:
-    token = params["token"]
-    search = adapter.ctrl.search
-    if token is None:
-        activity = search.current
-        return {
-            "activity": (
-                {
-                    "token": activity.token,
-                    "status": activity.status,
-                    "error": activity.error,
-                }
-                if activity is not None
-                else None
-            )
-        }
-    assert isinstance(token, int)  # ParamSpec rejects booleans/non-integers.
-    outcome = search.outcome(token)
-    return {
-        "activity": {
-            "token": token,
-            "status": outcome.status if outcome is not None else "pending",
-            "error": outcome.error if outcome is not None else None,
-        }
-    }
-
-
 def _h_operation_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> OperationCancelledReply:
@@ -577,18 +509,6 @@ def _h_fit_export_params(
 # ---------------------------------------------------------------------------
 
 
-def _h_state_check(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> StateCheckReply:
-    del params
-    state = adapter.ctrl.state
-    return {
-        "has_project": state.project is not None,
-        "spectrum_count": len(state.spectrums),
-        "has_active": state.active_spectrum is not None,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -603,12 +523,8 @@ _HANDLERS: dict[str, Handler] = {
     "spectrum.load": _h_spectrum_load,
     "spectrum.load_processed": _h_spectrum_load_processed,
     "spectrum.remove": _h_spectrum_remove,
-    "spectrum.set_active": _h_spectrum_set_active,
-    "spectrum.reset_alignment": _h_spectrum_reset_alignment,
-    "spectrum.reset_points": _h_spectrum_reset_points,
     "selection.snapshot": _h_selection_snapshot,
     "selection.render": _h_selection_render,
-    "selection.pointcloud": _h_selection_pointcloud,
     "interactive.read": h_interactive_read,
     "interactive.render": h_interactive_render,
     "spectrum.interactive.open": h_spectrum_interactive_open,
@@ -620,13 +536,11 @@ _HANDLERS: dict[str, Handler] = {
     "fit.database_info": _h_fit_database_info,
     "fit.render": _h_fit_render,
     "fit.search": _h_fit_search,
-    "operation.status": _h_operation_status,
     "operation.cancel": _h_operation_cancel,
     "operation.await": _h_operation_await,
     "export.spectrums": _h_export_spectrums,
     "fit.export_params": _h_fit_export_params,
     "resources.versions": _h_resources_versions,
-    "state.check": _h_state_check,
 }
 
 METHOD_REGISTRY: dict[str, BoundMethod] = build_method_registry(_HANDLERS, METHOD_SPECS)

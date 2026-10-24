@@ -1,6 +1,6 @@
-"""Dialog naming contract shared by the measure window and remote screenshots.
+"""Dialog naming contract shared by the measure window and its registry.
 
-``DialogName`` is the wire enum a remote caller passes to ``dialog.screenshot``
+``DialogName`` identifies dialogs opened by the measure GUI
 and the key ``MainWindow.open_dialog`` uses for its named-dialog registry.
 ``MainDialogRegistry`` owns the per-name factory that builds or reuses a
 ``QDialog`` for a toolbar click or the app's ``after_show`` hook.
@@ -16,11 +16,9 @@ from __future__ import annotations
 
 from enum import Enum
 
-from zcu_tools.gui.expected_error import InvalidInputError
-
 
 class DialogName(str, Enum):
-    """Wire-stable identifiers for remotely controllable dialogs."""
+    """Stable identifiers for the measure window's named dialogs."""
 
     SETUP = "setup"
     SOC = "soc"
@@ -30,28 +28,4 @@ class DialogName(str, Enum):
     ARB_WAVEFORM = "arb_waveform"
 
 
-def parse_dialog_name(value: object) -> DialogName:
-    """Coerce a wire string into a ``DialogName`` enum.
-
-    Accepts the lowercase wire form (``"setup"``) and the upper-case enum
-    name (``"SETUP"``) for client ergonomics. Raises ``InvalidInputError`` if
-    the name is unknown.
-    """
-    if isinstance(value, DialogName):
-        return value
-    if not isinstance(value, str):
-        raise InvalidInputError(
-            f"dialog name must be a string, got {type(value).__name__}"
-        )
-    lowered = value.lower()
-    for name in DialogName:
-        if name.value == lowered:
-            return name
-    upper = value.upper()
-    for name in DialogName:
-        if name.name == upper:
-            return name
-    raise InvalidInputError(f"unknown dialog name: {value!r}")
-
-
-__all__ = ["DialogName", "parse_dialog_name"]
+__all__ = ["DialogName"]

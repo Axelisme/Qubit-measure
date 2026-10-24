@@ -19,7 +19,7 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import ParamBounds
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.fluxdep.remote.dto import PointcloudReply, SpectrumListReply
+from zcu_tools.gui.app.fluxdep.remote.dto import SpectrumListReply
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from zcu_tools.gui.remote.param_spec import validate_params
 
@@ -45,14 +45,6 @@ def _call(
 
 @overload
 def _call(
-    adapter: _StubAdapter,
-    method: Literal["selection.pointcloud"],
-    raw_params: Mapping[str, object],
-) -> PointcloudReply: ...
-
-
-@overload
-def _call(
     adapter: _StubAdapter, method: str, raw_params: Mapping[str, object]
 ) -> Mapping[str, object]: ...
 
@@ -69,21 +61,6 @@ def _call(
 # ---------------------------------------------------------------------------
 # project.info
 # ---------------------------------------------------------------------------
-
-
-def test_state_check_reflects_project_and_spectra(spectrum_hdf5, fluxonium_entry):
-    filepath, *_ = spectrum_hdf5
-    adapter = _adapter()
-    check = _call(adapter, "state.check", {})
-    assert check == {"has_project": False, "spectrum_count": 0, "has_active": False}
-
-    adapter.ctrl.setup_project(
-        str(fluxonium_entry.result_path.parent.parent), "synthetic"
-    )
-    adapter.ctrl.load_spectrum(filepath, "OneTone")
-    check = _call(adapter, "state.check", {})
-    assert check["has_project"] is True
-    assert check["spectrum_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -179,20 +156,6 @@ def test_spectrum_list_wire_distinguishes_empty_completion_and_availability(
     finally:
         adapter.stop()
         ctrl.interactive.dispose()
-
-
-def test_selection_pointcloud_assembles_selected_points(spectrum_hdf5):
-    filepath, dev_values, freqs_ghz, _ = spectrum_hdf5
-    adapter = _adapter()
-    name = adapter.ctrl.load_spectrum(filepath, "OneTone")
-    adapter.ctrl.set_alignment(name, flux_half=0.0, flux_int=5.0)
-    adapter.ctrl.set_points(name, np.asarray(dev_values[:3]), np.asarray(freqs_ghz[:3]))
-
-    cloud = _call(adapter, "selection.pointcloud", {})
-    assert len(cloud["fluxs"]) == 3
-    assert len(cloud["freqs"]) == 3
-    # freqs come back in GHz (the loader/selection unit), unchanged from the input
-    np.testing.assert_allclose(sorted(cloud["freqs"]), sorted(freqs_ghz[:3]))
 
 
 # ---------------------------------------------------------------------------

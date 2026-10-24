@@ -83,7 +83,7 @@
 
 ### 分析檔欄位對照
 
-分析 JSON 經 [resources owner](../../lib/zcu_tools/resources/README.md) 驗證、寫入及讀回，不手工組裝第二套 codec。
+Dispersive JSON 經 [resources owner](../../lib/zcu_tools/resources/README.md) 驗證、寫入及讀回。T1 JSON 由本 package 的 `t1_curve_file.py` 保留原有 codec，runtime 不讀寫。
 
 | 舊值 | 正式欄位或處理 |
 | --- | --- |
@@ -153,7 +153,7 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 | 完整歷史 cfg | `CfgSnapshot(values, cfg_type, schema_version)`，不以目前預設補值 |
 | variable、axes、signal 名稱／單位／dtype／shape | `LegacyVariableSchema`，axes 由內到外，array shape 是 axes 長度反序 |
 | 開始／結束時間、完成狀態 | `RunMetadata`，未知規則見下文 |
-| entry、point、description、roles | `RunSnapshot`，point 無證據時為 None |
+| entry identity、point、roles | `RunSnapshot`，point 無證據時為 None；歷史名稱與 description 留在 evidence |
 | 軟體、主機、SoC | `SoftwareProvenance`，未知為 None 或空 mapping |
 | 原 Labber 新位置 | migration report／manifest 的 publication 目的路徑，不進 RunMetadata |
 | Labber `Instrument config` | `device_snapshot`，無法表達時 None 並列 pending |
@@ -174,7 +174,7 @@ RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_
 
 - Native 路徑由 `SaveLayout` 依 evidence 的 experiment 與完整 run_id 計算為 `Database/<entry>/runs/<experiment>_<run_id>/data.h5`，實驗名中的 `/` 轉 `_`。Dry-run 規劃與 resume 驗證使用同一規則，不解析舊目錄名。
 
-- 原 Labber 的保存路徑記在 migration report／manifest，例如 entry Database 根下的 `Labber/2025/10/scan.hdf5`。RunMetadata.labber 只保留原 comment、tags、project、user 與 creation_time。`Instrument config` 透過 datafile owner 的唯讀 codec 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
+- 原 Labber 的保存路徑記在 migration report／manifest，例如 entry Database 根下的 `Labber/2025/10/scan.hdf5`。原 comment、tags、project、user 與 creation_time 留在保存的 Labber。`Instrument config` 透過本 package 的 `labber_snapshot.py` 轉為 device_snapshot，只用舊檔中的值。不能表示的 snapshot 列 `device snapshot pending`，該 run snapshot 為 None，但量測資料仍轉 native，原設定留在保存的 Labber。
 
 - 所有 Labber 原檔一律保存到 `Database/<entry>/Labber/<來源相對路徑>`，不依 native 轉換成功與否分流。Native publication 與驗證完成後才安全搬移對應原檔，先複製、驗證雜湊，再刪來源。無法轉換者先發布 byte-identical copy，仍保留必要證據的 pending；兩部分完成後才隨完整來源清理。Source_removed 只驗證目的 hash，舊位置重用不改既有 run，也不刪新檔。除開始時間與 run_id 外，experiment tag+cfg_type、完整歷史 cfg、variable/axes/signal 名稱、單位、dtype、shape 或其他必要 mapping 缺失時，不產生 native，不猜名稱或補量測時間。原樣發布只固定來源 bytes/hash 與目的 ownership，不提前凍結外部 run evidence。尚無 native 規劃或 run assignment 時，可在 resume 補足證據；成功後重驗原樣副本，再沿既有 native 驗證與安全搬移協定完成。
 

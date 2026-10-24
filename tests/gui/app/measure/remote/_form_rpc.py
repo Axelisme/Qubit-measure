@@ -68,7 +68,7 @@ class ContainerRpcAdapter(SampleAdapter):
         del ctx
         return Form(
             SampleCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3)},
+            {"sweep": Range(1.0, 2.0, expts=3)},
             extras=RecipeExtras,
             lower=lambda _extras, cfg: cfg,
         )
@@ -90,7 +90,7 @@ class IndexedRpcAdapter(SampleAdapter):
         )
         return Form(
             cfg,
-            {"sweep": Range.between(1, 2, expts=3), **indexed_tree()},
+            {"sweep": Range(1, 2, expts=3), **indexed_tree()},
             fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
         )
 
@@ -99,4 +99,4 @@ class ModuleRpcAdapter(SampleAdapter):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
         del ctx
-        return Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+        return Form(ModuleRpcCfg, {"sweep": Range(1.0, 2.0, expts=3)})

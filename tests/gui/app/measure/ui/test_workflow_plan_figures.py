@@ -157,7 +157,7 @@ def _host_plan_window(
     ctrl.setup_control.new_entry(EntryRequest("plan-ui"))
     ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
     board = white_noise()
-    ctrl.install_soc(board.soc, board.soccfg)
+    ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )

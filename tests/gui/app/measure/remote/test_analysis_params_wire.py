@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_analyze,
-    h_tab_get_analyze_params,
     h_tab_post_analyze,
 )
 from zcu_tools.gui.remote.errors import RemoteError
@@ -36,18 +35,8 @@ def _adapter_with_params(params: ChoiceParams) -> MagicMock:
     return adapter
 
 
-def test_remote_analyze_params_exposes_and_accepts_amplitude_slope_key() -> None:
+def test_remote_analyze_accepts_amplitude_slope_key() -> None:
     adapter = _adapter_with_params(ChoiceParams())
-
-    reply = h_tab_get_analyze_params(adapter, {"tab_id": "t"})
-    assert reply["analyze_params"] == {
-        "model_type": "hm",
-        "fit_bg_amp_slope": True,
-        "fit_bg_phase_curvature": False,
-        "edelay_mode": "auto",
-        "manual_edelay": None,
-        "max_edelay_search_radius": 100.0,
-    }
 
     started = h_tab_analyze(
         adapter,

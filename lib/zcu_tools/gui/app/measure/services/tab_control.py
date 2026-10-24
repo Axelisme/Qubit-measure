@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormPreview
-from zcu_tools.gui.session.types import ParameterContext
 
 from .tab_input import StartupTab, TabInput
 
@@ -64,27 +62,6 @@ class TabControlPort(Protocol):
         self, adapter_name: str, *, stage: Literal["primary", "post"]
     ) -> list[dict[str, Any]]: ...
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
-
-    def capture_parameters(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext | None:
-        """Freeze current sources with optional named aliases overrides.
-
-        aliases maps alias names to concrete components. None and {} use global
-        rows. Unknown tab and source/alias errors propagate. EMPTY returns None
-        without overrides and rejects nonempty overrides with no_context. No tab/session mutation or guard observation occurs.
-        """
-        ...
-
-    def preview_cfg(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> FormPreview:
-        """Preview editable values/errors using the tab's fixed source capture.
-
-        None and {} reuse that capture. Nonempty aliases raise
-        FailedPreconditionError; use the resource Reset command first.
-        """
-        ...
 
 
 class TabControlFacet:
@@ -174,15 +151,3 @@ class TabControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
-
-    def capture_parameters(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext | None:
-        """Freeze current sources; see TabControlPort.capture_parameters."""
-        return self._tab.capture_parameters(tab_id, aliases=aliases)
-
-    def preview_cfg(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> FormPreview:
-        """Read fixed-source form preview; see TabControlPort.preview_cfg."""
-        return self._tab.preview_cfg(tab_id, aliases=aliases)

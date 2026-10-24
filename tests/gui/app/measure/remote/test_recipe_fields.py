@@ -102,69 +102,6 @@ def test_validated_recipe_batch_rejects_candidate_without_changing_shared_draft(
     assert owner.accept().values["gain"] == 0.7
 
 
-@pytest.mark.parametrize(
-    "selection",
-    [
-        {"action": "use_library"},
-        {"action": "use_library", "key": None},
-        {"action": "use_library", "key": " "},
-        {"action": "use_inline", "key": None},
-        {"action": "disable", "key": "unexpected"},
-    ],
-)
-def test_recipe_selector_rejects_bad_key_shape_without_effects(
-    form_rpc, selection
-) -> None:
-    fixture, tab, rpc = form_rpc
-    owner = fixture.ctrl.cfg_resources.lookup(tab)
-    before = owner.input.data
-    result = rpc.call(
-        "tab.select_recipe_module",
-        {
-            "tab_id": tab,
-            "path": ["pulse"],
-            **selection,
-        },
-    )
-    assert not result["ok"], result
-    assert result["error"]["code"] == "invalid_params"
-    assert result["error"]["reason"] == "form_errors"
-    assert owner.input.data == before
-
-
-def test_recipe_rpc_read_and_noop_preserve_observer_busy_and_notification_policy(
-    form_rpc,
-) -> None:
-    fixture, _, rpc = form_rpc
-    fixture.registry.register("logical-module", ModuleRpcAdapter)
-    tab = fixture.ctrl.new_tab("logical-module")
-    try:
-        owner = fixture.ctrl.cfg_resources.lookup(tab)
-        owner.write({("pulse",): {"kind": "inline"}})
-        version_key = f"tab:{tab}:cfg"
-        version = fixture.state.version.get(version_key)
-        selection = {"tab_id": tab, "path": ["pulse"], "action": "use_inline"}
-        noop = rpc.call("tab.select_recipe_module", selection)
-        assert noop["ok"], noop
-        assert noop["result"]["changed"] is False
-        assert noop["result"]["field"]["selector"]["mode"] == "inline"
-        assert fixture.state.version.get(version_key) == version
-        fixture.state.set_tab_running(tab, running=True)
-        busy = rpc.call("tab.select_recipe_module", selection)
-        assert not busy["ok"]
-        assert busy["error"]["reason"] == "mutation_blocked"
-        fixture.ctrl.control_identity.reclaim_local()
-        read = rpc.call("tab.read_recipe_field", {"tab_id": tab, "path": ["pulse"]})
-        assert read["ok"], read
-        assert read["result"]["selector"]["mode"] == "inline"
-        denied = rpc.call("tab.select_recipe_module", selection)
-        assert not denied["ok"]
-        assert denied["error"]["reason"] == "not_holder"
-    finally:
-        fixture.state.set_tab_running(tab, running=False)
-        fixture.ctrl.tab_control.close_tab(tab)
-
-
 @pytest.fixture
 def nested_recipe_rpc(form_rpc, tmp_path):
     from contextlib import closing
@@ -299,27 +236,6 @@ def container_recipe_rpc(nested_recipe_rpc):
         fixture.ctrl.tab_control.close_tab(tab)
 
 
-@pytest.mark.parametrize(
-    "method",
-    ["tab.read_recipe_field", "tab.edit_recipe_fields", "tab.select_recipe_module"],
-)
-def test_typed_recipe_rpc_passes_original_index_to_owner_errors(form_rpc, method):
-    fixture, tab, rpc = form_rpc
-    owner = fixture.ctrl.cfg_resources.lookup(tab)
-    before = owner.input.data
-    path = ["tones", 1, "drive", "gain"]
-    params = {"tab_id": tab, "path": path}
-    if method == "tab.edit_recipe_fields":
-        params = {"tab_id": tab, "edits": [{"path": path, "value": 0.3}]}
-    elif method == "tab.select_recipe_module":
-        params["action"] = "use_inline"
-    rejected = rpc.call(method, params)
-    assert not rejected["ok"]
-    assert rejected["error"]["reason"] == "form_path"
-    assert rejected["error"]["data"]["form_path"] == path
-    assert owner.input.data == before
-
-
 @pytest.mark.parametrize("value", [4])
 def test_recipe_rpc_structure_rejection_identifies_first_edit_atomically(
     container_recipe_rpc, value
@@ -409,56 +325,4 @@ def test_recipe_rpc_container_payload_cannot_replace_referenced_selector(
     assert owner.input.to_json() == before
     assert owner.editor_state.base.to_json() == base
     assert fixture.state.version.get(version_key) == version
-    assert notices == []
-
-
-@pytest.mark.parametrize("operation", ["read", "copy"])
-def test_recipe_source_failure_preserves_identity_and_draft(
-    nested_recipe_rpc, operation
-) -> None:
-    from zcu_tools.cfg_model import PulseSpec
-    from zcu_tools.mcp.measure.session import GuiRpcError
-
-    fixture, tab, client, context, target = nested_recipe_rpc
-    context.set_module(
-        target,
-        "Q1.pulses.pi",
-        PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.missing"),
-    )
-    owner = fixture.ctrl.cfg_resources.lookup(tab)
-    owner.reset()
-    # The source exists at the selected module, but its captured child key does not.
-    owner.select_recipe_module(("pulse",), "use_library", key="Q1.pulses.pi")
-    if operation == "copy":
-        owner.select_recipe_module(("pulse",), "use_inline")
-    before = owner.input.data
-    base = owner.editor_state.base.data
-    version = fixture.state.version.get(f"tab:{tab}:cfg")
-    notices: list[str] = []
-    owner.subscribe(lambda: notices.append("changed"))
-    path = (
-        ["pulse", "waveform", "length"]
-        if operation == "read"
-        else ["pulse", "waveform"]
-    )
-    method = (
-        "tab.read_recipe_field" if operation == "read" else "tab.select_recipe_module"
-    )
-    params = {"tab_id": tab, "path": path}
-    if operation == "copy":
-        params["action"] = "use_inline"
-    # Use the same in-process RPC transport as RecipeTab, retaining its native error.
-    with pytest.raises(GuiRpcError) as rejected:
-        client.context.session.send_gui_rpc(method, params)
-    assert rejected.value.code == "precondition_failed"
-    assert rejected.value.reason == "library_source"
-    assert rejected.value.data == {
-        "path": path,
-        "selector_path": ["pulse", "waveform"],
-        "key": "Q1.waveforms.missing",
-        "source_kind": "waveform",
-    }
-    assert owner.input.data == before
-    assert owner.editor_state.base.data == base
-    assert fixture.state.version.get(f"tab:{tab}:cfg") == version
     assert notices == []

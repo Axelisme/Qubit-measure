@@ -2,18 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Self
 
-import numpy as np
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.utils import deepupdate
-
-
-def _json_fallback(obj: Any) -> str:
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    raise ValidationError(
-        f"Object of type {type(obj).__name__} is not JSON serializable"
-    )
 
 
 class ConfigBase(BaseModel):
@@ -21,7 +12,7 @@ class ConfigBase(BaseModel):
 
     Unknown fields are rejected and assignments are validated. Subclasses own
     their field meanings and validation context. Serialization excludes None
-    fields and allows NumPy arrays through the JSON fallback.
+    fields.
     """
 
     model_config = ConfigDict(
@@ -46,18 +37,8 @@ class ConfigBase(BaseModel):
         """Return Python field values, excluding None, for subclass validation."""
         return self.model_dump(mode="python", exclude_none=True)
 
-    def to_json(self, **kwargs) -> str:
-        """Serialize fields as indented JSON, excluding None.
-
-        kwargs is forwarded to Pydantic model_dump_json. Unsupported values
-        propagate serialization errors; NumPy arrays serialize as lists.
-        """
-        return self.model_dump_json(
-            indent=4, exclude_none=True, fallback=_json_fallback, **kwargs
-        )
-
     def __str__(self) -> str:
-        return self.to_json()
+        return self.model_dump_json(indent=4, exclude_none=True)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self})"

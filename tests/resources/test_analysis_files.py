@@ -1,70 +1,50 @@
-"""Dispersive and T1 fit file owner contracts, independent of analysis completeness."""
+"""Dispersive fit file owner contracts, independent of analysis completeness."""
 
-import importlib
 import json
 from pathlib import Path
 
 import pytest
+from zcu_tools.resources.dispersive_file import (
+    load_dispersive_file as load,
+)
+from zcu_tools.resources.dispersive_file import (
+    save_dispersive_file as save,
+)
 
 
-def document(kind: str) -> dict[str, object]:
+def document() -> dict[str, object]:
     """Return incomplete but representable analysis data with unknown provenance."""
-    params: dict[str, object]
-    if kind == "dispersive":
-        params = {
+    return {
+        "format": "zcu.dispersive",
+        "version": 1,
+        "params": {
             "g": None,
             "bare_rf": 5.1,
             "plot_transitions": {"r_f": None, "0.1": [1, 2], "future": {"x": True}},
-        }
-    else:
-        params = {
-            "params": {"Q_cap": None, "Temp": 0.04},
-            "stderr": {"Q_cap": None},
-            "fixed": ["Temp"],
-            "free": ["Q_cap"],
-            "bounds": {"Q_cap": [1, None]},
-            "init": {"Q_cap": 1000, "Temp": None},
-            "cost": None,
-            "success": False,
-        }
-    return {
-        "format": f"zcu.{kind.replace('_', '-')}",
-        "version": 1,
-        "params": params,
+        },
         "source": {"run_id": None, "created_at": None},
     }
 
 
-@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
 def test_owner_roundtrip_retains_unknowns_without_creating_provenance(
-    tmp_path: Path, kind: str
+    tmp_path: Path,
 ) -> None:
-    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
     source = tmp_path / "input.json"
-    source.write_text(json.dumps(document(kind)), encoding="utf-8")
-    load = getattr(owner, f"load_{kind}_file")
-    save = getattr(owner, f"save_{kind}_file")
+    source.write_text(json.dumps(document()), encoding="utf-8")
     loaded = load(source)
     target = tmp_path / "output.json"
     save(target, loaded)
     assert load(target) == loaded
     assert loaded.source.run_id is None
     assert loaded.source.created_at is None
-    if kind == "dispersive":
-        assert loaded.params.g is None
-        assert loaded.params.plot_transitions.r_f is None
-        assert loaded.params.plot_transitions.model_extra == {
-            "0.1": [1, 2],
-            "future": {"x": True},
-        }
-    else:
-        assert loaded.params.params.Q_cap is None
-        assert loaded.params.params.model_fields_set == {"Q_cap", "Temp"}
-        assert loaded.params.bounds["Q_cap"] == (1.0, None)
-        assert loaded.params.success is False
+    assert loaded.params.g is None
+    assert loaded.params.plot_transitions.r_f is None
+    assert loaded.params.plot_transitions.model_extra == {
+        "0.1": [1, 2],
+        "future": {"x": True},
+    }
 
 
-@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
 @pytest.mark.parametrize(
     ("path", "bad"),
     [
@@ -80,10 +60,9 @@ def test_owner_roundtrip_retains_unknowns_without_creating_provenance(
     ],
 )
 def test_owner_rejects_invalid_envelope(
-    tmp_path: Path, kind: str, path: tuple[str, ...], bad: object
+    tmp_path: Path, path: tuple[str, ...], bad: object
 ) -> None:
-    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
-    raw = document(kind)
+    raw = document()
     if len(path) == 1:
         raw[path[0]] = bad
     else:
@@ -92,51 +71,39 @@ def test_owner_rejects_invalid_envelope(
     file = tmp_path / "bad.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match=path[0]):
-        getattr(owner, f"load_{kind}_file")(file)
+        load(file)
 
 
 @pytest.mark.parametrize(
-    ("kind", "params"),
+    "params",
     [
-        ("dispersive", {"g": True}),
-        ("dispersive", {"bare_rf": "5.0"}),
-        ("dispersive", {"plot_transitions": {"r_f": float("inf")}}),
-        ("t1_curve", {"params": {"Temp": True}}),
-        ("t1_curve", {"params": {"Q_cap": float("nan")}}),
-        ("t1_curve", {"params": {"Temp": None}, "free": ["Q_cap"]}),
-        ("t1_curve", {"params": {"Temp": None}, "bounds": {"Q_cap": [1, 2]}}),
-        ("t1_curve", {"params": {"Temp": None}, "stderr": {"Q_cap": 1}}),
-        ("t1_curve", {"params": {"Temp": None}, "init": {"Q_cap": 1}}),
+        {"g": True},
+        {"bare_rf": "5.0"},
+        {"plot_transitions": {"r_f": float("inf")}},
     ],
 )
-def test_owner_rejects_bad_content(
-    tmp_path: Path, kind: str, params: dict[str, object]
-) -> None:
-    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
-    raw = document(kind)
+def test_owner_rejects_bad_content(tmp_path: Path, params: dict[str, object]) -> None:
+    raw = document()
     raw["params"] = params
     file = tmp_path / "bad.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="params"):
-        getattr(owner, f"load_{kind}_file")(file)
+        load(file)
 
 
-@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
 def test_save_revalidates_and_retains_existing_file_on_invalid_input(
-    tmp_path: Path, kind: str
+    tmp_path: Path,
 ) -> None:
-    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
     file = tmp_path / "fit.json"
-    file.write_text(json.dumps(document(kind)), encoding="utf-8")
-    loaded = getattr(owner, f"load_{kind}_file")(file)
+    file.write_text(json.dumps(document()), encoding="utf-8")
+    loaded = load(file)
     invalid = loaded.model_copy(update={"version": True})
     before = file.read_bytes()
     with pytest.raises(ValueError, match="version"):
-        getattr(owner, f"save_{kind}_file")(file, invalid)
+        save(file, invalid)
     assert file.read_bytes() == before
 
 
-@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
 @pytest.mark.parametrize(
     "created_at",
     [
@@ -150,24 +117,20 @@ def test_save_revalidates_and_retains_existing_file_on_invalid_input(
         "2026-10-20T08:00:00+00:00",
     ],
 )
-def test_owner_preserves_proven_source_text(
-    tmp_path: Path, kind: str, created_at: str
-) -> None:
-    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
-    raw = document(kind)
+def test_owner_preserves_proven_source_text(tmp_path: Path, created_at: str) -> None:
+    raw = document()
     raw["source"] = {
         "run_id": "historical-run",
         "created_at": created_at,
     }
     file = tmp_path / "fit.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
-    loaded = getattr(owner, f"load_{kind}_file")(file)
-    getattr(owner, f"save_{kind}_file")(file, loaded)
+    loaded = load(file)
+    save(file, loaded)
     assert loaded.source.created_at == created_at
     assert json.loads(file.read_text(encoding="utf-8"))["source"] == raw["source"]
 
 
-@pytest.mark.parametrize("kind", ["dispersive", "t1_curve"])
 @pytest.mark.parametrize("operation", ["load", "save"])
 @pytest.mark.parametrize(
     "created_at",
@@ -199,14 +162,11 @@ def test_owner_preserves_proven_source_text(
     ],
 )
 def test_owner_rejects_unproven_created_at_on_load_and_save(
-    tmp_path: Path, kind: str, operation: str, created_at: str
+    tmp_path: Path, operation: str, created_at: str
 ) -> None:
-    owner = importlib.import_module(f"zcu_tools.resources.{kind}_file")
     file = tmp_path / "fit.json"
-    raw = document(kind)
+    raw = document()
     file.write_text(json.dumps(raw), encoding="utf-8")
-    load = getattr(owner, f"load_{kind}_file")
-    save = getattr(owner, f"save_{kind}_file")
     valid = load(file)
     before = file.read_bytes()
     if operation == "load":

@@ -20,7 +20,7 @@ class SweepPlan(ConfigBase):
 @pytest.fixture
 def coordinate_editor(qapp):
     env = FormEnv()
-    form = Form(SweepPlan, {"sweep": Range.between(10, 4, 4)})
+    form = Form(SweepPlan, {"sweep": Range(10, 4, 4)})
     state = FormState(form.default_input(env))
     editor = FormEditor(state, env)
     editor.resize(700, 600)

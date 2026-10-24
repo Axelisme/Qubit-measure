@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from zcu_tools.datafile import save_labber_data
+from zcu_tools.datafile import LabberData
 from zcu_tools.gui.app.fluxdep.services.load import (
     LoadService,
     transpose_spectrum_data,
@@ -123,11 +123,10 @@ def test_load_spectrum_inherit_from_unknown_raises(spectrum_hdf5):
 
 
 def test_non_2d_native_load_is_nominal_invalid_input(tmp_path):
-    path = save_labber_data(
-        str(tmp_path / "trace"),
-        z=("Signal", "a.u.", np.ones(3, dtype=np.complex128)),
-        axes=[("Device", "native", np.arange(3))],
-    )
+    path = LabberData(
+        ("Signal", "a.u.", np.ones(3, dtype=np.complex128)),
+        [("Device", "native", np.arange(3))],
+    ).save(str(tmp_path / "trace"))
     st = FluxDepState()
     with pytest.raises(InvalidInputError) as caught:
         LoadService(st).load_spectrum(path, "OneTone")

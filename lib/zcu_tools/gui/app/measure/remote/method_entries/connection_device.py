@@ -5,7 +5,6 @@ from __future__ import annotations
 from zcu_tools.gui.remote.method_spec import MethodSpec
 
 from ._params import (
-    default_boolean,
     required_integer,
     required_object,
     required_string,
@@ -32,80 +31,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "device.connect",
-        "connection_device:h_device_connect",
-        MethodSpec(
-            30.0,
-            "Connect a hardware device by driver type, friendly name, and address. "
-            "The connection runs asynchronously. The GUI returns operation_id; "
-            "rpc_call maps it to a handle. Call wait(op=handle) to observe terminal "
-            "status before reading device.snapshot. 'remember' persists the "
-            "device across sessions (default true).",
-            (
-                required_string(
-                    "type_name",
-                    "Manually addable driver class, e.g. 'YOKOGS200'; FakeDevice is simulation-published only",
-                ),
-                required_string("name", "Friendly name for this device"),
-                required_string("address", "VISA, GPIB, or IP address"),
-                default_boolean(
-                    "remember",
-                    default=True,
-                    desc="Persist device across sessions (default true)",
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(
-            operation_key="device:{name}",
-        ),
-    ),
-    method_entry(
-        "device.disconnect",
-        "connection_device:h_device_disconnect",
-        MethodSpec(
-            30.0,
-            "Disconnect a registered device by name via rpc_call. The call starts "
-            "an asynchronous operation and returns an MCP handle; use "
-            "wait(op=handle) for the terminal status. 'remember' keeps the "
-            "device in persistent storage (default true).",
-            (
-                required_string("name", "Device name"),
-                default_boolean(
-                    "remember",
-                    default=True,
-                    desc="Keep device in persistent storage (default true)",
-                ),
-            ),
-        ),
-        agent=AgentMethodPolicy(
-            operation_key="device:{name}",
-        ),
-    ),
-    method_entry(
-        "device.reconnect",
-        "connection_device:h_device_reconnect",
-        MethodSpec(
-            30.0,
-            "Reconnect a remembered (memory-only) device by name, reusing its stored "
-            "type/address. Call via rpc_call with name; the asynchronous "
-            "operation returns an MCP handle. Use wait(op=handle) for its "
-            "terminal status, then rpc_call on device.snapshot for state.",
-            (required_string("name", "Device name"),),
-        ),
-        agent=AgentMethodPolicy(
-            operation_key="device:{name}",
-        ),
-    ),
-    method_entry(
-        "device.forget",
-        "connection_device:h_device_forget",
-        MethodSpec(
-            5.0,
-            "Forget a memory-only device (synchronous). Echoes {forgotten: name}.",
-            (required_string("name", "Device name"),),
-        ),
-    ),
-    method_entry(
         "device.setup",
         "connection_device:h_device_setup",
         MethodSpec(
@@ -128,48 +53,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
     ),
     method_entry(
-        "device.setup_spec",
-        "connection_device:h_device_setup_spec",
-        MethodSpec(
-            5.0,
-            "List the Info fields used by device.setup's complete cfg for a connected "
-            "device: {fields: [{name, type, current, settable, choices?}, ...]} — each "
-            "field's name, type, choices (for enum/Literal fields like output/mode), "
-            "current value, and whether it is settable (the protected type/address are "
-            "reported settable=false). Use this RPC before rpc_call on "
-            "device.setup. The device must be connected.",
-            (required_string("name", "Device name"),),
-            readonly=True,
-        ),
-    ),
-    method_entry(
-        "device.cancel_operation",
-        "connection_device:h_device_cancel_operation",
-        MethodSpec(
-            5.0,
-            "Request cancellation of the named device's in-flight operation. Returns "
-            "{ok: true, cancelled: true}. Note: only a device APPLY (setup ramp) has a "
-            "cancellation point; a connect/disconnect has none and cannot be "
-            "cancelled (it raises PRECONDITION_FAILED).",
-            (required_string("name", "Device name"),),
-        ),
-        agent=AgentMethodPolicy(exposure="internal"),
-    ),
-    method_entry(
-        "device.active_operations",
-        "connection_device:h_device_active_operations",
-        MethodSpec(
-            5.0,
-            "List EVERY in-flight device operation (connect / disconnect / apply run "
-            "concurrently): {operations: [{handle, device_name, kind, type_name, "
-            "address, status, error}, ...]} (empty list if none), sorted by device "
-            "name. 'handle' here is a GUI-local id, not the MCP op. Use "
-            "status() to obtain MCP handles before wait(op). 'kind' is "
-            "device_connect / device_disconnect / device_setup.",
-            readonly=True,
-        ),
-    ),
-    method_entry(
         "device.list",
         "connection_device:h_device_list",
         MethodSpec(
@@ -177,8 +60,8 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "List registered devices with their current lifecycle status: "
             "{devices: [{name, type_name, status}, ...]} where status is one of "
             "memory_only | connecting | connected | disconnecting | setting_up "
-            "(same status vocabulary as device.snapshot and "
-            "device.active_operations). 'memory_only' means remembered but not "
+            "(same status vocabulary as device.snapshot). "
+            "'memory_only' means remembered but not "
             "live (no driver).",
             readonly=True,
         ),
