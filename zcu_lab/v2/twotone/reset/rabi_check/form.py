@@ -27,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[RabiCheckCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "sweep": {"gain": Range.between(0.0, 1.0, expts=51)},
+            "sweep": {"gain": Range(0.0, 1.0, expts=51)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

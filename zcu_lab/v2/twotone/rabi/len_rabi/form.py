@@ -34,7 +34,7 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
                 else Template("readout", bindings={"resonator": "$resonator"}),
                 "init_pulse": Hidden(),
             },
-            "sweep": {"length": Range.between(0.03, length_stop, expts=101)},
+            "sweep": {"length": Range(0.03, length_stop, expts=101)},
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
             "reps": 1000,

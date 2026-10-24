@@ -30,8 +30,8 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
             "sweep": {
-                "gain": Range.between(0.0, 0.0, expts=1),
-                "length": Range.between(0.1, relax_delay, expts=101),
+                "gain": Range(0.0, 0.0, expts=1),
+                "length": Range(0.1, relax_delay, expts=101),
             },
             "relax_delay": relax_delay,
             "initial_delay": Hidden(),

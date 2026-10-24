@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。前端中立的 Form 輸入、查詢、驗證與草稿契約。
 
@@ -80,6 +80,6 @@ WriteRejected 是 host 寫入入口拒絕一批輸入時 raise 的具名例外�
 
 `Display` 在巢狀 `Annotated` 與具名 alias 間逐屬性疊加。外層只覆蓋明示的 keyword，未指定者沿用內層。明示 `False` 或 `None` 也會覆蓋；例如 `Display(label="Fluxes")` 保留 alias 的 `selector=False`，`Display(selector=True)` 則重新顯示 dropdown。公開屬性仍回傳具體預設值；使用 `display.overlay(outer)` 合成 metadata 時會保留未指定狀態，不要把所有屬性重新傳入建構子。`InputDefault` 仍以外層整份宣告覆蓋內層。其他 metadata 沿用原有的完整宣告與優先規則，不套用 Display 的逐屬性疊加。
 
-Display 承載欄位呈現資訊與 readonly 寫入限制。順序沿欄位宣告，段落沿 nested model；collapsed 只用於子 model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，包含其子類別。Union 位置的 tag 仍是 selector。`Display(selector=False)` 只隱藏 dropdown，仍保留 selector metadata 與 active branch。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
+Display 承載欄位呈現資訊與 readonly 寫入限制。順序沿欄位宣告，段落沿 nested model。`group` 是同層畫面群組名稱，空字串在建構時報錯。`decimals` 是 float 顯示精度，非 float 宣告在 describe 報錯，不改 input。`hidden=True` 不畫 controls，但值、預設與驗證保留。Nested model 沒有 label 時，title 是欄位名，底線換空白且只有首字母大寫。普通 model 的單值結構 tag 標 hidden；branch 身分從 annotation 判斷，包含其子類別。Union 位置的 tag 仍是 selector。`Display(selector=False)` 只隱藏 dropdown，仍保留 selector metadata 與 active branch。Editor、host 與 MCP 共用 description，但不反向成為 core dependency。
 
 跨模組契約見 ADR-0065、ADR-0062 與 ADR-0008。Measure、Library／Inspect、writeback 與 workflows 共用本核心，各宿主持有 state 並決定 capture、Apply 與保存。Core cfg 推導與持久 Spec 投影由上層 `gui.form_adapter` 組合，不放進本 package。Complex codec 直接使用 `core.complex_codec`，不經舊 cfg owner。

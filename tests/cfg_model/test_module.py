@@ -538,7 +538,7 @@ def test_mux_labels_default_and_round_trip_through_spec_and_materialization() ->
     for tone, label in zip(authored["tones"], ["共振腔", "", "共振腔"], strict=True):
         tone["label"] = label
     spec = MuxReadoutSpec.model_validate(authored)
-    restored = MuxReadoutSpec.model_validate_json(spec.to_json())
+    restored = MuxReadoutSpec.model_validate_json(spec.model_dump_json())
     resolver = Resolver()
     resolver.modules["MG.readout.rf"] = restored
     cfg = ModuleCfgFactory.from_raw(
@@ -548,7 +548,10 @@ def test_mux_labels_default_and_round_trip_through_spec_and_materialization() ->
     assert cfg.to_dict() == restored.to_dict()
     assert [tone.label for tone in cfg.tones] == ["共振腔", "", "共振腔"]
     assert [tone.freq for tone in cfg.tones] == [6020.0, 5980.0, 5940.0]
-    assert MuxReadoutCfg.model_validate_json(cfg.to_json()).to_dict() == cfg.to_dict()
+    assert (
+        MuxReadoutCfg.model_validate_json(cfg.model_dump_json()).to_dict()
+        == cfg.to_dict()
+    )
 
     for invalid in (None, 1, True):
         authored["tones"][0]["label"] = invalid

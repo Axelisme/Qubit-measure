@@ -64,13 +64,13 @@ group 是 MCP 單層欄位描述可用的前端中立分類名稱 hint，因此�
 未知 seed、受屏蔽 seed、缺必要 discriminator 與不支援的選項在入口報錯。
 
 Tree 對齊 model 的欄位。字串是 literal，`Expr` 才是 expression。
-`Range.around`／`Range.between` 宣告掃描，`AliasName` 產生 direct 名稱，
-`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
+`Range(start, stop, expts)`／`Range.around` 宣告掃描。Range 的字串端點轉成 `Expr`，
+數字與 None 保留原樣。`Hidden` 宣告隱藏欄位。需要顯示但不能改的值，使用樹上的初值與 `Display(readonly=True)` 或 core 欄位的 `FieldMeta(readonly=True)`。
 生成器把中立 metadata 翻成 Display，由 Form core 強制唯讀，不生成單值 Literal。
 
 `LogPoints(max, points, include_zero=True)` 為指定的整數清單欄位宣告 Log 初值，`cfg_model` 不計算清單。
 `form_adapter` 擁有 Log／List 分支、換算與清單產生。Core 只接收 `list[int]`，普通 list 與 SweepCfg 不變。
-LogPoints 與 Range.between 使用相同的樹上初值邊界，依 advisor 2026-10-19 裁決。
+LogPoints 與 Range 使用相同的樹上初值邊界，依 advisor 2026-10-19 裁決。
 預設 Log 必含 0 與 max，含 0 的 points 至少為 2，geometric samples 的末點固定為 max。
 依 advisor 同日的正值分支裁決，include_zero=False 使用 `geomspace(1, max, points)`，首尾固定為 1 與 max，再四捨五入去重。
 此時 max 至少為 1；max>1 的 points 至少為 2，max=1 接受 points≥1 並產生 `[1]`。List 只接受正整數，保留順序與單點。

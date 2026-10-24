@@ -58,7 +58,7 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
                     "$coupler.module.cz_f2", copy=True, set={"freq": Hidden(0.0)}
                 ),
             },
-            "frequency": Range.between(None, None, expts=101),
+            "frequency": Range(None, None, expts=101),
             **{
                 f"{role}_centers": {
                     "g": Expr(f"${role}.ext.readout_cal.g_center"),

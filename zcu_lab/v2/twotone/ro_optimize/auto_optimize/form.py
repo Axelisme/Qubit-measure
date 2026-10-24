@@ -33,8 +33,8 @@ def make_form(ctx: FormContext) -> Form[AutoOptCfg]:
                 "freq": Range.around(
                     "$resonator.freq", "0.2 * $resonator.kappa", expts=51
                 ),
-                "gain": Range.between(0.1, 0.25, expts=51),
-                "length": Range.between(5.0, 10.0, expts=51),
+                "gain": Range(0.1, 0.25, expts=51),
+                "length": Range(5.0, 10.0, expts=51),
             },
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

@@ -25,7 +25,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
                 if ctx.has("$qubit.module.readout")
                 else Template("readout", bindings={"resonator": "$resonator"}),
             },
-            "sweep": {"gain": Range.between(-0.3, 1.0, expts=51)},
+            "sweep": {"gain": Range(-0.3, 1.0, expts=51)},
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),
             "e_center": Expr("$qubit.ext.readout_cal.e_center"),
             "radius": Expr("$qubit.ext.readout_cal.radius"),

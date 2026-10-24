@@ -48,8 +48,8 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
             "flux_dev": flux_source,
             "flux_unit": "A",
             "sweep": {
-                "freq": Range.between(None, None, expts=1001),
-                "flux": Range.between(
+                "freq": Range(None, None, expts=1001),
+                "flux": Range(
                     "1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half",
                     "1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int",
                     expts=101,

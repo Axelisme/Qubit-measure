@@ -27,7 +27,7 @@ class DiagnosticAdapter(SampleAdapter):
         return Form(
             DiagnosticCfg,
             {
-                "sweep": Range.between(1.0, 2.0, expts=3),
+                "sweep": Range(1.0, 2.0, expts=3),
                 "tones": [
                     {
                         "name": f"Q{i + 1}",
@@ -103,7 +103,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
             return Form(
                 DiagnosticCfg,
                 {
-                    "sweep": Range.between(1.0, 2.0, expts=3),
+                    "sweep": Range(1.0, 2.0, expts=3),
                     "tones": [
                         {"name": "A", "frequency": Expr("6000 + 1"), "gain": 0.1},
                         {"name": "B", "frequency": 6100.0, "gain": 0.2},
@@ -118,7 +118,6 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
                         description="Synthetic amplitude candidate",
                         calibration="uncalibrated",
                     ),
-                    ("tones", 1, "gain"): FieldMeta(calibration="measured"),
                 }
             )
 
@@ -133,7 +132,7 @@ def test_seed_metadata_keeps_position_sources_and_only_declared_calibration(
         assert (
             rows[("tones", 0, "gain")]["seed_source"] == "Synthetic amplitude candidate"
         )
-        assert rows[("tones", 1, "gain")]["uncalibrated"] is False
+        assert rows[("tones", 1, "gain")]["uncalibrated"] is None
         assert rows[("tones", 2, "frequency")]["seed_status"] == "missing"
         assert rows[("tones", 2, "frequency")]["uncalibrated"] is None
         assert rows[("tones", 2, "gain")]["uncalibrated"] is None
@@ -302,7 +301,7 @@ def test_fixed_element_rpc_describes_names_and_edits_typed_positions(form_rpc) -
             del ctx
             return Form(
                 core,
-                {"sweep": Range.between(1.0, 2.0, expts=3)},
+                {"sweep": Range(1.0, 2.0, expts=3)},
                 fixed_elements=model.fixed_elements,
             )
 

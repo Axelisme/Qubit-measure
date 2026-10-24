@@ -155,7 +155,7 @@ def test_hidden_module_list_keeps_values_and_sources_per_position():
                         "pulse",
                         set={"freq": Hidden(11.0), "waveform.length": Hidden(0.2)},
                     ),
-                    "sweep": Range.between(1, 2, 3),
+                    "sweep": Range(1, 2, 3),
                 },
                 {
                     "name": "B",
@@ -164,7 +164,7 @@ def test_hidden_module_list_keeps_values_and_sources_per_position():
                         copy=True,
                         set={"freq": Hidden(22.0), "waveform.length": Hidden(0.4)},
                     ),
-                    "sweep": Range.between(3, 4, 3),
+                    "sweep": Range(3, 4, 3),
                 },
             ],
             "participants": [1, 0],

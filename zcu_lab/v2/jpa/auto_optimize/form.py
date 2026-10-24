@@ -40,7 +40,7 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
             "flux_unit": "A",
             "sweep": {
                 "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
-                "jpa_freq": Range.between(
+                "jpa_freq": Range(
                     "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101
                 ),
                 "jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101),
