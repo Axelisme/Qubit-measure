@@ -6,7 +6,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, TypedDict
 
-from zcu_tools.gui.form import FormInputRejected, FormPathError
+from zcu_tools.gui.form import FormInputRejected, FormPathError, StructureError
 from zcu_tools.gui.form_adapter import LogicalEditError, LogicalSourceError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -64,6 +64,16 @@ def input_rejected_to_remote(
     )
 
 
+def structure_error_to_remote(exc: StructureError) -> RemoteError:
+    """Return invalid_params/form_structure at the consuming canonical field."""
+    return RemoteError(
+        ErrorCode.INVALID_PARAMS,
+        str(exc),
+        reason="form_structure",
+        data={"form_path": list(exc.field_path)},
+    )
+
+
 @contextmanager
 def recipe_form_errors() -> Generator[None]:
     """Translate declared logical/cfg failures without reclassifying author bugs.
@@ -77,6 +87,8 @@ def recipe_form_errors() -> Generator[None]:
         raise cfg_error_to_remote(exc) from exc
     except FormInputRejected as exc:
         raise input_rejected_to_remote(exc) from exc
+    except StructureError as exc:
+        raise structure_error_to_remote(exc) from exc
     except FormPathError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,

@@ -2,6 +2,7 @@
 
 from typing import Annotated, Literal
 
+import pytest
 from pydantic import Field
 from zcu_tools.gui import form as api
 
@@ -24,6 +25,51 @@ class ValueForm(api.FormModel):
     @classmethod
     def options(cls, _env: api.FormEnv) -> dict[api.FormPath, tuple[api.Option, ...]]:
         return {("sibling",): (api.Option("Seven", 7),)}
+
+
+class NestedValueForm(api.FormModel):
+    section: ValueForm
+
+
+def test_malformed_nested_write_reports_consuming_field_and_expected_tags():
+    state = api.FormState(
+        api.FormInput(
+            NestedValueForm,
+            {"section": {"branch": {"kind": "first", "amount": 1}, "sibling": 7}},
+        )
+    )
+    before, base = state.input, state.base
+    notices = []
+    state.subscribe(lambda: notices.append("changed"))
+    with pytest.raises(api.StructureError) as failure:
+        state.write(
+            {("section",): {"branch": {"amount": 2}, "sibling": 8}},
+            api.FormEnv(),
+        )
+    assert failure.value.path == ("section",)
+    assert failure.value.field_path == ("section", "branch")
+    assert "section.branch" in str(failure.value)
+    assert "kind" in str(failure.value)
+    assert "first" in str(failure.value) and "second" in str(failure.value)
+    assert state.input.same_as(before) and state.base.same_as(base)
+    assert notices == []
+
+
+@pytest.mark.parametrize("value", [None, {"kind": "second", "amount": 1}])
+def test_single_branch_rejection_names_consuming_field_and_expected_shape(value):
+    class SingleBranch(api.FormModel):
+        branch: Annotated[First, Field(discriminator="kind")]
+
+    class Container(api.FormModel):
+        section: SingleBranch
+
+    state = api.FormState(api.FormInput(Container, {}))
+    with pytest.raises(api.StructureError) as failure:
+        state.prepare_write({("section",): {"branch": value}}, api.FormEnv())
+    assert failure.value.field_path == ("section", "branch")
+    assert "section.branch" in str(failure.value)
+    assert "model object" in str(failure.value)
+    assert "first" in str(failure.value)
 
 
 def test_value_write_replaces_raw_and_clears_only_target_selection_overrides():

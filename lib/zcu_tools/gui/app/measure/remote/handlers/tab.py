@@ -16,6 +16,7 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormInputRejected,
     FormPathError,
+    StructureError,
 )
 from zcu_tools.gui.form_adapter import LogicalEdit
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
@@ -431,7 +432,7 @@ def h_tab_run_cfg_command(
 def h_tab_edit_cfg(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    from ..form_errors import cfg_error_to_remote
+    from ..form_errors import cfg_error_to_remote, structure_error_to_remote
     from ..form_observation import edit_path_hints, form_writes, observe_form
 
     tab_id = str(params["tab_id"])
@@ -450,6 +451,8 @@ def h_tab_edit_cfg(
         ) from exc
     except CfgPreconditionError as exc:
         raise cfg_error_to_remote(exc) from exc
+    except StructureError as exc:
+        raise structure_error_to_remote(exc) from exc
     except ValueError as exc:
         hints = edit_path_hints(resource)
         raise RemoteError(

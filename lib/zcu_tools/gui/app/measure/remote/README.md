@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -102,7 +102,10 @@ with [] submits current tunables draft, not defaults.
 
 Native run mismatch and lifecycle errors preserve reason/data. Form paths keep
 form_path, Form refusal keeps form_input_rejected, and invalid Start/Apply
-returns form_errors with path/message rows. Unexpected producer failures retain
+returns form_errors with path/message rows. Workflow form edits/previews and
+`tab.edit_cfg` reject malformed model structures as invalid_params/form_structure;
+`data.form_path` identifies the consuming canonical field and the message lists
+the expected object/tag shape. Unexpected producer failures retain
 controller_error. No retry or rollback follows an error or transport timeout.
 Figures and committed records remain readable after terminal delivery. Names
 and status do not render; figure returns png_b64 for validated MCP image delivery.

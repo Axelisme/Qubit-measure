@@ -165,7 +165,7 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
         "workflow_edit_form": _tool(
             ctx,
             "workflow.edit_form",
-            "Edit the shared owner draft and return input/values/errors. Owner enforces busy and Form rules.",
+            "Edit the shared owner draft and return input/values/errors. Owner enforces busy and Form rules. Module fields use nested tagged input, not native cfg; call workflow_describe_form at the field path for options and child paths.",
             {"tab_id": _STRING, "form": _FORM, "batch": _BATCH},
             ("tab_id", "form", "batch"),
         ),

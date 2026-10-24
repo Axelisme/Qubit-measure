@@ -1,6 +1,6 @@
 # gui/form — Qt-free Pydantic input editing
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。前端中立的 Form 輸入、查詢、驗證與草稿契約。
 
@@ -62,7 +62,7 @@ Editor 與 MCP 讀同一份 description options，照 label 列選項，透過�
 
 固定 identity、名稱唯一性與 participants 政策由 `gui.form_adapter.FixedElementsForm` 擁有。Core 不認識元素名字、參與名單、capture 或 group。普通 model-list 可改名稱、長度與順序；固定政策只在宣告者選用的 admission 中生效。
 
-`write(batch, env)` 一律覆寫指定 path 的完整 raw 子樹，不合併 defaults、不執行 converter、不求值舊 draft。新值決定 branch，該 path 及 descendants 的 selection overrides 會清除。只改一欄就寫該欄完整 typed path。寫入 model object 時，未提供的欄位只在 result 依 Pydantic defaults 補值或報錯，不回填 raw。Annotation、來源與宣告 admission 仍在原子安裝前檢查。
+`write(batch, env)` 一律覆寫指定 path 的完整 raw 子樹，不合併 defaults、不執行 converter、不求值舊 draft。新值決定 branch，該 path 及 descendants 的 selection overrides 會清除。只改一欄就寫該欄完整 typed path。寫入 model object 時，未提供的欄位只在 result 依 Pydantic defaults 補值或報錯，不回填 raw。Annotation、來源與宣告 admission 仍在原子安裝前檢查。結構拒絕的 `StructureError.path` 保留失敗的 batch target，`field_path` 指向該值內真正消費錯誤形狀的 canonical 欄位。訊息列出該欄位的路徑與 annotation 允許的 discriminator 值，不把普通 invalid leaf 當結構拒絕。
 
 還原不檢查 library 或一般 leaf 值是否合法。Missing ref、family 與 hook membership 走既有 result／preview 欄位錯誤，保留 invalid draft 並擋 Run。已 inline 的原稿不從 library 重建。
 
