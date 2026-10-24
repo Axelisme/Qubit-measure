@@ -16,28 +16,13 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
 
@@ -83,11 +68,13 @@ def get_resonance_freq(
 
 
 class AcStarkModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    stark_pulse1: Annotated[PulseCfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")]
-    stark_pulse2: Annotated[PulseCfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    stark_pulse1: Annotated[
+        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
+    ]
+    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class AcStarkSweepCfg(ConfigBase):
@@ -95,7 +82,7 @@ class AcStarkSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
-class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
+class AcStarkCfg(ProgramExpCfg):
     modules: AcStarkModuleCfg
     sweep: AcStarkSweepCfg
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
@@ -127,28 +114,16 @@ class AcStarkPlotOptions:
     cutoff: float | None = None
 
 
-class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
-            Axis(
-                "population_states",
-                "GE Population",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
-            Axis(
-                "gains",
-                "Stark Pulse Gain",
-                "a.u.",
-                scale=IDENTITY,
-                dtype=np.float64,
-            ),
+            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6, dtype=np.float64),
+            AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u.", dtype=np.float64),
         ),
-        z=ZSpec("populations", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("populations", "Population", "a.u.", dtype=np.float64),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
         cfg_schema_version="2.0",

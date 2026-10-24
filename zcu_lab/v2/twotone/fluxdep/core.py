@@ -2,20 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -23,14 +15,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2._support.device import set_flux
@@ -55,13 +40,13 @@ class FreqFluxSweepCfg(ConfigBase):
 
 
 class FreqFluxModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
-class FreqFluxCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqFluxCfg(ProgramExpCfg):
     flux_unit: Annotated[
         Literal["A", "V", "native"],
         FieldMeta(
@@ -81,14 +66,14 @@ class FreqFluxCfg(ProgramV2Cfg, ExpCfgModel):
     fail_retry: int = 0
 
 
-class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
-    # inner freqs stores MHz on disk -> scale=MHZ_TO_HZ; outer values raw -> IDENTITY
-    AXES_SPEC = AxesSpec(
+class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
+    # inner freqs stores MHz on disk -> scale=1e6; outer values raw -> IDENTITY
+    AXES_SPEC: ClassVar[AxesSpec[FreqFluxResult, FreqFluxCfg]] = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("values", "Flux device value", "a.u.", scale=IDENTITY),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("values", "Flux device value", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqFluxResult,
         cfg_type=FreqFluxCfg,
         tag="twotone/flux_dep/freq",

@@ -26,7 +26,6 @@ class PowerDepAdapter(BaseAdapter[PowerCfg, PowerDepRunResult]):
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=True

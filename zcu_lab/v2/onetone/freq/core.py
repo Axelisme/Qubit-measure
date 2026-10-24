@@ -8,13 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule
@@ -142,13 +136,13 @@ def homophasal_sweep2array(
     return rounded
 
 
-class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+class FreqExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
-    # freq stores Hz on disk -> scale=MHZ_TO_HZ (disk = memory * 1e6)
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    # freq stores Hz on disk -> scale=1e6 (disk = memory * 1e6)
+    AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="2.0",

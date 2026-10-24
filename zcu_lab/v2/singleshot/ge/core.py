@@ -11,14 +11,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    RunRecord,
-    ZSpec,
-)
+from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.utils.single_shot.ge import (
@@ -30,15 +23,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.plotting.singleshot import plot_with_classified
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    Reset,
-    ResetCfg,
-)
+from zcu_tools.program.v2 import ProgramV2Cfg, Pulse, PulseReadout, Reset
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
 from zcu_lab.v2._support.singleshot.plot import draw_ge_scatter
@@ -289,10 +274,10 @@ class GEPostAnalysis:
 
 
 class GEModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class GE_Cfg(ExpCfgModel):
@@ -315,28 +300,16 @@ class GE_Cfg(ExpCfgModel):
     shots: Annotated[int, FieldMeta(label="Shots")]
 
 
-class GE_Exp(PersistableExperiment[GE_Result, GE_Cfg]):
+class GE_Exp(Experiment[GE_Result, GE_Cfg]):
     Options: ClassVar[type[GEAnalyzeOptions]] = GEAnalyzeOptions
     PostOptions: ClassVar[type[GEPostAnalyzeOptions]] = GEPostAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[GE_Result, GE_Cfg]] = AxesSpec(
         axes=(
-            Axis(
-                "shot_indices",
-                "Shot Index",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis(
-                "prepared_states",
-                "Prepared State",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
+            AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
+            AxesSpec.Axis("prepared_states", "Prepared State", "None", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=GE_Result,
         cfg_type=GE_Cfg,
         cfg_schema_version="3.0",

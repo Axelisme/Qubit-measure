@@ -129,7 +129,7 @@ Model-field path 使用 typed segments：欄位名為 str，list index 為 int�
 
 一次讀全部元素由 owner 在單一 readonly 呼叫產生。MCP 不逐元素發出 N 次讀取再拼成假快照，不持有平行的名稱排序表。完整讀取保留每個元素的 authored input、可用值與定向錯誤，不因一個元素無效而隱藏其他元素。
 
-Recipe 輸入包含以完整原始索引表示的 participants，以及與 MCP 相同的 typed path overrides。例如 `[{"path": ["tones", 0, "drive", "gain"], "value": 0.3}]` 直接定位完整原始 list 的第 0 個元素。Overrides 不以元素 name 為 key，owner 不做 name→位置轉換。Owner 在 Run 前沿相同 Form 操作套用 overrides，不在 MCP／recipe 重做 converter，也不另建排序表。
+Recipe 輸入包含以完整原始索引表示的 participants。Recipe 寫入與 overrides 使用 dotted logical paths，例如 `[{"path": "tones.0.drive.gain", "value": 0.3}]`，由 MCP 編碼成 RPC 的 typed path。十進位段直接定位完整原始 list 的第 0 個元素，不以元素 name 為 key。Owner 不做 name→位置轉換。Recipe 在實驗值後依序套用 overrides，再以 check_ready 讀完整 Form／cfg errors，不去重或組成原子 batch。set 不執行 converter，select 與 command 沿既有 Form owner 規則，不另建排序表。省略的 Form 輸入用 Python KEEP 保留，明確 null 清空／關閉 nullable 欄位。
 
 每個葉欄位保留 explicit／default／derived 來源。Actual、estimates 與 writeback candidates 以完整原始 list 的位置標示，並附元素 name 供閱讀，不依 participants 順序重新編號。這些內容取當次 Run／Load 的事實，不用後來的 Reset 或當前 alias 改寫已完成回報。顯示位置與元素名不授權寫回，目的地與 Apply 仍歸既有 writeback owner。
 

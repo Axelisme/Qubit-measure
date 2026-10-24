@@ -7,30 +7,13 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.simulate import value2flux
 
 from zcu_lab.v2._support.device import set_flux
@@ -68,10 +51,10 @@ class FluxDepAnalyzeOptions:
 
 
 class FluxDepModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    init_pulse: PulseCfg | None = None
-    probe_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
 
 
 class FluxDepSweepCfg(ConfigBase):
@@ -79,7 +62,7 @@ class FluxDepSweepCfg(ConfigBase):
     gain: SweepCfg
 
 
-class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
+class FluxDepCfg(ProgramExpCfg):
     flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
     modules: FluxDepModuleCfg
     flux_dev: Annotated[
@@ -92,15 +75,15 @@ class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     sweep: FluxDepSweepCfg
 
 
-class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
     Options: ClassVar[type[FluxDepAnalyzeOptions]] = FluxDepAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FluxDepResult, FluxDepCfg]] = AxesSpec(
         axes=(
-            Axis("gains", "Power", "a.u."),
-            Axis("values", "Flux value", "a.u."),
+            AxesSpec.Axis("gains", "Power", "a.u."),
+            AxesSpec.Axis("values", "Flux value", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="mist/flux_dep",

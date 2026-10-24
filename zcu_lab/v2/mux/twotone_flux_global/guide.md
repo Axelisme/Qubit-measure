@@ -44,6 +44,15 @@ These initial values are editable candidates, not confirmed calibrations.
 Averaging starts at 1000 reps and 10 rounds. Reduce both and the sweep point
 counts for an offline smoke.
 
+## Recipe input semantics
+
+Omitted Form inputs retain captured values. Explicit null clears a field or
+range bounds. The Form chooses sources at Open/Reset; recipes do not offer
+separate library/inline input lists. Overrides use dotted paths, run in order
+and run last. Decimal indices keep their original complete-list positions.
+The recipe calls `check_ready()` before acquisition and reports all owner paths
+and reasons without rolling back edits. Analysis null goes to the picker owner.
+
 ## Starting scenarios
 
 1. **Blank kickstart.** Confirm group wiring, resonator nominal frequencies and

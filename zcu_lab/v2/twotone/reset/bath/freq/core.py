@@ -8,33 +8,13 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    MHZ_TO_HZ,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    BathReset,
-    BathResetCfg,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
 
@@ -67,10 +47,10 @@ class FreqGainAnalysis:
 
 
 class FreqGainModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class FreqGainSweepCfg(ConfigBase):
@@ -78,7 +58,7 @@ class FreqGainSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
-class FreqGainCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqGainCfg(ProgramExpCfg):
     modules: FreqGainModuleCfg
     sweep: FreqGainSweepCfg
 
@@ -89,18 +69,18 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     )  # (gain, freq)
 
 
-class FreqGainExp(PersistableExperiment[FreqGainResult, FreqGainCfg]):
+class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
     Options: ClassVar[type[FreqGainAnalyzeOptions]] = FreqGainAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FreqGainResult, FreqGainCfg]] = AxesSpec(
         axes=(
-            Axis("freqs", "Cavity Frequency", "Hz", scale=MHZ_TO_HZ, dtype=np.float64),
-            Axis(
-                "gains", "Cavity drive Gain", "a.u.", scale=IDENTITY, dtype=np.float64
+            AxesSpec.Axis(
+                "freqs", "Cavity Frequency", "Hz", scale=1e6, dtype=np.float64
             ),
-            Axis("phases", "Pi2 Phase", "deg", scale=IDENTITY, dtype=np.float64),
+            AxesSpec.Axis("gains", "Cavity drive Gain", "a.u.", dtype=np.float64),
+            AxesSpec.Axis("phases", "Pi2 Phase", "deg", dtype=np.float64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
         cfg_schema_version="2.0",

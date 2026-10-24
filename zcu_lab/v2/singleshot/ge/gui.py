@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeResultBase,
     PostWritebackRequest,
     RunRequest,
-    SessionEnv,
     WritebackItem,
     WritebackRequest,
 )
@@ -107,11 +106,6 @@ class GEAnalyzeResult(GEAnalysis, AnalyzeResultBase):
         }
 
 
-@dataclass
-class GEPostAnalyzeParams:
-    """The GE confusion diagnostic has no independent operator parameters."""
-
-
 @dataclass(frozen=True)
 class GEPostAnalyzeResult(PostAnalyzeResultBase):
     """Radius in normalized ADC units, 3x3 matrix and dimensionless condition."""
@@ -187,8 +181,6 @@ class GEAdapter(
         GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams, GEPostAnalyzeResult
     ]
 ):
-    experiment_tag: ClassVar[str | None] = GE_Exp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[GE_Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -240,15 +232,9 @@ class GEAdapter(
             fit_quality=analysis.fit_quality,
         )
 
-    def get_post_analyze_params(
-        self, analyze_result: GEAnalyzeResult, ctx: SessionEnv
-    ) -> GEPostAnalyzeParams:
-        del analyze_result, ctx
-        return GEPostAnalyzeParams()
-
     def post_analyze(
         self,
-        req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, GEPostAnalyzeParams],
+        req: PostAnalyzeRequest[GERunResult, GEAnalyzeResult, None],
         *,
         plots: Plots,
     ) -> GEPostAnalyzeResult:

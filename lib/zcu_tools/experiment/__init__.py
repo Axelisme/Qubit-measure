@@ -38,13 +38,8 @@ if TYPE_CHECKING:
         VariableZSpec,
         ZSpec,
     )
-    from .base import PersistableExperiment
-    from .cfg_model import ExpCfgModel
-    from .interfaces import (
-        PersistableRecordExperiment,
-        RecordExperiment,
-        SynchronousExperiment,
-    )
+    from .base import Experiment
+    from .cfg_model import ExpCfgModel, ProgramExpCfg
     from .metadata import (
         CfgSnapshot,
         RunMetadata,
@@ -61,6 +56,7 @@ if TYPE_CHECKING:
         load_run_with_metadata,
         prepare_run_data,
         restore_run,
+        save_labber,
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
@@ -82,8 +78,10 @@ __all__ = [
     "capture_software_provenance",
     "new_run_id",
     "ExpCfgModel",
+    "ProgramExpCfg",
     "RunRecord",
     "RunSnapshot",
+    "save_labber",
     "save_run",
     "load_run",
     "PreparedRunData",
@@ -93,8 +91,6 @@ __all__ = [
     "prepare_run_data",
     "load_run_with_metadata",
     "AnalysisRecord",
-    "RecordExperiment",
-    "PersistableRecordExperiment",
     "ArtifactRef",
     "ArtifactItem",
     "DataItem",
@@ -105,8 +101,7 @@ __all__ = [
     "OutputResult",
     "SaveReport",
     "save_artifacts",
-    "SynchronousExperiment",
-    "PersistableExperiment",
+    "Experiment",
     "Axis",
     "ZSpec",
     "AxesSpec",
@@ -136,8 +131,10 @@ _EXPORT_MODULES = {
     "capture_software_provenance": ".acquisition",
     "new_run_id": ".acquisition",
     "ExpCfgModel": ".cfg_model",
+    "ProgramExpCfg": ".cfg_model",
     "RunRecord": ".records",
     "RunSnapshot": ".metadata",
+    "save_labber": ".native_persistence",
     "save_run": ".native_persistence",
     "load_run": ".native_persistence",
     "PreparedRunData": ".native_persistence",
@@ -147,8 +144,6 @@ _EXPORT_MODULES = {
     "prepare_run_data": ".native_persistence",
     "load_run_with_metadata": ".native_persistence",
     "AnalysisRecord": ".records",
-    "RecordExperiment": ".interfaces",
-    "PersistableRecordExperiment": ".interfaces",
     "ArtifactRef": ".artifacts",
     "ArtifactItem": ".artifacts",
     "DataItem": ".artifacts",
@@ -159,8 +154,7 @@ _EXPORT_MODULES = {
     "OutputResult": ".artifacts",
     "SaveReport": ".artifacts",
     "save_artifacts": ".artifacts",
-    "SynchronousExperiment": ".interfaces",
-    "PersistableExperiment": ".base",
+    "Experiment": ".base",
     "Axis": ".axes_spec",
     "ZSpec": ".axes_spec",
     "AxesSpec": ".axes_spec",

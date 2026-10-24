@@ -17,7 +17,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -58,10 +57,7 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
             ax.legend()
 
 
-class JpaFluxAdapter(
-    BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult, NoAnalyzeParams]
-):
-    experiment_tag: ClassVar[str | None] = FluxExp.persistence_tag()
+class JpaFluxAdapter(BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult]):
     exp_cls = FluxExp
 
     @staticmethod
@@ -82,7 +78,7 @@ class JpaFluxAdapter(
         return RunRecord(cfg, FluxExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JpaFluxRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[JpaFluxRunResult, None], *, plots: Plots
     ) -> JpaFluxAnalyzeResult:
         answer = FluxExp().analyze(req.run_result, None, plots=plots)
         _relabel_flux_figure(plots["fit"], answer.best_flux)

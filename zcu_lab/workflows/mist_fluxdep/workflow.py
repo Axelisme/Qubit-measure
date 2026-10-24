@@ -224,6 +224,7 @@ async def run_readout_stage(
     iteration: Scope,
     inputs: CalibrationInputs,
     point_record: MISTPoint,
+    plots: Plots,
     *,
     carry: CalCarry,
     estimate: float,
@@ -235,6 +236,7 @@ async def run_readout_stage(
     ):
         point_record.readout = await calibrate_readout(
             iteration,
+            plots=plots,
             inputs=inputs,
             rabi=point_record.rabi,
             carry=carry,
@@ -325,6 +327,8 @@ async def mist_fluxdep(
                 snapshot=plan.snapshot,
                 directory=d,
                 point_index=index,
+                flux=flux,
+                flux_unit=plan.flux_unit,
             )
             # Locate frequency, calibrate pulses, then refresh readout on cadence.
             if (
@@ -343,6 +347,7 @@ async def mist_fluxdep(
                     iteration,
                     replace(captured, tun=tun.current.cal),
                     point_record,
+                    env.plots,
                     carry=carry,
                     estimate=tun.current.guess_us,
                 )

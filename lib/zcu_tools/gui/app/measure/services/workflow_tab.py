@@ -93,6 +93,7 @@ class WorkflowTabPort(Protocol):
     def form_state(self, form: FormKind) -> FormState[FormModel]: ...
     def form_env(self, form: FormKind) -> FormEnv: ...
     def prepare_forms(self) -> None: ...
+    def discard_tunables(self) -> None: ...
     def set_plot_host(self, host: PlotHost) -> None: ...
     def start(
         self,
@@ -183,6 +184,18 @@ class WorkflowTab[C]:
         self.form_state(form)
         binding = self.run.binding
         return self._env if binding is None or not self._forms_from_run else binding.env
+
+    def discard_tunables(self) -> None:
+        """Restore latest accepted tunables, or captured defaults before Start.
+
+        This resets only shared input. The caller clears renderer-local text.
+        It does not publish to the Engine or refresh sources.
+        """
+        binding = self.run.binding
+        if binding is not None and self._forms_from_run:
+            binding.discard()
+        else:
+            self._tunables.reset(self._tunables.base)
 
     def prepare_forms(self) -> None:
         """Refresh idle source capture without dropping authored input or selections."""

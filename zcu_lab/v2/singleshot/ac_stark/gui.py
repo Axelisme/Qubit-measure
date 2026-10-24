@@ -10,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -46,15 +45,8 @@ class SsAcStarkAnalyzeResult(AnalyzeResultBase):
 
 
 class SsAcStarkAdapter(
-    BaseAdapter[
-        AcStarkCfg,
-        SsAcStarkRunResult,
-        SsAcStarkAnalyzeResult,
-        NoAnalyzeParams,
-    ]
+    BaseAdapter[AcStarkCfg, SsAcStarkRunResult, SsAcStarkAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = AcStarkExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -64,7 +56,7 @@ class SsAcStarkAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
+    # No get_analyze_params override: None (4th generic arg).
 
     def run(
         self,
@@ -78,7 +70,7 @@ class SsAcStarkAdapter(
         return RunRecord(cfg=cfg, result=result)
 
     def analyze(
-        self, req: AnalyzeRequest[SsAcStarkRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[SsAcStarkRunResult, None], *, plots: Plots
     ) -> SsAcStarkAnalyzeResult:
         # Required chi/kappa and optional readout correction/cutoff use this
         # Run's fixed capture. The core derives eta and owns fit defaults.

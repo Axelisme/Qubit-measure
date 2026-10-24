@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -52,14 +51,13 @@ class RBAnalyzeResult:
         }
 
 
-class TwoQubitRBAdapter(BaseAdapter[RBCfg, RBRun, RBAnalyzeResult, NoAnalyzeParams]):
+class TwoQubitRBAdapter(BaseAdapter[RBCfg, RBRun, RBAnalyzeResult]):
     """Fixed-capture paired RB, saved-source analysis and canonical native IO.
 
     No calibration writeback or automatic acceptance is offered.
     """
 
     exp_cls = RBExp
-    experiment_tag: ClassVar[str | None] = RBExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -76,7 +74,7 @@ class TwoQubitRBAdapter(BaseAdapter[RBCfg, RBRun, RBAnalyzeResult, NoAnalyzePara
         return RunRecord(cfg=cfg, result=RBExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[RBRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[RBRun, None], *, plots: Plots
     ) -> RBAnalyzeResult:
         """Count joint00 and fit only the saved source, never the current Form."""
         return RBAnalyzeResult(

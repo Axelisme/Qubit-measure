@@ -119,8 +119,20 @@ Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位
 
 核心只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
 每次 env.run attempt 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。
-Decay PNG 由 Completed.value.result 的 times/signals 重畫並疊加既有 fit，summary 從接受的 lifetime history 重畫。MIST gain.png 同樣從 Result 的實際 gains/signals 重畫，不取 operation live 圖。
-Live 與 summary 只建立 enabled lifetime 的圖。圖形副作用不放進 carry。
+Coherence 與 MIST 的 workflow 校準圖為 `calibration/qubit_freq`、`calibration/len_rabi`、`calibration/readout`。
+Frequency 圖上方畫 accepted f01 對 flux，下方畫 flux × detune heatmap 與目前 trace/fit。Detune 相對各點掃描中心。
+Rabi 圖畫 flux × pulse-length heatmap，紅線連各 flux 點的 accepted pi duration，側欄畫目前 trace/fit。
+Readout 圖以 imshow 畫目前 freq × gain SNR，紅叉標有限 SNR 最大點。Cadence 未到期時保留上一張。
+Carry 只保留本次 run 的掃描列與 accepted scalars，不保留 Figure 或 axes。Frequency widening 取代目前點的列，各列保留實際座標。
+完整但 rejected 的 fit 仍顯示，分析失敗時顯示 raw I。Partial 不更新 heatmap 或 fit。
+三張圖在完成的校準 point 目錄內保存為 `qubit-freq.png`、`len-rabi.png`、`readout.png`，cadence skip 不另存 readout 圖。
+
+Coherence 的 `t1`、`t2ramsey`、`t2echo` 各一張，取代分開的 decay 與 vs_flux 圖。
+上 panel 從 accepted history 畫 lifetime 對 flux 的 scatter 與 error bar，下 panel 從 Completed.value.result 的 times/signals 重畫目前 decay 與同座標的 fit。
+Rejected fit 標示 rejected，不增加上方 accepted 點。只建立 enabled lifetime 的圖。
+每個 point 提交後更新 history panel，合併圖保存為 `<kind>-decay.png`，不另存 summary PNG。
+MIST 圖為 `mist/gain` 與 `mist/vs_flux`。gain.png 從 Result 的實際 gains/signals 重畫，map.png 從本次 run 保留的 traces 重畫。
+所有 PNG 都不取 operation live 圖。Native raw／export 格式不變，overnight 圖不變。
 GUI forms、measure headless owner、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
 行為比對使用 measure GUI 的 workflow tabs 與離線來源，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。
 

@@ -19,7 +19,6 @@ class OnetoneFluxGlobalAdapter(MuxFluxAdapter[OnetoneFluxGlobalCfg]):
     capabilities: ClassVar[AdapterCapabilities] = replace(
         MuxFluxAdapter.capabilities, load_data=True
     )
-    experiment_tag: ClassVar[str | None] = OnetoneFluxGlobalExp.persistence_tag()
     exp_cls = OnetoneFluxGlobalExp
     force_magnitude: ClassVar[bool] = True
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

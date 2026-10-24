@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。為已註冊的實驗新增 async recipe，串接 Run、保存與 preview。
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 Recipe 把 GUI tab 操作串成一個 MCP 流程，量測仍由 adapter 執行。
 這篇接續 [實驗與表單](03-experiment.md)，為 `twotone/power_map` 加入 `power_map` recipe。
@@ -21,27 +21,22 @@ GUI cfg、Form 初值與量測序列仍由原實驗擁有，不在 recipe 再建
 
 建立 `zcu_lab/recipes/power_map.py`，放入以下範例。
 它使用新 tab 的 Form 初值，取得資料後 preview，最後同步保存 raw 與已完成的 artifacts。
-範例不補校準，缺少必要輸入時 GUI 會拒絕 Run。
+範例不補校準，check_ready 先回報缺值與路徑，阻止 Run。
 執行前先在 entry／library 備好來源，並核對量測範圍。
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import Field
 
-from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
-
-
-class PowerMapInputs(FormModel):
-    """Choose the qubit for this tab's fixed Reset capture."""
-
-    target: str | None = Field(
-        None,
-        min_length=1,
-        description="Qubit alias for this Reset; null keeps the GUI aliases.",
-    )
+from zcu_tools.mcp.measure.recipe_api import (
+    RecipeInputs, RecipeReport, RecipeSession, recipe,
+)
 
 
-class PowerMapReport(BaseModel):
+class PowerMapInputs(RecipeInputs):
+    """Use the captured Form with optional target, reuse and ordered overrides."""
+
+
+class PowerMapReport(RecipeReport):
     """Report acquisition progress; Save receipts are returned separately in runs."""
 
     map_acquired: bool = Field(
@@ -55,18 +50,21 @@ async def power_map(
 ) -> PowerMapReport:
     """Acquire the tab's frequency/gain map without fitting or writeback.
 
-    Inputs select only this Reset's qubit alias. Form defaults supply the scan
-    and pulses. Invalid calibration or cfg fails Run. A child Run stop returns
-    partial data, then finally saves it on this worker. Root cancellation drains
+    Target selects this Reset's qubit alias; overrides edit the captured Form.
+    Form defaults supply the scan and pulses. check_ready reports missing cfg
+    values before Run. A child Run stop returns partial data, then finally saves
+    it on this worker. Root cancellation drains
     the Run and raises before this Save finalizer; the partial stays in the tab.
     """
-    # Capture the requested aliases without changing the global table.
-    if inputs.target is not None and not inputs.target.strip():
-        raise ValueError("target must be a non-empty string or null")
+    # Capture the requested target without changing the global aliases.
     tab = session.open_tab(
         "twotone/power_map",
-        aliases=None if inputs.target is None else {"qubit": inputs.target},
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     # Only enter the Save finalizer once a Run source exists.
     await tab.run()
@@ -81,7 +79,7 @@ DEFINITION = power_map
 ```
 
 `RecipeSession` 由 runtime 傳入，不是 MCP input。
-`@recipe` 從第二個參數的 `FormModel` 推導 MCP JSON schema，並驗證呼叫輸入。
+`@recipe` 從第二個參數的 inputs model 推導 MCP JSON schema，並驗證呼叫輸入。
 Inputs 不渲染 GUI Form，不另寫 input_schema。
 Recipe 可以開多個 adapter，因此宣告不設 adapter_name。
 Report 是作者選擇的具名 model，不需要 SummaryParameter、SummaryEstimate 或空的 summary 宣告。
@@ -89,13 +87,28 @@ Report 是作者選擇的具名 model，不需要 SummaryParameter、SummaryEsti
 `map_acquired=True` 只表示程式走到該處，不表示所有格式都保存成功。
 
 `target` 只覆寫這個 tab 在 Reset 時捕捉的 qubit alias，不改 GUI 全域 aliases。
-其他角色沿用該 entry 的 alias 關係。
+其他角色沿用該 entry 的 alias 關係。省略／KEEP／null target 都保留全域 alias。
+`reuse_tab_id` 指定 idle matching tab，省略／KEEP／null 則開新 tab。
+
+加入可省略的 Form 欄位時，從 recipe_api import `KEEP, Keep`，宣告 `T | None | Keep = KEEP`。
+省略保留 Form 值，明填 null 原樣交 owner。KEEP 不是 JSON 值，schema 不列 Keep 或 KEEP default。
+主體先明寫選 module 與逐欄 set，再依序 set overrides，最後 check_ready。
+例如 `tab.set("sweep.freq.n", inputs.points)`，寫入與 FieldEdit 用 dotted string。
+Overrides 只含 path／value，省略是空 list，不接受 null，不去重或過濾 null。
+`tab.read("modules.qub_pulse")` 用 dotted string，回 FormField。
+明填 scalar 前直接 command to_inline，再 set。已 inline 時 command 不改值。
+單 kind module 與巢狀 waveform 同規則，保留原 family，不強選 const。
+全部 scalar 省略時不切來源，也不因來源無效而 fallback。
+Center／span 必須成對提供或省略，不從 endpoints 或校準補齊，null 不參與算術。
+具名參數讀取用 `tab.read_parameter`，裝置快取單位用 `session.device_unit`。
+完整逐欄範例見 [Recipe 撰寫](../v2/measure-authoring.md#recipe-撰寫)。
 Author API 與來源語意見 [recipe 與 execution](../../lib/zcu_tools/mcp/measure/README.md#recipe-與-execution)。
 
 ## 3. 有分析時明確串接問答與保存
 
-FIT adapter 的 Run 後可使用以下流程。
-`FitSummary` 與 `Report` 由作者按 owner summary 宣告，框架以 TypeAdapter 驗證，不補欄位。
+FIT adapter 的 Run 後可使用以下流程。Analysis updates 只濾 KEEP，明填 null 原樣交分析 owner。
+`FitSummary` 直接 import 分析 owner 的具名 summary，不另宣告鏡像。`Report` 由作者宣告。
+框架以 TypeAdapter 驗證 owner summary，不補欄位。
 此例的 Report 包含 nullable value、writeback_applied 與 nullable analysis_failure。
 
 ```python
@@ -133,7 +146,8 @@ Analyze 不自動保存。`tab.save()` 同步保存 raw 與全部已完成階段
 不要在 Run 取得來源前進入 Save finalizer，避免保存失敗蓋掉原來的 Run 錯誤。
 回答本身不寫回，只有明確 accept_writeback 才寫已捕捉的項目。
 它回傳收據，`receipt.raise_for_error()` 在失敗時保留 owner 診斷並終止作者流程。
-不要以 decision.accepted 宣稱已寫入。Owner 先核對兩個 stages 的捕捉 revision，任何 draft 改動或替換都在第一筆寫入前拒絕。
+不要以 decision.accepted 宣稱已寫入。Owner 一次核對兩個 stages 的選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
+問答期間 draft 編輯或替換不觸發 stale 拒絕，寫入採 owner 當下 draft 的值與目的地，不還原舊 proposal。
 
 Run scope cancel 使 Run 回 partial，之後步驟仍繼續。
 取消 recipe 根則讓下一個 call／ask await raise 普通 `ScriptCancelled`。

@@ -459,9 +459,9 @@ class MainWindow(QMainWindow):
         if current.capabilities.analysis is AnalysisMode.NONE:
             return
         if not current.interaction.has_run_result:
-            tab_w.analyze_form.sync(None)
+            tab_w.analyze_form.clear()
             return
-        if current.analysis is None or current.analysis.params is None:
+        if current.analysis is None:
             raise RuntimeError("Run result has no initialized analyze parameters")
         tab_w.analyze_form.sync(current.analysis.params)
 

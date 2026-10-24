@@ -25,7 +25,13 @@ from zcu_tools.gui.form import (
     Option,
 )
 from zcu_tools.gui.form._describe import describe_field
-from zcu_tools.gui.form._selection import Field, Level, root_level, validate_path
+from zcu_tools.gui.form._selection import (
+    Field,
+    Level,
+    resolve,
+    root_level,
+    validate_path,
+)
 from zcu_tools.gui.form._sources import error_path
 from zcu_tools.gui.form._structure import StructureError, alternatives
 
@@ -696,6 +702,64 @@ def select(
             ),
         }
     return _candidate(input, {position.target.path: value}, env, path)
+
+
+def choose(
+    input: FormInput[FormModel],
+    path: FormWritePath,
+    option: str | None,
+    env: FormEnv,
+) -> LogicalEditCandidate:
+    """Resolve one exact option label in the active owner declaration."""
+    position = _resolve(input, path, env, writing=True)
+    target = position.target
+    if option is None and position.marker is not None:
+        return select(input, path, env, action="disable")
+    matches = [
+        item
+        for item in target.options or ()
+        if (item.value is None if option is None else item.label == option)
+    ]
+    if len(matches) != 1:
+        raise LogicalEditError(
+            "Unknown or ambiguous Form option",
+            reason_code="form_option",
+            path=path,
+            selector_path=path,
+        )
+    if position.marker is not None:
+        selector = _selector(target, position.marker, env)
+        if option in selector.available_keys:
+            return select(input, path, env, action="library", key=option)
+    candidate = FormState(input).prepare_selection(target.path, matches[0].value, env)
+    return LogicalEditCandidate(candidate, not candidate.same_as(input))
+
+
+def command(
+    input: FormInput[FormModel],
+    path: FormWritePath,
+    name: str,
+    env: FormEnv,
+    *,
+    canonical: bool = False,
+) -> LogicalEditCandidate:
+    """Run an owner command; inline selectors accept to_inline without a menu action."""
+    position = (
+        _Position(resolve(input.model, input.data, path, env, input.selections), path)
+        if canonical
+        else _resolve(input, path, env, writing=True)
+    )
+    raw = position.target.level.value(position.target.name)
+    if (
+        name == "to_inline"
+        and position.marker is not None
+        and isinstance(raw, dict)
+        and raw.get("kind") == "inline"
+    ):
+        return LogicalEditCandidate(input, False)
+    state = FormState(input)
+    state.run_command(position.target.path, name, env)
+    return LogicalEditCandidate(state.input, not state.input.same_as(input))
 
 
 def logical_errors(

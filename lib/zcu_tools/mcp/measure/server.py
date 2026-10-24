@@ -174,9 +174,12 @@ analysis supplies pending={tab,stage,op}; complete that same GUI operation with
 tab_interact. Missing parameters return needs_parameters, missing paths and
 outcome=null, not a failed RecipeOutcome. Cfg preflight also returns
 parameter_errors=[{path,message}] with all typed indexed paths and owner reasons.
-Mux participants/overrides apply as one require_valid batch; invalid candidates
-install no fields and start no Run. Earlier open/reset/library/inline actions
-remain. Run also checks the complete Form errors before starting acquisition.
+Recipe Form fields may be omitted to retain their values; explicit null clears
+or disables nullable fields. Ordered overrides run after experiment values,
+one set per edit, including repeated paths and null values. check_ready reads
+all owner Form and lowered cfg errors without mutation, recapture or Run.
+Earlier selections and edits remain after validation failure. Run also checks
+the complete Form errors before starting acquisition.
 Full recipe detail retains per-Run/tab/operation conditions from the owner's
 fixed Form observation, native analysis estimates and invalid paths, and explicit
 writeback candidates. Reading detail never reruns analysis, writes or saves.

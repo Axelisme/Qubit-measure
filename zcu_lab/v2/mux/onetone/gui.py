@@ -285,7 +285,6 @@ class MuxOnetoneAdapter(
 ):
     """Scan selected resonators, fit their spectra, and propose frequency updates."""
 
-    experiment_tag: ClassVar[str | None] = MuxOnetoneExp.persistence_tag()
     exp_cls = MuxOnetoneExp
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True

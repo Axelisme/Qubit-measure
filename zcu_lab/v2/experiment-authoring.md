@@ -68,8 +68,8 @@ core 依資料選固定 0°／180° 相位。共用 fitting helper 只接收明�
 
 ### 2. 在 recipe 函式本體寫出操作流程
 
-Recipe 本體依序開 tab、選 library／設欄位、Run、Analyze，再詢問 writeback。
-Helper 只能完成單一步驟，例如選一次 library，不能包住整個量測流程。
+Recipe 本體依序開 tab、選 module、逐欄 set、依序套 overrides、check_ready、Run、Analyze，再詢問 writeback。
+來源選擇與掃描端點直接留在主體，helper 只共用數字呈現或逐 Q 分析 updates 等機械對應。
 
 例如 [mux Amp Rabi recipe](../recipes/mux_amp_rabi.py) 應直接讀得到
 `session.open_tab(...)`、`tab.select(...)`、`tab.set(...)`、
@@ -78,7 +78,9 @@ Helper 只能完成單一步驟，例如選一次 library，不能包住整個�
 每次 Analyze 後先檢查 `analysis.result`。預期擬合失敗時 result=None、status="failed"，立即回含 `analysis_failure=analysis.reason` 的 report，不 Ask、不接受 writeback、不跑相依 Post。Post 失敗保留 Primary 估計；成功時 analysis_failure=None。任意程式錯誤仍 raise。
 
 Run 留在 try 外，成功返回後的流程以既有 finally 同步 `tab.save()`。根取消使下一個 await raise 普通 ScriptCancelled，進行中的 Run 先 drain 並保留 facts。該 Run await 被根取消時不進後續 Save finalizer，partial 留在 tab 交 agent 決定。作者不新增取消分支或 Save finalizer。
-Inputs 用 FormModel，框架只作 pydantic／MCP JSON schema 驗證，不渲染 recipe inputs Form。
+Inputs 繼承 RecipeInputs，框架只作 pydantic／MCP JSON schema 驗證，不渲染 recipe inputs Form。
+可省略欄位用 KEEP，null 原樣交 owner。Read 與寫入都用 dotted string。
+明填 scalar 前直接 command to_inline，保留 waveform family。已 inline 時不改值。
 完整宣告、Analyze 失敗值與根取消契約見 [recipe 教學](../tutorial/04-recipe.md)。
 
 ### 3. Docstring 說明量測、序列與結果
@@ -243,7 +245,7 @@ CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。de
 
 實驗基底、RunRecord 與 Result 契約見[父層實驗介面](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。以下記錄 v2 實驗特有的分析與資料形狀。
 
-有分析選項的實驗以 `Experiment.Options` 公開其既有 options 類別，例如 `T1Exp.Options(skip=1)`。GE 另以 `GE_Exp.PostOptions` 提供 post-analysis 選項。類屬性引用型別，不保存共用 instance；欄位與預設仍由原 options 定義擁有。沒有選項的實驗不補空 Options。這些屬性不是共用 Protocol 的要求。
+有分析選項的實驗以 `Experiment.Options` 公開其既有 options 類別，例如 `T1Exp.Options(skip=1)`。GE 另以 `GE_Exp.PostOptions` 提供 post-analysis 選項。類屬性引用型別，不保存共用 instance；欄位與預設仍由原 options 定義擁有。沒有選項的實驗不補空 Options。Experiment 基底不要求這些屬性。
 
 CKP numeric analysis先從ground/excited maps抽取resonance trace，再透過
 `analysis.fitting.shared`共同擬合Lorentzian baseline、scale與width；兩個resonance
@@ -284,9 +286,9 @@ Singleshot T1／T1WithTone／T1WithToneSweep 使用 explicit RunContext，unifor
 
 ### 版本實驗的資料形狀
 
-`PersistableExperiment`、`AxesSpec`、inner-first 軸序及 grouped variables 的共同映射見[父層 README](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。以下保留 v2 實驗的具體資料形狀。
+`Experiment`、`AxesSpec`、inner-first 軸序及 grouped variables 的共同映射見[父層 README](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。以下保留 v2 實驗的具體資料形狀。
 
-- **grouped experiment variables**：`CPMG_Exp` 使用 variables `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 variables `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 variables `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` variable unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。這些 runtime `load()` 讀取與 grouped spec 相符的 native `data.h5`，並透過 `from_stored` 還原 typed record。Labber 匯出由獨立的 `save(source, destination)` 提供，不能直接交給 native loader。既有 Labber 舊檔依 [migrations](../../migrations/README.md#legacy-resultdatabase--native-storage) 提供歷史證據並離線轉換；legacy `.npz` 或 sidecar 不是 runtime 可載入格式。
+- **grouped experiment variables**：`CPMG_Exp` 使用 variables `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 variables `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 variables `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` variable unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。`load_run_with_metadata(path, spec=Exp.AXES_SPEC)` 讀取與 grouped spec 相符的 native `data.h5`，並透過 `restore_run` 還原 typed record。Labber 匯出由獨立的 `save_labber(record, path, spec=Exp.AXES_SPEC)` 提供，不能直接交給 native loader。既有 Labber 舊檔依 [migrations](../../migrations/README.md#legacy-resultdatabase--native-storage) 提供歷史證據並離線轉換；legacy `.npz` 或 sidecar 不是 runtime 可載入格式。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
 - **single-variable 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e` population components 視為 `population_states=[0, 1]` axis，canonical shape 為 `(Nsweep, 2)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 2)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 2)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 2)`，只存 Result 的 g/e components，`other` 由 analysis 推導。這類 homogeneous Result 的 native 資料存成單一 `data.h5`，Labber 另匯出單一 `.hdf5`。離散狀態不是 Data Variable，不拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
 
@@ -357,7 +359,9 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ## v2 cfg 組合慣例
 
-具體實驗使用自己的 module／sweep cfg，並視需要組合 program/v2 的 `ProgramV2Cfg` 與父層 `ExpCfgModel`。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
+具體實驗使用自己的 module／sweep cfg。需要 reps、rounds、initial_delay、relax_delay 的 cfg 從 `zcu_tools.experiment` import `ProgramExpCfg`，再以 `class XxxCfg(ProgramExpCfg)` 加上實驗欄位。不含 program 欄位的 cfg 仍繼承 `ExpCfgModel`；在 run 內另建設定時保留 `ProgramV2Cfg`。
+
+Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型別寫 `Pulse.Cfg`、`Readout.Cfg`、`Reset.Cfg`。具體 readout／reset／waveform 也使用自己的 `.Cfg`，例如 `MuxReadout.Cfg` 與 `BathReset.Cfg`。`SweepCfg` 與硬體指令仍按需 import。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
 ---
 
@@ -428,11 +432,11 @@ distinct depths 時分析明確失敗。
 
 ## 寫新 Experiment 時的檢查清單
 
-1. 定義 `XxxModuleCfg` / `XxxSweepCfg`（通常繼承 `ConfigBase`）與 `XxxCfg = ProgramV2Cfg + ExpCfgModel + 自己欄位`。
-2. 需要 typed record 持久化時，繼承 `PersistableExperiment[T_Result, XxxCfg]` 並宣告 class-level `AXES_SPEC`，single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 由 RunRecord 持有。`from_stored(stored)` 還原已讀取的 native data，`load(source)` 是讀檔包裝；`save_run(source, destination, *, metadata, replace=False)` 寫 native，`save(source, destination)` 另作 Labber 匯出，兩者不猜格式。GUI 透過 adapter 的 restore 與保存內容 hooks 使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
+1. 定義 `XxxModuleCfg` / `XxxSweepCfg`，通常繼承 `ConfigBase`。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別。需要 program 欄位時，`XxxCfg` 繼承 `ProgramExpCfg`，否則繼承 `ExpCfgModel`。
+2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。
-5. 持久化由 `AXES_SPEC` 宣告。每個 `Axis` 帶 `scale`，頻率用 `MHZ_TO_HZ`、時間用 `US_TO_S`，盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
+5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
 
 Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。

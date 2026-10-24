@@ -3,72 +3,74 @@
 Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
-from zcu_tools.mcp.measure.recipe_contracts import RecipeNeedsParameters
+from zcu_tools.mcp.measure.recipe_contracts import (
+    MissingParameter,
+    RecipeNeedsParameters,
+)
 
 from zcu_lab.v2.onetone.freq.gui import OnetoneSpectrumSummary
-
-from .helpers import (
-    FrequencySweepCalibration,
-    FrequencySweepRange,
-    frequency_sweep_edits,
-)
 
 
 class OnetoneSpectrumInputs(RecipeInputs):
     """Inputs for onetone spectrum; all units and null policies are declared per
     field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
     )
-    center_mhz: float | None = Field(
-        None, description="Sweep center in MHz. Null reads $resonator.freq."
+    center_mhz: float | None | Keep = Field(
+        KEEP,
+        description="Sweep center in MHz. Supply with span_mhz; omission retains the Form range, null clears it.",
     )
-    span_mhz: float | None = Field(
-        None,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Null uses 3 times $resonator.kappa as the full span.",
+    span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
+        KEEP,
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz; omission retains the Form range, null clears it.",
     )
-    gain: float | None = Field(
-        None,
-        description="Fixed pulse amplitude in native gain units; null keeps the GUI value.",
+    gain: float | None | Keep = Field(
+        KEEP,
+        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
     )
-    points: int | None = Field(
-        None, description="Sweep sample count; null keeps the GUI count when optional."
+    points: Annotated[int, Field(ge=2)] | None | Keep = Field(
+        KEEP,
+        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
     )
-    reps: int | None = Field(
-        None, description="Acquisition repetition count; null keeps the GUI value."
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
     )
-    rounds: int | None = Field(
-        None, description="Averaging round count; null keeps the GUI value."
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value; null clears/disables it.",
     )
 
-    model_type: Literal["hm", "t", "auto"] | None = Field(
-        None,
-        description="Model type; null keeps the GUI analysis value. Analysis only.",
+    model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
+        KEEP,
+        description="Model type; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    fit_bg_amp_slope: bool | None = Field(
-        None,
-        description="Fit amplitude background; null keeps the GUI analysis value. Analysis only.",
+    fit_bg_amp_slope: bool | None | Keep = Field(
+        KEEP,
+        description="Fit amplitude background; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    fit_bg_phase_curvature: bool | None = Field(
-        None,
-        description="Fit phase curvature; null keeps the GUI analysis value. Analysis only.",
+    fit_bg_phase_curvature: bool | None | Keep = Field(
+        KEEP,
+        description="Fit phase curvature; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    edelay: float | None = Field(
-        None,
-        description="Electrical delay seed (us; blank = auto); null keeps the GUI analysis value. Analysis only.",
+    edelay: float | None | Keep = Field(
+        KEEP,
+        description="Electrical delay seed (us; blank = auto); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -97,42 +99,37 @@ async def onetone_spectrum(
     Ask before applying the calibration, then save raw data and analysis.
 
     points → expts sets the sweep sample count.
-    Analysis controls: model_type, fit_bg_amp_slope, fit_bg_phase_curvature, edelay. Null keeps each GUI value.
+    Analysis controls: model_type, fit_bg_amp_slope, fit_bg_phase_curvature, edelay. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    for name, value in (
-        ("reuse_tab_id", inputs.reuse_tab_id),
-        ("readout_ref", inputs.readout_ref),
+    tab = session.open_tab(
+        "onetone/freq",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
+    )
+    tab.select("modules.readout", inputs.readout_ref)
+    if not isinstance(inputs.gain, Keep):
+        tab.command("modules.readout", "to_inline")
+    if isinstance(inputs.center_mhz, Keep) != isinstance(inputs.span_mhz, Keep):
+        missing = "span_mhz" if isinstance(inputs.span_mhz, Keep) else "center_mhz"
+        raise RecipeNeedsParameters(
+            (MissingParameter(missing, "Supply center_mhz and span_mhz together"),)
+        )
+    if inputs.center_mhz is None or inputs.span_mhz is None:
+        tab.set("sweep.freq.start", None)
+        tab.set("sweep.freq.stop", None)
+    elif not isinstance(inputs.center_mhz, Keep) and not isinstance(
+        inputs.span_mhz, Keep
     ):
-        if value is not None and (not value.strip()):
-            raise ValueError(f"{name} must be a non-empty string or null")
-    if inputs.span_mhz is not None and inputs.span_mhz <= 0:
-        raise ValueError("span_mhz must be positive")
-    tab = session.open_recipe_tab("onetone/freq", inputs, target_alias="qubit")
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    sweep = frequency_sweep_edits(
-        tab,
-        ("sweep", "freq"),
-        calibration=FrequencySweepCalibration(
-            "$resonator.freq", "$resonator.kappa", 3.0
-        ),
-        scan=FrequencySweepRange(
-            center_mhz=inputs.center_mhz, span_mhz=inputs.span_mhz, expts=inputs.points
-        ),
-    )
-    missing = sweep.missing
-    edits.extend(sweep.edits)
-    if missing:
-        raise RecipeNeedsParameters(missing)
-    if inputs.gain is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(FieldEdit(path=("modules", "readout", "gain"), value=inputs.gain))
-    tab.apply_inputs(
-        inputs, {("reps",): inputs.reps, ("rounds",): inputs.rounds}, edits=edits
-    )
+        tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
+        tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
+    tab.set("sweep.freq.n", inputs.points)
+    tab.set("modules.readout.gain", inputs.gain)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
@@ -140,14 +137,10 @@ async def onetone_spectrum(
             "primary",
             result=OnetoneSpectrumSummary,
             updates={
-                key: value
-                for key, value in {
-                    "model_type": inputs.model_type,
-                    "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
-                    "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
-                    "edelay": inputs.edelay,
-                }.items()
-                if value is not None
+                "model_type": inputs.model_type,
+                "fit_bg_amp_slope": inputs.fit_bg_amp_slope,
+                "fit_bg_phase_curvature": inputs.fit_bg_phase_curvature,
+                "edelay": inputs.edelay,
             },
         )
         if analysis.result is None:

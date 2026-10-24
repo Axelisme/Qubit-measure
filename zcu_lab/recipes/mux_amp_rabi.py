@@ -3,14 +3,21 @@
 Recipe n → expts: one shared scan point count for every tone.
 """
 
+from typing import Annotated
+
 from pydantic import Field, StrictInt
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
+)
+from zcu_tools.mcp.measure.recipe_contracts import (
+    MissingParameter,
+    RecipeNeedsParameters,
 )
 
 from zcu_lab.v2._support.measure.mux_results import MuxSummaryFailure
@@ -19,31 +26,28 @@ from zcu_lab.v2.mux.amp_rabi.gui import MuxAmpRabiSummary
 from .mux_helpers import (
     MuxToneReport,
     ToneRangeInputs,
-    mux_sweep_edits,
 )
 
 
 class MuxAmpRabiInputs(RecipeInputs):
-    """Experiment inputs; null retains captured Form values, overrides apply last."""
+    """Omitted Form inputs retain values; null clears them; overrides apply last."""
 
-    participants: list[StrictInt] | None = Field(
-        default=None,
-        description="Unique original tone indices in acquisition order; null keeps the captured Form selection.",
+    participants: list[StrictInt] | None | Keep = Field(
+        default=KEEP,
+        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
     )
-    sweeps: list[ToneRangeInputs] | None = Field(
-        default=None,
-        description="Start/stop for every tone in original order, including nonparticipants; null keeps ranges. No per-tone n.",
+    sweeps: list[ToneRangeInputs] | None | Keep = Field(
+        default=KEEP,
+        description="Start/stop for every tone in original order, including nonparticipants; omission keeps ranges; null clears their bounds. No per-tone n.",
     )
-    n: int | None = Field(
-        default=None,
-        strict=True,
-        gt=0,
-        description="Positive hardware scan point count shared by all tones; null keeps Expts.",
+    n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
+        default=KEEP,
+        description="Positive hardware scan point count shared by all tones; omission keeps Expts; null clears it.",
     )
 
-    skip: int | None = Field(
-        None,
-        description="Points to skip before fitting the gain oscillation. Null retains analysis settings.",
+    skip: int | None | Keep = Field(
+        default=KEEP,
+        description="Points to skip before fitting the gain oscillation. Omission keeps analysis settings; null is passed to the analysis owner.",
     )
 
 
@@ -85,7 +89,7 @@ async def mux_amp_rabi(
 ) -> MuxAmpRabiReport:
     """Measure mux Rabi oscillations versus gain and review pi/pi2 pulse updates.
 
-    Select library then inline sources; null keeps captured Form values.
+    Open captures Form sources; omitted inputs keep values and null clears them.
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
@@ -94,31 +98,40 @@ async def mux_amp_rabi(
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.
     """
-    tab = session.open_recipe_tab("mux/amp_rabi", inputs, target_alias="mux")
-
-    tab.select_sources(inputs)
-    tab.apply_inputs(
-        inputs,
-        {},
-        edits=[
-            FieldEdit(
-                path=("participants",),
-                value=None if inputs.participants is None else [*inputs.participants],
-            ),
-            *mux_sweep_edits(tab, inputs.sweeps, inputs.n),
-        ],
+    tab = session.open_tab(
+        "mux/amp_rabi", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
+    tab.set("participants", inputs.participants)
+    if not isinstance(inputs.sweeps, Keep):
+        input_tones = tab.read("tones").value
+        if not isinstance(input_tones, list):
+            raise RecipeNeedsParameters(
+                (MissingParameter("tones", "Full tone list is unavailable."),)
+            )
+        if inputs.sweeps is not None and len(inputs.sweeps) != len(input_tones):
+            raise RecipeNeedsParameters(
+                (
+                    MissingParameter(
+                        "sweeps",
+                        f"Expected {len(input_tones)} ranges in original tone order; missing indices {list(range(len(inputs.sweeps), len(input_tones)))}; extra indices {list(range(len(input_tones), len(inputs.sweeps)))}.",
+                    ),
+                )
+            )
+        for index in range(len(input_tones)):
+            tab.set(
+                f"tones.{index}.sweep",
+                None if inputs.sweeps is None else inputs.sweeps[index],
+            )
+    tab.set("expts", inputs.n)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
-    # Acquire before fitting; the finally block saves raw and artifacts.
     await tab.run()
     try:
         fit = await tab.analyze(
             "primary",
-            updates={
-                key: value
-                for key, value in {"skip": inputs.skip}.items()
-                if value is not None
-            },
+            updates={"skip": inputs.skip},
             result=MuxAmpRabiSummary,
         )
         if fit.result is None:

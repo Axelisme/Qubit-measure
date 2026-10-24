@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 - `coherence_fluxdep/`：逐個 flux 點校準並量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
@@ -53,7 +53,25 @@ Saver 收 Completed、歷史 snapshot 與 scope.identity，不重新捕捉 evide
 每次 run attempt 建獨立 operation Plots，workflow 趨勢圖留在 env.plots。
 Pane/MCP 以 operation/<name> 顯示目前 attempt，workflow 圖名不能用 operation/ 前綴。
 
-Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。Coherence 的 decay 使用 Result.times/signals，fit 與 summary 使用同一份結果及接受值 history。MIST 的 gain.png 使用 Result 的實際 gains/signals 與既有 mist_signal2real，map.png 使用保留的 traces。這些保存不讀 operation 圖或更動科學序列。
+Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。
+Coherence 與 MIST 共用三張校準圖，每個完成的 flux 點保留一列掃描資料，僅供本次 run 畫圖。
+Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap 各列保留自己的實際掃描座標，不把變動的掃描範圍當成同一個 grid。
+
+| Workflow 圖名 | 面板內容 | Point 目錄內的 PNG |
+| --- | --- | --- |
+| `calibration/qubit_freq` | 上方 accepted f01 對 flux 點圖，下方 flux × detune heatmap 與目前 trace/fit。Detune 相對該點掃描中心。 | `qubit-freq.png` |
+| `calibration/len_rabi` | Flux × pulse-length heatmap，紅線連各點 accepted pi duration，側欄目前 trace/fit。 | `len-rabi.png` |
+| `calibration/readout` | 最近一次 readout freq × gain SNR landscape，紅叉標有限 SNR 最大點。 | `readout.png` |
+| `t1`、`t2ramsey`、`t2echo` | 各一張，上方 accepted lifetime 對 flux 的 error bar 點圖，下方目前 decay/fit。只建立 enabled lifetime 的圖。 | `<kind>-decay.png` |
+| `mist/gain` | 目前 MIST gain trace。 | `gain.png` |
+| `mist/vs_flux` | MIST gain 對 flux map。 | `map.png` |
+
+Readout 只在 cadence 到期且本點 Rabi 接受後更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
+校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
+Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
+每個 point 提交後更新上方 accepted history，保存含上下兩個 panel 的 `<kind>-decay.png`，不另存 summary PNG。
+MIST 的 gain.png 使用 Result 的實際 gains/signals 與既有 mist_signal2real，map.png 使用保留的 traces。
+這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的圖維持原樣。
 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
 Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。

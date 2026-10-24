@@ -16,7 +16,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
     AnalyzeRequest,
-    NoAnalyzeParams,
     ParameterWriteback,
     PostWritebackRequest,
     RunRequest,
@@ -128,9 +127,8 @@ class DummyAdapter:
 
     @classmethod
     def post_analyze_params_cls(cls) -> type:
-        # No annotated return on get_post_analyze_params → fall back to the
-        # same sentinel BaseAdapter returns when reflection finds nothing.
-        return NoAnalyzeParams
+        # No Post inputs use the built-in NoneType schema.
+        return type(None)
 
     def get_post_analyze_params(self, analyze_result: object, ctx: SessionEnv) -> None:
         del analyze_result, ctx

@@ -2,37 +2,18 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import find_rotate_angle
 
 from zcu_lab.v2.twotone.reset.rabi_check.fit import RabiCheckFit, fit_reset_rabi
@@ -59,28 +40,28 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class RabiCheckModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[PulseCfg, FieldMeta(label="Rabi pulse")]
-    tested_reset: Annotated[ResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class RabiCheckSweepCfg(ConfigBase):
     gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
 
 
-class RabiCheckCfg(ProgramV2Cfg, ExpCfgModel):
+class RabiCheckCfg(ProgramExpCfg):
     modules: RabiCheckModuleCfg
     sweep: RabiCheckSweepCfg
 
 
-class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
-    AXES_SPEC = AxesSpec(
+class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[RabiCheckResult, RabiCheckCfg]] = AxesSpec(
         axes=(
-            Axis("gains", "Amplitude", "a.u.", scale=IDENTITY, dtype=np.float64),
-            Axis("reset_states", "Reset", "None", scale=IDENTITY, dtype=np.int64),
+            AxesSpec.Axis("gains", "Amplitude", "a.u.", dtype=np.float64),
+            AxesSpec.Axis("reset_states", "Reset", "None", dtype=np.int64),
         ),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=RabiCheckResult,
         cfg_type=RabiCheckCfg,
         cfg_schema_version="2.0",

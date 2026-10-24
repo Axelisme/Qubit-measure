@@ -291,6 +291,10 @@ class AbsWaveform(ABC):
 
 
 class ConstWaveform(AbsWaveform):
+    """Build a native envelope from settings declared as ``ConstWaveform.Cfg``."""
+
+    Cfg: TypeAlias = ConstWaveformCfg
+
     def __init__(self, name: str, waveform_cfg: ConstWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
@@ -302,6 +306,10 @@ class ConstWaveform(AbsWaveform):
 
 
 class CosineWaveform(AbsWaveform):
+    """Build a native envelope from settings declared as ``CosineWaveform.Cfg``."""
+
+    Cfg: TypeAlias = CosineWaveformCfg
+
     def __init__(self, name: str, waveform_cfg: CosineWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
@@ -320,6 +328,10 @@ class CosineWaveform(AbsWaveform):
 
 
 class GaussWaveform(AbsWaveform):
+    """Build a native envelope from settings declared as ``GaussWaveform.Cfg``."""
+
+    Cfg: TypeAlias = GaussWaveformCfg
+
     def __init__(self, name: str, waveform_cfg: GaussWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
@@ -346,6 +358,10 @@ class GaussWaveform(AbsWaveform):
 
 
 class DragWaveform(AbsWaveform):
+    """Build a native envelope from settings declared as ``DragWaveform.Cfg``."""
+
+    Cfg: TypeAlias = DragWaveformCfg
+
     def __init__(self, name: str, waveform_cfg: DragWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
@@ -374,6 +390,10 @@ class DragWaveform(AbsWaveform):
 
 
 class ArbWaveform(AbsWaveform):
+    """Build a native envelope from settings declared as ``ArbWaveform.Cfg``."""
+
+    Cfg: TypeAlias = ArbWaveformCfg
+
     def __init__(self, name: str, waveform_cfg: ArbWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
@@ -429,6 +449,10 @@ class ArbWaveform(AbsWaveform):
 
 
 class FlatTopWaveform(AbsWaveform):
+    """Build a native envelope from settings declared as ``FlatTopWaveform.Cfg``."""
+
+    Cfg: TypeAlias = FlatTopWaveformCfg
+
     def __init__(self, name: str, waveform_cfg: FlatTopWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg

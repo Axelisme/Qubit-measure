@@ -27,6 +27,24 @@ from zcu_tools.program.v2.modules.waveform import (
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase, ArbWaveformError
 
 
+def test_waveform_cfg_namespace_builds_nested_flat_top(tmp_path):
+    cfg = FlatTopWaveform.Cfg(
+        length=1.0,
+        raise_waveform=GaussWaveform.Cfg(length=0.2, sigma=0.05),
+    )
+    assert cfg.build("envelope").length == 1.0
+    assert ConstWaveform.Cfg(length=0.3).build("const").length == 0.3
+    assert CosineWaveform.Cfg(length=0.4).build("cosine").length == 0.4
+    assert (
+        DragWaveform.Cfg(length=0.5, sigma=0.1, delta=1.0, alpha=0.2)
+        .build("drag")
+        .length
+        == 0.5
+    )
+    arb = ArbWaveform.Cfg(data="demo", path=_asset(tmp_path))
+    assert arb.build("arb").length == 2.0
+
+
 def _asset(
     tmp_path: Path,
     *,

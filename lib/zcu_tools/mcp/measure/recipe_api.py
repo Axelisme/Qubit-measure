@@ -11,9 +11,18 @@ from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from inspect import Parameter, iscoroutinefunction, signature
 from math import isfinite
-from typing import TYPE_CHECKING, Literal, Protocol, get_type_hints
+from typing import TYPE_CHECKING, Literal, Protocol, get_args, get_type_hints
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetCoreSchemaHandler,
+    GetJsonSchemaHandler,
+    field_validator,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import PydanticOmit, PydanticUndefined, core_schema
 
 from zcu_tools.analysis.fitting.quality import FitQuality as FitQuality
 from zcu_tools.analysis.fitting.quality import QualityIssue as QualityIssue
@@ -30,6 +39,34 @@ from zcu_tools.mcp.measure.writeback_recovery import WritebackRecovery
 if TYPE_CHECKING:
     from zcu_tools.mcp.measure.recipe_runtime import RecipeRuntime
 
+
+class Keep:
+    """Python-only omitted-input marker; use KEEP, never a JSON string or null.
+
+    In a RecipeInputs subclass, annotate optional Form inputs as T | None | Keep
+    and default them to KEEP. Omission retains the Form; explicit None clears it.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _source: object, _handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.is_instance_schema(cls)
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, _schema: core_schema.CoreSchema, _handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        raise PydanticOmit
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> Keep:
+        return self
+
+
+# A separate omitted marker is necessary because None is a real Form edit.
+KEEP = Keep()
+
+
 type FormPath = tuple[str | int, ...]
 """Nonempty logical field tuple; integers are original full-list indexes."""
 type FormValue = (
@@ -40,20 +77,23 @@ type FormValue = (
     | bool
     | None
     | Expr
+    | dict[str, YamlValue]
     | BaseModel
     | list[FormValue]
     | tuple[FormValue, ...]
 )
-"""Native values or named Form models, never an unstructured object mapping.
+"""Native values, named Form models or unevaluated JSON Form input mappings.
 
 Expr carries unevaluated text. Structured input accepts the existing authored
 ModuleRef, ModuleInline, SweepInput branches and Log/List integer-point models
 through their BaseModel base. These have no equivalent typed input carrier in
 the current remote contract. The GUI owner validates their declared shape,
 source and path compatibility; arbitrary BaseModel subclasses gain no new
-semantics. MCP does not import GUI Form types or hold a live Form object.
+semantics. JSON mappings retain expression tags, structured sweep values and
+nested content for owner validation. They are not a shortcut for selecting
+module sources. MCP does not hold a live Form object.
 Lists and tuples retain their original order. Values use declared field units.
-None passed to set/apply retains input rather than clearing it.
+None passed to set clears nullable input; KEEP alone retains it.
 """
 
 
@@ -84,20 +124,6 @@ class FormSource:
 
 
 @dataclass(frozen=True)
-class FormSelector:
-    """Current generated selector identity, distinct from its evaluated value.
-
-    mode is ref, inline, disabled, missing or unresolved. key is the actual
-    library key in ref mode, otherwise None. Missing means absent input;
-    unresolved means a draft without a usable selection. A ref does not imply
-    declaration-level readonly status.
-    """
-
-    mode: Literal["ref", "inline", "disabled", "missing", "unresolved"]
-    key: str | None
-
-
-@dataclass(frozen=True)
 class FormField:
     """Detached single-turn Form observation, even when the whole cfg is invalid.
 
@@ -107,8 +133,7 @@ class FormField:
     value_status is available, missing or unavailable; available None is a
     genuine null, not a missing-value marker. errors contains directed failures
     at this field, consuming ancestors or descendants. source is the nearest
-    captured reference, or None. selector is this field's generated selector,
-    or None for ordinary scalar/section fields. lock reports a fixed selection,
+    captured reference, or None. lock reports a fixed selection,
     fixed value or declaration readonly constraint; it does not follow source.
     fields lists logical direct-child field names. All values are detached.
     Reading does not install defaults, copy refs or validate the entire cfg.
@@ -118,85 +143,73 @@ class FormField:
     value_status: Literal["available", "missing", "unavailable"]
     errors: tuple[FormError, ...]
     source: FormSource | None
-    selector: FormSelector | None
     lock: bool
     fields: tuple[str, ...]
 
 
 class FieldEdit(BaseModel):
-    """One author-selected escape-hatch edit for tab.apply.
+    """One ordered override: dotted logical path and native Form input value.
 
-    path is a nonempty logical Form path with original list indexes. value is
-    untagged at this layer: a native value, Expr, ModuleRef, ModuleInline or
-    other named Form model. A ref selects its actual key; inline requests an
-    explicit copy. None retains GUI input. source labels provenance, normally
-    explicit for supplied literals and derived for authored expressions.
-    This carrier introduces no mandatory overrides field on recipe inputs.
-    """
-
-    path: FormPath
-    value: FormValue
-    source: str = "explicit"
-
-
-class LibrarySelection(BaseModel):
-    """Select one captured module key through RecipeTab.select.
-
-    path uses logical field names and original list indexes. key=None retains
-    the selection. The GUI checks family, readonly and source compatibility.
-    """
-
-    path: FormPath = Field(
-        description="Nonempty selector path; indexes are original positions."
-    )
-    key: str | None = Field(
-        description="Actual module library key; null retains the selection."
-    )
-
-
-class InlineSelection(BaseModel):
-    """Copy a captured selector inline through RecipeTab.select.
-
-    path uses logical field names and original list indexes. List ancestors
-    before children; the GUI rejects missing, readonly or invalid selections.
-    """
-
-    path: FormPath = Field(
-        description="Nonempty selector path to copy; ancestors come first."
-    )
-
-
-class RecipeInputs(BaseModel):
-    """Optional source and edit inputs shared by experiment recipes.
-
-    Add experiment fields in a subclass. Unknown fields and non-finite numeric
-    inputs fail validation; recipe admission records failed before binding the
-    GUI or starting measurement. None keeps the corresponding Form input or
-    global alias. These inputs do nothing until passed to a session or tab
-    method; authors may instead use open_tab, select and apply directly.
+    Decimal path segments address original full-list positions. None clears
+    nullable input. Overrides do not choose sources or perform conversions.
+    Apply each edit with tab.set after experiment values, without deduplication.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-    target: str | None = Field(
-        default=None,
-        description="Alias target for this Reset; null keeps global aliases.",
+    path: str = Field(min_length=1, description="Nonempty dotted logical Form path.")
+    value: FormValue
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, path: str) -> str:
+        """Reject malformed dotted paths before recipe execution."""
+        from zcu_tools.mcp.measure.recipe_form import dotted_path
+
+        dotted_path(path)
+        return path
+
+
+class RecipeInputs(BaseModel):
+    """Shared recipe controls and ordered Form overrides.
+
+    Subclass with experiment fields using T | None | Keep = KEEP. Omission
+    retains Form values; null clears/disables nullable Form fields. Unknown
+    fields and non-finite numbers fail admission before opening a tab.
+    target and reuse_tab_id control Open/Reset rather than editing Form fields:
+    omitted/null target keeps global aliases; omitted/null reuse opens a tab.
+    overrides defaults to an empty list and does not accept null.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    target: str | None | Keep = Field(
+        default_factory=lambda: KEEP,
+        description="Concrete target for this Reset; omission/null keeps global aliases.",
     )
-    reuse_tab_id: str | None = Field(
-        default=None, description="Idle matching tab to Reset; null opens a new tab."
+    reuse_tab_id: str | None | Keep = Field(
+        default_factory=lambda: KEEP,
+        description="Idle matching tab to Reset; omission/null opens a new tab.",
     )
-    library: list[LibrarySelection] | None = Field(
-        default=None,
-        description="Ordered captured module selections, before inline copies; null keeps sources.",
+    overrides: list[FieldEdit] = Field(
+        default_factory=list,
+        description="Ordered edits after experiment values; omitted means no edits, null values clear/disable Form fields.",
     )
-    inline: list[InlineSelection] | None = Field(
-        default=None,
-        description="Ordered captured module copies, ancestors first; null keeps sources.",
-    )
-    overrides: list[FieldEdit] | None = Field(
-        default=None,
-        description="Ordered edits after experiment values; null values retain Form input.",
-    )
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
+        super().__pydantic_init_subclass__(**kwargs)
+        for info in cls.model_fields.values():
+            if Keep not in get_args(info.annotation):
+                continue
+            if isinstance(info.default, Keep):
+                info.default = PydanticUndefined
+                info.default_factory = lambda: KEEP
+            if info.description is None or "omission" not in info.description:
+                info.description = (info.description or "") + (
+                    " Omission retains the Form value; null clears/disables nullable input."
+                )
+        cls.model_rebuild(force=True)
 
 
 class RecipeReport(BaseModel):
@@ -455,61 +468,35 @@ class RecipeSession:
         self,
         adapter: str,
         *,
-        aliases: Mapping[str, str | None] | None = None,
-        reuse: str | None = None,
+        target: Mapping[str, str | None | Keep] | None = None,
+        reuse: str | None | Keep = None,
     ) -> RecipeTab:
         """Open adapter or validate reuse, then Reset its fixed Form capture.
 
-        aliases only overrides this Reset; null entries retain global aliases.
-        No automatic tab search or close occurs. Busy/mismatched/source/holder
-        failures propagate before edits, without retry or fallback.
+        target maps alias names to concrete targets, for example {"qubit": "Q1"}.
+        Omitted/KEEP/null entries retain global aliases for this Reset.
+        reuse is an idle matching tab ID; KEEP/null opens a new tab.
+        No automatic tab search or close occurs. Busy, mismatch, source and
+        holder failures propagate without retry or fallback.
         """
-        return self._runtime.open_tab(adapter, aliases=aliases, reuse=reuse)
-
-    def open_recipe_tab(
-        self, adapter: str, inputs: RecipeInputs, *, target_alias: str
-    ) -> RecipeTab:
-        """Open or validate reuse and Reset, without selections or value edits.
-
-        adapter is the registered experiment name. target_alias is its alias
-        name (for example qubit or mux), not an experiment field path. A supplied
-        inputs.target overrides only that alias in this Reset; None keeps global
-        aliases. inputs.reuse_tab_id follows open_tab's idle/matching checks.
-        Owner and transport failures propagate without retry or rollback.
-        """
-        return self.open_tab(
+        return self._runtime.open_tab(
             adapter,
-            aliases=None if inputs.target is None else {target_alias: inputs.target},
-            reuse=inputs.reuse_tab_id,
+            aliases={
+                key: value
+                for key, value in (target or {}).items()
+                if value is not None and not isinstance(value, Keep)
+            },
+            reuse=None if isinstance(reuse, Keep) else reuse,
         )
 
-    def prepare_tab(
-        self,
-        adapter: str,
-        inputs: RecipeInputs,
-        *,
-        target_alias: str,
-        values: Mapping[FormPath, FormValue] | None = None,
-        require_valid: bool = True,
-    ) -> RecipeTab:
-        """Open/Reset, select library then inline sources, and apply values last.
+    def device_unit(self, name: str) -> str:
+        """Read a named device's cached flux value unit without hardware access.
 
-        values maps logical Form paths to native experiment values in field
-        units; None retains input. inputs.overrides follow those values in the
-        same batch. By default the owner validates the complete cfg before
-        returning the tab. No Run, analysis, Save or writeback occurs.
-        To read Form values or insert custom edits before complete validation,
-        use open_recipe_tab, select_sources, your steps, then apply_inputs.
-        require_valid=False keeps apply's invalid-draft commit/raise semantics;
-        it is not a promise to accept an invalid draft without an error.
-        Failure propagates without rollback of earlier Reset or selections.
+        Return the owner's unit, such as A, V, native or none (missing valid
+        cached Info). Unknown devices and owner/transport errors propagate.
+        This never polls hardware or refreshes the device cache.
         """
-        tab = self.open_recipe_tab(adapter, inputs, target_alias=target_alias)
-        tab.select_sources(inputs)
-        tab.apply_inputs(
-            inputs, values if values is not None else {}, require_valid=require_valid
-        )
-        return tab
+        return self._runtime.device_unit(name)
 
     async def ask[A: Answer](self, question: Question[A]) -> A:
         """Wait for a validated answer; raise ScriptCancelled on script cancel.
@@ -523,8 +510,8 @@ class RecipeSession:
 class RecipeTab:
     """One GUI tab's Form edits and operations, with no calibration policy.
 
-    Form paths are nonempty logical tuples. Integers are original full-list
-    indexes. Strings are literal field names, never split at dots. All owner
+    Writes use nonempty dotted logical paths; decimal segments are original
+    full-list indexes. read uses the same dotted paths. All owner
     admission and transport errors propagate without reconnect or retry.
     """
 
@@ -534,112 +521,67 @@ class RecipeTab:
         self.tab = tab
         self.adapter = adapter
 
-    def read(self, path: FormPath) -> FormField:
-        """Observe one logical field in one owner turn, without editing sources.
+    def read(self, path: str) -> FormField:
+        """Observe one dotted logical field without editing sources.
 
+        Decimal segments are original full-list indexes, as in tones.2.gain.
         Invalid local values remain visible as value_status/errors. Unknown or
         unreachable paths raise. Field validity does not prove whole-cfg validity.
         """
         return self._runtime.read_field(self.tab, path)
 
-    def set(self, path: FormPath, value: FormValue) -> None:
-        """Set native input or Expr at path; None retains the current GUI input.
+    def read_parameter(self, path: str, *, missing_ok: bool = False) -> YamlValue:
+        """Read one fixed Open/Reset parameter path, for example $qubit.freq.
 
-        Structured models replace complete branches. Invalid draft errors
-        propagate after the owner commits them. No defaults or units are inferred.
+        Explicit null returns None. Missing leaves raise GuiRpcError with reason
+        parameter_missing, unless missing_ok=True. Malformed paths, unknown
+        roles, unavailable sources and transport errors always propagate.
+        This does not read the session's live context or refresh any capture.
         """
-        self._runtime.set_field(self.tab, path, value)
+        return self._runtime.read_parameter(self.tab, path, missing_ok=missing_ok)
 
-    def select(
-        self,
-        path: FormPath,
-        *,
-        ref: str | None = None,
-        inline: bool = False,
-    ) -> None:
-        """Select an actual library key or copy the captured selector inline.
+    def set[V: FormValue](self, path: str, value: FormValue | list[V] | Keep) -> None:
+        """Replace one dotted-path field with native input or Expr.
 
-        ref and inline=True are mutually exclusive. Neither retains input.
-        Owner checks family, readonly and sources. Existing inline is a guarded
-        no-op. Copy ref ancestors explicitly before editing descendants.
+        Decimal segments are original list indexes, for example tones.2.gain.
+        KEEP skips mutation. None clears nullable input. Invalid drafts remain editable;
+        structural, source and readonly errors propagate. No source selection,
+        conversion, defaults or unit inference occurs.
         """
-        self._runtime.select(self.tab, path, ref=ref, inline=inline)
+        if not isinstance(value, Keep):
+            self._runtime.set_field(self.tab, path, value)
 
-    def apply(self, edits: Sequence[FieldEdit], *, require_valid: bool = False) -> None:
-        """Apply one ordered batch, optionally requiring a complete executable cfg.
+    def select(self, path: str, option: str | None | Keep) -> None:
+        """Select an owner Form option at a dotted logical path.
 
-        None retains input. Each source label must be nonblank. Structural and
-        source errors reject the entire batch. With require_valid=True, invalid
-        candidates leave input unchanged and raise RecipeNeedsParameters with
-        every owner-reported path and reason. Earlier selections are not rolled
-        back. False retains invalid drafts and raises invalid_cfg after commit.
-        An empty validated batch checks the current cfg without changing it.
+        option is an exact Form label or captured module key. Inline options
+        use the owner converter and its same-name/type inheritance policy.
+        Use command(path, "to_inline") for an explicit fixed-source copy.
+        None disables only nullable selectors. KEEP skips mutation. Unknown or
+        ambiguous options, nonnullable null, ref ancestry and readonly
+        restrictions raise without changing input. Legal invalid drafts remain.
         """
-        self._runtime.apply_fields(self.tab, edits, require_valid=require_valid)
+        if not isinstance(option, Keep):
+            self._runtime.select(self.tab, path, option)
 
-    def select_sources(self, inputs: RecipeInputs) -> None:
-        """Select inputs.library in order, then copy inputs.inline in order.
+    def command(self, path: str, name: Literal["to_inline"]) -> None:
+        """Run the owner's to_inline command at a dotted logical selector path.
 
-        None lists or library keys retain input. Paths use original list
-        indexes; put referenced ancestors before children. Each selection uses
-        select's owner checks. Failures stop without retry or rollback of prior
-        selections. Values and overrides are not applied by this method.
+        Copies a reference from the fixed capture and preserves child keys.
+        An inline module succeeds without changing its draft. Missing source,
+        unavailable command, ref ancestry and readonly errors propagate without
+        mutation. This does not select fresh defaults or refresh the capture.
         """
-        for selection in inputs.library or ():
-            self.select(selection.path, ref=selection.key)
-        for selection in inputs.inline or ():
-            self.select(selection.path, inline=True)
+        self._runtime.command(self.tab, path, name)
 
-    def apply_inputs(
-        self,
-        inputs: RecipeInputs,
-        values: Mapping[FormPath, FormValue],
-        *,
-        edits: Sequence[FieldEdit] = (),
-        require_valid: bool = True,
-    ) -> None:
-        """Apply experiment values, named edits, then overrides as one candidate.
+    def check_ready(self) -> None:
+        """Validate the whole current Form and lowered cfg without mutation.
 
-        values maps logical Form paths to native values in field units. Mapping
-        iteration order is retained. edits preserves each supplied path, value
-        and source, for example a calibration or linewidth-derived edit. None
-        values retain Form input in all three groups. For an exact repeated path,
-        the last non-None edit wins, including its source. Distinct ancestor and
-        descendant paths still reach owner admission and are rejected as overlaps.
-        All supplied edits retain path/source validation, even when superseded
-        or None. No source selection occurs here. require_valid=True checks the
-        complete cfg atomically and raises RecipeNeedsParameters on rejection. False follows apply's draft
-        commit/raise semantics. Prior custom edits/selections are not rolled back.
+        Raise RecipeNeedsParameters containing every owner path and reason.
+        This does not Run, refresh fixed captures or change the draft. Structural,
+        source, transport and author failures propagate without retry.
         """
-        batch = [
-            FieldEdit(path=path, value=value)
-            for path, value in values.items()
-            if value is not None
-        ]
-        batch.extend(edits)
-        batch.extend(inputs.overrides or ())
-        last = {
-            edit.path: index
-            for index, edit in enumerate(batch)
-            if edit.value is not None
-        }
-        # Preserve authored path/source validation while sending only the last non-None value per exact path.
-        final = [
-            edit
-            if edit.value is None or last[edit.path] == index
-            else FieldEdit(path=edit.path, value=None, source=edit.source)
-            for index, edit in enumerate(batch)
-        ]
-        self.apply(final, require_valid=require_valid)
-
-    def call[T](self, method: str, params: BaseModel, *, result: type[T]) -> T:
-        """Call one named RPC and decode its reply as result, without retries.
-
-        params is a request model; tab-scoped methods receive this tab's locator.
-        result is a response model/dataclass class. Validation errors propagate;
-        no field repair or default injection occurs at this boundary.
-        """
-        return self._runtime.call(self.tab, method, params, result=result)
+        self._runtime.check_ready(self.tab)
 
     async def run(self) -> RunResult:
         """Acquire the current cfg and retain its identity, without saving.
@@ -657,7 +599,7 @@ class RecipeTab:
         *,
         result: type[T],
         interactive: bool = False,
-        updates: Mapping[str, YamlValue] | None = None,
+        updates: Mapping[str, YamlValue | Keep] | None = None,
     ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
@@ -669,14 +611,25 @@ class RecipeTab:
         updates maps the adapter's analysis parameter names to ordinary values
         in their declared units; no conversion or Form expression evaluation
         occurs. None or an empty mapping keeps the owner's current parameters.
-        Explicit null values reach the owner unchanged. Unknown names and
-        incompatible values fail owner validation before analysis starts.
+        KEEP entries are omitted before sending updates to the owner; all KEEP
+        is equivalent to no updates. Explicit null values reach the owner
+        unchanged. Unknown names and incompatible values fail owner validation
+        before analysis starts.
         Updates and analysis share one tracked operation, including Post.
         interactive=True enables native PendingAnalysis/tab_interact/done
         handoff before this await resumes. answer only handles explicit questions.
         """
+        filtered_updates = (
+            None
+            if updates is None
+            else {
+                key: value
+                for key, value in updates.items()
+                if not isinstance(value, Keep)
+            }
+        )
         return await self._runtime.analyze(
-            self.tab, stage, result, interactive=interactive, updates=updates
+            self.tab, stage, result, interactive=interactive, updates=filtered_updates
         )
 
     def preview(self, pane: Literal["run", "analysis", "post"] = "run") -> None:
@@ -697,17 +650,13 @@ class RecipeTab:
         """
         return self._runtime.save(self.tab)
 
-    def writeback_proposal(self) -> WritebackProposal:
-        """Capture completed stages' current candidates without asking or writing."""
-        return self._runtime.writeback_proposal(self.tab)
-
     async def ask_writeback(self) -> WritebackAnswer:
         """Ask for validated choices; raise ScriptCancelled on script cancel.
 
         Reject unknown, changed or duplicate items before author continuation.
         Answering never writes. Call accept_writeback explicitly to write.
         """
-        proposal = self.writeback_proposal()
+        proposal = self._runtime.writeback_proposal(self.tab)
         return await self._runtime.host.ask(WritebackQuestion(proposal=proposal))
 
     def accept_writeback(self, items: Sequence[WritebackItem]) -> WritebackReceipt:

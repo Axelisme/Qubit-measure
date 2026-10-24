@@ -31,13 +31,6 @@ RoOptAutoRunResult: TypeAlias = RunRecord[AutoOptCfg, AutoOptResult]
 
 
 @dataclass
-class RoOptAutoAnalyzeParams:
-    # analyze() takes no tuning knobs — it reads off the best of the optimized
-    # points. No form fields.
-    pass
-
-
-@dataclass
 class RoOptAutoAnalyzeResult(AnalyzeResultBase):
     best_freq: float
     best_gain: float
@@ -45,14 +38,8 @@ class RoOptAutoAnalyzeResult(AnalyzeResultBase):
 
 
 class RoOptAutoAdapter(
-    BaseAdapter[
-        AutoOptCfg,
-        RoOptAutoRunResult,
-        RoOptAutoAnalyzeResult,
-        RoOptAutoAnalyzeParams,
-    ]
+    BaseAdapter[AutoOptCfg, RoOptAutoRunResult, RoOptAutoAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = AutoOptExp.persistence_tag()
     exp_cls = AutoOptExp
 
     @staticmethod
@@ -74,7 +61,7 @@ class RoOptAutoAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[RoOptAutoRunResult, RoOptAutoAnalyzeParams],
+        req: AnalyzeRequest[RoOptAutoRunResult, None],
         *,
         plots: Plots,
     ) -> RoOptAutoAnalyzeResult:

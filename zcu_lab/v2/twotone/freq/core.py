@@ -8,27 +8,13 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rotate2real
 
 
@@ -85,19 +71,19 @@ class FreqSweepCfg(ConfigBase):
 
 
 class FreqModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[
-        PulseCfg,
+        Pulse.Cfg,
         FieldMeta(
             label="Probe Pulse",
             description="Qubit drive; its frequency is set by the sweep.",
         ),
     ]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
-class FreqCfg(ProgramV2Cfg, ExpCfgModel):
+class FreqCfg(ProgramExpCfg):
     modules: FreqModuleCfg
     sweep: FreqSweepCfg
 
@@ -116,13 +102,13 @@ class FreqAnalysis:
     fwhm_err: float
 
 
-class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+class FreqExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
     # freq stores MHz on disk -> scale=IDENTITY (1.0)
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("freqs", "Frequency", "MHz"),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("freqs", "Frequency", "MHz"),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="2.0",

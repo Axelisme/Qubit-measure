@@ -21,7 +21,7 @@ from zcu_tools.experiment.stop_signal import (
 )
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure.remote.analysis_types import AnalysisPresentation
-from zcu_tools.gui.app.measure.remote.form_description import RecipeEditResult
+from zcu_tools.gui.app.measure.remote.handlers.tab import TabParameterRead
 from zcu_tools.mcp.core.images import validated_png
 from zcu_tools.mcp.core.reply import PngImage
 from zcu_tools.mcp.measure.analysis_execution import (
@@ -33,11 +33,8 @@ from zcu_tools.mcp.measure.analysis_execution import (
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
-    FieldEdit,
     FormError,
     FormField,
-    FormPath,
-    FormSelector,
     FormSource,
     FormValue,
     RecipeRun,
@@ -56,9 +53,9 @@ from zcu_tools.mcp.measure.recipe_contracts import (
 from zcu_tools.mcp.measure.recipe_details import RecipeAnalysisDetail, RecipeRunDetail
 from zcu_tools.mcp.measure.recipe_form import (
     RecipeFormError,
+    dotted_path,
     encode_form_value,
     field_observation,
-    field_path,
     read_form_field,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -122,6 +119,14 @@ class _Acceptance(BaseModel):
     status: Literal["completed", "failed"]
     written: tuple[_AppliedPane, ...]
     error: str | None
+
+
+class _DeviceSnapshot(BaseModel):
+    unit: str
+
+
+class _DeviceReply(BaseModel):
+    snapshot: _DeviceSnapshot
 
 
 class _TabSnapshot(BaseModel):
@@ -437,6 +442,30 @@ class RecipeRuntime:
             raise
         return TypeAdapter(YamlValue).validate_python(reply["value"])
 
+    def read_parameter(
+        self, tab: str, path: str, *, missing_ok: bool = False
+    ) -> YamlValue:
+        """Read one fixed parameter; only owner-omitted leaves may be missing."""
+        reply = TypeAdapter(TabParameterRead).validate_python(
+            self._tools.send_gui_rpc(
+                "tab.parameter_read",
+                {"tab_id": tab, "paths": [path], "module_refs": []},
+            )
+        )
+        if path not in reply["values"]:
+            if missing_ok:
+                return None
+            raise GuiRpcError(
+                f"Missing captured parameter: {path}", reason="parameter_missing"
+            )
+        return reply["values"][path]
+
+    def device_unit(self, name: str) -> str:
+        """Read the owner's cached unit without polling or reconstructing Info."""
+        return _DeviceReply.model_validate(
+            self._tools.send_gui_rpc("device.snapshot", {"name": name})
+        ).snapshot.unit
+
     @property
     def pending_analysis(self) -> PendingAnalysis | None:
         """Read the explicit interactive owner handoff, or None without one."""
@@ -449,14 +478,13 @@ class RecipeRuntime:
         if self._on_change is not None:
             self._on_change()
 
-    def read_field(self, tab: str, path: FormPath) -> FormField:
-        """Decode the owner's atomic logical field observation without guessing layout."""
-        field_path(path)
+    def read_field(self, tab: str, path: str) -> FormField:
+        """Decode one dotted-path observation without guessing owner layout."""
+        logical = dotted_path(path)
         reply = self._tools.send_gui_rpc(
-            "tab.read_recipe_field", {"tab_id": tab, "path": list(path)}
+            "tab.read_recipe_field", {"tab_id": tab, "path": list(logical)}
         )
-        observed = read_form_field(field_observation(reply), path)
-        selector = observed.selector
+        observed = read_form_field(field_observation(reply), logical)
         source = observed.source
         return FormField(
             observed.value,
@@ -465,72 +493,30 @@ class RecipeRuntime:
             FormSource(source["key"], source["source_kind"], tuple(source["spec_path"]))
             if source is not None
             else None,
-            FormSelector(
-                "ref" if selector["mode"] == "key" else selector["mode"],
-                selector["key"],
-            )
-            if selector is not None
-            else None,
             observed.locked,
             observed.fields,
         )
 
-    def set_field(self, tab: str, path: FormPath, value: FormValue) -> None:
-        """Send one logical native edit; None keeps input without a mutation RPC."""
-        field_path(path)
-        if value is None:
-            return
-        payload = encode_form_value(value)
-        reply = self._tools.send_gui_rpc(
-            "tab.edit_recipe_fields",
-            {"tab_id": tab, "edits": [{"path": list(path), "value": payload}]},
-        )
-        if reply["errors"]:
-            raise GuiRpcError(
-                "Owner retained an invalid cfg draft", reason="invalid_cfg"
-            )
-
-    def apply_fields(
-        self, tab: str, edits: Sequence[FieldEdit], *, require_valid: bool = False
+    def set_field[V: FormValue](
+        self, tab: str, path: str, value: FormValue | list[V]
     ) -> None:
-        """Send one native batch; validated rejection never installs its candidate.
+        """Write one dotted logical field, retaining owner-admitted invalid drafts."""
+        logical = dotted_path(path)
+        self._tools.send_gui_rpc(
+            "tab.edit_recipe_fields",
+            {
+                "tab_id": tab,
+                "edits": [{"path": list(logical), "value": encode_form_value(value)}],
+            },
+        )
 
-        None-valued edits retain input. Invalid labels/paths fail before RPC.
-        require_valid delegates complete cfg admission to the GUI owner; its
-        errors raise RecipeNeedsParameters. Ordinary invalid drafts raise
-        invalid_cfg after installation. No rollback or retry occurs.
-        """
-        changes: list[dict[str, object]] = []
-        for edit in edits:
-            if not edit.source.strip():
-                raise ValueError("Edit source must be nonblank")
-            field_path(edit.path)
-            if edit.value is not None:
-                changes.append(
-                    {
-                        "path": list(edit.path),
-                        "value": encode_form_value(edit.value),
-                    }
-                )
-        if not changes and not require_valid:
-            return
-        reply = TypeAdapter(RecipeEditResult).validate_python(
-            self._tools.send_gui_rpc(
-                "tab.edit_recipe_fields",
-                {"tab_id": tab, "edits": changes, "require_valid": require_valid},
-            ),
-            strict=True,
+    def check_ready(self, tab: str) -> None:
+        """Read all owner Form/cfg errors without changing input or captures."""
+        reply = self._tools.send_gui_rpc("tab.check_recipe_ready", {"tab_id": tab})
+        errors = TypeAdapter(tuple[RecipeFormError, ...]).validate_python(
+            reply["errors"]
         )
-        errors = tuple(
-            RecipeFormError(tuple(error["path"]), error["message"])
-            for error in reply["errors"]
-        )
-        if require_valid:
-            self._require_cfg(errors)
-        elif errors:
-            raise GuiRpcError(
-                "Owner retained an invalid cfg draft", reason="invalid_cfg"
-            )
+        self._require_cfg(errors)
 
     @staticmethod
     def _require_cfg(errors: Sequence[RecipeFormError]) -> None:
@@ -550,35 +536,18 @@ class RecipeRuntime:
             )
             raise RecipeNeedsParameters(missing, parameter_errors=tuple(errors))
 
-    def select(
-        self, tab: str, path: FormPath, *, ref: str | None, inline: bool
-    ) -> None:
-        """Dispatch an owner selector command, preserving actual keys and sources."""
-        field_path(path)
-        if ref is not None and inline:
-            raise ValueError("Select ref or inline, not both")
-        if ref is None and not inline:
-            return
-        if ref is not None and not ref.strip():
-            raise ValueError("Reference key must be nonblank")
-        params: dict[str, object] = {
-            "tab_id": tab,
-            "path": list(path),
-            "action": "use_inline" if inline else "use_library",
-        }
-        if ref is not None:
-            params["key"] = ref
-        self._tools.send_gui_rpc("tab.select_recipe_module", params)
+    def select(self, tab: str, path: str, option: str | None) -> None:
+        """Select the owner's exact option label/key without rebuilding Form input."""
+        self._tools.send_gui_rpc(
+            "tab.select_recipe_option",
+            {"tab_id": tab, "path": list(dotted_path(path)), "option": option},
+        )
 
-    def call[T](
-        self, tab: str, method: str, params: BaseModel, *, result: type[T]
-    ) -> T:
-        """Decode one RPC's reply as the caller's named result model/dataclass."""
-        values = params.model_dump(mode="json")
-        if method.startswith("tab."):
-            values["tab_id"] = tab
-        return TypeAdapter(result).validate_python(
-            self._tools.send_gui_rpc(method, values)
+    def command(self, tab: str, path: str, name: str) -> None:
+        """Run one declared owner command at a dotted logical path."""
+        self._tools.send_gui_rpc(
+            "tab.run_recipe_command",
+            {"tab_id": tab, "path": list(dotted_path(path)), "name": name},
         )
 
     async def run(self, tab: str, adapter: str) -> RunResult:

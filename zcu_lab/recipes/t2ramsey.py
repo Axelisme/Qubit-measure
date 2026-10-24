@@ -3,71 +3,63 @@
 Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
 """
 
-from typing import Literal
-
 from pydantic import Field
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
     report_number,
 )
-from zcu_tools.mcp.measure.recipe_contracts import (
-    MissingParameter,
-    RecipeNeedsParameters,
-)
 
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseySummary
-
-from .helpers import (
-    FrequencyCalibration,
-    choose_frequency,
-    require_pi,
-    select_or_disable,
-)
 
 
 class T2RamseyInputs(RecipeInputs):
     """Inputs for t2ramsey; all units and null policies are declared per field."""
 
-    readout_ref: str | None = Field(
-        None,
-        description="Readout library key; null keeps the GUI selection. Frequency uses a valid captured library value, then resonator calibration.",
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Readout library key; omission retains the Form value, null clears/disables it.",
     )
-    use_reset: str | Literal["off"] = Field(
-        "off",
-        description="Reset library key, or off to disable reset. Omission disables reset; null is rejected.",
+    use_reset: str | None | Keep = Field(
+        KEEP,
+        description="Preparation module option; omission retains the Form value, null clears/disables it.",
     )
-    pi2_ref: str | None = Field(
-        None,
-        description="Calibrated pi/2-pulse library key; null keeps the GUI selection, which must be a valid reference.",
+    pi2_ref: str | None | Keep = Field(
+        KEEP,
+        description="Calibrated pi/2-pulse library key; omission retains the Form value, null clears/disables it.",
     )
-    max_delay_us: float | None = Field(
-        None, description="Delay sweep stop in us; null keeps the GUI stop and start."
+    max_delay_us: float | None | Keep = Field(
+        KEEP,
+        description="Delay sweep stop in us; omission retains the Form value, null clears/disables it.",
     )
-    detune_ratio: float | None = Field(
-        None,
-        description="Final-pulse phase-ramp ratio, dimensionless; null keeps the GUI value.",
+    detune_ratio: float | None | Keep = Field(
+        KEEP,
+        description="Final-pulse phase-ramp ratio, dimensionless; omission retains the Form value, null clears/disables it.",
     )
-    points: int | None = Field(
-        None, description="Sweep sample count; null keeps the GUI count when optional."
+    points: int | None | Keep = Field(
+        KEEP,
+        description="Sweep sample count; omission retains the Form value, null clears/disables it.",
     )
-    reps: int | None = Field(
-        None, description="Acquisition repetition count; null keeps the GUI value."
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Acquisition repetition count; omission retains the Form value, null clears/disables it.",
     )
-    rounds: int | None = Field(
-        None, description="Averaging round count; null keeps the GUI value."
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value, null clears/disables it.",
     )
 
-    fit_fringe: bool | None = Field(
-        None,
-        description="Fit fringe; null keeps the GUI analysis value. Analysis only.",
+    fit_fringe: bool | None | Keep = Field(
+        KEEP,
+        description="Fit fringe; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
-    fit_phase: bool | None = Field(
-        None,
-        description="Fit phase offset (fringe only); null keeps the GUI analysis value. Analysis only.",
+    fit_phase: bool | None | Keep = Field(
+        KEEP,
+        description="Fit phase offset (fringe only); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
     )
 
 
@@ -100,46 +92,25 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     phase offset in the tab to use a fixed phase instead.
 
     points → expts sets the sweep sample count.
-    Analysis controls: fit_fringe, fit_phase. Null keeps each GUI value.
+    Analysis controls: fit_fringe, fit_phase. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    tab = session.open_recipe_tab("twotone/t2ramsey", inputs, target_alias="qubit")
-    select_or_disable(tab, ("modules", "reset"), inputs.use_reset)
-    tab.select(("modules", "readout"), ref=inputs.readout_ref)
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    missing: list[MissingParameter] = []
-    frequency = choose_frequency(
-        tab,
-        ("modules", "readout", "freq"),
-        calibration=FrequencyCalibration(
-            path="$resonator.freq", required="readout_ref"
-        ),
+    tab = session.open_tab(
+        "twotone/t2ramsey",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    missing.extend(frequency.missing)
-    if frequency.edit is not None:
-        tab.select(("modules", "readout"), inline=True)
-        edits.append(frequency.edit)
-    if (
-        parameter := require_pi(
-            tab, ("modules", "pi2_pulse"), inputs.pi2_ref, required="pi2_ref"
-        )
-    ) is not None:
-        missing.append(parameter)
-    if missing:
-        raise RecipeNeedsParameters(tuple(missing))
-    tab.apply_inputs(
-        inputs,
-        {
-            ("sweep", "length", "stop"): inputs.max_delay_us,
-            ("sweep", "length", "n"): inputs.points,
-            ("reps",): inputs.reps,
-            ("rounds",): inputs.rounds,
-            ("extras", "detune_ratio"): inputs.detune_ratio,
-        },
-        edits=edits,
-    )
+    tab.select("modules.reset", inputs.use_reset)
+    tab.select("modules.readout", inputs.readout_ref)
+    tab.select("modules.pi2_pulse", inputs.pi2_ref)
+    tab.set("sweep.length.stop", inputs.max_delay_us)
+    tab.set("sweep.length.n", inputs.points)
+    tab.set("extras.detune_ratio", inputs.detune_ratio)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
@@ -147,12 +118,8 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
             "primary",
             result=T2RamseySummary,
             updates={
-                key: value
-                for key, value in {
-                    "fit_fringe": inputs.fit_fringe,
-                    "fit_phase": inputs.fit_phase,
-                }.items()
-                if value is not None
+                "fit_fringe": inputs.fit_fringe,
+                "fit_phase": inputs.fit_phase,
             },
         )
         if analysis.result is None:

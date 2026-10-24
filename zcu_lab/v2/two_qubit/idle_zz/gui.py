@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -63,13 +62,10 @@ class IdleZZAnalyzeResult:
         }
 
 
-class IdleZZAdapter(
-    BaseAdapter[IdleZZCfg, IdleZZRun, IdleZZAnalyzeResult, NoAnalyzeParams]
-):
+class IdleZZAdapter(BaseAdapter[IdleZZCfg, IdleZZRun, IdleZZAnalyzeResult]):
     """Fixed-capture Form, thermal Ramsey acquisition and native restore."""
 
     exp_cls = IdleZZExp
-    experiment_tag: ClassVar[str | None] = IdleZZExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -92,7 +88,7 @@ class IdleZZAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[IdleZZRun, NoAnalyzeParams],
+        req: AnalyzeRequest[IdleZZRun, None],
         *,
         plots: Plots,
     ) -> IdleZZAnalyzeResult:

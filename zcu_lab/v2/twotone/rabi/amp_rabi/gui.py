@@ -95,7 +95,6 @@ class AmpRabiAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = AmpRabiExp.persistence_tag()
     exp_cls = AmpRabiExp
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

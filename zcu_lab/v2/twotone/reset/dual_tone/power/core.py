@@ -7,32 +7,20 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     TwoPulseReset,
     sweep2param,
 )
-from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
 
@@ -46,10 +34,10 @@ class PowerResult:
 
 
 class PowerModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseResetCfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class PowerSweepCfg(ConfigBase):
@@ -57,7 +45,7 @@ class PowerSweepCfg(ConfigBase):
     gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
 
 
-class PowerCfg(ProgramV2Cfg, ExpCfgModel):
+class PowerCfg(ProgramExpCfg):
     modules: PowerModuleCfg
     sweep: PowerSweepCfg
 
@@ -78,16 +66,16 @@ class PowerAnalysis:
     gain2: float
 
 
-class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+class PowerExp(Experiment[PowerResult, PowerCfg]):
     Options: ClassVar[type[PowerAnalyzeOptions]] = PowerAnalyzeOptions
 
     # Both axes are gains in a.u. -> scale=IDENTITY (default)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
-            Axis("gains2", "Power2", "a.u."),  # inner
-            Axis("gains1", "Power1", "a.u."),  # outer
+            AxesSpec.Axis("gains2", "Power2", "a.u."),  # inner
+            AxesSpec.Axis("gains1", "Power1", "a.u."),  # outer
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         cfg_schema_version="2.0",

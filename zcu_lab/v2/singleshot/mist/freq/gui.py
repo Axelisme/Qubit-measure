@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -8,8 +7,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -30,16 +27,7 @@ from zcu_lab.v2.singleshot.mist.freq.form import make_form
 MistFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
-@dataclass
-class MistFreqAnalyzeResult(AnalyzeResultBase):
-    pass
-
-
-class MistFreqAdapter(
-    BaseAdapter[FreqCfg, MistFreqRunResult, MistFreqAnalyzeResult, NoAnalyzeParams]
-):
-    experiment_tag: ClassVar[str | None] = FreqDepExp.persistence_tag()
-
+class MistFreqAdapter(BaseAdapter[FreqCfg, MistFreqRunResult]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[FreqCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -49,7 +37,7 @@ class MistFreqAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
+    # No get_analyze_params override: None (4th generic arg).
 
     def run(
         self,
@@ -63,12 +51,12 @@ class MistFreqAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[MistFreqRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[MistFreqRunResult, None],
         *,
         plots: Plots,
-    ) -> MistFreqAnalyzeResult:
+    ) -> None:
         options = FreqAnalyzeOptions(
             confusion_matrix=read_confusion_matrix(req.parameters),
         )
         FreqDepExp().analyze(req.run_result, options, plots=plots)
-        return MistFreqAnalyzeResult()
+        return

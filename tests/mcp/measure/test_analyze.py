@@ -36,6 +36,40 @@ from ._analyze_support import (
 )
 from ._save_report_support import analysis_report
 
+
+@pytest.mark.parametrize(
+    "stage,method,result_method,pane",
+    [
+        ("primary", "tab.analyze", "tab.get_analyze_result", "analysis"),
+        ("post", "tab.post_analyze", "tab.get_post_analyze_result", "post_analysis"),
+    ],
+)
+def test_figures_only_analysis_preserves_empty_summary(
+    tmp_path, clients, monkeypatch, stage, method, result_method, pane
+):
+    def respond(name, params):
+        if name == method:
+            return {**_start_reply({}, []), "params": None}
+        if name == "operation.await":
+            return {"reason": "completed", "status": "finished"}
+        if name == result_method:
+            return {**_result_reply(pane, ["fit"], {}), "summary": {}, "params": None}
+        if name == "tab.save_artifacts":
+            return asdict(analysis_report(pane, ["fit"]))
+        assert name == "tab.get_figure"
+        return {"png_b64": base64.b64encode(_PNG).decode()}
+
+    client = _client(tmp_path, clients, respond)
+    reply = _call_full_execution_stdio(
+        monkeypatch, client, "tab_analyze", {"tab": "t", "stage": stage}
+    )
+    result = _data(reply)
+    assert result["status"] == "finished"
+    assert result["result"]["summary"] == {}
+    assert result["result"]["params"] is None
+    _assert_figure(reply, present=True)
+
+
 _INVALID_PNGS = [
     pytest.param(b"hello", id="non-png"),
     pytest.param(b"hello" + _PNG[-12:], id="non-png-with-iend"),

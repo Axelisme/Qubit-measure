@@ -8,15 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -24,17 +16,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Branch,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    PulseReadout,
-    PulseReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-)
+from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Reset, SweepCfg
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
 
 
@@ -47,16 +29,16 @@ class LengthResult:
 
 
 class LengthModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[PulseCfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
 
 
 class LengthSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Readout length", unit="us")]
 
 
-class LengthCfg(ProgramV2Cfg, ExpCfgModel):
+class LengthCfg(ProgramExpCfg):
     modules: LengthModuleCfg
     sweep: LengthSweepCfg
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
@@ -78,13 +60,13 @@ class LengthAnalysis:
     best_length: float
 
 
-class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
+class LengthExp(Experiment[LengthResult, LengthCfg]):
     Options: ClassVar[type[LengthAnalyzeOptions]] = LengthAnalyzeOptions
 
-    # lengths stored in seconds on disk -> scale=US_TO_S (disk = memory * 1e-6)
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("lengths", "Readout Length", "s", scale=US_TO_S),),
-        z=ZSpec("signals", "Signal", "a.u.", dtype=np.float64),
+    # lengths stored in seconds on disk -> scale=1e-6 (disk = memory * 1e-6)
+    AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("lengths", "Readout Length", "s", scale=1e-6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="2.0",

@@ -277,6 +277,15 @@ class WorkflowControlFacet:
         tab.form_state(form).write(batch, tab.form_env(form))
         self._notify()
 
+    def discard_tunables(self, tab_id: str) -> None:
+        """Restore a tab's latest accepted tunables without native publication.
+
+        Before Start, restore the captured form base. Unknown tabs raise KeyError.
+        The driving renderer must separately discard its local invalid text.
+        """
+        self._tabs[tab_id].discard_tunables()
+        self._notify()
+
     def inspect_form(self, tab_id: str, form: FormKind) -> FormPreview:
         """Preview ordinary values/errors in the same captured draft, without writes."""
         tab = self._tabs[tab_id]

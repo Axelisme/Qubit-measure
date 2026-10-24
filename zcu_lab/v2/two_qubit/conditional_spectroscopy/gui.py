@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
     AnalyzeRequest,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -60,14 +59,11 @@ class SpectroscopyAnalyzeResult:
 
 
 class SpectroscopyAdapter(
-    BaseAdapter[
-        SpectroscopyCfg, SpectroscopyRun, SpectroscopyAnalyzeResult, NoAnalyzeParams
-    ]
+    BaseAdapter[SpectroscopyCfg, SpectroscopyRun, SpectroscopyAnalyzeResult]
 ):
     """Fixed-capture Form, full raw acquisition, diagnostic analysis and restore."""
 
     exp_cls = SpectroscopyExp
-    experiment_tag: ClassVar[str | None] = SpectroscopyExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )
@@ -86,7 +82,7 @@ class SpectroscopyAdapter(
         return RunRecord(cfg=cfg, result=SpectroscopyExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[SpectroscopyRun, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[SpectroscopyRun, None], *, plots: Plots
     ) -> SpectroscopyAnalyzeResult:
         """Use only source cfg/raw; never read current parameters or propose peaks."""
         return SpectroscopyAnalyzeResult(

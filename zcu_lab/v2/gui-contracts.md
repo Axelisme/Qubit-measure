@@ -33,7 +33,7 @@ Framework 只依宣告從固定 Run／Load capture 與 device snapshot 補入座
 
 T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned fit_quality。共用 mechanics 只投影數值與具體 summary 路徑，不重算品質。GUI 與 MCP 讀同一份結果，低 r2 不增加 accept 門檻。GE 保留 joint／ground／excited 身分，post 不產生新 fit。
 
-- `zcu_tools.gui.app.measure.adapter.base.BaseAdapter` 擁有共用的 framework implementation，不含特定實驗 policy。此 package 只提供 concrete adapters 與 domain support。
+- `zcu_tools.gui.app.measure.adapter.base.BaseAdapter` 擁有共用的 framework implementation，不含特定實驗 policy。`exp_cls` 必須是 `Experiment` 子類。Adapter 預設從 `exp_cls.AXES_SPEC.tag` 取得 `experiment_tag`，有需要時才明確覆寫。此 package 只提供 concrete adapters 與 domain support。
 - `lookback/`、`onetone/`、`mux/`、`twotone/`、`singleshot/`、`jpa/` 擁有 concrete experiment definitions。Leaf 的 `gui.py` 對應 `core.py`。專用 helper 留在 leaf；同群組共用的 helper 留在 family。
   `jpa/` 的六個 adapter（`freq` / `flux` / `power` / `auto_optimize` /
   `flux_onetone` / `check`）是單一可發現的 JPA 校準 family，依 bring-up 順序
@@ -69,7 +69,7 @@ RunRecord 是本套件 concrete adapters 採用的結果形式，framework 不�
 | `validate_run_request(req, cfg)` | 選填的純 preflight，Guard 在開 operation 前必呼。cfg 已由 Form 驗證；hook 不碰裝置、不改 cfg 或 state。 |
 | `run(req, cfg, *, context)` | 使用 Guard 接受並隔離的 Form 輸出。Base 原樣交給 core；需 RunRecord 的 adapter 自行配對同次 cfg 與純 Result。RunService 提供單次 RunContext，adapter 與核心共用 devices、plots 和取消訊號。 |
 | `analyze(req, *, plots)` | FIT 讀取 req.run_result、analyze_params 與固定 Run／Load parameters。具名圖交給本次 Plots，數值結果不含 Figure。`post_analyze` 另接已採用的 primary result，不使用未重新分析的表單。 |
-| `restore(stored)` | LoadService 先讀 native data、核對 experiment_tag，再交 StoredRun。Base 委派 `exp_cls().from_stored(stored)`，回傳含 record 與 cfg_issue 的 RestoredRun。Hook 不讀檔、不讀目前表單或重捕歷史。有效資料可在 typed cfg 不相容時保留，缺 cfg envelope 或壞資料仍拒絕。 |
+| `restore(stored)` | LoadService 先讀 native data、核對 experiment_tag，再交 StoredRun。Base 呼叫 `restore_run(stored, spec=exp_cls.AXES_SPEC)`，不建構 core，回傳含 record 與 cfg_issue 的 RestoredRun。Hook 不讀檔、不讀目前表單或重捕歷史。有效資料可在 typed cfg 不相容時保留，缺 cfg envelope 或壞資料仍拒絕。 |
 | `data_item(key, result, *, comment)`、`analysis_item(key, result, parameters, *, pane)` | Save 在 GUI owner thread 同步要求內容。Base 從明確 RunRecord/spec 準備 DataItem，從已提交輸出與歷史分析輸入準備 AnalysisItem。Hook 不選路徑、不做 I/O、不讀 live context。缺 cfg 不以表單補值，準備失敗只使該 data output 失敗，獨立圖與分析仍可保存。 |
 
 [`LoadService`](../../lib/zcu_tools/gui/app/measure/services/load.py) 保留目前表單與其固定來源，
@@ -164,9 +164,9 @@ Concrete Form 選擇 `_support/measure/` 的 domain helpers；實驗結構與初
 
 每個 concrete `BaseAdapter` 以一個 `AdapterCapabilities` 宣告 `analysis`（NONE／FIT／INTERACTIVE）、`requires_soc`、`post_analysis`、`load_data`。宣告的是支援範圍，不是目前是否連線、檔案是否可讀或是否已取得 operation lease。實驗側提供符合宣告的 hooks；framework 的 interface 與呼叫端規則見 [measure app](../../lib/zcu_tools/gui/app/measure/README.md) 和 [GUI ADR](../../docs/adr/0067-gui-application.md)。具體實驗的 capability 值以其 adapter class 為準。
 
-`BaseAdapter.__init_subclass__` 在定義 subclass 時檢查宣告與條件式 hooks，不延後到 UI 或 worker 第一次使用。FIT 要有 `analyze()`，INTERACTIVE 要有 `make_interactive_plugin()` 與 `make_interactive_frontend()`，NONE 不接受分析 hooks；非 INTERACTIVE 不接受這兩個 interactive factories。Post-analysis 只配 FIT，並要求其 params 與 analyze hooks。需要值才能建立的 analyze params 必須提供 `get_analyze_params()`，全有預設值則可繼承 base 實作。檢查 method override 時比較沿 MRO 解析後的實作與 `BaseAdapter`，所以中間 base 提供的 override 有效，不維護子類白名單。
+`BaseAdapter.__init_subclass__` 在定義 subclass 時檢查宣告與條件式 hooks，不延後到 UI 或 worker 第一次使用。FIT 要有 `analyze()`，INTERACTIVE 要有 `make_interactive_plugin()` 與 `make_interactive_frontend()`，NONE 不接受分析 hooks；非 INTERACTIVE 不接受這兩個 interactive factories。Post-analysis 只配 FIT，並要求 post_analyze hook。四個分析結果／參數槽位的 None 表示沒有數值／輸入；結果為 None 時保留具名圖與空摘要，不提出 writeback。Post params 和 primary 一樣，只有需要值時才覆寫 params hook。需要值才能建立的 analyze params 必須提供 `get_analyze_params()`，全有預設值則可繼承 base 實作。檢查 method override 時比較沿 MRO 解析後的實作與 `BaseAdapter`，所以中間 base 提供的 override 有效，不維護子類白名單。
 
-`load_data=True` 須有 concrete `restore()`，或有可無參數建立且提供 callable `from_stored()` 的 `exp_cls`；`load_data=False` 不接受 concrete restore override。這是 import-time 宣告一致性檢查，不證明某個檔案能載入、hook 語意正確或操作安全。`validate_run_request()` 是 framework 必呼的 preflight；base 提供 no-op default，不因繼承 no-op 而新增 capability flag。Subclass 拼錯預期要 override 的 no-op hook 名稱，驗證無法辨識其意圖。精確錯誤與預設值以 `zcu_tools.gui.app.measure.adapter.base` 為準。
+`load_data=True` 須有 concrete `restore()`，或有繼承 `Experiment` 且宣告非 None `AXES_SPEC` 的 `exp_cls`；`load_data=False` 不接受 concrete restore override。這是 import-time 宣告一致性檢查，不證明某個檔案能載入、hook 語意正確或操作安全。`validate_run_request()` 是 framework 必呼的 preflight；base 提供 no-op default，不因繼承 no-op 而新增 capability flag。Subclass 拼錯預期要 override 的 no-op hook 名稱，驗證無法辨識其意圖。精確錯誤與預設值以 `zcu_tools.gui.app.measure.adapter.base` 為準。
 
 ## 修改原則
 

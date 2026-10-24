@@ -9,12 +9,16 @@ editing、context/SoC/device/session wiring、run/analyze/save/writeback workflo
 view 與 GUI-side remote handler。使用者套件的 adapter 擁有實驗領域知識；
 framework 只看 `ExpAdapterProtocol`。
 Adapter 的 `analysis_result_tone_count` 從 captured Run／Load 宣告 measured tone 數，非 mux 預設為零。
-RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 Form 或猜 opaque result 結構。共用 `BaseAdapter` 住在 `adapter/base.py`。它宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
+RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 Form 或猜 opaque result 結構。
+共用 `BaseAdapter` 住在 `adapter/base.py`。Adapter 宣告 `Form`，分頁從固定 `FormEnv` 產生 fresh input。
+分析與 Post 的結果／參數槽位預設 None，表示沒有數值或輸入。
+Figures-only 的完成事實由 pane plots 保留，不靠 numeric payload 判斷。
+None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有保存格式。
 
 ## Owners
 
 - [`adapter/`](adapter/protocol.py)：framework-facing contract、request/result/analyze params、
-  adapter validation 與 protocol signature 所需的 session vocabulary。Writeback 型別由
+  adapter validation 與 protocol signature 所需的 session vocabulary。BaseAdapter 的 `exp_cls` 是 `type[Experiment[Any, Any]]`。預設 tag 讀取 `exp_cls.AXES_SPEC.tag`，adapter 可明確覆寫。預設 restore 將已讀 Container 與 `AXES_SPEC` 交給 `restore_run`，不建構 core。Load capability 要求有效 spec 或 concrete restore override。Writeback 型別由
   `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
   ModuleSpec。
 - [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
@@ -168,6 +172,12 @@ does not drain services or disconnect hardware.
 Qt workflow panes display these owners and forward commands. A busy workflow's
 local Stop remains available under Remote control. It reclaims locked Local before
 requesting Stop through the same facet; other mutations still require the holder.
+Tunables Discard restores the latest accepted input and clears local invalid text.
+Before Start, it restores the captured form base. It is enabled only for a changed
+draft while editing is allowed. Running, pausing and paused runs allow tunables
+edits and Apply; stopping locks edits, Apply and Discard. Entering paused selects
+Tunables and shows 「Resume 會重做未提交的點；可先 Apply 新的 tunables」.
+Resume or Stop hides the hint. A new Ask still selects its question page.
 Measure remote calls the same facet without a pane, toggle or selected-tab
 dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
@@ -203,6 +213,9 @@ The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
 same-host operation Plots and finishes before returning or being discarded.
 `WorkflowFigures` tiles workflow figures and the current operation together,
 with up to four figures per page and page controls for larger sets.
+Follow latest starts checked and selects each newly presented or live-refreshed
+figure's page and tile. Clicking a canvas unchecks it and pins the selection;
+final flushes do not move focus.
 Pane and MCP read `WorkflowPlots.figures()`: workflow names stay unchanged and
 operation names are `operation/<name>`. Workflow registration
 rejects that prefix. A new attempt releases and replaces the whole operation

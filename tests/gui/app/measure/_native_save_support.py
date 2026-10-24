@@ -65,7 +65,14 @@ class PostSummary(PostAnalyzeResultBase):
 
 
 class SavingAdapter(
-    BaseAdapter[SavingCfg, RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams]
+    BaseAdapter[
+        SavingCfg,
+        RunRecord[SavingCfg, SavingResult],
+        PaneSummary,
+        PaneParams,
+        PostSummary,
+        PaneParams,
+    ]
 ):
     """Real BaseAdapter mapping with an offline typed experiment declaration."""
 
@@ -79,7 +86,7 @@ class SavingAdapter(
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
     )
-    experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
+    experiment_tag: ClassVar[str | None] = SavingCore.AXES_SPEC.tag
 
     def run(
         self,
@@ -187,7 +194,7 @@ def native_save_session(
     record = RunRecord(cfg, SavingCore().run(cfg, context=None))
     metadata = RunMetadata(
         run_id="20261008T000000Z-a1b2c3",
-        experiment=SavingCore().persistence_spec().tag,
+        experiment=SavingCore.AXES_SPEC.tag,
         started_at="2026-10-08T00:00:00+00:00",
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",

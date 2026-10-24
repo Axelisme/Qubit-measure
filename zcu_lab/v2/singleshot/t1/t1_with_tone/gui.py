@@ -10,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -42,15 +41,8 @@ class SsT1ToneAnalyzeResult(AnalyzeResultBase):
 
 
 class SsT1ToneAdapter(
-    BaseAdapter[
-        T1WithToneCfg,
-        SsT1ToneRunResult,
-        SsT1ToneAnalyzeResult,
-        NoAnalyzeParams,
-    ]
+    BaseAdapter[T1WithToneCfg, SsT1ToneRunResult, SsT1ToneAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = T1WithToneExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T1WithToneCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -71,7 +63,7 @@ class SsT1ToneAdapter(
         return RunRecord(cfg, T1WithToneExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[SsT1ToneRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[SsT1ToneRunResult, None], *, plots: Plots
     ) -> SsT1ToneAnalyzeResult:
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
         confusion = read_confusion_matrix(req.parameters)

@@ -7,7 +7,6 @@ operator guide. The core experiment lives in ``zcu_lab.v2.jpa``
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -15,8 +14,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -29,15 +26,7 @@ from zcu_lab.v2.jpa.check.form import make_form
 JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
 
-@dataclass
-class JpaCheckAnalyzeResult(AnalyzeResultBase):
-    pass
-
-
-class JpaCheckAdapter(
-    BaseAdapter[CheckCfg, JpaCheckRunResult, JpaCheckAnalyzeResult, NoAnalyzeParams]
-):
-    experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
+class JpaCheckAdapter(BaseAdapter[CheckCfg, JpaCheckRunResult]):
     exp_cls = CheckExp
 
     @staticmethod
@@ -58,7 +47,7 @@ class JpaCheckAdapter(
         return RunRecord(cfg, CheckExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JpaCheckRunResult, NoAnalyzeParams], *, plots: Plots
-    ) -> JpaCheckAnalyzeResult:
+        self, req: AnalyzeRequest[JpaCheckRunResult, None], *, plots: Plots
+    ) -> None:
         CheckExp().analyze(req.run_result, None, plots=plots)
-        return JpaCheckAnalyzeResult()
+        return

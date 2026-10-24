@@ -14,32 +14,13 @@ from zcu_tools.analysis.fitting import (
     fit_decay_fringe,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Delay,
-    ProgramV2Cfg,
-    Pulse,
-    PulseCfg,
-    Readout,
-    ReadoutCfg,
-    Reset,
-    ResetCfg,
-    SweepCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.twotone.time_domain.detune import actual_detune
@@ -64,17 +45,17 @@ def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T2EchoModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[PulseCfg, FieldMeta(label="Pi/2 Pulse")]
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class T2EchoSweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
 
-class T2EchoCfg(ProgramV2Cfg, ExpCfgModel):
+class T2EchoCfg(ProgramExpCfg):
     modules: T2EchoModuleCfg
     sweep: T2EchoSweepCfg
     detune: float = 0.0
@@ -95,13 +76,13 @@ class T2EchoAnalysis:
     fit_quality: Mapping[str, FitQuality] | None = None
 
 
-class T2EchoExp(PersistableExperiment[T2EchoResult, T2EchoCfg]):
+class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
     Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
 
-    # times stores us in memory, s on disk -> scale=US_TO_S
-    AXES_SPEC = AxesSpec(
-        axes=(Axis("times", "Time", "s", scale=US_TO_S),),
-        z=ZSpec("signals", "Signal", "a.u."),
+    # times stores us in memory, s on disk -> scale=1e-6
+    AXES_SPEC: ClassVar[AxesSpec[T2EchoResult, T2EchoCfg]] = AxesSpec(
+        axes=(AxesSpec.Axis("times", "Time", "s", scale=1e-6),),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=T2EchoResult,
         cfg_type=T2EchoCfg,
         cfg_schema_version="2.0",

@@ -18,15 +18,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    IDENTITY,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -38,13 +30,9 @@ from zcu_tools.plotting.plots import LinePlot, Plots
 from zcu_tools.program.v2 import (
     Branch,
     ModularProgramV2,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SweepCfg,
     sweep2param,
 )
@@ -80,18 +68,18 @@ class T1WithToneResult:
 
 
 class T1WithToneModuleCfg(ConfigBase):
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[PulseCfg | None, FieldMeta(label="Init Pulse")] = None
-    pi_pulse: Annotated[PulseCfg, FieldMeta(label="Pi Pulse")]
-    probe_pulse: Annotated[PulseCfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 class T1WithToneSweepCfg(ConfigBase):
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
 
 
-class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
+class T1WithToneCfg(ProgramExpCfg):
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
     modules: T1WithToneModuleCfg
     sweep: T1WithToneSweepCfg
@@ -116,28 +104,16 @@ class T1WithToneAnalysis:
     t1_b: float
 
 
-class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
+class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
-            Axis(
-                "population_states",
-                "GE Population",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis(
-                "initial_states",
-                "Initial State",
-                "None",
-                scale=IDENTITY,
-                dtype=np.int64,
-            ),
-            Axis("lengths", "Time", "s", scale=US_TO_S, dtype=np.float64),
+            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
+            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
         ),
-        z=ZSpec("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
         result_type=T1WithToneResult,
         cfg_type=T1WithToneCfg,
         cfg_schema_version="2.0",

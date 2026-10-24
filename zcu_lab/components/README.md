@@ -4,7 +4,7 @@
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
-新增 model、註冊與表單引用見 [component 教學](../tutorial/01-components.md)。`register_all` 註冊以下六個 kind，import 不會註冊。
+新增 model、註冊與表單引用見 [component 教學](../tutorial/01-components.md)。Component 保存校準值、wiring 與 module 引用，不宣告 program 的執行型 cfg。Core 的 module 欄位使用 `Pulse.Cfg`、`Readout.Cfg`、`MuxReadout.Cfg` 等型別；寫法見 [實驗教學](../tutorial/03-experiment.md#2-在-corepy-定義資料與量測)。`register_all` 註冊以下六個 kind，import 不會註冊。
 
 | Kind | 代表什麼 | 哪些實驗讀它 |
 | --- | --- | --- |

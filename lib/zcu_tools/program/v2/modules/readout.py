@@ -114,12 +114,24 @@ class AbsReadout(Module):
         return True
 
 
-def Readout(name: str, cfg: AbsReadoutCfg) -> AbsReadout:
-    """Factory: dispatch a readout cfg to its concrete impl."""
-    return cfg.build(name)
+class Readout:
+    """Dispatch cfg to its readout module; zcu_lab uses ``Readout.Cfg`` fields.
+
+    Calling Readout(name, cfg) returns cfg.build(name), not a Readout instance.
+    name labels the module; cfg supplies validated native readout settings.
+    """
+
+    Cfg: TypeAlias = ReadoutCfg
+
+    def __new__(cls, name: str, cfg: AbsReadoutCfg) -> AbsReadout:
+        return cfg.build(name)
 
 
 class PulseReadout(AbsReadout):
+    """Play and acquire a pulse readout configured with ``PulseReadout.Cfg``."""
+
+    Cfg: TypeAlias = PulseReadoutCfg
+
     def __init__(
         self,
         name: str,
@@ -373,10 +385,14 @@ class TablePulseReadout(AbsReadout):
 class MuxReadout(AbsReadout):
     """Fixed mixmux8 playback and simultaneous static PFBv4 acquisition.
 
+    zcu_lab declares native settings as ``MuxReadout.Cfg``.
+
     Only explicit tone channels are used, in their original order. Initialization
     rejects incompatible hardware, duplicate routes and sub-cycle windows. No
     envelope, tProc readout configuration or hardware parameter update is used.
     """
+
+    Cfg: TypeAlias = MuxReadoutCfg
 
     def __init__(self, name: str, cfg: MuxReadoutCfg) -> None:
         """Copy numeric cfg; name identifies the const mask pulse and diagnostics."""

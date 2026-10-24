@@ -25,6 +25,20 @@ type RecipeFieldPath = tuple[str | int, ...]
 """Logical field names and original list indexes; numeric strings stay names."""
 
 
+def dotted_path(path: object) -> RecipeFieldPath:
+    """Decode a nonempty dotted recipe path into logical owner segments.
+
+    Decimal segments address original list positions. Empty/blank segments and
+    negative indexes and non-string carriers raise ValueError.
+    """
+    if not isinstance(path, str) or not path:
+        raise ValueError("field must be a nonempty dotted string")
+    parts = path.split(".")
+    if any(not part or part != part.strip() or part.startswith("-") for part in parts):
+        raise ValueError("field requires nonblank names or nonnegative indexes")
+    return tuple(int(part) if part.isdecimal() else part for part in parts)
+
+
 def field_path(path: RecipeFieldPath) -> RecipeFieldPath:
     """Validate a nonempty typed path carrier, without resolving owner fields.
 

@@ -28,9 +28,15 @@ monotonic display numbers. The status badge returns to the active workflow.
 The shared RUN lease locks competing panes and Setup/SoC submissions.
 
 `WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
-It forwards Refresh, Start, Pause, Resume, Stop and Apply to the facet.
+It forwards Refresh, Start, Pause, Resume, Stop, Apply and Discard to the facet.
+Discard restores accepted tunables and clears renderer-local invalid text. It is
+available only for changed drafts while editing is allowed. Entering paused
+selects Tunables and shows the Resume/Apply hint; Resume and Stop hide it.
+A new Ask takes focus after pause navigation. Stopping makes tunables read-only
+and disables Apply and Discard.
 The active_path label shows the root-to-first-fork chain. The live_paths label
-shows each live leaf full path on its own line; neither label picks a latest child.
+shows each live leaf full path on its own line, but hides when its only leaf
+matches active_path. Neither label picks a latest child.
 Busy Stop remains enabled under Remote control and reclaims locked Local before
 calling the same facet. Pause, Resume, Answer and tunables retain the holder gate.
 The services own source capture, lowering, accepted tunables and run lifetime.

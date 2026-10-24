@@ -1,27 +1,33 @@
 """MIST probe frequency/gain survey with native save and map analysis."""
 
+from typing import Annotated
+
 from pydantic import Field
-from zcu_tools.gui.form_adapter.sweep import LinRange
 from zcu_tools.mcp.measure.recipe_api import (
-    FieldEdit,
+    KEEP,
+    Keep,
     RecipeInputs,
     RecipeReport,
     RecipeSession,
     recipe,
 )
 
-from zcu_lab.v2.mist.power_dep.drive_freq.gui import DriveFreqAnalyzeResult
-
 
 class MistDriveFrequencyInputs(RecipeInputs):
     """Inputs for mist drive frequency; all units and null policies are declared
     per field."""
 
-    freq_range: list[float] = Field(description="Two frequency endpoints in MHz.")
-    gain_range: list[float] = Field(
-        description="Two native gain endpoints; null keeps the GUI range."
+    freq_range: list[float] = Field(
+        min_length=2, max_length=2, description="Two frequency endpoints in MHz."
     )
-    points: int = Field(51, description="Sample count on each map axis, at least two.")
+    gain_range: list[float] = Field(
+        min_length=2,
+        max_length=2,
+        description="Two native gain endpoints; omission retains the Form value; null clears/disables it.",
+    )
+    points: Annotated[int, Field(ge=2)] | None | Keep = Field(
+        KEEP, description="Sample count on each map axis, at least two."
+    )
 
 
 class MistDriveFrequencyReport(RecipeReport):
@@ -47,32 +53,24 @@ async def mist_drive_frequency(
     Analysis uses the captured GUI parameters; no fit controls are added.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
-    if len(inputs.freq_range) != 2 or len(inputs.gain_range) != 2:
-        raise ValueError("freq_range and gain_range must each contain two endpoints")
-    if inputs.points < 2:
-        raise ValueError("points must be at least two")
-    tab = session.open_recipe_tab(
-        "mist/power_dep/drive_freq", inputs, target_alias="qubit"
+    tab = session.open_tab(
+        "mist/power_dep/drive_freq",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
     )
-    tab.select_sources(inputs)
-
-    edits: list[FieldEdit] = []
-    tab.apply_inputs(
-        inputs,
-        {
-            ("sweep", "freq"): LinRange(
-                start=inputs.freq_range[0], stop=inputs.freq_range[1], n=inputs.points
-            ),
-            ("sweep", "gain"): LinRange(
-                start=inputs.gain_range[0], stop=inputs.gain_range[1], n=inputs.points
-            ),
-        },
-        edits=edits,
-    )
+    tab.set("sweep.freq.start", inputs.freq_range[0])
+    tab.set("sweep.freq.stop", inputs.freq_range[1])
+    tab.set("sweep.freq.n", inputs.points)
+    tab.set("sweep.gain.start", inputs.gain_range[0])
+    tab.set("sweep.gain.stop", inputs.gain_range[1])
+    tab.set("sweep.gain.n", inputs.points)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
 
     await tab.run()
     try:
-        analysis = await tab.analyze("primary", result=DriveFreqAnalyzeResult)
+        analysis = await tab.analyze("primary", result=dict)
         if analysis.result is None:
             return MistDriveFrequencyReport(
                 analysis_completed=False, analysis_failure=analysis.reason

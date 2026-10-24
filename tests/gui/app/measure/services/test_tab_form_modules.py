@@ -163,6 +163,56 @@ def test_option_command_copies_fixed_capture_and_publishes_once() -> None:
     assert captures == [100.0, 200.0]
 
 
+@pytest.mark.parametrize("recipe", [False, True], ids=["canonical", "logical"])
+@pytest.mark.parametrize("nested", [False, True], ids=["module", "waveform"])
+def test_inline_command_preserves_invalid_draft_without_capture_or_publication(
+    recipe: bool, nested: bool
+) -> None:
+    captures: list[str] = []
+
+    def capture(_aliases: object) -> TabFormSources:
+        captures.append("capture")
+        return TabFormSources(FormEnv())
+
+    resource = TabFormResource(
+        lambda _ctx: Form(ModuleCore, {}),
+        capture=capture,
+        mutation_allowed=lambda: True,
+    )
+    resource.write(
+        {
+            ("pulse",): {
+                "kind": "inline",
+                "module": {
+                    "type": "pulse",
+                    "freq": {"expr": "invalid"},
+                    "waveform": {
+                        "kind": "inline",
+                        "module": {"style": "const", "length": -1},
+                    },
+                },
+            }
+        }
+    )
+    before = resource.input
+    notifications: list[str] = []
+    resource.subscribe(lambda: notifications.append("changed"))
+    resource.editor_state.subscribe(lambda: notifications.append("state changed"))
+    path = ("pulse",)
+    if nested:
+        path = ("pulse", "waveform") if recipe else ("pulse", "module", "waveform")
+
+    for _ in range(2):
+        if recipe:
+            assert resource.run_recipe_command(path, "to_inline") is False
+        else:
+            resource.run_command(path, "to_inline")
+
+    assert resource.input.same_as(before)
+    assert notifications == []
+    assert captures == ["capture"]
+
+
 def test_option_command_guards_busy_lifetime_and_peer_reentry() -> None:
     from zcu_tools.gui.app.measure.services.tab_form import TabFormResources
 
@@ -239,8 +289,7 @@ def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) ->
     assert notifications == []
     resource.run_command(("pulse",), "to_inline")
     before = resource.input.data
-    with pytest.raises(ValueError, match="Unavailable"):
-        resource.run_command(("pulse",), "to_inline")
+    resource.run_command(("pulse",), "to_inline")
     assert resource.input.data == before
     assert notifications == ["changed"]
 

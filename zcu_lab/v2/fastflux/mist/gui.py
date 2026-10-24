@@ -10,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
 )
@@ -36,16 +35,8 @@ class MistAnalyzeParams:
     ] = None
 
 
-@dataclass
-class MistAnalyzeResult(AnalyzeResultBase):
-    """The core publishes a contrast figure without scalar calibration."""
-
-
-class MistAdapter(
-    BaseAdapter[MistCfg, MistRunResult, MistAnalyzeResult, MistAnalyzeParams]
-):
+class MistAdapter(BaseAdapter[MistCfg, MistRunResult, None, MistAnalyzeParams]):
     exp_cls = MistExp
-    experiment_tag: ClassVar[str | None] = MistExp.persistence_tag()
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
     @staticmethod
@@ -65,11 +56,11 @@ class MistAdapter(
         req: AnalyzeRequest[MistRunResult, MistAnalyzeParams],
         *,
         plots: Plots,
-    ) -> MistAnalyzeResult:
+    ) -> None:
         """Plot the stored map, optionally scaling gain squared to photons."""
         MistExp().analyze(
             req.run_result,
             MistAnalyzeOptions(ac_coeff=req.analyze_params.ac_coeff),
             plots=plots,
         )
-        return MistAnalyzeResult()
+        return

@@ -14,6 +14,50 @@ from ._registry import AgentMethodPolicy, RemoteMethodEntry, method_entry
 
 METHODS: tuple[RemoteMethodEntry, ...] = (
     method_entry(
+        "tab.check_recipe_ready",
+        "tab:h_tab_check_recipe_ready",
+        MethodSpec(
+            5.0,
+            "Validate the complete current Form and lowered cfg against fixed "
+            "sources. Returns all logical path/reason errors without mutation, "
+            "Run, source capture or publication. Empty errors means ready.",
+            (required_string("tab_id"),),
+            readonly=True,
+        ),
+    ),
+    method_entry(
+        "tab.select_recipe_option",
+        "tab:h_tab_select_recipe_option",
+        MethodSpec(
+            5.0,
+            "Select an exact Form option label or captured module key at a typed "
+            "logical path. option=null requires a nullable option. Inline labels "
+            "use the declared converter; to_inline is a separate command. "
+            "Unknown/ambiguous options and owner admission failures preserve input. "
+            "Returns changed; ordinary invalid drafts remain installed.",
+            (
+                required_string("tab_id"),
+                ParamSpec("path", JsonType.ARRAY),
+                ParamSpec("option", JsonType.STRING, nullable=True),
+            ),
+        ),
+    ),
+    method_entry(
+        "tab.run_recipe_command",
+        "tab:h_tab_run_recipe_command",
+        MethodSpec(
+            5.0,
+            "Run an available owner command at a typed logical path, including "
+            "to_inline for a fixed captured Spec copy. Returns changed. Same "
+            "holder, busy, readonly, source and lifetime checks as Form edits.",
+            (
+                required_string("tab_id"),
+                ParamSpec("path", JsonType.ARRAY),
+                required_string("name"),
+            ),
+        ),
+    ),
+    method_entry(
         "tab.run_cfg_command",
         "tab:h_tab_run_cfg_command",
         MethodSpec(

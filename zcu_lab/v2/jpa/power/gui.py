@@ -17,7 +17,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     AnalyzeResultBase,
-    NoAnalyzeParams,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -51,10 +50,7 @@ def _relabel_power_figure(fig: Figure) -> None:
         ax.set_xlabel("JPA pump power (dBm)")
 
 
-class JpaPowerAdapter(
-    BaseAdapter[PowerCfg, JpaPowerRunResult, JpaPowerAnalyzeResult, NoAnalyzeParams]
-):
-    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
+class JpaPowerAdapter(BaseAdapter[PowerCfg, JpaPowerRunResult, JpaPowerAnalyzeResult]):
     exp_cls = PowerExp
 
     @staticmethod
@@ -75,7 +71,7 @@ class JpaPowerAdapter(
         return RunRecord(cfg, PowerExp().run(cfg, context=context))
 
     def analyze(
-        self, req: AnalyzeRequest[JpaPowerRunResult, NoAnalyzeParams], *, plots: Plots
+        self, req: AnalyzeRequest[JpaPowerRunResult, None], *, plots: Plots
     ) -> JpaPowerAnalyzeResult:
         answer = PowerExp().analyze(req.run_result, None, plots=plots)
         _relabel_power_figure(plots["fit"])

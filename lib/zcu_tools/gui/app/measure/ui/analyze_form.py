@@ -85,13 +85,15 @@ class AnalyzeFormWidget(QWidget):
         layout.addWidget(self._empty_hint)
 
     def populate(self, params_instance: object) -> None:
-        """Build form from a dataclass instance."""
+        """Build inputs from a dataclass, or show no parameters for None."""
         self.sync(params_instance)
 
     def sync(self, params_instance: object | None) -> None:
         """Clear, rebuild, or hydrate the form to match ``params_instance``."""
         if params_instance is None:
             self.clear()
+            self._params_cls = type(None)
+            self._empty_hint.setVisible(True)
             return
         if not dataclasses.is_dataclass(params_instance) or isinstance(
             params_instance, type

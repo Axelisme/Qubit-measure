@@ -56,7 +56,6 @@ class RoOptPowerAdapter(
         RoOptPowerAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
     exp_cls = PowerExp
 
     @staticmethod

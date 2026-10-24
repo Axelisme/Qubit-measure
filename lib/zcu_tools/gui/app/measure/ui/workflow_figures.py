@@ -3,8 +3,8 @@
 from collections.abc import Callable
 
 from matplotlib.figure import Figure
-from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
+from qtpy.QtCore import QEvent, QObject, Qt
+from qtpy.QtWidgets import QCheckBox, QComboBox, QLabel, QVBoxLayout, QWidget
 
 from zcu_tools.experiment.workflows import WorkflowPlots
 from zcu_tools.gui.plotting.container import FigureContainer
@@ -22,6 +22,8 @@ class WorkflowFigures(QWidget):
     Construct on the GUI thread with the session owner and a read-only WorkflowPlots
     query for this tab. The producer must stop and release its plots before
     dispose or Qt deletion. No run, source capture or result data is owned here.
+    Follow latest starts checked and selects newly presented or live-refreshed
+    figures. A canvas click unchecks it and pins the tile; final flushes keep focus.
     """
 
     def __init__(
@@ -34,6 +36,10 @@ class WorkflowFigures(QWidget):
         self._plots = plots
         self._figures: dict[str, Figure] = {}
         layout = QVBoxLayout(self)
+        self._follow = QCheckBox("Follow latest", self)
+        self._follow.setObjectName("workflow.figures.follow")
+        self._follow.setChecked(True)
+        layout.addWidget(self._follow)
         self._selector = QComboBox(self)
         self._selector.setObjectName("workflow.figures.selector")
         self._selector.hide()
@@ -49,6 +55,16 @@ class WorkflowFigures(QWidget):
         self._container = FigureContainer(self._stack, placeholder)
         self._host = QtPlotHost(self._container, owner)
 
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            a1 is not None
+            and a1.type() == QEvent.Type.MouseButtonPress
+            and isinstance(a0, QWidget)
+            and self._stack.indexOf(a0) > 0
+        ):
+            self._follow.setChecked(False)
+        return super().eventFilter(a0, a1)
+
     def call[T](self, callback: Callable[[], T]) -> T:
         """Run a native artist update on the session owner, propagating failures."""
         return self._host.call(callback)
@@ -56,8 +72,8 @@ class WorkflowFigures(QWidget):
     def present(self, figure: Figure) -> None:
         """Present a retained named figure on-owner; reject unknown figures.
 
-        Keep the current tile/page when adding or re-presenting figures. The first
-        attached figure becomes current until a page change or canvas click.
+        Follow latest selects a newly attached figure and its page. Otherwise
+        keep the current tile/page, including when re-presenting an attached figure.
         """
         plots = self._plots()
         if plots is None:
@@ -69,13 +85,20 @@ class WorkflowFigures(QWidget):
         if name is None:
             raise ValueError("Figure is not retained by this workflow tab")
         selected = self._selector.currentText()
+        if name not in self._figures and self._follow.isChecked():
+            selected = name
         self._host.present(figure)
         self._figures[name] = figure
         self._present_tiles(selected)
 
     def refresh(self, figure: Figure, *, final: bool = False) -> None:
-        """Refresh a presented figure through the shared coalescing Qt host."""
+        """Refresh a presented figure, following live updates when checked.
+
+        A final flush renders the last data without moving the current tile/page.
+        """
         self._host.refresh(figure, final=final)
+        if not final and self._follow.isChecked():
+            self._stack.setCurrentIndex(list(self._figures.values()).index(figure) + 1)
 
     def release(self, figure: Figure) -> None:
         """Release the figure's canvas and pending redraw without clearing artists."""
@@ -113,3 +136,7 @@ class WorkflowFigures(QWidget):
             selected=selected,
             pane="workflow",
         )
+        for index in range(1, self._stack.count()):
+            canvas = self._stack.widget(index)
+            if canvas is not None:
+                canvas.installEventFilter(self)

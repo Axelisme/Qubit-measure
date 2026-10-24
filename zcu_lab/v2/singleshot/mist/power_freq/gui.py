@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -8,8 +7,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
-    NoAnalyzeParams,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -30,21 +27,7 @@ from zcu_lab.v2.singleshot.mist.power_freq.form import make_form
 MistPowerFreqRunResult: TypeAlias = RunRecord[FreqPowerCfg, FreqPowerResult]
 
 
-@dataclass
-class MistPowerFreqAnalyzeResult(AnalyzeResultBase):
-    pass
-
-
-class MistPowerFreqAdapter(
-    BaseAdapter[
-        FreqPowerCfg,
-        MistPowerFreqRunResult,
-        MistPowerFreqAnalyzeResult,
-        NoAnalyzeParams,
-    ]
-):
-    experiment_tag: ClassVar[str | None] = FreqPowerExp.persistence_tag()
-
+class MistPowerFreqAdapter(BaseAdapter[FreqPowerCfg, MistPowerFreqRunResult]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[FreqPowerCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -54,7 +37,7 @@ class MistPowerFreqAdapter(
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 
-    # No get_analyze_params override: NoAnalyzeParams (4th generic arg).
+    # No get_analyze_params override: None (4th generic arg).
 
     def run(
         self,
@@ -68,12 +51,12 @@ class MistPowerFreqAdapter(
 
     def analyze(
         self,
-        req: AnalyzeRequest[MistPowerFreqRunResult, NoAnalyzeParams],
+        req: AnalyzeRequest[MistPowerFreqRunResult, None],
         *,
         plots: Plots,
-    ) -> MistPowerFreqAnalyzeResult:
+    ) -> None:
         options = FreqPowerAnalyzeOptions(
             confusion_matrix=read_confusion_matrix(req.parameters),
         )
         FreqPowerExp().analyze(req.run_result, options, plots=plots)
-        return MistPowerFreqAnalyzeResult()
+        return

@@ -9,16 +9,7 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    MHZ_TO_HZ,
-    US_TO_S,
-    AxesSpec,
-    Axis,
-    PersistableExperiment,
-    ZSpec,
-    config,
-)
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
@@ -31,13 +22,9 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Join,
-    ProgramV2Cfg,
     Pulse,
-    PulseCfg,
     Readout,
-    ReadoutCfg,
     Reset,
-    ResetCfg,
     SoftDelay,
     SweepCfg,
     sweep2param,
@@ -127,10 +114,10 @@ def get_resonance_freq(
 
 
 class AcStarkModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    stark_pulse1: Annotated[PulseCfg, FieldMeta(label="Stark resonator tone")]
-    stark_pulse2: Annotated[PulseCfg, FieldMeta(label="Qubit spectroscopy probe")]
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
+    readout: Readout.Cfg
 
 
 class AcStarkSweepCfg(ConfigBase):
@@ -138,22 +125,22 @@ class AcStarkSweepCfg(ConfigBase):
     freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
 
 
-class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
+class AcStarkCfg(ProgramExpCfg):
     modules: AcStarkModuleCfg
     sweep: AcStarkSweepCfg
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
-class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
 
     # gains stored in a.u. -> IDENTITY; freqs stored in Hz on disk -> MHZ_TO_HZ
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
-            Axis("freqs", "Frequency", "Hz", scale=MHZ_TO_HZ),
-            Axis("gains", "Stark Pulse Gain", "a.u."),
+            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
         cfg_schema_version="2.0",
@@ -357,10 +344,10 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 
 class AcStarkRamseyModuleCfg(ConfigBase):
-    reset: ResetCfg | None = None
-    pi2_pulse: Annotated[PulseCfg, FieldMeta(label="Ramsey pi/2 pulse")]
-    stark_pulse: Annotated[PulseCfg, FieldMeta(label="Stark resonator tone")]
-    readout: ReadoutCfg
+    reset: Reset.Cfg | None = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
+    stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    readout: Readout.Cfg
 
 
 class AcStarkRamseySweepCfg(ConfigBase):
@@ -368,23 +355,23 @@ class AcStarkRamseySweepCfg(ConfigBase):
     length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
 
 
-class AcStarkRamseyCfg(ProgramV2Cfg, ExpCfgModel):
+class AcStarkRamseyCfg(ProgramExpCfg):
     modules: AcStarkRamseyModuleCfg
     wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
     sweep: AcStarkRamseySweepCfg
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 
-class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
+class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
     Options: ClassVar[type[AcStarkRamseyAnalyzeOptions]] = AcStarkRamseyAnalyzeOptions
 
     # gains stored in a.u. -> IDENTITY; lengths stored in s on disk -> US_TO_S
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AcStarkRamseyResult, AcStarkRamseyCfg]] = AxesSpec(
         axes=(
-            Axis("lengths", "Time", "s", scale=US_TO_S),
-            Axis("gains", "Stark Pulse Gain", "a.u."),
+            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6),
+            AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u."),
         ),
-        z=ZSpec("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AcStarkRamseyResult,
         cfg_type=AcStarkRamseyCfg,
         cfg_schema_version="2.0",

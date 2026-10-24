@@ -223,6 +223,71 @@ def nested_recipe_rpc(form_rpc, tmp_path):
         restore_registry(registry_before)
 
 
+def test_form_option_command_and_readiness_share_the_guarded_logical_owner(
+    nested_recipe_rpc,
+) -> None:
+    fixture, tab, client, _context, _target = nested_recipe_rpc
+    call = client.context.session.send_gui_rpc
+    call(
+        "tab.select_recipe_option",
+        {"tab_id": tab, "path": ["pulse"], "option": "Q1.pulses.pi"},
+    )
+    call(
+        "tab.run_recipe_command",
+        {"tab_id": tab, "path": ["pulse"], "name": "to_inline"},
+    )
+    call(
+        "tab.select_recipe_option",
+        {"tab_id": tab, "path": ["pulse", "waveform"], "option": "Inline: gauss"},
+    )
+    incomplete = call("tab.check_recipe_ready", {"tab_id": tab})
+    assert any(
+        error["path"] == ["pulse", "waveform", "sigma"]
+        for error in incomplete["errors"]
+    )
+    call(
+        "tab.edit_recipe_fields",
+        {
+            "tab_id": tab,
+            "edits": [
+                {"path": ["pulse", "waveform", "sigma"], "value": 0.02},
+            ],
+        },
+    )
+    assert call("tab.check_recipe_ready", {"tab_id": tab}) == {"errors": []}
+    call("tab.select_recipe_option", {"tab_id": tab, "path": ["pulse"], "option": None})
+    assert (
+        call("tab.read_recipe_field", {"tab_id": tab, "path": ["pulse"]})["selector"][
+            "mode"
+        ]
+        == "disabled"
+    )
+    fixture.state.set_tab_running(tab, running=True)
+    try:
+        from zcu_tools.mcp.measure.session import GuiRpcError
+
+        with pytest.raises(GuiRpcError) as busy:
+            call(
+                "tab.select_recipe_option",
+                {"tab_id": tab, "path": ["pulse"], "option": None},
+            )
+        assert busy.value.reason == "mutation_blocked", (
+            busy.value.code,
+            str(busy.value),
+            busy.value.data,
+        )
+        fixture.ctrl.control_identity.reclaim_local()
+        assert call("tab.check_recipe_ready", {"tab_id": tab}) == {"errors": []}
+        with pytest.raises(GuiRpcError) as denied:
+            call(
+                "tab.run_recipe_command",
+                {"tab_id": tab, "path": ["pulse"], "name": "to_inline"},
+            )
+        assert denied.value.reason == "not_holder"
+    finally:
+        fixture.state.set_tab_running(tab, running=False)
+
+
 @pytest.fixture
 def container_recipe_rpc(nested_recipe_rpc):
     fixture, _, client, _, _ = nested_recipe_rpc

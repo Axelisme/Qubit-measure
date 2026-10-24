@@ -143,7 +143,7 @@ def test_recipe_failure_identifies_the_failed_runtime_action(
             tab.preview()
         else:
             await tab.analyze("primary", result=Fit)
-            tab.writeback_proposal()
+            await tab.ask_writeback()
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
