@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
@@ -11,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
-    ParamMeta,
     RunRequest,
     WritebackItem,
     WritebackRequest,
@@ -52,11 +50,6 @@ class AmplitudeRabiSummary(BaseModel):
     pi2_amp_err: float | None = Field(
         description="Owner pi2_amp_err in gain; null retains an unavailable estimate."
     )
-
-
-@dataclass
-class AmpRabiAnalyzeParams:
-    skip: Annotated[int, ParamMeta(label="Skip points")] = 0
 
 
 class AmpRabiAdapter(

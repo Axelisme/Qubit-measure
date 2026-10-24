@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
@@ -11,7 +10,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
-    ParamMeta,
     RunRequest,
     SampleWriteback,
     WritebackItem,
@@ -51,12 +49,6 @@ class TwotoneSpectrumSummary(BaseModel):
     fwhm_err: float | None = Field(
         description="Owner fwhm_err in MHz; null retains an unavailable estimate."
     )
-
-
-@dataclass
-class FreqAnalyzeParams:
-    model_type: Annotated[Literal["lor", "sinc"], ParamMeta(label="Model type")] = "lor"
-    plot_fit: Annotated[bool, ParamMeta(label="Plot fit")] = True
 
 
 class FreqAdapter(

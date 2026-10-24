@@ -13,6 +13,10 @@ from typing import (
     get_type_hints,
 )
 
+from pydantic.fields import FieldInfo
+
+from zcu_tools.cfg_model import FieldMeta, get_field_meta
+
 # typing_extensions.Literal is an alias of typing.Literal on Python 3.11+;
 # a single-element set suffices.
 _LITERAL_ORIGINS = {typing.Literal}
@@ -40,8 +44,10 @@ def resolve_field_info(
 
     Supported annotations are plain bool/int/float/str, nonempty Literal choices
     sharing one runtime type, and a single Optional[T] of either kind. An outer
-    Annotated may wrap any supported annotation; its first ParamMeta supplies
-    presentation metadata. Literal choices are not restricted to the four plain
+    Annotated may wrap any supported annotation. The first ParamMeta supplies
+    presentation metadata when present; otherwise cfg_model's metadata reader
+    supplies FieldMeta label and decimals. Other FieldMeta hints do not change
+    this scalar form. Literal choices are not restricted to the four plain
     primitive types.
 
     Return ``(bare_type, choices, label, decimals, optional)``: the unwrapped type
@@ -55,6 +61,7 @@ def resolve_field_info(
     """
     hint = hints[field.name]
     origin = get_origin(hint)
+    meta: ParamMeta | FieldMeta | None
     if origin is Annotated:
         args = get_args(hint)
         bare = args[0]
@@ -62,6 +69,8 @@ def resolve_field_info(
     else:
         bare = hint
         meta = None
+    if meta is None:
+        meta = get_field_meta(FieldInfo.from_annotation(hint))
 
     # Optional[T] (= Union[T, None]) -> the field may be left blank (None): strip
     # the None to resolve T, and flag it so the form renders the "(none)" empty

@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
@@ -14,7 +13,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
-    ParamMeta,
     RunRequest,
     SampleWriteback,
     WritebackItem,
@@ -91,16 +89,6 @@ def _coherence_fit_review_reasons(quality: FitQuality | None) -> list[str]:
     elif rms > 0.1:
         reasons.append(f"normalized RMS={rms:.4g} >0.1")
     return reasons
-
-
-@dataclass
-class T2EchoAnalyzeParams:
-    fit_method: Annotated[Literal["fringe", "decay"], ParamMeta(label="Fit method")] = (
-        "decay"
-    )
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = (
-        False
-    )
 
 
 class T2EchoAdapter(

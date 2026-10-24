@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
@@ -12,7 +11,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
-    ParamMeta,
     RunRequest,
     WritebackItem,
     WritebackRequest,
@@ -62,12 +60,6 @@ class TimeRabiSummary(BaseModel):
     rabi_f_err: float | None = Field(
         description="Owner rabi_f_err in MHz; null retains an unavailable estimate."
     )
-
-
-@dataclass
-class LenRabiAnalyzeParams:
-    decay: Annotated[bool, ParamMeta(label="Fit decay envelope")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset")] = False
 
 
 class LenRabiAdapter(

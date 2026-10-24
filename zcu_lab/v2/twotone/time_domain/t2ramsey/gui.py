@@ -4,7 +4,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias
 
 from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
@@ -13,7 +13,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
     ParameterWriteback,
-    ParamMeta,
     RunRequest,
     SampleWriteback,
     WritebackItem,
@@ -65,12 +64,6 @@ class T2RamseyAnalyzeResult:
     detune: float
     fit_fringe: bool
     fit_quality: Mapping[str, FitQuality] | None = None
-
-
-@dataclass
-class T2RamseyAnalyzeParams:
-    fit_fringe: Annotated[bool, ParamMeta(label="Fit fringe")] = True
-    fit_phase: Annotated[bool, ParamMeta(label="Fit phase offset (fringe only)")] = True
 
 
 class T2RamseyAdapter(

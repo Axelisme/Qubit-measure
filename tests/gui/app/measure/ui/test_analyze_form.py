@@ -8,6 +8,7 @@ import pytest
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QLineEdit
+from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.ui.analyze_form import AnalyzeFormWidget
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
@@ -29,6 +30,43 @@ class _OptionalParams:
 @dataclass
 class _OptionalIntParams:
     t0: Annotated[int | None, ParamMeta(label="T0")] = None
+
+
+@dataclass
+class _CoreOptions:
+    model: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
+    cutoff: Annotated[float | None, FieldMeta(label="Gain cutoff")] = None
+    skip: Annotated[int, ParamMeta(label="Skip points")] = 2
+
+
+def test_core_options_and_param_meta_share_visible_form(qapp, tmp_path: Path):
+    form = AnalyzeFormWidget()
+    form.populate(_CoreOptions())
+    form.resize(420, 160)
+    form.show()
+    qapp.processEvents()
+    driver = ComponentDriver(form)
+    try:
+        driver.screenshot(tmp_path / "01-core-defaults.png")
+        labels = [
+            widget.text
+            for widget in driver.visible().widgets
+            if widget.kind == "QLabel"
+        ]
+        assert labels == ["Model type:", "Gain cutoff:", "Skip points:"]
+        controls = [
+            widget.text
+            for widget in driver.visible().widgets
+            if widget.kind in {"QComboBox", "QLineEdit"}
+        ]
+        assert controls == ["lor", "", "2"]
+        driver.choose_option("Model type:", "sinc")
+        driver.enter_text("Gain cutoff:", "0.25")
+        driver.screenshot(tmp_path / "02-core-edited.png")
+        assert form.read_params() == _CoreOptions(model="sinc", cutoff=0.25)
+    finally:
+        form.close()
+        form.deleteLater()
 
 
 def test_analyze_form_round_trips_values(qapp):
