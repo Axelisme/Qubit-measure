@@ -198,9 +198,10 @@ class FormEditor[F: FormModel](QWidget):
     group's first field. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
     shows a "Contains errors" note; a folded group stays folded.
-    Groups start folded. Sweep containers and their axes start open; a single
-    axis replaces its container row with a combined title and unchanged paths.
-    Modules start folded. Other model rows start folded unless collapsed=False
+    Groups start folded except Sweep, whose member axes also start open. A
+    sole nonnullable expandable Sweep member uses a combined title and keeps
+    its canonical path, selector and commands. These hints use Display.group,
+    not field names. Model rows start folded unless collapsed=False
     or their subtree has errors on the editor's first publication. Saved user
     folds take precedence, and later refreshes keep the established folds.
     Folds the user sets on groups and model rows survive rebuilds of this
@@ -534,7 +535,7 @@ class FormEditor[F: FormModel](QWidget):
         *,
         redraw: bool,
     ) -> None:
-        shown = tuple(item for item in metadata if not item.hidden)
+        shown = present_fields(tuple(item for item in metadata if not item.hidden))
         ungrouped = tuple(item for item in shown if item.group is None)
         self._sync_rows(level, ungrouped, data, preview, redraw=redraw)
         grouped: dict[str, list[FormFieldDescription]] = {}
@@ -547,6 +548,7 @@ class FormEditor[F: FormModel](QWidget):
                 self._clear_level(body)
                 self._retire(block.widget)
         for name, members in grouped.items():
+            self._group_expanded.setdefault((level.path, name), name == "Sweep")
             if name not in level.groups:
                 block = GroupBlock(
                     level.path,
@@ -580,10 +582,6 @@ class FormEditor[F: FormModel](QWidget):
         *,
         redraw: bool,
     ) -> None:
-        state = self._require_state()
-        metadata = present_fields(
-            metadata, lambda path: state.describe(path, self._require_env()).children
-        )
         wanted = {item.path for item in metadata}
         for path in tuple(level.rows):
             if path not in wanted:
@@ -648,7 +646,6 @@ class FormEditor[F: FormModel](QWidget):
             not field.collapsed
             or (
                 self._publication_count == 0
-                and field.path[-1] != "modules"
                 and errors is not None
                 and any(
                     path[: len(field.path)] == field.path for path in errors.messages
