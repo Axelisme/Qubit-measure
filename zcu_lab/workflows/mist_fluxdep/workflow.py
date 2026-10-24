@@ -40,6 +40,7 @@ from zcu_lab.workflows.common.calibration import (
     readout_due,
 )
 from zcu_lab.workflows.common.devices import set_flux
+from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
 from zcu_lab.workflows.mist_fluxdep.acquire import run_mist
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 from zcu_lab.workflows.mist_fluxdep.saving import save_mist
@@ -69,6 +70,9 @@ class MISTPlan(BaseModel):
     gain_start: float
     gain_stop: float
     gain_points: int = Field(ge=2)
+    predictor: FrequencyModel = Field(
+        description="Captured fluxonium model and device affine map"
+    )
     snapshot: RunSnapshot
 
     @model_validator(mode="after")
@@ -298,7 +302,9 @@ async def mist_fluxdep(
     """
     _ = env.soc
     _ = env.devices
-    carry = CalCarry(env.context)
+    carry = CalCarry(
+        env.context, frequency_tracker=FrequencyTracker(plan.predictor.make_predictor())
+    )
     traces = np.full((len(plan.fluxes), plan.gain_points), complex(np.nan, np.nan))
     gains = np.linspace(plan.gain_start, plan.gain_stop, plan.gain_points)
     prepare_mist_map(env.plots)

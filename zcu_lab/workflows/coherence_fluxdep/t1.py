@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
@@ -29,7 +29,8 @@ class T1Plan(BaseModel):
 
     flux_dev names the connected device. Required flux_unit is A, V or native
     (Fake); the workflow tool rejects mismatched driver units without conversion or mode
-    changes. fluxes retain absolute values in that unit and order; points >= 5 controls each uniform delay grid. qub_pulse/readout
+    changes. fluxes retain absolute values in that unit and order; points >= 5
+    controls the number of delay samples. qub_pulse/readout
     are the shared host-resolved drive and pulse-backed readout selections.
     Drive routing/waveform/gain are fixed; runtime overwrites frequency/pi
     duration and applies accepted readout frequency/gain on shared routing.
@@ -47,7 +48,7 @@ class T1Plan(BaseModel):
     fluxes: tuple[float, ...] = Field(
         description="Ordered absolute setpoints in native device units"
     )
-    points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
+    points: int = Field(default=51, ge=5, description="T1 delay samples")
     qub_pulse: PulseCfg = Field(
         description="Resolved shared spectroscopy/Rabi/pi drive"
     )
@@ -61,6 +62,9 @@ class T1Tunables(BaseModel):
     reps/rounds control T1 averaging; shared calibration is owned by Coherence.
     guess_us seeds lifetime history; sweep_factor/relax_factor multiply the
     current lifetime guess into delay-grid end/relax delay in microseconds.
+    sweep_mode/relax_mode choose history-based auto timing or fixed endpoints/
+    relax_delay_us. Auto timing uses the sweep bounds and relax_min_us; fixed
+    values bypass those clamps. uniform selects linear or exponential sampling.
     max_rel_err and max_fit_residual are strict upper bounds for error/lifetime
     and normalized residual RMS. Defaults are provisional, confirmed at CP-B/C.
     """
@@ -83,6 +87,34 @@ class T1Tunables(BaseModel):
     relax_factor: float = Field(
         default=3.0, gt=0, description="Relax delay divided by lifetime guess"
     )
+    sweep_mode: Literal["auto", "fixed"] = Field(
+        default="auto", description="History-based or fixed delay window"
+    )
+    sweep_start_us: float = Field(
+        default=0.5, ge=0, description="First delay in us, in either mode"
+    )
+    sweep_stop_us: float = Field(
+        default=50.0, gt=0, description="Fixed last delay in us"
+    )
+    sweep_stop_min_us: float = Field(
+        default=1.0, gt=0, description="Auto sweep stop lower bound in us"
+    )
+    max_length_us: float = Field(
+        default=50.0, gt=0, description="Auto sweep stop upper bound in us"
+    )
+    relax_mode: Literal["auto", "fixed"] = Field(
+        default="auto", description="T1-based or fixed relaxation"
+    )
+    relax_delay_us: float = Field(
+        default=30.0, ge=0, description="Fixed relaxation delay in us"
+    )
+    relax_min_us: float = Field(
+        default=1.0, ge=0, description="Auto relaxation lower bound in us"
+    )
+    uniform: bool = Field(
+        default=True,
+        description="Linear sampling; false selects exponential delay spacing",
+    )
     max_rel_err: float = Field(
         default=0.3, gt=0, le=1, description="Strict T1 error/lifetime upper bound"
     )
@@ -90,14 +122,26 @@ class T1Tunables(BaseModel):
         default=0.2, gt=0, le=1, description="Strict normalized residual RMS bound"
     )
 
+    @model_validator(mode="after")
+    def validate_window(self) -> T1Tunables:
+        """Reject reversed fixed windows or unreachable auto window bounds."""
+        if self.sweep_mode == "fixed":
+            if self.sweep_stop_us <= self.sweep_start_us:
+                raise ValueError("Fixed T1 stop must exceed start")
+        elif not self.sweep_start_us < self.sweep_stop_min_us <= self.max_length_us:
+            raise ValueError("Auto T1 requires start < stop minimum <= max length")
+        return self
+
 
 def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -> T1Cfg:
-    """Build a detached complete uniform native T1 cfg, without acquisition.
+    """Build a detached native T1 cfg with linear or exponential delay sampling.
 
     lifetime_us is the positive finite lifetime guess in microseconds;
-    invalid values raise ValueError. Delay ranges from zero through
-    tun.sweep_factor * lifetime_us, with plan.points samples. Relax delay is
-    tun.relax_factor * lifetime_us. reps/rounds come from tun.
+    invalid values raise ValueError. Auto stop clamps sweep_factor*lifetime_us
+    between sweep_stop_min_us and max_length_us. Auto relax floors
+    relax_factor*lifetime_us at relax_min_us. Fixed mode uses sweep_stop_us or
+    relax_delay_us unchanged. Both grids start at sweep_start_us with plan.points
+    samples. reps/rounds and uniform come from tun.
     Pi drive uses plan.qub_pulse waveform/gain and cal's accepted frequency
     and duration. Readout uses cal's frequency/gain on plan.readout routing.
     Native initial_delay/dev defaults remain owned by the native cfg model;
@@ -112,17 +156,33 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     pi_pulse.set_param("length", cal.pi_length_us)
     readout = plan.readout.model_copy(deep=True)
     apply_readout_calibration(readout, cal)
-    stop = tun.sweep_factor * lifetime_us
+    stop = (
+        min(
+            tun.max_length_us,
+            max(tun.sweep_stop_min_us, tun.sweep_factor * lifetime_us),
+        )
+        if tun.sweep_mode == "auto"
+        else tun.sweep_stop_us
+    )
+    relax = (
+        max(tun.relax_min_us, tun.relax_factor * lifetime_us)
+        if tun.relax_mode == "auto"
+        else tun.relax_delay_us
+    )
     return T1Cfg(
         reps=tun.reps,
         rounds=tun.rounds,
         acquire_retry=tun.acquire_retry,
         earlystop_snr=tun.earlystop_snr,
-        relax_delay=tun.relax_factor * lifetime_us,
+        relax_delay=relax,
+        uniform=tun.uniform,
         pi_pulse=pi_pulse,
         readout=readout,
         length=SweepCfg(
-            start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
+            start=tun.sweep_start_us,
+            stop=stop,
+            expts=plan.points,
+            step=(stop - tun.sweep_start_us) / (plan.points - 1),
         ),
     )
 

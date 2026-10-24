@@ -1,10 +1,12 @@
 """Native Echo/Ramsey cfg generation and scalar conversion carriers."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
@@ -47,9 +49,11 @@ class T2EchoTunables(BaseModel):
 
     reps/rounds control T2 averaging; shared calibration is owned by Coherence. guess_us
     seeds the delay-history EWMA in microseconds; sweep_factor multiplies it
-    into maximum delay. relax_factor times guess_us fixes relax timing without
-    an additional T1 estimate. Acceptance retains the old two T2 rejection
-    rules and is not replaced by T1 relative-error or RMS thresholds.
+    into maximum delay, capped at max_length_us. Auto relax uses relax_factor
+    times the caller's T1 estimate, floored at relax_min_us. Fixed modes use
+    sweep_start_us/sweep_stop_us and relax_delay_us without auto clamps.
+    detune_ratio adds fringes per delay step; zero selects pure Echo decay.
+    Acceptance retains the old two T2 rejection rules.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -66,6 +70,39 @@ class T2EchoTunables(BaseModel):
     guess_us: float = Field(default=20.0, gt=0)
     sweep_factor: float = Field(default=5.0, gt=0)
     relax_factor: float = Field(default=3.0, gt=0)
+    sweep_mode: Literal["auto", "fixed"] = Field(
+        default="auto", description="History-based or fixed delay window"
+    )
+    sweep_start_us: float = Field(
+        default=0.0, ge=0, description="First delay in us, in either mode"
+    )
+    sweep_stop_us: float = Field(
+        default=12.5, gt=0, description="Fixed last delay in us"
+    )
+    max_length_us: float = Field(
+        default=12.5, gt=0, description="Auto sweep stop upper bound in us"
+    )
+    relax_mode: Literal["auto", "fixed"] = Field(
+        default="auto", description="T1-based or fixed relaxation"
+    )
+    relax_delay_us: float = Field(
+        default=30.0, ge=0, description="Fixed relaxation delay in us"
+    )
+    relax_min_us: float = Field(
+        default=1.0, ge=0, description="Auto relaxation lower bound in us"
+    )
+    detune_ratio: float = Field(
+        default=0.1,
+        description="Artificial fringes per delay step; zero selects pure decay",
+    )
+
+    @model_validator(mode="after")
+    def validate_window(self) -> T2EchoTunables:
+        """Reject fixed windows or auto caps that cannot exceed the start."""
+        stop = self.sweep_stop_us if self.sweep_mode == "fixed" else self.max_length_us
+        if stop <= self.sweep_start_us:
+            raise ValueError("T2 stop/cap must exceed start")
+        return self
 
 
 class T2RamseyTunables(T2EchoTunables):
@@ -105,15 +142,22 @@ class T2Point:
 
 
 def t2echo_cfg(
-    plan: T1Plan | T2Plan, tun: T2EchoTunables, cal: CalibratedPi2, guess_us: float
+    plan: T1Plan | T2Plan,
+    tun: T2EchoTunables,
+    cal: CalibratedPi2,
+    guess_us: float,
+    *,
+    t1_estimate_us: float,
 ) -> T2EchoCfg:
-    """Build detached zero-detune Echo cfg from the successful fitted pi/pi2.
+    """Build detached Echo cfg with the fitted pi/pi2 and optional fringes.
 
     guess_us is the positive finite delay-grid estimate in microseconds.
     Template waveform/gain is identical for pi and pi/2, with separate fitted
-    durations. Readout scalars use calibration. Delay ends at sweep_factor times
-    guess_us, relax at relax_factor times tun.guess_us. Invalid grid estimates
-    raise ValueError; no setup/acquisition occurs or caller models change.
+    durations. Readout scalars use calibration. Auto stop caps sweep_factor times
+    guess_us at max_length_us. Auto relax uses the positive finite T1 estimate
+    (current accepted T1, historical EWMA, then seed), floored at relax_min_us.
+    Fixed modes use explicit timing unchanged. Detune in MHz is ratio/step.
+    Invalid grid/T1 estimates raise ValueError; inputs remain unchanged.
     """
     sweep = _sweep(plan, tun, guess_us)
     pi = plan.qub_pulse.model_copy(deep=True)
@@ -129,8 +173,8 @@ def t2echo_cfg(
         rounds=tun.rounds,
         acquire_retry=tun.acquire_retry,
         earlystop_snr=tun.earlystop_snr,
-        relax_delay=tun.relax_factor * tun.guess_us,
-        detune=0.0,
+        relax_delay=_relax(tun, t1_estimate_us),
+        detune=tun.detune_ratio / sweep.step,
         pi_pulse=pi,
         pi2_pulse=pi2,
         readout=ro,
@@ -139,7 +183,12 @@ def t2echo_cfg(
 
 
 def t2ramsey_cfg(
-    plan: T1Plan | T2Plan, tun: T2RamseyTunables, cal: CalibratedPi2, guess_us: float
+    plan: T1Plan | T2Plan,
+    tun: T2RamseyTunables,
+    cal: CalibratedPi2,
+    guess_us: float,
+    *,
+    t1_estimate_us: float,
 ) -> T2RamseyCfg:
     """Build detached Ramsey cfg with native detune_ratio/length_step MHz.
 
@@ -158,7 +207,7 @@ def t2ramsey_cfg(
         rounds=tun.rounds,
         acquire_retry=tun.acquire_retry,
         earlystop_snr=tun.earlystop_snr,
-        relax_delay=tun.relax_factor * tun.guess_us,
+        relax_delay=_relax(tun, t1_estimate_us),
         detune=tun.detune_ratio / sweep.step,
         pi2_pulse=pi2,
         readout=ro,
@@ -169,7 +218,26 @@ def t2ramsey_cfg(
 def _sweep(plan: T1Plan | T2Plan, tun: T2EchoTunables, guess: float) -> SweepCfg:
     if not np.isfinite(guess) or guess <= 0:
         raise ValueError("T2 grid guess must be positive and finite")
-    stop = tun.sweep_factor * guess
+    stop = (
+        min(tun.max_length_us, tun.sweep_factor * guess)
+        if tun.sweep_mode == "auto"
+        else tun.sweep_stop_us
+    )
+    if stop <= tun.sweep_start_us:
+        raise ValueError("T2 generated stop must exceed start")
     return SweepCfg(
-        start=0.0, stop=stop, expts=plan.points, step=stop / (plan.points - 1)
+        start=tun.sweep_start_us,
+        stop=stop,
+        expts=plan.points,
+        step=(stop - tun.sweep_start_us) / (plan.points - 1),
+    )
+
+
+def _relax(tun: T2EchoTunables, t1_estimate_us: float) -> float:
+    if not np.isfinite(t1_estimate_us) or t1_estimate_us <= 0:
+        raise ValueError("T1 relaxation estimate must be positive and finite")
+    return (
+        max(tun.relax_min_us, tun.relax_factor * t1_estimate_us)
+        if tun.relax_mode == "auto"
+        else tun.relax_delay_us
     )

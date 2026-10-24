@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Annotated, Self
 
 from pydantic import Field, model_validator
-from zcu_tools.gui.form import Display, FormModel, field_error
+from zcu_tools.gui.form import Display, field_error
 
 from zcu_lab.workflows.common.calibration import CalibrationTunables
+from zcu_lab.workflows.common.frequency_form import FrequencyTunablesForm
 
 
-class CalibrationTunablesForm(FormModel):
+class CalibrationTunablesForm(FrequencyTunablesForm):
     """User-editable calibration generation, acceptance and cadence knobs.
 
     Field descriptions carry the ordinary knob meanings. Acceptance/cadence and
@@ -126,6 +127,12 @@ class CalibrationTunablesForm(FormModel):
             ro_acquire_retry=self.ro_acquire_retry,
             span_mhz=self.span_mhz,
             qf_widen=self.qf_widen,
+            detune_center_mhz=self.detune_center_mhz,
+            qf_points=self.qf_points,
+            drive_gain_mode=self.drive_gain_mode,
+            target_kappa=self.target_kappa,
+            drive_gain_cap=self.drive_gain_cap,
+            physical_recovery_mode=self.physical_recovery_mode,
             max_frequency_rel_err=self.max_frequency_rel_err,
             max_rabi_rel_err=self.max_rabi_rel_err,
             max_fit_residual=self.max_fit_residual,

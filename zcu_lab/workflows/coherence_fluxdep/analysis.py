@@ -1,5 +1,7 @@
 """coherence_fluxdep analysis helpers for lab workflows."""
 
+from dataclasses import dataclass
+
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay, fit_decay_fringe
@@ -17,6 +19,17 @@ from zcu_lab.workflows.common.analysis import (
 )
 
 
+@dataclass(frozen=True)
+class RamseyFit(DecayFit):
+    """Ramsey decay fit with physical detune_mhz after removing the phase ramp.
+
+    Inherited fields retain DecayFit's units and trace alignment.
+    detune_mhz is fitted fringe frequency minus the actual artificial detune.
+    """
+
+    detune_mhz: float
+
+
 def _fluxdep_projection(
     signals: NDArray[np.complex128], *, echo: bool
 ) -> NDArray[np.float64]:
@@ -26,30 +39,38 @@ def _fluxdep_projection(
     return 1.0 - normalized if real[0] < 0.5 * (upper + lower) else normalized
 
 
-def analyze_t2echo_fluxdep(result: T2EchoResult) -> DecayFit | Failed:
+def analyze_t2echo_fluxdep(
+    result: T2EchoResult, *, fit_fringe: bool
+) -> DecayFit | Failed:
     """Fit Hahn-echo decay to estimate the refocused coherence lifetime.
 
     Supply matching 1-D microsecond times and complex IQ, at least five samples,
-    with strictly increasing finite times and explicit zero detune. Normalize
-    native rotated IQ to [0,1], reversing polarity when the initial signal is
-    low, then fit_decay without skipping the first sample. Return DecayFit with
+    with strictly increasing finite times. Normalize IQ to [0,1], reversing
+    polarity when the initial signal is low. Pass fit_fringe=False for requested
+    detune_ratio=0, True otherwise, even if the hardware rounds the ramp to zero.
+    This selects fit_decay or fit_decay_fringe respectively. Both keep the
+    first sample. Return DecayFit with
     whole-trace residual curves and microsecond estimates. Unlike the native
     CLI/overnight analysis, this fluxdep fit keeps sample zero. Invalid input
-    raises ValueError for grid/shape/detune errors. Nonfinite measured IQ and
+    raises ValueError for grid/shape errors. Nonfinite measured IQ and
     fit_or_failed's expected failures return Failed(reason); unexpected errors
     propagate. No acceptance or I/O occurs.
     """
-    if result.true_activate_detune != 0.0:
-        raise ValueError("Echo fluxdep requires explicit zero detune")
     failure = _validate_fluxdep_trace(result.times, result.signals)
     if failure is not None:
         return failure
     # Normalize the complete trace with the flux-sweep polarity policy.
     observed = _fluxdep_projection(result.signals, echo=True)
-    fit = fit_or_failed(lambda: fit_decay(result.times, observed))
-    if isinstance(fit, Failed):
-        return fit
-    lifetime, error, fitted, _ = fit
+    if not fit_fringe:
+        fit = fit_or_failed(lambda: fit_decay(result.times, observed))
+        if isinstance(fit, Failed):
+            return fit
+        lifetime, error, fitted, _ = fit
+    else:
+        fringe = fit_or_failed(lambda: fit_decay_fringe(result.times, observed))
+        if isinstance(fringe, Failed):
+            return fringe
+        lifetime, error, _detune, _detune_error, fitted, _ = fringe
     return DecayFit(
         float(lifetime),
         float(error),
@@ -59,17 +80,25 @@ def analyze_t2echo_fluxdep(result: T2EchoResult) -> DecayFit | Failed:
     )
 
 
-def analyze_t2ramsey(result: T2RamseyResult) -> DecayFit | Failed:
+def analyze_t2ramsey(result: T2RamseyResult) -> RamseyFit | Failed:
     """Fit Ramsey fringes to estimate the unrefocused dephasing lifetime.
 
     Supply matching 1-D microsecond delays and complex IQ, at least five samples,
-    with strictly increasing finite delays. Native rotated IQ is normalized
+    with strictly increasing finite delays and finite runtime artificial-detune
+    metadata. Missing metadata raises ValueError rather than reporting the
+    artificial fringe frequency as physical detune. Native rotated IQ is normalized
     to [0,1] and initial-low polarity reversed. fit_decay_fringe estimates the
-    microsecond lifetime and marginal error. Observed/fitted retain all samples.
+    microsecond lifetime and marginal error. detune_mhz subtracts the actual
+    artificial phase-ramp frequency from the fitted fringe frequency.
+    Observed/fitted retain all samples.
     Grid/shape errors raise ValueError. Nonfinite measured IQ and fit_or_failed's
     expected failures return Failed(reason); unexpected errors propagate. This
     function does not reject estimates, refit calibration, acquire, plot or save.
     """
+    if result.true_activate_detune is None or not np.isfinite(
+        result.true_activate_detune
+    ):
+        raise ValueError("Ramsey fluxdep requires actual artificial-detune metadata")
     failure = _validate_fluxdep_trace(result.times, result.signals)
     if failure is not None:
         return failure
@@ -78,13 +107,14 @@ def analyze_t2ramsey(result: T2RamseyResult) -> DecayFit | Failed:
     fit = fit_or_failed(lambda: fit_decay_fringe(result.times, observed))
     if isinstance(fit, Failed):
         return fit
-    lifetime, error, _detune, _error, fitted, _ = fit
-    return DecayFit(
+    lifetime, error, detune, _error, fitted, _ = fit
+    return RamseyFit(
         float(lifetime),
         float(error),
         observed,
         fitted,
         compute_fit_quality(observed, fitted, {}, None),
+        float(detune - result.true_activate_detune),
     )
 
 
