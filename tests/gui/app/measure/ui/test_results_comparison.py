@@ -1,4 +1,4 @@
-"""Drive the fixed comparison table and aligned all-PNG run columns."""
+"""Drive the saved-summary comparison table and aligned all-PNG run columns."""
 
 from collections.abc import Iterator
 from dataclasses import replace
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtGui import QColor, QImage, QPainter
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QScrollArea, QSplitter, QTableWidget
-from zcu_tools.datafile import JsonObject
 from zcu_tools.gui.app.measure.services.results_index import ResultsIndex
 from zcu_tools.gui.app.measure.ui.results_comparison import ResultsComparison
 
@@ -22,7 +22,7 @@ def comparison(qapp: QApplication, tmp_path: Path) -> Iterator[ResultsComparison
         run = saved_run(
             tmp_path,
             f"run-{number}",
-            "mux/t1",
+            "archived/arbitrary",
             {
                 "tones": [
                     {
@@ -84,7 +84,7 @@ def test_pins_table_remove_and_clear(
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 6"
     rows = ui.table_rows(object_name="results.comparison_table")
     assert comparison.findChildren(QTableWidget)[0].rowCount() == 6
-    assert "Q5: 21.25\nQ9: 8" in rows[0].columns
+    assert "0: 21.25\n1: 8" in rows[0].columns
     ui.screenshot(tmp_path / "comparison-table.png")
     ui.click(object_name="results.compare.remove.2")
     assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 5"
@@ -123,52 +123,10 @@ def test_all_run_columns_align_png_rows_and_missing_members(
     ui.screenshot(tmp_path / "comparison-splitter-dragged.png")
 
 
-@pytest.mark.parametrize(
-    ("experiment", "summary", "expected", "fact", "scenario"),
-    [
-        (
-            "twotone/t1",
-            {"t1": 21.25, "fit_quality": {"decay": {"r2": 0.01, "invalid": []}}},
-            "21.25",
-            "decay: 0.01",
-            "flat",
-        ),
-        (
-            "mux/onetone",
-            {
-                "resonators": [
-                    {
-                        "label": "R2",
-                        "freq": 6.125,
-                        "fit_quality": {"peak": {"r2": 0.8}},
-                    },
-                    {"name": "R8", "freq": 7.25, "fit_quality": {"peak": {"r2": 0.3}}},
-                ]
-            },
-            "R2: 6.125\nR8: 7.25",
-            "R2 / peak: 0.8\nR8 / peak: 0.3",
-            "resonators",
-        ),
-        (
-            "unknown/custom",
-            {"t1": 123, "failure": "saved failure"},
-            "—",
-            "saved failure",
-            "unknown",
-        ),
-    ],
-    ids=("flat", "resonators", "unknown"),
-)
-def test_saved_summary_cells_are_visible(
-    qapp: QApplication,
-    tmp_path: Path,
-    experiment: str,
-    summary: JsonObject,
-    expected: str,
-    fact: str,
-    scenario: str,
-) -> None:
-    run = saved_run(tmp_path, "historical", experiment, summary)
+def test_unknown_summary_value_is_visible(qapp: QApplication, tmp_path: Path) -> None:
+    run = saved_run(
+        tmp_path, "historical", "deleted/arbitrary", {"unexpected": {"leaf": 19.75}}
+    )
     widget = ResultsComparison(ResultsIndex(tmp_path, (run,)))
     widget.pin_run(run)
     widget.resize(1400, 700)
@@ -176,18 +134,44 @@ def test_saved_summary_cells_are_visible(
     qapp.processEvents()
     ui = ComponentDriver(widget)
     try:
+        ui.screenshot(tmp_path / "comparison-neutral-summary.png")
         rows = ui.table_rows(object_name="results.comparison_table")
-        assert len(rows) == 1
-        assert expected in rows[0].columns
-        assert fact in rows[0].columns
-        ui.select_table_row("historical", object_name="results.comparison_table")
-        ui.screenshot(tmp_path / f"comparison-{scenario}.png")
-        ui.click("Clear comparison")
-        assert ui.observe(object_name="results.pin_count").text == "Pinned runs: 0"
+        assert rows[0].columns == (
+            "sample",
+            "historical",
+            "deleted/arbitrary",
+            "—",
+            "19.75",
+        )
     finally:
         widget.close()
         widget.deleteLater()
         qapp.processEvents()
+
+
+def test_table_drag_and_horizontal_navigation_reveal_summary_cells(
+    comparison: ResultsComparison, tmp_path: Path
+) -> None:
+    ui = ComponentDriver(comparison)
+    ui.resize_window(850, 900)
+    ui.select_table_row("run-0", object_name="results.comparison_table")
+    before = ui.table_rows(object_name="results.comparison_table")[0]
+    assert before.columns[7] == "0: []\n1: —"
+    assert before.columns[-1] == ""
+    ui.screenshot(tmp_path / "comparison-before-column-drag.png")
+    ui.drag_column(0, 160, object_name="results.comparison_table")
+    ui.screenshot(tmp_path / "comparison-after-column-drag.png")
+    after = ui.table_rows(object_name="results.comparison_table")[0]
+    assert after.columns[7] == ""
+    ui.press_key(
+        Qt.Key.Key_End,
+        object_name="results.comparison_table",
+        modifiers=Qt.KeyboardModifier.ControlModifier,
+    )
+    scrolled = ui.table_rows(object_name="results.comparison_table")
+    assert scrolled[-1].columns[-1] == "0: —\n1: saved failure"
+    assert scrolled[-1].columns[0] == ""
+    ui.screenshot(tmp_path / "comparison-horizontal-end.png")
 
 
 def test_pin_api_is_atomic_and_preserves_insertion_order(

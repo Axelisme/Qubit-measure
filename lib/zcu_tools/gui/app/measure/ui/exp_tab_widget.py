@@ -277,6 +277,11 @@ class ExpTabWidget(QWidget):
         self._cfg_unsub: Callable[[], None] | None = None
         self._follow_cfg()
         run_layout.addWidget(self._form_scroll, stretch=1)
+        self._run_cfg_notice = QLabel()
+        self._run_cfg_notice.setObjectName("run.cfg_error")
+        self._run_cfg_notice.setWordWrap(True)
+        self._run_cfg_notice.hide()
+        run_layout.addWidget(self._run_cfg_notice)
 
         # Explicit source actions share the idle row; running shows only Stop.
         self._run_action_bar = QFrame()
@@ -1011,6 +1016,12 @@ class ExpTabWidget(QWidget):
         """Enable idle Run and project the first blocking reason in UI priority order."""
         invalid_reason = self.cfg_invalid_reason()
         cfg_valid = invalid_reason is None
+        self._run_cfg_notice.setText(
+            "" if cfg_valid else f"Config invalid: {invalid_reason}"
+        )
+        self._run_cfg_notice.setVisible(
+            not cfg_valid and self._cfg.unavailable_reason is None
+        )
         can_run = (
             writable
             and not local_busy

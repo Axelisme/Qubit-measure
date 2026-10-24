@@ -86,8 +86,10 @@ form/action builders live in `experiment_ledger.py`.
 describes how `ExpTabWidget` and `ExperimentFigureArea` divide presentation
 responsibilities. `ExperimentFigureArea` is not a second application controller.
 
-For every adapter, `MainWindow` projects the current tab's cfg invalid reason to the bottom status on interaction refresh and tab selection, while Run stays disabled.
-A valid cfg clears only that cfg diagnostic; background tabs and valid refreshes do not clear unrelated status messages.
+Cfg invalid reasons stay in the form area and disabled Run tooltip. A history tab
+without a form retains the factory's original reason there. Edits, interaction
+refreshes and tab selection preserve unrelated bottom-status messages. They do
+not cover the tab or figure area with a cfg diagnostic. Load behavior is unchanged.
 
 `AnalyzeFormWidget` keeps invalid optional scalar text visible. Only blank text
 means None. A committed parse failure shows a field-labelled error and publishes
@@ -115,19 +117,31 @@ one representative PNG per run. Selecting a run shows all its saved PNGs in a
 vertically scrolling gallery, separate from the measure figure pager.
 Runs without PNGs remain selectable in the tree.
 Both grouping orders and the experiment filter use the saved experiment string.
-Browsing never queries the catalog. Only Open resolves an adapter through the
-catalog owner, then delegates to existing Load admission. Success selects the
+Browsing never queries the catalog. Only Load into analysis tab resolves an
+adapter through the catalog owner, then delegates to existing Load admission. Success selects the
 new history tab and raises the measure window; failure stays in the right-side
 feedback. Deleted experiments and old cfg versions remain browsable.
 A left click on a group image opens its run directly and selects that figure.
-Within a run, left clicks select the current figure and open or replace one
-non-modal Tool preview. Esc closes it; closing the browser hides it. Gallery
-cards and decoded rasters stay local to one gallery, with at most one retained
+Within a run, left clicks select the current figure and open a browser-owned
+lightbox. Comparison PNG cells open the same overlay with that cell's run and
+exact PNG, independently of Gallery focus. The translucent backdrop covers the
+browser content and blocks clicks on the underlying gallery. The native raster
+fits the available area with its aspect ratio preserved as the browser resizes.
+The caption shows the short run id and filename. Clicking outside the image,
+including its caption, or pressing Esc dismisses it. Clicking the image keeps it
+open. Closing the browser dismisses the overlay before reopening.
+Gallery cards and decoded rasters stay local to one gallery, with at most one retained
 card per indexed PNG. File identity, size and timestamps invalidate changed
 members. Back/Forward and grouping reuse unchanged cards and rasters.
-Context menus copy a member path or image and pin its run in ResultsComparison.
-`ResultsComparison` shows the fixed-column table above a filename-aligned image
-grid, separated by a vertical splitter. All pins are run columns; PNG filenames
+Gallery context menus copy a member path or image and pin its run in
+ResultsComparison. Tree run context menus pin the clicked run or Load into
+analysis tab through the same Load owner as the right-side button. Group nodes
+have neither command. The right-side action row contains only Load into analysis
+tab; the action loads saved data without measurement or automatic analysis.
+`ResultsComparison` shows identity columns and an ordered union of saved summary
+JSON leaf paths above a filename-aligned image grid, separated by a vertical
+splitter. Object-list cells use indexed lines; other lists use JSON text. Table
+columns support dragging and horizontal scrolling. All pins are run columns; PNG filenames
 are rows. Missing members show an em dash. Headers unpin or open a run. Pin count
 updates the Comparison tab caption. Context-menu pinning reveals that PNG row;
 there is no per-pin selected-image state.

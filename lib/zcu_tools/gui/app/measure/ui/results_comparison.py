@@ -1,10 +1,10 @@
-"""Pinned fixed-column tables and filename-aligned saved PNG comparisons."""
+"""Pinned summary-JSON tables and filename-aligned saved PNG comparisons."""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QMouseEvent
+from qtpy.QtGui import QMouseEvent, QPixmap
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QGridLayout,
@@ -41,11 +41,14 @@ class ResultsComparison(QWidget):
     pins_changed emits after membership changes. run_activated emits the opaque
     run key when a table row or image-column header is double-clicked. All
     callbacks run synchronously on the Qt owner thread. Pins belong only to this
-    instance; no selected-image or image-count limit is applied.
+    instance; no selected-image or image-count limit is applied. image_activated
+    emits the clicked cell's opaque run key, exact PNG basename and native raster
+    on left click. Missing or unreadable cells do not emit it.
     """
 
     pins_changed = pyqtSignal()
     run_activated = pyqtSignal(str)
+    image_activated = pyqtSignal(str, str, QPixmap)
 
     def __init__(self, index: ResultsIndex, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -165,6 +168,13 @@ class ResultsComparison(QWidget):
                             f"results.compare.image.{row - 1}.{column - 1}"
                         )
                         image.setToolTip(f"{run.run_path.name}\n{filename}")
+                        image.activated.connect(
+                            lambda key=run.key, name=filename, source=image: (
+                                self.image_activated.emit(
+                                    key, name, source.original_pixmap()
+                                )
+                            )
+                        )
                         cell = image
                 else:
                     cell = QLabel("—")

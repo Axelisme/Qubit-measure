@@ -1,5 +1,7 @@
-"""Saved result comparisons preserve values and historical quality facts."""
+"""Saved summaries project as neutral JSON, independent of experiment names."""
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,254 +11,153 @@ from zcu_tools.gui.app.measure.services.results_index import ResultsIndex
 from tests.gui.app.measure._comparison_support import saved_run
 
 
-def test_mixed_tones_keep_names_fit_facts_failures_and_input_order(
-    tmp_path: Path,
+@pytest.mark.parametrize("experiment", ["retired/custom", "mux/t2ramsey", "t1"])
+def test_summary_paths_union_follows_pin_and_json_order(
+    tmp_path: Path, experiment: str
 ) -> None:
-    mux = saved_run(
+    first = saved_run(
         tmp_path,
-        "mux",
-        "mux/t2ramsey",
-        {
-            "tones": [
-                {
-                    "name": "Q5",
-                    "t2": 11.5,
-                    "fit_quality": {
-                        "decay": {"r2": 0.03, "invalid": []},
-                        "fringe": {
-                            "r2": 0.9,
-                            "invalid": [{"path": "amplitude", "reason": "singular"}],
-                        },
-                    },
-                },
-                {"label": "Q9", "t2": 8, "fit_quality": {"r2": 0.7, "invalid": False}},
-                {"index": 7, "failure": "fit did not converge"},
-            ]
-        },
-    )
-    resonator = saved_run(
-        tmp_path,
-        "readout",
-        "mux/onetone",
-        {
-            "resonators": [
-                {"label": "R2", "freq": 6.125, "kappa": 0.002},
-                {"name": "R8", "freq": 7.25},
-            ]
-        },
-    )
-    unknown = saved_run(
-        tmp_path, "unknown", "custom/t1ish", {"t1": 999, "failure": "saved failure"}
-    )
-    table = build_comparison(
-        ResultsIndex(tmp_path, (mux, resonator, unknown)),
-        (unknown.key, resonator.key, mux.key),
-    )
-    assert tuple(row.run_key for row in table.rows) == (
-        unknown.key,
-        resonator.key,
-        mux.key,
-    )
-    assert table.columns == (
-        "entry",
-        "point",
-        "experiment",
-        "time",
-        "t2",
-        "t2_err",
-        "detune",
-        "freq",
-        "fwhm",
-        "kappa",
-        "depth",
-        "r2",
-        "invalid",
-        "failure",
-        "issues",
-    )
-    cells = dict(zip(table.columns, table.rows[2].cells, strict=True))
-    assert cells["t2"] == "Q5: 11.5\nQ9: 8\n7: —"
-    assert cells["r2"] == "Q5 / decay: 0.03\nQ5 / fringe: 0.9\nQ9: 0.7\n7: —"
-    assert (
-        cells["invalid"]
-        == 'Q5 / decay: []\nQ5 / fringe: [{"path": "amplitude", "reason": "singular"}]\nQ9: false\n7: —'
-    )
-    assert cells["failure"] == "Q5: —\nQ9: —\n7: fit did not converge"
-    assert table.rows[1].cells[7] == "R2: 6.125\nR8: 7.25"
-    assert table.rows[0].cells[-2] == "saved failure"
-
-
-def test_registered_spectrum_name_selects_saved_frequency_fields(
-    tmp_path: Path,
-) -> None:
-    run = saved_run(
-        tmp_path,
-        "spectrum",
-        "twotone/freq",
-        {"freq": 5123.75, "freq_err": 0.1, "fwhm": 2, "unrelated": 4},
-    )
-    table = build_comparison(ResultsIndex(tmp_path, (run,)), (run.key,))
-    assert table.columns[4:7] == ("freq", "freq_err", "fwhm")
-    assert table.rows[0].cells[4:7] == ("5123.75", "0.1", "2")
-
-
-@pytest.mark.parametrize(
-    ("experiment", "fields", "values"),
-    [
-        (
-            "mux/rabi/len",
-            ("pi_len", "pi_len_err", "pi2_len", "rabi_f"),
-            ("0.2", "0.01", "0.1", "2.5"),
-        ),
-        (
-            "mux/onetone_fine",
-            ("freq", "fwhm", "kappa", "depth"),
-            ("6123.5", "0.4", "0.2", "0.8"),
-        ),
-        (
-            "mux/rabi/amp",
-            ("pi_gain", "pi_gain_err", "pi2_gain"),
-            ("0.3", "0.02", "0.15"),
-        ),
-        (
-            "twotone/rabi/amp_rabi",
-            ("pi_gain", "pi_gain_err", "pi2_gain"),
-            ("0.3", "0.02", "0.15"),
-        ),
-        (
-            "twotone/ge/rabi_gain",
-            ("pi_gain", "pi_gain_err", "pi2_gain"),
-            ("0.3", "0.02", "0.15"),
-        ),
-        (
-            "twotone/rabi/len_rabi",
-            ("pi_len", "pi_len_err", "pi2_len", "rabi_f"),
-            ("0.2", "0.01", "0.1", "2.5"),
-        ),
-        (
-            "archive/twotone/freq",
-            ("freq", "freq_err", "fwhm"),
-            ("6123.5", "0.05", "0.4"),
-        ),
-        ("custom/rabi/length_scan", (), ()),
-        ("custom/onetone_fine_scan", (), ()),
-        ("archive/not_twotone/freq", (), ()),
-        ("archive/twotone/freq_scan", (), ()),
-    ],
-)
-def test_historical_path_tokens_select_only_declared_saved_fields(
-    tmp_path: Path,
-    experiment: str,
-    fields: tuple[str, ...],
-    values: tuple[str, ...],
-) -> None:
-    run = saved_run(
-        tmp_path,
-        "historical",
+        "first",
         experiment,
-        {
-            "pi_len": 0.2,
-            "pi_len_err": 0.01,
-            "pi2_len": 0.1,
-            "rabi_f": 2.5,
-            "pi_gain": 0.3,
-            "pi_gain_err": 0.02,
-            "pi2_gain": 0.15,
-            "freq": 6123.5,
-            "freq_err": 0.05,
-            "fwhm": 0.4,
-            "kappa": 0.2,
-            "depth": 0.8,
-        },
+        {"unknown": 12.5, "fit_quality": {"nested": {"r2": 0.03}}, "zero": 0},
     )
-    table = build_comparison(ResultsIndex(tmp_path, (run,)), (run.key,))
+    second = saved_run(
+        tmp_path, "second", "arbitrary/name", {"zero": False, "later": "saved"}
+    )
+    index = ResultsIndex(tmp_path, (first, second))
+    table = build_comparison(index, (first.key, second.key))
     assert table.columns == (
         "entry",
         "point",
         "experiment",
         "time",
-        *fields,
-        "r2",
-        "invalid",
-        "failure",
-        "issues",
+        "unknown",
+        "fit_quality.nested.r2",
+        "zero",
+        "later",
     )
-    assert table.rows[0].cells[4:-4] == values
+    assert table.rows[0].cells == (
+        "sample",
+        "first",
+        experiment,
+        "—",
+        "12.5",
+        "0.03",
+        "0",
+        "—",
+    )
+    assert table.rows[1].cells == (
+        "sample",
+        "second",
+        "arbitrary/name",
+        "—",
+        "—",
+        "—",
+        "false",
+        "saved",
+    )
+    reversed_table = build_comparison(index, (second.key, first.key))
+    assert reversed_table.columns[4:] == (
+        "zero",
+        "later",
+        "unknown",
+        "fit_quality.nested.r2",
+    )
+    assert tuple(row.run_key for row in reversed_table.rows) == (second.key, first.key)
 
 
-def test_direct_quality_diagnostics_keep_tone_label(tmp_path: Path) -> None:
+def test_object_lists_union_leaf_paths_and_use_indices_not_labels(
+    tmp_path: Path,
+) -> None:
     run = saved_run(
         tmp_path,
-        "direct",
-        "mux/t1",
+        "lists",
+        "unknown/object-list",
         {
-            "tones": [
-                {
-                    "name": "Q4",
-                    "t1": 20,
-                    "fit_quality": {
-                        "r2": 0.02,
-                        "invalid": [{"path": "t1", "reason": "saved diagnostic"}],
-                    },
-                }
-            ]
+            "items": [
+                {"name": "Q5", "value": 2.5, "nested": {"enabled": True}},
+                {"label": "Q9", "nested": {"extra": "saved"}},
+                {},
+            ],
+            "scalars": [1, "two", None, False],
+            "mixed": [{"value": 3}, 4],
+            "empty_list": [],
+            "empty_object": {},
+            "null_value": None,
         },
     )
     table = build_comparison(ResultsIndex(tmp_path, (run,)), (run.key,))
-    assert (
-        table.rows[0].cells[-3] == 'Q4: [{"path": "t1", "reason": "saved diagnostic"}]'
+    assert table.columns[4:] == (
+        "items.name",
+        "items.value",
+        "items.nested.enabled",
+        "items.label",
+        "items.nested.extra",
+        "scalars",
+        "mixed",
+        "empty_list",
+        "null_value",
+    )
+    assert table.rows[0].cells[4:] == (
+        "0: Q5\n1: —\n2: —",
+        "0: 2.5\n1: —\n2: —",
+        "0: true\n1: —\n2: —",
+        "0: —\n1: Q9\n2: —",
+        "0: —\n1: saved\n2: —",
+        '[1, "two", null, false]',
+        '[{"value": 3}, 4]',
+        "[]",
+        "null",
     )
 
 
-def test_unknown_keys_raise_and_broken_files_remain_visible(tmp_path: Path) -> None:
-    run = saved_run(tmp_path, "broken", None, {})
-    run.analysis_paths[0].write_text("broken", encoding="utf-8")
+def test_analysis_members_merge_without_parameters_and_isolate_bad_json(
+    tmp_path: Path,
+) -> None:
+    run = saved_run(tmp_path, "members", None, {"entry": "saved entry", "value": 1})
+    (first,) = run.analysis_paths
+    first.write_text(
+        json.dumps(
+            {
+                "summary": {"entry": "saved entry", "value": 1},
+                "parameters": {"hidden_parameter": 999},
+            }
+        ),
+        encoding="utf-8",
+    )
+    second = first.with_name("second.json")
+    second.write_text(
+        json.dumps({"summary": {"value": 2, "later": None}}), encoding="utf-8"
+    )
+    broken = first.with_name("broken.json")
+    broken.write_text("broken JSON", encoding="utf-8")
+    run = replace(run, analysis_paths=(first, second, broken))
     index = ResultsIndex(tmp_path, (run,))
     with pytest.raises(KeyError):
         build_comparison(index, ("missing",))
     table = build_comparison(index, (run.key,))
-    assert table.rows[0].cells[2:4] == ("—", "—")
-    assert "analysis.json" in table.rows[0].cells[-1]
-
-
-def test_flat_saved_summary_uses_fixed_fields_and_missing_values(
-    tmp_path: Path,
-) -> None:
-    run = saved_run(
-        tmp_path,
-        "flat",
-        "twotone/time_domain/t1",
-        {"t1": 21.25, "t1_err": 0, "extra": 999, "r2": 0.01},
-    )
-    table = build_comparison(ResultsIndex(tmp_path, (run,)), (run.key,))
     assert table.columns == (
         "entry",
         "point",
         "experiment",
         "time",
-        "t1",
-        "t1_err",
-        "t1b",
-        "r2",
-        "invalid",
-        "failure",
-        "issues",
+        "entry",
+        "value",
+        "later",
     )
-    assert [(row.run_key, row.cells) for row in table.rows] == [
-        (
-            run.key,
-            (
-                "sample",
-                "flat",
-                "twotone/time_domain/t1",
-                "—",
-                "21.25",
-                "0",
-                "—",
-                "0.01",
-                "—",
-                "—",
-                "—",
-            ),
-        )
-    ]
+    assert table.rows[0].cells == (
+        "sample",
+        "members",
+        "—",
+        "—",
+        "analysis.json: saved entry",
+        "analysis.json: 1\nsecond.json: 2",
+        "second.json: null",
+    )
+    assert build_comparison(index, ()).columns == (
+        "entry",
+        "point",
+        "experiment",
+        "time",
+    )
+    assert build_comparison(index, ()).rows == ()

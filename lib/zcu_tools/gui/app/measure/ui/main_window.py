@@ -161,7 +161,6 @@ class MainWindow(QMainWindow):
         self._workflow_busy = False
         self._writable = True
         self._tab_widgets: dict[str, ExpTabWidget] = {}
-        self._cfg_status_message: str | None = None
         self._tab_actions: TabActions = _MainWindowTabActions(self)
         self._dialog_refs = DialogRefStore()
         self._dialog_presenter = dialog_presenter or QtDialogPresenter(
@@ -576,17 +575,6 @@ class MainWindow(QMainWindow):
         if tab_w is None or not self._ctrl.has_tab(tab_id):
             return
         tab_w.update_interaction_state(snapshot or self._ctrl.get_tab_snapshot(tab_id))
-        if self._tabs.currentWidget() is tab_w:
-            self._refresh_cfg_status(tab_w)
-
-    def _refresh_cfg_status(self, tab_w: ExpTabWidget | None) -> None:
-        reason = tab_w.cfg_invalid_reason() if tab_w is not None else None
-        if reason is not None:
-            message = f"Config invalid: {reason}"
-            self.show_status_message(message)
-            self._cfg_status_message = message
-        elif self._cfg_status_message is not None:
-            self.show_status_message("")
 
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
@@ -776,7 +764,6 @@ class MainWindow(QMainWindow):
 
     def show_status_message(self, message: str) -> None:
         logger.info("status: %s", message)
-        self._cfg_status_message = None
         self._status_label.setText(message)
         self._status_label.setToolTip(message)
 
@@ -1028,11 +1015,9 @@ class MainWindow(QMainWindow):
     def _on_current_tab_changed(self, index: int) -> None:
         widget = self._tabs.widget(index)
         if not isinstance(widget, ExpTabWidget):
-            self._refresh_cfg_status(None)
             return
         if not self._ctrl.has_tab(widget.tab_id):
             return
-        self._refresh_cfg_status(widget)
         if self._ctrl.control_identity.status().holder == "gui":
             self._ctrl.set_active_tab(widget.tab_id)
 
@@ -1066,8 +1051,6 @@ class MainWindow(QMainWindow):
         if reason is not None:
             msg = f"Config invalid: {reason}"
             logger.warning("run_or_stop_tab: blocked — %s", msg)
-            self.show_status_message(msg)
-            self._cfg_status_message = msg
             return
         self._ctrl.start_run(tab_id)
 
