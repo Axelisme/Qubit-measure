@@ -7,7 +7,6 @@ guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -16,7 +15,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -26,15 +24,10 @@ from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.jpa.power.core import PowerCfg, PowerExp, PowerResult
+from zcu_lab.v2.jpa.power.core import PowerAnalysis, PowerCfg, PowerExp, PowerResult
 from zcu_lab.v2.jpa.power.form import make_form
 
 JpaPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
-
-
-@dataclass
-class JpaPowerAnalyzeResult(AnalyzeResultBase):
-    best_power: float
 
 
 def _relabel_power_figure(fig: Figure) -> None:
@@ -50,7 +43,7 @@ def _relabel_power_figure(fig: Figure) -> None:
         ax.set_xlabel("JPA pump power (dBm)")
 
 
-class JpaPowerAdapter(BaseAdapter[PowerCfg, JpaPowerRunResult, JpaPowerAnalyzeResult]):
+class JpaPowerAdapter(BaseAdapter[PowerCfg, JpaPowerRunResult, PowerAnalysis]):
     exp_cls = PowerExp
 
     @staticmethod
@@ -72,13 +65,13 @@ class JpaPowerAdapter(BaseAdapter[PowerCfg, JpaPowerRunResult, JpaPowerAnalyzeRe
 
     def analyze(
         self, req: AnalyzeRequest[JpaPowerRunResult, None], *, plots: Plots
-    ) -> JpaPowerAnalyzeResult:
+    ) -> PowerAnalysis:
         answer = PowerExp().analyze(req.run_result, None, plots=plots)
         _relabel_power_figure(plots["fit"])
-        return JpaPowerAnalyzeResult(best_power=answer.best_power)
+        return answer
 
     def get_writeback_items(
-        self, req: WritebackRequest[JpaPowerRunResult, JpaPowerAnalyzeResult]
+        self, req: WritebackRequest[JpaPowerRunResult, PowerAnalysis]
     ) -> Sequence[WritebackItem]:
         return [
             ParameterWriteback(

@@ -10,7 +10,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -22,6 +21,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.lookback.core import (
+    LookbackAnalysis,
     LookbackAnalyzeOptions,
     LookbackCfg,
     LookbackExp,
@@ -40,32 +40,18 @@ class LookbackAnalyzeParams:
 
 
 class LookbackSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Decode consumed scalar JSON fields; null retains an unavailable estimate."""
 
     predict_offset: float | None = Field(
         description="Owner predict_offset in us; null retains an unavailable estimate."
     )
 
 
-@dataclass
-class LookbackAnalyzeResult(AnalyzeResultBase):
-    predict_offset: float
-
-    def summary(self) -> LookbackSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return LookbackSummary(
-            predict_offset=self.predict_offset,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
-
-
 class LookbackAdapter(
     BaseAdapter[
         LookbackCfg,
         LookbackRunResult,
-        LookbackAnalyzeResult,
+        LookbackAnalysis,
         LookbackAnalyzeParams,
     ]
 ):
@@ -94,9 +80,9 @@ class LookbackAdapter(
         req: AnalyzeRequest[LookbackRunResult, LookbackAnalyzeParams],
         *,
         plots: Plots,
-    ) -> LookbackAnalyzeResult:
+    ) -> LookbackAnalysis:
         params = req.analyze_params
-        answer = LookbackExp().analyze(
+        return LookbackExp().analyze(
             req.run_result,
             LookbackAnalyzeOptions(
                 ratio=params.ratio,
@@ -105,10 +91,9 @@ class LookbackAdapter(
             ),
             plots=plots,
         )
-        return LookbackAnalyzeResult(predict_offset=answer.predict_offset)
 
     def get_writeback_items(
-        self, req: WritebackRequest[LookbackRunResult, LookbackAnalyzeResult]
+        self, req: WritebackRequest[LookbackRunResult, LookbackAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose detected arrival time in us at captured resonator.time_of_fly.
 
