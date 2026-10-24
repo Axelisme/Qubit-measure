@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import ClassVar
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from zcu_tools.cfg_model import Range
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -46,17 +46,15 @@ class ExtraInputs(BaseModel):
     scale: float = Field(default=1.0, ge=0)
 
 
-def retain_cfg(extras: ExtraInputs, cfg: SampleCfg) -> SampleCfg:
-    return cfg
+class ExtraInput(SampleCfg):
+    extras: ExtraInputs = Field(default_factory=ExtraInputs)
 
 
-def ExtrasAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+def ExtrasAdapter_make_form(ctx: FormContext) -> Form[ExtraInput]:
     del ctx
     return Form(
-        SampleCfg,
+        ExtraInput,
         {"sweep": Range.between(1.0, 2.0, expts=3)},
-        extras=ExtraInputs,
-        lower=retain_cfg,
     )
 
 
@@ -176,18 +174,26 @@ class FailingOptionsExtras(FormModel):
         return {}
 
 
-def retain_failing_cfg(extras: FailingOptionsExtras, cfg: SampleCfg) -> SampleCfg:
-    return cfg
+class FailingOptionsInput(SampleCfg):
+    extras: FailingOptionsExtras = Field(default_factory=FailingOptionsExtras)
 
 
-def FailingOptionsAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+class FailingOptionsObserver(FormModel):
+    @classmethod
+    def options(cls, env):
+        return FailingOptionsExtras.options(env)
+
+
+def FailingOptionsAdapter_make_form(ctx: FormContext) -> Form[FailingOptionsInput]:
     del ctx
-    return Form(
-        SampleCfg,
+    form = Form(
+        FailingOptionsInput,
         {"sweep": Range.between(1.0, 2.0, expts=3)},
-        extras=FailingOptionsExtras,
-        lower=retain_failing_cfg,
     )
+    form.model = create_model(
+        "FailingOptionsForm", __base__=(FailingOptionsObserver, form.model)
+    )
+    return form
 
 
 FailingOptionsAdapter = Adapter(
@@ -591,17 +597,15 @@ class TaggedExtraInputs(BaseModel):
     kind: typing.Literal["inline"] = "inline"
 
 
-def retain_tagged_cfg(extras: TaggedExtraInputs, cfg: ModuleRpcCfg) -> ModuleRpcCfg:
-    return cfg
+class TaggedInput(ModuleRpcCfg):
+    extras: TaggedExtraInputs = Field(default_factory=TaggedExtraInputs)
 
 
-def TaggedExtrasAdapter_make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
+def TaggedExtrasAdapter_make_form(ctx: FormContext) -> Form[TaggedInput]:
     del ctx
     return Form(
-        ModuleRpcCfg,
+        TaggedInput,
         {"sweep": Range.between(1.0, 2.0, expts=3)},
-        extras=TaggedExtraInputs,
-        lower=retain_tagged_cfg,
     )
 
 

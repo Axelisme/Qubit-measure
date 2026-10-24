@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
@@ -230,6 +231,8 @@ def blocked_writeback_window(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
     ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
+    board = white_noise()
+    ctrl.install_soc(board.soc, board.soccfg)
     tab_id = ctrl.new_tab("blocked-writeback")
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)

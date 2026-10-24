@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 
 import pytest
-from pydantic import BaseModel
+from pydantic import Field
 from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
@@ -80,30 +80,6 @@ def test_module_read_and_conversion_use_capture_until_reset() -> None:
     resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
     assert resource.read_module(("pulse",)).value["freq"] == 200.0
     assert captures == [100.0, 200.0]
-
-
-class ModuleExtras(BaseModel):
-    shift: float = 5.0
-
-
-def shift_frequency(extras: ModuleExtras, cfg: ModuleCore) -> ModuleCore:
-    result = cfg.model_copy(deep=True)
-    if result.pulse is not None:
-        result.pulse.freq += extras.shift
-    return result
-
-
-def test_module_read_is_field_local_and_excludes_extras_lowering() -> None:
-    resource = TabFormResource(
-        lambda _ctx: Form(ModuleCore, {}, extras=ModuleExtras, lower=shift_frequency),
-        capture=lambda _aliases: TabFormSources(module_env(100.0)),
-        mutation_allowed=lambda: True,
-    )
-    resource.write({("pulse",): {"kind": "ref", "name": "Q1.pulses.pi"}})
-    assert hasattr(resource, "read_module"), "Missing field-local module observation"
-    assert resource.read_module(("pulse",)).value["freq"] == 100.0
-    resource.run_command(("pulse",), "to_inline")
-    assert resource.read_module(("pulse",)).value["freq"] == 100.0
 
 
 def test_module_read_allows_other_invalid_input_but_rejects_own_errors() -> None:
@@ -435,8 +411,11 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
         reference=(field.annotation, None),
     )
 
-    def lower(_extras: BaseModel, cfg: ModuleCore) -> ModuleCore:
-        return cfg
+    recipe_input = create_model(
+        "RecipeInput",
+        __base__=ModuleCore,
+        extras=(extras, Field(default_factory=extras)),
+    )
 
     library = LibrarySnapshot(
         ModuleLibraryDocument(
@@ -460,7 +439,7 @@ def test_recipe_nested_and_extra_selectors_require_explicit_ancestor_copies() ->
     )
     library_before = library.module_spec("Q1.pulses.pi").model_dump()
     resource = TabFormResource(
-        lambda _ctx: Form(ModuleCore, {}, extras=extras, lower=lower),
+        lambda _ctx: Form(recipe_input, {}),
         capture=lambda _aliases: TabFormSources(FormEnv(library=library)),
         mutation_allowed=lambda: True,
     )

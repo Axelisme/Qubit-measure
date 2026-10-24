@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
@@ -360,15 +361,22 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
     release = threading.Event()
     original_run = SampleAdapter.run
 
-    def held_run(self, request, schema, *, context):
-        result = original_run(self, request, schema, context=context)
+    def held_run(cfg, *, context):
+        result = original_run(cfg, context=context)
         entered.set()
         # The test finally releases the held collaborator.
         if not release.wait(30):
             raise TimeoutError("fake run release was not signalled")
         return result
 
-    monkeypatch.setattr(SampleAdapter, "run", held_run)
+    fx.state.get_tab(tab_id).adapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=held_run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})
@@ -460,7 +468,7 @@ def test_large_context_roundtrip_restores_load_guard(
         assert observed["point"]["general"]["ext"]["changed"] == 17
         with pytest.raises(RuntimeError) as missing_file:
             call("rpc_call", args)
-        assert getattr(missing_file.value, "reason", None) == "unsupported_load"
+        assert getattr(missing_file.value, "reason", None) == "data_file_read_failed"
     finally:
         bridge.disconnect()
 
@@ -497,7 +505,7 @@ def test_oversized_context_read_returns_error_without_advancing_guard(
         )
         with pytest.raises(RuntimeError) as missing_file:
             call("rpc_call", args)
-        assert getattr(missing_file.value, "reason", None) == "unsupported_load"
+        assert getattr(missing_file.value, "reason", None) == "data_file_read_failed"
     finally:
         bridge.disconnect()
 

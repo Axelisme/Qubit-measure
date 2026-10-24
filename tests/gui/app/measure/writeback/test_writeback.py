@@ -76,7 +76,9 @@ def test_proposal_initial_selection_and_note_survive_manual_review(session, kind
     proposals = {
         "parameter": ParameterWriteback("general.ext.value", "fit", 5.0),
         "module": ModuleWriteback(PULSE, "fit", pulse_proposal()),
-        "sample": SampleWriteback("Q1", "fit", {"freq": 5.0}),
+        "sample": SampleWriteback(
+            "Q1", "fit", {"freq": 5.0}, coordinate_device="$flux_dev"
+        ),
     }
     original = proposals[kind]
     original.selected = False
@@ -86,7 +88,6 @@ def test_proposal_initial_selection_and_note_survive_manual_review(session, kind
         parameters=control.read_context(),
         experiment_name="test/review",
         run_id="review-run",
-        sample_device_alias="$flux_dev",
         device_snapshot={"bias": {"value": 0.1, "value_unit": "V"}},
     )
     (item,) = service.preview_draft(draft)

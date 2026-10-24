@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from pydantic import create_model
+from pydantic import Field, create_model
 from zcu_tools.cfg_model import PulseCfg, PulseSpec, Range
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -66,13 +66,18 @@ RecipeExtras = create_model(
 )
 
 
+ContainerRpcInput = create_model(
+    "ContainerRpcInput",
+    __base__=SampleCfg,
+    extras=(RecipeExtras, Field(default_factory=RecipeExtras)),
+)
+
+
 def ContainerRpcAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
     del ctx
     return Form(
-        SampleCfg,
+        ContainerRpcInput,
         {"sweep": Range.between(1.0, 2.0, expts=3)},
-        extras=RecipeExtras,
-        lower=lambda _extras, cfg: cfg,
     )
 
 

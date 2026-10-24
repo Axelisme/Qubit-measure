@@ -50,30 +50,6 @@ def fx(tmp_path, qapp):
     f.stop()
 
 
-def test_analyze_params_wire_describes_live_adapter_before_run(fx):
-    tab_id = fx.ctrl.new_tab("fake")
-    sock = open_client(fx.service.port)
-    try:
-        primary = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
-        assert primary["ok"] is True
-        assert primary["result"]["analyze_params"] is None
-        assert primary["result"]["definitions"] == [
-            {
-                "name": "threshold",
-                "type": "float",
-                "label": "Threshold",
-                "decimals": 2,
-                "default": 0.5,
-            }
-        ]
-        post = call(sock, "tab.get_post_analyze_params", {"tab_id": tab_id})
-        assert post["ok"] is True
-        assert post["result"]["post_analyze_params"] is None
-        assert isinstance(post["result"]["definitions"], list)
-    finally:
-        sock.close()
-
-
 def test_device_setup_started_and_finished_push(fx):
     sock = open_client(fx.service.port)
     try:

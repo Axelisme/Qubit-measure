@@ -13,6 +13,7 @@ from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
@@ -158,6 +159,8 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
+        board = white_noise()
+        app.controller.install_soc(board.soc, board.soccfg)
         app.controller.new_tab("presentation")
         app.window.resize(1280, 800)
         yield app.window
@@ -204,6 +207,8 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
         )
+        board = white_noise()
+        app.controller.install_soc(board.soc, board.soccfg)
         app.controller.new_tab("layout")
         app.window.resize(1440, 900)
         yield app.window

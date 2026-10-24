@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui._qt_waits import qt_until
+
 from ._helpers import Fixture, call, mcp_client, open_client
 
 pytestmark = pytest.mark.uses_wall_clock
@@ -39,6 +41,17 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
         tab = invoke(
             "rpc_call", {"method": "tab.new", "params": {"adapter_name": "fake"}}
         )["tab_id"]
+        initial = invoke(
+            "rpc_call", {"method": "tab.get_analyze_params", "params": {"tab_id": tab}}
+        )
+        assert initial["definitions"] == []
+        live_gui.ctrl.start_run(tab)
+        qt_until(
+            lambda: live_gui.ctrl.active_operation_count() == 0,
+            label="sample Run setup terminal",
+        )
+        assert live_gui.state.get_tab(tab).run.result is not None
+        # Run setup ends before the read-only observation and focus baseline.
         # The fixture's render-view snapshot is a static stub; State owns focus.
         assert live_gui.state.active_tab_id == tab
         focused = call(sock, "tab.new", {"adapter_name": "fake"})["result"]["tab_id"]
@@ -57,18 +70,18 @@ def test_existing_tab_reads_and_failed_open_share_gui_state(
             "rpc_call", {"method": "tab.snapshot", "params": {"tab_id": tab}}
         )["tabs"][0]
         assert overview["adapter_name"] == "fake"
-        assert overview["interaction"]["has_run_result"] is False
+        assert overview["interaction"]["has_run_result"] is True
         params = invoke(
             "rpc_call", {"method": "tab.get_analyze_params", "params": {"tab_id": tab}}
         )
         assert any(entry["name"] == "threshold" for entry in params["definitions"])
         assert overview["interaction"]["is_running"] is False
         assert overview["tab_id"] == tab
-        assert overview["result_state"]["available"] is False
+        assert overview["result_state"]["available"] is True
         assert live_gui.state.active_tab_id == focused
 
         invoke("rpc_call", {"method": "context.snapshot"})
-        with pytest.raises(GuiRpcError, match="does not support loading data files"):
+        with pytest.raises(GuiRpcError, match="Could not read the data file"):
             invoke(
                 "rpc_call",
                 {

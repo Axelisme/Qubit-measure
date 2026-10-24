@@ -170,7 +170,10 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
                 ),
             ),
             SampleWriteback(
-                "invalid/component" if fails else "Q1", "Sample", {"freq": 12.0}
+                "invalid/component" if fails else "Q1",
+                "Sample",
+                {"freq": 12.0},
+                coordinate_device="$coordinate",
             ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
             ParameterWriteback("Q1.ext.rate", "Rate", proposed_value=5000.0),
@@ -178,7 +181,6 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
         parameters=captured,
         experiment_name="synthetic",
         run_id="run-1",
-        sample_device_alias="$coordinate",
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
     ids = tuple(item.session_id for item in draft.items)
@@ -203,13 +205,14 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
     session.control.set_alias_rows((AliasRow("coordinate", "device"),))
     draft = session.service.create_draft(
         [
-            SampleWriteback("Q1", "Sample", {"freq": 12.0}),
+            SampleWriteback(
+                "Q1", "Sample", {"freq": 12.0}, coordinate_device="$coordinate"
+            ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
         ],
         parameters=session.control.read_context(),
         experiment_name="synthetic",
         run_id="run-1",
-        sample_device_alias="$coordinate",
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
     receipts = session.service.write_draft(

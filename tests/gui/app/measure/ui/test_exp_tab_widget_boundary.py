@@ -135,7 +135,9 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(
     tab = ExpTabWidget(
         "tab-1",
         mock_ctrl(main_window_control_factory),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
     )
     tab.update_interaction_state(
         make_tab_snapshot(
@@ -167,7 +169,9 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qa
     tab = ExpTabWidget(
         "tab-1",
         mock_ctrl(main_window_control_factory),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
     )
     tab.update_interaction_state(
         make_tab_snapshot(
@@ -196,7 +200,9 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(
     tab = ExpTabWidget(
         "tab-1",
         mock_ctrl(main_window_control_factory),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
     )
     reps = tab.findChild(QLineEdit, "form.input.reps")
     assert reps is not None
@@ -275,7 +281,9 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
     tab = ExpTabWidget(
         "tab-1",
         mock_ctrl(main_window_control_factory),
-        AdapterCapabilities(analysis=AnalysisMode.NONE, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.NONE, post_analysis=False, load_data=True
+        ),
     )
     tab.update_interaction_state(
         make_tab_snapshot(
@@ -295,10 +303,6 @@ def test_non_analysis_adapter_hides_analysis_widgets_but_keeps_save(
     assert not hasattr(tab, "_analysis_panel")
     assert not hasattr(tab, "analyze_form")
     assert not hasattr(tab, "_analyze_section")
-    # No Load Data capability means no control is constructed.
-    assert not any(
-        button.text() == "Load Data" for button in tab.findChildren(QPushButton)
-    )
     # ... but Save stays reachable and usable (run result + active context).
     saves = [
         button for button in tab.findChildren(QPushButton) if button.text() == "Save"
@@ -317,7 +321,9 @@ def test_analysis_adapter_shows_analysis_widgets_and_labels_tab(
     tab = ExpTabWidget(
         "tab-1",
         mock_ctrl(main_window_control_factory),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
     )
     tab.update_interaction_state(
         make_tab_snapshot("tab-1", has_run_result=True, supports_analysis=True)
@@ -378,7 +384,9 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
 def test_exp_tab_attach_projects_existing_resource(main_window_control_factory, qapp):
     ctrl = editor_wiring_ctrl(main_window_control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    tab = ExpTabWidget(
+        "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
+    )
     tab.attach(make_tab_snapshot("tab-1"), _RecordingTabActions())
     cfg.write({("gain",): 0.45})
     entry = tab.findChild(QLineEdit, "form.input.gain")
@@ -390,11 +398,15 @@ def test_exp_tab_detach_preserves_resource_for_later_views(
 ):
     ctrl = editor_wiring_ctrl(main_window_control_factory)
     cfg = ctrl.cfg_resources.lookup("tab-1")
-    tab = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    tab = ExpTabWidget(
+        "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
+    )
     tab.attach(make_tab_snapshot("tab-1"), _RecordingTabActions())
     tab.detach()
     cfg.write({("gain",): 0.45})
-    other = ExpTabWidget("tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT))
+    other = ExpTabWidget(
+        "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
+    )
     other.attach(make_tab_snapshot("tab-1"), _RecordingTabActions())
     entry = other.findChild(QLineEdit, "form.input.gain")
     assert entry is not None and float(entry.text()) == 0.45
@@ -486,7 +498,7 @@ def test_exp_tab_reset_publishes_defaults_on_same_resource(
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True),
         dialog_presenter=dialogs,
     )
     actions = _RecordingTabActions()
@@ -505,7 +517,7 @@ def test_exp_tab_reset_confirm_no_does_not_reset(main_window_control_factory, qa
     tab = ExpTabWidget(
         "tab-1",
         ctrl,
-        AdapterCapabilities(analysis=AnalysisMode.FIT),
+        AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True),
         dialog_presenter=dialogs,
     )
     actions = _RecordingTabActions()
@@ -523,7 +535,9 @@ def test_exp_tab_reset_btn_idle_only_enable(main_window_control_factory, qapp):
     tab = ExpTabWidget(
         "tab-1",
         mock_ctrl(main_window_control_factory),
-        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=False),
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
+        ),
     )
 
     # Idle: reset_btn should be enabled.

@@ -50,8 +50,10 @@ def RecipePicker_make_form(ctx: FormContext) -> Form[PickCfg]:
     return Form(PickCfg, {})
 
 
-def RecipePicker_run(cfg: PickCfg, *, context: RunContext) -> PickResult:
-    return PickResult()
+def RecipePicker_run(
+    cfg: PickCfg, *, context: RunContext
+) -> RunRecord[PickCfg, PickResult]:
+    return RunRecord(cfg=cfg, result=PickResult())
 
 
 def RecipePicker_make_interactive_plugin(

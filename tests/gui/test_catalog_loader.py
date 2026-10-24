@@ -168,7 +168,8 @@ def test_deferred_import_cannot_use_previous_bytecode(
             label: str
         def run(cfg, *, context):
             from reload_fixture.domain.experiment import Experiment
-            return Result(Experiment().label())
+            from zcu_tools.experiment.records import RunRecord
+            return RunRecord(cfg=cfg, result=Result(Experiment().label()))
         Adapter = Base(spec=AxesSpec(axes=(), z=ZSpec("label", "label", ""),
             result_type=Result, cfg_type=ConfigBase, tag="test/deferred"),
             make_form=DummyAdapter.make_form, run=run, guide=None)
@@ -182,7 +183,7 @@ def test_deferred_import_cannot_use_previous_bytecode(
         source_catalog.reload()
         .create("demo")
         .run(ConfigBase(), context=MagicMock())
-        .label
+        .result.label
         == "v2"
     )
 

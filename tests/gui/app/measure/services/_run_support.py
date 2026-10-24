@@ -34,6 +34,7 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import Module
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -48,7 +49,7 @@ def make_state(
         SessionEnv(
             parameters=parameter_capture(),
             soc=MagicMock(),
-            soccfg=MagicMock(),
+            soccfg=make_mock_soccfg(),
             readiness=readiness,
         )
     )
