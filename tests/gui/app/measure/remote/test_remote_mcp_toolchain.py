@@ -390,9 +390,6 @@ def test_operation_progress_device_setup_bars(fx):
 
     m = ProgressBarModel(label="Ramp", total=10, start_time=time.monotonic())
     m.set_n(3)
-    fx.ctrl.get_operation_progress = MagicMock(
-        side_effect=AssertionError("operation.progress must use operation_control")
-    )
     fx.service.operation_control.get_operation_progress = MagicMock(
         return_value=((1, m),)
     )
@@ -409,7 +406,6 @@ def test_operation_progress_device_setup_bars(fx):
         assert bar["eta_s"] is not None and bar["eta_s"] >= 0
         assert "Ramp" in bar["format"]
         fx.service.operation_control.get_operation_progress.assert_called_once_with(7)
-        fx.ctrl.get_operation_progress.assert_not_called()
     finally:
         sock.close()
 

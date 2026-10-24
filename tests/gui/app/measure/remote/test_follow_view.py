@@ -173,7 +173,6 @@ def test_run_forwards_without_editing_sources():
     assert h_tab_run_start(adapter, {"tab_id": "t"}) == {"operation_id": 19}
     adapter.run_analyze_control.start_run.assert_called_once_with(
         "t",
-        aliases=None,
         origin=CommandOrigin("mcp"),
     )
 

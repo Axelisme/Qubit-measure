@@ -11,10 +11,8 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import Session, TabInteractionState
 from zcu_tools.gui.app.measure.writeback import WritebackItem
-from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form import FormPath, FormPreview
+from zcu_tools.gui.form import FormPath
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.session.types import ParameterContext
 
 from ..adapter import AdapterGuide, AnalysisMode
 from ..writeback import WritebackDraft
@@ -73,16 +71,12 @@ class TabService:
         writeback: WritebackLifecyclePort,
         cfg_resources: TabFormResources,
         form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
-        captured_parameters: Callable[
-            [Mapping[str, str] | None], ParameterContext | None
-        ],
     ) -> None:
         """Inject one owner-sequence form source capture for Open and Reset only.
 
         form_sources captures parameters/library/devices/value cache with optional
-        named aliases overrides. It performs no hardware I/O. captured_parameters
-        serves explicit consumer queries, not cfg preview or Run; EMPTY returns
-        None without overrides. Errors propagate before registering a new tab.
+        named aliases overrides. It performs no hardware I/O.
+        Errors propagate before registering a new tab.
         """
         self._state = state
         self._registry = registry
@@ -91,32 +85,6 @@ class TabService:
         self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
-        self._captured_parameters = captured_parameters
-
-    def capture_parameters(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> ParameterContext | None:
-        """Freeze current point/library/aliases for an existing tab's consumer.
-
-        aliases maps alias names to concrete components for this capture only.
-        None and {} use global rows. EMPTY yields None without overrides.
-        Unknown tab and source or alias failures propagate; no observation guard is refreshed.
-        """
-        self._state.get_tab(tab_id)
-        return self._captured_parameters(aliases)
-
-    def preview_cfg(
-        self, tab_id: str, *, aliases: Mapping[str, str] | None = None
-    ) -> FormPreview:
-        """Preview current input leaves using the tab's fixed source snapshot.
-
-        None and empty aliases leave the snapshot unchanged. Nonempty aliases
-        raise FailedPreconditionError; use resource.reset(aliases=...) to replace
-        defaults with a one-shot source capture. No input or source is mutated.
-        """
-        if aliases:
-            raise FailedPreconditionError("Reset with aliases before previewing cfg")
-        return self._state.get_tab(tab_id).cfg.preview()
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields

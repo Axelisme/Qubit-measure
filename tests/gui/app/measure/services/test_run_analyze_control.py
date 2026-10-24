@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -89,8 +89,6 @@ class RecordingGuard:
     def capture_run_inputs(
         self,
         tab_id: str,
-        *,
-        aliases: Mapping[str, str] | None = None,
     ) -> object:
         self._log.add("guard", "capture_run_inputs", tab_id)
         return "run-inputs"

@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-23（analysis updates 由 RecipeTab 略過 KEEP）
+**Last updated:** 2026-10-24（recipe 參數讀取與寫回問答入口）
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -108,8 +108,6 @@ target 是 alias 到 concrete target 的 mapping，例如 `{"qubit": inputs.targ
 reuse 是 idle matching tab ID；省略、KEEP 或 null 開新 tab。
 Recipe 不自動選重用 tab，也不自動關閉 tab；關閉用 `tab_close`。
 
-`session.context.read(source_path)` 讀 session 層的 `value.read`，不需先開 tab。
-`missing_ok=True` 只把 owner 的 `unregistered_source` 轉成 None，其他錯誤照常拋出。
 `tab.read_parameter(path, missing_ok=False)` 讀 tab 固定 Open／Reset 的參數，例如 `$qubit.freq`。
 缺葉拋 `GuiRpcError(reason="parameter_missing")`；missing_ok 只放行這種缺值。
 明確 null 回 None，來源故障與格式錯誤仍拋出。
@@ -145,7 +143,7 @@ Range find 的 `min_separation` 透過同一 tracked Analyze 的 `updates` 傳�
 它使用 MHz，預設 1 MHz，必須有限且大於零，只影響 dip 選取，不改 acquisition grid。
 
 作者用 `await tab.run()`、`await tab.analyze("primary"|"post", result=T)`、
-`await tab.ask_writeback()` 與 `await session.ask(question)` 串接流程。
+`await tab.ask_writeback()` 串接流程。
 Run 回 `RunResult`，不自動保存。
 Analyze 用 TypeAdapter 將 owner summary 驗證為 T，不補欄位或修資料，也不自動保存或 preview。
 `interactive=True` 明確開啟互動交接，公開 `PendingAnalysis(tab, stage, op)`。

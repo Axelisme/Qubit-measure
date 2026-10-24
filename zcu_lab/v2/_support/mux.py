@@ -1,11 +1,9 @@
 """Shared numeric mechanics for simultaneous qubit spectroscopy and Amp Rabi."""
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.program.v2 import PulseCfg
 
 
 @dataclass(frozen=True)
@@ -63,19 +61,3 @@ class MuxFitFailure:
 
     index: int
     reason: str
-
-
-@dataclass(frozen=True)
-class MuxPulseScan:
-    """Prepared numeric zip data, without binding or acquisition state.
-
-    indices is the once-lowered active original index sequence, in full tone
-    order. coordinates is float64 (K,P), using each drive's own hardware grid.
-    point_pulses is (P,K) fixed native PulseCfg values in matching order; these
-    retain nominal requested parameters for program-owned native conversion.
-    This record does not choose a scheduler or acquire. Treat values as read-only.
-    """
-
-    indices: Sequence[int]
-    coordinates: NDArray[np.float64]
-    point_pulses: Sequence[Sequence[PulseCfg]]

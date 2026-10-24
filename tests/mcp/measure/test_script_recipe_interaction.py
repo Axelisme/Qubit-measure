@@ -15,7 +15,7 @@ from zcu_tools.mcp.measure.recipe_host import (
 )
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
-from ._script_recipe_support import ConfirmQuestion, Fit, Inputs, Report, SyntheticGui
+from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui
 from ._support import make_client
 
 
@@ -76,7 +76,7 @@ def test_done_returns_next_recipe_handoff(tmp_path: Path, following: str) -> Non
         await tab.run()
         await tab.analyze("primary", result=Fit, interactive=True)
         if following == "question":
-            await session.ask(ConfirmQuestion(evidence="after done"))
+            await tab.ask_writeback()
         elif following == "interactive":
             await tab.analyze("post", result=Fit, interactive=True)
         return Report(count=inputs.count)
@@ -118,7 +118,10 @@ def test_done_returns_next_recipe_handoff(tmp_path: Path, following: str) -> Non
         assert reply["execution"] == key
         if following == "question":
             assert reply["status"] == "paused"
-            assert reply["pending_question"]["question"]["evidence"] == "after done"
+            assert (
+                reply["pending_question"]["question"]["proposal"]["items"][0]["name"]
+                == "Q1.freq"
+            )
         elif following == "interactive":
             assert reply["status"] == "interactive"
             assert reply["pending"] == {"tab": "tab-1", "stage": "post", "op": 3}

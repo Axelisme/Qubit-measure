@@ -74,6 +74,7 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar
 
@@ -91,10 +92,10 @@ from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse
+from zcu_tools.program.v2.modules import Join, MuxReadout, Pulse, PulseCfg
 from zcu_tools.program.v2.utils import sweep2param
 
-from zcu_lab.v2._support.mux import MuxFitFailure, MuxPulseScan, MuxSweepResult
+from zcu_lab.v2._support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2._support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2._support.mux_sweep_cfg import (
     MuxDriveModuleCfg,
@@ -104,6 +105,22 @@ from zcu_lab.v2._support.mux_sweep_cfg import (
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 from .analysis import MuxAmpRabiFit, analyze_amplitude
+
+
+@dataclass(frozen=True)
+class MuxPulseScan:
+    """Prepared numeric zip data, without binding or acquisition state.
+
+    indices is the once-lowered active original index sequence, in full tone
+    order. coordinates is float64 (K,P), using each drive's own hardware grid.
+    point_pulses is (P,K) fixed native PulseCfg values in matching order; these
+    retain nominal requested parameters for program-owned native conversion.
+    This record does not choose a scheduler or acquire. Treat values as read-only.
+    """
+
+    indices: Sequence[int]
+    coordinates: NDArray[np.float64]
+    point_pulses: Sequence[Sequence[PulseCfg]]
 
 
 class MuxAmpRabiCfg(ProgramExpCfg):
