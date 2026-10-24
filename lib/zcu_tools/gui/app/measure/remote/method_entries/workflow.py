@@ -110,7 +110,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     _entry(
         "edit_form",
-        "Edit the owner's shared draft and return its observation. Busy/structure/readonly rejection belongs to the owner; invalid model values remain editable.",
+        "Edit the owner's shared draft and return its observation. Busy/structure/readonly rejection belongs to the owner; invalid model values remain editable. Module fields use nested tagged input, not native cfg; query workflow.describe_form at the field path for options and child paths.",
         (_TAB, _FORM, _REQUIRED_BATCH),
     ),
     _entry(

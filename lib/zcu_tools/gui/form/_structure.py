@@ -14,6 +14,7 @@ from pydantic.fields import FieldInfo
 
 from ._json import default_json
 from .model import (
+    FormCommandError,
     FormPath,
     FormWritePath,
     InputConverter,
@@ -21,18 +22,25 @@ from .model import (
 )
 
 
-class StructureError(ValueError):
+class StructureError(FormCommandError):
     """Invalid write structure, distinct from author/provider ValueErrors.
 
     path identifies the canonical batch write that failed, not a position inside
-    its value. Value-write admission preserves that full path through traversal
-    and structural validation. No candidate is installed on failure.
+    its value. field_path identifies the consuming field inside that value.
+    No candidate is installed on failure.
     """
 
-    def __init__(self, message: str, *, path: FormWritePath) -> None:
-        """Store the diagnostic message and the failing canonical write path."""
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: FormWritePath,
+        field_path: FormWritePath | None = None,
+    ) -> None:
+        """Store the batch target and consuming field (defaults to the target)."""
         super().__init__(message)
         self.path = path
+        self.field_path = path if field_path is None else field_path
 
 
 def unwrap(annotation: object) -> object:

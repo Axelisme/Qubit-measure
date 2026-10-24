@@ -68,6 +68,45 @@ ExtrasAdapter = Adapter(
 )
 
 
+def test_malformed_nested_module_returns_consuming_field_error(form_rpc) -> None:
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("module-rpc", ModuleRpcAdapter)
+    tab = fixture.ctrl.tab_control.new_tab("module-rpc")
+    try:
+        before = rpc.call("tab.get_cfg", {"tab_id": tab})["result"]
+        reply = rpc.call(
+            "tab.edit_cfg",
+            {
+                "tab_id": tab,
+                "edits": [
+                    {
+                        "path": ["pulse"],
+                        "value": {
+                            "kind": "inline",
+                            "module": {
+                                "type": "pulse",
+                                "waveform": {
+                                    "style": "const",
+                                    "length": 1,
+                                },
+                            },
+                        },
+                    }
+                ],
+            },
+        )
+        assert not reply["ok"], reply
+        error = reply["error"]
+        assert error["code"] == "invalid_params"
+        assert error["reason"] == "form_structure"
+        assert error["data"]["form_path"] == ["pulse", "module", "waveform"]
+        assert "pulse.module.waveform" in error["message"]
+        assert all(word in error["message"] for word in ("kind", "ref", "inline"))
+        assert rpc.call("tab.get_cfg", {"tab_id": tab})["result"] == before
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
+
+
 def test_dangling_module_rejects_unrelated_rpc_write_without_publication(
     form_rpc: tuple[Fixture, str, FormRpc],
 ) -> None:

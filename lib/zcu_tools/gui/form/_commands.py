@@ -67,36 +67,55 @@ def _evaluate(target: Field, path: FormWritePath, env: FormEnv) -> FormValue:
     return value_at(evaluated, ("value",))
 
 
-def _check_object(model: type[BaseModel], data: dict[str, JsonValue]) -> None:
+def _check_object(
+    model: type[BaseModel], data: dict[str, JsonValue], path: FormWritePath
+) -> None:
     """Check model shape only; ordinary invalid leaf values remain drafts."""
     for name, value in data.items():
         info = model.model_fields.get(name)
         if info is None:
-            raise FormCommandError(f"Command returned unknown field {name!r}")
-        _check_field(info, value)
+            raise StructureError(
+                f"{'.'.join(map(str, (*path, name)))}: unknown field; "
+                f"expected fields: {', '.join(model.model_fields)}",
+                path=(*path, name),
+            )
+        _check_field(info, value, (*path, name))
 
 
-def _check_field(info: FieldInfo, value: JsonValue) -> None:
+def _model_structure_error(info: FieldInfo, path: FormWritePath) -> StructureError:
+    expected = "expected a model object"
+    key = discriminator(info)
+    if key is not None:
+        tags = [
+            tag
+            for model in model_types(info.annotation)
+            for tag in intrinsic_tags(model, key)
+        ]
+        expected += f" with {key!r} in {tags!r}"
+    if type(None) in alternatives(info.annotation):
+        expected += " or null"
+    return StructureError(f"{'.'.join(map(str, path))}: {expected}", path=path)
+
+
+def _check_field(info: FieldInfo, value: JsonValue, path: FormWritePath) -> None:
     models = model_types(info.annotation)
     if models:
         if value is None:
             if type(None) not in alternatives(info.annotation):
-                raise FormCommandError(
-                    "Command cannot remove a nonnullable model structure"
-                )
+                raise _model_structure_error(info, path)
             return
         branch = selected(info, value)
         if not isinstance(value, dict) or branch is None:
-            raise FormCommandError("Command returned an illegal model structure")
+            raise _model_structure_error(info, path)
         key = discriminator(info)
         if key is not None and value.get(key) not in intrinsic_tags(branch, key):
-            raise FormCommandError("Command returned an illegal selection")
-        _check_object(branch, value)
+            raise _model_structure_error(info, path)
+        _check_object(branch, value, path)
     elif (element := list_model(info)) is not None and isinstance(value, list):
-        for item in value:
+        for index, item in enumerate(value):
             if not isinstance(item, dict):
                 raise FormCommandError("Replacement returned an illegal list element")
-            _check_object(element, item)
+            _check_object(element, item, (*path, index))
     elif isinstance(value, dict) and info.annotation in (
         int,
         float,
@@ -145,7 +164,7 @@ def _replacement(target: Field, output: FormCommandResult) -> JsonValue:
             )
     elif branch is not None:
         raise FormCommandError("Command must name its model structure")
-    _check_field(target.info, value)
+    _check_field(target.info, value, target.path)
     return value
 
 
@@ -199,6 +218,10 @@ def prepare_write[F: FormModel](
                 env,
                 validate_sources=False,
             )
+        except StructureError as exc:
+            raise StructureError(
+                str(exc), path=path, field_path=exc.field_path
+            ) from exc
         except FormCommandError as exc:
             raise StructureError(str(exc), path=path) from exc
     check_sources(input.model, candidate.data, env, validate_paths=True)
@@ -251,6 +274,8 @@ def install_field[F: FormModel](
     path = target.path
     try:
         replacement = _replacement(target, output)
+    except FormCommandError:
+        raise
     except ValueError as exc:
         raise FormCommandError(str(exc)) from exc
     parent: JsonValue = data

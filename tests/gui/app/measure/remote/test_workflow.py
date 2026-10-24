@@ -4,7 +4,8 @@ import base64
 
 import pytest
 from matplotlib.figure import Figure
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, create_model
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import (
     Live,
@@ -19,6 +20,7 @@ from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttac
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormModel
+from zcu_tools.gui.form_adapter import ModuleInputField
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.resources.entry import ResultEntry
@@ -99,6 +101,59 @@ def workflow_rpc(qapp, tmp_path):
             facet.close(tab.tab_id)
         remote.on_client_close(rpc.link, on_owner_thread=True)
         qapp.processEvents()
+
+
+@pytest.mark.parametrize("method", ["edit_form", "form", "describe_form"])
+def test_malformed_waveform_returns_consuming_field_error(workflow_rpc, method):
+    controller, rpc = workflow_rpc
+    pulse = ModuleInputField(PulseSpec)
+    plan_model = create_model(
+        "PulsePlan", __base__=FormModel, drive=(pulse.annotation, ...)
+    )
+    controller.workflow_control().configure(
+        (
+            WorkflowAttachment(
+                script=script,
+                plan_model=plan_model,
+                knobs_model=Values,
+                plan_to_cfg=lambda form, env, snapshot: Native(),
+                knobs_to_cfg=lambda form: Native(value=form.value),
+                seed=lambda plan, form: None,
+            ),
+        )
+    )
+    tab = result(rpc, "workflow.open", name="synthetic")["tab_id"]
+    before = result(rpc, "workflow.form", tab_id=tab, form="plan")
+    params = {
+        "tab_id": tab,
+        "form": "plan",
+        "batch": [
+            {
+                "path": ["drive"],
+                "value": {
+                    "kind": "inline",
+                    "module": {
+                        "type": "pulse",
+                        "waveform": {
+                            "style": "const",
+                            "length": 1,
+                        },
+                    },
+                },
+            }
+        ],
+    }
+    if method == "describe_form":
+        params["path"] = []
+    reply = rpc.call(f"workflow.{method}", params)
+    assert not reply["ok"], reply
+    error = reply["error"]
+    assert error["code"] == "invalid_params"
+    assert error["reason"] == "form_structure"
+    assert error["data"]["form_path"] == ["drive", "module", "waveform"]
+    assert "drive.module.waveform" in error["message"]
+    assert all(word in error["message"] for word in ("kind", "ref", "inline"))
+    assert result(rpc, "workflow.form", tab_id=tab, form="plan") == before
 
 
 def result(rpc, method, **params):
