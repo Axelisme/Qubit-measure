@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -70,10 +71,17 @@ def _get_writeback_items(
     ]
 
 
+def run(
+    cfg: ConstructivePhaseCfg, *, context: RunContext
+) -> RunRecord[ConstructivePhaseCfg, RabiScanResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=ConstructivePhaseExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=ConstructivePhaseExp.AXES_SPEC,
     make_form=make_form,
-    run=ConstructivePhaseExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
 )

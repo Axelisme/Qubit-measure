@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -23,10 +24,17 @@ def _analyze(req: AnalyzeRequest[ChevronRun, None], *, plots: Plots) -> RabiAnal
     return ChevronExp().analyze(req.run_result, None, plots=plots)
 
 
+def run(
+    cfg: ChevronCfg, *, context: RunContext
+) -> RunRecord[ChevronCfg, RabiScanResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=ChevronExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=ChevronExp.AXES_SPEC,
     make_form=make_form,
-    run=ChevronExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze),
 )

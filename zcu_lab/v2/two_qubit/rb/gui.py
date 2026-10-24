@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -52,10 +53,15 @@ def _analyze(req: AnalyzeRequest[RBRun, None], *, plots: Plots) -> RBAnalyzeResu
     return RBAnalyzeResult(RBExp().analyze(req.run_result, RBOptions(), plots=plots))
 
 
+def run(cfg: RBCfg, *, context: RunContext) -> RunRecord[RBCfg, RBResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=RBExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=RBExp.AXES_SPEC,
     make_form=make_form,
-    run=RBExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze),
 )

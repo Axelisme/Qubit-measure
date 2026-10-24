@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -117,10 +118,17 @@ def _get_writeback_items(
     return items
 
 
+def run(
+    cfg: ConditionalPhaseCfg, *, context: RunContext
+) -> RunRecord[ConditionalPhaseCfg, ConditionalPhaseResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=ConditionalPhaseExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=ConditionalPhaseExp.AXES_SPEC,
     make_form=make_form,
-    run=ConditionalPhaseExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
 )

@@ -11,6 +11,7 @@ import numpy as np
 from pydantic import BaseModel
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -324,10 +325,15 @@ def _get_post_writeback_items(
     return items
 
 
+def run(cfg: MuxGECfg, *, context: RunContext) -> RunRecord[MuxGECfg, MuxGEResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=MuxGEExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=MuxGEExp.AXES_SPEC,
     make_form=make_form,
-    run=MuxGEExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,

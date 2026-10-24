@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -90,10 +91,17 @@ def _get_writeback_items(
     return []
 
 
+def run(
+    cfg: JointReadoutCfg, *, context: RunContext
+) -> RunRecord[JointReadoutCfg, JointReadoutResult]:
+    """Run the experiment and retain its actual configuration."""
+    return RunRecord(cfg=cfg, result=JointReadoutExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=JointReadoutExp.AXES_SPEC,
     make_form=make_form,
-    run=JointReadoutExp().run,
+    run=run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze, writeback=_get_writeback_items),
 )
