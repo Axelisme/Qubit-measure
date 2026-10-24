@@ -43,8 +43,6 @@ class SsT1ToneAnalyzeResult(AnalyzeResultBase):
 class SsT1ToneAdapter(
     BaseAdapter[T1WithToneCfg, SsT1ToneRunResult, SsT1ToneAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = T1WithToneExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T1WithToneCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

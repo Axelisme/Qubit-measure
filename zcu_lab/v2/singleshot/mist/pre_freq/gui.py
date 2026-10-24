@@ -32,7 +32,6 @@ MistPreFreqRunResult: TypeAlias = RunRecord[PreFreqCfg, PreFreqResult]
 class MistPreFreqAdapter(BaseAdapter[PreFreqCfg, MistPreFreqRunResult]):
     """Expose preparation-frequency acquisition and population analysis in Measure."""
 
-    experiment_tag: ClassVar[str | None] = PreFreqExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

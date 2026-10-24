@@ -83,7 +83,6 @@ class ConditionalPhaseAdapter(
     """Fixed-capture Form, full raw acquisition, diagnostic analysis and restore."""
 
     exp_cls = ConditionalPhaseExp
-    experiment_tag: ClassVar[str | None] = ConditionalPhaseExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

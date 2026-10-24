@@ -27,7 +27,6 @@ JpaCheckRunResult: TypeAlias = RunRecord[CheckCfg, CheckResult]
 
 
 class JpaCheckAdapter(BaseAdapter[CheckCfg, JpaCheckRunResult]):
-    experiment_tag: ClassVar[str | None] = CheckExp.persistence_tag()
     exp_cls = CheckExp
 
     @staticmethod

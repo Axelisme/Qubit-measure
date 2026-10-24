@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from matplotlib import colormaps
@@ -13,9 +13,9 @@ from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
+    Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    PersistableExperiment,
     ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
@@ -289,8 +289,10 @@ JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
-    AXES_SPEC = JPA_AUTO_GROUPED_AXES_SPEC
+class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
+    AXES_SPEC: ClassVar[GroupedAxesSpec[JPAOptimizeResult, JPAOptCfg]] = (
+        JPA_AUTO_GROUPED_AXES_SPEC
+    )
 
     def run(self, cfg: JPAOptCfg, *, context: RunContext) -> JPAOptimizeResult:
         """Search JPA flux, pump frequency, and pump power for high readout SNR.
@@ -422,7 +424,7 @@ class AutoOptimizeExp(PersistableExperiment[JPAOptimizeResult, JPAOptCfg]):
     def analyze(
         self,
         source: RunRecord[JPAOptCfg, JPAOptimizeResult],
-        # tolerated: SynchronousExperiment requires the options keyword even without analysis options.
+        # tolerated: Experiment requires options even when this analysis has no options.
         options: None,  # noqa: ARG002
         *,
         plots: Plots,

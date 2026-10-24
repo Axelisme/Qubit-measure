@@ -18,7 +18,7 @@ None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有�
 ## Owners
 
 - [`adapter/`](adapter/protocol.py)：framework-facing contract、request/result/analyze params、
-  adapter validation 與 protocol signature 所需的 session vocabulary。Writeback 型別由
+  adapter validation 與 protocol signature 所需的 session vocabulary。BaseAdapter 的 `exp_cls` 是 `type[Experiment[Any, Any]]`。預設 tag 讀取 `exp_cls.AXES_SPEC.tag`，adapter 可明確覆寫。預設 restore 將已讀 Container 與 `AXES_SPEC` 交給 `restore_run`，不建構 core。Load capability 要求有效 spec 或 concrete restore override。Writeback 型別由
   `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久
   ModuleSpec。
 - [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。

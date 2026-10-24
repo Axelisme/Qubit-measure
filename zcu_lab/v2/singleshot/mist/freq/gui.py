@@ -28,8 +28,6 @@ MistFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
 
 class MistFreqAdapter(BaseAdapter[FreqCfg, MistFreqRunResult]):
-    experiment_tag: ClassVar[str | None] = FreqDepExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[FreqCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

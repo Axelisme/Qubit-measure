@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 
 import pytest
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -18,7 +19,7 @@ class _MinimalNoAnalysisAdapter(BaseAdapter[Any, Any, None, None]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE
     )
-    exp_cls: ClassVar[type[object]] = object
+    exp_cls = Experiment
 
 
 class _FitNoParamsAdapter(_MinimalNoAnalysisAdapter):
@@ -69,7 +70,7 @@ def test_fit_requires_analyze_params_hook_when_params_need_values() -> None:
             capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
                 analysis=AnalysisMode.FIT
             )
-            exp_cls: ClassVar[type[object]] = object
+            exp_cls = Experiment
 
             def analyze(self, req: Any, *, plots: Plots) -> None:
                 del req
@@ -83,7 +84,7 @@ def test_fit_allows_base_analyze_params_hook_when_params_all_have_defaults() -> 
         capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
             analysis=AnalysisMode.FIT
         )
-        exp_cls: ClassVar[type[object]] = object
+        exp_cls = Experiment
 
         def analyze(self, req: Any, *, plots: Plots) -> None:
             del req

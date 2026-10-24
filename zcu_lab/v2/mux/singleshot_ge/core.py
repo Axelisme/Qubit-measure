@@ -132,16 +132,16 @@ Caller finishes/releases the plots.
 ## Calling and saving
 
 ```python
-from zcu_tools.experiment import RunRecord
+from zcu_tools.experiment import RunRecord, load_run, save_run
 from zcu_lab.v2.mux.singleshot_ge import MuxGEExp
 
 core = MuxGEExp()
 result = core.run(config, context=context)
-source = RunRecord(config, result)
+source = RunRecord(config, result, metadata=metadata)
 context.scope.stop.raise_if_error()
 # Preserve stopped/partial status in caller metadata; do not infer it from IQ.
-core.save_run(source, native_path, metadata=metadata)
-restored, device_snapshot = core.load_run(native_path)
+save_run(source, native_path, spec=MuxGEExp.AXES_SPEC)
+restored, device_snapshot = load_run(native_path, spec=MuxGEExp.AXES_SPEC)
 primary = core.analyze(restored, core.Options(), plots=analysis_plots)
 post = core.post_analyze(restored, primary, core.PostOptions(), plots=analysis_plots)
 ```
@@ -181,7 +181,7 @@ from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, RunRecord
+from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -397,7 +397,7 @@ def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
             raise ValueError("source cfg active indices/shots do not match raw result")
 
 
-class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
+class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
     """Record paired mux IQ clouds and fit each participating qubit's GE separation."""
 
     Options: ClassVar[type[MuxGEAnalyzeOptions]] = MuxGEAnalyzeOptions
@@ -439,7 +439,7 @@ class MuxGEExp(PersistableExperiment[MuxGEResult, MuxGECfg]):
         _validate_source(source)
         return post_analyze_ge(source, primary, options, plots=plots)
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[MuxGEResult, MuxGECfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("shot_indices", "Shot Index", "", dtype=np.int64),
             AxesSpec.Axis("prepared_states", "Probe On", "", dtype=np.int64),

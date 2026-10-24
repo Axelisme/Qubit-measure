@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import partial
 from itertools import pairwise
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -128,10 +128,10 @@ class LocalZResult:
     signals: NDArray[np.complex128]
 
 
-class LocalZExp(PersistableExperiment[LocalZResult, LocalZCfg]):
+class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
     """Stateless two-target local-Z acquisition, saved-source analysis and native IO."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[LocalZResult, LocalZCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
             AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),

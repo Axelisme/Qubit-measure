@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -55,8 +55,8 @@ class RabiCheckCfg(ProgramExpCfg):
     sweep: RabiCheckSweepCfg
 
 
-class RabiCheckExp(PersistableExperiment[RabiCheckResult, RabiCheckCfg]):
-    AXES_SPEC = AxesSpec(
+class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[RabiCheckResult, RabiCheckCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("gains", "Amplitude", "a.u.", dtype=np.float64),
             AxesSpec.Axis("reset_states", "Reset", "None", dtype=np.int64),

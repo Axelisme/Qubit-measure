@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import AfterValidator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -62,9 +62,9 @@ class PowerDepCfg(ProgramExpCfg):
     ] = None
 
 
-class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
+class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     # freqs stored as Hz on disk (MHz * 1e6); gains stored as-is (IDENTITY)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerDepResult, PowerDepCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
             AxesSpec.Axis("gains", "Power", "a.u."),

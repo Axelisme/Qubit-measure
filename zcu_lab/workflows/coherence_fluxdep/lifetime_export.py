@@ -20,7 +20,7 @@ def load_lifetime_trace(
     Directory/reference/schema/I/O errors retain load_trace's source diagnosis.
     """
     if kind == "t1":
-        return load_trace(directory, filename, T1Exp().persistence_spec())
+        return load_trace(directory, filename, T1Exp.AXES_SPEC)
     if kind == "t2ramsey":
-        return load_trace(directory, filename, T2RamseyExp().persistence_spec())
-    return load_trace(directory, filename, T2EchoExp().persistence_spec())
+        return load_trace(directory, filename, T2RamseyExp.AXES_SPEC)
+    return load_trace(directory, filename, T2EchoExp.AXES_SPEC)

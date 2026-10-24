@@ -137,7 +137,6 @@ class MuxLenRabiAdapter(
 ):
     """Run explicit sources and propose captured destinations without applying them."""
 
-    experiment_tag: ClassVar[str | None] = MuxLenRabiExp.persistence_tag()
     exp_cls = MuxLenRabiExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

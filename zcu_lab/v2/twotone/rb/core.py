@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -61,11 +61,11 @@ class RBAnalysis:
     fidelity: float
 
 
-class RB_Exp(PersistableExperiment[RB_Result, RBCfg]):
+class RB_Exp(Experiment[RB_Result, RBCfg]):
     # depths/sub_seeds are integer sweeps on disk -> scale=IDENTITY (1.0).
     # axes inner-first [depths, sub_seeds] so native z == signals2D
     # (n_seeds, n_depths) with zero transpose.
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[RB_Result, RBCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("depths", "Depth", "a.u.", dtype=np.int64),
             AxesSpec.Axis("sub_seeds", "Entropy", "a.u.", dtype=np.int64),

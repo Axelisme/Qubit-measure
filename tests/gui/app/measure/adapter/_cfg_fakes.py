@@ -4,6 +4,7 @@ from typing import ClassVar, Literal
 
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
@@ -31,7 +32,7 @@ class CalibrationInput(ExpCfgModel):
     modules: dict[str, ModuleCfg] = Field(default_factory=dict)
 
 
-class _RejectRun:
+class _RejectRun(Experiment[float, CalibrationInput]):
     def run(self, cfg: CalibrationInput, *, context: RunContext) -> float:
         raise AssertionError("Invalid cfg reached core execution")
 

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.base import cosfunc, fitcos
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -52,8 +52,8 @@ class PhaseCfg(ProgramExpCfg):
     sweep: PhaseSweepCfg
 
 
-class PhaseExp(PersistableExperiment[PhaseResult, PhaseCfg]):
-    AXES_SPEC = AxesSpec(
+class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("phases", "Phase", "deg"),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PhaseResult,

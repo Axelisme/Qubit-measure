@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -62,10 +62,10 @@ class CheckAnalyzeOptions:
     max_point: int = 5000
 
 
-class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
+class CheckExp(Experiment[CheckResult, CheckCfg]):
     Options: ClassVar[type[CheckAnalyzeOptions]] = CheckAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[CheckResult, CheckCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("shots", "shot", "point", dtype=np.int64),),
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
         result_type=CheckResult,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, ClassVar, cast
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -13,9 +13,9 @@ from skopt.space import Real
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
+    Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    PersistableExperiment,
     ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
@@ -268,8 +268,10 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class AutoOptExp(PersistableExperiment[AutoOptResult, AutoOptCfg]):
-    AXES_SPEC = RO_AUTO_GROUPED_AXES_SPEC
+class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
+    AXES_SPEC: ClassVar[GroupedAxesSpec[AutoOptResult, AutoOptCfg]] = (
+        RO_AUTO_GROUPED_AXES_SPEC
+    )
 
     def run(
         self,

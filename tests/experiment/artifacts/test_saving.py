@@ -79,7 +79,7 @@ def artifacts() -> tuple[SaveArtifact, ...]:
         cfg=cfg,
         result=core.run(cfg, context=None),
     )
-    prepared = prepare_run_data(source, spec=core.persistence_spec(), comment="raw")
+    prepared = prepare_run_data(source, spec=core.AXES_SPEC, comment="raw")
     document = AnalysisDocument(
         pane="analysis", parameters={"skip": 1}, summary={"value": 3.0}
     )

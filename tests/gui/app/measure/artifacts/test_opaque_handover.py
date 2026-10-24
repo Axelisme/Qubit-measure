@@ -53,7 +53,7 @@ class OpaqueAdapter(
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, requires_soc=False, load_data=False
     )
-    experiment_tag: ClassVar[str | None] = SavingCore().persistence_spec().tag
+    experiment_tag: ClassVar[str | None] = SavingCore.AXES_SPEC.tag
 
     @staticmethod
     def make_form(ctx: FormContext) -> Form[SavingCfg]:
@@ -85,7 +85,7 @@ class OpaqueAdapter(
             raise TypeError("Expected this adapter's record and opaque result")
         source = RunRecord(result.cfg, result.result.source, metadata=result.metadata)
         return DataItem.from_run(
-            key, source, spec=SavingCore().persistence_spec(), comment=comment
+            key, source, spec=SavingCore.AXES_SPEC, comment=comment
         )
 
     def analysis_item(

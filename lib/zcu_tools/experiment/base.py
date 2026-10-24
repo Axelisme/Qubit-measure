@@ -1,164 +1,59 @@
-"""Stateless persistence for record-based experiments."""
+"""Stateless experiment declarations shared by GUI and Notebook callers."""
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
-from zcu_tools.datafile import Container
-from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
-from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.metadata import RunSnapshot
-from zcu_tools.experiment.records import RunRecord
+from zcu_tools.plotting.plots import Plots
 
-if TYPE_CHECKING:
-    from .native_persistence import RestoredRun
+from .axes_spec import AxesSpec, GroupedAxesSpec
+from .cfg_model import ExpCfgModel
+from .context import RunContext
+from .records import RunRecord
 
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=ExpCfgModel)
 
 
-class PersistableExperiment(Generic[T_Result, T_Config]):
-    """Stateless persistence through a single or grouped AXES_SPEC declaration.
+class Experiment(Generic[T_Result, T_Config]):
+    """Declare acquisition and optional analysis without retaining run state.
 
-    save exports Labber; load reads native data through from_stored.
-    Callers choose the RunRecord and exact local Path. Loading returns a new
-    record without changing this instance. Callers own path reservation and
-    native replace policy. No entry guesses the other file format.
+    Subclasses implement run and whichever analysis stages they support.
+    Unimplemented operations raise NotImplementedError. AXES_SPEC maps records
+    for external persistence functions; None means persistence is unavailable.
+    Hosts own records, plots, hardware lifetimes and file paths.
     """
 
-    #: Single or grouped mapping required by both explicit persistence formats.
+    #: Single/grouped mapping of Result and cfg, or None without persistence.
     AXES_SPEC: ClassVar[AxesSpec[Any, Any] | GroupedAxesSpec[Any, Any] | None] = None
 
-    @classmethod
-    def persistence_tag(cls) -> str | None:
-        """Return the declared persistence tag without constructing an instance.
+    def run(self, cfg: T_Config, /, *, context: RunContext) -> T_Result:
+        """Acquire a Result from positional cfg using this operation's context.
 
-        None is a valid result meaning this experiment declares no persistence.
-        This class-level query performs no I/O or live capture.
+        The caller owns context hardware and plots. Subclasses define their
+        device requirements, cancellation and partial-result behavior.
         """
-        spec = cls.AXES_SPEC
-        return spec.tag if spec is not None else None
+        raise NotImplementedError("Experiment must implement run")
 
-    def persistence_spec(
-        self,
-    ) -> AxesSpec[T_Result, T_Config] | GroupedAxesSpec[T_Result, T_Config]:
-        """Return this experiment's declared single or grouped persistence mapping.
+    def analyze(
+        self, source: RunRecord[T_Config, T_Result], options: Any, *, plots: Plots
+    ) -> Any:
+        """Analyze an explicit record with experiment-specific options and plots.
 
-        The declaration supplies Result/cfg types, variable identities and unit
-        conversions to typed persistence callers. No I/O or live capture occurs.
-        Missing AXES_SPEC raises NotImplementedError; no fallback is inferred.
+        Subclasses define options and output types, including whether cfg=None
+        is accepted. The base provides no analysis or retained result.
         """
-        spec = type(self).AXES_SPEC
-        if spec is None:
-            raise NotImplementedError(
-                f"{type(self).__name__} has no AXES_SPEC; "
-                "not migrated to native persistence"
-            )
-        return spec
+        raise NotImplementedError("Experiment does not implement analyze")
 
-    def save_run(
+    def post_analyze(
         self,
         source: RunRecord[T_Config, T_Result],
-        destination: Path,
+        primary: Any,
+        options: Any,
         *,
-        replace: bool = False,
-    ) -> None:
-        """Save native data with this instance's explicit persistence declaration.
+        plots: Plots,
+    ) -> Any:
+        """Derive a second analysis from this record and its primary analysis.
 
-        source.cfg and source.metadata must be present. Historical evidence is
-        never recaptured from live state. Destination and replace policy
-        belong to the caller; conflicts raise FileExistsError, malformed records
-        raise ValueError or TypeError and I/O errors propagate. Existing save()
-        remains the separate Labber entry, with no format guessing.
+        Subclasses define primary/options/output types and publish to plots.
+        The base provides no post-analysis or retained result.
         """
-        from .native_persistence import save_run
-
-        save_run(
-            source,
-            destination,
-            spec=self.persistence_spec(),
-            replace=replace,
-        )
-
-    def load_run(
-        self, source: Path
-    ) -> tuple[RunRecord[T_Config, T_Result], RunSnapshot]:
-        """Read native typed data and its historical snapshot using this spec.
-
-        Read once through the Container reader. Invalid format, tag, variable
-        or cfg envelope fails with a located validation error; I/O errors
-        propagate. Incompatible typed cfg warns and returns cfg=None with valid
-        data. Do not guess a legacy format or mutate this instance.
-        Retain the generic Container for unknown-field lossless rewrites.
-        """
-        from .native_persistence import load_run
-
-        return load_run(source, spec=self.persistence_spec())
-
-    def from_stored(
-        self, stored: Container
-    ) -> "RestoredRun[RunRecord[T_Config, T_Result]]":
-        """Restore already-read native data with this instance's declared spec.
-
-        Return a typed record and cfg_issue without I/O or instance mutation.
-        Invalid tag/data/cfg envelope or builder results raise ValueError or
-        TypeError. Incompatible typed cfg retains data with cfg=None and emits
-        CfgUnavailableWarning with the same readable reason as cfg_issue.
-        Missing AXES_SPEC raises NotImplementedError. Historical raw cfg and
-        metadata remain unchanged; no current settings or devices are consulted.
-        """
-        from .native_persistence import restore_run
-
-        return restore_run(stored, spec=self.persistence_spec())
-
-    def save(
-        self,
-        source: RunRecord[T_Config, T_Result],
-        destination: Path,
-        *,
-        comment: str | None = None,
-        tag: str | None = None,
-    ) -> None:
-        """Save this typed record at the caller's Labber-normalized local Path.
-
-        source.cfg must be present. comment is appended to its JSON cfg comment;
-        tag overrides the declaration's Labber tag. Single mappings write one
-        log. Grouped exports follow spec.labber_layout: the default common layout
-        requires a common grid; explicit independent layout preserves each
-        variable's own 1D or 2D axes. Invalid arrays or missing cfg raise
-        ValueError; existing paths raise FileExistsError and I/O
-        errors propagate. This entry neither selects a path nor writes native.
-        """
-        from dataclasses import replace
-
-        from zcu_tools.datafile import encode_labber_comment, format_ext, write_labber
-
-        from .native_persistence import prepare_run_data
-
-        prepared = prepare_run_data(
-            source, spec=self.persistence_spec(), comment=comment or ""
-        )
-        write_labber(
-            Path(format_ext(str(destination))),
-            prepared.container,
-            metadata=replace(
-                prepared.labber_metadata,
-                comment=encode_labber_comment(prepared.cfg.values, comment),
-                tags=[tag] if tag is not None else prepared.labber_metadata.tags,
-            ),
-            grouped_layout=prepared.labber_layout,
-        )
-
-    def load(self, source: Path) -> RunRecord[T_Config, T_Result]:
-        """Read native data.h5 into a new single/grouped memory-unit record.
-
-        source is an exact local Path. Use the same from_stored conversion as
-        other native callers, without hardware or instance mutation. Invalid
-        format, tag, data or cfg envelope raises ValueError; I/O errors propagate.
-        Incompatible typed cfg emits CfgUnavailableWarning and retains valid data
-        with cfg=None. Labber-only files require offline conversion with the
-        migrations tools; there is no legacy fallback. save remains a separate
-        Labber export, not the inverse of this entry.
-        """
-        from .native_persistence import load_run_with_metadata
-
-        return load_run_with_metadata(source, spec=self.persistence_spec())
+        raise NotImplementedError("Experiment does not implement post_analyze")

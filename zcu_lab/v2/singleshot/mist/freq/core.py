@@ -14,7 +14,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -64,10 +64,10 @@ class FreqAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
 
 
-class FreqDepExp(PersistableExperiment[FreqResult, FreqCfg]):
+class FreqDepExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
             AxesSpec.Axis("freqs", "Drive Freq", "Hz", scale=1e6, dtype=np.float64),

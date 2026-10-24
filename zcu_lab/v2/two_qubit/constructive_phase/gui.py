@@ -36,7 +36,6 @@ class ConstructivePhaseAdapter(
     """Fixed-capture acquisition, saved-source analysis and native restore."""
 
     exp_cls = ConstructivePhaseExp
-    experiment_tag: ClassVar[str | None] = ConstructivePhaseExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

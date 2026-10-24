@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, config
+from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -75,11 +75,11 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(signals)
 
 
-class LookbackExp(PersistableExperiment[LookbackResult, LookbackCfg]):
+class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
     Options: ClassVar[type[LookbackAnalyzeOptions]] = LookbackAnalyzeOptions
 
     # times stored in seconds on disk -> scale=1e-6 (mem us)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[LookbackResult, LookbackCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=LookbackResult,

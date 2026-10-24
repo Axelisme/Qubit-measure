@@ -10,7 +10,7 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -173,10 +173,10 @@ class AllXYAnalysis:
     residual_rms: float
 
 
-class AllXY_Exp(PersistableExperiment[AllXY_Result, AllXYCfg]):
+class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AllXY_Result, AllXYCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("gate_idxs", "Gate Pair Index", "", dtype=np.int64),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AllXY_Result,

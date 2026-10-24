@@ -25,7 +25,6 @@ class DriveFreqAdapter(BaseAdapter[DriveFreqCfg, DriveFreqRunResult]):
     """Acquire native complex IQ and publish the core's MIST response map."""
 
     exp_cls = DriveFreqExp
-    experiment_tag: ClassVar[str | None] = DriveFreqExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True, requires_soc=True
     )

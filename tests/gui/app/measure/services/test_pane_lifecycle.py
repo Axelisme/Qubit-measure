@@ -471,7 +471,7 @@ def analysis_panes(native_session: NativeSaveSession):
         replace(
             _pane_source_with_excited_initial_state(),
             metadata=native_session.metadata.model_copy(
-                update={"experiment": SavingCore().persistence_spec().tag}
+                update={"experiment": SavingCore.AXES_SPEC.tag}
             ),
         ),
         parameters=_pane_capture(state.get_tab(tab_id).run.parameters),

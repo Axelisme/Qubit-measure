@@ -181,8 +181,6 @@ class GEAdapter(
         GE_Cfg, GERunResult, GEAnalyzeResult, GEAnalyzeParams, GEPostAnalyzeResult
     ]
 ):
-    experiment_tag: ClassVar[str | None] = GE_Exp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[GE_Cfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

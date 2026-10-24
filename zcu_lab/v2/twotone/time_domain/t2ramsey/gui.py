@@ -99,7 +99,6 @@ class T2RamseyAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = T2RamseyExp.persistence_tag()
     sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
     exp_cls = T2RamseyExp
 

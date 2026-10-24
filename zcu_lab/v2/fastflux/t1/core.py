@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -52,10 +53,10 @@ class T1Analysis:
     t1errs: NDArray[np.float64]
 
 
-class T1Exp(PersistableExperiment[T1Result, T1Cfg]):
+class T1Exp(Experiment[T1Result, T1Cfg]):
     # inner lengths stores memory us on disk (disk seconds) -> scale=1e-6;
     # outer gains -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("lengths", "Time", "s", scale=1e-6),
             AxesSpec.Axis("gains", "Flux Pulse Gain", "a.u."),

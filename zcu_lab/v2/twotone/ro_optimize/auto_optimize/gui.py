@@ -40,7 +40,6 @@ class RoOptAutoAnalyzeResult(AnalyzeResultBase):
 class RoOptAutoAdapter(
     BaseAdapter[AutoOptCfg, RoOptAutoRunResult, RoOptAutoAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = AutoOptExp.persistence_tag()
     exp_cls = AutoOptExp
 
     @staticmethod

@@ -38,6 +38,7 @@ from zcu_lab.v2._support.mux_sweep_cfg import MuxDriveModuleCfg
 from zcu_lab.v2.mux.t1 import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment import load_run, save_run
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
@@ -68,12 +69,12 @@ try:
         context=RunContext(env.soc, env.soccfg, plots, {}, stop),
     )
     stop.raise_if_error()
-    source = RunRecord(cfg=cfg, result=result)
+    source = RunRecord(cfg=cfg, result=result, metadata=metadata)
     fits = core.analyze(source, core.Options(skip=0, dual_exp=False), plots=plots)
     # Preserve completion separately: stop.is_set() means cancelled, not complete.
     # metadata is caller-captured RunMetadata for this source and its completion.
-    core.save_run(source, destination, metadata=metadata)
-    loaded, snapshot = core.load_run(destination)
+    save_run(source, destination, spec=MuxT1Exp.AXES_SPEC)
+    loaded, snapshot = load_run(destination, spec=MuxT1Exp.AXES_SPEC)
 finally:
     plots.finish(present=False)
     plots.release()
@@ -119,8 +120,8 @@ Inspect quality and uncertainty before using a fitted value as calibration.
 Native save/load preserve full cfg, original indices, complex IQ and the one
 requested axis. Time is seconds on disk and microseconds in memory. Always pass
 the captured `RunRecord`; changing a current cfg does not change the saved source.
-Canonical saving requires cfg. `save_run`/`load_run` use native HDF5; inherited
-`save` is a Labber export, not the inverse of native `load`.
+Canonical saving requires cfg. External `save_run`/`load_run` use native HDF5;
+`save_labber(source, path, spec=MuxT1Exp.AXES_SPEC)` exports Labber separately.
 
 The numerical core does not infer component identity from readout labels.
 The adapter below owns component proposals using the captured binding.
@@ -137,7 +138,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -228,7 +229,7 @@ def _averaged_signal(
     raise ValueError("T1 program is missing its named MuxReadout")
 
 
-class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
+class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
     """Measure selected qubits' energy relaxation on one shared delay axis.
 
     Each point applies simultaneous pi pulses, waits for the longest branch,
@@ -237,7 +238,7 @@ class MuxT1Exp(PersistableExperiment[MuxT1Result, MuxT1Cfg]):
     """
 
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[MuxT1Result, MuxT1Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("times", "Requested delay", "s", 1e-6),
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),

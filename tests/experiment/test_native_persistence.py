@@ -28,9 +28,9 @@ from zcu_tools.experiment import (
     Axis,
     CfgUnavailableWarning,
     ExpCfgModel,
+    Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    PersistableExperiment,
     PreparedRunData,
     RunRecord,
     VariableAxisSpec,
@@ -103,8 +103,8 @@ def test_axes_namespace_maps_memory_units_to_native_values():
     np.testing.assert_allclose(variable.values, [0.001 + 0.002j, 0.003 + 0.004j])
 
 
-class SingleExperiment(PersistableExperiment[SingleResult, NativeCfg]):
-    AXES_SPEC: ClassVar = SINGLE
+class SingleExperiment(Experiment[SingleResult, NativeCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[SingleResult, NativeCfg]] = SINGLE
 
 
 @dataclass
@@ -142,8 +142,8 @@ GROUPED = GroupedAxesSpec(
 )
 
 
-class GroupedExperiment(PersistableExperiment[GroupedResult, NativeCfg]):
-    AXES_SPEC: ClassVar = GROUPED
+class GroupedExperiment(Experiment[GroupedResult, NativeCfg]):
+    AXES_SPEC: ClassVar[GroupedAxesSpec[GroupedResult, NativeCfg]] = GROUPED
 
 
 def single_record() -> RunRecord[NativeCfg, SingleResult]:
@@ -182,8 +182,8 @@ def test_single_instance_native_round_trip_keeps_cfg_snapshot_and_memory_units(
     record = single_record()
     path = tmp_path / "unrelated-name.h5"
     experiment = SingleExperiment()
-    experiment.save_run(record, path)
-    loaded, snapshot = experiment.load_run(path)
+    save_run(record, path, spec=experiment.AXES_SPEC)
+    loaded, snapshot = load_run(path, spec=experiment.AXES_SPEC)
     assert loaded.cfg == record.cfg
     assert loaded.metadata == record.metadata
     assert record.metadata is not None
@@ -215,8 +215,8 @@ def test_grouped_instance_uses_shared_native_entry_for_different_grids(
     record = RunRecord(NativeCfg(), result, metadata=native_metadata(GROUPED.tag))
     path = tmp_path / "grouped.h5"
     experiment = GroupedExperiment()
-    experiment.save_run(record, path)
-    loaded = experiment.load(path)
+    save_run(record, path, spec=experiment.AXES_SPEC)
+    loaded = load_run_with_metadata(path, spec=experiment.AXES_SPEC)
     assert loaded.cfg == record.cfg
     for field in ("frequency", "signal", "delay", "decay"):
         np.testing.assert_allclose(
@@ -412,7 +412,7 @@ def test_full_metadata_load_preserves_historical_evidence(
     assert str(path) in str(caught.value)
 
 
-@pytest.mark.parametrize("entry", ["load_run", "load_run_with_metadata", "from_stored"])
+@pytest.mark.parametrize("entry", ["load_run", "load_run_with_metadata", "restore_run"])
 def test_typed_readers_keep_optional_labber_input_metadata(
     tmp_path: Path, entry: str
 ) -> None:
@@ -432,20 +432,9 @@ def test_typed_readers_keep_optional_labber_input_metadata(
     elif entry == "load_run_with_metadata":
         loaded = load_run_with_metadata(path, spec=SINGLE)
     else:
-        loaded = SingleExperiment().from_stored(load(path)).record
+        loaded = restore_run(load(path), spec=SingleExperiment.AXES_SPEC).record
     assert loaded.metadata is not None
     assert loaded.metadata.labber == labber
-
-
-def test_public_persistence_declaration_supports_single_grouped_and_missing() -> None:
-    assert SingleExperiment.persistence_tag() == "test/single"
-    assert GroupedExperiment.persistence_tag() == "test/grouped"
-    assert SingleExperiment().persistence_spec() is SINGLE
-    assert GroupedExperiment().persistence_spec() is GROUPED
-    missing = PersistableExperiment[SingleResult, NativeCfg]()
-    assert missing.persistence_tag() is None
-    with pytest.raises(NotImplementedError, match="AXES_SPEC"):
-        missing.persistence_spec()
 
 
 @pytest.fixture(params=[False, True], ids=["single", "grouped"])
@@ -651,7 +640,7 @@ def test_native_wrappers_share_cfg_fallback_and_keep_history(
     assert load(path).docs == stored.docs
 
 
-def test_instance_from_stored_returns_the_shared_restore_result(
+def test_restore_run_returns_the_record_and_cfg_diagnostic(
     restorable_run: tuple[
         Container,
         AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
@@ -659,10 +648,7 @@ def test_instance_from_stored_returns_the_shared_restore_result(
 ) -> None:
     stored, spec = restorable_run
 
-    class Experiment(PersistableExperiment[SingleResult, NativeCfg]):
-        AXES_SPEC: ClassVar = spec
-
-    restored = Experiment().from_stored(stored)
+    restored = restore_run(stored, spec=spec)
     assert restored.cfg_issue is None
     assert restored.record.cfg == NativeCfg()
     assert restored.record.metadata is not None

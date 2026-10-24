@@ -3,12 +3,12 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -53,9 +53,9 @@ class LengthCfg(ProgramExpCfg):
     sweep: LengthSweepCfg
 
 
-class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
+class LengthExp(Experiment[LengthResult, LengthCfg]):
     # Length stores seconds on disk; Result holds us -> scale=1e-6
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("lengths", "Length", "s", 1e-6),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=LengthResult,

@@ -137,7 +137,6 @@ class T2EchoAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = T2EchoExp.persistence_tag()
     sample_device_alias: ClassVar[str | None] = "$qubit.flux_source"
     exp_cls = T2EchoExp
 

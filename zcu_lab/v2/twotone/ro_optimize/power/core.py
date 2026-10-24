@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -68,11 +68,11 @@ class PowerAnalysis:
     best_gain: float
 
 
-class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+class PowerExp(Experiment[PowerResult, PowerCfg]):
     Options: ClassVar[type[PowerAnalyzeOptions]] = PowerAnalyzeOptions
 
     # gains stored as-is on disk -> scale=IDENTITY (default)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("gains", "Probe Power", "a.u."),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerResult,

@@ -57,8 +57,6 @@ class SsLenRabiAdapter(
         LenRabiCfg, SsLenRabiRunResult, SsLenRabiAnalyzeResult, SsLenRabiAnalyzeParams
     ]
 ):
-    experiment_tag: ClassVar[str | None] = LenRabiExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

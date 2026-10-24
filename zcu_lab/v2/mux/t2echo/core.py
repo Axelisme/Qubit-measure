@@ -135,7 +135,8 @@ from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
@@ -234,10 +235,12 @@ def _averaged_signal(
     raise ValueError("Coherence program is missing its named MuxReadout")
 
 
-class MuxT2EchoExp(PersistableExperiment[MuxCoherenceResult, MuxT2EchoCfg]):
+class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
     """Measure and fit each participating qubit's Hahn Echo decay or fringes."""
 
-    AXES_SPEC = coherence_spec(MuxT2EchoCfg, tag="mux/time_domain/t2echo")
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxCoherenceResult, MuxT2EchoCfg]] = (
+        coherence_spec(MuxT2EchoCfg, tag="mux/time_domain/t2echo")
+    )
     Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
 
     def run(self, config: MuxT2EchoCfg, *, context: RunContext) -> MuxCoherenceResult:

@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -75,10 +75,10 @@ class FluxDepCfg(ProgramExpCfg):
     sweep: FluxDepSweepCfg
 
 
-class FluxDepExp(PersistableExperiment[FluxDepResult, FluxDepCfg]):
+class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
     Options: ClassVar[type[FluxDepAnalyzeOptions]] = FluxDepAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FluxDepResult, FluxDepCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("gains", "Power", "a.u."),
             AxesSpec.Axis("values", "Flux value", "a.u."),

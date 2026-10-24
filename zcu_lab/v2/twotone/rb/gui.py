@@ -40,8 +40,6 @@ class RBAdapter(BaseAdapter[RBCfg, RBRunResult, RBAnalyzeResult]):
 
     """Run, persist and fit RB using calibrated X90/X180 and readout modules."""
 
-    experiment_tag: ClassVar[str | None] = RB_Exp.persistence_tag()
-
     exp_cls = RB_Exp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

@@ -147,7 +147,6 @@ class RangeFindAdapter(
     """Find coarse resonator frequencies and propose only captured scalar freq rows."""
 
     exp_cls = RangeFindExp
-    experiment_tag: ClassVar[str | None] = RangeFindExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

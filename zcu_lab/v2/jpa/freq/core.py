@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -65,9 +65,9 @@ class FreqCfg(ProgramExpCfg):
     ] = Field(default=0.0, ge=0.0)
 
 
-class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+class FreqExp(Experiment[FreqResult, FreqCfg]):
     # jpa_freq stored as Hz on disk -> scale=1e6; signals are SNR (float64)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("freqs", "JPA Frequency", "Hz", scale=1e6),),
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=FreqResult,

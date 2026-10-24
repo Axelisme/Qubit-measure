@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -44,9 +45,9 @@ class TwotoneCfg(ProgramExpCfg):
     sweep: TwoToneSweepCfg
 
 
-class TwoToneExp(PersistableExperiment[TwoToneResult, TwotoneCfg]):
+class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[TwoToneResult, TwotoneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
             AxesSpec.Axis("gains", "Flux Pulse Gain", "a.u."),

@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -52,11 +52,11 @@ class CheckCfg(ProgramExpCfg):
     sweep: CheckSweepCfg
 
 
-class CheckExp(PersistableExperiment[CheckResult, CheckCfg]):
+class CheckExp(Experiment[CheckResult, CheckCfg]):
     OUTPUT_MAP: ClassVar[dict[int, Literal["off", "on"]]] = {0: "off", 1: "on"}
 
     # freqs stored as Hz on disk -> scale=1e6; outputs are int JPA labels.
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[CheckResult, CheckCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
             AxesSpec.Axis("outputs", "JPA Output", "a.u.", dtype=np.int_),

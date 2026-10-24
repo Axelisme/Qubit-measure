@@ -47,7 +47,6 @@ class MistTraceAdapter(
 ):
     """Acquire averaged MIST IQ and plot displacement without population fitting."""
 
-    experiment_tag: ClassVar[str | None] = PowerDepExp.persistence_tag()
     exp_cls = PowerDepExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
 

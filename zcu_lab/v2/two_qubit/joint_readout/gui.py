@@ -83,7 +83,6 @@ class JointReadoutAdapter(
     """Open, acquire, load and classify joint raw shots without calibration writes."""
 
     exp_cls = JointReadoutExp
-    experiment_tag: ClassVar[str | None] = JointReadoutExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

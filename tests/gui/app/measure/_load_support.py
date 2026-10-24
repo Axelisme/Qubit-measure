@@ -20,7 +20,7 @@ def write_native_file(
     cfg = SavingCfg(gain=gain)
     prepared = prepare_run_data(
         RunRecord(cfg, core.run(cfg, context=None)),
-        spec=replace(core.persistence_spec(), tag=tag),
+        spec=replace(core.AXES_SPEC, tag=tag),
         comment="history",
     )
     metadata = historical_metadata().model_copy(update={"experiment": tag})

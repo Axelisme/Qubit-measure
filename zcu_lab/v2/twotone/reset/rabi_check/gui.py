@@ -55,8 +55,6 @@ class RabiCheckAdapter(
     diagnostics do not determine reset fidelity or a unique reset channel.
     """
 
-    experiment_tag: ClassVar[str | None] = RabiCheckExp.persistence_tag()
-
     exp_cls = RabiCheckExp
 
     @staticmethod

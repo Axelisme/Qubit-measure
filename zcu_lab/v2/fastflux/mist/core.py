@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -52,13 +52,13 @@ class MistAnalyzeOptions:
     ac_coeff: float | None = None
 
 
-class MistExp(PersistableExperiment[MistResult, MistCfg]):
+class MistExp(Experiment[MistResult, MistCfg]):
     Options: ClassVar[type[MistAnalyzeOptions]] = MistAnalyzeOptions
 
     # both axes are gains in a.u. (no MHz/us conversion) -> scale=IDENTITY.
     # inner-first: signals.shape == (len(flux_gains), len(mist_gains)) ==
     # reversed(axes) lengths, so mist_gains is the inner axis, flux_gains the outer.
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[MistResult, MistCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("mist_gains", "Mist Pulse Gain", "a.u."),
             AxesSpec.Axis("flux_gains", "Flux Pulse Gain", "a.u."),

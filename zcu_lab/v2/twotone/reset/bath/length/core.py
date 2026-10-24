@@ -3,13 +3,13 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Annotated, Any
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -55,8 +55,8 @@ class LengthCfg(ProgramExpCfg):
     sweep: LengthSweepCfg
 
 
-class LengthExp(PersistableExperiment[LengthResult, LengthCfg]):
-    AXES_SPEC = AxesSpec(
+class LengthExp(Experiment[LengthResult, LengthCfg]):
+    AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("phases", "Pi2 Phase", "deg", dtype=np.float64),
             AxesSpec.Axis("lengths", "Length", "s", scale=1e-6, dtype=np.float64),

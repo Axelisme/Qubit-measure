@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -67,11 +67,11 @@ class FreqAnalysis:
     best_freq: float
 
 
-class FreqExp(PersistableExperiment[FreqResult, FreqCfg]):
+class FreqExp(Experiment[FreqResult, FreqCfg]):
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
     # freq stores Hz on disk -> scale=1e6 (disk = memory * 1e6)
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=FreqResult,

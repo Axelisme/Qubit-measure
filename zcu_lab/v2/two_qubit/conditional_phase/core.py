@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -154,25 +154,25 @@ class ConditionalPhaseResult:
     signals: NDArray[np.complex128]
 
 
-class ConditionalPhaseExp(
-    PersistableExperiment[ConditionalPhaseResult, ConditionalPhaseCfg]
-):
+class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg]):
     """Stateless conditional phase acquisition, saved-source analysis and native IO."""
 
-    AXES_SPEC = AxesSpec(
-        axes=(
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
-            AxesSpec.Axis("frequencies", "Common CZ frequency", "Hz", 1e6),
-            AxesSpec.Axis("gate_counts", "CZ gate count", "", dtype=np.int64),
-            AxesSpec.Axis("quadratures", "Projection X or Y", "", dtype=np.int64),
-            AxesSpec.Axis("branches", "Spectator I or Xπ", "", dtype=np.int64),
-        ),
-        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
-        result_type=ConditionalPhaseResult,
-        cfg_type=ConditionalPhaseCfg,
-        cfg_schema_version="1.0",
-        tag="two_qubit/conditional_phase",
+    AXES_SPEC: ClassVar[AxesSpec[ConditionalPhaseResult, ConditionalPhaseCfg]] = (
+        AxesSpec(
+            axes=(
+                AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+                AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
+                AxesSpec.Axis("frequencies", "Common CZ frequency", "Hz", 1e6),
+                AxesSpec.Axis("gate_counts", "CZ gate count", "", dtype=np.int64),
+                AxesSpec.Axis("quadratures", "Projection X or Y", "", dtype=np.int64),
+                AxesSpec.Axis("branches", "Spectator I or Xπ", "", dtype=np.int64),
+            ),
+            z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
+            result_type=ConditionalPhaseResult,
+            cfg_type=ConditionalPhaseCfg,
+            cfg_schema_version="1.0",
+            tag="two_qubit/conditional_phase",
+        )
     )
 
     def run(

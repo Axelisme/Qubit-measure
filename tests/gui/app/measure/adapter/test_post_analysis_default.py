@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.base import Experiment
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AnalysisMode,
@@ -26,7 +27,7 @@ class _FakeAdapter(BaseAdapter[Any, Any, Any, Any]):
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.NONE
     )
-    exp_cls = MagicMock
+    exp_cls = Experiment
 
 
 def test_default_capability_has_no_post_analysis() -> None:

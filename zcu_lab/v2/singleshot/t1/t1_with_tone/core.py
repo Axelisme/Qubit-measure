@@ -18,7 +18,7 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -104,10 +104,10 @@ class T1WithToneAnalysis:
     t1_b: float
 
 
-class T1WithToneExp(PersistableExperiment[T1WithToneResult, T1WithToneCfg]):
+class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     Options: ClassVar[type[T1WithToneAnalyzeOptions]] = T1WithToneAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
             AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),

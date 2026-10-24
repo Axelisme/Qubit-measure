@@ -1,6 +1,9 @@
 """Global coil DC scan with mux onetone spectra."""
 
-from zcu_tools.experiment import PersistableExperiment
+from typing import ClassVar
+
+from zcu_tools.experiment import Experiment
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 
 from zcu_lab.v2._support.mux_flux import (
@@ -20,10 +23,12 @@ class OnetoneFluxGlobalCfg(GlobalFluxCfg[MuxOnetoneSweepCfg]):
     """
 
 
-class OnetoneFluxGlobalExp(PersistableExperiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
+class OnetoneFluxGlobalExp(Experiment[MuxFluxResult, OnetoneFluxGlobalCfg]):
     """Set DC, settle, acquire spectra and preserve completed flux points."""
 
-    AXES_SPEC = mux_flux_spec(OnetoneFluxGlobalCfg, tag="mux/onetone_flux_global")
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxFluxResult, OnetoneFluxGlobalCfg]] = (
+        mux_flux_spec(OnetoneFluxGlobalCfg, tag="mux/onetone_flux_global")
+    )
 
     def run(
         self, config: OnetoneFluxGlobalCfg, *, context: RunContext

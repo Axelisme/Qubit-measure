@@ -76,7 +76,6 @@ class LocalZAdapter(BaseAdapter[LocalZCfg, LocalZRun, LocalZAnalyzeResult]):
     """Fixed-capture Form, both-target Run, saved-source analysis and native restore."""
 
     exp_cls = LocalZExp
-    experiment_tag: ClassVar[str | None] = LocalZExp.persistence_tag()
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
         analysis=AnalysisMode.FIT, load_data=True
     )

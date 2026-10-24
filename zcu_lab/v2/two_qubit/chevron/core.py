@@ -1,11 +1,11 @@
 """Thermal B11 common-frequency × duration Rabi chevron."""
 
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
@@ -50,10 +50,10 @@ class ChevronCfg(DurationScanCfg):
         return self
 
 
-class ChevronExp(PersistableExperiment[RabiScanResult, ChevronCfg]):
+class ChevronExp(Experiment[RabiScanResult, ChevronCfg]):
     """Stateless common-frequency acquisition and native persistence."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[RabiScanResult, ChevronCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
             AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),

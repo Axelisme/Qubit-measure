@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -61,10 +61,10 @@ class AmpRabiCfg(ProgramExpCfg):
     sweep: AmpRabiSweepCfg
 
 
-class AmpRabiExp(PersistableExperiment[AmpRabiResult, AmpRabiCfg]):
+class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AmpRabiResult, AmpRabiCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("amps", "Gain", ""),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=AmpRabiResult,

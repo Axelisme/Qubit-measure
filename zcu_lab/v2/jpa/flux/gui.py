@@ -58,7 +58,6 @@ def _relabel_flux_figure(fig: Figure, best_flux: float) -> None:
 
 
 class JpaFluxAdapter(BaseAdapter[FluxCfg, JpaFluxRunResult, JpaFluxAnalyzeResult]):
-    experiment_tag: ClassVar[str | None] = FluxExp.persistence_tag()
     exp_cls = FluxExp
 
     @staticmethod

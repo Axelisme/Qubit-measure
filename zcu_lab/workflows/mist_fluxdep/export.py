@@ -88,7 +88,7 @@ def prepare_export(
             trace = load_trace(
                 saved.directory,
                 point.gain_file,
-                PowerDepExp().persistence_spec(),
+                PowerDepExp.AXES_SPEC,
                 allow_stopped=True,
             )
             if not np.array_equal(trace.axes[0].values, gains):

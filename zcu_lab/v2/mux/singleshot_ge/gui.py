@@ -191,7 +191,6 @@ class MuxGEAdapter(
 ):
     """Acquire paired mux shots, analyze via GE owner and propose without Apply."""
 
-    experiment_tag: ClassVar[str | None] = MuxGEExp.persistence_tag()
     exp_cls = MuxGEExp
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")
     capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(

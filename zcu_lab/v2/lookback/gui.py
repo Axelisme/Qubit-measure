@@ -69,7 +69,6 @@ class LookbackAdapter(
         LookbackAnalyzeParams,
     ]
 ):
-    experiment_tag: ClassVar[str | None] = LookbackExp.persistence_tag()
     exp_cls = LookbackExp
 
     @staticmethod

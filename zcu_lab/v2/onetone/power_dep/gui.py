@@ -20,7 +20,6 @@ OneTonePowerDepRunResult: TypeAlias = RunRecord[PowerDepCfg, PowerDepResult]
 
 
 class OneTonePowerDepAdapter(BaseAdapter[PowerDepCfg, OneTonePowerDepRunResult]):
-    experiment_tag: ClassVar[str | None] = PowerDepExp.persistence_tag()
     exp_cls = PowerDepExp
 
     @staticmethod

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -66,9 +66,9 @@ class FreqFluxCfg(ProgramExpCfg):
     fail_retry: int = 0
 
 
-class FreqFluxExp(PersistableExperiment[FreqFluxResult, FreqFluxCfg]):
+class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
     # inner freqs stores MHz on disk -> scale=1e6; outer values raw -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[FreqFluxResult, FreqFluxCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
             AxesSpec.Axis("values", "Flux device value", "a.u."),

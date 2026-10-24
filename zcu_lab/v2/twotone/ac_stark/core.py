@@ -9,7 +9,7 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
@@ -131,11 +131,11 @@ class AcStarkCfg(ProgramExpCfg):
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
-class AcStarkExp(PersistableExperiment[AcStarkResult, AcStarkCfg]):
+class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
 
     # gains stored in a.u. -> IDENTITY; freqs stored in Hz on disk -> MHZ_TO_HZ
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
             AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u."),
@@ -362,11 +362,11 @@ class AcStarkRamseyCfg(ProgramExpCfg):
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 
-class AcStarkRamseyExp(PersistableExperiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
+class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
     Options: ClassVar[type[AcStarkRamseyAnalyzeOptions]] = AcStarkRamseyAnalyzeOptions
 
     # gains stored in a.u. -> IDENTITY; lengths stored in s on disk -> US_TO_S
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[AcStarkRamseyResult, AcStarkRamseyCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("lengths", "Time", "s", scale=1e-6),
             AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u."),

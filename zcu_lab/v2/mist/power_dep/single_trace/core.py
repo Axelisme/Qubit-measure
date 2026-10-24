@@ -7,7 +7,7 @@ from typing import ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -55,10 +55,10 @@ class PowerDepCfg(ProgramExpCfg):
     sweep: PowerDepSweepCfg
 
 
-class PowerDepExp(PersistableExperiment[PowerDepResult, PowerDepCfg]):
+class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     Options: ClassVar[type[PowerDepAnalyzeOptions]] = PowerDepAnalyzeOptions
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerDepResult, PowerDepCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("gains", "Drive Power", "a.u."),),
         z=AxesSpec.Z("signals", "Signal", "a.u."),
         result_type=PowerDepResult,

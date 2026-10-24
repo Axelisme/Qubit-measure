@@ -56,7 +56,6 @@ class AllXYAdapter(
         """Build this adapter's definition using captured Open/Reset sources."""
         return make_form(ctx)
 
-    experiment_tag: ClassVar[str | None] = AllXY_Exp.persistence_tag()
     exp_cls = AllXY_Exp
 
     guide_path: ClassVar[Path | None] = Path(__file__).with_name("guide.md")

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import field_serializer, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -191,10 +191,10 @@ def _source_shots(
     return cfg, acquired
 
 
-class JointReadoutExp(PersistableExperiment[JointReadoutResult, JointReadoutCfg]):
+class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
     """Measure joint readout outcomes after four thermal I/Xπ preparations."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[JointReadoutResult, JointReadoutCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
             AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),

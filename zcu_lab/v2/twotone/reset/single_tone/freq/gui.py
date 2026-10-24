@@ -35,7 +35,6 @@ class SingleToneFreqAnalyzeResult(AnalyzeResultBase):
 class SingleToneFreqAdapter(
     BaseAdapter[FreqCfg, SingleToneFreqRunResult, SingleToneFreqAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = FreqExp.persistence_tag()
     exp_cls = FreqExp
 
     @staticmethod

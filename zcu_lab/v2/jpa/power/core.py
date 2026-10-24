@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg, config
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -65,9 +65,9 @@ class PowerCfg(ProgramExpCfg):
     ] = Field(default=0.0, ge=0.0)
 
 
-class PowerExp(PersistableExperiment[PowerResult, PowerCfg]):
+class PowerExp(Experiment[PowerResult, PowerCfg]):
     # powers stored in dBm on disk -> scale=IDENTITY (1.0); signals are real -> ZSpec dtype float64
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("powers", "JPA Power", "dBm"),),
         z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
         result_type=PowerResult,

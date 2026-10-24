@@ -12,9 +12,9 @@ from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
+    Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
-    PersistableExperiment,
     ProgramExpCfg,
     VariableAxisSpec,
     VariableSpec,
@@ -213,8 +213,8 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
-class CPMG_Exp(PersistableExperiment[CPMG_Result, CPMG_Cfg]):
-    AXES_SPEC = CPMG_GROUPED_AXES_SPEC
+class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
+    AXES_SPEC: ClassVar[GroupedAxesSpec[CPMG_Result, CPMG_Cfg]] = CPMG_GROUPED_AXES_SPEC
 
     Options: ClassVar[type[CPMGAnalyzeOptions]] = CPMGAnalyzeOptions
 

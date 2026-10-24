@@ -80,7 +80,8 @@ from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
@@ -184,7 +185,7 @@ def _averaged_signal(
     raise ValueError("Mux scan program is missing its named MuxReadout")
 
 
-class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
+class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
     """Measure qubit spectra with simultaneous drives and a shared mux readout.
 
     Each point optionally resets, starts selected drives together and reads out after
@@ -193,7 +194,7 @@ class MuxFreqExp(PersistableExperiment[MuxSweepResult, MuxFreqCfg]):
     tone positions, actual MHz axes and complex IQ.
     """
 
-    AXES_SPEC = mux_sweep_spec(
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxSweepResult, MuxFreqCfg]] = mux_sweep_spec(
         MuxFreqCfg,
         tag="mux/twotone_spectrum",
         coordinate_label="Drive frequency",

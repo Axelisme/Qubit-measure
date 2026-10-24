@@ -40,8 +40,6 @@ class MistPowerAnalyzeParams:
 class MistPowerAdapter(
     BaseAdapter[PowerCfg, MistPowerRunResult, None, MistPowerAnalyzeParams]
 ):
-    experiment_tag: ClassVar[str | None] = PowerExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[PowerCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""

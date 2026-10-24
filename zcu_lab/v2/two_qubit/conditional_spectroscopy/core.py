@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -136,10 +136,10 @@ class SpectroscopyResult:
     signals: NDArray[np.complex128]
 
 
-class SpectroscopyExp(PersistableExperiment[SpectroscopyResult, SpectroscopyCfg]):
+class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
     """Stateless thermal spectroscopy, diagnostic analysis and native persistence."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[SpectroscopyResult, SpectroscopyCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
             AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),

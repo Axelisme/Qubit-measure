@@ -18,7 +18,7 @@ from zcu_tools.analysis.fitting.resonance import (
 )
 from zcu_tools.analysis.fitting.resonance.base import remove_background
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import AxesSpec, Experiment, ProgramExpCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -117,11 +117,11 @@ def _plot_circle_fit(
     ax.legend()
 
 
-class DispersiveExp(PersistableExperiment[DispersiveResult, DispersiveCfg]):
+class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
     Options: ClassVar[type[DispersiveAnalyzeOptions]] = DispersiveAnalyzeOptions
 
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer ge index -> IDENTITY
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[DispersiveResult, DispersiveCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
             AxesSpec.Axis("ge", "Amplitude", "None", dtype=np.int64),

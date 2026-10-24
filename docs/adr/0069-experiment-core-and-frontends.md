@@ -25,15 +25,19 @@ RunRecord 泛型組合 nullable typed cfg 與實驗專屬 Result。Typed cfg 的
 
 ```python
 run(config, *, context) -> Result
-save(source: RunRecord, destination) -> None
-load(source: Path) -> RunRecord
-from_stored(stored: StoredRun) -> RestoredRun[RunRecord]
 
-# Only synchronous analysis cores provide this operation.
+# Optional analysis signatures; unimplemented operations raise NotImplementedError.
 analyze(source: RunRecord, options, *, plots) -> Analysis
+post_analyze(source: RunRecord, primary, options, *, plots) -> PostAnalysis
+
+# External persistence functions, not core methods.
+save_labber(source: RunRecord, destination: Path, *, spec) -> None
+save_run(source: RunRecord, destination: Path, *, spec, replace=False) -> None
+load_run_with_metadata(source: Path, *, spec) -> RunRecord
+restore_run(stored: Container, *, spec) -> RestoredRun[RunRecord]
 ```
 
-直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。最低共用 core 契約不能強制 analyze，不補空方法、不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
+直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。`Experiment` 的分析方法只提供簽名並 raise `NotImplementedError`，不強制實作 analyze，也不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
 
 RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與顯式 scope，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
 
@@ -47,7 +51,7 @@ Load／analyze 不要求硬體；run 在缺少必要 handles 或 binding 時拒�
 
 共用包裝層隔離 caller cfg／options 與 core 工作輸入，成功後保留該次來源與選項。Record 的欄位關聯固定，不深拷貝大型 Result，不凍結 Figure artists。Record-owned cfg／options 可被使用者刻意修改，不提供 deep-freeze、讀取時複製或完整不可變歷史保證。
 
-同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。實驗類別以 `Options` 引用既有分析選項型別，有獨立 post-analysis 選項時使用 `PostOptions`。Caller 以 `T1Exp.Options(...)` 建立獨立物件，不另匯入 Options。沒有選項的實驗不補空型別，共用 Protocol 不增加這項要求，NotebookExperiment 不轉送這些類屬性。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 的 analyze(options, *, source=None) 與 save(destination, *, source=None) 預設最近成功 run／load 的 last_run，無來源就拒絕。分析歷史 source 不改 last_run 或 save 的預設來源。Core 與獨立互動工具仍要求明確來源。Notebook 不新增 writeback。
+同步核心 options 與 Analysis 是實驗專屬 typed 資料，options 欄位擁有預設值，不另設 Notebook defaults 或動態簽名。實驗類別以 `Options` 引用既有分析選項型別，有獨立 post-analysis 選項時使用 `PostOptions`。Caller 以 `T1Exp.Options(...)` 建立獨立物件，不另匯入 Options。沒有選項的實驗不補空型別，Experiment 基底不增加這項要求，NotebookExperiment 不轉送這些類屬性。Analysis 不含 Figure 或 writeback。Notebook 同步入口回傳 AnalysisRecord，互動工具也保留成功成果的來源、實際 options 與純圖。Notebook 的 analyze(options, *, source=None) 與 save(destination, *, source=None) 預設最近成功 run／load 的 last_run，無來源就拒絕。分析歷史 source 不改 last_run 或 save 的預設來源。Core 與獨立互動工具仍要求明確來源。Notebook 不新增 writeback。
 
 GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選項、隨機 seed、時間或其他重現資訊。Framework 保存來源、插件輸出與圖，不追查插件的隱式依賴，也不保證完整 options 或可重現性。`params` 保持表單輸入，不在 Done 時替換成終態 options；不新增通用 committed-options owner。GUI 與 remote 讀同一份已提交輸出。
 
@@ -63,7 +67,7 @@ Schedule 在自己的 with 保護區域接住 KeyboardInterrupt，將該 scope �
 
 ### Experiment tag 與 adapter
 
-實驗核心宣告持久化 tag，GUI adapter 轉接或明確覆寫 experiment_tag。Framework 只讀 adapter 的公開 tag，不取得實驗類別，也不從泛型反推實驗類。這讓核心擁有持久化身分，同時保留 adapter 黑箱；代價是每個 adapter 必須明確接上 tag。
+實驗核心以 `AXES_SPEC.tag` 宣告持久化身分。GUI BaseAdapter 預設轉接這個 tag，concrete adapter 可明確覆寫 `experiment_tag`。Framework 只讀 adapter 的公開 tag，不取得實驗類別，也不從泛型反推實驗類。
 
 原裁決日期未記錄，使用者於 2026-10-16 map 結案時確認沿用，原話「都採用建議」。原裁決原話為「插隊問題我的想法是tag應該放實驗類讓adapter轉接或複寫才對」及「不太建議暴露實驗類給框架，最好都經由adapter轉接」。
 
@@ -105,7 +109,7 @@ Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析�
 
 實驗透過 AXES_SPEC／GroupedAxesSpec 擁有 RunRecord 到保存資料的映射，datafile 擁有檔案格式。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。Caller 指定 exact path，save 不依目前 run。本機單檔 save 是明示 Labber 匯出，load 只讀 native data.h5，兩者不是對稱格式。只有 Labber 的舊資料須先用既有 migrations 離線轉換，不提供執行期 fallback，也不代跑真實資料遷移。Run 保存與重存的 native replace、Labber 新檔及失敗語意由 [[0063]] 規定。
 
-PersistableExperiment.from_stored 使用公開 restore_run(stored, spec=...)，不做 I/O、不查 registry 或動態匯入實驗。Notebook 的 load 只收 Path，先以 datafile 讀成 StoredRun，再經同一轉換回 typed RunRecord。GUI LoadService 讀檔後交 adapter.restore；GUI 只持有 adapter 的 opaque result。RestoredRun 以 record 型別為泛型，同時保留核心 typed record 與 GUI opaque handle 的型別資訊，cfg_issue 為 None 或非空的不可用原因。
+2026-10-24 使用者要求「實驗基底只剩宣告」。`Experiment[Result, Cfg]` 只保留 `AXES_SPEC` 與 run／analyze／post_analyze 簽名；`from_stored` 契約改為外部函式 `restore_run(stored, spec=...)`，不做 I/O、不查 registry 或動態匯入實驗。Notebook 的 load 只收 Path，先以 datafile 讀成 StoredRun，再經同一轉換回 typed RunRecord。GUI LoadService 讀檔後交 adapter.restore；GUI 只持有 adapter 的 opaque result。RestoredRun 以 record 型別為泛型，同時保留核心 typed record 與 GUI opaque handle 的型別資訊，cfg_issue 為 None 或非空的不可用原因。
 
 Restore 先驗證 native 格式、experiment tag、必要 variables、axes、unit、dtype、shape 與 builder result，再處理 typed cfg。缺 /cfg、非法 JSON 或非法 CfgSnapshot envelope 仍是格式錯誤。合法 envelope 的 cfg_type、schema major 或 concrete model values 不相容時，保留有效資料、令 RunRecord.cfg=None，並發出 CfgUnavailableWarning；cfg_issue 攜帶同一原因。同 major 的 minor 與未知 cfg keys 沿既有 known projection，StoredRun 保留 raw cfg JSON 與歷史 metadata，不重拍來源或裝置。
 
@@ -113,7 +117,7 @@ GroupedLoadData.cfg_snapshot 允許 None，資料 builder 讀 variables，不拿
 
 使用者於 2026-10-14 對框架讀檔後交 StoredRun 給 adapter 回答：「看起來沒問題」；對資料優先、cfg 可缺回答：「我認為可以」。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與 Labber-only 先離線遷移。
 
-一般實驗使用預設 save／load，作者可用相同 RunRecord 介面明確 override，不要求額外 experiment_codec，也不聲稱支援任意 Python 物件。Workflow streaming／grouped artifacts 保留自己的契約，不改成 one-shot record 格式。PersistableExperiment、RecordExperiment 與 NotebookAdapter 的 save／load 只接本機路徑，不公開 server_ip／port；獨立 datafile／workflow transport 保留自己的契約。
+一般實驗將明確 RunRecord 與 spec 交給外部存讀函式，不要求額外 experiment_codec，也不聲稱支援任意 Python 物件。Workflow streaming／grouped artifacts 保留自己的契約，不改成 one-shot record 格式。外部 persistence 函式與 NotebookExperiment 的 save／load 只接本機路徑，不公開 server_ip／port；獨立 datafile／workflow transport 保留自己的契約。
 
 Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 exact saver。Path helper 不建立檔案或鎖，不宣稱原子 reservation。AnalysisRecord 保留記憶體內來源與 options，分析圖另外保存；不新增完整 analysis session 磁碟格式，也不撤銷實驗既有保存義務。
 

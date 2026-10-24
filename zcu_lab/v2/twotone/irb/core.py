@@ -2,14 +2,14 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, PersistableExperiment
+from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
@@ -59,10 +59,10 @@ def _label_arms(ax: Axes) -> None:
     ax.legend()
 
 
-class IRB_Exp(PersistableExperiment[IRBResult, IRBCfg]):
+class IRB_Exp(Experiment[IRBResult, IRBCfg]):
     """Acquire both arms with software switching and hardware depth/repetitions."""
 
-    AXES_SPEC = AxesSpec(
+    AXES_SPEC: ClassVar[AxesSpec[IRBResult, IRBCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("depths", "Depth", "a.u.", dtype=np.int64),
             AxesSpec.Axis(

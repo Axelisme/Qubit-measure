@@ -82,7 +82,8 @@ from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import PersistableExperiment, ProgramExpCfg
+from zcu_tools.experiment import Experiment, ProgramExpCfg
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
@@ -171,7 +172,7 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
     return MuxPulseScan(indices, np.asarray(coordinates, dtype=np.float64), points)
 
 
-class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
+class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
     """Measure each participant's Rabi oscillation versus drive gain.
 
     Reset precedes simultaneous drives and a shared mux readout at each point.
@@ -179,12 +180,14 @@ class MuxAmpRabiExp(PersistableExperiment[MuxSweepResult, MuxAmpRabiCfg]):
     complex IQ and original index; saved data also retains the complete cfg.
     """
 
-    AXES_SPEC = mux_sweep_spec(
-        MuxAmpRabiCfg,
-        tag="mux/rabi/amp",
-        coordinate_label="Pulse gain",
-        unit="",
-        scale=1.0,
+    AXES_SPEC: ClassVar[GroupedAxesSpec[MuxSweepResult, MuxAmpRabiCfg]] = (
+        mux_sweep_spec(
+            MuxAmpRabiCfg,
+            tag="mux/rabi/amp",
+            coordinate_label="Pulse gain",
+            unit="",
+            scale=1.0,
+        )
     )
 
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions

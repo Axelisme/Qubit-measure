@@ -39,8 +39,6 @@ class SsResetCheckAnalyzeResult(AnalyzeResultBase):
 class SsResetCheckAdapter(
     BaseAdapter[ResetCheckCfg, SsResetCheckRunResult, SsResetCheckAnalyzeResult]
 ):
-    experiment_tag: ClassVar[str | None] = ResetCheckExp.persistence_tag()
-
     @staticmethod
     def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
