@@ -15,6 +15,45 @@ RunAnalyzeControl owner 以此產生 Post 結果讀取 budget，不讀目前 For
 Figures-only 的完成事實由 pane plots 保留，不靠 numeric payload 判斷。
 None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有保存格式。
 
+## Immutable definition values
+
+[`adapter/value.py`](adapter/value.py) defines four frozen, keyword-only values.
+`Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` connects
+native persistence, captured Form construction and raw acquisition.
+`Analysis(fn, options=None, writeback=None)` and
+`Interactive(plugin, frontend, options=None, writeback=None)` occupy the same
+primary slot. `PostAnalysis(fn, options=None, writeback=None)` declares the
+independent second stage. Authors do not declare capability flags or artifact hooks.
+
+Adapter's six generic slots connect cfg, raw Result, primary options/result and
+post options/result. The four optional slots default to None. Keyword-aware
+Protocols in [`adapter/hooks.py`](adapter/hooks.py) retain `context=` and `plots=`.
+Analysis and writeback callbacks retain their existing typed request envelopes.
+
+Primary options have signature `(source, env) -> O`; post options also receive
+the adopted primary result. The returned object's type supplies the form and
+JSON schema. None means no options form, not a missing analysis capability.
+The host must generate once when preparing a new source or primary, retain the
+object for schema queries, and pass edited options to analysis. Existing lab
+wrappers may still read historical parameters during analysis. Their cleanup is
+a separate task.
+
+The private primary-stage base hides only Interactive's state type S.
+Interactive passes its typed plugin to the host's generic SessionFactory, then
+closes over that matching session in a frontend mount callback. The host owns
+session lifetime and operation settlement. The UI still validates, mounts and
+cleans up the returned widget. The contract imports no widget or controller.
+
+Registry stores values and performs its one heterogeneous generic erasure at
+registration. Capabilities derive from the primary value and post declaration.
+Every value requires SoC for Run and permits a Load attempt; restore compatibility
+is decided by the declared spec. `restore`, `data_item` and `analysis_item`
+provide framework projections without I/O. Guide reads its declared Markdown
+only when called. Sample proposals declare `coordinate_device` on each item.
+
+Ticket 05 fixes this contract. The legacy BaseAdapter/protocol and host calls
+below remain until ticket 07 migrates them; no class/value runtime bridge is added.
+
 ## Owners
 
 - [`adapter/`](adapter/protocol.py)：framework-facing contract、request/result/analyze params、
