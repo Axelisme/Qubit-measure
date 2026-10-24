@@ -11,6 +11,7 @@ from zcu_tools.experiment.workflows.export import load_trace
 from zcu_tools.experiment.workflows.saved_run import SavedRecord, native_path
 from zcu_tools.resources.sample_table import JsonlSampleTable
 
+from zcu_lab.v2.singleshot.ge.core import GE_Exp
 from zcu_lab.v2.twotone.freq.core import FreqExp
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
@@ -112,6 +113,11 @@ def _last_completed(saved: SavedRecord[CoherencePoint]) -> str:
     if point.readout is not None and point.readout.file is not None:
         load_trace(saved.directory, point.readout.file, FreqGainExp.AXES_SPEC)
         references.append(point.readout.file)
+    if point.singleshot is not None and point.singleshot.file is not None:
+        load_trace(
+            saved.directory, point.singleshot.file, GE_Exp.AXES_SPEC, allow_stopped=True
+        )
+        references.append(point.singleshot.file)
     for item in point.measurements:
         if item.file is not None:
             load_lifetime_trace(saved.directory, item.file, item.kind)
@@ -151,7 +157,7 @@ def prepare_samples(
 
     Only accepted values appear in MHz/us fields (t1, t2r, t2e). Calibration
     success is not a row gate. Coordinates preserve last Completed native device
-    value/unit in frequency→Rabi→readout→T1→Ramsey→Echo order, including rejected
+    value/unit in frequency→Rabi→readout→GE→T1→Ramsey→Echo order, including rejected
     fits. No plan/live/alias substitution or fitting occurs. Validate the whole
     batch before returning; malformed scalars/references/snapshots raise with
     their record/native source and nothing is appended.

@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-10-24
 
-- `coherence_fluxdep/`：逐個 flux 點校準並量測 T1、Ramsey 與 Hahn echo。
+- `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
 - `overnight/`：在固定 flux 下按固定間隔量測 T1 與 Hahn echo，不做 feedback。
 - `overnight_mux/`：按固定間隔先同時量所有 participant 的 T1，再同時量 Hahn echo，不設 flux、不做校準或 feedback。
@@ -66,6 +66,10 @@ Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap
 | `t1`、`t2ramsey`、`t2echo` | 各一張，上方 accepted lifetime 對 flux 的 error bar 點圖，下方目前 decay/fit。只建立 enabled lifetime 的圖。 | `<kind>-decay.png` |
 | `mist/gain` | 目前 MIST gain trace。 | `gain.png` |
 | `mist/vs_flux` | MIST gain 對 flux map。 | `map.png` |
+
+Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校準之後、lifetimes 之前執行。
+GE 要求本點 Rabi 已接受。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
+預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
 
 Readout 只在 cadence 到期且本點 Rabi 接受後更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。

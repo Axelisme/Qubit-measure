@@ -12,10 +12,17 @@ GUI／MCP 只支援 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。不提�
 
 `CoherencePlan` 固定 flux setpoints、明填的 flux_unit、resolved drive/readout modules、delay points 與 historical RunSnapshot。
 `measure_t1`、`measure_t2ramsey`、`measure_t2echo` 預設 true，至少開啟一項。全關在 acquisition 前拒絕。
-每點先設 flux，再依 frequency、Rabi、readout、T1、Ramsey、Echo 順序執行。
+每點先設 flux，再依 frequency、Rabi、readout、可選 singleshot GE、T1、Ramsey、Echo 順序執行。
 關閉的 lifetime 不量、不保存、不產生 result 元素。
 
-`CoherenceTunables` 分為共用 `cal` 與獨立 `t1`、`t2ramsey`、`t2echo`。
+`measure_singleshot` 是固定 plan bool，預設 false，不取代至少開啟一項 lifetime 的要求。
+`CoherenceTunables` 分為共用 `cal` 與獨立 `singleshot`、`t1`、`t2ramsey`、`t2echo`。
+GE 只要求本點 Rabi 已接受，不再加 Rabi residual 或對比門檻。熱布居會壓低 Rabi 對比，額外門檻會偏向排除熱激發大的點。
+`singleshot.min_spacing` 用 plan 的 flux 單位，從上一個實際取得 GE 的點計算絕對距離；距離至少等於它才量。
+Schedule failure 不更新間距基準，Completed partial 仍更新。預設間距 0，允許每個合格點及重複 setpoint。
+每種 preparation 預設 100000 shots，是暫定模擬值。
+GE 使用本點 fitted pi pulse 與接受或保留的合法 readout，relax delay 使用 T1 的 relax_factor × 該點 history-based guess，即使 T1 關閉也沿用此公式。
+每個 Completed GE 保存 `singleshot-ge.h5`，partial 也先保存。Workflow 不呼叫 GE analyze，不做分類、擬合或 workflow 結果圖。Core 的 operation 即時圖保留。
 三份 lifetime history 只收各自接受值，delay grid 保留 alpha=0.5 的 EWMA 與各自初始 guess。
 T1 的 relax delay 沿它的 delay guess。T2 的 relax delay 仍是 relax_factor × 自己的初始 guess，不用本點 T1 改寫。
 Rabi／readout 的 relax delay 是最近 accepted T1 的五倍；尚無 accepted T1 或 T1 關閉時，用合法 T1 guess。
@@ -40,7 +47,9 @@ Index 0 自然先掃。失敗／拒絕不增加掃描，也不改下一個 due i
 Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
 任何 dependent acquisition 都不能借 prior frequency 或 pi pulse 取代本點依賴。
 
-`CoherencePoint` 保存 frequency、rabi、readout 與 enabled `measurements` tuple。
+`CoherencePoint` 保存 frequency、rabi、readout、singleshot 與 enabled `measurements` tuple。
+`singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
+完整擷取記 measured，Schedule failure 記 failed 且沒有檔名，partial 記 failed／partial 並保留檔名。未走到此 stage 的點記 skipped／not reached，歷史 record 缺欄位時為 None。
 Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
 Frequency widening 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
 Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
@@ -119,7 +128,7 @@ MIST 保留 actual gain inner-first 的 Signal 及 Flux-only Success，grid 不�
 
 Coherence samples 每點最多一行，有 accepted frequency 或任一 lifetime 才寫。
 僅寫接受值，欄位沿 freq_mhz 與 t1/t2r/t2e_us、對應 err_us，未接受欄位省略。
-座標來自 frequency→Rabi→readout→T1→Ramsey→Echo 的最後 Completed native snapshot，包括拒絕的 fit。
+座標來自 frequency→Rabi→readout→GE→T1→Ramsey→Echo 的最後 Completed native snapshot，包括拒絕的 fit。
 歷史 point/component 取固定 plan，key 為 run_id/index。全部 rows 先驗再追加，I/O failure 保留 prefix/count/cause。
 Latest-wins 由 sample table owner 決定。GUI、RPC、MCP 沒有 conversion controls。
 
