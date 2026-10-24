@@ -1,6 +1,6 @@
 """Production form ownership without tab widgets or live hardware."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from pathlib import Path
 from typing import ClassVar, NoReturn
 from unittest.mock import MagicMock
@@ -22,11 +22,10 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.app.measure.services.guard import GuardError, GuardService, RunInputs
+from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -326,16 +325,13 @@ def test_authored_missing_module_expression_blocks_run(
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
 
 
-def test_reset_aliases_capture_once_and_run_rejects_live_override(
+def test_reset_aliases_capture_once_for_run(
     global_sources: tuple[AppServices, State],
 ) -> None:
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
     rows = services.context.get_alias_rows()
-    with pytest.raises(GuardError) as caught:
-        services.guard.capture_run_inputs(tab_id, aliases={"qubit": "Q2"})
-    assert caught.value.reason_code == "run_aliases_not_supported"
     assert cfg.accept().values["gain"] == 10.0
     cfg.reset(aliases={"qubit": "Q2"})
     assert cfg.accept().values["gain"] == 20.0
@@ -349,22 +345,6 @@ def test_reset_aliases_capture_once_and_run_rejects_live_override(
     reopened = state.get_tab(state.list_tab_ids()[0]).cfg
     assert reopened.input.data["gain"] == 20.0
     assert reopened.accept().values["gain"] == 20.0
-
-
-@pytest.mark.parametrize("aliases", [None, {}], ids=["none", "empty"])
-def test_empty_aliases_preserve_cached_acceptance_and_deferred_context(
-    global_sources: tuple[AppServices, State], aliases: Mapping[str, str] | None
-) -> None:
-    services, state = global_sources
-    tab_id = services.tab.new_tab("global-source")
-    admitted = GuardService(state).capture_run_inputs(tab_id, aliases=aliases)
-    assert admitted.accepted_cfg.values["gain"] == 10.0
-    services.context.clear_context()
-    deferred = services.tab.new_tab("global-source")
-    assert services.tab.capture_parameters(deferred, aliases=aliases) is None
-    with pytest.raises(FailedPreconditionError) as caught:
-        services.tab.capture_parameters(deferred, aliases={"custom": "Q2"})
-    assert caught.value.reason_code == "no_context"
 
 
 def test_existing_tab_and_run_keep_point_until_reset(
@@ -437,29 +417,6 @@ def test_reset_target_capture_delivers_displayed_values_to_execution(
     assert services.context.get_alias_rows() == rows
     cfg.write({("gain",): 15.0})
     assert admitted[0].accepted_cfg.values["gain"] == (10.0 if target is None else 20.0)
-
-
-def test_run_control_rejects_nonempty_aliases_before_execution(
-    global_sources: tuple[AppServices, State], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    services, state = global_sources
-    tab_id = services.tab.new_tab("global-source")
-    cfg = state.get_tab(tab_id).cfg
-    before = cfg.input.data
-    executions: list[RunInputs] = []
-
-    def receive_run(
-        _self: RunService, inputs: RunInputs, *, plots: Plots, origin: CommandOrigin
-    ) -> int:
-        executions.append(inputs)
-        return 99
-
-    monkeypatch.setattr(RunService, "start_run", receive_run)
-    with pytest.raises(GuardError) as caught:
-        services.run_analyze_control.start_run(tab_id, aliases={"qubit": "missing"})
-    assert caught.value.reason_code == "run_aliases_not_supported"
-    assert executions == []
-    assert cfg.input.data == before
 
 
 def test_unbound_alias_reports_named_invalid_input(

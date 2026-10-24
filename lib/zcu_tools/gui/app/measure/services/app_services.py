@@ -238,9 +238,7 @@ def build_app_services(  # noqa: PLR0913
     )
     # TabService composes the tab render model and needs the writeback query port
     # (built above) — built after writeback (read-model dependency, ADR-0067).
-    tab = TabService(
-        state, registry, writeback, tab_forms, form_sources, captured_parameters
-    )
+    tab = TabService(state, registry, writeback, tab_forms, form_sources)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state)
     load = LoadService(
@@ -294,9 +292,7 @@ def build_app_services(  # noqa: PLR0913
         run_analyze=run_analyze_control,
         device=session.device_control,
     )
-    save_control = SaveControlFacet(
-        state=state, guard=guard, save=save, context=context
-    )
+    save_control = SaveControlFacet(state=state, save=save, context=context)
     writeback_control = WritebackControlFacet(
         state=state,
         guard=guard,

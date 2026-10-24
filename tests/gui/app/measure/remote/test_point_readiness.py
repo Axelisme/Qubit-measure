@@ -224,7 +224,6 @@ def parameter_writeback_pane(
         service,
         form_resources(application.state),
         lambda aliases: form_sources(application.state, aliases),
-        lambda aliases: control.read_context(aliases=aliases),
     )
     application.remote.tab_control = TabControlFacet(
         state=application.state,

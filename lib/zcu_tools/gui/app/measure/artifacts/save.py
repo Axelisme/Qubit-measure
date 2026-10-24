@@ -16,7 +16,7 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
-from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.records import RunMetadata, RunRecord
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
@@ -82,7 +82,6 @@ class SaveService:
         """Synchronously save native HDF5 and a fresh Labber file on the owner thread.
 
         tab_id identifies an existing idle tab with historical storage/metadata.
-        Call after GuardService.check_save on the same owner-thread command.
         comment=None retains its annotation; origin attributes this command.
         Missing evidence, busy or an entry mismatch between file history and
         captured storage raises FailedPreconditionError before mapping or I/O.
@@ -107,8 +106,7 @@ class SaveService:
     ) -> SaveReport:
         """Synchronously save whole artifacts and publish their complete report.
 
-        tab_id identifies an existing tab. Call after GuardService.check_save on
-        the same owner-thread command. None selects all declarations, including
+        tab_id identifies an existing tab. None selects all declarations, including
         Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
         missing storage/metadata, busy or history/captured entry mismatch raise
         FailedPreconditionError before mapping, I/O or annotation mutation.
@@ -135,16 +133,8 @@ class SaveService:
         comment: str | None,
         origin: CommandOrigin,
     ) -> _SavePlan:
-        self._require_tab_idle(tab_id)
+        record, metadata, storage = self._capture_source(tab_id)
         tab = self._state.get_tab(tab_id)
-        record = tab.run.result
-        metadata = None if record is None else record.metadata
-        storage = tab.run.storage
-        if record is None or metadata is None or storage is None:
-            raise FailedPreconditionError(
-                "Run has no historical native metadata or captured storage",
-                reason_code="storage_unavailable",
-            )
         try:
             selected = tab.artifacts.select(refs)
         except ValueError as exc:
@@ -196,6 +186,31 @@ class SaveService:
                     )
             captured.append(SaveArtifact(ref, tuple(members)))
         return _SavePlan(tuple(captured), layout, record, storage, origin, annotation)
+
+    def _capture_source(
+        self, tab_id: str
+    ) -> tuple[RunRecord[Any, Any], RunMetadata, PointStorageBinding]:
+        """Capture native save evidence after admission checks."""
+        if not self._state.has_tab(tab_id):
+            raise FailedPreconditionError(
+                f"Unknown tab: {tab_id!r}", reason_code="unknown_tab"
+            )
+        tab = self._state.get_tab(tab_id)
+        record = tab.run.result
+        metadata = None if record is None else record.metadata
+        storage = tab.run.storage
+        if record is None:
+            raise FailedPreconditionError(
+                "No run result available to save.", reason_code="no_run_result"
+            )
+        self._access.require_available()
+        self._require_tab_idle(tab_id)
+        if metadata is None or storage is None:
+            raise FailedPreconditionError(
+                "Run has no historical native metadata or captured storage",
+                reason_code="storage_unavailable",
+            )
+        return record, metadata, storage
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)

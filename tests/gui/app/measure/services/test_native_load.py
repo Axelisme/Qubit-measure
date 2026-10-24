@@ -86,7 +86,6 @@ def _native_controls(
         writeback,
         form_resources(session.state),
         lambda aliases: form_sources(session.state, aliases),
-        capture,
     )
     load = LoadService(
         session.state,

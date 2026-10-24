@@ -10,7 +10,6 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
-from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -208,7 +207,6 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
             MagicMock(),
             form_resources(empty_state),
             form_sources=lambda aliases: form_sources(empty_state, aliases),
-            captured_parameters=lambda _aliases: None,
         )
         tab_id = tabs.new_tab("pure")
         empty_state.update_tab_result(
@@ -221,7 +219,6 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
         empty_state.set_context(native.state.session_env)
         control = SaveControlFacet(
             state=empty_state,
-            guard=GuardService(empty_state),
             save=SaveService(empty_state, native.bus),
             context=native.context,
         )

@@ -36,8 +36,6 @@ None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有�
 - [`remote/`](remote/README.md)：與 `ui/` 平級的 GUI-process driving adapter，將 RPC 意圖交給
   application commands/queries。`remote.method_specs` public import path 不載入
   Qt-bound service code；MCP bridge 不在本 package。
-- `driven/`：measure app-local Qt/liveplot driven adapters；與 `adapter/` 的 experiment
-  framework contract 分開命名。
 
 resources.entry executor 與 remote handler／wire types 留在各自 owner。
 App composition 協調 Artifact 與 Writeback。
@@ -93,8 +91,8 @@ Run disables Setup and SoC submissions. Inspect, Devices and ARB retain their
 existing Run policy. Remote control makes all five shared dialogs read-only;
 Local restores editing subject to each dialog's Run and validation gates.
 
-`Controller.install_soc` / `uninstall_soc` publish a caller-built board on the
-owner thread. `register_device` adopts a built driver through DeviceService.
+`Controller.session_services.soc_connection.install_soc` / `uninstall_soc` publish
+a caller-built board on the owner thread. `register_device` adopts a built driver through DeviceService.
 `close()` only drains work, leaving resources available for caller callbacks.
 `finish_close()` drains, runs startup callbacks in reverse order, then calls
 `close_hardware()` to close registered drivers and unpublish the board.
@@ -153,6 +151,9 @@ User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.
 
 ## Figure presentation
+
+`services/run_analyze_control.py` 的 `MeasurePlotHost` 在 Qt canvas 掛載後通知 pane，
+沿用 `QtPlotHost` 的 owner-thread 繪圖與 release 契約。
 
 Run、Analysis、Post-analysis、Workflow 與 Data 的具名圖預覽，四張以內在同一頁平鋪，
 超過四張時每頁最多四張。上一頁／下一頁按鈕與 `i / N` 顯示目前頁次。
