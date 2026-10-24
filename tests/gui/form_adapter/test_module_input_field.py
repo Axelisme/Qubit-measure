@@ -12,7 +12,6 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     ConstWaveformCfg,
     ModuleSpec,
-    NoneResetCfg,
     PulseReadoutSpec,
     PulseResetSpec,
     PulseSpec,
@@ -100,7 +99,7 @@ def library_env() -> FormEnv:
                 components={
                     "Q": ComponentLibrary(
                         pulses={"first": pulse, "second": pulse},
-                        reset={"none": NoneResetCfg()},
+                        reset={"active": PulseResetSpec(pulse_cfg="Q.pulses.first")},
                     )
                 },
             )
@@ -139,7 +138,6 @@ def library_env() -> FormEnv:
             "waveform",
             "Q.waveforms.const",
         ),
-        ({"type": "reset/none"}, NoneResetCfg, "type", "reset/none"),
         (
             {
                 "type": "reset/pulse",
@@ -221,7 +219,7 @@ def test_ref_family_only_limits_captured_keys_and_preserves_local_choices() -> N
     )
     assert field.to_spec(selection_result(state, env)) == "Q.pulses.second"
     # The generated ref's most-local choices win over the parent's narrower list.
-    state.write({("selection",): {"kind": "ref", "name": "Q.reset.none"}}, env)
+    state.write({("selection",): {"kind": "ref", "name": "Q.reset.active"}}, env)
     errors = state.result(env)
     assert isinstance(errors, FormErrors)
     assert ("selection", "name") in errors.messages
@@ -267,7 +265,15 @@ def test_nullability_and_foreign_value_fail_at_the_public_boundary(
     foreign_state = FormState(
         FormInput(
             foreign_model,
-            {"selection": {"kind": "inline", "module": {"type": "reset/none"}}},
+            {
+                "selection": {
+                    "kind": "inline",
+                    "module": {
+                        "type": "reset/pulse",
+                        "pulse_cfg": {"kind": "ref", "name": "Q.pulses.first"},
+                    },
+                }
+            },
         )
     )
     with pytest.raises(TypeError, match="field|generated"):

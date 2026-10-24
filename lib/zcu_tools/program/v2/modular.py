@@ -12,6 +12,7 @@ from qick.asm_v2 import AsmV2, Macro
 
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
+from .modules.base import as_modules
 from .sweep import SweepCfg
 
 logger = logging.getLogger(__name__)
@@ -20,17 +21,19 @@ logger = logging.getLogger(__name__)
 class ModularProgramV2(MyProgramV2):
     """
     A class that allows custom behavior based on the provided modules.
+
+    None in the ordered modules sequence means no module and is skipped.
     """
 
     def __init__(
         self,
         soccfg: QickConfig,
         cfg: ProgramV2Cfg,
-        modules: Sequence[Module],
+        modules: Sequence[Module | None],
         sweep: list[tuple[str, SweepCfg | int]] | None = None,
         **kwargs,
     ) -> None:
-        self.modules = modules
+        self.modules = as_modules(modules)
         self.sweep_dict = sweep
         self._dmem_buffer: list[int] = []
         self._protected_gen_routes: dict[int, str] = {}

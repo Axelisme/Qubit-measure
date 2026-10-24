@@ -13,7 +13,6 @@ from zcu_tools.cfg_model import (
     BathResetSpec,
     Expr,
     MuxReadoutSpec,
-    NoneResetCfg,
     PulseReadoutSpec,
     PulseResetSpec,
     PulseSpec,
@@ -142,7 +141,6 @@ TEMPLATES: dict[str, TemplateDef] = {
     ),
     "pi_pulse": TemplateDef(PulseSpec, "Pi pulse", pulse(), default_name="pi_amp"),
     "pi2_pulse": TemplateDef(PulseSpec, "Pi/2 pulse", pulse(), default_name="pi2_amp"),
-    "none_reset": TemplateDef(NoneResetCfg, "No reset", {}, default_name="reset_none"),
     "reset": TemplateDef(
         PulseResetSpec,
         "Pulse reset",
@@ -209,8 +207,5 @@ TEMPLATES: dict[str, TemplateDef] = {
             "trig_offset": 0.0,
         },
         default_name="readout_rf",
-    ),
-    "reset/none:blank": TemplateDef(
-        NoneResetCfg, "Blank: reset/none", {"type": "reset/none"}
     ),
 }

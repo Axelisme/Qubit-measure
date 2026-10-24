@@ -11,7 +11,6 @@ from zcu_tools.cfg_model import (
     DragWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
-    NoneResetCfg,
     PulseCfg,
     PulseReadoutCfg,
     PulseResetCfg,
@@ -53,7 +52,6 @@ def _pulse_cfg() -> PulseCfg:
             ro_ch=0,
             ro_length=1.0,
         ),
-        lambda: NoneResetCfg(),
         lambda: PulseResetCfg(pulse_cfg=_pulse_cfg()),
         lambda: TwoPulseResetCfg(
             pulse1_cfg=_pulse_cfg(),
@@ -69,9 +67,7 @@ def _pulse_cfg() -> PulseCfg:
 def test_concrete_cfg_set_param_rejects_unknown_name(make_cfg: CfgFactory):
     cfg = make_cfg()
 
-    if isinstance(cfg, NoneResetCfg):
-        error = "NoneReset does not support set_param"
-    elif isinstance(cfg, ArbWaveformCfg):
+    if isinstance(cfg, ArbWaveformCfg):
         error = "Arb waveform length is asset-derived"
     else:
         error = "Unknown parameter: __unknown_param__"
