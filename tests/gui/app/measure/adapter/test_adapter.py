@@ -78,4 +78,3 @@ def test_base_adapter_analyze_raises_by_default():
     )
     with pytest.raises(NotImplementedError, match="analysis"):
         adapter.analyze(req, plots=Plots(NonPresentingHost()))
-

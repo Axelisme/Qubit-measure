@@ -18,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._synthetic import SampleAdapter
@@ -38,6 +39,8 @@ def diagnostic_window(
         BaseEventBus(),
         project_root=str(tmp_path),
     )
+    soccfg = make_mock_soccfg()
+    ctrl.install_soc(soccfg, soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
     )

@@ -43,7 +43,7 @@ def _inputs() -> FluxPickInputs:
 
 def _current_plugin(
     entrypoint: FluxEntrypoint, half: float | None, integer: float | None, plots: Plots
-) -> FluxPickPlugin:
+) -> FluxPickPlugin[FluxPickResult]:
     # The two retained projection modes are synthetic callers, not lab adapters.
     return make_flux_pick_plugin(
         _inputs(),
