@@ -1,8 +1,9 @@
 """Historical analysis documents for adapters that produce figures only."""
 
 import pytest
-from tests.gui.app.measure._native_save_support import SavingAdapter
 from zcu_tools.resources.entry import ArtifactKey
+
+from tests.gui.app.measure._native_save_support import SavingAdapter
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])

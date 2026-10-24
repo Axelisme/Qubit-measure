@@ -46,7 +46,12 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import configure_form_lookup
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleAnalysis, SampleRun
+from tests.gui.app.measure._synthetic import (
+    SampleAdapter,
+    SampleAnalysis,
+    SampleParams,
+    SampleRun,
+)
 from tests.gui.app.measure.ui._main_window_fakes import (
     apply_window_defaults,
     editor_wiring_ctrl,
@@ -96,9 +101,7 @@ def test_main_window_load_data_dialog_calls_controller(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", supports_load_data=True, has_figure=False
-    )
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_figure=False)
     database_root = tmp_path / "Database" / "Q3_2D" / "Q1"
     database_root.mkdir(parents=True)
     ctrl.save_control.list_saved_runs.return_value = ()
@@ -206,7 +209,7 @@ def blocked_writeback_window(
         guide=None,
         analysis=Analysis(
             fn=SampleAdapter.analyze,
-            options=SampleAdapter.get_analyze_params,
+            options=lambda source, env: SampleParams(),
             writeback=BlockedWritebackAdapter_get_writeback_items,
         ),
         post_analysis=SampleAdapter.post_analysis,
@@ -573,9 +576,7 @@ def test_main_window_load_data_dialog_cancel_is_noop(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", supports_load_data=True, has_figure=False
-    )
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_figure=False)
     ctrl.save_control.list_saved_runs.return_value = ()
     window = MainWindow(ctrl, templates=lambda: {})
     window.add_tab_widget("tab-1", "fake")
@@ -607,9 +608,7 @@ def test_main_window_load_data_dialog_shows_user_facing_error(
     ctrl = apply_window_defaults(mock_ctrl(main_window_control_factory))
     ctrl.get_bus.return_value = EventBus()
     ctrl.has_tab.return_value = True
-    ctrl.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", supports_load_data=True, has_figure=False
-    )
+    ctrl.get_tab_snapshot.return_value = make_tab_snapshot("tab-1", has_figure=False)
     ctrl.save_control.list_saved_runs.return_value = ()
     ctrl.load_tab_result.side_effect = LoadDataError(
         "Cannot load this data file into the current tab.\n\nDetails: bad axes",

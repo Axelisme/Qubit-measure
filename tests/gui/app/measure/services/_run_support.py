@@ -13,11 +13,11 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     ContextReadiness,
-    ExpAdapterProtocol,
     RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
+from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.app.measure.services.guard import RunInputs
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationGate,
@@ -71,7 +71,7 @@ def make_plots() -> Plots:
     return Plots(NonPresentingHost())
 
 
-def make_inputs(state: State, tab_id: str, adapter: ExpAdapterProtocol) -> RunInputs:
+def make_inputs(state: State, tab_id: str, adapter: RegisteredAdapter) -> RunInputs:
     ctx = state.session_env
     parameters = ctx.parameters
     return RunInputs(

@@ -11,15 +11,12 @@ import pytest
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
     ContextReadiness,
     ParameterWriteback,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
-from zcu_tools.gui.app.measure.services.guard import GuardService
-from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
@@ -31,7 +28,6 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackService,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-from zcu_tools.gui.expected_error import ExpectedErrorCategory
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -489,7 +485,7 @@ def analysis_panes(native_session: NativeSaveSession):
     assert isinstance(primary, PaneResult)
     # The post operation must use the adopted primary, not the later form edit.
     params.initial_state = "ground"
-    post_params = adapter.get_post_analyze_params(primary, ctx)
+    post_params = adapter.get_post_analyze_params(require_record(tab.run), primary, ctx)
     post_bg = _Bg()
     post_handles = OperationHandles()
     post_runner = OperationRunner(
@@ -650,44 +646,3 @@ def test_retired_teardown_failure_does_not_roll_back_committed_pane() -> None:
     assert tab.post_analysis.result is None
     assert tab.post_analysis.writeback_draft is None
     assert writeback.torn_down == [old_primary_draft, old_post_draft]
-
-
-def test_load_capability_gate_rejects_concrete_disabled_adapter() -> None:
-    state, tab_id, _adapter, _ctx = _state()
-
-    class DisabledAdapter:
-        capabilities = AdapterCapabilities(load_data=False)
-
-        def restore(self, stored: object) -> object:
-            return object()
-
-    adapter = DisabledAdapter()
-    # tolerated: This load-capability fixture implements only the adapter surface exercised by the service.
-    state.get_tab(tab_id).adapter = adapter  # pyright: ignore[reportAttributeAccessIssue]
-    load = LoadService(
-        state,
-        MagicMock(),
-        context=MagicMock(),
-        captured_parameters=lambda _aliases: state.session_env.parameters,
-    )
-
-    with pytest.raises(LoadDataError) as exc_info:
-        load.load_result(tab_id, "/tmp/x")
-
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert exc_info.value.reason_code == "unsupported_load"
-
-
-def test_guard_and_load_accept_enabled_concrete_adapter() -> None:
-    state, tab_id, _adapter, _ctx = _state()
-
-    class EnabledAdapter:
-        capabilities = AdapterCapabilities(load_data=True)
-
-        def restore(self, stored: object) -> object:
-            return object()
-
-    # tolerated: This load-capability fixture implements only the adapter surface exercised by the service.
-    state.get_tab(tab_id).adapter = EnabledAdapter()  # pyright: ignore[reportAttributeAccessIssue]
-    GuardService(state).check_load(tab_id)
-    assert require_record(state.get_tab(tab_id).run).result == "run"

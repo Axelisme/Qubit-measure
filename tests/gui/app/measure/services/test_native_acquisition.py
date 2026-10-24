@@ -14,7 +14,6 @@ from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    Adapter,
     RunRequest,
     SessionEnv,
 )
@@ -53,7 +52,6 @@ from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import (
     GUI_ORIGIN,
     NativeSaveSession,
-    SavingAdapter,
 )
 from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure._synthetic import ALIAS_PRESET

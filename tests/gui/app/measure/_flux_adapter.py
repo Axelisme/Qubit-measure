@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import ClassVar
 
 import numpy as np
@@ -82,6 +83,7 @@ def SpectrumAdapter_make_interactive_plugin(
     req: AnalyzeRequest[RunRecord[SpectrumCfg, SpectrumResult], FluxPickParams],
     *,
     plots: Plots,
+    force_magnitude: bool = True,
 ) -> PluginDefinition[FluxPickState, FluxPickResult]:
     result = req.run_result.result
     half, integer = (None, None)
@@ -96,7 +98,7 @@ def SpectrumAdapter_make_interactive_plugin(
         FluxPickInputs(result.signals, result.values, result.freqs),
         flux_half=half,
         flux_int=integer,
-        force_magnitude=True,
+        force_magnitude=force_magnitude,
         plots=plots,
         result_builder=render_flux_pick,
     )
@@ -147,6 +149,11 @@ PhaseSpectrumAdapter = Adapter(
     make_form=SpectrumAdapter.make_form,
     run=SpectrumAdapter.run,
     guide=None,
-    analysis=SpectrumAdapter.analysis,
+    analysis=Interactive(
+        plugin=partial(SpectrumAdapter_make_interactive_plugin, force_magnitude=False),
+        frontend=SpectrumAdapter_make_interactive_frontend,
+        options=lambda source, env: FluxPickParams(),
+        writeback=SpectrumAdapter_get_writeback_items,
+    ),
     post_analysis=SpectrumAdapter.post_analysis,
 )

@@ -32,6 +32,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._load_support import write_native_file
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
+    PaneParams,
     PaneSummary,
 )
 from tests.gui.app.measure._synthetic import (
@@ -574,7 +575,7 @@ CapturedCouplerAdapter = Adapter(
     guide=None,
     analysis=Analysis(
         fn=AnalysisSavingAdapter.analyze,
-        options=AnalysisSavingAdapter.get_analyze_params,
+        options=lambda source, env: PaneParams(),
         writeback=CapturedCouplerAdapter_get_writeback_items,
     ),
     post_analysis=AnalysisSavingAdapter.post_analysis,

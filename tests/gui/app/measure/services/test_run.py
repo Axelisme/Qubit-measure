@@ -50,7 +50,6 @@ from tests.gui.app.measure._synthetic import (
     SampleAdapter,
     SampleCfg,
     SampleResult,
-    SampleRun,
 )
 
 from ._run_support import (

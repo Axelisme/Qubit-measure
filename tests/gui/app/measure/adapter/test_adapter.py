@@ -4,26 +4,22 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting import compute_fit_quality
-from zcu_tools.cfg_model import ConfigBase, PulseSpec
-from zcu_tools.experiment.base import Experiment
+from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
     AnalyzeResultBase,
-    ExpAdapterProtocol,
     ModuleWriteback,
     ParameterWriteback,
     require_soc_handles,
 )
-from zcu_tools.gui.app.measure.adapter import Adapter
-from tests.gui._adapter_fakes import DummyAdapter
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from tests.gui._adapter_fakes import DummyAdapter
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:

@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock
-from zcu_tools.cfg_model import ConfigBase
 
 import pytest
 import zcu_tools
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.catalog_loader import (

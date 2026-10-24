@@ -114,7 +114,7 @@ def test_reload_preserves_config_order_selection_and_uses_new_instances(
     assert app.workspace.capture_session() == expected
     assert closed == [first, second]
     assert set(app.state.list_tab_ids()).isdisjoint({first, second})
-    assert all(isinstance(tab.adapter, NewAdapter) for tab in app.state.tabs.values())
+    assert all(tab.adapter is NewAdapter for tab in app.state.tabs.values())
     assert all(tab.run.result is None for tab in app.state.tabs.values())
     app.writeback.teardown_draft.assert_called_once_with(draft)
 
@@ -174,7 +174,7 @@ def test_capture_failure_keeps_tabs_and_catalog(
     with pytest.raises(ValueError, match="bad snapshot"):
         app.reload.reload_confirmed(preview)
     assert app.state.list_tab_ids() == [tab_id]
-    assert isinstance(app.registry.create("demo"), OldAdapter)
+    assert app.registry.create("demo") is OldAdapter
 
 
 def test_late_preflight_failure_does_not_close_tabs(app: App) -> None:

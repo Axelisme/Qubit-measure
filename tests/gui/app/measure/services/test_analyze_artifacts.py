@@ -45,6 +45,7 @@ from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._components import QubitSchema
 from tests.gui.app.measure._flux_adapter import (
     SpectrumAdapter,
+    SpectrumAdapter_make_interactive_plugin,
     SpectrumCfg,
     SpectrumCore,
     SpectrumResult,
@@ -94,8 +95,8 @@ def _start_onetone_plugin(
     tab_id: str = "tab1",
 ) -> tuple[AnalyzeService, PluginDefinition[Any, Any], int]:
     adapter = state.get_tab(tab_id).adapter
-    assert isinstance(adapter, SpectrumAdapter)
-    plugin = adapter.make_interactive_plugin(
+    assert adapter is SpectrumAdapter
+    plugin = SpectrumAdapter_make_interactive_plugin(
         AnalyzeRequest(
             source,
             FluxPickParams(),

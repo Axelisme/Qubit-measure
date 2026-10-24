@@ -36,9 +36,9 @@ from tests.gui.app.measure._synthetic import (
     PairAdapter,
     SampleAnalysis,
     SampleCfg,
-    SampleRun,
+    SampleParams,
     SampleResult,
-    SampleAdapter,
+    SampleRun,
 )
 from tests.gui.app.measure._templates import TEMPLATES
 
@@ -64,7 +64,7 @@ LedgerAdapter = Adapter(
     guide=None,
     analysis=Analysis(
         fn=PairAdapter.analyze,
-        options=SampleAdapter.get_analyze_params,
+        options=lambda source, env: SampleParams(),
         writeback=LedgerAdapter_get_writeback_items,
     ),
     post_analysis=PairAdapter.post_analysis,

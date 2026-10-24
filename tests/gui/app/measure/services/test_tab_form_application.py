@@ -9,7 +9,6 @@ from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
-    ExpAdapterProtocol,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.form import FormValue

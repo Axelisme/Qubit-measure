@@ -229,7 +229,7 @@ def test_close_timeout_keeps_admission_closed_and_can_be_retried(cf):
 def test_new_tab_adds_entry_to_state(cf):
     tab_id = cf.ctrl.new_tab("fake")
     assert tab_id in cf.state.tabs
-    assert isinstance(cf.state.get_tab(tab_id).adapter, RecordingAdapter)
+    assert cf.state.get_tab(tab_id).adapter is RecordingAdapter
 
 
 def test_new_tab_unknown_adapter_raises(cf):

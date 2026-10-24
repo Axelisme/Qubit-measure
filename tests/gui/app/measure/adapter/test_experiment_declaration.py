@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 from zcu_tools.datafile import load
 from zcu_tools.gui.app.measure.adapter import Adapter
-from tests.gui.app.measure._native_save_support import SavingAdapter
 
-from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.experiment._saving_support import SavingCfg, SavingCore
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._native_save_support import SavingAdapter
 
 
 def test_adapter_restores_from_the_declaration_without_constructing_core(

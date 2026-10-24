@@ -108,7 +108,6 @@ def test_exp_tab_disables_local_buttons_while_analyzing(
             has_run_result=True,
             has_analyze_result=True,
             has_figure=True,
-            supports_load_data=True,
         )
     )
 
@@ -228,7 +227,6 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
 
     snap = make_tab_snapshot(
         "tab-1",
-        supports_load_data=True,
         global_run_active=False,
         is_running=False,
         is_analyzing=False,
@@ -349,7 +347,6 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
         has_run_result=False,
         has_analyze_result=False,
         has_figure=False,
-        supports_load_data=True,
     )
     assert snap1.capabilities is not None
     tab = ExpTabWidget(
@@ -373,7 +370,6 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
             has_run_result=False,
             has_analyze_result=False,
             has_figure=False,
-            supports_load_data=True,
         )
     )
     assert load.isEnabled() is False
@@ -427,7 +423,6 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(main_window_control_factory
             has_figure=True,
             has_post_analyze_result=True,
             supports_post_analysis=True,
-            supports_load_data=True,
         ),
         cfg_input={},
     )

@@ -4,26 +4,22 @@ import json
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Literal
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load
-from zcu_tools.experiment.artifacts import AnalysisDocument, AnalysisItem, DataItem
+from zcu_tools.experiment import AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
-    RunRequest,
     SessionEnv,
 )
-from zcu_tools.experiment import AxesSpec, Axis, ZSpec
-from zcu_tools.gui.app.measure.adapter import Adapter, Analysis
-import numpy as np
-from numpy.typing import NDArray
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
@@ -35,7 +31,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import AcquiredPayload, ArtifactKey
+from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 from tests.gui._qt_waits import qt_until

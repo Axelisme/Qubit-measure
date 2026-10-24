@@ -36,11 +36,11 @@ def native_path(tmp_path: Path) -> str:
     return str(path)
 
 
-def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
+def _make_state() -> tuple[State, str, MagicMock]:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     tab_id = "tab-1"
     adapter = MagicMock()
-    adapter.capabilities = AdapterCapabilities(load_data=load_data)
+    adapter.capabilities = AdapterCapabilities(load_data=True)
     adapter.experiment_tag = "test/load"
     state.add_tab(
         tab_id,

@@ -29,6 +29,7 @@ from tests.gui.app.measure._synthetic import (
     SampleAdapter,
     SampleAnalysis,
     SampleCfg,
+    SampleParams,
     SampleResult,
     SampleRun,
 )
@@ -50,7 +51,7 @@ ReviewAdapter = Adapter(
     guide=None,
     analysis=Analysis(
         fn=SampleAdapter.analyze,
-        options=SampleAdapter.get_analyze_params,
+        options=lambda source, env: SampleParams(),
         writeback=ReviewAdapter_get_writeback_items,
     ),
     post_analysis=SampleAdapter.post_analysis,

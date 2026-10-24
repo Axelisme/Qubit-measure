@@ -108,20 +108,13 @@ def test_resource_write_publishes_input_and_advances_cfg_version(
     assert application.state.version.get(version_key) > before
 
 
-def test_run_rejects_unaccepted_cfg_without_preflight_or_operation(
-    application: Fixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_run_rejects_unaccepted_cfg_without_operation(application: Fixture) -> None:
     tab_id = application.ctrl.new_tab("cfg-contract")
     editor = application.ctrl.cfg_resources.lookup(tab_id)
     editor.write({("gain",): {"expr": "unfinished +"}})
-    preflight = MagicMock()
-    monkeypatch.setattr(
-        application.state.get_tab(tab_id).adapter, "validate_run_request", preflight
-    )
     with pytest.raises(CfgPreconditionError) as caught:
         application.ctrl.start_run(tab_id)
     assert caught.value.reason is CfgPreconditionReason.NOT_VALID
-    preflight.assert_not_called()
     assert application.ctrl.run_analyze_control.active_tab_operations() == ()
     assert application.ctrl.get_running_tab_id() is None
     assert editor.input.data["gain"] == {"expr": "unfinished +"}
