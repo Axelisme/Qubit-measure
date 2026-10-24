@@ -1,40 +1,19 @@
-"""Structural adapter fakes shared by GUI tests."""
+"""Synthetic registered value shared by GUI registry and reload tests."""
 
-from __future__ import annotations
-
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import Container
+from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AdapterGuide,
-    AnalyzeRequest,
-    ParameterWriteback,
-    PostWritebackRequest,
-    RunRequest,
-    SessionEnv,
-    WritebackRequest,
-)
-from zcu_tools.gui.app.measure.artifacts import AnalysisItem, ArtifactKey, DataItem
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 
-class DummyExp:
-    """Structural ExperimentProtocol stub for the Registry-level test."""
-
-    def run(self, cfg, *, context: RunContext):
-        del cfg, context
-        return object()
-
-    def save(self, filepath, result, **kwargs):
-        del filepath, result, kwargs
+@dataclass
+class DummyResult:
+    value: float = 0.0
 
 
 @dataclass
@@ -50,111 +29,36 @@ class DummyAnalyzeParams:
     threshold: float = 0.0
 
 
-class DummyAdapter:
-    """Self-contained ExpAdapterProtocol implementer for the Registry test.
+def dummy_form(ctx: FormContext) -> Form[ConfigBase]:
+    return Form(ConfigBase, {})
 
-    Defines every Protocol member directly (no BaseAdapter dependency), so the
-    registry test stays scoped to the gui-side structural contract.
-    """
 
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities()
-    experiment_tag: ClassVar[str | None] = None
-    sample_device_alias: ClassVar[str | None] = None
-    exp_cls = DummyExp
+def dummy_run[C: ConfigBase](
+    cfg: C, *, context: RunContext
+) -> RunRecord[C, DummyResult]:
+    return RunRecord(cfg=cfg, result=DummyResult())
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ConfigBase]:
-        del ctx
-        return Form(ConfigBase, {})
 
-    @classmethod
-    def guide(cls) -> AdapterGuide:
-        return AdapterGuide(markdown="dummy", resource_dir=None)
+def dummy_analyze[C: ConfigBase](
+    req: AnalyzeRequest[RunRecord[C, DummyResult], DummyAnalyzeParams],
+    *,
+    plots: Plots,
+) -> DummyAnalyzeResult:
+    return DummyAnalyzeResult()
 
-    @classmethod
-    def analyze_params_cls(cls) -> type:
-        return DummyAnalyzeParams
 
-    def get_analyze_params(self, result, ctx) -> DummyAnalyzeParams:
-        del result, ctx
-        return DummyAnalyzeParams()
-
-    def validate_run_request(self, req: RunRequest, cfg: ConfigBase) -> None:
-        del req, cfg
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: ConfigBase,
-        *,
-        context: RunContext,
-    ):
-        del req, cfg, context
-        return RunRecord(None, object())
-
-    def restore(self, stored: Container) -> RestoredRun[RunRecord[Any, Any]]:
-        del stored
-        raise NotImplementedError("DummyAdapter does not load native runs")
-
-    def analysis_result_tone_count(self, result: object) -> int:
-        """Return zero measured tones for any captured non-mux Run/Load result."""
-        del result
-        return 0
-
-    def analyze(self, req: AnalyzeRequest[object, DummyAnalyzeParams], *, plots: Plots):
-        del req, plots
-        return DummyAnalyzeResult()
-
-    def make_interactive_plugin(
-        self, req: AnalyzeRequest[object, DummyAnalyzeParams], *, plots: Plots
-    ):
-        raise NotImplementedError
-
-    def make_interactive_frontend(
-        self, plugin, session, env, request_finish, request_cancel, *, plots: Plots
-    ):
-        raise NotImplementedError
-
-    def get_writeback_items(
-        self,
-        req: WritebackRequest[object, DummyAnalyzeResult],
-    ) -> Sequence[ParameterWriteback]:
-        del req
-        return []
-
-    # -- post-analysis stubs (mirror BaseAdapter raising defaults) -----------
-
-    @classmethod
-    def post_analyze_params_cls(cls) -> type:
-        # No Post inputs use the built-in NoneType schema.
-        return type(None)
-
-    def get_post_analyze_params(self, analyze_result: object, ctx: SessionEnv) -> None:
-        del analyze_result, ctx
-        raise NotImplementedError
-
-    def post_analyze(self, req: object, *, plots: Plots) -> None:
-        del req, plots
-        raise NotImplementedError
-
-    def get_post_writeback_items(
-        self,
-        req: PostWritebackRequest[object, DummyAnalyzeResult, DummyAnalyzeResult],
-    ) -> Sequence[ParameterWriteback]:
-        del req
-        return []
-
-    def analysis_item(
-        self,
-        key: ArtifactKey,
-        result: object,
-        parameters: object | None,
-        *,
-        pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisItem:
-        """Reject native analysis persistence unsupported by this collaborator."""
-        raise NotImplementedError("DummyAdapter has no native analysis document")
-
-    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
-        """Reject native run persistence unsupported by this collaborator."""
-        raise NotImplementedError("DummyAdapter has no native run evidence")
+DummyAdapter = Adapter(
+    spec=AxesSpec(
+        axes=(),
+        z=ZSpec("value", "value", ""),
+        result_type=DummyResult,
+        cfg_type=ConfigBase,
+        tag="test/dummy",
+    ),
+    make_form=dummy_form,
+    run=dummy_run,
+    guide=None,
+    analysis=Analysis(
+        fn=dummy_analyze, options=lambda source, env: DummyAnalyzeParams()
+    ),
+)

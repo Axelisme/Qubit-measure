@@ -13,7 +13,45 @@ from zcu_tools.gui.app.measure.remote.handlers.analysis import (
 )
 from zcu_tools.gui.remote.errors import RemoteError
 
+from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import ChoiceParams
+
+from ._helpers import Fixture, call, open_client
+
+
+def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
+    fx = Fixture(project_root=str(tmp_path / "project"))
+    fx.start()
+    tab_id = fx.ctrl.new_tab("fake")
+    sock = open_client(fx.service.port)
+    try:
+        primary = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
+        assert primary["ok"] is True
+        assert primary["result"]["analyze_params"] is None
+        assert primary["result"]["definitions"] == []
+        fx.ctrl.start_run(tab_id)
+        qt_until(
+            lambda: fx.ctrl.active_operation_count() == 0, label="sample Run terminal"
+        )
+        assert fx.state.get_tab(tab_id).run.result is not None
+        generated = call(sock, "tab.get_analyze_params", {"tab_id": tab_id})
+        assert generated["ok"] is True
+        assert generated["result"]["definitions"] == [
+            {
+                "name": "threshold",
+                "type": "float",
+                "label": "Threshold",
+                "decimals": 2,
+                "default": 0.5,
+            }
+        ]
+        post = call(sock, "tab.get_post_analyze_params", {"tab_id": tab_id})
+        assert post["ok"] is True
+        assert post["result"]["post_analyze_params"] is None
+        assert isinstance(post["result"]["definitions"], list)
+    finally:
+        sock.close()
+        fx.stop()
 
 
 def _adapter_with_params(params: ChoiceParams) -> MagicMock:

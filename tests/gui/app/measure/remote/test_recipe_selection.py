@@ -1,7 +1,12 @@
 """Module selection replies and correction paths use the active Form contract."""
 
+from dataclasses import replace
+
 import pytest
 from zcu_tools.cfg_model import ConfigBase, MuxReadoutCfg, MuxReadoutSpec, Range
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
@@ -15,11 +20,19 @@ class MuxCfg(SampleCfg):
     modules: MuxModules
 
 
-class MuxAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[MuxCfg]:
-        del ctx
-        return Form(MuxCfg, {"sweep": Range.between(1, 2, expts=3)})
+def MuxAdapter_make_form(ctx: FormContext) -> Form[MuxCfg]:
+    del ctx
+    return Form(MuxCfg, {"sweep": Range.between(1, 2, expts=3)})
+
+
+MuxAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=MuxCfg),
+    make_form=MuxAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @pytest.fixture

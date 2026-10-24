@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter, PostAnalysis
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._load_support import historical_metadata
@@ -51,7 +52,14 @@ def _install_result(
         fx.state.update_tab_analyze(tab, result, plots, source_operation_id=operation)
     else:
         adapter = fx.state.get_tab(tab).adapter
-        adapter.capabilities = replace(adapter.capabilities, post_analysis=True)
+        fx.state.get_tab(tab).adapter = Adapter(
+            spec=adapter.spec,
+            make_form=adapter.make_form,
+            run=adapter.run,
+            guide=None,
+            analysis=adapter.analysis,
+            post_analysis=PostAnalysis(fn=lambda req, *, plots: req.analyze_result),
+        )
         if fx.state.get_tab(tab).analysis.result is None:
             _install_result(fx, tab, "analysis", 1.0, 100)
         fx.state.update_tab_post_analyze(

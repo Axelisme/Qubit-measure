@@ -48,11 +48,9 @@ def _make_state(
     *,
     readiness: ContextReadiness,
     soc_attached: bool = True,
-    requires_soc: bool = True,
     lowering_raises: bool = False,
     run_result: RunRecord[ConfigBase, object] | None = _DEFAULT_RECORD,
     analyze_result: object = object(),
-    load_data: bool = True,
     adapter: MagicMock | None = None,
 ) -> tuple[State, str]:
     soc = MagicMock() if soc_attached else None
@@ -71,9 +69,7 @@ def _make_state(
     if adapter is None:
         adapter = MagicMock()
     adapter.experiment_tag = None
-    adapter.capabilities = AdapterCapabilities(
-        requires_soc=requires_soc, load_data=load_data
-    )
+    adapter.capabilities = AdapterCapabilities(load_data=True)
 
     form = Form(GainCfg, {}) if lowering_raises else Form(ConfigBase, {})
 
@@ -108,9 +104,6 @@ def test_run_inputs_issued_for_active_valid_cfg():
     assert parameters is not None
     assert inputs.request.cfg_context == parameters.library.validation_context()
     assert inputs.adapter is state.get_tab(tab_id).adapter
-    adapter.validate_run_request.assert_called_once_with(
-        inputs.request, inputs.accepted_cfg.cfg
-    )
 
 
 def test_run_inputs_freezes_published_expression_and_provenance() -> None:
@@ -132,7 +125,7 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
     assert cfg.accept().values == {"gain": 0.25}
 
 
-def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
+def test_run_inputs_rejects_invalid_expression() -> None:
     adapter = MagicMock()
     state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
     cfg = make_form(
@@ -141,7 +134,6 @@ def test_run_inputs_rejects_invalid_expression_without_preflight() -> None:
     state.get_tab(tab_id).cfg = cfg
     with pytest.raises(CfgPreconditionError):
         _make_guard(state).capture_run_inputs(tab_id)
-    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_inputs_detaches_reference_shape_and_values() -> None:
@@ -218,20 +210,6 @@ def test_run_inputs_admits_live_devices_without_valid_cached_settings(
     assert inputs.request.soc is state.session_env.soc
 
 
-def test_run_inputs_translates_adapter_preflight_error() -> None:
-    adapter = MagicMock()
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
-    preflight_error = ValueError("bad preflight")
-    adapter.validate_run_request.side_effect = preflight_error
-    guard = _make_guard(state)
-
-    with pytest.raises(GuardError, match="Run config invalid: bad preflight") as exc:
-        guard.capture_run_inputs(tab_id)
-
-    assert exc.value.reason_code == "invalid_cfg"
-    assert exc.value.__cause__ is preflight_error
-
-
 @pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY])
 def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
     state, tab_id = _make_state(readiness=readiness)
@@ -260,7 +238,6 @@ def test_run_inputs_rejected_on_invalid_cfg():
 
     with pytest.raises(CfgPreconditionError, match="valid"):
         guard.capture_run_inputs(tab_id)
-    adapter.validate_run_request.assert_not_called()
 
 
 def test_run_inputs_rejected_when_soc_required_but_missing():
@@ -268,24 +245,12 @@ def test_run_inputs_rejected_when_soc_required_but_missing():
     state, tab_id = _make_state(
         readiness=ContextReadiness.ACTIVE,
         soc_attached=False,
-        requires_soc=True,
         adapter=adapter,
     )
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="soc"):
         guard.capture_run_inputs(tab_id)
-    adapter.validate_run_request.assert_not_called()
-
-
-def test_run_inputs_issued_without_soc_when_capability_does_not_require():
-    state, tab_id = _make_state(
-        readiness=ContextReadiness.ACTIVE, soc_attached=False, requires_soc=False
-    )
-    guard = _make_guard(state)
-
-    inputs = guard.capture_run_inputs(tab_id)
-    assert isinstance(inputs, RunInputs)
 
 
 def test_run_inputs_rejected_for_unknown_tab():
@@ -399,10 +364,3 @@ def test_check_rejects_unknown_tab_with_original_reason(operation: str) -> None:
     with pytest.raises(GuardError) as caught:
         getattr(guard, operation)("unknown")
     assert caught.value.reason_code == "unknown_tab"
-
-
-def test_check_load_rejects_unsupported_adapter_with_original_reason() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, load_data=False)
-    with pytest.raises(GuardError) as caught:
-        _make_guard(state).check_load(tab_id)
-    assert caught.value.reason_code == "unsupported_load"

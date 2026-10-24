@@ -24,9 +24,9 @@ from PIL import Image
 from PyQt6 import sip
 from qtpy.QtCore import QCoreApplication, QEventLoop, QSocketNotifier, QTimer
 from zcu_tools.cfg_model import ConfigBase, TemplateDef
-from zcu_tools.gui.app.measure.adapter import ExpAdapterProtocol, SessionEnv
+from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.registry import RegisteredAdapter, Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.app.measure.remote.wire_version import WIRE_VERSION
@@ -201,7 +201,7 @@ class Fixture:
     def prepare_tab[C: ConfigBase](
         self,
         tab_id: str,
-        adapter: ExpAdapterProtocol,
+        adapter: RegisteredAdapter,
         form: Form[C],
         *,
         adapter_name: str = "fake",

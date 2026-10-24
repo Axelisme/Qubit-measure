@@ -9,8 +9,12 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.core.element import ElementIdentity
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
+    PostAnalysis,
     PostAnalyzeRequest,
     PostWritebackRequest,
     WritebackRequest,
@@ -55,7 +59,12 @@ from zcu_tools.resources.entry.ledger_models import AcceptedPayload, LedgerEvent
 from zcu_tools.resources.entry.registry import RoleSpec
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
-from tests.gui.app.measure._native_save_support import PaneSummary, native_save_session
+from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.gui.app.measure._native_save_support import (
+    AnalysisSavingAdapter,
+    PaneSummary,
+    native_save_session,
+)
 from tests.gui.app.measure._record_support import require_metadata, require_record
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -161,7 +170,10 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
                 ),
             ),
             SampleWriteback(
-                "invalid/component" if fails else "Q1", "Sample", {"freq": 12.0}
+                "invalid/component" if fails else "Q1",
+                "Sample",
+                {"freq": 12.0},
+                coordinate_device="$coordinate",
             ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
             ParameterWriteback("Q1.ext.rate", "Rate", proposed_value=5000.0),
@@ -169,7 +181,6 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
         parameters=captured,
         experiment_name="synthetic",
         run_id="run-1",
-        sample_device_alias="$coordinate",
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
     ids = tuple(item.session_id for item in draft.items)
@@ -194,13 +205,14 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
     session.control.set_alias_rows((AliasRow("coordinate", "device"),))
     draft = session.service.create_draft(
         [
-            SampleWriteback("Q1", "Sample", {"freq": 12.0}),
+            SampleWriteback(
+                "Q1", "Sample", {"freq": 12.0}, coordinate_device="$coordinate"
+            ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
         ],
         parameters=session.control.read_context(),
         experiment_name="synthetic",
         run_id="run-1",
-        sample_device_alias="$coordinate",
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
     receipts = session.service.write_draft(
@@ -330,24 +342,36 @@ def test_analysis_draft_uses_start_run_identity(
             if require_record(tab.run).metadata is not None
             else None
         )
-        seen_analyze: list[AnalyzeRequest[object, object]] = []
-        seen_proposals: list[WritebackRequest[object, PaneSummary]] = []
+        seen_analyze: list[
+            AnalyzeRequest[RunRecord[SavingCfg, SavingResult], object]
+        ] = []
+        seen_proposals: list[
+            WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary]
+        ] = []
 
         def analyze(
-            request: AnalyzeRequest[object, object], *, plots: Plots
+            request: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], object],
+            *,
+            plots: Plots,
         ) -> PaneSummary:
             del plots
             seen_analyze.append(request)
             return PaneSummary()
 
         def proposals(
-            request: WritebackRequest[object, PaneSummary],
+            request: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
         ) -> list[WritebackItem]:
             seen_proposals.append(request)
             return []
 
-        monkeypatch.setattr(tab.adapter, "analyze", analyze)
-        monkeypatch.setattr(tab.adapter, "get_writeback_items", proposals)
+        tab.adapter = Adapter(
+            spec=AnalysisSavingAdapter.spec,
+            make_form=AnalysisSavingAdapter.make_form,
+            run=AnalysisSavingAdapter.run,
+            guide=None,
+            analysis=Analysis(fn=analyze, writeback=proposals),
+            post_analysis=AnalysisSavingAdapter.post_analysis,
+        )
         control = ContextControlFacet(context=native.context)
         writeback = WritebackService(control, arb_names=lambda: ())
         runner = OperationRunner(
@@ -443,20 +467,30 @@ def test_post_analysis_draft_retains_primary_identity(
             # Save is independent of whether Primary has a native identity.
             tab.run.result = replace(require_record(tab.run), metadata=native.metadata)
             native.save()
-        seen_requests: list[PostAnalyzeRequest[object, PaneSummary, object]] = []
+        seen_requests: list[
+            PostAnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneSummary, object]
+        ] = []
         seen_proposals: list[
-            PostWritebackRequest[object, PaneSummary, PaneSummary]
+            PostWritebackRequest[
+                RunRecord[SavingCfg, SavingResult], PaneSummary, PaneSummary
+            ]
         ] = []
 
         def post_analyze(
-            request: PostAnalyzeRequest[object, PaneSummary, object], *, plots: Plots
+            request: PostAnalyzeRequest[
+                RunRecord[SavingCfg, SavingResult], PaneSummary, object
+            ],
+            *,
+            plots: Plots,
         ) -> PaneSummary:
             del plots
             seen_requests.append(request)
             return PaneSummary()
 
         def proposals(
-            request: PostWritebackRequest[object, PaneSummary, PaneSummary],
+            request: PostWritebackRequest[
+                RunRecord[SavingCfg, SavingResult], PaneSummary, PaneSummary
+            ],
         ) -> list[WritebackItem]:
             seen_proposals.append(request)
             return (
@@ -469,8 +503,14 @@ def test_post_analysis_draft_retains_primary_identity(
                 ]
             )
 
-        monkeypatch.setattr(tab.adapter, "post_analyze", post_analyze)
-        monkeypatch.setattr(tab.adapter, "get_post_writeback_items", proposals)
+        tab.adapter = Adapter(
+            spec=AnalysisSavingAdapter.spec,
+            make_form=AnalysisSavingAdapter.make_form,
+            run=AnalysisSavingAdapter.run,
+            guide=None,
+            analysis=AnalysisSavingAdapter.analysis,
+            post_analysis=PostAnalysis(fn=post_analyze, writeback=proposals),
+        )
         runner = OperationRunner(
             None, native.handles, None, native.background, native.bus
         )

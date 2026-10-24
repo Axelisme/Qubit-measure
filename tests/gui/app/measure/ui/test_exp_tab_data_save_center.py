@@ -127,13 +127,6 @@ def test_load_data_gates(
             )
         )
         assert center.load_button.isEnabled() is enabled
-    assert snap.capabilities is not None
-    unsupported = ArtifactSaveCenter(replace(snap.capabilities, load_data=False))
-    try:
-        unsupported.update_interaction(snap)
-        assert unsupported.load_button.isHidden()
-    finally:
-        unsupported.deleteLater()
 
 
 def test_remote_save_completion_refreshes_state_owned_status(

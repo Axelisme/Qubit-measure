@@ -1,6 +1,7 @@
 """Plan editing and figure availability through registered synthetic workflows."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -9,9 +10,12 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
@@ -33,7 +37,7 @@ from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._operation_plots import attachment as plot_attachment
-from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleRun
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
 
 
 class Plan(FormModel):
@@ -52,21 +56,40 @@ class RequiredSweepPlan(FormModel):
     )
 
 
-class FluxAdapter(SampleAdapter):
-    def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> SampleRun:
-        values = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
-        viewer = create_trace(
-            context.plots, "flux trace", "Flux", f"fluxes={values.tolist()}"
-        )
-        viewer.update((values, values))
-        return super().run(req, cfg, context=context)
+def FluxAdapter_run(
+    cfg: SampleCfg, *, context: RunContext
+) -> RunRecord[SampleCfg, SampleResult]:
+    values = np.linspace(cfg.sweep.start, cfg.sweep.stop, cfg.sweep.expts)
+    viewer = create_trace(
+        context.plots, "flux trace", "Flux", f"fluxes={values.tolist()}"
+    )
+    viewer.update((values, values))
+    return SampleAdapter.run(cfg, context=context)
 
 
-class RequiredFluxAdapter(FluxAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(SampleCfg, {})
+FluxAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=FluxAdapter_run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
+
+
+def RequiredFluxAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+    del ctx
+    return Form(SampleCfg, {})
+
+
+RequiredFluxAdapter = Adapter(
+    spec=replace(FluxAdapter.spec, cfg_type=SampleCfg),
+    make_form=RequiredFluxAdapter_make_form,
+    run=FluxAdapter.run,
+    guide=None,
+    analysis=FluxAdapter.analysis,
+    post_analysis=FluxAdapter.post_analysis,
+)
 
 
 class Tunables(FormModel):

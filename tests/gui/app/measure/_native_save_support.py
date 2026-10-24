@@ -4,7 +4,6 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar
 
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
@@ -12,14 +11,13 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     AnalyzeRequest,
+    PostAnalysis,
     PostAnalyzeRequest,
-    RunRequest,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.adapter.types import (
     AnalyzeResultBase,
     PostAnalyzeResultBase,
@@ -64,71 +62,66 @@ class PostSummary(PostAnalyzeResultBase):
     correction: float = 0.5
 
 
-class SavingAdapter(
-    BaseAdapter[
-        SavingCfg,
-        RunRecord[SavingCfg, SavingResult],
-        PaneSummary,
-        PaneParams,
-        PostSummary,
-        PaneParams,
-    ]
-):
-    """Real BaseAdapter mapping with an offline typed experiment declaration."""
-
-    exp_cls = SavingCore
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SavingCfg]:
-        del ctx
-        return Form(SavingCfg, {})
-
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.NONE, load_data=False, requires_soc=False
-    )
-    experiment_tag: ClassVar[str | None] = SavingCore.AXES_SPEC.tag
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: SavingCfg,
-        *,
-        context: RunContext,
-    ) -> RunRecord[SavingCfg, SavingResult]:
-        """Acquire a typed record using only the offline fake backend."""
-        return RunRecord(cfg, SavingCore().run(cfg, context=context))
+def SavingAdapter_make_form(ctx: FormContext) -> Form[SavingCfg]:
+    del ctx
+    return Form(SavingCfg, {})
 
 
-class AnalysisSavingAdapter(SavingAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT,
-        post_analysis=True,
-        load_data=True,
-        requires_soc=False,
-    )
+def SavingAdapter_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    """Acquire a typed record using only the offline fake backend."""
+    return RunRecord(cfg=cfg, result=SavingCore().run(cfg, context=context))
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
-        *,
-        plots: Plots,
-    ) -> PaneSummary:
-        return PaneSummary()
 
-    def get_post_analyze_params(
-        self, analyze_result: PaneSummary, ctx: SessionEnv
-    ) -> PaneParams:
-        return PaneParams()
+SavingAdapter = Adapter(
+    spec=SavingCore.AXES_SPEC,
+    make_form=SavingAdapter_make_form,
+    run=SavingAdapter_run,
+    guide=None,
+    analysis=None,
+    post_analysis=None,
+)
 
-    def post_analyze(
-        self,
-        req: PostAnalyzeRequest[
-            RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams
-        ],
-        *,
-        plots: Plots,
-    ) -> PostSummary:
-        return PostSummary()
+
+def AnalysisSavingAdapter_analyze(
+    req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
+) -> PaneSummary:
+    return PaneSummary()
+
+
+def AnalysisSavingAdapter_get_post_analyze_params(
+    source, analyze_result: PaneSummary, ctx: SessionEnv
+) -> PaneParams:
+    return PaneParams()
+
+
+def AnalysisSavingAdapter_post_analyze(
+    req: PostAnalyzeRequest[
+        RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams
+    ],
+    *,
+    plots: Plots,
+) -> PostSummary:
+    return PostSummary()
+
+
+AnalysisSavingAdapter = Adapter(
+    spec=SavingAdapter.spec,
+    make_form=SavingAdapter.make_form,
+    run=SavingAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=AnalysisSavingAdapter_analyze,
+        options=lambda source, env: PaneParams(),
+        writeback=None,
+    ),
+    post_analysis=PostAnalysis(
+        fn=AnalysisSavingAdapter_post_analyze,
+        options=AnalysisSavingAdapter_get_post_analyze_params,
+        writeback=None,
+    ),
+)
 
 
 @dataclass
@@ -218,7 +211,7 @@ def native_save_session(
         "tab",
         Session(
             adapter_name="saving",
-            adapter=AnalysisSavingAdapter(),
+            adapter=AnalysisSavingAdapter,
             cfg=make_form(SavingAdapter.make_form(FormContext(None)), state=state),
         ),
     )

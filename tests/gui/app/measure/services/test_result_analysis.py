@@ -54,7 +54,7 @@ def test_default_analysis_params_retain_result_source(
         primary_contexts.append(ctx.parameters)
         return primary_params
 
-    def post(_result: object, ctx: SessionEnv) -> object:
+    def post(_source: object, _result: object, ctx: SessionEnv) -> object:
         post_contexts.append(ctx.parameters)
         return post_params
 

@@ -13,10 +13,13 @@ from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     AnalyzeRequest,
+    PostAnalysis,
     PostAnalyzeRequest,
-    RunRequest,
 )
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -74,90 +77,76 @@ class StaticInteractive(InteractiveFrontend):
         pass
 
 
-class LayoutAdapter(AnalysisSavingAdapter):
-    """Produce four figures first, then five, without instruments or lab definitions."""
+def LayoutAdapter_draw_figures(plots: Plots, count: int, prefix: str) -> None:
+    for index in range(1, count + 1):
+        name = f"{prefix} tone {index}"
+        plots.subplots(name)
 
-    run_count = 3
-    analysis_count = 3
-
-    @staticmethod
-    def draw_figures(plots: Plots, count: int, prefix: str) -> None:
-        for index in range(1, count + 1):
-            name = f"{prefix} tone {index}"
-            plots.subplots(name)
-
-            def draw(figure: Figure, name: str = name, height: int = index) -> None:
-                axes = figure.axes[0]
-                axes.plot([0, 1, 2], [0, height, 0], label=name)
-                axes.set_xlabel("Time")
-                axes.legend()
-
-            plots.draw(name, draw)
-
-    def run(
-        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
-    ) -> RunRecord[SavingCfg, SavingResult]:
-        record = super().run(req, cfg, context=context)
-        self.run_count += 1
-        self.draw_figures(context.plots, self.run_count, "Run")
-        return record
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
-        *,
-        plots: Plots,
-    ) -> PaneSummary:
-        self.analysis_count += 1
-        self.draw_figures(plots, self.analysis_count, "Analysis")
-        return PaneSummary()
-
-
-class PresentationAdapter(AnalysisSavingAdapter):
-    """Offline adapter with two independently selectable figures in each result pane."""
-
-    def run(
-        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
-    ) -> RunRecord[SavingCfg, SavingResult]:
-        record = super().run(req, cfg, context=context)
-        context.plots.subplots("signal")
-
-        def draw(figure: Figure) -> None:
+        def draw(figure: Figure, name: str = name, height: int = index) -> None:
             axes = figure.axes[0]
-            axes.plot([0, 1, 2], [0, 1, 0], label="Signal")
+            axes.plot([0, 1, 2], [0, height, 0], label=name)
             axes.set_xlabel("Time")
             axes.legend()
 
-        context.plots.draw("signal", draw)
-        return record
+        plots.draw(name, draw)
 
-    def analyze(
-        self,
-        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
-        *,
-        plots: Plots,
-    ) -> PaneSummary:
-        for name, values in (("fit", [0, 1, 0]), ("residual", [0, -1, 0])):
-            _, axes = plots.subplots(name)
-            axes.plot([0, 1, 2], values, label=name)
-            axes.set_xlabel("Time")
-            axes.legend()
-        return PaneSummary()
 
-    def post_analyze(
-        self,
-        req: PostAnalyzeRequest[
-            RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams
-        ],
-        *,
-        plots: Plots,
-    ) -> PostSummary:
-        for name, values in (("summary", [1, 0, 1]), ("detail", [-1, 0, -1])):
-            _, axes = plots.subplots(name)
-            axes.plot([0, 1, 2], values, label=name)
-            axes.set_xlabel("Time")
-            axes.legend()
-        return PostSummary()
+def PresentationAdapter_run(
+    cfg: SavingCfg, *, context: RunContext
+) -> RunRecord[SavingCfg, SavingResult]:
+    record = AnalysisSavingAdapter.run(cfg, context=context)
+    context.plots.subplots("signal")
+
+    def draw(figure: Figure) -> None:
+        axes = figure.axes[0]
+        axes.plot([0, 1, 2], [0, 1, 0], label="Signal")
+        axes.set_xlabel("Time")
+        axes.legend()
+
+    context.plots.draw("signal", draw)
+    return record
+
+
+def PresentationAdapter_analyze(
+    req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
+) -> PaneSummary:
+    for name, values in (("fit", [0, 1, 0]), ("residual", [0, -1, 0])):
+        _, axes = plots.subplots(name)
+        axes.plot([0, 1, 2], values, label=name)
+        axes.set_xlabel("Time")
+        axes.legend()
+    return PaneSummary()
+
+
+def PresentationAdapter_post_analyze(
+    req: PostAnalyzeRequest[
+        RunRecord[SavingCfg, SavingResult], PaneSummary, PaneParams
+    ],
+    *,
+    plots: Plots,
+) -> PostSummary:
+    for name, values in (("summary", [1, 0, 1]), ("detail", [-1, 0, -1])):
+        _, axes = plots.subplots(name)
+        axes.plot([0, 1, 2], values, label=name)
+        axes.set_xlabel("Time")
+        axes.legend()
+    return PostSummary()
+
+
+PresentationAdapter = Adapter(
+    spec=AnalysisSavingAdapter.spec,
+    make_form=AnalysisSavingAdapter.make_form,
+    run=PresentationAdapter_run,
+    guide=None,
+    analysis=Analysis(
+        fn=PresentationAdapter_analyze,
+        options=lambda source, env: PaneParams(),
+        writeback=AnalysisSavingAdapter.get_writeback_items,
+    ),
+    post_analysis=PostAnalysis(
+        fn=PresentationAdapter_post_analyze, options=None, writeback=None
+    ),
+)
 
 
 @pytest.fixture
@@ -170,6 +159,8 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
+        board = white_noise()
+        app.controller.install_soc(board.soc, board.soccfg)
         app.controller.new_tab("presentation")
         app.window.resize(1280, 800)
         yield app.window
@@ -177,6 +168,38 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
 
 @pytest.fixture
 def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
+    layout_counts = [3, 3]
+
+    def LayoutAdapter_run(
+        cfg: SavingCfg, *, context: RunContext
+    ) -> RunRecord[SavingCfg, SavingResult]:
+        record = AnalysisSavingAdapter.run(cfg, context=context)
+        layout_counts[0] += 1
+        LayoutAdapter_draw_figures(context.plots, layout_counts[0], "Run")
+        return record
+
+    def LayoutAdapter_analyze(
+        req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams],
+        *,
+        plots: Plots,
+    ) -> PaneSummary:
+        layout_counts[1] += 1
+        LayoutAdapter_draw_figures(plots, layout_counts[1], "Analysis")
+        return PaneSummary()
+
+    LayoutAdapter = Adapter(
+        spec=AnalysisSavingAdapter.spec,
+        make_form=AnalysisSavingAdapter.make_form,
+        run=LayoutAdapter_run,
+        guide=None,
+        analysis=Analysis(
+            fn=LayoutAdapter_analyze,
+            options=lambda source, env: PaneParams(),
+            writeback=AnalysisSavingAdapter.get_writeback_items,
+        ),
+        post_analysis=AnalysisSavingAdapter.post_analysis,
+    )
+
     registry = Registry()
     registry.register("layout", LayoutAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
@@ -184,6 +207,8 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
         )
+        board = white_noise()
+        app.controller.install_soc(board.soc, board.soccfg)
         app.controller.new_tab("layout")
         app.window.resize(1440, 900)
         yield app.window

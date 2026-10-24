@@ -4,6 +4,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from socket import socket
 
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
 from zcu_tools.gui.app.measure.state import State
@@ -13,9 +16,14 @@ from tests.gui.app.measure._synthetic import SampleAdapter
 
 from ._helpers import recv_response, send
 
-
-class PointAdapter(SampleAdapter):
-    pass
+PointAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @dataclass
