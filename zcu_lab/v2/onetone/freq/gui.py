@@ -7,12 +7,11 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     ParamMeta,
     RunRequest,
@@ -90,35 +89,30 @@ class OneToneFreqAnalyzeParams:
 
 
 class OnetoneSpectrumSummary(BaseModel):
-    """Analysis summary in native units; null retains an unavailable estimate."""
+    """Decode the framework's native result JSON; no experiment serialization."""
 
-    freq: float | None = Field(
-        description="Owner freq in MHz; null retains an unavailable estimate."
+    freq: float | None = Field(description="Fitted resonator frequency in MHz.")
+    fwhm: float | None = Field(description="Fitted linewidth FWHM in MHz.")
+    params: dict[str, JsonValue] = Field(
+        description="Native model parameters, with non-finite numbers represented by null."
     )
-
-    fwhm: float | None = Field(
-        description="Owner fwhm in MHz; null retains an unavailable estimate."
+    edelay: float | None = Field(description="Fitted electrical delay in us.")
+    edelay_source: EDelaySource = Field(
+        description="Delay seed source: global, calibrated, or manual."
+    )
+    edelay_persistable: bool = Field(
+        description="Whether the fitted delay satisfies the existing writeback gate."
     )
 
 
 @dataclass
-class OneToneFreqAnalyzeResult(AnalyzeResultBase):
+class OneToneFreqAnalyzeResult:
     freq: float
     fwhm: float
     params: dict[str, Any]
     edelay: float | None = None
     edelay_source: EDelaySource = "global"
     edelay_persistable: bool = False
-
-    def summary(self) -> OnetoneSpectrumSummary:
-        """Return the named scalar summary consumed by recipes, in native units."""
-        return OnetoneSpectrumSummary(
-            freq=self.freq,
-            fwhm=self.fwhm,
-        )
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {**super().to_summary_dict(), **self.summary().model_dump()}
 
 
 class OneToneFreqAdapter(

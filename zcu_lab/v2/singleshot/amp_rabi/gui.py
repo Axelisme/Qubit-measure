@@ -9,7 +9,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParamMeta,
     RunRequest,
     WritebackItem,
@@ -39,21 +38,8 @@ class SsAmpRabiAnalyzeParams:
     ] = "ground"
 
 
-@dataclass
-class SsAmpRabiAnalyzeResult(AnalyzeResultBase):
-    pi_gain: float
-    pi_gain_error: float
-    pi2_gain: float
-    pi2_gain_error: float
-    frequency: float
-    amplitude: float
-    fit_result: AmpRabiFit
-
-
 class SsAmpRabiAdapter(
-    BaseAdapter[
-        AmpRabiCfg, SsAmpRabiRunResult, SsAmpRabiAnalyzeResult, SsAmpRabiAnalyzeParams
-    ]
+    BaseAdapter[AmpRabiCfg, SsAmpRabiRunResult, AmpRabiFit, SsAmpRabiAnalyzeParams]
 ):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
@@ -79,23 +65,14 @@ class SsAmpRabiAdapter(
         req: AnalyzeRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeParams],
         *,
         plots: Plots,
-    ) -> SsAmpRabiAnalyzeResult:
-        fit = AmpRabiExp().analyze(
+    ) -> AmpRabiFit:
+        return AmpRabiExp().analyze(
             req.run_result,
             AmpRabiAnalyzeOptions(initial_state=req.analyze_params.initial_state),
             plots=plots,
         )
-        return SsAmpRabiAnalyzeResult(
-            fit.pi_gain,
-            fit.pi_gain_error,
-            fit.pi2_gain,
-            fit.pi2_gain_error,
-            fit.frequency,
-            fit.amplitude,
-            fit,
-        )
 
     def get_writeback_items(
-        self, req: WritebackRequest[SsAmpRabiRunResult, SsAmpRabiAnalyzeResult]
+        self, req: WritebackRequest[SsAmpRabiRunResult, AmpRabiFit]
     ) -> Sequence[WritebackItem]:
-        return rabi_calibration_writeback(req.analyze_result.fit_result.joint_fit)
+        return rabi_calibration_writeback(req.analyze_result.joint_fit)

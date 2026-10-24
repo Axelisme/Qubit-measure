@@ -7,7 +7,6 @@ operator guide. The core experiment lives in ``zcu_lab.v2.jpa``.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
@@ -16,7 +15,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -29,6 +27,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2.jpa.auto_optimize.core import (
     AutoOptimizeExp,
     JPAOptCfg,
+    JPAOptimizeAnalysis,
     JPAOptimizeResult,
 )
 from zcu_lab.v2.jpa.auto_optimize.form import make_form
@@ -50,15 +49,8 @@ def _relabel_auto_figure(fig: Figure) -> None:
             ax.set_xlabel("JPA flux device value")
 
 
-@dataclass
-class JpaAutoAnalyzeResult(AnalyzeResultBase):
-    best_flux: float
-    best_freq: float
-    best_power: float
-
-
 class JpaAutoOptimizeAdapter(
-    BaseAdapter[JPAOptCfg, JpaAutoRunResult, JpaAutoAnalyzeResult]
+    BaseAdapter[JPAOptCfg, JpaAutoRunResult, JPAOptimizeAnalysis]
 ):
     exp_cls = AutoOptimizeExp
 
@@ -81,17 +73,13 @@ class JpaAutoOptimizeAdapter(
 
     def analyze(
         self, req: AnalyzeRequest[JpaAutoRunResult, None], *, plots: Plots
-    ) -> JpaAutoAnalyzeResult:
+    ) -> JPAOptimizeAnalysis:
         analysis = AutoOptimizeExp().analyze(req.run_result, None, plots=plots)
         _relabel_auto_figure(plots["fit"])
-        return JpaAutoAnalyzeResult(
-            best_flux=analysis.best_flux,
-            best_freq=analysis.best_freq,
-            best_power=analysis.best_power,
-        )
+        return analysis
 
     def get_writeback_items(
-        self, req: WritebackRequest[JpaAutoRunResult, JpaAutoAnalyzeResult]
+        self, req: WritebackRequest[JpaAutoRunResult, JPAOptimizeAnalysis]
     ) -> Sequence[WritebackItem]:
         result = req.analyze_result
         return [

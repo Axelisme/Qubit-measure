@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
-import numpy as np
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -25,25 +24,10 @@ T1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 @dataclass(frozen=True)
 class T1AnalyzeResult:
-    """Gain-resolved decay estimates; rejected fits are null in the summary."""
+    """Raw gains and core decay estimates; rejected fits remain non-finite."""
 
     gains: list[float]
     analysis: T1Analysis
-
-    def to_summary_dict(self) -> dict[str, object]:
-        return {
-            "gains": self.gains,
-            "t1_us": [
-                float(value) if np.isfinite(value) else None
-                for value in self.analysis.t1s
-            ],
-            "t1_err_us": [
-                float(error) if np.isfinite(value) and np.isfinite(error) else None
-                for value, error in zip(
-                    self.analysis.t1s, self.analysis.t1errs, strict=True
-                )
-            ],
-        }
 
 
 class T1Adapter(BaseAdapter[T1Cfg, T1RunResult, T1AnalyzeResult]):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -9,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -23,6 +21,7 @@ from zcu_lab.v2._support.measure.singleshot_shared import (
     read_confusion_matrix,
 )
 from zcu_lab.v2.singleshot.t1.t1_with_tone.core import (
+    T1WithToneAnalysis,
     T1WithToneAnalyzeOptions,
     T1WithToneCfg,
     T1WithToneExp,
@@ -34,14 +33,8 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone.form import make_form
 SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
 
 
-@dataclass
-class SsT1ToneAnalyzeResult(AnalyzeResultBase):
-    t1: float
-    t1_b: float
-
-
 class SsT1ToneAdapter(
-    BaseAdapter[T1WithToneCfg, SsT1ToneRunResult, SsT1ToneAnalyzeResult]
+    BaseAdapter[T1WithToneCfg, SsT1ToneRunResult, T1WithToneAnalysis]
 ):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[T1WithToneCfg]:
@@ -64,19 +57,18 @@ class SsT1ToneAdapter(
 
     def analyze(
         self, req: AnalyzeRequest[SsT1ToneRunResult, None], *, plots: Plots
-    ) -> SsT1ToneAnalyzeResult:
+    ) -> T1WithToneAnalysis:
         # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
         confusion = read_confusion_matrix(req.parameters)
-        result = T1WithToneExp().analyze(
+        return T1WithToneExp().analyze(
             req.run_result,
             T1WithToneAnalyzeOptions(confusion_matrix=confusion),
             plots=plots,
         )
-        return SsT1ToneAnalyzeResult(t1=result.t1, t1_b=result.t1_b)
 
     def get_writeback_items(
         self,
-        req: WritebackRequest[SsT1ToneRunResult, SsT1ToneAnalyzeResult],
+        req: WritebackRequest[SsT1ToneRunResult, T1WithToneAnalysis],
     ) -> Sequence[WritebackItem]:
         # Key ``t1_with_tone`` per single_qubit.md:3079.
         return [

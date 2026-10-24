@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -9,7 +8,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     WritebackItem,
@@ -25,6 +23,7 @@ from zcu_lab.v2._support.measure.singleshot_shared import (
     read_confusion_matrix,
 )
 from zcu_lab.v2.singleshot.ac_stark.core import (
+    AcStarkAnalysis,
     AcStarkAnalyzeOptions,
     AcStarkCfg,
     AcStarkExp,
@@ -39,14 +38,7 @@ from zcu_lab.v2.singleshot.ac_stark.form import make_form
 SsAcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
 
 
-@dataclass
-class SsAcStarkAnalyzeResult(AnalyzeResultBase):
-    ac_stark_coeff: float
-
-
-class SsAcStarkAdapter(
-    BaseAdapter[AcStarkCfg, SsAcStarkRunResult, SsAcStarkAnalyzeResult]
-):
+class SsAcStarkAdapter(BaseAdapter[AcStarkCfg, SsAcStarkRunResult, AcStarkAnalysis]):
     @staticmethod
     def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
         """Build this adapter's definition using captured Open/Reset sources."""
@@ -71,24 +63,23 @@ class SsAcStarkAdapter(
 
     def analyze(
         self, req: AnalyzeRequest[SsAcStarkRunResult, None], *, plots: Plots
-    ) -> SsAcStarkAnalyzeResult:
+    ) -> AcStarkAnalysis:
         # Required chi/kappa and optional readout correction/cutoff use this
         # Run's fixed capture. The core derives eta and owns fit defaults.
         chi, kappa = read_chi_kappa(req.parameters)
         confusion = read_confusion_matrix(req.parameters)
         cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
-        analysis = AcStarkExp().analyze(
+        return AcStarkExp().analyze(
             req.run_result,
             AcStarkAnalyzeOptions(
                 chi=chi, kappa=kappa, confusion_matrix=confusion, cutoff=cutoff
             ),
             plots=plots,
         )
-        return SsAcStarkAnalyzeResult(ac_stark_coeff=analysis.ac_stark_coeff)
 
     def get_writeback_items(
         self,
-        req: WritebackRequest[SsAcStarkRunResult, SsAcStarkAnalyzeResult],
+        req: WritebackRequest[SsAcStarkRunResult, AcStarkAnalysis],
     ) -> Sequence[WritebackItem]:
         # Key ``ac_stark_coeff`` per single_qubit.md:3329.
         return [

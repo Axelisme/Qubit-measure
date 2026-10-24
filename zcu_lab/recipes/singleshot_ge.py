@@ -78,8 +78,8 @@ class SingleshotGEReport(RecipeReport):
     ge_radius: float | None = Field(
         description="Post-analysis classification radius in IQ units; null means not estimable."
     )
-    confusion: list[list[float]] = Field(
-        description="Post-analysis confusion matrix in state order."
+    confusion: list[list[float | None]] = Field(
+        description="Post-analysis confusion matrix in state order; nonfinite entries are null."
     )
 
 
@@ -162,8 +162,8 @@ async def singleshot_ge(
             fidelity=report_number(primary.result.fidelity),
             theta=report_number(primary.result.theta),
             threshold=report_number(primary.result.threshold),
-            ge_radius=report_number(analysis.result.ge_radius),
-            confusion=analysis.result.confusion,
+            ge_radius=report_number(analysis.result.confusion.radius),
+            confusion=analysis.result.confusion.matrix,
             writeback_applied=writeback_applied,
         )
     finally:
