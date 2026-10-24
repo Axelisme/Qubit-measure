@@ -1,16 +1,22 @@
 """Exact preparation streams with source-scoped immutable envelope reuse."""
 
 from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from sys import getsizeof
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import PulseEnvelope, RoundRequest
+from zcu_tools.core.simulation import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource
 from zcu_tools.experiment.ftf.preparation import EnvelopeEncoder, preparation_key
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EvolutionResult,
+    ModelSource,
+    TimelineBatch,
+)
 
 from tests.experiment._ftf_templates import (
     expect_statistics,
@@ -151,8 +157,15 @@ class RecordingEngine(Engine):
         self.density_bytes = b""
 
     def evolve(
-        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
-    ):
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+    ) -> EvolutionResult:
         result = super().evolve(
             source,
             batches,

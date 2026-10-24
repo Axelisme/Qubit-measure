@@ -1,5 +1,6 @@
 """Template-to-engine composition and per-acquire FTF round semantics."""
 
+from collections.abc import Sequence
 from dataclasses import replace
 from threading import Event
 
@@ -7,11 +8,17 @@ import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
 from zcu_tools.core.simulation import (
+    CancellationQuery,
     RoundSignals,
     RoundStatistics,
 )
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EvolutionResult,
+    ModelSource,
+    TimelineBatch,
+)
 
 from tests.experiment._ftf_templates import (
     expect_statistics,
@@ -220,8 +227,15 @@ class CountingEngine(Engine):
         self.calls = 0
 
     def evolve(
-        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
-    ):
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+    ) -> EvolutionResult:
         self.calls += 1
         return super().evolve(
             source,
@@ -266,9 +280,16 @@ class ResidualEngine(Engine):
         self.populations = populations
 
     def evolve(
-        self, source, batches, *, budget=1e-3, cancel, telemetry=False, reuse_key=None
-    ):
-        from zcu_tools.simulate.evolution import EvolutionResult, PathDiagnostics
+        self,
+        source: ModelSource,
+        batches: Sequence[TimelineBatch],
+        *,
+        budget: float = 1e-3,
+        cancel: CancellationQuery | None = None,
+        telemetry: bool = False,
+        reuse_key: bytes | None = None,
+    ) -> EvolutionResult:
+        from zcu_tools.simulate.evolution import PathDiagnostics
 
         points = np.concatenate([batch.points for batch in batches])
         densities = np.repeat(np.diag(self.populations)[None], len(points), axis=0)
