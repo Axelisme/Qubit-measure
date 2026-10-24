@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-24，mux participant capture 與 recipe 省略語意
+**Last updated:** 2026-10-24，mux 原生分析結果與 JSON consumers
 
 # Measure domain support
 
@@ -8,12 +8,6 @@
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
 已定案且供多個 Form 共用的初值政策集中在具名 domain helper，涵蓋 T1 時間尺度選源、Rabi 來源與首次初值，以及 mux readout 的 ringup 等待。
 各 Form 仍明確選擇倍率或場景，並組合表單結構。校準政策不進入 generic framework，也不擴及 writeback 或實驗順序。
-
-`analyze_results.fit_quality_models(qualities, *, summary_path="summary.fit_quality")` 回傳 `dict[str, FitQuality] | None`。
-它複製 core diagnostics，只將 invalid 的路徑加上 summary 位置，不更改原物件或 metrics。
-Mux caller 傳入 `summary.tones[row].fit_quality`，單 qubit 沿用預設路徑。
-`fit_quality_summary` 序列化同一組 owner 型別，保留既有 JSON 欄位與 invalid 清單。
-數值與原因由 fitting core 擁有，這些 helper 不算品質，也不改 writeback 或 accept policy。
 
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
@@ -40,15 +34,13 @@ Label 不是 identity。這些初值不保證硬體安全，操作員仍須核�
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
 
-`mux_results.py` 集中七個 mux qubit adapters 的固定來源身分核對與 position/name summary。目的地只來自同次 Run／Load capture；缺 capture 不產生 proposal。來源 cfg 有完整名稱時，必須與捕捉的完整 qubits 相同。Summary 的名稱只取來源 cfg，缺 cfg 時保留 None，不讀目前 Form 或 library。
-來源名稱可用時，作者附 `ElementIdentity` 給 native summary rows 與候選；原始位置不由
-row offset 推測。直接 NumPy scalar 在 summary 邊界轉為 Python scalar，不改數值、fit
-或 proposal eligibility。
-各 mux analysis carrier 的 `summary()` 從 native outcomes 建立具名 BaseModel，`to_summary_dict()` 序列化同一模型。
-Recipe 的 `analyze(result=...)` 直接引用這些 owner 模型，不宣告結果鏡像。
-`mux_results.py` 擁有原始位置／名稱、失敗與共用 coherence summary。
-各實驗的 `gui.py` 擁有頻率、Rabi、T1、GE 與 onetone summary。
-品質欄位直接使用 fitting owner 的 `FitQuality`，coherence sampling 使用 owner 的 `FringeSamplingQuality`。
+`mux_results.py` 集中七個 mux qubit adapters 的固定來源身分核對與共用 JSON consumer 型別。目的地只來自同次 Run／Load capture；缺 capture 不產生 proposal。來源 cfg 有完整名稱時，必須與捕捉的完整 qubits 相同。分析結果的 `names` 只取來源 cfg，缺 cfg 時保留 None，不讀目前 Form 或 library。
+分析結果保留原生 `outcomes`、`index` 與失敗的 `reason`，不建立 position/name/element 投影。
+Recipe 從 `names[index]` 取得捕捉名稱，再建立自己的報告身分。Writeback 候選仍使用 `ElementIdentity`，原始位置不由 row offset 推測。
+框架統一將分析回傳物件轉成 JSON。實驗端不另寫 summary 方法，也不改數值、fit 或 proposal eligibility。
+Recipe 的 `analyze(result=...)` 引用 JSON-shaped BaseModel，陣列欄位用 list，非有限估計用 nullable 欄位。
+`mux_results.py` 提供原始 index、失敗與共用 coherence consumer；各實驗的 `gui.py` 提供其 JSON consumer。
+品質欄位直接使用 fitting owner 的 `FitQuality`，coherence sampling 使用 owner 的 `FringeSamplingQuality`，診斷路徑保留原生值。
 
 Concrete adapters 依賴本 package 與 framework contracts，`zcu_lab.definitions` 組合 adapters。
 本 package 不 import concrete adapter 或 `zcu_lab.definitions`，也不宣告 experiment order。只屬於
@@ -126,7 +118,7 @@ Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gu
 Recipe 經同一個 Analyze operation 的 typed updates 傳入，不更改 capture 或其他 tone。
 Picker done 保留原始 tone／Q 身分並產生該 Q 的 writeback proposal，不直接接受寫回。
 `mux_flux_adapter.MuxFluxPickSummary` 擁有該原始 tone／Q 與 native DC half／integer／period 結果。
-`MuxFluxPickResult.summary()` 建立此模型，四個 flux recipes 直接引用它。
+四個 flux recipes 直接引用此 JSON consumer。框架從 `MuxFluxPickResult` 的原生欄位轉換，helper 不再建立 summary 投影。
 
 package facade 只 re-export concrete adapters 實際共用的 authoring vocabulary。單一 adapter 的
 range recipe 與 writeback policy 不經 facade 轉送。共用 readout writeback helper 依 caller 傳入的

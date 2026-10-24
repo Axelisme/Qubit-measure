@@ -119,18 +119,18 @@ async def mux_t2ramsey(
             writeback_applied = bool(receipt.items)
 
         tones: list[MuxT2RamseyToneReport] = []
-        for outcome in fit.result.tones:
-            name = outcome.name
+        for outcome in fit.result.outcomes:
+            name = None if fit.result.names is None else fit.result.names[outcome.index]
             if isinstance(outcome, MuxSummaryFailure):
                 tones.append(
                     MuxT2RamseyToneReport(
-                        index=outcome.position, name=name, failure=outcome.failure
+                        index=outcome.index, name=name, failure=outcome.reason
                     )
                 )
             else:
                 tones.append(
                     MuxT2RamseyToneReport(
-                        index=outcome.position,
+                        index=outcome.index,
                         name=name,
                         t2=report_number(outcome.t2),
                         t2_err=report_number(outcome.t2_err),

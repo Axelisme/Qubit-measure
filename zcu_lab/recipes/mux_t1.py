@@ -112,23 +112,23 @@ async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
             writeback_applied = bool(receipt.items)
 
         tones: list[MuxT1ToneReport] = []
-        for outcome in fit.result.tones:
-            name = outcome.name
+        for outcome in fit.result.outcomes:
+            name = None if fit.result.names is None else fit.result.names[outcome.index]
             if isinstance(outcome, MuxSummaryFailure):
                 tones.append(
                     MuxT1ToneReport(
-                        index=outcome.position, name=name, failure=outcome.failure
+                        index=outcome.index, name=name, failure=outcome.reason
                     )
                 )
             else:
                 tones.append(
                     MuxT1ToneReport(
-                        index=outcome.position,
+                        index=outcome.index,
                         name=name,
-                        t1=report_number(outcome.t1),
-                        t1_err=report_number(outcome.t1_err),
-                        t1b=report_number(outcome.t1b),
-                        t1b_err=report_number(outcome.t1b_err),
+                        t1=report_number(outcome.fit.t1),
+                        t1_err=report_number(outcome.fit.t1_err),
+                        t1b=report_number(outcome.fit.t1b),
+                        t1b_err=report_number(outcome.fit.t1b_err),
                     )
                 )
         return MuxT1Report(tones=tones, writeback_applied=writeback_applied)

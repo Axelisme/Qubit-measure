@@ -163,18 +163,18 @@ async def mux_len_rabi(
             writeback_applied = bool(receipt.items)
 
         tones: list[MuxLenRabiToneReport] = []
-        for outcome in fit.result.tones:
-            name = outcome.name
+        for outcome in fit.result.outcomes:
+            name = None if fit.result.names is None else fit.result.names[outcome.index]
             if isinstance(outcome, MuxSummaryFailure):
                 tones.append(
                     MuxLenRabiToneReport(
-                        index=outcome.position, name=name, failure=outcome.failure
+                        index=outcome.index, name=name, failure=outcome.reason
                     )
                 )
             else:
                 tones.append(
                     MuxLenRabiToneReport(
-                        index=outcome.position,
+                        index=outcome.index,
                         name=name,
                         pi_len=report_number(outcome.pi_len),
                         pi_len_err=report_number(outcome.pi_len_err),

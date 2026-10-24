@@ -238,27 +238,6 @@ class ReturnData:
     complete: NDArray[np.bool_]
     acquired_shots: NDArray[np.int64]
 
-    def to_summary_dict(self) -> dict[str, object]:
-        """Report completion/counts without serializing missing values as zeros."""
-        return {
-            "points": [
-                {
-                    "coordinate_index": int(c),
-                    "duration_index": int(d),
-                    "complete": bool(self.complete[c, d]),
-                    "acquired_shots": int(self.acquired_shots[c, d]),
-                    "analyzed_shots": int(self.acquired_shots[c, d])
-                    if self.complete[c, d]
-                    else 0,
-                    "reason": None
-                    if self.complete[c, d]
-                    else "Expected rounds not fully acquired",
-                }
-                for c, d in np.ndindex(self.complete.shape)
-            ],
-            "interpretation": "Thermal nominal B11; same-shot joint return proxy after double Xπ, not leakage population or physical gate fidelity. All shots retained; no heralding or matrix inversion.",
-        }
-
 
 def joint_return(
     cfg: DurationScanCfg, data: RabiScanResult, coordinates: NDArray[np.float64]
@@ -402,23 +381,6 @@ class RabiAnalysis:
 
     return_data: ReturnData
     rates: tuple[RabiRate, ...]
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Report rates, failure reasons and fit diagnostics without quality gates."""
-        summary = self.return_data.to_summary_dict()
-        summary["rates"] = [
-            {
-                "coordinate_index": index,
-                "rate_mhz": rate.rate,
-                "reason": rate.reason,
-                "fit_quality": rate.quality.to_summary_dict() if rate.quality else None,
-            }
-            for index, rate in enumerate(self.rates)
-        ]
-        summary["model"] = (
-            "Undamped single-frequency cosine of same-shot joint P00. Thermal mixtures can violate the model; no physical gate fidelity is inferred."
-        )
-        return summary
 
 
 def fit_duration_rates(

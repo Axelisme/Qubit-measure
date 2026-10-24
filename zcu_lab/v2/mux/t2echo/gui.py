@@ -13,7 +13,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     SampleWriteback,
@@ -22,21 +21,17 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.mux_results import (
-    MuxCoherenceSummary,
     captured_qubits,
-    coherence_summary,
 )
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoAnalyzeOptions
-from zcu_lab.v2.twotone.time_domain.t2echo.gui import (
-    T2EchoAnalyzeParams,
-    coherence_review_note,
-)
+from zcu_lab.v2.twotone.time_domain.t2echo.gui import coherence_review_note
 
 from .core import MuxT2EchoCfg, MuxT2EchoExp
 from .form import make_form
@@ -45,24 +40,16 @@ MuxT2EchoRunResult: TypeAlias = RunRecord[MuxT2EchoCfg, MuxCoherenceResult]
 
 
 @dataclass(frozen=True)
-class MuxT2EchoAnalyzeResult(AnalyzeResultBase):
+class MuxT2EchoAnalyzeResult:
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
 
     outcomes: tuple[MuxCoherenceFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
 
-    def summary(self) -> MuxCoherenceSummary:
-        """Return native coherence outcomes with fixed original tone identities."""
-        return coherence_summary(self.outcomes, self.names)
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
-
 
 class MuxT2EchoAdapter(
     BaseAdapter[
-        MuxT2EchoCfg, MuxT2EchoRunResult, MuxT2EchoAnalyzeResult, T2EchoAnalyzeParams
+        MuxT2EchoCfg, MuxT2EchoRunResult, MuxT2EchoAnalyzeResult, T2EchoAnalyzeOptions
     ]
 ):
     """Run explicit sources and propose captured destinations without applying them."""
@@ -83,19 +70,23 @@ class MuxT2EchoAdapter(
         del req
         return RunRecord(cfg, MuxT2EchoExp().run(cfg, context=context))
 
+    def get_analyze_params(
+        self, result: MuxT2EchoRunResult, ctx: SessionEnv
+    ) -> T2EchoAnalyzeOptions:
+        """Seed the analysis controls without changing the core defaults."""
+        del result, ctx
+        return T2EchoAnalyzeOptions(fit_method="decay", fit_phase=False)
+
     def analyze(
         self,
-        req: AnalyzeRequest[MuxT2EchoRunResult, T2EchoAnalyzeParams],
+        req: AnalyzeRequest[MuxT2EchoRunResult, T2EchoAnalyzeOptions],
         *,
         plots: Plots,
     ) -> MuxT2EchoAnalyzeResult:
         """Analyze the explicit Run/Load source, retaining each original-index outcome."""
-        params = req.analyze_params
         outcomes = MuxT2EchoExp().analyze(
             req.run_result,
-            T2EchoAnalyzeOptions(
-                fit_method=params.fit_method, fit_phase=params.fit_phase
-            ),
+            req.analyze_params,
             plots=plots,
         )
         snapshot = req.run_result.cfg

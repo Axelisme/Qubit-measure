@@ -1,7 +1,6 @@
 """Fixed-capture CZ amplitude calibration and operator-selected pulse writeback."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TypeAlias
 
@@ -29,42 +28,8 @@ from .form import make_form
 CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]
 
 
-@dataclass(frozen=True)
-class CZAmplitudeAnalyzeResult:
-    """JSON-safe projection of saved-source classification and first-cycle fitting."""
-
-    analysis: CZAmplitudeAnalysis
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Report finite diagnostics, coverage failures and uncertainty without NaN JSON."""
-        data, fit = self.analysis.data, self.analysis.fit
-        return {
-            "scale": fit.scale,
-            "period": fit.period,
-            "period_error": fit.error,
-            "offset": fit.offset,
-            "contrast": fit.contrast,
-            "reason": fit.reason,
-            "fit_quality": fit.fit_quality.to_summary_dict()
-            if fit.fit_quality
-            else None,
-            "complete_scales": int(data.complete.sum()),
-            "acquired_shots": data.acquired_shots.tolist(),
-            "analyzed_shots": data.analyzed_shots.tolist(),
-            "joint_counts": [
-                row.astype(int).tolist() if complete else None
-                for row, complete in zip(data.counts, data.complete, strict=True)
-            ],
-            "joint_probabilities": [
-                row.tolist() if complete else None
-                for row, complete in zip(data.probabilities, data.complete, strict=True)
-            ],
-            "interpretation": "Zero-phase single-frequency model; first positive return requires measured 0 through the full period. Thermal nominal B11; same-shot return is a leakage proxy, not physical gate fidelity. Large-amplitude AC Stark shifts can violate the model. No heralding, radius cuts, confusion inversion or automatic statistical threshold.",
-        }
-
-
 class CZAmplitudeAdapter(
-    BaseAdapter[CZAmplitudeCfg, CZAmplitudeRun, CZAmplitudeAnalyzeResult]
+    BaseAdapter[CZAmplitudeCfg, CZAmplitudeRun, CZAmplitudeAnalysis]
 ):
     """Acquire full-tone raw, restore native source and propose first-cycle pulses.
 
@@ -92,14 +57,12 @@ class CZAmplitudeAdapter(
 
     def analyze(
         self, req: AnalyzeRequest[CZAmplitudeRun, None], *, plots: Plots
-    ) -> CZAmplitudeAnalyzeResult:
+    ) -> CZAmplitudeAnalysis:
         """Use only saved cfg/raw for joint return, fixed-phase fit and named plots."""
-        return CZAmplitudeAnalyzeResult(
-            CZAmplitudeExp().analyze(req.run_result, None, plots=plots)
-        )
+        return CZAmplitudeExp().analyze(req.run_result, None, plots=plots)
 
     def get_writeback_items(
-        self, req: WritebackRequest[CZAmplitudeRun, CZAmplitudeAnalyzeResult]
+        self, req: WritebackRequest[CZAmplitudeRun, CZAmplitudeAnalysis]
     ) -> Sequence[WritebackItem]:
         """Propose two ordinary coupler pulses and two separate resolved slot keys.
 
@@ -110,7 +73,7 @@ class CZAmplitudeAdapter(
         capture raises ValueError. Read no current library calibration, perform
         no hardware or persistent writes, and leave source cfg untouched.
         """
-        cfg, fit = req.run_result.cfg, req.analyze_result.analysis.fit
+        cfg, fit = req.run_result.cfg, req.analyze_result.fit
         if cfg is None or fit.scale is None:
             return []
         parameters = req.ctx.parameters

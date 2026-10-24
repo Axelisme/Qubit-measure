@@ -14,7 +14,6 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    AnalyzeResultBase,
     ParameterWriteback,
     RunRequest,
     SampleWriteback,
@@ -23,19 +22,17 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2._support.measure.mux_results import (
-    MuxCoherenceSummary,
     captured_qubits,
-    coherence_summary,
 )
 from zcu_lab.v2._support.mux import MuxFitFailure
 from zcu_lab.v2._support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import coherence_review_note
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
-from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeParams
 
 from .core import MuxT2RamseyCfg, MuxT2RamseyExp
 from .form import make_form
@@ -44,19 +41,11 @@ MuxT2RamseyRunResult: TypeAlias = RunRecord[MuxT2RamseyCfg, MuxCoherenceResult]
 
 
 @dataclass(frozen=True)
-class MuxT2RamseyAnalyzeResult(AnalyzeResultBase):
+class MuxT2RamseyAnalyzeResult:
     """Indexed core outcomes and complete source names, absent when cfg is absent."""
 
     outcomes: tuple[MuxCoherenceFit | MuxFitFailure, ...]
     names: tuple[str, ...] | None
-
-    def summary(self) -> MuxCoherenceSummary:
-        """Return native coherence outcomes with fixed original tone identities."""
-        return coherence_summary(self.outcomes, self.names)
-
-    def to_summary_dict(self) -> dict[str, object]:
-        """Serialize the owner summary for GUI and recipe consumers."""
-        return self.summary().model_dump(mode="json")
 
 
 def _frequency_review_note(outcome: MuxCoherenceFit, t2_note: str | None) -> str | None:
@@ -97,7 +86,7 @@ class MuxT2RamseyAdapter(
         MuxT2RamseyCfg,
         MuxT2RamseyRunResult,
         MuxT2RamseyAnalyzeResult,
-        T2RamseyAnalyzeParams,
+        T2RamseyAnalyzeOptions,
     ]
 ):
     """Run explicit sources and propose captured destinations without applying them."""
@@ -118,19 +107,23 @@ class MuxT2RamseyAdapter(
         del req
         return RunRecord(cfg, MuxT2RamseyExp().run(cfg, context=context))
 
+    def get_analyze_params(
+        self, result: MuxT2RamseyRunResult, ctx: SessionEnv
+    ) -> T2RamseyAnalyzeOptions:
+        """Seed the analysis controls without changing the core defaults."""
+        del result, ctx
+        return T2RamseyAnalyzeOptions(fit_fringe=True, fit_phase=True)
+
     def analyze(
         self,
-        req: AnalyzeRequest[MuxT2RamseyRunResult, T2RamseyAnalyzeParams],
+        req: AnalyzeRequest[MuxT2RamseyRunResult, T2RamseyAnalyzeOptions],
         *,
         plots: Plots,
     ) -> MuxT2RamseyAnalyzeResult:
         """Analyze the explicit Run/Load source, retaining each original-index outcome."""
-        params = req.analyze_params
         outcomes = MuxT2RamseyExp().analyze(
             req.run_result,
-            T2RamseyAnalyzeOptions(
-                fit_fringe=params.fit_fringe, fit_phase=params.fit_phase
-            ),
+            req.analyze_params,
             plots=plots,
         )
         snapshot = req.run_result.cfg

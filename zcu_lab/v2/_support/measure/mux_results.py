@@ -1,23 +1,15 @@
-"""Captured identities and indexed summaries shared by mux qubit adapters."""
+"""Captured identities and JSON consumers shared by mux qubit adapters."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.sampling import FringeSamplingQuality
-from zcu_tools.core.element import ElementIdentity
 from zcu_tools.gui.session.parameters import ParameterContext
 
-from zcu_lab.v2._support.mux import MuxFitFailure
-
-from .analyze_results import fit_quality_models
 from .mux_bindings import require_mux_qubits
-
-if TYPE_CHECKING:
-    from zcu_lab.v2._support.mux_coherence_analysis import MuxCoherenceFit
 
 
 def captured_qubits(
@@ -42,76 +34,31 @@ def captured_qubits(
 
 
 class MuxSummaryTone(BaseModel):
-    """Original complete-list position/name; element is absent without source names."""
+    """Decode the original complete-list index without adding a summary identity."""
 
-    position: int
-    name: str | None
-    element: ElementIdentity | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    index: int
 
 
 class MuxSummaryFailure(MuxSummaryTone):
     """Native fitter failure reason at the original tone position."""
 
-    failure: str
+    reason: str
 
 
 class MuxCoherenceFitSummary(MuxSummaryTone):
     """T2/error in us, detuning/error in MHz, fringe mode and owner diagnostics."""
 
-    t2: float
-    t2_err: float
-    detune: float
-    detune_err: float
+    t2: float | None
+    t2_err: float | None
+    detune: float | None
+    detune_err: float | None
     fit_fringe: bool
     sampling_quality: FringeSamplingQuality | None
-    fit_quality: dict[str, FitQuality] | None
+    quality: FitQuality
 
 
 class MuxCoherenceSummary(BaseModel):
     """Coherence outcomes in acquisition order, retaining failed original indices."""
 
-    tones: list[MuxCoherenceFitSummary | MuxSummaryFailure]
-
-
-def coherence_summary(
-    outcomes: Sequence[MuxCoherenceFit | MuxFitFailure],
-    names: Sequence[str] | None,
-) -> MuxCoherenceSummary:
-    """Project native coherence outcomes and qualified quality paths without refitting.
-
-    Names come from the full source cfg, never live state. Each original index
-    retains its acquisition row; invalid positions raise IndexError with names.
-    """
-    summaries: list[MuxCoherenceFitSummary | MuxSummaryFailure] = []
-    for outcome in outcomes:
-        name = None if names is None else names[outcome.index]
-        element = (
-            None if name is None else ElementIdentity(index=outcome.index, name=name)
-        )
-        if isinstance(outcome, MuxFitFailure):
-            row = MuxSummaryFailure(
-                position=outcome.index,
-                name=name,
-                element=element,
-                failure=outcome.reason,
-            )
-        else:
-            row = MuxCoherenceFitSummary(
-                position=outcome.index,
-                name=name,
-                element=element,
-                t2=outcome.t2,
-                t2_err=outcome.t2_err,
-                detune=outcome.detune,
-                detune_err=outcome.detune_err,
-                fit_fringe=outcome.fit_fringe,
-                sampling_quality=outcome.sampling_quality,
-                fit_quality=fit_quality_models(
-                    {"fit": outcome.quality},
-                    summary_path=f"summary.tones[{len(summaries)}].fit_quality",
-                ),
-            )
-        summaries.append(row)
-    return MuxCoherenceSummary(tones=summaries)
+    outcomes: list[MuxCoherenceFitSummary | MuxSummaryFailure]
+    names: list[str] | None
