@@ -1,4 +1,4 @@
-"""Project analysis values to JSON without invoking result serializers."""
+"""Project analysis result objects to JSON without invoking result serializers."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
@@ -7,6 +7,8 @@ from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, JsonValue
+
+from zcu_tools.datafile import JsonObject
 
 
 @dataclass(frozen=True)
@@ -19,28 +21,35 @@ class SummaryIssue:
 
 @dataclass(frozen=True)
 class AnalysisSummary:
-    """JSON projection and ordered locations of numbers replaced by null.
+    """JSON object projection and ordered locations of numbers replaced by null.
 
-    summary retains all supported fields. invalid contains one issue per
-    non-finite real number, including each component of a complex number.
+    summary retains all fields from a dataclass instance, pydantic model or
+    string-key Mapping root. summarize_analysis raises TypeError for other roots.
+    invalid contains one issue per non-finite real number, including each
+    component of a complex number.
     """
 
-    summary: JsonValue
+    summary: JsonObject
     invalid: tuple[SummaryIssue, ...]
 
 
 def summarize_analysis(result: object) -> AnalysisSummary:
-    """Project a result into JSON by field name, starting at path ``summary``.
+    """Project a result object by field name, starting at path ``summary``.
 
-    Dataclasses, pydantic models and string-key mappings become objects.
-    Lists, tuples and numpy arrays become lists. Numpy scalars become JSON
+    The root must be a dataclass instance, pydantic model or string-key Mapping.
+    Other roots raise TypeError naming the root type and path ``summary``.
+    Nested dataclasses, pydantic models and mappings become objects. Nested
+    lists, tuples and numpy arrays become lists. Numpy scalars become JSON
     scalars, and complex numbers become real/imag objects. Non-finite numbers
-    become null with a SummaryIssue. Custom serializers are never called.
-    Unsupported values or non-string keys raise TypeError naming their path.
-    The input is not modified.
+    become null with a SummaryIssue. Custom serializers and to_summary_dict
+    are never called. Unsupported nested values or non-string keys raise
+    TypeError naming their path. The input is not modified.
     """
     invalid: list[SummaryIssue] = []
-    projected = _project(result, "summary", invalid)
+    projected: JsonObject = {
+        name: _project(item, f"summary.{name}", invalid)
+        for name, item in _field_values(result, "summary").items()
+    }
     return AnalysisSummary(projected, tuple(invalid))
 
 
