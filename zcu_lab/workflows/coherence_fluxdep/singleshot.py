@@ -84,13 +84,15 @@ def singleshot_cfg(
 
     relax_delay is the T1 stage's relax_factor times its history-based guess,
     in microseconds, also when T1 is disabled. Use no reset or init pulse;
-    compare probe off/on. Copy modules, retaining drive waveform/gain and
+    compare probe off/on. Copy modules, applying cal.drive_gain when present and retaining waveform and
     readout routing. Native cfg validation errors propagate; no acquisition,
     fitting or input mutation occurs.
     """
     pulse = plan.qub_pulse.model_copy(deep=True)
     pulse.set_param("freq", cal.f01_mhz)
     pulse.set_param("length", cal.pi_length_us)
+    if cal.drive_gain is not None:
+        pulse.set_param("gain", cal.drive_gain)
     readout = plan.readout.model_copy(deep=True)
     apply_readout_calibration(readout, cal)
     return GE_Cfg(

@@ -142,8 +142,9 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     relax_factor*lifetime_us at relax_min_us. Fixed mode uses sweep_stop_us or
     relax_delay_us unchanged. Both grids start at sweep_start_us with plan.points
     samples. reps/rounds and uniform come from tun.
-    Pi drive uses plan.qub_pulse waveform/gain and cal's accepted frequency
-    and duration. Readout uses cal's frequency/gain on plan.readout routing.
+    Pi drive uses plan.qub_pulse waveform and cal's acquisition gain, frequency
+    and duration. None drive_gain retains the template gain. Readout uses cal's
+    frequency/gain on plan.readout routing.
     Native initial_delay/dev defaults remain owned by the native cfg model;
     no reset or extra module role is selected. Flux is set by the workflow,
     never patched into a cfg device mapping.
@@ -154,6 +155,8 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     pi_pulse = plan.qub_pulse.model_copy(deep=True)
     pi_pulse.set_param("freq", cal.f01_mhz)
     pi_pulse.set_param("length", cal.pi_length_us)
+    if cal.drive_gain is not None:
+        pi_pulse.set_param("gain", cal.drive_gain)
     readout = plan.readout.model_copy(deep=True)
     apply_readout_calibration(readout, cal)
     stop = (

@@ -59,6 +59,7 @@ from zcu_lab.workflows.common.calibration import (
     calibrate_rabi,
     calibrate_readout,
     calibration_source,
+    current_pi_calibration,
     current_point_calibration,
     readout_due,
 )
@@ -204,10 +205,12 @@ def draw_summaries(
             )
 
 
-def dependency_skips(plan: CoherencePlan) -> tuple[LifetimeResult, ...]:
-    """Describe enabled measurements without a usable dependency pulse."""
+def dependency_skips(
+    plan: CoherencePlan, *, include_t1: bool = True
+) -> tuple[LifetimeResult, ...]:
+    """Describe enabled measurements lacking pulses; omit T1 if already recorded."""
     enabled_lifetimes: tuple[tuple[LifetimeKind, bool], ...] = (
-        ("t1", plan.measure_t1),
+        ("t1", plan.measure_t1 and include_t1),
         ("t2ramsey", plan.measure_t2ramsey),
         ("t2echo", plan.measure_t2echo),
     )
@@ -237,15 +240,24 @@ def _append(history: LifetimeHistory, flux: float, result: LifetimeResult) -> No
 
 async def run_t1_stage(
     iteration: Scope,
-    cfg: T1Cfg,
+    cfg: T1Cfg | None,
     point_record: CoherencePoint,
     plots: Plots,
     *,
     snapshot: RunSnapshot,
     tun: T1Tunables,
 ) -> bool:
-    """Require NOW pi, then save and classify T1 before checking cancellation."""
-    if point_record.rabi is None or point_record.rabi.status != "accepted":
+    """Use cfg from current_pi_calibration, independent of pi2 trust.
+
+    None cfg or nonaccepted Rabi records a NOW dependency skip. Otherwise record
+    this point as the pi producer, save and classify T1, then return whether the
+    iteration was cancelled. cfg contains this point\'s pi frequency and gain.
+    """
+    if (
+        cfg is None
+        or point_record.rabi is None
+        or point_record.rabi.status != "accepted"
+    ):
         point_record.measurements += (
             LifetimeResult(
                 "t1",
@@ -430,9 +442,9 @@ async def run_calibration_stages(
 ) -> None:
     """Initialize GE status, set flux and collect frequency, Rabi, then readout.
 
-    history supplies calibration carry and the latest accepted T1, falling back
-    to the legal initial T1 guess for Rabi/readout relaxation. Read live
-    calibration tunables before each stage. Return None, filling the supplied
+    history supplies calibration carry and an alpha=.5 accepted T1 estimate.
+    With no accepted T1, use the legal initial guess for Rabi/readout relaxation.
+    Read live calibration tunables before each stage. Return None, filling the supplied
     mutable record as each result arrives. status=skipped means cancellation,
     so no later stage should run. The caller owns the single finally commit.
     Unexpected errors propagate with already collected fields retained.
@@ -449,7 +461,9 @@ async def run_calibration_stages(
         point_record.status = "skipped"
         return
     estimate = (
-        history.t1_by_flux[-1][1] if history.t1_by_flux else tun.current.t1.guess_us
+        history_guess(history.t1_by_flux[0][1], history.t1_by_flux[1:])
+        if history.t1_by_flux
+        else tun.current.t1.guess_us
     )
     captured = CalibrationInputs(
         qub_pulse=plan.qub_pulse,
@@ -498,7 +512,8 @@ async def run_singleshot_stage(
     Skip unaccepted Rabi or insufficient spacing. Save every Completed as
     singleshot-ge.h5, including partial; partial is failed/reason=partial.
     Failed acquisition has no file and does not advance spacing history.
-    Neither fit nor workflow plotting runs. Update point_record before checking
+    Neither fit nor workflow plotting runs. Record this point as the NOW pi
+    producer even when pi2 is untrusted. Update point_record before checking
     iteration cancellation. Unexpected writer/acquisition errors propagate.
     """
     if iteration.cancelled:
@@ -513,6 +528,12 @@ async def run_singleshot_stage(
         return inputs.last_flux
     if inputs.cal is None:
         raise ValueError("Eligible singleshot requires current accepted calibration")
+    point_record.calibration_sources["singleshot"] = CalibrationSource(
+        need="now",
+        source_index=point_record.index,
+        source_flux=point_record.flux,
+        fallback=False,
+    )
     cfg = singleshot_cfg(plan, tun, inputs.cal, relax_delay=inputs.relax_delay)
     ge = await iteration.run(GE_Exp().run, cfg, name="singleshot GE")
     if isinstance(ge, Failed):
@@ -546,9 +567,9 @@ async def coherence_fluxdep(
     Await calibration, optional raw GE, then enabled T1, Ramsey and Echo. GE
     requires accepted Rabi and absolute flux distance >= singleshot.min_spacing
     from the last Completed GE, including partial. GE saves raw only and uses
-    T1's history-based relax timing. Current
-    Rabi frequency is NOW; T1 requires this point's accepted pi. Ramsey/Echo
-    use latest accepted pi/pi2, with producer coordinates in calibration_sources.
+    T1's history-based relax timing. Rabi frequency is NOW; T1/GE require this
+    point's accepted pi, independent of pi2 trust. Ramsey/Echo use latest
+    accepted pi/pi2, with producer coordinates in calibration_sources.
     Nonaccepted readout retains legal prior values.
     Save each completed trace before fitting and commit one CoherencePoint per
     setpoint. Each accepted lifetime updates only its own delay-grid history.
@@ -588,7 +609,8 @@ async def coherence_fluxdep(
                 point_record,
                 CalibrationStageHistory(carry, t1_by_flux),
             )
-            # T2 consumes LATEST; the T1 stage independently requires NOW pi.
+            # T1/GE resolve NOW pi independently of T2 LATEST pi/pi2.
+            now_cal = current_pi_calibration(point_record.rabi, carry)
             cal = (
                 current_point_calibration(
                     point_record.rabi, carry, point_index=index, flux=flux
@@ -607,7 +629,7 @@ async def coherence_fluxdep(
                     tun.current.singleshot,
                     point_record,
                     SingleshotInputs(
-                        cal,
+                        now_cal,
                         last_ge_flux,
                         tun.current.t1.relax_factor
                         * history_guess(tun.current.t1.guess_us, t1_by_flux),
@@ -616,28 +638,30 @@ async def coherence_fluxdep(
             if iteration.cancelled:
                 point_record.status = "skipped"
                 continue
-            # Without a latest pi/pi2 pulse, retain enabled dependency skips.
-            if cal is None:
-                point_record.measurements = dependency_skips(plan)
-            else:
-                # Measure relaxation on T1's own history-based delay grid.
-                if plan.measure_t1:
-                    skip = await run_t1_stage(
-                        iteration,
-                        t1_cfg(
-                            plan,
-                            tun.current.t1,
-                            cal,
-                            history_guess(tun.current.t1.guess_us, t1_by_flux),
-                        ),
-                        point_record,
-                        env.plots,
-                        snapshot=plan.snapshot,
-                        tun=tun.current.t1,
+            # T1 needs current pi, not pi2 or a prior pair.
+            if plan.measure_t1:
+                skip = await run_t1_stage(
+                    iteration,
+                    t1_cfg(
+                        plan,
+                        tun.current.t1,
+                        now_cal,
+                        history_guess(tun.current.t1.guess_us, t1_by_flux),
                     )
-                    _append(t1_by_flux, flux, point_record.measurements[-1])
-                    if skip:
-                        continue
+                    if now_cal is not None
+                    else None,
+                    point_record,
+                    env.plots,
+                    snapshot=plan.snapshot,
+                    tun=tun.current.t1,
+                )
+                _append(t1_by_flux, flux, point_record.measurements[-1])
+                if skip:
+                    continue
+            # Missing LATEST pair skips only T2; T1 was independently resolved.
+            if cal is None:
+                point_record.measurements += dependency_skips(plan, include_t1=False)
+            else:
                 # Prefer current accepted T1; failed/disabled T1 uses its EWMA/seed.
                 t1_estimate = next(
                     (
