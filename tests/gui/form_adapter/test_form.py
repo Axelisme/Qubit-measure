@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import typing
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Annotated
 
 import pytest
@@ -178,17 +178,13 @@ def test_failed_range_endpoint_requires_input(endpoint: str, expression: str) ->
 
 
 @pytest.mark.parametrize(
-    "factory", [nodes.Range, nodes.Range], ids=["direct", "between"]
-)
-@pytest.mark.parametrize(
     "blank", [("start",), ("stop",), ("start", "stop")], ids=["start", "stop", "both"]
 )
 def test_blank_range_endpoints_remain_required_when_input_keys_are_absent(
-    factory: Callable[[float | None, float | None, int], nodes.Range],
     blank: tuple[str, ...],
 ) -> None:
     env = FormEnv()
-    node = factory(
+    node = nodes.Range(
         None if "start" in blank else 2.0, None if "stop" in blank else 8.0, 4
     )
     form = form_adapter.Form(ScalarCfg, {"sweep": {"freq": node}})
