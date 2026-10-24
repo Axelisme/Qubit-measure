@@ -249,12 +249,12 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
     )
     if window is not None:
         controller.add_view(window)
-    tab = controller.new_tab("native")
+    tab = controller.tab_control.new_tab("native")
     controller.setup_control.new_entry(EntryRequest("native"))
     controller.setup_control.new_point(
         PointCreateRequest("p", "", CommandOrigin("gui"))
     )
-    captured = controller.read_context()
+    captured = controller.context_control.read_context()
     storage = captured.capture_storage()
     metadata = RunMetadata(
         run_id="20261008T000000Z-a1b2c3",
