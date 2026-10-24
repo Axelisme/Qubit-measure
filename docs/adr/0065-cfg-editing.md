@@ -66,7 +66,7 @@ Run 只接受目前有效的 Form result，不收 cfg ref 或 expected revision�
 
 Tab 在來源就緒後建立，建立時 capture 一次，隨即能 headless 編輯。腳本可用 `tabs.new_tab(adapter, input=TabInput(form_json))` 交回 opaque authored input，由 Form owner 解碼及還原，不由腳本重建 form 或來源。`TabInput` 保存 data、expression 原稿、一般 invalid draft 與 explicit selections，不含結果或來源，也不是 framework session 磁碟 schema。不相容路徑由既有 restore 政策丟棄並記 log，未知 adapter、無效 JSON 或來源建立失敗在 tab 發布前報錯。框架沒有 pending 還原；腳本選擇何時建 tab，見 [[0064]]。
 
-Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 extras。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load_run_data 離線讀取為 StoredRun，GUI 不提供檢視入口，見 [[0063]]。
+Qt attach/detach 只管理 view 與訂閱。Idle close 撤銷舊 handle，重建同名 tab 建立新資源。Active Run 禁止同 tab 的人工 Edit、Reset、replacement 與 close，其他 tab 仍可編輯。Load 只載既有結果及分析來源，保留表單原輸入與固定來源。有效、Invalid 與未完成的 draft 都不被改寫，Load 不要求 current 有效，也不從 native cfg 推回 Form input。Wire 回覆保留結果與分析準備 facts，不提供回填狀態。原始 cfg 保存在 native 資料檔，透過公開 datafile.load 離線讀取為 Container；Results browser 可唯讀檢視保存的 cfg，不回填 Form，見 [[0063]]。
 
 ## 固定來源與 Form library key
 

@@ -39,6 +39,15 @@ status: accepted
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
 
+### 實驗計算與 GUI 接線
+
+core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
+分析計算包含擬合、逐 tone 迴圈、失敗隔離與結果型別。
+GUI 為 writeback 決策做的有限值檢查與摘要整理不算分析計算。
+使用者於 2026-10-24 裁決：「怎麼會有分析寫在gui ,這是違規吧」「分析修正可以做」。
+目前 mux/onetone 的逐 tone 計算仍在 gui.py，搬入 core 由獨立的分析層清理工作處理。
+此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
+
 ### 即時圖工具與機制
 
 使用者於 2026-10-24 裁定：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -418,8 +418,10 @@ Singleshot Rabi 數值由 `tests/analysis/fitting/test_singleshot_rabi.py` 驗�
 及 finish／release 拒絕。Frontend 與 workflow 測試使用合成繪圖 callback，不固定 lab 格式。Notebook flux picker 使用 caller 提供的
 `FluxPickInputs`，由 `tests/notebook/test_flux_dep.py` 驗證。
 
-`tests/gui/app/measure/adapter/` 保留 BaseAdapter 的 capability、canonical load、
-post defaults、lowering 與 writeback framework 契約。
+`tests/gui/app/measure/adapter/` 驗證 Adapter／Analysis／Interactive／PostAnalysis 值、options 生成、
+canonical load 與 writeback framework 契約。Form input 與實際 cfg 的轉接由 adapter.run 擁有；
+`services/test_input_record.py` 驗證 host 保留 adapter 回傳的 RunRecord。
+`services/test_adapter_load.py` 涵蓋共享 Load 成功、不支援失敗原因與舊成果保留。
 `tests/notebook/test_adapter.py` 與 `test_plotting.py` 使用共用 recording core，驗證
 source retention、nullable options、失敗隔離與 widget lifecycle，不使用具體實驗數值。
 

@@ -1,16 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from types import UnionType
-from typing import TypeVar, Union, get_args, get_origin
-
-import numpy as np
-from numpy.typing import NDArray
-
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.program.v2 import SweepCfg
-
-T = TypeVar("T")
 
 
 def make_sweep(
@@ -81,53 +71,3 @@ def _infer_sweep_step(
     if stop is None:
         raise ValueError("Not enough information to define a sweep.")
     return (stop - start) / (expts - 1)
-
-
-def get_single_sweep_name(cfg_model: type[ConfigBase]) -> str | None:
-    """Return the sole top-level SweepCfg field name, or None for zero/many.
-
-    Nullable SweepCfg annotations and subclasses count as axes. Nested models
-    and lists are not traversed; field names and display groups are irrelevant.
-    This inspects the schema without constructing a cfg or accessing hardware.
-    """
-    sweep_names: list[str] = []
-    for name, field in cfg_model.model_fields.items():
-        annotation = field.annotation
-        candidates = (
-            get_args(annotation)
-            if get_origin(annotation) in (UnionType, Union)
-            else (annotation,)
-        )
-        if any(
-            isinstance(candidate, type) and issubclass(candidate, SweepCfg)
-            for candidate in candidates
-        ):
-            sweep_names.append(name)
-    return sweep_names[0] if len(sweep_names) == 1 else None
-
-
-def format_sweep1D(
-    sweep: Mapping[str, T] | T, name: str
-) -> dict[str, T | NDArray[np.generic] | SweepCfg | Mapping[str, T]]:
-    """Normalize a single sweep to a mapping keyed by the target field name.
-
-    sweep accepts a SweepCfg, numeric list/array, start/stop dict, or a named
-    dict containing exactly name. Lists become arrays; other values retain
-    their representation. Units belong to the target cfg.
-    This does not mutate inputs or isolate their children.
-    Unsupported formats raise ValueError. Existing single-sweep policy raises
-    AssertionError for named dicts with multiple or missing entries.
-    """
-
-    if isinstance(sweep, (np.ndarray, list)):
-        return {name: np.asarray(sweep)}
-    if isinstance(sweep, SweepCfg):
-        return {name: sweep}
-    if isinstance(sweep, dict):
-        if "start" in sweep and "stop" in sweep:
-            return {name: sweep}
-
-        assert len(sweep) == 1, "Only one sweep is allowed"
-        assert sweep.get(name) is not None, f"Key {name} is not found in the sweep"
-        return dict(sweep)
-    raise ValueError(sweep)
