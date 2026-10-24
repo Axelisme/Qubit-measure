@@ -8,8 +8,9 @@ import pytest
 from qtpy.QtWidgets import QApplication, QCheckBox, QLabel, QScrollArea
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     ParameterWriteback,
-    RunRequest,
     SessionEnv,
     WritebackItem,
     WritebackRequest,
@@ -36,30 +37,38 @@ from tests.gui.app.measure._synthetic import (
     SampleAnalysis,
     SampleCfg,
     SampleRun,
+    SampleResult,
+    SampleAdapter,
 )
 from tests.gui.app.measure._templates import TEMPLATES
 
 
-class LedgerAdapter(PairAdapter):
-    """Supply a fixed native proposal over deterministic sample acquisition."""
+def LedgerAdapter_run(cfg: SampleCfg, *, context: RunContext) -> SampleResult:
+    return PairAdapter.run(cfg, context=context)
 
-    def run(
-        self,
-        req: RunRequest,
-        cfg: SampleCfg,
-        *,
-        context: RunContext,
-    ) -> SampleRun:
-        return super().run(req, cfg, context=context)
 
-    def get_writeback_items(
-        self, req: WritebackRequest[SampleRun, SampleAnalysis]
-    ) -> Sequence[WritebackItem]:
-        return [
-            ParameterWriteback(
-                target_name="R1.freq", description="freq", proposed_value=6100.0
-            )
-        ]
+def LedgerAdapter_get_writeback_items(
+    req: WritebackRequest[SampleRun, SampleAnalysis],
+) -> Sequence[WritebackItem]:
+    return [
+        ParameterWriteback(
+            target_name="R1.freq", description="freq", proposed_value=6100.0
+        )
+    ]
+
+
+LedgerAdapter = Adapter(
+    spec=PairAdapter.spec,
+    make_form=PairAdapter.make_form,
+    run=LedgerAdapter_run,
+    guide=None,
+    analysis=Analysis(
+        fn=PairAdapter.analyze,
+        options=SampleAdapter.get_analyze_params,
+        writeback=LedgerAdapter_get_writeback_items,
+    ),
+    post_analysis=PairAdapter.post_analysis,
+)
 
 
 @pytest.fixture

@@ -84,7 +84,7 @@ def _default_analyze_params(
 
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
-    adapter = PairAdapter()
+    adapter = PairAdapter
     from zcu_tools.program.v2 import SweepCfg
 
     from tests.gui.app.measure._synthetic import SampleCfg

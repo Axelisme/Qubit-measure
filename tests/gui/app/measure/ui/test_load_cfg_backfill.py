@@ -1,18 +1,14 @@
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, replace
 
 import pytest
-from pydantic import TypeAdapter
 from qtpy.QtCore import QMetaObject, Qt
 from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
-from zcu_tools.experiment.metadata import CfgSnapshot
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
+from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.controller import Controller
@@ -49,35 +45,19 @@ class RuntimeCfg(ConfigBase):
     knob: int = 7
 
 
-class LoadAdapter(OldAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        load_data=True, analysis=AnalysisMode.NONE
-    )
+def LoadAdapter_make_form(ctx: FormContext) -> Form[RuntimeCfg]:
+    del ctx
+    return Form(RuntimeCfg, {})
 
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[RuntimeCfg]:
-        del ctx
-        return Form(RuntimeCfg, {})
 
-    experiment_tag: ClassVar[str | None] = "test/load"
-
-    def restore(self, stored: Container) -> RestoredRun[RunRecord[RuntimeCfg, Result]]:
-        cfg = (
-            None
-            if TypeAdapter(CfgSnapshot)
-            .validate_python(stored.docs["cfg"])
-            .values["gain"]
-            == 2.0
-            else RuntimeCfg(knob=42)
-        )
-        return RestoredRun(
-            RunRecord(
-                cfg=cfg,
-                result=Result("native"),
-                metadata=metadata_from_container(stored),
-            ),
-            "cfg unavailable" if cfg is None else None,
-        )
+LoadAdapter = Adapter(
+    spec=replace(replace(OldAdapter.spec, cfg_type=RuntimeCfg), tag="test/load"),
+    make_form=LoadAdapter_make_form,
+    run=OldAdapter.run,
+    guide=None,
+    analysis=None,
+    post_analysis=OldAdapter.post_analysis,
+)
 
 
 @pytest.fixture

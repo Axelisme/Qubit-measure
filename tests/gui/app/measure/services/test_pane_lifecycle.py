@@ -464,7 +464,7 @@ class _AnalysisPanes:
 @pytest.fixture
 def analysis_panes(native_session: NativeSaveSession):
     state, tab_id, ctx = native_session.state, "tab", native_session.state.session_env
-    adapter = PaneAdapter()
+    adapter = PaneAdapter
     state.get_tab(tab_id).adapter = adapter
     state.update_tab_result(
         tab_id,

@@ -264,16 +264,3 @@ def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
     writeback.teardown_draft.assert_not_called()
     assert state.get_tab(tab_id).run.result is old
     assert state.version.get(f"tab:{tab_id}:result") == 0
-
-
-def test_load_result_wraps_unsupported_adapter(native_path: str) -> None:
-    state, tab_id, adapter = _make_state()
-    adapter.restore.side_effect = NotImplementedError("unsupported")
-    svc, _emit, writeback = _service(state)
-
-    with pytest.raises(LoadDataError, match="does not support loading") as exc_info:
-        svc.load_result(tab_id, native_path)
-
-    assert exc_info.value.reason_code == "unsupported_load"
-    assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    writeback.teardown_draft.assert_not_called()

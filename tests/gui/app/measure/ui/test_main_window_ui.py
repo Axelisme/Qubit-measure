@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,13 +17,13 @@ from qtpy.QtWidgets import (
     QTabWidget,
 )
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
+    Analysis,
     ParameterWriteback,
     WritebackRequest,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
@@ -192,15 +192,25 @@ def test_main_window_successful_writeback_relies_on_event_owned_projection(
 def blocked_writeback_window(
     tmp_path: Path, qapp: QApplication
 ) -> Iterator[tuple[MainWindow, str]]:
-    class BlockedWritebackAdapter(SampleAdapter):
-        def get_writeback_items(
-            self, req: WritebackRequest[SampleRun, SampleAnalysis]
-        ) -> list[ParameterWriteback]:
-            return [
-                ParameterWriteback(
-                    "general.ext.blocked.sigma", "Nested calibration", 1.0
-                )
-            ]
+    def BlockedWritebackAdapter_get_writeback_items(
+        req: WritebackRequest[SampleRun, SampleAnalysis],
+    ) -> list[ParameterWriteback]:
+        return [
+            ParameterWriteback("general.ext.blocked.sigma", "Nested calibration", 1.0)
+        ]
+
+    BlockedWritebackAdapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=None,
+        analysis=Analysis(
+            fn=SampleAdapter.analyze,
+            options=SampleAdapter.get_analyze_params,
+            writeback=BlockedWritebackAdapter_get_writeback_items,
+        ),
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     registry = Registry()
     registry.register("blocked-writeback", BlockedWritebackAdapter)
@@ -361,15 +371,28 @@ def footer_form_window(tmp_path: Path, qapp: QApplication) -> Iterator[MainWindo
                 raise ValueError("Fill in frequency.")
             return value
 
-    class DiagnosticAdapter(BaseAdapter[DiagnosticCfg, object]):
-        capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-            requires_soc=False, analysis=AnalysisMode.NONE, load_data=False
-        )
+    @dataclass
+    class DiagnosticResult:
+        value: float = 0.0
 
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
-            del ctx
-            return Form(DiagnosticCfg, {})
+    def DiagnosticAdapter_make_form(ctx: FormContext) -> Form[DiagnosticCfg]:
+        del ctx
+        return Form(DiagnosticCfg, {})
+
+    DiagnosticAdapter = Adapter(
+        spec=AxesSpec(
+            axes=(),
+            z=ZSpec("value", "data", ""),
+            result_type=DiagnosticResult,
+            cfg_type=DiagnosticCfg,
+            tag="test/DiagnosticAdapter",
+        ),
+        make_form=DiagnosticAdapter_make_form,
+        run=lambda cfg, *, context: DiagnosticResult(),
+        guide=None,
+        analysis=None,
+        post_analysis=None,
+    )
 
     registry = Registry()
     registry.register("diagnostic", DiagnosticAdapter)

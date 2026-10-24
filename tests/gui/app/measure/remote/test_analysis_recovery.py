@@ -1,13 +1,13 @@
 """Synthetic owner receipts and source-bound Post recovery through RPC."""
 
 from dataclasses import dataclass
-from typing import ClassVar
 
 import numpy as np
 import pytest
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
+    Adapter,
+    PostAnalysis,
     PostAnalyzeRequest,
     PostAnalyzeResultBase,
     SessionEnv,
@@ -31,28 +31,30 @@ class TonePostAnalysis(PostAnalyzeResultBase):
     peak: float
 
 
-class ToneAdapter(SampleAdapter[TonePostAnalysis, EmptyParams]):
-    """Declare a synthetic per-tone read cost without any lab definition."""
+def ToneAdapter_get_post_analyze_params(
+    source, analyze_result: SampleAnalysis, ctx: SessionEnv
+) -> EmptyParams:
+    return EmptyParams()
 
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False, load_data=False, post_analysis=True
-    )
 
-    def analysis_result_tone_count(self, result: SampleRun) -> int:
-        return len(result.result.data)
+def ToneAdapter_post_analyze(
+    req: PostAnalyzeRequest[SampleRun, SampleAnalysis, EmptyParams], *, plots: Plots
+) -> TonePostAnalysis:
+    return TonePostAnalysis(peak=req.analyze_result.peak)
 
-    def get_post_analyze_params(
-        self, analyze_result: SampleAnalysis, ctx: SessionEnv
-    ) -> EmptyParams:
-        return EmptyParams()
 
-    def post_analyze(
-        self,
-        req: PostAnalyzeRequest[SampleRun, SampleAnalysis, EmptyParams],
-        *,
-        plots: Plots,
-    ) -> TonePostAnalysis:
-        return TonePostAnalysis(peak=req.analyze_result.peak)
+ToneAdapter = Adapter(
+    spec=SampleAdapter.spec,
+    make_form=SampleAdapter.make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=PostAnalysis(
+        fn=ToneAdapter_post_analyze,
+        options=ToneAdapter_get_post_analyze_params,
+        writeback=None,
+    ),
+)
 
 
 @pytest.mark.parametrize(("tones", "seconds"), [(0, 5), (1, 10), (6, 35), (20, 60)])

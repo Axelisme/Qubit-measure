@@ -19,7 +19,11 @@ from zcu_tools.analysis.fluxdep.line_state import (
 )
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import AnalyzeRequest
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
+    AnalyzeRequest,
+)
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
@@ -116,13 +120,25 @@ def test_typed_gui_analysis_publishes_typed_result_and_saveable_named_fit(
     state = native_session.state
     tab = state.get_tab("tab")
 
-    class NamedAdapter(AnalysisSavingAdapter):
-        def analyze(self, req, *, plots):
-            _, ax = plots.subplots("fit")
-            ax.plot(req.run_result.result.frequency, req.run_result.result.signal.real)
-            return PaneSummary(mean=req.analyze_params.gain)
+    def NamedAdapter_analyze(req, *, plots):
+        _, ax = plots.subplots("fit")
+        ax.plot(req.run_result.result.frequency, req.run_result.result.signal.real)
+        return PaneSummary(mean=req.analyze_params.gain)
 
-    tab.adapter = NamedAdapter()
+    NamedAdapter = Adapter(
+        spec=AnalysisSavingAdapter.spec,
+        make_form=AnalysisSavingAdapter.make_form,
+        run=AnalysisSavingAdapter.run,
+        guide=None,
+        analysis=Analysis(
+            fn=NamedAdapter_analyze,
+            options=lambda source, env: PaneParams(),
+            writeback=AnalysisSavingAdapter.get_writeback_items,
+        ),
+        post_analysis=AnalysisSavingAdapter.post_analysis,
+    )
+
+    tab.adapter = NamedAdapter
     times = np.linspace(0, 100, 101)
     signals = (0.2 + 0.8 * np.exp(-times / 20)).astype(np.complex128)
     source = RunRecord[SavingCfg, SavingResult](
@@ -184,7 +200,7 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
 ) -> None:
     state = native_session.state
     tab = state.get_tab("tab")
-    tab.adapter = SpectrumAdapter()
+    tab.adapter = SpectrumAdapter
     values = np.linspace(-0.5, 0.5, 9)
     freqs = np.linspace(4.8, 5.4, 7)
     signals = np.asarray(
@@ -265,7 +281,7 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
 def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None:
     state = make_state()
     tab = state.get_tab("tab1")
-    tab.adapter = SpectrumAdapter()
+    tab.adapter = SpectrumAdapter
     previous = object()
     previous_plots = make_plots()
     old_figure, _ = previous_plots.subplots("old")
@@ -299,7 +315,7 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
 ) -> None:
     state = make_state()
     tab = state.get_tab("tab1")
-    tab.adapter = SpectrumAdapter()
+    tab.adapter = SpectrumAdapter
     source = RunRecord(
         cfg=None,
         result=SpectrumResult(

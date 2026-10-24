@@ -1,12 +1,15 @@
 """Explicit target capture through the shipped remote tab/app/context seam."""
 
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, Expr, PulseSpec, Range
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    SessionEnv,
+)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
@@ -46,21 +49,37 @@ class TargetCfg(SampleCfg):
     rate: float = 1.0
 
 
-class TargetAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TargetCfg]:
-        del ctx
-        return Form(
-            TargetCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
-        )
+def TargetAdapter_make_form(ctx: FormContext) -> Form[TargetCfg]:
+    del ctx
+    return Form(
+        TargetCfg,
+        {"sweep": Range.between(1.0, 2.0, expts=3), "rate": Expr("$driver.rate")},
+    )
 
 
-class RolelessAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TargetCfg]:
-        del ctx
-        return Form(TargetCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+TargetAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=TargetCfg),
+    make_form=TargetAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
+
+
+def RolelessAdapter_make_form(ctx: FormContext) -> Form[TargetCfg]:
+    del ctx
+    return Form(TargetCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+RolelessAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=TargetCfg),
+    make_form=RolelessAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @dataclass

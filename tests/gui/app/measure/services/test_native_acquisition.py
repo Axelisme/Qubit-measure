@@ -13,7 +13,11 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import RunRequest, SessionEnv
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    RunRequest,
+    SessionEnv,
+)
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import (
@@ -106,45 +110,6 @@ def _acquire_to_terminal(
     assert len(finished) == 1
     assert not session.state.is_tab_busy("tab")
     return token, finished[0]
-
-
-class CfglessSavingAdapter(SavingAdapter):
-    """Return usable data without a core configuration snapshot."""
-
-    def run(
-        self,
-        req: RunRequest,
-        cfg: SavingCfg,
-        *,
-        context: RunContext,
-    ) -> RunRecord[SavingCfg, SavingResult]:
-        record = super().run(req, cfg, context=context)
-        return RunRecord(cfg=None, result=record.result)
-
-
-def test_run_without_cfg_records_acquired_evidence(
-    native_session: NativeSaveSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = native_session
-    session.state.get_tab("tab").adapter = CfglessSavingAdapter()
-    token, terminal = _acquire_to_terminal(session, monkeypatch)
-    assert terminal.outcome == "finished"
-    outcome = session.handles.known_outcome(token)
-    assert outcome is not None and outcome.status == "finished"
-    metadata = require_record(session.state.get_tab("tab").run).metadata
-    assert metadata is not None
-    events = session.entry.ledger.events()
-    assert len(events) == 1
-    event = events[0]
-    assert event.kind == "acquired" and event.origin == "gui"
-    assert event.at == metadata.finished_at
-    assert isinstance(event.payload, AcquiredPayload)
-    assert event.payload.run_id == metadata.run_id
-    assert event.payload.experiment == metadata.experiment
-    assert event.payload.point == "p"
-    assert event.payload.roles == dict(metadata.snapshot.roles)
-    assert not (session.entry.database_path / "runs").exists()
 
 
 @pytest.mark.parametrize("frontend", ["gui", "mcp"])

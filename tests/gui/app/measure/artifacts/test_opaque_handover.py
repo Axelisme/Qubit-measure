@@ -20,7 +20,10 @@ from zcu_tools.gui.app.measure.adapter import (
     RunRequest,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
+from zcu_tools.experiment import AxesSpec, Axis, ZSpec
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis
+import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
@@ -44,73 +47,43 @@ from tests.gui.app.measure._record_support import require_record
 class OpaqueRun:
     """Adapter-owned handle without the framework's historical cfg/result fields."""
 
-    source: SavingResult
+    frequency: NDArray[np.float64]
+    signal: NDArray[np.complex128]
+
+    def __init__(self, source: SavingResult) -> None:
+        self.frequency = source.frequency
+        self.signal = source.signal
 
 
-class OpaqueAdapter(
-    BaseAdapter[SavingCfg, RunRecord[SavingCfg, OpaqueRun], PaneSummary, PaneParams]
-):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        analysis=AnalysisMode.FIT, requires_soc=False, load_data=False
-    )
-    experiment_tag: ClassVar[str | None] = SavingCore.AXES_SPEC.tag
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SavingCfg]:
-        del ctx
-        return Form(SavingCfg, {})
-
-    def run(
-        self, req: RunRequest, cfg: SavingCfg, *, context: RunContext
-    ) -> RunRecord[SavingCfg, OpaqueRun]:
-        return RunRecord(cfg, OpaqueRun(SavingCore().run(cfg, context=context)))
-
-    def analyze(
-        self,
-        req: AnalyzeRequest[RunRecord[SavingCfg, OpaqueRun], PaneParams],
-        *,
-        plots: Plots,
-    ) -> PaneSummary:
-        _, axes = plots.subplots("fit")
-        axes.plot(
-            req.run_result.result.source.frequency,
-            req.run_result.result.source.signal.real,
-        )
-        return PaneSummary(17.0)
-
-    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
-        if not isinstance(result, RunRecord) or not isinstance(
-            result.result, OpaqueRun
-        ):
-            raise TypeError("Expected this adapter's record and opaque result")
-        source = RunRecord(result.cfg, result.result.source, metadata=result.metadata)
-        return DataItem.from_run(
-            key, source, spec=SavingCore.AXES_SPEC, comment=comment
-        )
-
-    def analysis_item(
-        self,
-        key: ArtifactKey,
-        result: object,
-        parameters: object | None,
-        *,
-        pane: Literal["analysis", "post_analysis"],
-    ) -> AnalysisItem:
-        return AnalysisItem(
-            key,
-            AnalysisDocument.model_validate(
-                {
-                    "pane": pane,
-                    "parameters": {"captured": 2.0},
-                    "summary": {"opaque_mean": 17.0},
-                }
-            ),
-        )
+def opaque_form(ctx: FormContext) -> Form[SavingCfg]:
+    return Form(SavingCfg, {})
 
 
-class FailingDataAdapter(OpaqueAdapter):
-    def data_item(self, key: ArtifactKey, result: object, *, comment: str) -> DataItem:
-        raise ValueError("opaque data preparation rejected")
+def opaque_run(cfg: SavingCfg, *, context: RunContext) -> OpaqueRun:
+    return OpaqueRun(SavingCore().run(cfg, context=context))
+
+
+def opaque_analyze(
+    req: AnalyzeRequest[RunRecord[SavingCfg, OpaqueRun], PaneParams], *, plots: Plots
+) -> PaneSummary:
+    _, axes = plots.subplots("fit")
+    axes.plot(req.run_result.result.frequency, req.run_result.result.signal.real)
+    return PaneSummary(17.0)
+
+
+OpaqueAdapter = Adapter(
+    spec=AxesSpec(
+        axes=(Axis("frequency", "frequency", "Hz", scale=1e6),),
+        z=ZSpec("signal", "signal", "V"),
+        result_type=OpaqueRun,
+        cfg_type=SavingCfg,
+        tag="test/opaque",
+    ),
+    make_form=opaque_form,
+    run=opaque_run,
+    guide=None,
+    analysis=Analysis(fn=opaque_analyze, options=lambda source, env: PaneParams()),
+)
 
 
 @pytest.fixture
@@ -120,7 +93,6 @@ def opaque_host(
     """Register synthetic adapters in one real offline application host."""
     registry = Registry()
     registry.register("opaque", OpaqueAdapter)
-    registry.register("failed_data", FailingDataAdapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     controller = Controller(
         state=state,
@@ -142,12 +114,11 @@ def opaque_host(
         qapp.processEvents()
 
 
-@pytest.mark.parametrize("failed_data", [False, True])
 def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
-    opaque_host: tuple[State, Controller], qapp: QApplication, failed_data: bool
+    opaque_host: tuple[State, Controller], qapp: QApplication
 ) -> None:
     state, controller = opaque_host
-    tab_id = controller.new_tab("failed_data" if failed_data else "opaque")
+    tab_id = controller.new_tab("opaque")
     controller.run_analyze_control.start_run(tab_id, origin=CommandOrigin("mcp"))
     # The admitted synthetic run returns; pump its terminal owner delivery.
     qt_until(lambda: not state.is_tab_busy(tab_id), label="opaque run terminal")
@@ -181,22 +152,16 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     data = [item for item in report.outputs if item.key.member == "data"]
     other = [item for item in report.outputs if item.key.member != "data"]
     assert len(data) == 2 and len(other) == 3
-    assert all(item.status == ("failed" if failed_data else "saved") for item in data)
-    if failed_data:
-        assert all(
-            item.error and "opaque data preparation rejected" in item.error
-            for item in data
-        )
-    else:
-        stored = load(data[0].output.path)
-        assert metadata_from_container(stored).run_id == metadata.run_id
-        assert metadata_from_container(stored).snapshot == metadata.snapshot
+    assert all(item.status == "saved" for item in data)
+    stored = load(data[0].output.path)
+    assert metadata_from_container(stored).run_id == metadata.run_id
+    assert metadata_from_container(stored).snapshot == metadata.snapshot
     assert all(item.status == "saved" and item.output.path.is_file() for item in other)
     assert json.loads(
         next(
             item.output.path for item in other if item.output.format == "json"
         ).read_text()
-    )["summary"] == {"opaque_mean": 17.0}
+    )["summary"] == {"mean": 17.0}
     committed = state.get_artifact_snapshots(tab_id)
     projected = {
         (member.key, output.path): (output.status, output.error)
@@ -212,12 +177,9 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     second = controller.save_control.save_artifacts(tab_id, origin=CommandOrigin("mcp"))
     assert second.run_id == report.run_id == metadata.run_id
     assert second.outputs[0].output.path == report.outputs[0].output.path
-    if not failed_data:
-        assert second.outputs[1].output.path != report.outputs[1].output.path
+    assert second.outputs[1].output.path != report.outputs[1].output.path
     assert all(
-        item.status == ("failed" if failed_data else "saved")
-        for item in second.outputs
-        if item.key.member == "data"
+        item.status == "saved" for item in second.outputs if item.key.member == "data"
     )
     assert all(
         item.status == "saved" for item in second.outputs if item.key.member != "data"

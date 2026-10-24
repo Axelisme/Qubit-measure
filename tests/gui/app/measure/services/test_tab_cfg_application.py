@@ -1,8 +1,9 @@
 """Production form ownership without tab widgets or live hardware."""
 
 from collections.abc import Generator, Mapping
+from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar, NoReturn
+from typing import NoReturn
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,7 +13,9 @@ from zcu_tools.cfg_model import Expr, Range
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.gui.app.measure.adapter import RunRequest
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import (
     AppServices,
@@ -48,11 +51,19 @@ from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, Sample
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
-class SchemaAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(SampleCfg, {"gain": 1.0, "sweep": Range.between(5, 6, expts=11)})
+def SchemaAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+    del ctx
+    return Form(SampleCfg, {"gain": 1.0, "sweep": Range.between(5, 6, expts=11)})
+
+
+SchemaAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+    make_form=SchemaAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 @pytest.fixture
@@ -123,11 +134,18 @@ def test_definition_failure_does_not_publish_a_partial_tab(
         def default_input(self, env: FormEnv) -> FormInput[FormModel]:
             raise RuntimeError("definition failed")
 
-    class BrokenAdapter(SchemaAdapter):
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[SampleCfg]:
-            del ctx
-            return BrokenForm(SampleCfg, {})
+    def BrokenAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return BrokenForm(SampleCfg, {})
+
+    BrokenAdapter = Adapter(
+        spec=replace(SchemaAdapter.spec, cfg_type=SampleCfg),
+        make_form=BrokenAdapter_make_form,
+        run=SchemaAdapter.run,
+        guide=None,
+        analysis=SchemaAdapter.analysis,
+        post_analysis=SchemaAdapter.post_analysis,
+    )
 
     tab_id = application.ctrl.new_tab("cfg-contract")
     before = application.ctrl.cfg_resources.lookup(tab_id).input.data
@@ -233,32 +251,46 @@ class SourceDrive(ComponentSchema):
     module: dict[str, str | None] = Field(default_factory=dict)
 
 
-class GlobalSourceAdapter(SampleAdapter):
-    experiment_tag: ClassVar[str | None] = "fake.stub"
-
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(
-            SampleCfg,
-            {"gain": Expr("$qubit.gain"), "sweep": Range.between(5, 6, expts=11)},
-        )
-
-    def run(self, req: RunRequest, cfg: SampleCfg, *, context: RunContext) -> NoReturn:
-        raise AssertionError("Admission-only adapter must not execute")
+def GlobalSourceAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+    del ctx
+    return Form(
+        SampleCfg, {"gain": Expr("$qubit.gain"), "sweep": Range.between(5, 6, expts=11)}
+    )
 
 
-class MissingModuleSlotAdapter(GlobalSourceAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(
-            SampleCfg,
-            {
-                "gain": Expr("$qubit.module.x180.gain"),
-                "sweep": Range.between(5, 6, expts=11),
-            },
-        )
+def GlobalSourceAdapter_run(cfg: SampleCfg, *, context: RunContext) -> NoReturn:
+    raise AssertionError("Admission-only adapter must not execute")
+
+
+GlobalSourceAdapter = Adapter(
+    spec=replace(replace(SampleAdapter.spec, cfg_type=SampleCfg), tag="fake.stub"),
+    make_form=GlobalSourceAdapter_make_form,
+    run=GlobalSourceAdapter_run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
+
+
+def MissingModuleSlotAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+    del ctx
+    return Form(
+        SampleCfg,
+        {
+            "gain": Expr("$qubit.module.x180.gain"),
+            "sweep": Range.between(5, 6, expts=11),
+        },
+    )
+
+
+MissingModuleSlotAdapter = Adapter(
+    spec=replace(GlobalSourceAdapter.spec, cfg_type=SampleCfg),
+    make_form=MissingModuleSlotAdapter_make_form,
+    run=GlobalSourceAdapter.run,
+    guide=None,
+    analysis=GlobalSourceAdapter.analysis,
+    post_analysis=GlobalSourceAdapter.post_analysis,
+)
 
 
 @pytest.fixture

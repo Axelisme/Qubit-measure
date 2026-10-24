@@ -5,9 +5,9 @@ from __future__ import annotations
 import socket
 from collections.abc import Callable, Iterator
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QMetaObject, Qt, QTimer
@@ -27,14 +27,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
-from zcu_tools.datafile import Container
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    RunRequest,
+    Adapter,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.controller import Controller
@@ -66,6 +62,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
+from tests.gui._adapter_fakes import DummyResult
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver, key_click, type_text
@@ -79,19 +76,21 @@ from tests.resources.entry.fakes import registry_state, restore_registry
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]
 
 
-class StoppableAdapter(OldAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        requires_soc=False
-    )
+def StoppableAdapter_run(cfg: ConfigBase, *, context: RunContext) -> DummyResult:
+    del cfg
+    if not context.scope.stop.event.wait(30):
+        raise RuntimeError("test run was not stopped")
+    return DummyResult()
 
-    def run(
-        self, req: RunRequest, cfg: ConfigBase, *, context: RunContext
-    ) -> RunRecord[ConfigBase, object]:
-        del req, cfg
-        # The test Stop/close action releases this held adapter via cancellation.
-        if not context.scope.stop.event.wait(30):
-            raise RuntimeError("test run was not stopped")
-        return RunRecord(None, object())
+
+StoppableAdapter = Adapter(
+    spec=OldAdapter.spec,
+    make_form=OldAdapter.make_form,
+    run=StoppableAdapter_run,
+    guide=None,
+    analysis=OldAdapter.analysis,
+    post_analysis=OldAdapter.post_analysis,
+)
 
 
 class ModalRuntimeCfg(ConfigBase):
@@ -103,24 +102,14 @@ class ModalLoadResult:
     data_path: str
 
 
-class ModalLoadAdapter(OldAdapter):
-    """Legal native owner contract, without file parsing or acquisition."""
-
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(load_data=True)
-
-    experiment_tag: ClassVar[str | None] = "test/load"
-
-    def restore(
-        self, stored: Container
-    ) -> RestoredRun[RunRecord[ModalRuntimeCfg, ModalLoadResult]]:
-        return RestoredRun(
-            RunRecord(
-                cfg=ModalRuntimeCfg(),
-                result=ModalLoadResult(metadata_from_container(stored).run_id),
-                metadata=metadata_from_container(stored),
-            ),
-            None,
-        )
+ModalLoadAdapter = Adapter(
+    spec=replace(OldAdapter.spec, tag="test/load"),
+    make_form=OldAdapter.make_form,
+    run=OldAdapter.run,
+    guide=None,
+    analysis=OldAdapter.analysis,
+    post_analysis=OldAdapter.post_analysis,
+)
 
 
 @dataclass

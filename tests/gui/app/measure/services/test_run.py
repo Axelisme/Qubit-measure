@@ -25,8 +25,8 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
     ContextReadiness,
-    RunRequest,
 )
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import (
@@ -243,33 +243,29 @@ def test_worker_executes_permit_after_model_changes_and_releases_lease():
 
 
 def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> None:
-    class RecordingSnapshotAdapter(SampleAdapter):
-        @staticmethod
-        def make_form(ctx: FormContext) -> Form[SampleCfg]:
-            del ctx
-            return Form(
-                SampleCfg,
-                {
-                    "gain": Expr("general.ext.gain"),
-                    "sweep": Range.between(5, 6, expts=11),
-                },
-            )
+    def RecordingSnapshotAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+        del ctx
+        return Form(
+            SampleCfg,
+            {"gain": Expr("general.ext.gain"), "sweep": Range.between(5, 6, expts=11)},
+        )
 
-        def run(
-            self,
-            req: RunRequest,
-            cfg: SampleCfg,
-            *,
-            context: RunContext,
-        ) -> SampleRun:
-            # Controlled execution produces an artifact with the real domain cfg builder.
-            return RunRecord(
-                cfg=cfg,
-                result=SampleResult(np.empty(0)),
-            )
+    def RecordingSnapshotAdapter_run(
+        cfg: SampleCfg, *, context: RunContext
+    ) -> SampleResult:
+        return SampleResult(np.empty(0))
+
+    RecordingSnapshotAdapter = Adapter(
+        spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+        make_form=RecordingSnapshotAdapter_make_form,
+        run=RecordingSnapshotAdapter_run,
+        guide=None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     state, tab_id, _adapter = make_state(readiness=ContextReadiness.ACTIVE)
-    adapter = RecordingSnapshotAdapter()
+    adapter = RecordingSnapshotAdapter
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )

@@ -305,7 +305,7 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     # This producer seam substitutes the public cfg assembly/acquisition
     # collaborators. It does not claim the pending assembler/core integration.
     state, tab_id, _mock_adapter = make_state()
-    adapter = SavingAdapter()
+    adapter = SavingAdapter
     cfg = SavingCfg(gain=2.0)
     result = SavingResult(
         frequency=np.array([0.0, 1.0]), signal=np.array([1.0 + 0j, 0.5 + 0j])
@@ -388,7 +388,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
 
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     state, tab_id, _ = make_state()
-    adapter = SnapshotAdapter()
+    adapter = SnapshotAdapter
     state.get_tab(tab_id).cfg = make_form(
         adapter.make_form(FormContext(state.session_env.parameters)), state=state
     )
@@ -430,7 +430,7 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
 
 def test_device_read_failure_rejects_run_before_core() -> None:
     state, tab_id, _ = make_state()
-    adapter = SnapshotAdapter()
+    adapter = SnapshotAdapter
     flux, unused = SnapshotDevice(), SnapshotDevice()
     unused.read_failure = OSError("snapshot read failed")
     service, gate, background, handles = make_run_service(
@@ -456,7 +456,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
         captured = session.context.read_context()
         state = session.state
-        adapter = SnapshotAdapter()
+        adapter = SnapshotAdapter
         state.get_tab("tab").adapter = adapter
         resource = TabFormResource(
             lambda _ctx: Form(SavingCfg, {}),
@@ -508,7 +508,7 @@ def test_gui_save_uses_fixed_run_device_snapshot(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         state = session.state
-        adapter = SnapshotAdapter()
+        adapter = SnapshotAdapter
         state.get_tab("tab").adapter = adapter
         flux = SnapshotDevice()
         flux.set_value(0.25)

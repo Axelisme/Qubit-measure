@@ -218,20 +218,6 @@ def test_run_inputs_admits_live_devices_without_valid_cached_settings(
     assert inputs.request.soc is state.session_env.soc
 
 
-def test_run_inputs_translates_adapter_preflight_error() -> None:
-    adapter = MagicMock()
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
-    preflight_error = ValueError("bad preflight")
-    adapter.validate_run_request.side_effect = preflight_error
-    guard = _make_guard(state)
-
-    with pytest.raises(GuardError, match="Run config invalid: bad preflight") as exc:
-        guard.capture_run_inputs(tab_id)
-
-    assert exc.value.reason_code == "invalid_cfg"
-    assert exc.value.__cause__ is preflight_error
-
-
 @pytest.mark.parametrize("readiness", [ContextReadiness.EMPTY])
 def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
     state, tab_id = _make_state(readiness=readiness)
@@ -276,16 +262,6 @@ def test_run_inputs_rejected_when_soc_required_but_missing():
     with pytest.raises(GuardError, match="soc"):
         guard.capture_run_inputs(tab_id)
     adapter.validate_run_request.assert_not_called()
-
-
-def test_run_inputs_issued_without_soc_when_capability_does_not_require():
-    state, tab_id = _make_state(
-        readiness=ContextReadiness.ACTIVE, soc_attached=False, requires_soc=False
-    )
-    guard = _make_guard(state)
-
-    inputs = guard.capture_run_inputs(tab_id)
-    assert isinstance(inputs, RunInputs)
 
 
 def test_run_inputs_rejected_for_unknown_tab():
@@ -399,10 +375,3 @@ def test_check_rejects_unknown_tab_with_original_reason(operation: str) -> None:
     with pytest.raises(GuardError) as caught:
         getattr(guard, operation)("unknown")
     assert caught.value.reason_code == "unknown_tab"
-
-
-def test_check_load_rejects_unsupported_adapter_with_original_reason() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, load_data=False)
-    with pytest.raises(GuardError) as caught:
-        _make_guard(state).check_load(tab_id)
-    assert caught.value.reason_code == "unsupported_load"

@@ -9,6 +9,9 @@ import pytest
 from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QTextEdit
 from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.artifacts import ArtifactDeclaration, ArtifactSaveCenter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import (
@@ -34,11 +37,14 @@ from tests.gui.app.measure._native_save_support import (
 )
 from tests.gui.app.measure._record_support import require_record
 
-
-class _UndeclaredSavingAdapter(AnalysisSavingAdapter):
-    """Same adapter without a persistence declaration."""
-
-    experiment_tag = None
+_UndeclaredSavingAdapter = Adapter(
+    spec=AnalysisSavingAdapter.spec,
+    make_form=AnalysisSavingAdapter.make_form,
+    run=AnalysisSavingAdapter.run,
+    guide=None,
+    analysis=AnalysisSavingAdapter.analysis,
+    post_analysis=AnalysisSavingAdapter.post_analysis,
+)
 
 
 @pytest.fixture
@@ -325,7 +331,7 @@ def test_hint_tracks_declared_support_not_current_outputs(saving_view) -> None:
     )
     assert not center.save_all_button.isEnabled()
     # experiment_tag is the existing declaration, not an inference from methods.
-    session.state.get_tab(tab_id).adapter = _UndeclaredSavingAdapter()
+    session.state.get_tab(tab_id).adapter = _UndeclaredSavingAdapter
     window.refresh_tab_interaction(tab_id)
     hints = [
         label for label in center.findChildren(QLabel) if label.text() == hint_text

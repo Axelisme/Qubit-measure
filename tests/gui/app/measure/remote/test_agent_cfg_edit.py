@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from threading import Event
 
 import pytest
 from zcu_tools.cfg_model import Range
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.remote import ControlOptions
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -237,11 +241,19 @@ class TextCfg(SampleCfg):
     text: str = "before"
 
 
-class TextAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[TextCfg]:
-        del ctx
-        return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+def TextAdapter_make_form(ctx: FormContext) -> Form[TextCfg]:
+    del ctx
+    return Form(TextCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+TextAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=TextCfg),
+    make_form=TextAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
 def test_reply_encoding_failure_does_not_roll_back_the_cfg_publication(tmp_path, qapp):

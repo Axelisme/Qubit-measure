@@ -1,18 +1,12 @@
 """New-tab loading through the public GUI socket contract."""
 
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, replace
 
 import pytest
-from pydantic import TypeAdapter
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import Container
-from zcu_tools.experiment.metadata import CfgSnapshot
-from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    AdapterCapabilities,
-    AnalysisMode,
+    Adapter,
 )
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -37,26 +31,14 @@ class LoadedResult:
     gain: object
 
 
-class FileAdapter(OldAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = AdapterCapabilities(
-        load_data=True, analysis=AnalysisMode.NONE
-    )
-
-    experiment_tag: ClassVar[str | None] = "test/load"
-
-    def restore(self, stored: Container):
-        gain = (
-            TypeAdapter(CfgSnapshot).validate_python(stored.docs["cfg"]).values["gain"]
-        )
-        cfg = None if gain == 2.0 else LoadedCfg()
-        return RestoredRun(
-            RunRecord(
-                cfg=cfg,
-                result=LoadedResult(gain),
-                metadata=metadata_from_container(stored),
-            ),
-            "cfg unavailable" if cfg is None else None,
-        )
+FileAdapter = Adapter(
+    spec=replace(OldAdapter.spec, tag="test/load"),
+    make_form=OldAdapter.make_form,
+    run=OldAdapter.run,
+    guide=None,
+    analysis=None,
+    post_analysis=OldAdapter.post_analysis,
+)
 
 
 @pytest.fixture

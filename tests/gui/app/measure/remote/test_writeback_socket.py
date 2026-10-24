@@ -13,6 +13,8 @@ from zcu_tools.datafile import load, save
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
     ModuleWriteback,
     ParameterWriteback,
     WritebackItem,
@@ -547,28 +549,36 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         qapp.processEvents()
 
 
-class CapturedCouplerAdapter(AnalysisSavingAdapter):
-    """Produce a concrete library destination and an explicit captured alias."""
+def CapturedCouplerAdapter_get_writeback_items(
+    req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
+) -> list[WritebackItem]:
+    parameters = req.ctx.parameters
+    if parameters is None or req.run_result.cfg is None:
+        raise ValueError("This proposal needs a captured source and native cfg")
+    return [
+        ModuleWriteback(
+            parameters.library_key("coupler.pulses.cz_f2"),
+            "Pulse",
+            _stored_pulse(gain=req.run_result.cfg.gain),
+        ),
+        ParameterWriteback(
+            "$coupler.rate", "Rate", proposed_value=parameters.value("$coupler.rate")
+        ),
+    ]
 
-    def get_writeback_items(
-        self,
-        req: WritebackRequest[RunRecord[SavingCfg, SavingResult], PaneSummary],
-    ) -> list[WritebackItem]:
-        parameters = req.ctx.parameters
-        if parameters is None or req.run_result.cfg is None:
-            raise ValueError("This proposal needs a captured source and native cfg")
-        return [
-            ModuleWriteback(
-                parameters.library_key("coupler.pulses.cz_f2"),
-                "Pulse",
-                _stored_pulse(gain=req.run_result.cfg.gain),
-            ),
-            ParameterWriteback(
-                "$coupler.rate",
-                "Rate",
-                proposed_value=parameters.value("$coupler.rate"),
-            ),
-        ]
+
+CapturedCouplerAdapter = Adapter(
+    spec=AnalysisSavingAdapter.spec,
+    make_form=AnalysisSavingAdapter.make_form,
+    run=AnalysisSavingAdapter.run,
+    guide=None,
+    analysis=Analysis(
+        fn=AnalysisSavingAdapter.analyze,
+        options=AnalysisSavingAdapter.get_analyze_params,
+        writeback=CapturedCouplerAdapter_get_writeback_items,
+    ),
+    post_analysis=AnalysisSavingAdapter.post_analysis,
+)
 
 
 @pytest.fixture

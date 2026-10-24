@@ -2,10 +2,14 @@
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from pydantic import create_model
 from zcu_tools.cfg_model import PulseCfg, PulseSpec, Range
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.remote import RemoteControlAdapter
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import Form, FormContext, ModuleInputField
@@ -62,41 +66,65 @@ RecipeExtras = create_model(
 )
 
 
-class ContainerRpcAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[SampleCfg]:
-        del ctx
-        return Form(
-            SampleCfg,
-            {"sweep": Range.between(1.0, 2.0, expts=3)},
-            extras=RecipeExtras,
-            lower=lambda _extras, cfg: cfg,
-        )
+def ContainerRpcAdapter_make_form(ctx: FormContext) -> Form[SampleCfg]:
+    del ctx
+    return Form(
+        SampleCfg,
+        {"sweep": Range.between(1.0, 2.0, expts=3)},
+        extras=RecipeExtras,
+        lower=lambda _extras, cfg: cfg,
+    )
 
 
-class IndexedRpcAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext):
-        from zcu_tools.gui.form_adapter import FixedElements
-
-        from tests.gui.form_adapter._indexed_models import NativeTone, indexed_tree
-
-        del ctx
-        cfg = create_model(
-            "IndexedRpcCfg",
-            __base__=SampleCfg,
-            tones=(list[NativeTone], ...),
-            participants=(list[int], ...),
-        )
-        return Form(
-            cfg,
-            {"sweep": Range.between(1, 2, expts=3), **indexed_tree()},
-            fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
-        )
+ContainerRpcAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+    make_form=ContainerRpcAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
 
 
-class ModuleRpcAdapter(SampleAdapter):
-    @staticmethod
-    def make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
-        del ctx
-        return Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+def IndexedRpcAdapter_make_form(ctx: FormContext):
+    from zcu_tools.gui.form_adapter import FixedElements
+
+    from tests.gui.form_adapter._indexed_models import NativeTone, indexed_tree
+
+    del ctx
+    cfg = create_model(
+        "IndexedRpcCfg",
+        __base__=SampleCfg,
+        tones=(list[NativeTone], ...),
+        participants=(list[int], ...),
+    )
+    return Form(
+        cfg,
+        {"sweep": Range.between(1, 2, expts=3), **indexed_tree()},
+        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+    )
+
+
+IndexedRpcAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+    make_form=IndexedRpcAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
+
+
+def ModuleRpcAdapter_make_form(ctx: FormContext) -> Form[ModuleRpcCfg]:
+    del ctx
+    return Form(ModuleRpcCfg, {"sweep": Range.between(1.0, 2.0, expts=3)})
+
+
+ModuleRpcAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=ModuleRpcCfg),
+    make_form=ModuleRpcAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)

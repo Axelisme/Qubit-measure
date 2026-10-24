@@ -1,17 +1,14 @@
 """A registered synthetic experiment acquires, stops, fails and saves via RPC."""
 
 import sys
-from dataclasses import replace
 from threading import Event
-from typing import ClassVar
 
 import numpy as np
 import pytest
 from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_from_container
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -33,39 +30,39 @@ from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import call, open_client
 
 
-class NoiseAdapter(SavingAdapter):
-    capabilities: ClassVar[AdapterCapabilities] = replace(
-        SavingAdapter.capabilities, requires_soc=True
+def NoiseAdapter_run(cfg, *, context):
+    prog = ModularProgramV2(
+        context.soccfg,
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=0,
+                ro_ch=0,
+                nqz=1,
+                freq=100.0,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=0.1),
+                ro_length=0.1,
+            ).build("readout")
+        ],
+        sweep=[("point", 3)],
+        reps=1,
     )
+    acquired = prog.acquire(
+        context.soc, progress=False, cancel_flag=context.scope.stop, rounds=3
+    )
+    assert acquired is not None
+    iq = acquired[0][0]
+    return SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1])
 
-    def run(self, req, cfg, *, context):
-        prog = ModularProgramV2(
-            context.soccfg,
-            modules=[
-                PulseReadoutCfg(
-                    gen_ch=0,
-                    ro_ch=0,
-                    nqz=1,
-                    freq=100.0,
-                    gain=0.1,
-                    waveform=ConstWaveformCfg(length=0.1),
-                    ro_length=0.1,
-                ).build("readout")
-            ],
-            sweep=[("point", 3)],
-            reps=1,
-        )
-        acquired = prog.acquire(
-            context.soc,
-            progress=False,
-            cancel_flag=context.scope.stop,
-            rounds=3,
-        )
-        assert acquired is not None
-        iq = acquired[0][0]
-        return RunRecord(
-            cfg, SavingResult(np.array([1.0, 2.0, 3.0]), iq[:, 0] + 1j * iq[:, 1])
-        )
+
+NoiseAdapter = Adapter(
+    spec=SavingAdapter.spec,
+    make_form=SavingAdapter.make_form,
+    run=NoiseAdapter_run,
+    guide=None,
+    analysis=SavingAdapter.analysis,
+    post_analysis=SavingAdapter.post_analysis,
+)
 
 
 @pytest.fixture

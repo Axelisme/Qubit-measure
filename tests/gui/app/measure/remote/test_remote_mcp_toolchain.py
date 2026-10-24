@@ -6,7 +6,6 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -14,6 +13,9 @@ import pytest
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+)
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.device_models import (
@@ -858,7 +860,7 @@ def _add_fake_tab(fx, tab_id: str) -> None:
     """Register a minimal Session so has_tab(tab_id) is True."""
     from tests.gui.app.measure._synthetic import SampleAdapter
 
-    adapter = SampleAdapter()
+    adapter = SampleAdapter
     from zcu_tools.cfg_model import Range
     from zcu_tools.gui.form_adapter import Form
 
@@ -949,8 +951,14 @@ def test_adapter_guide_returns_markdown_and_absolute_resource_directory(
     (tmp_path / "guide.md").write_text(markdown, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    class GuideAdapter(SampleAdapter):
-        guide_path: ClassVar[Path | None] = Path("guide.md") if declared else None
+    GuideAdapter = Adapter(
+        spec=SampleAdapter.spec,
+        make_form=SampleAdapter.make_form,
+        run=SampleAdapter.run,
+        guide=Path("guide.md") if declared else None,
+        analysis=SampleAdapter.analysis,
+        post_analysis=SampleAdapter.post_analysis,
+    )
 
     fx.registry.register("guide-test", GuideAdapter)
     sock = open_client(fx.service.port)
