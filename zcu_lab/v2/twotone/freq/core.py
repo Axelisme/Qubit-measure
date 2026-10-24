@@ -135,8 +135,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
     ) -> FreqResult:
         """Locate a qubit transition by sweeping the drive frequency.
 
-        Apply reset, the frequency-swept qubit probe, then readout; this
-        sequence does not use init_pulse. Return mean complex IQ
+        Apply reset, optional init_pulse, the frequency-swept qubit probe,
+        then readout. None init_pulse emits no pulse. Return mean complex IQ
         at each frequency in MHz, not a fitted transition frequency. The live
         preview always uses background-subtracted magnitude (``lor``), independent
         of the model selected later for analyze.
@@ -164,12 +164,13 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freq_sweep = cfg.freq
             cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
-            # Reset before each probe; sweep frequency on the FPGA, then read out.
+            # Reset and initialize before the FPGA-swept probe, then read out.
             _ = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
                 .add_reset("reset", cfg.reset)
+                .add_pulse("init_pulse", cfg.init_pulse)
                 .add_pulse("qub_pulse", cfg.qub_pulse)
                 .add_readout("readout", cfg.readout)
                 .declare_sweep("freq", freq_sweep)
