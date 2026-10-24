@@ -14,6 +14,7 @@ from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
+from zcu_tools import plotting
 from zcu_tools.gui.plotting import FigureContainer, get_figure_container
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -94,7 +95,7 @@ def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
     def work() -> int:
         normal, _ = plots.subplots("fit")
         assert adapters[0].call(lambda: get_figure_container(normal)) is None
-        viewer = plots.liveplot_1d("measurement", "Time", "Signal")
+        viewer = plotting.live_line(plots, "measurement", "Time", "Signal")
         assert adapters[0].call(lambda: stacks[0].count()) == 2
         viewer.update(np.array([0.0, 1.0]), np.array([3.0, 4.0]), refresh=False)
         plots.finish()
@@ -149,8 +150,8 @@ def test_worker_2d_heatmap_and_lines_mutate_on_qt_owner_and_remain_saveable(
     monkeypatch.setattr(Line2D, "set_data", observed_line_set_data)
 
     def work() -> int:
-        viewer = plots.liveplot_2d_with_line(
-            "heatmap", "Flux", "Frequency", num_lines=2
+        viewer = plotting.live_heatmap_with_line(
+            plots, "heatmap", "Flux", "Frequency", num_lines=2
         )
         viewer.update(
             np.array([0.0, 1.0]),
@@ -184,8 +185,8 @@ def test_worker_2d_heatmap_and_lines_mutate_on_qt_owner_and_remain_saveable(
 def test_two_plot_hosts_keep_ownership_and_release_independent(hosts) -> None:
     stacks, containers, adapters = hosts
     first, second = Plots(adapters[0]), Plots(adapters[1])
-    first.liveplot_1d("live", "x", "y")
-    second.liveplot_1d("live", "x", "y")
+    plotting.live_line(first, "live", "x", "y")
+    plotting.live_line(second, "live", "x", "y")
     figure = first["live"]
     canvas = figure.canvas
     with pytest.raises(ValueError, match="another container"):
@@ -215,7 +216,7 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     ax.plot([0, 1], [4, 5])
     plots.finish()
     other = Plots(adapters[1])
-    other.liveplot_1d("live", "x", "y")
+    plotting.live_line(other, "live", "x", "y")
     other.finish()
     assert get_figure_container(first) is containers[0]
     assert get_figure_container(second) is containers[0]

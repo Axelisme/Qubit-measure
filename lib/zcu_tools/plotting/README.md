@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 繪圖能力家族
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev。共用繪圖能力、liveplot 與診斷圖的分工。
 
@@ -16,11 +16,14 @@ canvas，保留 Matplotlib shape／layout，不登記 pyplot manager 或切換�
 一般圖可先繪製與保存，adapter 於操作完成後才接上呈現。此接口不處理 frontend
 呈現、保存政策或 Matplotlib thread safety。
 `Plots.fork()` 建立共享同一 presentation host 的全新通用 Plots。兩個集合各自持有圖、finish 與 release，不共享名稱或 typed handles。即使原集合是子型別，fork 也不繼承其命名政策。
-`plots.Plots` 在此集合上提供明確 `PlotHost`、typed 1D liveplot、單熱圖
-`liveplot_2d` 與含最近掃描線的 `liveplot_2d_with_line`。`liveplot_scatter` 接同長、非空一維實數 xs／ys／colors，保留 scalar color coordinate 與自動色階；更新前複製三組資料，artist mutation 仍由 host owner 執行。兩種 2D handle 共用
+`plots.Plots` 管理具名 Figure、明確 `PlotHost` 與呈現生命週期。
+Caller 從 `zcu_tools.plotting` import `live_line`、`live_scatter`、`live_heatmap`、`live_heatmap_with_line`，以 `live_line(plots, name, xlabel, ylabel, ...)` 建立 typed handle。
+四個 helper 依序提供線圖、散點圖、單熱圖與含最近掃描線的熱圖，不是 Plots 的方法。
+`Plots.create_live` 集中管理 active 檢查、axes 登記、owner 執行與成功後呈現，供四個 helper 初始化 artists 與 handle。
+`live_scatter` 接同長、非空一維實數 xs／ys／colors，保留 scalar color coordinate 與自動色階；更新前複製三組資料，artist mutation 仍由 host owner 執行。兩種 2D handle 共用
 `(len(xs), len(ys))` 實數資料契約；uniform 與 nonuniform 座標共用具名 Figure。單熱圖可指定 `clim=(min, max)`，固定色階跨 update 保留，未指定時沿資料自動縮放。
-`liveplot_1d` 的 `configure_axes` callback 在 host owner 初始化 artists 後、呈現前執行一次，供實驗設定原生 ticks／style。Callback 不得保留 active axes 供 worker 後續修改；設定失敗直接傳遞例外，不呈現未完成圖。
-1D／2D factories 可接同一具名 Figure 的既有 axes，支援 workflow 合併圖。外部、移除或已被其他 handle 使用的 axes 會被拒絕；同圖只呈現一次。Heatmap 的 `mark_point` 與 scan-line 的 `mark_line` 由 host owner 更新 reference marker，不把 active artists 交回 worker。`refresh(name)` 在批次 typed update 後刷新整圖。
+`live_line` 的 `configure_axes` callback 在 host owner 初始化 artists 後、呈現前執行一次，供實驗設定原生 ticks／style。Callback 不得保留 active axes 供 worker 後續修改；設定失敗直接傳遞例外，不呈現未完成圖。
+Live helpers 可接同一具名 Figure 的既有 axes，支援 workflow 合併圖。外部、移除或已被其他 handle 使用的 axes 會被拒絕；同圖只呈現一次。Heatmap 的 `mark_point` 與 scan-line 的 `mark_line` 由 host owner 更新 reference marker，不把 active artists 交回 worker。`refresh(name)` 在批次 typed update 後刷新整圖。
 `draw(name, callback)` 將具名 Figure 交给 callback，透過同步 host call 在 owner thread 任意繪圖，成功後首次 present 並標為 live 圖，再 refresh；後續 draw 共用同一 presentation。Callback 失敗不 present／refresh，不 rollback。未 draw 的一般圖仍 finish 才 present。Worker 等 callback 完成，不保留 artists 供之後直接修改。自由繪圖與 liveplot 模板可共用 axes；模板的 artist 被清除或移除，或整個 axes 離開 Figure 時，下一次 update 明確 raise。同名圖可透過 draw 清除並重建 axes，再以 factory 的 axes 參數接上新模板；原模板不恢復。`save(name, path)` 在同一 owner 存原生 Figure，不執行繪圖 callback 或 refresh，finish 前後皆可用。模板仍是常用捷徑，不限制自由繪圖。
 `record_animation(name, path)` 以 FFmpeg 保存 live figure；recorder 的 setup、grab_frame、finish 均在 host owner 執行。Caller 在 producer 停止後結束 recorder，Plots.finish 也收尾尚未結束的 recorder。錄影不取得 Figure 所有權，不依賴 ambient backend，writer 錯誤不代表操作成功。
 未 draw 的一般圖在 `finish()` 時呈現，liveplot 與首次成功 draw 立即呈現；update 先驗證與複製資料，
@@ -33,7 +36,7 @@ Plots handle 而失去所有權。Presentation owner 另持有 Plots，以 relea
 釋放呈現，不銷毀 NamedFigures 中的原 Figure。失敗時可
 finish(present=False) 保留普通診斷圖而不呈現。GUI host 在 gui/plotting，
 shared plotting 不依賴 Qt。Experiment 與 application callers 顯式傳遞 Plots。
-只有需要共用的繪圖能力才納入此家族。Notebook 專用圖、實驗特化圖與 app 專用 renderer 保留在各自 owner；此處不建立通用 PlotManager、統一 Figure schema 或新 plugin framework。根 package 的 `__init__.py` 不載入子 package，避免只匯入家族名稱就載入個別 frontend 或 backend。
+只有需要共用的繪圖能力才納入此家族。Notebook 專用圖、實驗特化圖與 app 專用 renderer 保留在各自 owner；此處不建立通用 PlotManager、統一 Figure schema 或新 plugin framework。根 package 匯出 live helpers，但不初始化 pyplot 或載入 GUI／Notebook frontend。
 
 Qt canvas 與 figure container 的接入由 [gui/plotting](../gui/plotting/README.md) 負責。GUI 注入 explicit QtPlotHost，透過 owner scheduler 更新 artists 與呈現。Standalone liveplot backend 仍服務其 public plotters，與 operation-owned Plots 分開。依賴方向為 GUI → plotting，不由 liveplot 偵測 GUI。
 

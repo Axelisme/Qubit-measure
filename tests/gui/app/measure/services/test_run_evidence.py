@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from qtpy.QtWidgets import QApplication
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment import ExpCfgModel
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
@@ -79,7 +79,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     monkeypatch: pytest.MonkeyPatch, stopped: bool
 ) -> None:
     state, tab_id, adapter = make_state()
-    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
     adapter.run.return_value = record
     provenance = _provenance()
     capture = MagicMock(return_value=provenance)
@@ -164,7 +164,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
         snapshot=_run_snapshot(),
         experiment_tag="test/native",
     )
-    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
     acquisitions = []
 
     def acquire(*_args: object, context: RunContext) -> object:
@@ -220,7 +220,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
 def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
-    record = RunRecord(cfg=ExpCfgModel(), result=SampleResult(np.array([1.0])))
+    record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
 
     def partial(*_args: object, context: RunContext) -> object:
         child = context.scope.branch("acquire")
@@ -250,7 +250,7 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
 ) -> None:
     state, tab_id, adapter = make_state()
     adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=SampleResult(np.array([1.0]))
+        cfg=ConfigBase(), result=SampleResult(np.array([1.0]))
     )
     capture = MagicMock(return_value=_provenance())
     monkeypatch.setattr(
@@ -282,7 +282,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     monkeypatch: pytest.MonkeyPatch, has_snapshot: bool
 ) -> None:
     state, tab_id, adapter = make_state()
-    adapter.run.return_value = RunRecord(ExpCfgModel(), SampleResult(np.array([1.0])))
+    adapter.run.return_value = RunRecord(ConfigBase(), SampleResult(np.array([1.0])))
     capture = MagicMock(side_effect=RuntimeError("must not capture"))
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", capture
@@ -362,7 +362,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
 ) -> None:
     state, tab_id, adapter = make_state()
     adapter.run.return_value = RunRecord(
-        cfg=ExpCfgModel(), result=SampleResult(np.array([1.0]))
+        cfg=ConfigBase(), result=SampleResult(np.array([1.0]))
     )
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance",

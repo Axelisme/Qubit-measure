@@ -1,6 +1,6 @@
 """Run owner exposes forks and resolves selectors without selecting the latest."""
 
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 
@@ -11,7 +11,7 @@ def test_run_scope_reports_fork_candidates_and_exact_leaf_selection() -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
 
-    def run(*_args: object, context: RunContext) -> RunRecord[ExpCfgModel, object]:
+    def run(*_args: object, context: RunContext) -> RunRecord[ConfigBase, object]:
         with (
             context.scope.branch("operation", name="T1") as first,
             context.scope.branch("operation", name="T1") as second,

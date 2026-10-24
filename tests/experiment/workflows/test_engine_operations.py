@@ -8,9 +8,9 @@ from threading import Event, Thread, Timer
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment import workflows as w
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
@@ -42,7 +42,7 @@ class Approval(Question[Reply]):
     label: str
 
 
-class Cfg(ExpCfgModel):
+class Cfg(ConfigBase):
     value: int = 3
 
 

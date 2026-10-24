@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-24
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -56,10 +56,10 @@ CallContext 提供本次 operation 的 Scope 與起跑 epoch。其他能力由 c
 任意程式例外直接傳回作者，不降級成 Failed。
 
 `await scope.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result`，包括 bound Experiment.run。
-Cfg 必須是 ExpCfgModel。每次 attempt 深複製原 capture，建 RunContext 與獨立 operation Plots，借用 soc、soccfg 與 connected drivers。
+Cfg 必須是 `zcu_tools.cfg_model.ConfigBase`。每次 attempt 深複製原 capture，建 RunContext 與獨立 operation Plots，借用 soc、soccfg 與 connected drivers。
 呼叫前經 capture_device_snapshot 讀全部 connected drivers。任一讀取失敗就不執行 core。
 回傳是 `Completed[RunRecord[Cfg, Result]] | Failed`，不自動保存 raw 或圖。
-非 ExpCfgModel 的工作用 call。
+非 ConfigBase 的工作用 call。
 
 `scope.get_device_cfg(name)` live-read detached 完整設定。
 `await scope.setup_device(name, cfg)` 把完整 capture 與 operation stop bit 交給 device owner。

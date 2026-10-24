@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools import plotting
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Live, WorkflowEnv
 
@@ -18,7 +19,7 @@ def test_engine_reuses_plots_across_commits_and_saves_figure(tmp_path: Path) -> 
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            viewer = env.plots.liveplot_1d("trace", "Time", "Signal")
+            viewer = plotting.live_line(env.plots, "trace", "Time", "Signal")
             for index in range(plan.count):
                 seen.append(env.plots)
 
@@ -63,13 +64,13 @@ def test_projection_error_is_not_a_recoverable_acquire_failure(
         try:
             iteration = next(iterations)
             if dimensions == 1:
-                viewer = env.plots.liveplot_1d("trace", "x", "y")
+                viewer = plotting.live_line(env.plots, "trace", "x", "y")
 
                 def project(ctx: CallContext) -> None:
                     viewer.update(np.array([0.0]), np.array([2.0]))
                     raise cause
             else:
-                grid = env.plots.liveplot_2d("trace", "x", "y")
+                grid = plotting.live_heatmap(env.plots, "trace", "x", "y")
 
                 def project(ctx: CallContext) -> None:
                     grid.update(

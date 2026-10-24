@@ -8,10 +8,10 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
-    ExpCfgModel,
     Experiment,
     ZSpec,
 )
@@ -50,7 +50,7 @@ class SpectrumResult:
     signals: NDArray[np.complex128]
 
 
-class SpectrumSweep(ExpCfgModel):
+class SpectrumSweep(ConfigBase):
     freq: SweepCfg = Field(
         default_factory=lambda: SweepCfg(start=4.0, stop=5.0, expts=30, step=1.0 / 29)
     )
@@ -59,7 +59,7 @@ class SpectrumSweep(ExpCfgModel):
     )
 
 
-class SpectrumCfg(ExpCfgModel):
+class SpectrumCfg(ConfigBase):
     sweep: SpectrumSweep = Field(default_factory=SpectrumSweep)
 
 

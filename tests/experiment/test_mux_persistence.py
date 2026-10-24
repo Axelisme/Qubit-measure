@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     decode_labber_comment,
     encode_labber_comment,
@@ -12,7 +13,6 @@ from zcu_tools.datafile import (
 )
 from zcu_tools.experiment import (
     AxesSpec,
-    ExpCfgModel,
     RunRecord,
     ZSpec,
     load_run,
@@ -26,7 +26,7 @@ from tests._native_support import native_metadata
 from tests.program.v2._mux_support import RecordingProgram, mux_soccfg, native_mux
 
 
-class MuxCfg(ExpCfgModel):
+class MuxCfg(ConfigBase):
     readout: readout.ReadoutCfg
 
 

@@ -25,7 +25,6 @@ from zcu_tools.cfg_model import (
     PulseSpec,
     Range,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
     AdapterGuide,
@@ -243,7 +242,7 @@ class Pulse(ConfigBase):
     length: float = 1.0
 
 
-class SectionCfg(ExpCfgModel):
+class SectionCfg(ConfigBase):
     """Top-level scalars and one foldable section."""
 
     reps: int = 100

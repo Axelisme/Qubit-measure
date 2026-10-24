@@ -4,12 +4,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.plotting.figures import NamedFigures
 
-from .cfg_model import ExpCfgModel
 from .metadata import RunMetadata
 
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
 OptionsT = TypeVar("OptionsT")
 AnalysisT = TypeVar("AnalysisT")

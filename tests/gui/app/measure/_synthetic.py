@@ -6,8 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import PulseSpec, Range
-from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.cfg_model import ConfigBase, PulseSpec, Range
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -41,7 +40,7 @@ class SampleResult:
     data: NDArray[np.float64]
 
 
-class SampleCfg(ExpCfgModel):
+class SampleCfg(ConfigBase):
     reps: int = 100
     rounds: int = 10
     gain: float = 0.1

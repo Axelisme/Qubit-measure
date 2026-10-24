@@ -13,11 +13,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.datafile import JsonObject
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.experiment.acquisition import capture_device_snapshot
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.operations import RunFunction
 from zcu_tools.experiment.records import RunRecord
@@ -361,7 +361,7 @@ class WorkflowEnv[C](Scope):
         self._hooks.operation_finished(scope, facts)
         return facts
 
-    async def execute_run[Cfg: ExpCfgModel, Result](
+    async def execute_run[Cfg: ConfigBase, Result](
         self,
         scope: Scope,
         experiment: RunFunction[Cfg, Result],
@@ -372,7 +372,7 @@ class WorkflowEnv[C](Scope):
         """Run a core callable with a copied configuration, without saving it.
 
         experiment accepts (cfg, *, context: RunContext), including a bound
-        T1Exp().run. cfg must be an ExpCfgModel; other scans use raw env.call.
+        T1Exp().run. cfg must be a ConfigBase; other scans use raw env.call.
         Each attempt builds RunContext with this operation token and borrowed
         soc/soccfg/devices and fresh operation Plots on the workflow's same
         presentation host, captures device settings, then invokes the core
@@ -390,7 +390,7 @@ class WorkflowEnv[C](Scope):
         Framework journal/commit envelopes retain attempt facts and snapshots;
         provenance stays in workflow startup metadata, not a per-operation identity.
         """
-        _validate_model(cfg, ExpCfgModel, "env.run cfg")
+        _validate_model(cfg, ConfigBase, "env.run cfg")
         captured = deepcopy(cfg)
 
         def invoke(ctx: CallContext, attempt: _Attempt) -> RunRecord[Cfg, Result]:

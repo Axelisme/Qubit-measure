@@ -29,7 +29,6 @@ from qtpy.QtWidgets import (
 from zcu_tools.cfg_model import ConfigBase, waveform_spec_from_raw
 from zcu_tools.datafile import Container
 from zcu_tools.device import DeviceManager, FakeDevice
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
@@ -87,7 +86,7 @@ class StoppableAdapter(OldAdapter):
 
     def run(
         self, req: RunRequest, cfg: ConfigBase, *, context: RunContext
-    ) -> RunRecord[ExpCfgModel, object]:
+    ) -> RunRecord[ConfigBase, object]:
         del req, cfg
         # The test Stop/close action releases this held adapter via cancellation.
         if not context.scope.stop.event.wait(30):
@@ -95,7 +94,7 @@ class StoppableAdapter(OldAdapter):
         return RunRecord(None, object())
 
 
-class ModalRuntimeCfg(ExpCfgModel):
+class ModalRuntimeCfg(ConfigBase):
     knob: int = 42
 
 

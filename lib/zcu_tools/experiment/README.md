@@ -100,10 +100,10 @@ physical models, evolution and sampling.
 
 ## Cfg 與父層支援
 
-- zcu_lab 的程式型實驗從 package root import `ProgramExpCfg`，以 `class T1Cfg(ProgramExpCfg)` 宣告輸入。
-  它組合 `ProgramV2Cfg` 與 `ExpCfgModel`，保留 reps、rounds、initial_delay、relax_delay 的預設值與驗證。
-  不含這些 program 欄位的 cfg 仍繼承 `ExpCfgModel`，例如在 run 內另建 program cfg 的 raw-shot 實驗。
-- `cfg_model.py` 的 `ExpCfgModel` 繼承 package-root `zcu_tools.cfg_model.ConfigBase`，不宣告 `dev`。
+- 實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`，直接繼承它宣告輸入。
+  Cfg 自行宣告用到的 reps、rounds、initial_delay、relax_delay 與驗證，不繼承 program 設定。
+  Core 將執行控制參數明確交給 program builder 與 acquire。
+- `ConfigBase` 不宣告 `dev`。
   需要 device 的實驗 cfg 自行宣告角色到 device 名稱的 mapping；只有確實可選的實驗才宣告 optional dev。Dev 不保存 DeviceInfo、設定 patch 或 snapshot。
   使用 flux 的實驗 cfg 必填 `flux_unit`，值為 A、V 或 native，core 不提供隱含 default。
   Run 不預查 cfg.dev 名稱是否存在。Core 實際取 `context.devices[cfg.dev[role]]` 時，缺名即報錯並指名 device，不設定未使用的 device。Cfg 格式與必填 unit 的驗證仍保留。

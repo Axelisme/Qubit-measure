@@ -5,8 +5,8 @@ import pytest
 from pydantic import TypeAdapter
 from qtpy.QtCore import QMetaObject, Qt
 from qtpy.QtWidgets import QFileDialog, QPushButton, QTabWidget
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
@@ -43,7 +43,7 @@ class Result:
     data_path: str
 
 
-class RuntimeCfg(ExpCfgModel):
+class RuntimeCfg(ConfigBase):
     """The experiment cfg this adapter runs and stores with its results."""
 
     knob: int = 7

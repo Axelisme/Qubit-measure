@@ -5,7 +5,6 @@ from typing import ClassVar, Literal
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import Experiment
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.adapter.base import BaseAdapter
@@ -20,7 +19,7 @@ class CalibrationCfg(ConfigBase):
     phase: float = Field(default=0.0, allow_inf_nan=False)
 
 
-class CalibrationInput(ExpCfgModel):
+class CalibrationInput(ConfigBase):
     """Fake cfg: mode is an editor choice, calibration is nested typed input.
 
     modules holds resolved program modules, keyed by their test-local names.

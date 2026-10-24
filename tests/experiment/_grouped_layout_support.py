@@ -5,9 +5,9 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import DataVariable, LabberPayload
 from zcu_tools.experiment import (
-    ExpCfgModel,
     GroupedAxesSpec,
     GroupedLoadData,
     RunRecord,
@@ -17,7 +17,7 @@ from zcu_tools.experiment import (
 )
 
 
-class MixedCfg(ExpCfgModel):
+class MixedCfg(ConfigBase):
     name: str = "mixed grids"
 
 

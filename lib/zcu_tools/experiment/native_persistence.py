@@ -9,6 +9,7 @@ from typing import Generic, Literal, TypeVar
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     Container,
     ContainerAttrs,
@@ -30,11 +31,10 @@ from .axes_spec import (
     VariableSpec,
     VariableZSpec,
 )
-from .cfg_model import ExpCfgModel
 from .metadata import CfgSnapshot, RunMetadata, RunSnapshot, validate_cfg_snapshot
 from .records import RunRecord
 
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
 RecordT = TypeVar("RecordT", covariant=True)
 _METADATA = TypeAdapter(RunMetadata)

@@ -20,6 +20,7 @@ from typing import Generic, Literal, TypeVar
 import numpy as np
 from numpy.typing import ArrayLike
 
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     Axis as ContainerAxis,
 )
@@ -34,7 +35,6 @@ from zcu_tools.datafile import (
     save_grouped_labber_data,
     write_labber,
 )
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 
 __all__ = [
@@ -53,7 +53,7 @@ __all__ = [
 ]
 
 T_Result = TypeVar("T_Result")
-T_Config = TypeVar("T_Config", bound=ExpCfgModel)
+T_Config = TypeVar("T_Config", bound=ConfigBase)
 
 # On-disk scale convention: disk_value = memory_value * scale; load divides back.
 IDENTITY = 1.0

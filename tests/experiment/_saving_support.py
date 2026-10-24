@@ -7,17 +7,17 @@ from typing import ClassVar
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
-    ExpCfgModel,
     Experiment,
     ZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 
 
-class SavingCfg(ExpCfgModel):
+class SavingCfg(ConfigBase):
     """Synthetic gain in volts per unit signal."""
 
     dev: Mapping[str, str] | None = None

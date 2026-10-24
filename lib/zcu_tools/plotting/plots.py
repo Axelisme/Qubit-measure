@@ -1,4 +1,13 @@
-"""Explicit operation plotting with typed updates and frontend-owned presentation."""
+"""Explicit operation plotting with typed updates and frontend-owned presentation.
+
+Live helpers take an active Plots, a unique figure name and axis labels. With no
+axes they create a named figure; explicit axes must belong to that named figure
+and not another live handle. Name and axes conflicts raise ValueError. Creation,
+configuration, presentation and updates run synchronously on the host owner.
+Handles copy and validate update data before dispatch, and reject updates after
+Plots.finish. Stop producers before finish, then release presentation separately.
+Native figures remain usable after release. Host and configuration errors propagate.
+"""
 
 from __future__ import annotations
 
@@ -386,7 +395,8 @@ class Plots(FigureCollection):
         """
         return Plots(self._host)
 
-    def _ensure_active(self) -> None:
+    def ensure_active(self) -> None:
+        """Raise RuntimeError after finish, before creating or updating artists."""
         if self._finished:
             raise RuntimeError("Plot operation has finished")
 
@@ -416,6 +426,38 @@ class Plots(FigureCollection):
             self._host.present(figure)
             self._live.append(figure)
 
+    def create_live(
+        self,
+        name: str,
+        initialize: Callable[
+            [PlotHost, Figure, tuple[Axes, ...], Callable[[], None]], _T
+        ],
+        *,
+        axes: tuple[Axes, ...] | None = None,
+        count: int = 1,
+    ) -> _T:
+        """Initialize a live figure on its owner and return the callback's handle.
+
+        Without axes, create a unique named figure with count columns. Otherwise
+        claim count distinct, unused axes of self[name]. Conflicts raise
+        ValueError; an unknown existing name raises KeyError. A finished
+        collection raises RuntimeError. The callback receives the host, figure,
+        claimed axes and an active-lifetime checker for its update handle.
+        It initializes artists but must not retain them for worker mutation.
+        Present only after initialization succeeds, once per figure. Callback
+        and host errors propagate without presentation or rollback.
+        """
+        self.ensure_active()
+
+        def create() -> _T:
+            self.ensure_active()
+            figure, resolved = self._resolve_axes(name, axes, count)
+            handle = initialize(self._host, figure, resolved, self.ensure_active)
+            self._present_live(figure)
+            return handle
+
+        return self._host.call(create)
+
     def draw(self, name: str, callback: Callable[[Figure], None]) -> None:
         """Draw on an existing named figure, then refresh on the host owner.
 
@@ -432,11 +474,11 @@ class Plots(FigureCollection):
         rollback, presentation or refresh. Unknown names raise KeyError; finished plots raise
         RuntimeError. Host errors also propagate.
         """
-        self._ensure_active()
+        self.ensure_active()
         figure = self[name]
 
         def draw_frame() -> None:
-            self._ensure_active()
+            self.ensure_active()
             callback(figure)
             self._present_live(figure)
             self._host.refresh(figure)
@@ -463,13 +505,13 @@ class Plots(FigureCollection):
 
     def refresh(self, name: str) -> None:
         """Refresh a complete live frame after a batch of typed updates."""
-        self._ensure_active()
+        self.ensure_active()
         figure = self[name]
         if figure not in self._live:
             raise ValueError("Figure is not live")
 
         def refresh_frame() -> None:
-            self._ensure_active()
+            self.ensure_active()
             self._host.refresh(figure)
 
         self._host.call(refresh_frame)
@@ -483,7 +525,7 @@ class Plots(FigureCollection):
         """
         from matplotlib.animation import FFMpegWriter
 
-        self._ensure_active()
+        self.ensure_active()
         figure = self[name]
         if figure not in self._live:
             raise ValueError("Figure is not live")
@@ -493,173 +535,14 @@ class Plots(FigureCollection):
             raise RuntimeError("FFmpeg is required to record animations")
 
         def start() -> MovieRecording:
-            self._ensure_active()
+            self.ensure_active()
             writer = FFMpegWriter(fps=30)
             writer.setup(figure, str(path), dpi=200)
-            recording = MovieRecording(self._host, writer, self._ensure_active)
+            recording = MovieRecording(self._host, writer, self.ensure_active)
             self._recordings[figure] = recording
             return recording
 
         return self._host.call(start)
-
-    # tolerated: Preserve public labels, style, owner-side configuration and existing-axes options.
-    def liveplot_1d(  # noqa: PLR0913
-        self,
-        name: str,
-        xlabel: str,
-        ylabel: str,
-        *,
-        title: str | None = None,
-        num_lines: int = 1,
-        configure_axes: Callable[[Axes], None] | None = None,
-        axes: Axes | None = None,
-    ) -> LinePlot:
-        """Configure native artists once on the host owner before presenting.
-
-        The callback must not retain active axes for later worker-side mutation.
-        Configuration errors propagate without presenting the incomplete figure.
-        """
-        self._ensure_active()
-        if num_lines < 1:
-            raise ValueError("Line count must be positive")
-
-        def create() -> LinePlot:
-            self._ensure_active()
-            figure, (ax,) = self._resolve_axes(
-                name, None if axes is None else (axes,), 1
-            )
-            segment = Plot1DSegment(xlabel, ylabel, title=title, num_lines=num_lines)
-            segment.init_ax(ax)
-            if configure_axes is not None:
-                configure_axes(ax)
-            viewer = LinePlot(self._host, figure, ax, segment, self._ensure_active)
-            self._present_live(figure)
-            return viewer
-
-        return self._host.call(create)
-
-    def liveplot_scatter(
-        self,
-        name: str,
-        xlabel: str,
-        ylabel: str,
-        *,
-        title: str | None = None,
-        axes: Axes | None = None,
-    ) -> ScatterPlot:
-        """Present scalar-colored points, with artist updates on the host owner.
-
-        Without ``axes`` the figure gets one new axes; pass axes of the named
-        figure to place several live plots in one experiment-defined layout.
-        """
-        self._ensure_active()
-
-        def create() -> ScatterPlot:
-            self._ensure_active()
-            figure, (ax,) = self._resolve_axes(
-                name, None if axes is None else (axes,), 1
-            )
-            segment = ScatterSegment(xlabel, ylabel, title=title)
-            segment.init_ax(ax)
-            viewer = ScatterPlot(self._host, figure, ax, segment, self._ensure_active)
-            self._present_live(figure)
-            return viewer
-
-        return self._host.call(create)
-
-    # tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
-    def liveplot_2d(  # noqa: PLR0913
-        self,
-        name: str,
-        xlabel: str,
-        ylabel: str,
-        *,
-        title: str | None = None,
-        uniform: bool = True,
-        clim: tuple[float, float] | None = None,
-        axes: Axes | None = None,
-    ) -> HeatmapPlot:
-        """Present a named heatmap without adding scan-line axes."""
-        self._ensure_active()
-
-        def create() -> HeatmapPlot:
-            self._ensure_active()
-            figure, (ax,) = self._resolve_axes(
-                name, None if axes is None else (axes,), 1
-            )
-            vmin, vmax = clim if clim is not None else (None, None)
-            heatmap = (
-                Plot2DSegment(xlabel, ylabel, title, vmin=vmin, vmax=vmax)
-                if uniform
-                else PlotNonUniform2DSegment(
-                    xlabel, ylabel, title, vmin=vmin, vmax=vmax
-                )
-            )
-            heatmap.init_ax(ax)
-            viewer = HeatmapPlot(self._host, figure, ax, heatmap, self._ensure_active)
-            self._present_live(figure)
-            return viewer
-
-        return self._host.call(create)
-
-    # tolerated: Preserve public scan direction/count, grid choice, labels and paired-axes options.
-    def liveplot_2d_with_line(  # noqa: PLR0913
-        self,
-        name: str,
-        xlabel: str,
-        ylabel: str,
-        *,
-        line_axis: Literal[0, 1] = 1,
-        num_lines: int = 1,
-        title: str | None = None,
-        uniform: bool = True,
-        axes: tuple[Axes, Axes] | None = None,
-    ) -> HeatmapLinePlot:
-        """Present a named, owner-updated 2D heatmap with recent scan lines."""
-        self._ensure_active()
-        if num_lines < 1:
-            raise ValueError("Line count must be positive")
-        if line_axis not in (0, 1):
-            raise ValueError("line_axis must be 0 or 1")
-
-        def create() -> HeatmapLinePlot:
-            self._ensure_active()
-            figure, (heatmap_axes, line_axes) = self._resolve_axes(name, axes, 2)
-            heatmap = (
-                Plot2DSegment(xlabel, ylabel, title)
-                if uniform
-                else PlotNonUniform2DSegment(xlabel, ylabel, title)
-            )
-            line_kwargs = [
-                {"marker": "None", "alpha": 0.3, "color": "red"}
-                for _ in range(num_lines)
-            ]
-            line_kwargs[-1].update(
-                {"label": "current line", "marker": ".", "alpha": 1.0, "color": "C0"}
-            )
-            lines = Plot1DSegment(
-                xlabel if line_axis == 0 else ylabel,
-                "",
-                title=title,
-                num_lines=num_lines,
-                line_kwargs=line_kwargs,
-            )
-            heatmap.init_ax(heatmap_axes)
-            lines.init_ax(line_axes)
-            viewer = HeatmapLinePlot(
-                self._host,
-                figure,
-                heatmap_axes,
-                line_axes,
-                heatmap,
-                lines,
-                line_axis,
-                self._ensure_active,
-            )
-            self._present_live(figure)
-            return viewer
-
-        return self._host.call(create)
 
     def finish(self, *, present: bool = True) -> NamedFigures:
         if self._finished_figures is not None:
@@ -711,3 +594,174 @@ class Plots(FigureCollection):
                 raise ExceptionGroup("Failed to release plot presentation", errors)
 
         self._host.call(cleanup)
+
+
+# tolerated: Preserve public labels, style, owner-side configuration and existing-axes options.
+def live_line(  # noqa: PLR0913
+    plots: Plots,
+    name: str,
+    xlabel: str,
+    ylabel: str,
+    *,
+    title: str | None = None,
+    num_lines: int = 1,
+    configure_axes: Callable[[Axes], None] | None = None,
+    axes: Axes | None = None,
+) -> LinePlot:
+    """Configure native artists once on the host owner before presenting.
+
+    The callback must not retain active axes for later worker-side mutation.
+    Configuration errors propagate without presenting the incomplete figure.
+    """
+    plots.ensure_active()
+    if num_lines < 1:
+        raise ValueError("Line count must be positive")
+
+    def create(
+        host: PlotHost,
+        figure: Figure,
+        resolved: tuple[Axes, ...],
+        ensure_active: Callable[[], None],
+    ) -> LinePlot:
+        (ax,) = resolved
+        segment = Plot1DSegment(xlabel, ylabel, title=title, num_lines=num_lines)
+        segment.init_ax(ax)
+        if configure_axes is not None:
+            configure_axes(ax)
+        return LinePlot(host, figure, ax, segment, ensure_active)
+
+    return plots.create_live(name, create, axes=None if axes is None else (axes,))
+
+
+def live_scatter(
+    plots: Plots,
+    name: str,
+    xlabel: str,
+    ylabel: str,
+    *,
+    title: str | None = None,
+    axes: Axes | None = None,
+) -> ScatterPlot:
+    """Present scalar-colored points, with artist updates on the host owner.
+
+    Without ``axes`` the figure gets one new axes; pass axes of the named
+    figure to place several live plots in one experiment-defined layout.
+    """
+    plots.ensure_active()
+
+    def create(
+        host: PlotHost,
+        figure: Figure,
+        resolved: tuple[Axes, ...],
+        ensure_active: Callable[[], None],
+    ) -> ScatterPlot:
+        (ax,) = resolved
+        segment = ScatterSegment(xlabel, ylabel, title=title)
+        segment.init_ax(ax)
+        return ScatterPlot(host, figure, ax, segment, ensure_active)
+
+    return plots.create_live(name, create, axes=None if axes is None else (axes,))
+
+
+# tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
+def live_heatmap(  # noqa: PLR0913
+    plots: Plots,
+    name: str,
+    xlabel: str,
+    ylabel: str,
+    *,
+    title: str | None = None,
+    uniform: bool = True,
+    clim: tuple[float, float] | None = None,
+    axes: Axes | None = None,
+) -> HeatmapPlot:
+    """Present a heatmap; uniform selects the grid and clim fixes color limits.
+
+    Update accepts real signals with shape (len(xs), len(ys)). Without clim,
+    each update rescales colors. Explicit axes belong to plots[name].
+    """
+    plots.ensure_active()
+
+    def create(
+        host: PlotHost,
+        figure: Figure,
+        resolved: tuple[Axes, ...],
+        ensure_active: Callable[[], None],
+    ) -> HeatmapPlot:
+        (ax,) = resolved
+        vmin, vmax = clim if clim is not None else (None, None)
+        heatmap = (
+            Plot2DSegment(xlabel, ylabel, title, vmin=vmin, vmax=vmax)
+            if uniform
+            else PlotNonUniform2DSegment(xlabel, ylabel, title, vmin=vmin, vmax=vmax)
+        )
+        heatmap.init_ax(ax)
+        return HeatmapPlot(host, figure, ax, heatmap, ensure_active)
+
+    return plots.create_live(name, create, axes=None if axes is None else (axes,))
+
+
+# tolerated: Preserve public scan direction/count, grid choice, labels and paired-axes options.
+def live_heatmap_with_line(  # noqa: PLR0913
+    plots: Plots,
+    name: str,
+    xlabel: str,
+    ylabel: str,
+    *,
+    line_axis: Literal[0, 1] = 1,
+    num_lines: int = 1,
+    title: str | None = None,
+    uniform: bool = True,
+    axes: tuple[Axes, Axes] | None = None,
+) -> HeatmapLinePlot:
+    """Present a heatmap and recent lines along line_axis (0=x, 1=y).
+
+    Update accepts real signals with shape (len(xs), len(ys)). num_lines must
+    be positive; line_axis must be 0 or 1, otherwise raise ValueError. Explicit
+    axes are the heatmap and line axes of plots[name], in that order.
+    """
+    plots.ensure_active()
+    if num_lines < 1:
+        raise ValueError("Line count must be positive")
+    if line_axis not in (0, 1):
+        raise ValueError("line_axis must be 0 or 1")
+
+    def create(
+        host: PlotHost,
+        figure: Figure,
+        resolved: tuple[Axes, ...],
+        ensure_active: Callable[[], None],
+    ) -> HeatmapLinePlot:
+        heatmap_axes, line_axes = resolved
+        heatmap = (
+            Plot2DSegment(xlabel, ylabel, title)
+            if uniform
+            else PlotNonUniform2DSegment(xlabel, ylabel, title)
+        )
+        line_kwargs = [
+            {"marker": "None", "alpha": 0.3, "color": "red"} for _ in range(num_lines)
+        ]
+        line_kwargs[-1].update(
+            {"label": "current line", "marker": ".", "alpha": 1.0, "color": "C0"}
+        )
+        lines = Plot1DSegment(
+            xlabel if line_axis == 0 else ylabel,
+            "",
+            title=title,
+            num_lines=num_lines,
+            line_kwargs=line_kwargs,
+        )
+        heatmap.init_ax(heatmap_axes)
+        lines.init_ax(line_axes)
+        return HeatmapLinePlot(
+            host,
+            figure,
+            heatmap_axes,
+            line_axes,
+            heatmap,
+            lines,
+            line_axis,
+            ensure_active,
+        )
+
+    return plots.create_live(name, create, axes=axes, count=2)

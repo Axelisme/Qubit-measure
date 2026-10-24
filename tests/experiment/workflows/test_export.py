@@ -8,6 +8,7 @@ from typing import Literal
 import numpy as np
 import pytest
 from pydantic import TypeAdapter
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     Axis as ContainerAxis,
 )
@@ -20,7 +21,7 @@ from zcu_tools.datafile import (
     load_grouped_labber_data,
     save,
 )
-from zcu_tools.experiment import AxesSpec, Axis, ExpCfgModel, ZSpec
+from zcu_tools.experiment import AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
@@ -51,7 +52,7 @@ def test_trace_requires_known_completion_but_not_known_start_time(
         axes=(Axis("frequency", "frequency", "Hz"),),
         z=ZSpec("signal", "signal", "V"),
         result_type=TraceResult,
-        cfg_type=ExpCfgModel,
+        cfg_type=ConfigBase,
         tag="test/native",
         data_variable=DataVariable("readout"),
     )
@@ -68,7 +69,7 @@ def test_trace_requires_known_completion_but_not_known_start_time(
                 **container.docs,
                 "cfg": {
                     "values": {},
-                    "cfg_type": "ExpCfgModel",
+                    "cfg_type": "ConfigBase",
                     "schema_version": "1.0",
                 },
             },
@@ -98,12 +99,12 @@ class SyntheticTraceResult:
 
 
 @pytest.fixture
-def trace_spec() -> AxesSpec[SyntheticTraceResult, ExpCfgModel]:
+def trace_spec() -> AxesSpec[SyntheticTraceResult, ConfigBase]:
     return AxesSpec(
         axes=(Axis("frequency", "frequency", "Hz"), Axis("flux", "Flux", "V")),
         z=ZSpec("signal", "signal", "V"),
         result_type=SyntheticTraceResult,
-        cfg_type=ExpCfgModel,
+        cfg_type=ConfigBase,
         tag="test/native",
         data_variable=DataVariable("readout"),
     )
@@ -128,14 +129,14 @@ def stopped_trace() -> Container:
         },
         docs={
             **container.docs,
-            "cfg": {"values": {}, "cfg_type": "ExpCfgModel", "schema_version": "1.0"},
+            "cfg": {"values": {}, "cfg_type": "ConfigBase", "schema_version": "1.0"},
         },
     )
 
 
 def test_trace_rejects_stopped_by_default(
     tmp_path: Path,
-    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    trace_spec: AxesSpec[SyntheticTraceResult, ConfigBase],
     stopped_trace: Container,
 ) -> None:
     path = tmp_path / "stopped.h5"
@@ -153,7 +154,7 @@ def test_trace_rejects_stopped_by_default(
 )
 def test_trace_completion_policy_preserves_raw_values_and_inner_first_axes(
     tmp_path: Path,
-    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    trace_spec: AxesSpec[SyntheticTraceResult, ConfigBase],
     stopped_trace: Container,
     completion: str,
     allow_stopped: bool,
@@ -190,7 +191,7 @@ def test_trace_completion_policy_preserves_raw_values_and_inner_first_axes(
 @pytest.mark.parametrize("allow_stopped", [False, True])
 def test_trace_never_allows_partial_or_unknown(
     tmp_path: Path,
-    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    trace_spec: AxesSpec[SyntheticTraceResult, ConfigBase],
     stopped_trace: Container,
     completion: str,
     allow_stopped: bool,
@@ -221,7 +222,7 @@ def test_trace_never_allows_partial_or_unknown(
 )
 def test_trace_completion_policy_keeps_validation_and_source_diagnostics(
     tmp_path: Path,
-    trace_spec: AxesSpec[SyntheticTraceResult, ExpCfgModel],
+    trace_spec: AxesSpec[SyntheticTraceResult, ConfigBase],
     stopped_trace: Container,
     allow_stopped: bool,
     invalid: str,

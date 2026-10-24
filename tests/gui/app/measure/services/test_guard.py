@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 import pytest
 from zcu_tools.cfg_model import ConfigBase, Expr
 from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AdapterCapabilities,
@@ -42,7 +41,7 @@ def _make_guard(state: State) -> GuardService:
     return GuardService(state)
 
 
-_DEFAULT_RECORD: RunRecord[ExpCfgModel, object] = RunRecord(None, object())
+_DEFAULT_RECORD: RunRecord[ConfigBase, object] = RunRecord(None, object())
 
 
 def _make_state(
@@ -51,7 +50,7 @@ def _make_state(
     soc_attached: bool = True,
     requires_soc: bool = True,
     lowering_raises: bool = False,
-    run_result: RunRecord[ExpCfgModel, object] | None = _DEFAULT_RECORD,
+    run_result: RunRecord[ConfigBase, object] | None = _DEFAULT_RECORD,
     analyze_result: object = object(),
     load_data: bool = True,
     adapter: MagicMock | None = None,

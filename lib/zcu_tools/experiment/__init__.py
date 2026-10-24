@@ -39,7 +39,6 @@ if TYPE_CHECKING:
         ZSpec,
     )
     from .base import Experiment
-    from .cfg_model import ExpCfgModel, ProgramExpCfg
     from .metadata import (
         CfgSnapshot,
         RunMetadata,
@@ -77,8 +76,6 @@ __all__ = [
     "AcquisitionEvidence",
     "capture_software_provenance",
     "new_run_id",
-    "ExpCfgModel",
-    "ProgramExpCfg",
     "RunRecord",
     "RunSnapshot",
     "save_labber",
@@ -130,8 +127,6 @@ _EXPORT_MODULES = {
     "AcquisitionEvidence": ".acquisition",
     "capture_software_provenance": ".acquisition",
     "new_run_id": ".acquisition",
-    "ExpCfgModel": ".cfg_model",
-    "ProgramExpCfg": ".cfg_model",
     "RunRecord": ".records",
     "RunSnapshot": ".metadata",
     "save_labber": ".native_persistence",

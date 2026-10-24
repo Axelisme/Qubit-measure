@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 import pytest
 from matplotlib.figure import Figure
 from pydantic import Field, JsonValue
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.native_persistence import RestoredRun, metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
@@ -47,7 +47,7 @@ def _make_state(*, load_data: bool = True) -> tuple[State, str, MagicMock]:
         Session(
             adapter_name="any",
             adapter=adapter,
-            cfg=make_form(Form(ExpCfgModel, {}), state=state),
+            cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
     return state, tab_id, adapter
@@ -86,14 +86,14 @@ def test_load_retains_history_without_foreign_analysis_fallback(
         tab_id, RunRecord(None, object()), parameters=q2, source_operation_id=91
     )
     state.set_context(replace(state.session_env, parameters=captured))
-    loaded: RunRecord[ExpCfgModel, object] = RunRecord(
+    loaded: RunRecord[ConfigBase, object] = RunRecord(
         cfg=None, result=object(), metadata=historical_metadata()
     )
     metadata = historical_metadata()
 
     def restore_and_rebind(
         stored: Container,
-    ) -> RestoredRun[RunRecord[ExpCfgModel, object]]:
+    ) -> RestoredRun[RunRecord[ConfigBase, object]]:
         assert metadata_from_container(stored) == metadata
         state.set_context(replace(state.session_env, parameters=q2))
         return RestoredRun(loaded, "cfg unavailable")
@@ -118,7 +118,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     state, tab_id, adapter = _make_state()
     stale_result = RunRecord(None, object())
     loaded = RunRecord(
-        cfg=None if missing_cfg else ExpCfgModel(),
+        cfg=None if missing_cfg else ConfigBase(),
         result=object(),
         metadata=historical_metadata(),
     )
@@ -172,7 +172,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     assert state.version.get(f"tab:{tab_id}:save_path") == save_path_version
 
 
-class RepeatsCfg(ExpCfgModel):
+class RepeatsCfg(ConfigBase):
     """A result snapshot and the editable draft can have different repeats."""
 
     reps: int = Field(default=20, ge=1)

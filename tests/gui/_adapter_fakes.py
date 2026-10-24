@@ -8,7 +8,6 @@ from typing import Any, ClassVar, Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import Container
-from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import RestoredRun
 from zcu_tools.experiment.records import RunRecord
@@ -66,7 +65,7 @@ class DummyAdapter:
     @staticmethod
     def make_form(ctx: FormContext) -> Form[ConfigBase]:
         del ctx
-        return Form(ExpCfgModel, {})
+        return Form(ConfigBase, {})
 
     @classmethod
     def guide(cls) -> AdapterGuide:

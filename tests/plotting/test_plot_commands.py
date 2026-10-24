@@ -7,6 +7,7 @@ from typing import TypeVar
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from zcu_tools import plotting
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 _T = TypeVar("_T")
@@ -34,7 +35,7 @@ class OwnerHost(NonPresentingHost):
 def test_draw_shares_template_axes_and_refreshes_after_callback() -> None:
     host = OwnerHost()
     plots = Plots(host)
-    viewer = plots.liveplot_1d("frequency", "MHz", "Signal")
+    viewer = plotting.live_line(plots, "frequency", "MHz", "Signal")
     figure = plots["frequency"]
 
     def references(target: Figure) -> None:
@@ -58,7 +59,7 @@ def test_draw_shares_template_axes_and_refreshes_after_callback() -> None:
 def test_draw_rebuilds_same_named_figure_for_successive_live_templates() -> None:
     host = OwnerHost()
     plots = Plots(host)
-    previous = plots.liveplot_1d("decay", "Time", "Signal")
+    previous = plotting.live_line(plots, "decay", "Time", "Signal")
     figure = plots["decay"]
     xs = np.array([0.0, 1.0])
     previous.update(xs, xs)
@@ -70,7 +71,9 @@ def test_draw_rebuilds_same_named_figure_for_successive_live_templates() -> None
 
     for attempt in range(3):
         plots.draw("decay", rebuild)
-        current = plots.liveplot_1d("decay", "Time", "Signal", axes=figure.axes[0])
+        current = plotting.live_line(
+            plots, "decay", "Time", "Signal", axes=figure.axes[0]
+        )
         current.update(xs, xs + attempt)
         assert plots["decay"] is figure
         assert len(figure.axes) == 1
@@ -108,7 +111,7 @@ def test_save_uses_owner_without_refresh(
 ) -> None:
     host = OwnerHost()
     plots = Plots(host)
-    plots.liveplot_1d("decay", "Time", "Signal")
+    plotting.live_line(plots, "decay", "Time", "Signal")
     figure = plots["decay"]
     if finished:
         plots.finish()
@@ -166,12 +169,12 @@ def test_marker_reports_draw_removal(kind: str, removal: str) -> None:
     host = OwnerHost()
     plots = Plots(host)
     if kind == "point":
-        heatmap = plots.liveplot_2d("live", "x", "y")
+        heatmap = plotting.live_heatmap(plots, "live", "x", "y")
 
         def mark() -> None:
             heatmap.mark_point(0.5, 0.75)
     else:
-        combined = plots.liveplot_2d_with_line("live", "x", "y")
+        combined = plotting.live_heatmap_with_line(plots, "live", "x", "y")
 
         def mark() -> None:
             combined.mark_line(0.5)
@@ -212,12 +215,12 @@ def test_marker_keeps_valid_overlay_after_draw(kind: str) -> None:
     host = OwnerHost()
     plots = Plots(host)
     if kind == "point":
-        heatmap = plots.liveplot_2d("live", "x", "y")
+        heatmap = plotting.live_heatmap(plots, "live", "x", "y")
 
         def mark(value: float) -> None:
             heatmap.mark_point(value, value)
     else:
-        combined = plots.liveplot_2d_with_line("live", "x", "y")
+        combined = plotting.live_heatmap_with_line(plots, "live", "x", "y")
 
         def mark(value: float) -> None:
             combined.mark_line(value)
@@ -277,22 +280,24 @@ def test_template_update_reports_artists_removed_by_draw(
     xs, ys = np.array([0.0, 1.0]), np.array([2.0, 3.0])
     grid = np.ones((2, 2))
     if template == "line":
-        line = plots.liveplot_1d("live", "x", "y", num_lines=2)
+        line = plotting.live_line(plots, "live", "x", "y", num_lines=2)
 
         def update() -> None:
             line.update(xs, np.ones((2, 2)))
     elif template == "scatter":
-        scatter = plots.liveplot_scatter("live", "x", "y")
+        scatter = plotting.live_scatter(plots, "live", "x", "y")
 
         def update() -> None:
             scatter.update(xs, ys, colors=ys)
     elif template in ("heatmap", "nonuniform"):
-        heatmap = plots.liveplot_2d("live", "x", "y", uniform=template == "heatmap")
+        heatmap = plotting.live_heatmap(
+            plots, "live", "x", "y", uniform=template == "heatmap"
+        )
 
         def update() -> None:
             heatmap.update(xs, ys, grid)
     else:
-        combined = plots.liveplot_2d_with_line("live", "x", "y")
+        combined = plotting.live_heatmap_with_line(plots, "live", "x", "y")
 
         def update() -> None:
             combined.update(xs, ys, grid)

@@ -11,11 +11,10 @@ from uuid import uuid4
 from matplotlib.figure import Figure
 from pydantic import TypeAdapter
 
-from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
+from zcu_tools.cfg_model import ConfigBase, ModuleSpec, WaveformSpec
 from zcu_tools.experiment import (
     AcquisitionEvidence,
     AxesSpec,
-    ExpCfgModel,
     GroupedAxesSpec,
     RunRecord,
 )
@@ -53,7 +52,7 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 
-CfgT = TypeVar("CfgT", bound=ExpCfgModel)
+CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
 
 
