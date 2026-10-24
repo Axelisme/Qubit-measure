@@ -162,7 +162,7 @@ class ResultsBrowser(QWidget):
         self._resolve_experiment = resolve_experiment
         self.setStyleSheet("""
             QWidget { background: #f6f8fb; color: #1e293b; font-size: 12px; }
-            QTreeWidget, QTableWidget, QPlainTextEdit, QLineEdit, QComboBox, QDateEdit {
+            QTreeWidget, QTableWidget, QPlainTextEdit, QLineEdit, QComboBox {
                 background: white; border: 1px solid #cbd5e1; border-radius: 3px; }
             QDateEdit:disabled { background: #e2e8f0; color: #94a3b8; border-color: #cbd5e1; }
             QPushButton { background: #e7edf6; border: 1px solid #b7c9df;
@@ -276,7 +276,8 @@ class ResultsBrowser(QWidget):
         edit.setCalendarPopup(True)
         edit.setEnabled(False)
         edit.setToolTip(
-            "先勾 Filter by date (UTC)，點日期文字或右側箭頭選日期。From / To 含端點；無 UTC 時間的 run 不列入。"
+            "Enable Filter by date (UTC), then click the date text or right-hand arrow "
+            "to choose a date. From / To are inclusive; runs without a UTC time are excluded."
         )
         edit.dateChanged.connect(self._render)
         layout.addWidget(edit)
