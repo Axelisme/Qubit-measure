@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -50,6 +50,11 @@ from zcu_lab.workflows.common.calibration_plots import (
     draw_rabi,
     draw_readout,
     retain_trace,
+)
+from zcu_lab.workflows.common.frequency_tracking import (
+    FrequencyTracker,
+    FrequencyTunables,
+    trusted_curve,
 )
 from zcu_lab.workflows.common.rabi_feedback import RabiDriveFeedback
 from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
@@ -183,12 +188,13 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit | Failed:
     )
 
 
-class CalibrationTunables(BaseModel):
+class CalibrationTunables(FrequencyTunables):
     """Generation and acceptance knobs captured once per flux-point invocation.
 
     qf_widen specifies the finite sequence of spectroscopy spans, not retries
     after adapter errors. Error and residual upper bounds are strict; readout
     SNR uses an inclusive lower bound. ro_every counts flux points.
+    drive_gain_mode controls spectroscopy; rabi_drive_gain_mode controls Rabi.
     Acceptance/cadence/range defaults are provisional simulator settings, not
     hardware-validated physics defaults; users confirm them at CP-B/CP-C.
     """
@@ -200,12 +206,6 @@ class CalibrationTunables(BaseModel):
     rabi_rounds: int = Field(default=1, ge=1, description="Rabi rounds")
     ro_reps: int = Field(default=100, ge=1, description="Readout averages")
     ro_rounds: int = Field(default=1, ge=1, description="Readout rounds")
-    span_mhz: float = Field(default=30.0, gt=0, description="Base spectroscopy span")
-    qf_widen: tuple[Annotated[float, Field(gt=0)], ...] = Field(
-        default=(1.0, 2.0, 4.0),
-        min_length=1,
-        description="Ordered spectroscopy span multipliers",
-    )
     max_frequency_rel_err: float = Field(
         default=0.3, gt=0, le=1, description="Strict center-error/FWHM upper bound"
     )
@@ -231,7 +231,7 @@ class CalibrationTunables(BaseModel):
         default=3.0, gt=0, description="Sweep stop divided by prior pi duration"
     )
 
-    drive_gain_mode: Literal["auto_pi_product", "fixed"] = Field(
+    rabi_drive_gain_mode: Literal["auto_pi_product", "fixed"] = Field(
         default="auto_pi_product",
         description="Predict/control gain or retain template gain",
     )
@@ -354,6 +354,9 @@ class CalCarry:
     rabi_drive holds the pi-product history and query-aged gain controller.
     Widening replaces the current point's frequency row. Pause preserves this carry;
     only explicit point commits persist reports. There are no stage checkpoints.
+    frequency_tracker owns the run-local physical overlay, IDW and linewidth
+    feedback. cur_m is |<0|n|1>| and m_ratio is relative to the first flux point;
+    both are None before prediction (ratio also None for a zero reference).
     """
 
     seed: Calibrated
@@ -362,6 +365,10 @@ class CalCarry:
     frequency_traces: list[CalibrationTrace] = field(default_factory=list)
     rabi_traces: list[CalibrationTrace] = field(default_factory=list)
     rabi_drive: RabiDriveFeedback = field(default_factory=RabiDriveFeedback)
+    frequency_tracker: FrequencyTracker | None = None
+    # Matrix-element feed-forward for the Rabi lane; refreshed at every point.
+    cur_m: float | None = None
+    m_ratio: float | None = None
 
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
@@ -403,13 +410,17 @@ class FrequencyResult:
     files lists every Completed widening attempt in acquisition order, including
     partial, rejected and failed fits; Schedule failures have no filename.
     References do not guarantee later existence. Unexpected writer/adapter/fit/
-    plot exceptions propagate instead.
+    plot exceptions propagate instead. probe_gains records actual spectroscopy
+    gain for every acquisition attempt, including failed/partial attempts.
+    scan_center_mhz is the physical-plus-IDW center before window offset.
     """
 
     status: StageStatus
     reason: str | None
     frequency_mhz: float | None
     files: tuple[str, ...]
+    probe_gains: tuple[float, ...] = ()
+    scan_center_mhz: float | None = None
 
 
 @dataclass(frozen=True)
@@ -477,6 +488,63 @@ def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
         raise ValueError("Calibration flux must be finite")
 
 
+def _frequency_cfg(
+    inputs: CalibrationInputs,
+    prior: Calibrated,
+    center: float,
+    gain: float,
+    widen: float,
+) -> FreqCfg:
+    drive = inputs.qub_pulse.model_copy(deep=True)
+    drive.set_param("gain", gain)
+    ro = inputs.readout.model_copy(deep=True)
+    apply_readout_calibration(ro, prior)
+    span = inputs.tun.span_mhz * widen
+    offset = inputs.tun.detune_center_mhz
+    return FreqCfg(
+        reps=inputs.tun.qf_reps,
+        rounds=inputs.tun.qf_rounds,
+        relax_delay=1.0,
+        qub_pulse=drive,
+        readout=ro,
+        freq=SweepCfg(
+            start=center + offset - span / 2,
+            stop=center + offset + span / 2,
+            expts=inputs.tun.qf_points,
+            step=span / (inputs.tun.qf_points - 1),
+        ),
+    )
+
+
+def _accept_frequency(fit: FrequencyFit, tun: CalibrationTunables) -> bool:
+    residual = fit.quality.normalized_residual_rms
+    return (
+        math.isfinite(fit.frequency_mhz)
+        and fit.frequency_mhz > 0
+        and math.isfinite(fit.width_mhz)
+        and fit.width_mhz > 0
+        and math.isfinite(fit.error_mhz)
+        and fit.error_mhz >= 0
+        and fit.error_mhz / fit.width_mhz < tun.max_frequency_rel_err
+        and residual is not None
+        and residual < tun.max_fit_residual
+        and trusted_curve(fit.observed, fit.fitted, 0.2)
+    )
+
+
+def _observe_linewidth(
+    tracker: FrequencyTracker,
+    fit: FrequencyFit,
+    result: FreqResult,
+    gain: float,
+    index: int,
+) -> None:
+    if 0 < fit.width_mhz <= float(np.ptp(result.freqs)) and trusted_curve(
+        fit.observed, fit.fitted, 0.1
+    ):
+        tracker.observe_linewidth(index, fit.width_mhz, gain)
+
+
 async def calibrate_frequency(
     scope: Scope,
     *,
@@ -491,44 +559,37 @@ async def calibrate_frequency(
     coroutine-local; only frequency/history change. inputs supplies the
     resolved modules, this invocation's policy and the fixed historical snapshot
     used by the native saver after each Completed attempt,
-    before fitting. Widening uses inputs.tun.qf_widen; the center follows an
-    EWMA(alpha=.5) and relax timing is 1 us. Acceptance uses the captured gates.
+    before fitting. Widening uses inputs.tun.qf_widen; the center follows the
+    captured physical model plus confidence-decayed IDW residuals. Probe gain
+    follows trusted linewidth feedback. Relax timing is 1 us. Acceptance uses
+    both the captured gates and the legacy mean-error frequency gate.
     Partial attempts save then return rejected/stopped without fitting. Widening
     continues as usual. Expected fit failures return failed/reason, with all
-    Completed refs retained; neither failure nor partial updates carry/history.
+    Completed refs retained. Failure advances only recovery state, while partial
+    leaves accepted history and feedback observations unchanged.
     Invalid flux raises before acquisition; all unexpected errors propagate.
     """
     # Check the setpoint before acquiring and project the frequency history.
     if not math.isfinite(flux):
         raise ValueError("Calibration flux must be finite")
     prior = carry.seed if carry.last is None else carry.last
-    hint = prior.f01_mhz
-    for _, frequency in carry.f01_by_flux:
-        hint = 0.5 * frequency + 0.5 * hint
+    tracker = carry.frequency_tracker
+    if tracker is None:
+        raise ValueError("Frequency calibration requires a captured physical predictor")
+    hint = tracker.begin_point(flux)
+    carry.cur_m, carry.m_ratio = tracker.cur_m, tracker.m_ratio
+    gain = tracker.probe_gain(float(inputs.qub_pulse.gain), inputs.tun)
     filenames: list[str] = []
+    gains: list[float] = []
     status: StageStatus = "rejected"
     reason = "No accepted frequency fit"
     for attempt, widen in enumerate(inputs.tun.qf_widen, start=1):
         if scope.cancelled:
-            return FrequencyResult("skipped", "Point cancelled", None, tuple(filenames))
-        # Sweep a widened span around the history estimate using retained readout.
-        drive = inputs.qub_pulse.model_copy(deep=True)
-        ro = inputs.readout.model_copy(deep=True)
-        apply_readout_calibration(ro, prior)
-        span = inputs.tun.span_mhz * widen
-        cfg = FreqCfg(
-            reps=inputs.tun.qf_reps,
-            rounds=inputs.tun.qf_rounds,
-            relax_delay=1.0,
-            qub_pulse=drive,
-            readout=ro,
-            freq=SweepCfg(
-                start=hint - span / 2,
-                stop=hint + span / 2,
-                expts=101,
-                step=span / 100,
-            ),
-        )
+            return FrequencyResult(
+                "skipped", "Point cancelled", None, tuple(filenames), tuple(gains), hint
+            )
+        cfg = _frequency_cfg(inputs, prior, hint, gain, widen)
+        gains.append(gain)
         outcome = await scope.run(FreqExp().run, cfg, name="frequency")
         if isinstance(outcome, Failed):
             status, reason = "failed", outcome.reason
@@ -565,25 +626,17 @@ async def calibrate_frequency(
             )
             status, reason = "failed", fit.reason
             continue
-        residual = fit.quality.normalized_residual_rms
-        accepted = (
-            math.isfinite(fit.frequency_mhz)
-            and fit.frequency_mhz > 0
-            and math.isfinite(fit.width_mhz)
-            and fit.width_mhz > 0
-            and math.isfinite(fit.error_mhz)
-            and fit.error_mhz >= 0
-            and fit.error_mhz / fit.width_mhz < inputs.tun.max_frequency_rel_err
-            and residual is not None
-            and residual < inputs.tun.max_fit_residual
-        )
+        accepted = _accept_frequency(fit, inputs.tun)
         if accepted:
             carry.last = replace(prior, f01_mhz=fit.frequency_mhz)
             carry.f01_by_flux.append((flux, fit.frequency_mhz))
+            tracker.finish_point(flux, fit.frequency_mhz, tun=inputs.tun)
+            _observe_linewidth(tracker, fit, result, gain, inputs.point_index)
         carry.frequency_traces[-1] = replace(
             trace,
             observed=fit.observed,
             fitted=fit.fitted,
+            accepted=fit.frequency_mhz - hint,
         )
         draw_frequency(
             plots,
@@ -594,10 +647,17 @@ async def calibrate_frequency(
         )
         if accepted:
             return FrequencyResult(
-                "accepted", None, fit.frequency_mhz, tuple(filenames)
+                "accepted",
+                None,
+                fit.frequency_mhz,
+                tuple(filenames),
+                tuple(gains),
+                hint,
             )
         status, reason = "rejected", "No accepted frequency fit"
-    return FrequencyResult(status, reason, None, tuple(filenames))
+    if reason != "stopped":
+        tracker.finish_point(flux, None, tun=inputs.tun)
+    return FrequencyResult(status, reason, None, tuple(filenames), tuple(gains), hint)
 
 
 async def calibrate_rabi(
@@ -651,7 +711,7 @@ async def calibrate_rabi(
         if inputs.tun.target_pi_length_us is None
         else inputs.tun.target_pi_length_us
     )
-    if inputs.tun.drive_gain_mode == "auto_pi_product":
+    if inputs.tun.rabi_drive_gain_mode == "auto_pi_product":
         gain = carry.rabi_drive.select_gain(
             carry.seed.pi_length_us * float(inputs.qub_pulse.gain),
             target_pi_us,
@@ -745,7 +805,7 @@ async def calibrate_rabi(
         fit.pi_length_us,
         gain,
         target_pi_us,
-        control=inputs.tun.drive_gain_mode == "auto_pi_product",
+        control=inputs.tun.rabi_drive_gain_mode == "auto_pi_product",
     )
     pi2 = (
         fit.pi2_length_us

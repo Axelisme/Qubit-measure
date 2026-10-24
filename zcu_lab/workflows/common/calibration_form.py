@@ -5,17 +5,20 @@ from __future__ import annotations
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
-from zcu_tools.gui.form import Display, FormModel, field_error
+from zcu_tools.gui.form import Display, field_error
 
 from zcu_lab.workflows.common.calibration import CalibrationTunables
+from zcu_lab.workflows.common.frequency_form import FrequencyTunablesForm
 
 
-class CalibrationTunablesForm(FormModel):
+class CalibrationTunablesForm(FrequencyTunablesForm):
     """User-editable calibration generation, acceptance and cadence knobs.
 
     Field descriptions carry the ordinary knob meanings. Acceptance/cadence and
     range defaults remain provisional simulator settings for CP-B/CP-C, not
     hardware-validated physics defaults. No hidden fixed value is edited here.
+    Inherited drive_gain_mode controls spectroscopy; rabi_drive_gain_mode controls
+    the separate Rabi gain feedback.
     """
 
     qf_reps: Annotated[int, Display(label="Spectroscopy averages")] = Field(
@@ -79,9 +82,9 @@ class CalibrationTunablesForm(FormModel):
         default=3.0, gt=0, description="Sweep stop divided by prior pi duration"
     )
 
-    drive_gain_mode: Annotated[
-        Literal["auto_pi_product", "fixed"], Display(label="Drive gain mode")
-    ] = Field(default="auto_pi_product", description="Drive gain mode")
+    rabi_drive_gain_mode: Annotated[
+        Literal["auto_pi_product", "fixed"], Display(label="Rabi drive gain mode")
+    ] = Field(default="auto_pi_product", description="Rabi drive gain mode")
     target_pi_length_us: Annotated[
         float | None, Display(label="Target pi duration", unit="µs")
     ] = Field(
@@ -157,6 +160,12 @@ class CalibrationTunablesForm(FormModel):
             ro_rounds=self.ro_rounds,
             span_mhz=self.span_mhz,
             qf_widen=self.qf_widen,
+            detune_center_mhz=self.detune_center_mhz,
+            qf_points=self.qf_points,
+            drive_gain_mode=self.drive_gain_mode,
+            target_kappa=self.target_kappa,
+            drive_gain_cap=self.drive_gain_cap,
+            physical_recovery_mode=self.physical_recovery_mode,
             max_frequency_rel_err=self.max_frequency_rel_err,
             max_rabi_rel_err=self.max_rabi_rel_err,
             max_fit_residual=self.max_fit_residual,
@@ -164,7 +173,7 @@ class CalibrationTunablesForm(FormModel):
             ro_every=self.ro_every,
             rabi_start_factor=self.rabi_start_factor,
             rabi_stop_factor=self.rabi_stop_factor,
-            drive_gain_mode=self.drive_gain_mode,
+            rabi_drive_gain_mode=self.rabi_drive_gain_mode,
             target_pi_length_us=self.target_pi_length_us,
             rabi_min_start_us=self.rabi_min_start_us,
             rabi_min_stop_us=self.rabi_min_stop_us,

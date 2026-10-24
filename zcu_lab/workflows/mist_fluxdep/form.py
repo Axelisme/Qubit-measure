@@ -38,6 +38,7 @@ from zcu_lab.workflows.common.calibration_modules import (
     expand_fluxes,
     resolve_calibration_modules,
 )
+from zcu_lab.workflows.common.frequency_form import FrequencyModelForm
 from zcu_lab.workflows.mist_fluxdep.workflow import MISTPlan, MISTTunables
 
 MIST_MODULE_FIELD = ModuleInputField(ModuleSpec)
@@ -65,6 +66,9 @@ class MISTPlanForm(FormModel):
     threshold replaces these old native modules.
     """
 
+    predictor: Annotated[FrequencyModelForm, Display(label="Fluxonium predictor")] = (
+        Field(description="Captured physical model and native flux mapping")
+    )
     flux_dev: Annotated[str, Display(label="Flux device")] = Field(
         min_length=1, description="Connected flux driver name"
     )
@@ -182,6 +186,7 @@ class MISTPlanForm(FormModel):
         if errors or mist is None:
             return FormErrors(errors)
         return MISTPlan(
+            predictor=self.predictor.to_cfg(),
             flux_dev=self.flux_dev,
             flux_unit=self.flux_unit,
             fluxes=expand_fluxes(self.fluxes),
