@@ -96,6 +96,7 @@ def _T1_get_writeback_items(
             SampleWriteback(
                 target_name=parameters.resolve_path("$qubit"),
                 description="T1 sample at the captured bias",
+                coordinate_device="$qubit.flux_source",
                 proposed_value={
                     "t1_us": result.t1,
                     "t1_err_us": result.t1_err,

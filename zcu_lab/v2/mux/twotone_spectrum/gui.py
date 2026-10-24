@@ -144,6 +144,7 @@ def _get_writeback_items(
                 SampleWriteback(
                     target_name=qubit,
                     description="Qubit frequency sample at captured bias",
+                    coordinate_device="$mux.flux_source",
                     proposed_value={
                         "freq_mhz": outcome.freq,
                         "freq_err_mhz": outcome.freq_err,

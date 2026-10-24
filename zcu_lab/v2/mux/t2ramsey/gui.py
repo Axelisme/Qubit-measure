@@ -142,6 +142,7 @@ def _get_writeback_items(
                 SampleWriteback(
                     target_name=qubit,
                     description="t2r sample at captured bias",
+                    coordinate_device="$mux.flux_source",
                     proposed_value={
                         "t2r_us": outcome.t2,
                         "t2r_err_us": outcome.t2_err,

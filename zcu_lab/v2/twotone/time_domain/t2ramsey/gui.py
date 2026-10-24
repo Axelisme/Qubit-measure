@@ -137,6 +137,7 @@ def _T2Ramsey_get_writeback_items(
             SampleWriteback(
                 target_name=parameters.resolve_path("$qubit"),
                 description="T2 Ramsey sample at the captured bias",
+                coordinate_device="$qubit.flux_source",
                 proposed_value={
                     "t2r_us": result.t2r,
                     "t2r_err_us": result.t2r_err,

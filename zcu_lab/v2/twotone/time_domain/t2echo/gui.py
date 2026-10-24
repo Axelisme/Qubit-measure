@@ -134,6 +134,7 @@ def _T2Echo_get_writeback_items(
             SampleWriteback(
                 target_name=parameters.resolve_path("$qubit"),
                 description="T2 Echo sample at the captured bias",
+                coordinate_device="$qubit.flux_source",
                 proposed_value={
                     "t2e_us": result.t2e,
                     "t2e_err_us": result.t2e_err,

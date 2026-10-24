@@ -93,6 +93,7 @@ def _Freq_get_writeback_items(
             SampleWriteback(
                 target_name=parameters.resolve_path("$qubit"),
                 description="Qubit frequency sample at the captured bias",
+                coordinate_device="$qubit.flux_source",
                 proposed_value={
                     "freq_mhz": result.freq,
                     "freq_err_mhz": result.freq_err,
