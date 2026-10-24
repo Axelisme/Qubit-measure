@@ -40,6 +40,7 @@ from zcu_lab.workflows.common.calibration_modules import (
     expand_fluxes,
     resolve_calibration_modules,
 )
+from zcu_lab.workflows.common.frequency_form import FrequencyModelForm
 
 
 class CoherenceTunablesForm(FormModel):
@@ -109,6 +110,9 @@ class CoherencePlanForm(FormModel):
     selections stay unfilled until supplied. Runtime owns every cfg and grid.
     """
 
+    predictor: Annotated[FrequencyModelForm, Display(label="Fluxonium predictor")] = (
+        Field(description="Captured physical model and native flux mapping")
+    )
     flux_dev: Annotated[str, Display(label="Flux device")] = Field(
         min_length=1, description="Host flux device name"
     )
@@ -217,6 +221,7 @@ class CoherencePlanForm(FormModel):
             measure_t1=self.measure_t1,
             measure_t2ramsey=self.measure_t2ramsey,
             measure_t2echo=self.measure_t2echo,
+            predictor=self.predictor.to_cfg(),
             flux_dev=self.flux_dev,
             flux_unit=self.flux_unit,
             fluxes=expand_fluxes(self.fluxes),

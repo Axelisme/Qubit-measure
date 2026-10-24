@@ -61,6 +61,7 @@ from zcu_lab.workflows.common.calibration import (
     readout_due,
 )
 from zcu_lab.workflows.common.devices import set_flux
+from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
 from zcu_lab.workflows.common.saving import save_native
 
 
@@ -75,6 +76,9 @@ class CoherencePlan(T1Plan):
     GE shots after calibration and before lifetimes, without fitting.
     """
 
+    predictor: FrequencyModel = Field(
+        description="Captured fluxonium model and device affine map"
+    )
     measure_singleshot: bool = False
     measure_t1: bool = True
     measure_t2ramsey: bool = True
@@ -521,7 +525,9 @@ async def coherence_fluxdep(
     """
     _ = env.soc
     _ = env.devices
-    carry = CalCarry(env.context)
+    carry = CalCarry(
+        env.context, frequency_tracker=FrequencyTracker(plan.predictor.make_predictor())
+    )
     last_ge_flux: float | None = None
     t1_by_flux: LifetimeHistory = []
     t2ramsey_by_flux: LifetimeHistory = []
