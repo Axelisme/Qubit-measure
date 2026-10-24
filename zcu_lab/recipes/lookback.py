@@ -86,9 +86,7 @@ async def lookback(session: RecipeSession, inputs: LookbackInputs) -> LookbackRe
         or not isinstance(inputs.readout_length_us, Keep)
         or not isinstance(inputs.trigger_offset_us, Keep)
     ):
-        pulse_selector = tab.read(("modules", "readout")).selector
-        if pulse_selector is not None and pulse_selector.mode == "ref":
-            tab.command("modules.readout", "to_inline")
+        tab.command("modules.readout", "to_inline")
     tab.set("modules.readout.freq", inputs.frequency_mhz)
     tab.set("modules.readout.ro_length", inputs.readout_length_us)
     tab.set("modules.readout.trig_offset", inputs.trigger_offset_us)

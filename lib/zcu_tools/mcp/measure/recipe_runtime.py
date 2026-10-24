@@ -35,8 +35,6 @@ from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
     FormError,
     FormField,
-    FormPath,
-    FormSelector,
     FormSource,
     FormValue,
     RecipeRun,
@@ -58,7 +56,6 @@ from zcu_tools.mcp.measure.recipe_form import (
     dotted_path,
     encode_form_value,
     field_observation,
-    field_path,
     read_form_field,
 )
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -481,14 +478,13 @@ class RecipeRuntime:
         if self._on_change is not None:
             self._on_change()
 
-    def read_field(self, tab: str, path: FormPath) -> FormField:
-        """Decode the owner's atomic logical field observation without guessing layout."""
-        field_path(path)
+    def read_field(self, tab: str, path: str) -> FormField:
+        """Decode one dotted-path observation without guessing owner layout."""
+        logical = dotted_path(path)
         reply = self._tools.send_gui_rpc(
-            "tab.read_recipe_field", {"tab_id": tab, "path": list(path)}
+            "tab.read_recipe_field", {"tab_id": tab, "path": list(logical)}
         )
-        observed = read_form_field(field_observation(reply), path)
-        selector = observed.selector
+        observed = read_form_field(field_observation(reply), logical)
         source = observed.source
         return FormField(
             observed.value,
@@ -497,17 +493,13 @@ class RecipeRuntime:
             FormSource(source["key"], source["source_kind"], tuple(source["spec_path"]))
             if source is not None
             else None,
-            FormSelector(
-                "ref" if selector["mode"] == "key" else selector["mode"],
-                selector["key"],
-            )
-            if selector is not None
-            else None,
             observed.locked,
             observed.fields,
         )
 
-    def set_field(self, tab: str, path: str, value: FormValue) -> None:
+    def set_field[V: FormValue](
+        self, tab: str, path: str, value: FormValue | list[V]
+    ) -> None:
         """Write one dotted logical field, retaining owner-admitted invalid drafts."""
         logical = dotted_path(path)
         self._tools.send_gui_rpc(

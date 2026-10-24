@@ -59,12 +59,7 @@ async def mux_onetone_flux_global(
         target={"mux": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     if isinstance(inputs.df, ToneRangeInputs):
         tab.set("frequency.df.start", inputs.df.start)
         tab.set("frequency.df.stop", inputs.df.stop)

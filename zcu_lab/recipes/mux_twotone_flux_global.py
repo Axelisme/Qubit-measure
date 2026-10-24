@@ -63,19 +63,9 @@ async def mux_twotone_flux_global(
         target={"mux": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     if not isinstance(inputs.sweeps, Keep):
-        input_tones = tab.read(
-            (
-                "frequency",
-                "tones",
-            )
-        ).value
+        input_tones = tab.read("frequency.tones").value
         if not isinstance(input_tones, list):
             raise RecipeNeedsParameters(
                 (MissingParameter("frequency.tones", "Full tone list is unavailable."),)

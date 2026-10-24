@@ -119,11 +119,9 @@ def mux_flux_analysis_updates(
     when the caller omits a map; they are not omitted caller field edits.
     This never changes Run cfg or calibration.
     """
-    tones = TypeAdapter(list[FluxToneIdentity]).validate_python(
-        tab.read(("tones",)).value
-    )
+    tones = TypeAdapter(list[FluxToneIdentity]).validate_python(tab.read("tones").value)
     participants = TypeAdapter(list[int]).validate_python(
-        tab.read(("participants",)).value
+        tab.read("participants").value
     )
     names = [tones[index].name for index in participants]
     flux_half = None if isinstance(inputs.flux_half, Keep) else inputs.flux_half

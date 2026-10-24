@@ -29,7 +29,7 @@ def dotted_path(path: object) -> RecipeFieldPath:
     """Decode a nonempty dotted recipe path into logical owner segments.
 
     Decimal segments address original list positions. Empty/blank segments and
-    negative indexes raise ValueError. Tuple paths are only supported by reads.
+    negative indexes and non-string carriers raise ValueError.
     """
     if not isinstance(path, str) or not path:
         raise ValueError("field must be a nonempty dotted string")

@@ -124,20 +124,6 @@ class FormSource:
 
 
 @dataclass(frozen=True)
-class FormSelector:
-    """Current generated selector identity, distinct from its evaluated value.
-
-    mode is ref, inline, disabled, missing or unresolved. key is the actual
-    library key in ref mode, otherwise None. Missing means absent input;
-    unresolved means a draft without a usable selection. A ref does not imply
-    declaration-level readonly status.
-    """
-
-    mode: Literal["ref", "inline", "disabled", "missing", "unresolved"]
-    key: str | None
-
-
-@dataclass(frozen=True)
 class FormField:
     """Detached single-turn Form observation, even when the whole cfg is invalid.
 
@@ -147,8 +133,7 @@ class FormField:
     value_status is available, missing or unavailable; available None is a
     genuine null, not a missing-value marker. errors contains directed failures
     at this field, consuming ancestors or descendants. source is the nearest
-    captured reference, or None. selector is this field's generated selector,
-    or None for ordinary scalar/section fields. lock reports a fixed selection,
+    captured reference, or None. lock reports a fixed selection,
     fixed value or declaration readonly constraint; it does not follow source.
     fields lists logical direct-child field names. All values are detached.
     Reading does not install defaults, copy refs or validate the entire cfg.
@@ -158,7 +143,6 @@ class FormField:
     value_status: Literal["available", "missing", "unavailable"]
     errors: tuple[FormError, ...]
     source: FormSource | None
-    selector: FormSelector | None
     lock: bool
     fields: tuple[str, ...]
 
@@ -527,7 +511,7 @@ class RecipeTab:
     """One GUI tab's Form edits and operations, with no calibration policy.
 
     Writes use nonempty dotted logical paths; decimal segments are original
-    full-list indexes. read retains typed tuple paths. All owner
+    full-list indexes. read uses the same dotted paths. All owner
     admission and transport errors propagate without reconnect or retry.
     """
 
@@ -537,9 +521,10 @@ class RecipeTab:
         self.tab = tab
         self.adapter = adapter
 
-    def read(self, path: FormPath) -> FormField:
-        """Observe one logical field in one owner turn, without editing sources.
+    def read(self, path: str) -> FormField:
+        """Observe one dotted logical field without editing sources.
 
+        Decimal segments are original full-list indexes, as in tones.2.gain.
         Invalid local values remain visible as value_status/errors. Unknown or
         unreachable paths raise. Field validity does not prove whole-cfg validity.
         """
@@ -555,7 +540,7 @@ class RecipeTab:
         """
         return self._runtime.read_parameter(self.tab, path, missing_ok=missing_ok)
 
-    def set(self, path: str, value: FormValue | Keep) -> None:
+    def set[V: FormValue](self, path: str, value: FormValue | list[V] | Keep) -> None:
         """Replace one dotted-path field with native input or Expr.
 
         Decimal segments are original list indexes, for example tones.2.gain.
@@ -582,7 +567,8 @@ class RecipeTab:
     def command(self, path: str, name: Literal["to_inline"]) -> None:
         """Run the owner's to_inline command at a dotted logical selector path.
 
-        Copies the fixed captured Spec and preserves child keys. Missing source,
+        Copies a reference from the fixed capture and preserves child keys.
+        An inline module succeeds without changing its draft. Missing source,
         unavailable command, ref ancestry and readonly errors propagate without
         mutation. This does not select fresh defaults or refresh the capture.
         """

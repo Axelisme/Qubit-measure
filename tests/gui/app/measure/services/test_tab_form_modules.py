@@ -239,8 +239,7 @@ def test_option_command_rejection_is_atomic(path: tuple[str, ...], name: str) ->
     assert notifications == []
     resource.run_command(("pulse",), "to_inline")
     before = resource.input.data
-    with pytest.raises(ValueError, match="Unavailable"):
-        resource.run_command(("pulse",), "to_inline")
+    resource.run_command(("pulse",), "to_inline")
     assert resource.input.data == before
     assert notifications == ["changed"]
 

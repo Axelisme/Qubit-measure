@@ -95,8 +95,8 @@ Report 是作者選擇的具名 model，不需要 SummaryParameter、SummaryEsti
 主體先明寫選 module 與逐欄 set，再依序 set overrides，最後 check_ready。
 例如 `tab.set("sweep.freq.n", inputs.points)`，寫入與 FieldEdit 用 dotted string。
 Overrides 只含 path／value，省略是空 list，不接受 null，不去重或過濾 null。
-`tab.read(("modules", "qub_pulse"))` 仍用 typed tuple，回 FormField。
-明填 scalar 前讀 selector.mode，ref 才 command to_inline，已 inline 直接 set。
+`tab.read("modules.qub_pulse")` 用 dotted string，回 FormField。
+明填 scalar 前直接 command to_inline，再 set。已 inline 時 command 不改值。
 單 kind module 與巢狀 waveform 同規則，保留原 family，不強選 const。
 全部 scalar 省略時不切來源，也不因來源無效而 fallback。
 Center／span 必須成對提供或省略，不從 endpoints 或校準補齊，null 不參與算術。

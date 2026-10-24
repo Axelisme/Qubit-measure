@@ -41,17 +41,17 @@ Reuse 是 idle matching tab ID，省略／KEEP／null 開新 tab。不改全域 
 `session.context.read(source_path)` 讀 session 值，不需要先開 tab。
 `tab.read_parameter(path, missing_ok=False)` 讀 tab 固定捕捉的參數。
 `session.device_unit(name)` 讀裝置快取的 flux 單位，不碰硬體或刷新快取。
-`tab.read(path)` 回 `FormField`，仍用 typed tuple，例如 `("tones", 2, "drive")`。
+`tab.read(path)` 回 `FormField`，使用 dotted string，例如 `"tones.2.drive"`。
 
 寫入使用非空 dotted string，例如 `"tones.2.drive.gain"`，索引指完整清單的原始位置。
 `tab.set(path, value)` 原樣替換欄位，不選來源、不自動 convert。
 `tab.select(path, option)` 使用 owner 的精確 option label 或 captured module key。
 單 kind 的 inline label 是 `"Inline"`，多 kind 是 `"Inline: <kind>"`。
-`tab.command(path, "to_inline")` 複製固定來源，保留原 module／waveform family。
+`tab.command(path, "to_inline")` 複製固定來源，保留原 module／waveform family。已 inline 時成功且不改草稿。
 三者同步完成。Set／select 收到 KEEP 不發 mutation，None 原樣交 owner。
 Nullable selector 用 None 關閉，非 nullable 由 owner 拒絕，不用字串 `"off"`。
 
-明填 scalar 前先讀 selector.mode，只有 ref 才 command to_inline，已 inline 直接 set。
+明填 scalar 前直接 command to_inline，再 set。已 inline 時 command 不改值。
 巢狀 waveform 也按同一規則，不以固定 const 或 select Inline 作可寫前置。
 全部 scalar 省略時不切來源。來源壞掉不 fallback，讓 owner 回報路徑與原因。
 Center／span 必須成對提供或成對省略，缺一個就回 needs_parameters 指名另一欄。

@@ -151,6 +151,10 @@ def test_copy_is_explicit_preserves_child_key_and_batch_keeps_expressions() -> N
         "name": "Q.waveforms.wave",
     }
     assert not form.prepare_inline_copy(candidate.input, ("drive",), env).changed
+    repeated = form.prepare_logical_command(
+        candidate.input, ("drive",), "to_inline", env
+    )
+    assert not repeated.changed and repeated.input.same_as(candidate.input)
     child = form.prepare_inline_copy(candidate.input, ("drive", "waveform"), env)
     edits = [
         adapter.LogicalEdit(("drive", "waveform", "length"), {"expr": "1 / 4"}),

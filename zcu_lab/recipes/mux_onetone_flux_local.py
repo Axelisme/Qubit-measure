@@ -63,12 +63,7 @@ async def mux_onetone_flux_local(
         target={"mux": inputs.target},
         reuse=inputs.reuse_tab_id,
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     if isinstance(inputs.df, ToneRangeInputs):
         tab.set("frequency.df.start", inputs.df.start)
         tab.set("frequency.df.stop", inputs.df.stop)
@@ -77,7 +72,7 @@ async def mux_onetone_flux_local(
         tab.set("frequency.df.stop", None)
     tab.set("frequency.df.n", inputs.n)
     if not isinstance(inputs.flux_sweeps, Keep):
-        input_tones = tab.read(("tones",)).value
+        input_tones = tab.read("tones").value
         if not isinstance(input_tones, list):
             raise RecipeNeedsParameters(
                 (MissingParameter("tones", "Full tone list is unavailable."),)

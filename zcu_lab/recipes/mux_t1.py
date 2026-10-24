@@ -81,12 +81,7 @@ async def mux_t1(session: RecipeSession, inputs: MuxT1Inputs) -> MuxT1Report:
     tab = session.open_tab(
         "mux/t1", target={"mux": inputs.target}, reuse=inputs.reuse_tab_id
     )
-    tab.set(
-        "participants",
-        [*inputs.participants]
-        if isinstance(inputs.participants, list)
-        else inputs.participants,
-    )
+    tab.set("participants", inputs.participants)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
     tab.check_ready()

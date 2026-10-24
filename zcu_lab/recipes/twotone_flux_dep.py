@@ -102,9 +102,7 @@ async def twotone_flux_dep(
     )
     tab.select("modules.readout", inputs.readout_ref)
     if not isinstance(inputs.gain, Keep):
-        pulse_selector = tab.read(("modules", "qub_pulse")).selector
-        if pulse_selector is not None and pulse_selector.mode == "ref":
-            tab.command("modules.qub_pulse", "to_inline")
+        tab.command("modules.qub_pulse", "to_inline")
     tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
     tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
     tab.set("sweep.freq.n", inputs.freq_points)

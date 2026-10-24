@@ -115,9 +115,7 @@ async def time_rabi(session: RecipeSession, inputs: TimeRabiInputs) -> TimeRabiR
     tab.select("modules.readout", inputs.readout_ref)
     tab.select("modules.qub_pulse", inputs.drive_ref)
     if not isinstance(inputs.frequency_mhz, Keep) or not isinstance(inputs.gain, Keep):
-        pulse_selector = tab.read(("modules", "qub_pulse")).selector
-        if pulse_selector is not None and pulse_selector.mode == "ref":
-            tab.command("modules.qub_pulse", "to_inline")
+        tab.command("modules.qub_pulse", "to_inline")
     tab.set("modules.qub_pulse.freq", inputs.frequency_mhz)
     tab.set("modules.qub_pulse.gain", inputs.gain)
     tab.set("sweep.length.stop", inputs.max_length_us)

@@ -116,13 +116,9 @@ async def twotone_spectrum(
     if not isinstance(inputs.gain, Keep) or not isinstance(
         inputs.pulse_length_us, Keep
     ):
-        pulse_selector = tab.read(("modules", "qub_pulse")).selector
-        if pulse_selector is not None and pulse_selector.mode == "ref":
-            tab.command("modules.qub_pulse", "to_inline")
+        tab.command("modules.qub_pulse", "to_inline")
     if not isinstance(inputs.pulse_length_us, Keep):
-        waveform_selector = tab.read(("modules", "qub_pulse", "waveform")).selector
-        if waveform_selector is not None and waveform_selector.mode == "ref":
-            tab.command("modules.qub_pulse.waveform", "to_inline")
+        tab.command("modules.qub_pulse.waveform", "to_inline")
     tab.set("sweep.freq.start", inputs.center_mhz - inputs.span_mhz / 2)
     tab.set("sweep.freq.stop", inputs.center_mhz + inputs.span_mhz / 2)
     tab.set("sweep.freq.n", inputs.points)

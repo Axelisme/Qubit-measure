@@ -30,6 +30,10 @@ from ._script_recipe_support import Inputs, Report, SyntheticGui, start
 from ._support import make_client
 
 
+class ReadTone(ConfigBase):
+    gain: float = 0.2
+
+
 class PrimitiveCfg(ConfigBase):
     pulse: PulseCfg | None = None
     required: PulseCfg
@@ -38,6 +42,7 @@ class PrimitiveCfg(ConfigBase):
     sweep: SweepCfg
     payload: list[list[dict[str, int]]] = Field(default_factory=list)
     label: str | None = "seed"
+    tones: list[ReadTone] = Field(default_factory=lambda: [ReadTone(), ReadTone()])
 
 
 class WireEdit(BaseModel):
@@ -145,19 +150,19 @@ def test_select_and_command_follow_owner_options_and_captured_sources(
         tab = session.open_tab("synthetic")
         tab.select("pulse", "Q.pulses.drive")
         tab.command("pulse", "to_inline")
-        assert tab.read(("pulse", "gain")).value == 0.3
-        assert tab.read(("pulse", "waveform")).selector == api.FormSelector(
-            "ref", "Q.waveforms.gauss"
+        assert tab.read("pulse.gain").value == 0.3
+        assert tab.read("pulse.waveform").source == api.FormSource(
+            "Q.waveforms.gauss", "waveform", ()
         )
         tab.command("pulse.waveform", "to_inline")
-        assert tab.read(("pulse", "waveform", "sigma")).value == 0.2
+        assert tab.read("pulse.waveform.sigma").value == 0.2
         tab.select("pulse.waveform", "Inline: const")
-        assert tab.read(("pulse", "waveform", "length")).value == 0.8
-        assert "sigma" not in tab.read(("pulse", "waveform")).fields
+        assert tab.read("pulse.waveform.length").value == 0.8
+        assert "sigma" not in tab.read("pulse.waveform").fields
         tab.select("mode", "slow")
-        assert tab.read(("mode",)).value == "slow"
+        assert tab.read("mode").value == "slow"
         tab.select("pulse", None)
-        assert tab.read(("pulse",)).selector == api.FormSelector("disabled", None)
+        assert tab.read("pulse").value is None
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
@@ -166,6 +171,32 @@ def test_select_and_command_follow_owner_options_and_captured_sources(
         execution.join()
         assert execution.snapshot().status == "completed", execution.snapshot()
         assert owner.read_recipe_field(("mode",)).value == "slow"
+    finally:
+        client.context.session.close()
+
+
+def test_read_dotted_paths_observes_nested_fields_and_original_list_indexes(
+    tmp_path: Path,
+    form_owner: tuple[TabFormResource, Responder],
+) -> None:
+    _owner, respond = form_owner
+
+    @api.recipe("synthetic", "Observe dotted logical field paths")
+    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        tab.set("tones.1.gain", 0.7)
+        tab.select("pulse", "Q.pulses.drive")
+        assert tab.read("tones.0.gain").value == 0.2
+        assert tab.read("tones.1.gain").value == 0.7
+        assert tab.read("pulse.waveform.sigma").value == 0.2
+        assert tab.read("count").value == 1
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        assert execution.snapshot().status == "completed", execution.snapshot()
     finally:
         client.context.session.close()
 
@@ -297,16 +328,16 @@ def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
         tab = session.open_tab("synthetic")
         for edit in inputs.overrides:
             tab.set(edit.path, edit.value)
-        assert tab.read(("count",)).value == 5
-        assert tab.read(("sweep",)).value == {
+        assert tab.read("count").value == 5
+        assert tab.read("sweep").value == {
             "kind": "linrange",
             "start": 10.0,
             "stop": 20.0,
             "n": 7,
         }
-        assert tab.read(("payload",)).value == [[{"count": 2}]]
-        assert tab.read(("label",)).value is None
-        assert tab.read(("label",)).value_status == "available"
+        assert tab.read("payload").value == [[{"count": 2}]]
+        assert tab.read("label").value is None
+        assert tab.read("label").value_status == "available"
         return Report(count=1)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))

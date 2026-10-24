@@ -116,7 +116,7 @@ Recipe 不自動選重用 tab，也不自動關閉 tab；關閉用 `tab_close`�
 `session.device_unit(name)` 讀裝置快取的 flux 單位，不讀硬體或更新快取。
 它保留 owner 的 A、V、native 或 none 字串。
 
-`tab.read(path)` 保留 typed tuple path，回 detached `FormField`。
+`tab.read(path)` 使用 dotted string，例如 `"tones.2.drive"`，回 detached `FormField`。
 Structured value 保留 owner 的 `YamlValue` mapping，需要 model 時由作者 TypeAdapter 解碼。
 Value_status 區分 available、missing、unavailable；available null 是有效觀察，不證明整份 cfg 有效。
 
@@ -126,7 +126,7 @@ Value_status 區分 available、missing、unavailable；available null 是有效
 `tab.set(path, value)` 原樣替換欄位，不選來源或執行 converter。
 `tab.select(path, option)` 選 owner 的精確 option label 或 captured module key。
 `"Inline"` 或 `"Inline: const"` 等選項沿 owner 的同名同型繼承政策切換。
-`tab.command(path, "to_inline")` 執行 owner 指令，明確複製固定來源並保留 child keys。
+`tab.command(path, "to_inline")` 複製固定來源並保留 child keys。已 inline 時成功且不改草稿。
 未知、歧義、readonly、來源與 ref 祖先錯誤立即拋出，MCP 不重建 Form 內部資料。
 
 set／select 收到 KEEP 就跳過 mutation。None 原樣交 Form，表示清空／關閉 nullable 欄位。
@@ -210,9 +210,7 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
         "synthetic", target={"qubit": inputs.target}, reuse=inputs.reuse_tab_id,
     )
     if not isinstance(inputs.gain, Keep):
-        selector = tab.read(("modules", "pulse")).selector
-        if selector is not None and selector.mode == "ref":
-            tab.command("modules.pulse", "to_inline")
+        tab.command("modules.pulse", "to_inline")
     tab.set("modules.pulse.gain", inputs.gain)
     for edit in inputs.overrides:
         tab.set(edit.path, edit.value)
@@ -225,7 +223,7 @@ async def synthetic_pulse(session: RecipeSession, inputs: PulseInputs) -> Recipe
 ```
 
 來源選擇、編輯、驗證與 Run 都由主體明寫。分析、問答、寫回與保存仍是各自獨立的操作。
-明填 scalar 前只檢查 selector.mode，ref 才 command to_inline，已 inline 直接 set。
+明填 scalar 前直接 command to_inline，再 set。已 inline 時 command 不改值。
 單 kind module 與巢狀 waveform 同規則，不以選 Inline 或固定 const 改掉原 family。
 全部 scalar 省略時不切來源，來源故障不 fallback。
 Center／span 必須成對提供或省略，缺一個就回 needs_parameters 指名另一欄。
