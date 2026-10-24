@@ -218,6 +218,25 @@ class ComponentDriver:
             self._window.resize(width, height)
         QApplication.processEvents()
 
+    def close_window(self) -> None:
+        """Request the shown window's normal Qt close, then flush owner events."""
+        if self._can_interact(self._window):
+            self._window.close()
+        QApplication.processEvents()
+
+    def click_at(self, x: int, y: int) -> None:
+        """Click global logical coordinates through the window's actual hit target.
+
+        Coordinates outside this shown window are a no-op. Child overlays receive
+        the event instead of covered controls, just as with physical mouse input.
+        """
+        point = self._window.mapFromGlobal(QPoint(x, y))
+        if self._can_interact(self._window) and self._window.rect().contains(point):
+            target = self._window.childAt(point) or self._window
+            if self._can_interact(target):
+                mouse_click(target, target.mapFromGlobal(QPoint(x, y)))
+        QApplication.processEvents()
+
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.
 
@@ -263,6 +282,26 @@ class ComponentDriver:
                 and widget.isCheckable()
                 else None
             ),
+        )
+
+    def image_center_colour(self, *, object_name: str) -> str:
+        """Read the displayed QLabel raster's centre pixel as a hex RGB colour.
+
+        Hidden/clipped labels raise LookupError; a label without a displayed
+        raster raises ValueError. Other widget kinds raise TypeError.
+        """
+        widget = self._find(None, object_name)
+        if not self._on_screen(widget):
+            raise LookupError("Raster is not visible")
+        if not isinstance(widget, QLabel):
+            raise TypeError("Expected a raster label")
+        pixmap = widget.pixmap()
+        if pixmap.isNull():
+            raise ValueError("Label has no displayed raster")
+        return (
+            pixmap.toImage()
+            .pixelColor(pixmap.width() // 2, pixmap.height() // 2)
+            .name()
         )
 
     def list_rows(self) -> tuple[ListRowObservation, ...]:
@@ -897,6 +936,7 @@ class ComponentDriver:
         *,
         object_name: str | None = None,
         evidence: Path | None = None,
+        tree_path: tuple[str, ...] | None = None,
     ) -> None:
         """Open a control's context menu and click an exact visible action caption.
 
@@ -907,9 +947,34 @@ class ComponentDriver:
         delivery has a 30-second watchdog; all popup/callback failures are returned
         to the caller after closing the menu, never left in Qt's event loop.
         evidence optionally captures the visible popup before selecting the action.
+        tree_path targets a visible QTreeWidget row instead of the control centre;
+        missing/ambiguous paths raise LookupError and non-tree targets TypeError.
         """
         widget = self._field_control(text, object_name)
         if not self._can_interact(widget):
+            return
+        target = (
+            widget.viewport() if isinstance(widget, QAbstractScrollArea) else widget
+        )
+        assert target is not None
+        point = target.rect().center()
+        if tree_path is not None:
+            if not isinstance(widget, QTreeWidget):
+                raise TypeError("Expected a tree for tree_path")
+            item = _unique(
+                repr(tree_path),
+                [
+                    i
+                    for i, path in self._visible_tree_items(widget)
+                    if path == tree_path
+                ],
+                [repr(path) for _, path in self._visible_tree_items(widget)],
+            )
+            point = QPoint(
+                widget.columnViewportPosition(0) + widget.columnWidth(0) // 2,
+                widget.visualItemRect(item).center().y(),
+            )
+        if not target.visibleRegion().contains(point):
             return
         errors: list[Exception] = []
 
@@ -935,11 +1000,6 @@ class ComponentDriver:
         watchdog.start(30_000)
         QTimer.singleShot(0, choose)
         try:
-            target = (
-                widget.viewport() if isinstance(widget, QAbstractScrollArea) else widget
-            )
-            assert target is not None
-            point = target.rect().center()
             QApplication.sendEvent(
                 target,
                 QContextMenuEvent(

@@ -117,17 +117,27 @@ one representative PNG per run. Selecting a run shows all its saved PNGs in a
 vertically scrolling gallery, separate from the measure figure pager.
 Runs without PNGs remain selectable in the tree.
 Both grouping orders and the experiment filter use the saved experiment string.
-Browsing never queries the catalog. Only Open resolves an adapter through the
-catalog owner, then delegates to existing Load admission. Success selects the
+Browsing never queries the catalog. Only Load into analysis tab resolves an
+adapter through the catalog owner, then delegates to existing Load admission. Success selects the
 new history tab and raises the measure window; failure stays in the right-side
 feedback. Deleted experiments and old cfg versions remain browsable.
 A left click on a group image opens its run directly and selects that figure.
-Within a run, left clicks select the current figure and open or replace one
-non-modal Tool preview. Esc closes it; closing the browser hides it. Gallery
-cards and decoded rasters stay local to one gallery, with at most one retained
+Within a run, left clicks select the current figure and open a browser-owned
+lightbox. Comparison PNG cells open the same overlay with that cell's run and
+exact PNG, independently of Gallery focus. The translucent backdrop covers the
+browser content and blocks clicks on the underlying gallery. The native raster
+fits the available area with its aspect ratio preserved as the browser resizes.
+The caption shows the short run id and filename. Clicking outside the image,
+including its caption, or pressing Esc dismisses it. Clicking the image keeps it
+open. Closing the browser dismisses the overlay before reopening.
+Gallery cards and decoded rasters stay local to one gallery, with at most one retained
 card per indexed PNG. File identity, size and timestamps invalidate changed
 members. Back/Forward and grouping reuse unchanged cards and rasters.
-Context menus copy a member path or image and pin its run in ResultsComparison.
+Gallery context menus copy a member path or image and pin its run in
+ResultsComparison. Tree run context menus pin the clicked run or Load into
+analysis tab through the same Load owner as the right-side button. Group nodes
+have neither command. The right-side action row contains only Load into analysis
+tab; the action loads saved data without measurement or automatic analysis.
 `ResultsComparison` shows the fixed-column table above a filename-aligned image
 grid, separated by a vertical splitter. All pins are run columns; PNG filenames
 are rows. Missing members show an em dash. Headers unpin or open a run. Pin count

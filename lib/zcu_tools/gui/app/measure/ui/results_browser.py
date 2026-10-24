@@ -7,8 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QDate, QEvent, QObject, QPointF, Qt
-from qtpy.QtGui import QHideEvent, QImage, QMouseEvent
+from qtpy.QtCore import QDate, QEvent, QObject, QPoint, QPointF, Qt
+from qtpy.QtGui import QAction, QHideEvent, QImage, QMouseEvent, QPixmap, QResizeEvent
 from qtpy.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -18,6 +18,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPushButton,
     QSplitter,
     QStyle,
@@ -37,8 +38,14 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from .results_comparison import ResultsComparison
 from .results_details import ResultsDetailsTree
 from .results_gallery import ResultImageAction, ResultsGallery
+from .results_lightbox import ResultLightbox
 
 logger = logging.getLogger(__name__)
+
+_LOAD_TOOLTIP = (
+    "Load this run's raw data into a new analysis tab in the main window "
+    "for re-analysis; no measurement."
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -182,6 +189,8 @@ class ResultsBrowser(QWidget):
         self._tree.setObjectName("results.navigation")
         self._tree.setHeaderHidden(True)
         self._tree.itemClicked.connect(self._navigate)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._run_context_menu)
         self._tree.setMinimumWidth(300)
         self._tree.setIndentation(15)
         filters.addWidget(self._tree, 1)
@@ -196,6 +205,7 @@ class ResultsBrowser(QWidget):
         self._tabs.addTab(self._gallery, "Gallery")
         self.comparison = ResultsComparison(self._index)
         self.comparison.run_activated.connect(self._open_compared)
+        self.comparison.image_activated.connect(self._show_compared_image)
         self._tabs.addTab(self.comparison, "Comparison")
         self.comparison.pins_changed.connect(self._update_pin_count)
         central.addWidget(self._tabs, 1)
@@ -203,11 +213,16 @@ class ResultsBrowser(QWidget):
         splitter.addWidget(self._build_details())
         splitter.setSizes([340, 700, 350])
         layout.addWidget(splitter, 1)
+        self._lightbox = ResultLightbox(self)
         self._render()
 
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        super().resizeEvent(a0)
+        self._lightbox.setGeometry(self.rect())
+
     def hideEvent(self, a0: QHideEvent | None) -> None:
-        """Close the floating preview together with its owning browser."""
-        self._gallery.close_image()
+        """Dismiss the overlay when its owning browser is hidden or closed."""
+        self._lightbox.hide()
         super().hideEvent(a0)
 
     def _build_filters(self) -> QVBoxLayout:
@@ -295,12 +310,9 @@ class ResultsBrowser(QWidget):
         self._current_figure = QLabel("Current figure: none")
         self._current_figure.setObjectName("results.current_figure")
         make_label_selectable(self._current_figure)
-        self._open_button = QPushButton("Open in new analysis tab")
+        self._open_button = QPushButton("Load into analysis tab")
         self._open_button.clicked.connect(self._open_selected)
         layout.addWidget(self._open_button)
-        self._pin_button = QPushButton("Add to comparison")
-        self._pin_button.clicked.connect(self._pin_selected)
-        layout.addWidget(self._pin_button)
         layout.addWidget(self._current_figure)
         self._feedback = QLabel("")
         self._feedback.setObjectName("results.feedback")
@@ -471,6 +483,29 @@ class ResultsBrowser(QWidget):
                 self._visit(focus)
                 break
 
+    def _run_context_menu(self, point: QPoint) -> None:
+        item = self._tree.itemAt(point)
+        focus = next((focus for node, focus in self._navigation if node is item), None)
+        if focus is None or focus.run_key is None:
+            return
+        run = self._index.get_run(focus.run_key)
+        menu = QMenu(self._tree)
+        pin = QAction("Add to comparison", menu)
+        load = QAction("Load into analysis tab", menu)
+        menu.addActions([pin, load])
+        reason = self._load_unavailable_reason(run)
+        load.setEnabled(not reason)
+        load.setToolTip(reason or _LOAD_TOOLTIP)
+        viewport = self._tree.viewport()
+        assert viewport is not None
+        selected = menu.exec(viewport.mapToGlobal(point))
+        if selected is pin:
+            self.comparison.pin_run(run)
+            self._tabs.setCurrentIndex(1)
+        elif selected is load:
+            self._load_run(run)
+        menu.deleteLater()
+
     def _activate_figure(self, run: ResultRun, figure: str) -> None:
         already_in_run = self._focus.run_key == run.key
         self._visit(
@@ -483,7 +518,10 @@ class ResultsBrowser(QWidget):
             )
         )
         if already_in_run:
-            self._gallery.show_image(run, figure)
+            self._lightbox.present(
+                self._gallery.original_pixmap(run, figure),
+                f"{run.run_path.name[-6:]} / {figure}",
+            )
 
     def _render_details(self, runs: tuple[ResultRun, ...]) -> None:
         run = (
@@ -493,18 +531,21 @@ class ResultsBrowser(QWidget):
         )
         self._details.present_metadata(self._index, run)
         self._analysis.present_analysis(self._index, run)
-        reason = "Select a run"
-        if run is not None:
-            reason = "No data.h5 in this saved run" if run.data_path is None else ""
-        if not self._writable:
-            reason = "Local control is required to open an analysis tab"
+        reason = self._load_unavailable_reason(run)
         self._open_button.setEnabled(not reason)
-        self._open_button.setToolTip(
-            reason
-            or "在主視窗開一個只載入此 run 保存資料的分析 tab，不量測，不自動分析"
-        )
-        self._pin_button.setEnabled(run is not None)
+        self._open_button.setToolTip(reason or _LOAD_TOOLTIP)
         self._current_figure.setText(f"Current figure: {self._focus.figure or 'none'}")
+
+    def _load_unavailable_reason(self, run: ResultRun | None) -> str:
+        if not self._writable:
+            return "Local control is required to open an analysis tab"
+        if run is None:
+            return "Select a run"
+        return "No data.h5 in this saved run" if run.data_path is None else ""
+
+    def _show_compared_image(self, key: str, figure: str, raster: QPixmap) -> None:
+        run = self._index.get_run(key)
+        self._lightbox.present(raster, f"{run.run_path.name[-6:]} / {figure}")
 
     def _open_compared(self, key: str) -> None:
         run = self._index.get_run(key)
@@ -522,14 +563,12 @@ class ResultsBrowser(QWidget):
         count = len(self.comparison.pinned_runs())
         self._tabs.setTabText(1, f"Comparison ({count})" if count else "Comparison")
 
-    def _pin_selected(self) -> None:
-        if self._focus.run_key is not None:
-            self.comparison.pin_run(self._index.get_run(self._focus.run_key))
-
     def _open_selected(self) -> None:
         if self._focus.run_key is None:
             return
-        run = self._index.get_run(self._focus.run_key)
+        self._load_run(self._index.get_run(self._focus.run_key))
+
+    def _load_run(self, run: ResultRun) -> None:
         try:
             resolution = self._resolve_experiment(run.experiment)
             if resolution.adapter_name is None:
