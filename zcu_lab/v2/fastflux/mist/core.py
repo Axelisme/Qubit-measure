@@ -58,7 +58,9 @@ class MistCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class MistAnalyzeOptions:
-    ac_coeff: float | None = None
+    ac_coeff: Annotated[
+        float | None, FieldMeta(label="Photon number / gain squared")
+    ] = None
 
 
 class MistExp(Experiment[MistResult, MistCfg]):
