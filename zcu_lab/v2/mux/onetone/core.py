@@ -62,8 +62,9 @@ class MuxFrequencyOffsetCfg(ConfigBase):
 class MuxOnetoneCfg(ConfigBase):
     """Scan every selected readout tone by the same frequency offset.
 
-    modules supplies the base mux readout and optional reset. df supplies
-    nominal offsets in MHz; each point uses base_freq[i] + df with no cumulative
+    readout supplies the base mux readout; reset optionally runs before it.
+    Both fields are top-level. df supplies nominal offsets in MHz;
+    each point uses base_freq[i] + df with no cumulative
     update. Each point's program quantizes these frequencies to the hardware grid.
 
     Explicit reps (default 1) is repetitions per round; rounds (default 1) is
