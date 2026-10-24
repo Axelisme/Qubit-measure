@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -75,10 +76,16 @@ def _writeback(
     return rabi_calibration_writeback(req.analyze_result.fit_result.joint_fit)
 
 
+def _run(
+    cfg: AmpRabiCfg, *, context: RunContext
+) -> RunRecord[AmpRabiCfg, AmpRabiResult]:
+    return RunRecord(cfg=cfg, result=AmpRabiExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=AmpRabiExp.AXES_SPEC,
     make_form=make_form,
-    run=AmpRabiExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,

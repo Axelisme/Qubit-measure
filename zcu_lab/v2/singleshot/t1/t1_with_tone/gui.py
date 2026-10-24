@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -64,10 +65,16 @@ def _writeback(
     ]
 
 
+def _run(
+    cfg: T1WithToneCfg, *, context: RunContext
+) -> RunRecord[T1WithToneCfg, T1WithToneResult]:
+    return RunRecord(cfg=cfg, result=T1WithToneExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=T1WithToneExp.AXES_SPEC,
     make_form=make_form,
-    run=T1WithToneExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze, writeback=_writeback),
 )

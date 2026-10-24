@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -65,10 +66,16 @@ def _analyze_gain(
     _analyze(req, plots=plots, xlabel="Probe gain (a.u.)")
 
 
+def _run_gain(
+    cfg: T1WithToneSweepCfg, *, context: RunContext
+) -> RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]:
+    return RunRecord(cfg=cfg, result=T1WithToneSweepExp().run(cfg, context=context))
+
+
 GAIN_DEFINITION = Adapter(
     spec=T1WithToneSweepExp.AXES_SPEC,
     make_form=make_form_gain,
-    run=T1WithToneSweepExp().run,
+    run=_run_gain,
     guide=Path(__file__).with_name("guide.gain.md"),
     analysis=Analysis(fn=_analyze_gain),
 )
@@ -80,10 +87,16 @@ def _analyze_freq(
     _analyze(req, plots=plots, xlabel="Probe frequency (MHz)")
 
 
+def _run_freq(
+    cfg: T1WithToneSweepCfg, *, context: RunContext
+) -> RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]:
+    return RunRecord(cfg=cfg, result=T1WithToneSweepExp().run(cfg, context=context))
+
+
 FREQ_DEFINITION = Adapter(
     spec=T1WithToneSweepExp.AXES_SPEC,
     make_form=make_form_freq,
-    run=T1WithToneSweepExp().run,
+    run=_run_freq,
     guide=Path(__file__).with_name("guide.freq.md"),
     analysis=Analysis(fn=_analyze_freq),
 )

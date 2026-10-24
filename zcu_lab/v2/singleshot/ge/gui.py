@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -278,10 +279,14 @@ def _post_writeback(
     ]
 
 
+def _run(cfg: GE_Cfg, *, context: RunContext) -> RunRecord[GE_Cfg, GE_Result]:
+    return RunRecord(cfg=cfg, result=GE_Exp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=GE_Exp.AXES_SPEC,
     make_form=make_form,
-    run=GE_Exp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,

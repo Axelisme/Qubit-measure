@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -96,10 +97,16 @@ def _writeback(
     ]
 
 
+def _run(
+    cfg: LookbackCfg, *, context: RunContext
+) -> RunRecord[LookbackCfg, LookbackResult]:
+    return RunRecord(cfg=cfg, result=LookbackExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=LookbackExp.AXES_SPEC,
     make_form=make_form,
-    run=LookbackExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,

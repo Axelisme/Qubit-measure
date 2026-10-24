@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -73,10 +74,16 @@ def _writeback(
     return rabi_calibration_writeback(req.analyze_result.fit_result)
 
 
+def _run(
+    cfg: LenRabiCfg, *, context: RunContext
+) -> RunRecord[LenRabiCfg, LenRabiResult]:
+    return RunRecord(cfg=cfg, result=LenRabiExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=LenRabiExp.AXES_SPEC,
     make_form=make_form,
-    run=LenRabiExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze,

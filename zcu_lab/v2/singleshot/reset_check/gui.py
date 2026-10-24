@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -54,10 +55,16 @@ def _analyze(
     )
 
 
+def _run(
+    cfg: ResetCheckCfg, *, context: RunContext
+) -> RunRecord[ResetCheckCfg, ResetCheckResult]:
+    return RunRecord(cfg=cfg, result=ResetCheckExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=ResetCheckExp.AXES_SPEC,
     make_form=make_form,
-    run=ResetCheckExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze),
 )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -33,10 +34,14 @@ def _analyze(req: AnalyzeRequest[CheckRunResult, None], *, plots: Plots) -> None
     return
 
 
+def _run(cfg: CheckCfg, *, context: RunContext) -> RunRecord[CheckCfg, CheckResult]:
+    return RunRecord(cfg=cfg, result=CheckExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=CheckExp.AXES_SPEC,
     make_form=make_form,
-    run=CheckExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(fn=_analyze),
 )

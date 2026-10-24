@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -49,10 +50,14 @@ def _analyze(
     return
 
 
+def _run(cfg: PowerCfg, *, context: RunContext) -> RunRecord[PowerCfg, PowerResult]:
+    return RunRecord(cfg=cfg, result=PowerExp().run(cfg, context=context))
+
+
 DEFINITION = Adapter(
     spec=PowerExp.AXES_SPEC,
     make_form=make_form,
-    run=PowerExp().run,
+    run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze, options=lambda source, env: MistPowerAnalyzeParams()
