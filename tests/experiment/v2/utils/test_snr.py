@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.experiment.v2.utils.snr import calc_snr, snr_as_signal
+from zcu_tools.experiment.acquisition_facts import StopDecision
+from zcu_tools.experiment.v2.runtime import SignalBuffer
+from zcu_tools.experiment.v2.utils.snr import calc_snr, snr_as_signal, snr_checker
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
 
@@ -46,6 +48,19 @@ def _score(
         skew_e=skew_e,
     )
     return float(calc_snr(mean, cov, m3, ge_axis=0, skew_penalty=skew_penalty))
+
+
+def test_curve_stop_decision_retains_the_threshold_crossing_snr() -> None:
+    signals = SignalBuffer((5,), dtype=np.float64)
+    signals.set(np.array([0.0, 1.0, 0.0, 1.0, 0.0]))
+    check = snr_checker(signals[()], 1.0, lambda values: values, check_interval=None)
+    decision = check()
+    assert isinstance(decision, StopDecision)
+    assert decision.met
+    # Five-point quadratic smoothing gives range 5/7 and mean residual 16/35.
+    assert decision.value == pytest.approx(25 / 16)
+    signals.set(np.zeros(5))
+    assert check() == decision
 
 
 def test_default_score_is_unbounded_pooled_sigma_snr() -> None:

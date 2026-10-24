@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
@@ -55,8 +56,12 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
 
 
 @pytest.mark.parametrize("decimated", [False, True])
+@pytest.mark.parametrize("rounds", [1, 3])
+@pytest.mark.parametrize("stop_value", [12.5, float("inf")])
 def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
     decimated: bool,
+    rounds: int,
+    stop_value: float,
 ) -> None:
     result = None
     produced_rounds: list[int] = []
@@ -107,18 +112,18 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
                 **kwargs,
             )
 
-    def stop_after_written_round() -> bool:
+    def stop_after_written_round() -> StopDecision:
         checked_signals.append(signals_buffer.array.copy())
-        return True
+        return StopDecision(met=True, value=stop_value)
 
     with Schedule(
-        _cfg(rounds=3), signals_buffer, scope=Scope("run", stop=run_stop)
+        _cfg(rounds=rounds), signals_buffer, scope=Scope("run", stop=run_stop)
     ) as sched:
         builder = sched.prog_builder("soc", "soccfg")
         runner = builder.run_program_decimated if decimated else builder.run_program
         result = runner(
             CooperativeProgram(),
-            rounds=3,
+            rounds=rounds,
             raw2signal_fn=identity_array,
             options=AcquireOptions(stop_condition=stop_after_written_round),
         )
@@ -131,6 +136,14 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
 
     assert result is not None
     assert produced_rounds == [1]
+    acquisition = sched.outcome.acquisitions[0]
+    assert acquisition.requested_rounds == rounds
+    assert acquisition.completed_rounds == 1
+    assert acquisition.attempts == 1
+    assert acquisition.early_stopped is (rounds > 1)
+    expected_value = stop_value if rounds > 1 and np.isfinite(stop_value) else None
+    assert acquisition.stop_value == expected_value
+    assert run_stop.acquisitions == sched.outcome.acquisitions
     np.testing.assert_allclose(checked_signals, [[1.0]])
     np.testing.assert_allclose(result, [1.0])
     np.testing.assert_allclose(signals_buffer.array, [1.0])
@@ -150,6 +163,12 @@ def test_build_and_acquire_retries_acquire_on_the_same_program():
             )
         )
         assert sched.outcome.status == "completed"
+        acquisition = sched.outcome.acquisitions[0]
+        assert acquisition.requested_rounds == 1
+        assert acquisition.completed_rounds == 1
+        assert acquisition.attempts == 2
+        assert acquisition.early_stopped is False
+        assert acquisition.stop_value is None
 
     assert result is not None
     assert np.allclose(result, [4.0])

@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-10-22，單一 async 腳本、operation facts 與 commit 目錄
+**Last updated:** 2026-10-25，operation acquisition observations
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -28,7 +28,14 @@ Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 f
 
 `env.run` 每個 attempt 建立新的 RunContext，借用 soc、soccfg 與 connected drivers，使用獨立的 operation Plots 與 operation child token。框架在 worker 呼叫前捕捉 device snapshot，再以 cfg deepcopy 呼叫 fn。它回 `Completed[RunRecord[Cfg, Result]] | Failed`。Completed.value 是 RunRecord，Completed.facts 是 OperationFacts，與框架寫入 journal／該 commit 的 record.json 信封使用同一事實結構。Schedule acquire error 回 Failed，build、conversion、callback 與其他例外 raise。不符合此 typed run 簽名的操作用 env.call，不另造 workflow Run、buffer 或 schedule 糖。
 
-框架按每次實際 attempt 記 kind、iteration、attempt、時間、snapshot、outcome、reason 與 stopped，不新增 Acquired 或 operation run_id。Software provenance 按 workflow run 記錄，manifest 與既有 journal run_started.identity 副本保留，不逐 operation 複製。`env.identity` 提供 detached startup RunIdentity。Lab saver 顯式用 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata，不自行捕捉 AcquisitionEvidence。RunRecord.metadata 與 [[0080]] 的 datafile 改造仍待後續實作。使用者同日修正：「框架不應該知道run裡面是跑acquire或是其他」「workflow有需要run_id嗎？他沒有一次run的概念吧？只有commit的概念」。Measure headless owner 與 Qt pane 的分工仍依 [[0067]]。
+框架按每次實際 operation attempt 記 kind、iteration、attempt、時間、snapshot、outcome、reason、stopped、name 與 acquisitions，不新增 Acquired 或 operation run_id。
+Name 保留作者傳入的 operation label，舊記錄缺少時讀成 None。
+Acquisitions 是通用 AcquisitionFacts 的有序 tuple，沒有 acquisition 或舊記錄缺少欄位時讀成空 tuple。
+每筆 requested_rounds 是 producer 的設定 rounds，completed_rounds 是最後一次 producer attempt 的完整 round 數，attempts 是實際 acquire 呼叫總數，包含失敗。
+Early_stopped 表示 data condition 在 requested_rounds 前正常結束，stop_value 是當時由 StopDecision 提供的有限 scalar。沒有提前停止、未提供或非有限時為 None。框架不定義該值的科學意義或單位。
+Schedule 透過 scope 完成事實交付 observations，OperationFacts.attempt 仍是 operation 序號，不當成 acquire 重試計數。
+Completed.facts、journal 與 point record 的 operations 信封共用這些事實，包含 Failed 或 discarded stage。
+Lab saver 經 record_with_metadata 將 acquisitions 原樣放進 native RunMetadata。GUI 與 Notebook 的單一實驗也在各自的 acquisition 邊界保存同一組 observations。Software provenance 按 workflow run 記錄，manifest 與既有 journal run_started.identity 副本保留，不逐 operation 複製。`env.identity` 提供 detached startup RunIdentity。Lab saver 顯式用 facts、identity、spec.tag 與 snapshot 組裝既有 RunMetadata，不自行捕捉 AcquisitionEvidence。RunRecord.metadata 與 native Container 的保存邊界依 [[0080]]。使用者同日修正：「框架不應該知道run裡面是跑acquire或是其他」「workflow有需要run_id嗎？他沒有一次run的概念吧？只有commit的概念」。Measure headless owner 與 Qt pane 的分工仍依 [[0067]]。
 
 ## 表單 input 與 Engine 普通值
 

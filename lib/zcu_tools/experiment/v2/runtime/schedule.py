@@ -243,7 +243,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
 
     @property
     def outcome(self) -> ScheduleOutcome:
-        return self._outcome
+        return replace(self._outcome, acquisitions=self.stop.acquisitions)
 
     def is_stop(self) -> bool:
         return self.stop.is_set()
