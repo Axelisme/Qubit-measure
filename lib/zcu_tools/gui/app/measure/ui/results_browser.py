@@ -7,24 +7,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import QDate, Qt
-from qtpy.QtGui import QImage
+from qtpy.QtCore import QDate, QEvent, QObject, QPointF, Qt
+from qtpy.QtGui import QHideEvent, QImage, QMouseEvent
 from qtpy.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
-    QPlainTextEdit,
     QPushButton,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
+    QStyle,
+    QStyleOptionComboBox,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -38,7 +35,7 @@ from zcu_tools.gui.app.measure.services.results_index import ResultRun, ResultsI
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .results_comparison import ResultsComparison
-from .results_details import analysis_details, result_details
+from .results_details import ResultsDetailsTree
 from .results_gallery import ResultImageAction, ResultsGallery
 
 logger = logging.getLogger(__name__)
@@ -60,6 +57,49 @@ def _point_label(point: tuple[str, str | None]) -> str:
     return f"{point[0]} / {point[1] or 'Global / unknown'}"
 
 
+class _CalendarDateEdit(QDateEdit):
+    def __init__(self, date: QDate) -> None:
+        super().__init__(date)
+        editor = self.lineEdit()
+        if editor is None:
+            raise RuntimeError("Date edit has no text editor")
+        editor.installEventFilter(self)
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            a0 is self.lineEdit()
+            and isinstance(a1, QMouseEvent)
+            and a1.type() == QEvent.Type.MouseButtonPress
+            and a1.button() == Qt.MouseButton.LeftButton
+            and self.calendarPopup()
+        ):
+            # Route the text click through Qt's own calendar-arrow handling.
+            option = QStyleOptionComboBox()
+            option.initFrom(self)
+            option.editable = True
+            style = self.style()
+            assert style is not None
+            arrow = style.subControlRect(
+                QStyle.ComplexControl.CC_ComboBox,
+                option,
+                QStyle.SubControl.SC_ComboBoxArrow,
+                self,
+            ).center()
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
+            super().mousePressEvent(
+                QMouseEvent(
+                    a1.type(),
+                    QPointF(arrow),
+                    QPointF(self.mapToGlobal(arrow)),
+                    a1.button(),
+                    a1.buttons(),
+                    a1.modifiers(),
+                )
+            )
+            return True
+        return super().eventFilter(a0, a1)
+
+
 class ResultsBrowserWindow(QMainWindow):
     """Retain one read-only results view; the measure window owns its lifetime."""
 
@@ -71,9 +111,17 @@ class ResultsBrowserWindow(QMainWindow):
         self.setWindowTitle("Results browser")
         self.resize(1400, 850)
         index = controller.query_results()
+
+        def open_run(adapter: str, path: str) -> LoadTabResultOutcome:
+            outcome = controller.tab_control.open_tab_from_file(adapter, path)
+            if parent is not None:
+                parent.raise_()
+                parent.activateWindow()
+            return outcome
+
         self._browser = ResultsBrowser(
             index,
-            controller.tab_control.open_tab_from_file,
+            open_run,
             self,
             resolve_experiment=controller.resolve_experiment,
         )
@@ -89,8 +137,9 @@ class ResultsBrowser(QWidget):
 
     open_run accepts a resolved adapter name and native data path, returning the
     existing Load outcome or raising a user-facing error. resolve_experiment is
-    the catalog owner's query; one result per historical identity is shared by
-    navigation, filters and opening. All callbacks run on the Qt owner thread.
+    the catalog owner's query, called only when Open is requested. Navigation,
+    filters and saved documents use historical strings without catalog access.
+    All callbacks run on the Qt owner thread.
     """
 
     def __init__(
@@ -103,14 +152,12 @@ class ResultsBrowser(QWidget):
     ) -> None:
         super().__init__(parent)
         self._index = index
-        self._resolutions = {
-            experiment: resolve_experiment(experiment)
-            for experiment in {run.experiment for run in index.runs}
-        }
+        self._resolve_experiment = resolve_experiment
         self.setStyleSheet("""
             QWidget { background: #f6f8fb; color: #1e293b; font-size: 12px; }
             QTreeWidget, QTableWidget, QPlainTextEdit, QLineEdit, QComboBox, QDateEdit {
                 background: white; border: 1px solid #cbd5e1; border-radius: 3px; }
+            QDateEdit:disabled { background: #e2e8f0; color: #94a3b8; border-color: #cbd5e1; }
             QPushButton { background: #e7edf6; border: 1px solid #b7c9df;
                 padding: 6px 9px; border-radius: 4px; }
             QPushButton:hover { background: #d3e5ff; }
@@ -126,9 +173,6 @@ class ResultsBrowser(QWidget):
         self._navigation: list[tuple[QTreeWidgetItem, _Focus]] = []
         self._navigation_runs: tuple[ResultRun, ...] | None = None
         layout = QVBoxLayout(self)
-        heading = QLabel("Results browser  /  Saved results · read only")
-        heading.setStyleSheet("font-size: 17px; font-weight: 600; padding: 5px;")
-        layout.addWidget(heading)
         splitter = QSplitter()
         left = QWidget()
         filters = QVBoxLayout(left)
@@ -153,17 +197,18 @@ class ResultsBrowser(QWidget):
         self.comparison = ResultsComparison(self._index)
         self.comparison.run_activated.connect(self._open_compared)
         self._tabs.addTab(self.comparison, "Comparison")
+        self.comparison.pins_changed.connect(self._update_pin_count)
         central.addWidget(self._tabs, 1)
         splitter.addWidget(center)
         splitter.addWidget(self._build_details())
         splitter.setSizes([340, 700, 350])
         layout.addWidget(splitter, 1)
-        self._feedback = QLabel("")
-        self._feedback.setObjectName("results.feedback")
-        make_label_selectable(self._feedback)
-        self._feedback.setWordWrap(True)
-        layout.addWidget(self._feedback)
         self._render()
+
+    def hideEvent(self, a0: QHideEvent | None) -> None:
+        """Close the floating preview together with its owning browser."""
+        self._gallery.close_image()
+        super().hideEvent(a0)
 
     def _build_filters(self) -> QVBoxLayout:
         layout = QVBoxLayout()
@@ -188,7 +233,7 @@ class ResultsBrowser(QWidget):
         self._search.textChanged.connect(self._render)
         layout.addWidget(self._search, 1)
         dates = QHBoxLayout()
-        self._dates_enabled = QCheckBox("UTC dates")
+        self._dates_enabled = QCheckBox("Filter by date (UTC)")
         self._dates_enabled.setObjectName("results.dates_enabled")
         dates.addWidget(self._dates_enabled)
         known = sorted(run.at[:10] for run in self._index.runs if run.at)
@@ -210,13 +255,13 @@ class ResultsBrowser(QWidget):
         return layout
 
     def _date_filter(self, name: str, initial: str, layout: QHBoxLayout) -> QDateEdit:
-        edit = QDateEdit(QDate.fromString(initial, "yyyy-MM-dd"))
+        edit = _CalendarDateEdit(QDate.fromString(initial, "yyyy-MM-dd"))
         edit.setObjectName(name)
         edit.setDisplayFormat("yyyy-MM-dd")
         edit.setCalendarPopup(True)
         edit.setEnabled(False)
         edit.setToolTip(
-            "Inclusive UTC date; runs without a timestamp are excluded when enabled"
+            "先勾 Filter by date (UTC)，點日期文字或右側箭頭選日期。From / To 含端點；無 UTC 時間的 run 不列入。"
         )
         edit.dateChanged.connect(self._render)
         layout.addWidget(edit)
@@ -257,21 +302,18 @@ class ResultsBrowser(QWidget):
         self._pin_button.clicked.connect(self._pin_selected)
         layout.addWidget(self._pin_button)
         layout.addWidget(self._current_figure)
+        self._feedback = QLabel("")
+        self._feedback.setObjectName("results.feedback")
+        make_label_selectable(self._feedback)
+        self._feedback.setWordWrap(True)
+        layout.addWidget(self._feedback)
         tabs = QTabWidget()
         tabs.setObjectName("results.detail_tabs")
-        self._details = QPlainTextEdit()
+        self._details = ResultsDetailsTree()
         self._details.setObjectName("results.details")
-        self._details.setReadOnly(True)
         tabs.addTab(self._details, "Metadata / cfg")
-        self._analysis = QTableWidget(0, 2)
+        self._analysis = ResultsDetailsTree()
         self._analysis.setObjectName("results.analysis")
-        self._analysis.setHorizontalHeaderLabels(["Key", "Value"])
-        self._analysis.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        header = self._analysis.horizontalHeader()
-        if header is None:
-            raise RuntimeError("Analysis table has no header")
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._analysis.setColumnWidth(1, 110)
         tabs.addTab(self._analysis, "Analysis")
         layout.addWidget(tabs, 1)
         return pane
@@ -301,8 +343,7 @@ class ResultsBrowser(QWidget):
             self._render()
 
     def _experiment_name(self, run: ResultRun) -> str:
-        resolution = self._resolutions[run.experiment]
-        return resolution.adapter_name or run.experiment or "Unknown experiment"
+        return run.experiment or "Unknown experiment"
 
     def _filtered(self) -> tuple[ResultRun, ...]:
         enabled = self._dates_enabled.isChecked()
@@ -431,6 +472,7 @@ class ResultsBrowser(QWidget):
                 break
 
     def _activate_figure(self, run: ResultRun, figure: str) -> None:
+        already_in_run = self._focus.run_key == run.key
         self._visit(
             _Focus(
                 entry=run.entry,
@@ -440,6 +482,8 @@ class ResultsBrowser(QWidget):
                 figure=figure,
             )
         )
+        if already_in_run:
+            self._gallery.show_image(run, figure)
 
     def _render_details(self, runs: tuple[ResultRun, ...]) -> None:
         run = (
@@ -447,26 +491,18 @@ class ResultsBrowser(QWidget):
             if self._focus.run_key and runs
             else None
         )
-        self._details.setPlainText(
-            result_details(self._index, run)
-            if run
-            else "Select a run to inspect cfg and analysis"
-        )
-        rows = analysis_details(self._index, run) if run else ()
-        self._analysis.setRowCount(len(rows))
-        for row, (key, value) in enumerate(rows):
-            for column, text in enumerate((key, value)):
-                item = QTableWidgetItem(text)
-                item.setToolTip(text)
-                self._analysis.setItem(row, column, item)
-        self._analysis.resizeRowsToContents()
+        self._details.present_metadata(self._index, run)
+        self._analysis.present_analysis(self._index, run)
         reason = "Select a run"
         if run is not None:
             reason = "No data.h5 in this saved run" if run.data_path is None else ""
         if not self._writable:
             reason = "Local control is required to open an analysis tab"
         self._open_button.setEnabled(not reason)
-        self._open_button.setToolTip(reason)
+        self._open_button.setToolTip(
+            reason
+            or "在主視窗開一個只載入此 run 保存資料的分析 tab，不量測，不自動分析"
+        )
         self._pin_button.setEnabled(run is not None)
         self._current_figure.setText(f"Current figure: {self._focus.figure or 'none'}")
 
@@ -478,26 +514,27 @@ class ResultsBrowser(QWidget):
                 experiment=self._experiment_name(run),
                 point=(run.entry, run.point),
                 run_key=key,
-                figure=self.comparison.selected_figure(key),
             )
         )
         self._tabs.setCurrentIndex(0)
 
+    def _update_pin_count(self) -> None:
+        count = len(self.comparison.pinned_runs())
+        self._tabs.setTabText(1, f"Comparison ({count})" if count else "Comparison")
+
     def _pin_selected(self) -> None:
         if self._focus.run_key is not None:
-            self.comparison.pin_run(
-                self._index.get_run(self._focus.run_key), self._focus.figure
-            )
+            self.comparison.pin_run(self._index.get_run(self._focus.run_key))
 
     def _open_selected(self) -> None:
         if self._focus.run_key is None:
             return
         run = self._index.get_run(self._focus.run_key)
-        resolution = self._resolutions[run.experiment]
-        if resolution.adapter_name is None:
-            self._feedback.setText(f"Cannot open analysis tab: {resolution.reason}")
-            return
         try:
+            resolution = self._resolve_experiment(run.experiment)
+            if resolution.adapter_name is None:
+                self._feedback.setText(f"Cannot open analysis tab: {resolution.reason}")
+                return
             outcome = self._open_run(resolution.adapter_name, str(run.data_path))
         except Exception as error:
             logger.exception("Cannot open saved history in a new tab")
@@ -520,7 +557,10 @@ class ResultsBrowser(QWidget):
     ) -> None:
         clipboard = QApplication.clipboard()
         if action is ResultImageAction.ADD_TO_COMPARISON:
-            self.comparison.pin_run(run, figure)
+            self.comparison.pin_run(run)
+            self._tabs.setCurrentIndex(1)
+            QApplication.processEvents()
+            self.comparison.reveal_figure(figure)
             return
         if clipboard is None:
             self._feedback.setText("Clipboard unavailable")

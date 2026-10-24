@@ -114,17 +114,27 @@ isolated even when experiment, point and run names match. Group galleries show
 one representative PNG per run. Selecting a run shows all its saved PNGs in a
 vertically scrolling gallery, separate from the measure figure pager.
 Runs without PNGs remain selectable in the tree.
-The catalog owner resolves historical adapter names and loadable tags once per
-identity. Both grouping orders, the experiment filter and new-tab Load share that
-resolution. Unresolved identities keep their saved figures and refusal reason.
+Both grouping orders and the experiment filter use the saved experiment string.
+Browsing never queries the catalog. Only Open resolves an adapter through the
+catalog owner, then delegates to existing Load admission. Success selects the
+new history tab and raises the measure window; failure stays in the right-side
+feedback. Deleted experiments and old cfg versions remain browsable.
 A left click on a group image opens its run directly and selects that figure.
-Within a run, left clicks select the current figure. Context menus copy
-a member path or image and pin its run in ResultsComparison.
-`ResultsComparison` retains every pin in its fixed-column table. Checked list rows
-select at most four saved PNGs for the 2×2 view, independently of pin membership.
-Re-pinning from a figure card preserves that exact filename across mode changes.
-Runs without PNGs stay in the list and show a reason in the image view.
-Cfg values 與 analysis summary 使用相對路徑。Cfg 的身分區段另列保存的 cfg_type 與 schema_version，analysis parameters 也有自己的區段。
+Within a run, left clicks select the current figure and open or replace one
+non-modal Tool preview. Esc closes it; closing the browser hides it. Gallery
+cards and decoded rasters stay local to one gallery, with at most one retained
+card per indexed PNG. File identity, size and timestamps invalidate changed
+members. Back/Forward and grouping reuse unchanged cards and rasters.
+Context menus copy a member path or image and pin its run in ResultsComparison.
+`ResultsComparison` shows the fixed-column table above a filename-aligned image
+grid, separated by a vertical splitter. All pins are run columns; PNG filenames
+are rows. Missing members show an em dash. Headers unpin or open a run. Pin count
+updates the Comparison tab caption. Context-menu pinning reveals that PNG row;
+there is no per-pin selected-image state.
+`ResultsDetailsTree` presents metadata/cfg and analysis as collapsible Key/Value
+trees. It bounds preview depth and value length, while Copy JSON retains the full
+selected section. Headers remain mouse-resizable. Filter by date (UTC) enables
+the greyed-out date edits; either their text area or arrow opens the calendar.
 新 tab 的 Load 使用既有 application owner。缺少 analysis source 的原因同時顯示在瀏覽器結果與載入後的 tab。
 A history tab whose form factory failed shows its original reason in the form
 area and disabled Run tooltip. Reset can replace that notice with a real editor;

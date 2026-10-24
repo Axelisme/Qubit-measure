@@ -6,11 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from zcu_tools.datafile import JsonObject, read_doc
-from zcu_tools.experiment.metadata import RunMetadata
-from zcu_tools.experiment.native_persistence import read_run_metadata
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerEvent,
@@ -20,6 +18,22 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.aliases import AliasValue
 
 _JSON = TypeAdapter(JsonObject)
+
+
+class _SavedSnapshot(BaseModel):
+    model_config = ConfigDict(strict=True)
+    point: str | None = None
+    roles: dict[str, AliasValue] = Field(default_factory=dict)
+
+
+class _SavedMetadata(BaseModel):
+    # A browsing projection, not persistence admission: missing fields and extra
+    # saved facts do not require today's RunMetadata schema or experiment code.
+    model_config = ConfigDict(strict=True)
+    run_id: str | None = None
+    experiment: str | None = None
+    started_at: str | None = None
+    snapshot: _SavedSnapshot = Field(default_factory=_SavedSnapshot)
 
 
 @dataclass(frozen=True)
@@ -74,6 +88,18 @@ class ResultsIndex:
             if run.key == key:
                 return run
         raise KeyError(f"unknown run key: {key!r}")
+
+    def read_metadata(self, key: str) -> JsonObject:
+        """Read the saved metadata JSON without admitting it as current RunMetadata.
+
+        Unknown keys raise KeyError; absent data.h5 raises FileNotFoundError.
+        Container/document errors and containment checks match read_cfg.
+        """
+        run = self.get_run(key)
+        _checked_run(self.project_root, run.entry, run.run_path)
+        if run.data_path is None:
+            raise FileNotFoundError(run.run_path / "data.h5")
+        return read_doc(_inside(run.run_path, run.data_path), "metadata")
 
     def read_cfg(self, key: str) -> JsonObject:
         """Read the full native cfg envelope for key, without arrays.
@@ -197,11 +223,11 @@ def _members(run: Path, folder: str, pattern: str) -> tuple[Path, ...]:
     )
 
 
-def _metadata(path: Path | None, issues: list[str]) -> RunMetadata | None:
+def _metadata(path: Path | None, issues: list[str]) -> _SavedMetadata | None:
     if path is None:
         return None
     try:
-        return read_run_metadata(path)
+        return _SavedMetadata.model_validate(read_doc(path, "metadata"))
     except (OSError, KeyError, ValueError) as error:
         # A broken file must remain visible and selectable in the browser.
         issues.append(f"{path}: {error}")
@@ -242,7 +268,7 @@ def _scan_run(
         ),
         None,
     )
-    if metadata is not None:
+    if metadata is not None and metadata.run_id is not None:
         event = acquisitions.get(metadata.run_id)
     payload = event.payload if event is not None else None
     acquired = payload if isinstance(payload, AcquiredPayload) else None
