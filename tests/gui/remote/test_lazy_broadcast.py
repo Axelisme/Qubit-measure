@@ -22,11 +22,10 @@ def endpoint():
         server_name="LazyPushTest",
         router=MagicMock(),
     )
-    sockets: list[socket.socket] = []
 
     def register(link: ClientLink) -> socket.socket:
-        sock = socket.socket()
-        sockets.append(sock)
+        # Broadcast only uses the socket as a registry key; no network I/O runs.
+        sock = MagicMock(spec=socket.socket)
         # tolerated: Synthetic registry setup uses the endpoint's own synchronization.
         with value._clients_lock:  # pyright: ignore[reportPrivateUsage]
             # tolerated: Existing queue/backpressure cases need synthetic recipients without a live writer.
@@ -34,8 +33,6 @@ def endpoint():
         return sock
 
     yield value, register
-    for sock in sockets:
-        sock.close()
 
 
 def _link(peer: str, *, subscribed: bool = False) -> ClientLink:
