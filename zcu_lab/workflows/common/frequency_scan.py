@@ -24,7 +24,15 @@ from zcu_lab.workflows.common.calibration_analysis import (
 )
 from zcu_lab.workflows.common.calibration_results import (
     FrequencyCandidateAttempt,
+    FrequencyDiagnostics,
     FrequencyScan,
+)
+from zcu_lab.workflows.common.frequency_diagnostics import (
+    MAX_FREQUENCY_MEAN_RESIDUAL_RATIO,
+    confirmation_gates,
+    fit_diagnostics,
+    scan_diagnostics,
+    selected_peak_diagnostics,
 )
 from zcu_lab.workflows.common.frequency_tracking import FrequencyTracker, trusted_curve
 from zcu_lab.workflows.common.saving import save_native
@@ -61,7 +69,7 @@ def accept_frequency_fit(
         and fit.error_mhz / fit.width_mhz < tun.max_frequency_rel_err
         and residual is not None
         and residual < tun.max_fit_residual
-        and trusted_curve(fit.observed, fit.fitted, 0.2)
+        and trusted_curve(fit.observed, fit.fitted, MAX_FREQUENCY_MEAN_RESIDUAL_RATIO)
     )
 
 
@@ -118,7 +126,11 @@ async def acquire_frequency_scan(
     outcome = await scope.run(FreqExp().run, cfg, name="frequency")
     observe_operation(inputs.summary, outcome)
     if isinstance(outcome, Failed):
-        return replace(scan, file=None), outcome
+        return replace(
+            scan,
+            file=None,
+            diagnostics=FrequencyDiagnostics(fit_failure=outcome.reason),
+        ), outcome
     if scan.file is None:
         raise ValueError("A scan needs its planned native filename")
     save_native(
@@ -129,10 +141,14 @@ async def acquire_frequency_scan(
         identity=scope.identity,
     )
     if outcome.partial_result:
-        return scan, Failed("stopped")
+        return replace(
+            scan, diagnostics=FrequencyDiagnostics(fit_failure="stopped")
+        ), Failed("stopped")
     result = outcome.value.result
     if not np.all(np.isfinite(result.signals)):
-        return scan, Failed("Nonfinite measured IQ")
+        return replace(
+            scan, diagnostics=FrequencyDiagnostics(fit_failure="Nonfinite measured IQ")
+        ), Failed("Nonfinite measured IQ")
     observed = qubfreq_signal2real(result.signals)
     tun = inputs.tun
     peaks = tuple(
@@ -145,7 +161,9 @@ async def acquire_frequency_scan(
             min_width_samples=tun.peak_min_width_samples,
         )
     )
-    return replace(scan, peaks=peaks), result
+    return replace(
+        scan, peaks=peaks, diagnostics=scan_diagnostics(result, len(peaks))
+    ), result
 
 
 def fit_frequency_scan(
@@ -168,9 +186,15 @@ def fit_frequency_scan(
         if peaks and expected_center_mhz is not None
         else next(iter(peaks), None)
     )
-    scan = replace(scan, peaks=peaks, selected_peak=selected)
+    scan = replace(scan, peaks=peaks, selected_peak=selected, fitted_center_mhz=None)
+    scan = replace(scan, diagnostics=selected_peak_diagnostics(scan, tun))
     if scan.stage != "single" and selected is not None and selected.truncated:
-        return scan, Failed("Selected peak is truncated")
+        return replace(
+            scan,
+            diagnostics=scan.diagnostics.model_copy(
+                update={"fit_failure": "Selected peak is truncated"}
+            ),
+        ), Failed("Selected peak is truncated")
     fit = analyze_qubit_freq(
         result,
         FreqAnalyzeOptions(
@@ -184,13 +208,27 @@ def fit_frequency_scan(
         isolate_peaks=scan.stage != "single",
     )
     if not isinstance(fit, Failed):
-        scan = replace(scan, fitted_center_mhz=fit.frequency_mhz)
+        scan = replace(
+            scan,
+            fitted_center_mhz=fit.frequency_mhz,
+            diagnostics=fit_diagnostics(fit, scan, tun),
+        )
         if scan.stage == "coarse" and not float(
             np.min(fit.freqs)
         ) <= fit.frequency_mhz <= float(np.max(fit.freqs)):
-            return scan, Failed(
-                "Coarse fitted center is outside its candidate interval"
-            )
+            return replace(
+                scan,
+                diagnostics=scan.diagnostics.model_copy(
+                    update={
+                        "fit_failure": "Coarse fitted center is outside its candidate interval",
+                    }
+                ),
+            ), Failed("Coarse fitted center is outside its candidate interval")
+    else:
+        scan = replace(
+            scan,
+            diagnostics=scan.diagnostics.model_copy(update={"fit_failure": fit.reason}),
+        )
     return scan, fit
 
 
@@ -201,12 +239,13 @@ def confirm_frequency_candidate(
     fit: FrequencyFit | Failed,
     tun: CalibrationTunables,
     acquisition: FreqResult | Failed,
-) -> FrequencyCandidateAttempt:
-    """Record fine confirmation against the coarse target's center and width.
+) -> tuple[FrequencyScan, FrequencyCandidateAttempt]:
+    """Record fine confirmation gates and the coarse target's center and width.
 
     The strongest fine peak must lie within one coarse candidate width of its
     fitted center, then pass the existing frequency gates. Failed acquisitions
-    and partials retain their failure reason; no fine file is invented.
+    and partials retain their failure reason; no fine file is invented. Return
+    the scan with confirmation diagnostics and its candidate-attempt record.
     """
     peak = coarse_fit.selected_peak
     if peak is None:
@@ -224,7 +263,15 @@ def confirm_frequency_candidate(
         reason = "Fine frequency fit failed quality gates"
     else:
         reason = None
-    return FrequencyCandidateAttempt(
+    scan = replace(
+        scan,
+        diagnostics=scan.diagnostics.model_copy(
+            update={
+                "gates": scan.diagnostics.gates + confirmation_gates(coarse_fit, scan),
+            }
+        ),
+    )
+    return scan, FrequencyCandidateAttempt(
         coarse_file, peak, coarse_fit.frequency_mhz, scan.file, reason
     )
 
@@ -249,8 +296,10 @@ def fit_coarse_candidates(
     candidates = [nearest, *(peak for peak in scan.peaks if peak is not nearest)]
     fits: list[FrequencyFit] = []
     rejected: list[FrequencyCandidateAttempt] = []
+    diagnostics: list[FrequencyDiagnostics] = []
     for index, peak in enumerate(candidates[:limit]):
         candidate_scan, fit = fit_frequency_scan(result, scan, tun, peak.center)
+        diagnostics.append(candidate_scan.diagnostics)
         if index == 0:
             scan = candidate_scan
         if isinstance(fit, Failed):
@@ -261,4 +310,8 @@ def fit_coarse_candidates(
             )
         else:
             fits.append(fit)
-    return scan, tuple(fits), tuple(rejected)
+    return (
+        replace(scan, coarse_candidate_diagnostics=tuple(diagnostics)),
+        tuple(fits),
+        tuple(rejected),
+    )

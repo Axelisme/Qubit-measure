@@ -1,8 +1,9 @@
 """Per-point calibration outcomes and serializable feedback diagnostics."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
+from pydantic import BaseModel, ConfigDict
 from zcu_tools.analysis.fitting import PeakCandidate
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
@@ -10,6 +11,47 @@ from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
 from zcu_lab.workflows.common.frequency_tracking import RecoveryAttempt
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
+
+
+class FrequencyGate(BaseModel):
+    """One numeric decision with its comparison, threshold and observed value.
+
+    actual is null for unavailable/nonfinite values, which cannot pass.
+    applied=False marks final acceptance gates reported for a coarse fit but
+    not used to select it. name identifies the metric and its decision stage.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    name: str
+    comparison: Literal["<", "<=", ">", ">=", "=="]
+    threshold: float
+    actual: float | None
+    passed: bool
+    applied: bool = True
+
+
+class FrequencyDiagnostics(BaseModel):
+    """Frequency decision inputs, retained even when a fit is rejected.
+
+    Center/error/FWHM use MHz. peak_snr is the selected candidate's height SNR;
+    trace_snr uses the full projected scan's Savitzky-Golay SNR estimator.
+    normalized_rms uses the fit interval's observed peak-to-peak; MAE uses its
+    fitted peak-to-peak. Missing/nonfinite metrics are null, never accepted
+    substitutes. gates records evaluated decisions; fit_failure names a failed
+    analysis or acquisition. selected_peak_center_mhz links coarse candidates.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    selected_peak_center_mhz: float | None = None
+    fitted_center_mhz: float | None = None
+    center_error_mhz: float | None = None
+    fwhm_mhz: float | None = None
+    peak_snr: float | None = None
+    trace_snr: float | None = None
+    normalized_rms: float | None = None
+    mae_over_fit_ptp: float | None = None
+    gates: tuple[FrequencyGate, ...] = ()
+    fit_failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -20,6 +62,8 @@ class FrequencyScan:
     gain/span_mhz/center_mhz describe the actual scan. peaks contains every
     detected candidate, empty for failed/partial acquisition. selected_peak is
     the sampled target; fitted_center_mhz is None when fitting did not finish.
+    diagnostics retains its decision metrics. coarse_candidate_diagnostics
+    records every locally tried coarse fit, not just the first selected target.
     """
 
     stage: Literal["coarse", "fine", "single"]
@@ -30,6 +74,8 @@ class FrequencyScan:
     peaks: tuple[PeakCandidate, ...] = ()
     selected_peak: PeakCandidate | None = None
     fitted_center_mhz: float | None = None
+    diagnostics: FrequencyDiagnostics = field(default_factory=FrequencyDiagnostics)
+    coarse_candidate_diagnostics: tuple[FrequencyDiagnostics, ...] = ()
 
 
 @dataclass(frozen=True)

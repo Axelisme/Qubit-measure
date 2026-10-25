@@ -264,7 +264,7 @@ async def calibrate_frequency(
         _record_frequency_trace(fit, inputs, carry, plots, (flux, hint))
         rejection = fit.reason if isinstance(fit, Failed) else None
         if coarse_fit is not None:
-            confirmation = confirm_frequency_candidate(
+            scans[-1], confirmation = confirm_frequency_candidate(
                 coarse_fit, coarse_file, scan, fit, tun, result
             )
             attempts.append(confirmation)

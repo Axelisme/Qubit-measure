@@ -101,6 +101,12 @@ span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain`
 降低 SNR 或寬度門檻會同時增加弱峰與雜訊候選。這些統計門檻不保證排除所有雜訊。
 每點 Frequency result 的 `scans` 保存 coarse、fine 或 single 階段、
 檔名、gain、span、實際中心、全部候選、選定候選及擬合中心。
+每次 scan 的 `diagnostics` 記 fitted_center_mhz、center_error_mhz、fwhm_mhz、peak_snr、trace_snr、normalized_rms 與 mae_over_fit_ptp。
+Peak SNR 取選定候選相對 median 的高度 SNR。Trace SNR 用完整投影 trace 的 Savitzky-Golay estimator；它是診斷值，不增加接受門檻。
+`gates` 記名稱、comparison、threshold、actual、passed 與 applied。非有限或未取得的 actual 為 null，該比較不通過；尚未執行的 fit gate 不虛造結果。
+選定候選記 SNR 與 truncation gate。Coarse 另記局部 fit interval 上下界，最終接受 gates 只供診斷，標記 applied=false。
+Fine 與 single 記正中心、窗內中心上下界、正 FWHM、非負 center error、error/FWHM、normalized RMS 與 MAE/fit ptp 的既有門檻。Fine 另記最強候選是否存在及其中心到粗峰的距離上限。
+每個試過的局部粗峰診斷保存在 `coarse_candidate_diagnostics`，以 selected_peak_center_mhz 對應候選。Failed／partial acquisition 不擬合，保留 fit_failure，無法取得的數值為 null。這些紀錄不參與接受判斷。
 `candidate_attempts` 逐一保存試過的粗峰、粗掃檔名、局部擬合中心、細掃檔名與 rejection_reason。
 拒絕原因包含沒有細峰、超出粗峰寬度、截斷、擬合失敗與品質 gate；只有接受的候選沒有拒絕原因。
 候選的 `truncated` 表示窗內無法觀察完整半 prominence 寬度。
@@ -178,7 +184,7 @@ Coherence lifetime 與 calibration 沿用原有 status。完整 singleshot 的 m
 Overnight 與 mux member 的 status 直接在結果產生處填寫：接受值為 accepted、完整 fit 未過門檻或 partial 為 rejected、Schedule／預期 fit failure 為 failed、未執行為 skipped。
 MIST trace 完整 success 為 accepted、partial 為 rejected、Schedule failure 為 failed、依賴不足或未執行為 skipped。
 MIST both 每點計兩個 preparation 結果；mux 每點按 participant 計 T1／Echo。副模型診斷不計為另一個 stage，也不改主模型的狀態。
-各 stage 的 rejected_reasons、skipped_reasons 按原始 reason 字串計數，不分類或改寫原因。
+各 stage 的 rejected_reasons、skipped_reasons、failed_reasons 按原始 reason 字串計數，不分類或改寫原因。
 
 `duration.mean_s/max_s` 先加總同一 point、同一 stage 的 operations 秒數，再算平均與最大值。只有有時間的 point 參與平均。
 Frequency 包含該點所有 delivered coarse／fine／widening scans，MIST 包含兩種 preparation。Mux 計一次共用 acquisition 時間，不乘 participant 數。

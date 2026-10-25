@@ -32,10 +32,10 @@ class DurationSummary(BaseModel):
 
 
 class StageSummary(BaseModel):
-    """Outcome counts, exact rejection/skip reasons and optional operation timing.
+    """Outcome counts, exact rejection/skip/failure reasons and operation timing.
 
     Counts describe point-stage outcomes (per participant for mux lifetimes).
-    Reasons exclude failures. Timing sums same-stage operations within each point
+    Reasons preserve the original status and message. Timing sums same-stage operations within each point
     before taking mean/max, without multiplying mux time by participant count.
     """
 
@@ -46,6 +46,7 @@ class StageSummary(BaseModel):
     failed: int = 0
     rejected_reasons: dict[str, int] = Field(default_factory=dict)
     skipped_reasons: dict[str, int] = Field(default_factory=dict)
+    failed_reasons: dict[str, int] = Field(default_factory=dict)
     duration: DurationSummary | None = Field(
         default=None, exclude_if=lambda v: v is None
     )
@@ -161,12 +162,12 @@ def _stage_totals(points: Iterable[SummaryPoint]) -> dict[StageName, StageSummar
                     total.skipped += 1
                 case "failed":
                     total.failed += 1
-            if outcome.reason is not None and outcome.status in ("rejected", "skipped"):
-                reasons = (
-                    total.rejected_reasons
-                    if outcome.status == "rejected"
-                    else total.skipped_reasons
-                )
+            if outcome.reason is not None and outcome.status != "accepted":
+                reasons = {
+                    "rejected": total.rejected_reasons,
+                    "skipped": total.skipped_reasons,
+                    "failed": total.failed_reasons,
+                }[outcome.status]
                 reasons[outcome.reason] = reasons.get(outcome.reason, 0) + 1
     return totals
 
