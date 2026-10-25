@@ -2,46 +2,32 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from math import isfinite
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.experiment.metadata import RunSnapshot
-from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
-    Failed,
     Live,
     WorkflowEnv,
     workflow,
 )
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.support.lifetime_models import (
-    LifetimeModelRecord,
-    show_lifetime_comparison,
-)
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
-from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
-from zcu_lab.workflows.common.analysis import (
-    DecayFit,
-    analyze_t1,
-    compare_decay_fit,
-    lifetime_rejection,
-)
+from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.relaxation import echo_relaxation
-from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import overnight_summary_point
-from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 from zcu_lab.workflows.overnight.samples import append_point_sample
+from zcu_lab.workflows.overnight.stages import FitSettings, run_echo_stage, run_t1_stage
 from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
 
@@ -201,156 +187,8 @@ class OvernightPoint(BaseModel):
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
-def _summary(
-    fit: DecayFit | Failed, tun: OvernightTunables, name: str
-) -> tuple[float | None, float | None, str | None]:
-    """Apply the shared scalar acceptance bounds to either lifetime fit.
-
-    fit contains microsecond lifetime/error and residual quality; tun holds
-    strict dimensionless bounds. name identifies rejected members. Expected
-    fitting failures supply Failed(reason). Return accepted lifetime/error or
-    None values with a diagnosis, without feedback.
-    """
-    if isinstance(fit, Failed):
-        return None, None, fit.reason
-    rejection = lifetime_rejection(
-        fit.quality, fit.times, fit.lifetime_us, tun.min_lifetime_points
-    )
-    if rejection is not None:
-        return None, None, f"{name} fit rejected: {rejection}"
-    residual = fit.quality.normalized_residual_rms
-    if not (
-        isfinite(fit.lifetime_us)
-        and fit.lifetime_us > 0
-        and isfinite(fit.error_us)
-        and fit.error_us >= 0
-        and fit.error_us / fit.lifetime_us < tun.max_rel_err
-        and residual is not None
-        and residual < tun.max_fit_residual
-    ):
-        return None, None, f"{name} fit rejected"
-    return fit.lifetime_us, fit.error_us, None
-
-
-@dataclass(frozen=True)
-class OvernightStageInputs:
-    """Historical save identity, live lifetime gates and run-local reporting."""
-
-    snapshot: RunSnapshot
-    tun: Live[OvernightTunables]
-    summary: SummaryAccumulator
-
-
-async def run_t1_stage(
-    iteration: Scope,
-    cfg: T1Cfg,
-    point_record: OvernightPoint,
-    *,
-    inputs: OvernightStageInputs,
-    plots: Plots,
-) -> bool:
-    """Save T1 before fitting and retain its summary on point cancellation."""
-    t1_record = await iteration.run(T1Exp().run, cfg, name="T1")
-    inputs.summary.observe(t1_record)
-    if not isinstance(t1_record, Failed):
-        save_native(
-            t1_record,
-            iteration.dir / "t1.h5",
-            spec=T1Exp.AXES_SPEC,
-            snapshot=inputs.snapshot,
-            identity=iteration.identity,
-        )
-        point_record.t1_file = "t1.h5"
-    if isinstance(t1_record, Failed):
-        point_record.t1_status = "failed"
-        member_summary = (None, None, t1_record.reason)
-    elif t1_record.partial_result:
-        point_record.t1_status = "rejected"
-        member_summary = (None, None, "stopped")
-    else:
-        fit = analyze_t1(t1_record.value.result)
-        if not isinstance(fit, Failed):
-            comparison = compare_decay_fit(
-                fit,
-                t1=True,
-                max_window_factor=inputs.tun.current.max_model_window_factor,
-            )
-            point_record.t1_models = comparison.records
-            show_lifetime_comparison(
-                plots, "t1-models", fit.times, fit.observed, comparison
-            )
-        member_summary = _summary(fit, inputs.tun.current, "T1")
-        point_record.t1_status = (
-            "failed"
-            if isinstance(fit, Failed)
-            else "accepted"
-            if member_summary[0] is not None
-            else "rejected"
-        )
-    point_record.t1_us, point_record.t1_error_us, point_record.t1_reason = (
-        member_summary
-    )
-    if iteration.cancelled:
-        point_record.status = "skipped"
-    return iteration.cancelled
-
-
-async def run_echo_stage(
-    iteration: Scope,
-    cfg: T2EchoCfg,
-    point_record: OvernightPoint,
-    *,
-    inputs: OvernightStageInputs,
-    plots: Plots,
-) -> bool:
-    """Save T2 Echo before fitting and retain its summary on point cancellation."""
-    t2_record = await iteration.run(T2EchoExp().run, cfg, name="Echo")
-    inputs.summary.observe(t2_record)
-    if not isinstance(t2_record, Failed):
-        save_native(
-            t2_record,
-            iteration.dir / "t2echo.h5",
-            spec=T2EchoExp.AXES_SPEC,
-            snapshot=inputs.snapshot,
-            identity=iteration.identity,
-        )
-        point_record.t2_file = "t2echo.h5"
-    if isinstance(t2_record, Failed):
-        point_record.t2_status = "failed"
-        member_summary = (None, None, t2_record.reason)
-    elif t2_record.partial_result:
-        point_record.t2_status = "rejected"
-        member_summary = (None, None, "stopped")
-    else:
-        fit = analyze_t2echo(t2_record.value.result)
-        if not isinstance(fit, Failed):
-            comparison = compare_decay_fit(
-                fit,
-                t1=False,
-                max_window_factor=inputs.tun.current.max_model_window_factor,
-            )
-            point_record.t2_models = comparison.records
-            show_lifetime_comparison(
-                plots, "t2echo-models", fit.times, fit.observed, comparison
-            )
-        member_summary = _summary(fit, inputs.tun.current, "T2 Echo")
-        point_record.t2_status = (
-            "failed"
-            if isinstance(fit, Failed)
-            else "accepted"
-            if member_summary[0] is not None
-            else "rejected"
-        )
-    point_record.t2_us, point_record.t2_error_us, point_record.t2_reason = (
-        member_summary
-    )
-    if iteration.cancelled:
-        point_record.status = "skipped"
-    return iteration.cancelled
-
-
 @workflow("overnight", "Monitor fixed-flux T1 and Hahn-echo lifetime pairs.")
-async def overnight[C](
+async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top to bottom
     env: WorkflowEnv[C],
     plan: OvernightPlan,
     tun: Live[OvernightTunables],
@@ -379,7 +217,7 @@ async def overnight[C](
     _ = env.soc
     _ = env.devices
     summary = SummaryAccumulator(plan.outer_rounds, plan.flux_unit)
-    inputs = OvernightStageInputs(plan.snapshot, tun, summary)
+    stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
     qubit_role = plan.snapshot.roles.get("qubit")
     qubit_name = qubit_role if isinstance(qubit_role, str) else None
     last_actual_start: datetime | None = None
@@ -416,16 +254,17 @@ async def overnight[C](
                 point_record.status = "skipped"
                 continue
             # Acquire and save T1 before fitting its scalar summary.
-            t1_stop = tun.current.sweep_factor * tun.current.t1_guess_us
+            current = tun.current
+            t1_stop = current.sweep_factor * current.t1_guess_us
             t1_cfg = T1Cfg(
-                uniform=tun.current.uniform,
-                reps=tun.current.reps,
-                rounds=tun.current.rounds,
-                acquire_retry=tun.current.t1_acquire_retry,
-                earlystop_snr=tun.current.t1_earlystop_snr,
+                uniform=current.uniform,
+                reps=current.reps,
+                rounds=current.rounds,
+                acquire_retry=current.t1_acquire_retry,
+                earlystop_snr=current.t1_earlystop_snr,
                 relax_delay=max(
-                    tun.current.relax_min_us,
-                    tun.current.relax_factor * tun.current.t1_guess_us,
+                    current.relax_min_us,
+                    current.relax_factor * current.t1_guess_us,
                 ),
                 pi_pulse=plan.qub_pulse,
                 readout=plan.readout,
@@ -436,29 +275,42 @@ async def overnight[C](
                     step=t1_stop / (plan.points - 1),
                 ),
             )
-            if await run_t1_stage(
+            t1 = await run_t1_stage(
                 iteration,
+                stage_env,
                 t1_cfg,
-                point_record,
-                inputs=inputs,
-                plots=env.plots,
-            ):
+                FitSettings(
+                    max_rel_err=current.max_rel_err,
+                    max_fit_residual=current.max_fit_residual,
+                    min_lifetime_points=current.min_lifetime_points,
+                    max_model_window_factor=current.max_model_window_factor,
+                ),
+            )
+            point_record.t1_status = t1.status
+            point_record.t1_us = t1.lifetime_us
+            point_record.t1_error_us = t1.error_us
+            point_record.t1_reason = t1.reason
+            point_record.t1_models = t1.models
+            point_record.t1_file = t1.file
+            if iteration.cancelled:
+                point_record.status = "skipped"
                 continue
             # Acquire zero-detune Echo even if the T1 member failed.
+            current = tun.current
             point_record.echo_relax_delay_us, point_record.echo_t1_source = (
                 echo_relaxation(
                     (point_record.t1_us,),
-                    t1_guess_us=tun.current.t1_guess_us,
-                    relax_factor=tun.current.relax_factor,
-                    relax_min_us=tun.current.relax_min_us,
+                    t1_guess_us=current.t1_guess_us,
+                    relax_factor=current.relax_factor,
+                    relax_min_us=current.relax_min_us,
                 )
             )
-            t2_stop = tun.current.sweep_factor * tun.current.t2_guess_us
+            t2_stop = current.sweep_factor * current.t2_guess_us
             t2_cfg = T2EchoCfg(
-                reps=tun.current.reps,
-                rounds=tun.current.rounds,
-                acquire_retry=tun.current.t2_acquire_retry,
-                earlystop_snr=tun.current.t2_earlystop_snr,
+                reps=current.reps,
+                rounds=current.rounds,
+                acquire_retry=current.t2_acquire_retry,
+                earlystop_snr=current.t2_earlystop_snr,
                 relax_delay=point_record.echo_relax_delay_us,
                 pi_pulse=plan.qub_pulse,
                 pi2_pulse=plan.qub_pulse.with_updates(
@@ -474,13 +326,23 @@ async def overnight[C](
                     step=t2_stop / (plan.points - 1),
                 ),
             )
-            await run_echo_stage(
+            echo = await run_echo_stage(
                 iteration,
+                stage_env,
                 t2_cfg,
-                point_record,
-                inputs=inputs,
-                plots=env.plots,
+                FitSettings(
+                    max_rel_err=current.max_rel_err,
+                    max_fit_residual=current.max_fit_residual,
+                    min_lifetime_points=current.min_lifetime_points,
+                    max_model_window_factor=current.max_model_window_factor,
+                ),
             )
+            point_record.t2_status = echo.status
+            point_record.t2_us = echo.lifetime_us
+            point_record.t2_error_us = echo.error_us
+            point_record.t2_reason = echo.reason
+            point_record.t2_models = echo.models
+            point_record.t2_file = echo.file
             point_record.status = "skipped" if iteration.cancelled else "completed"
             last_actual_start = actual
             trend_points += (point_record,)

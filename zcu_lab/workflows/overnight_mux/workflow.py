@@ -10,15 +10,20 @@ from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.program.v2 import ResetCfg, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadoutCfg, PulseCfg
 
-from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
-from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg, MuxT2EchoExp
+from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1ToneCfg
+from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.relaxation import echo_relaxation
+from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import mux_summary_point
-from zcu_lab.workflows.overnight_mux.analysis import record_echo, record_t1
 from zcu_lab.workflows.overnight_mux.samples import append_point_samples
+from zcu_lab.workflows.overnight_mux.stages import (
+    FitSettings,
+    run_mux_echo_stage,
+    run_mux_t1_stage,
+)
 from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
 
 
@@ -184,7 +189,7 @@ class OvernightMuxPoint(BaseModel):
 
 
 @workflow("overnight_mux", "Monitor simultaneous mux T1 and Hahn-echo pairs.")
-async def overnight_mux[C](
+async def overnight_mux[C](  # noqa: PLR0915  # tolerated: workflow flow reads top to bottom
     env: WorkflowEnv[C], plan: OvernightMuxPlan, tun: Live[OvernightMuxTunables]
 ) -> RunSummary:
     """Measure all participants' T1, then all participants' zero-detune Echo.
@@ -204,6 +209,7 @@ async def overnight_mux[C](
     overnight. Trends retain scalars only and are not automatically saved.
     """
     summary = SummaryAccumulator(plan.outer_rounds)
+    stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
     last_actual_start: datetime | None = None
     trend_points: tuple[OvernightMuxPoint, ...] = ()
     for round_index, iteration in zip(
@@ -234,16 +240,17 @@ async def overnight_mux[C](
                 continue
             actual = datetime.now(UTC)
             point_record.actual_start = actual
-            t1_stop = tun.current.sweep_factor * tun.current.t1_guess_us
+            current = tun.current
+            t1_stop = current.sweep_factor * current.t1_guess_us
             t1_cfg = MuxT1Cfg(
-                uniform=tun.current.uniform,
-                reps=tun.current.reps,
-                rounds=tun.current.rounds,
-                acquire_retry=tun.current.t1_acquire_retry,
-                earlystop_snr=tun.current.t1_earlystop_snr,
+                uniform=current.uniform,
+                reps=current.reps,
+                rounds=current.rounds,
+                acquire_retry=current.t1_acquire_retry,
+                earlystop_snr=current.t1_earlystop_snr,
                 relax_delay=max(
-                    tun.current.relax_min_us,
-                    tun.current.relax_factor * tun.current.t1_guess_us,
+                    current.relax_min_us,
+                    current.relax_factor * current.t1_guess_us,
                 ),
                 reset=plan.reset,
                 readout=plan.readout,
@@ -256,26 +263,44 @@ async def overnight_mux[C](
                     step=t1_stop / (plan.points - 1),
                 ),
             )
-            t1_record = await iteration.run(MuxT1Exp().run, t1_cfg, name="Mux T1")
-            summary.observe(t1_record)
-            record_t1(iteration, t1_record, point_record, plan, tun.current, env.plots)
+            t1 = await run_mux_t1_stage(
+                iteration,
+                stage_env,
+                t1_cfg,
+                FitSettings(
+                    max_rel_err=current.max_rel_err,
+                    max_fit_residual=current.max_fit_residual,
+                    min_lifetime_points=current.min_lifetime_points,
+                    max_model_window_factor=current.max_model_window_factor,
+                ),
+            )
+            point_record.t1_file = t1.file
+            qubits = dict(zip(plan.participants, point_record.qubits, strict=True))
+            for fit in t1.qubits:
+                qubit = qubits[fit.index]
+                qubit.t1_status = fit.status
+                qubit.t1_us = fit.lifetime_us
+                qubit.t1_error_us = fit.error_us
+                qubit.t1_reason = fit.reason
+                qubit.t1_models = fit.models
             if iteration.cancelled:
                 point_record.status = "skipped"
                 continue
+            current = tun.current
             point_record.echo_relax_delay_us, point_record.echo_t1_source = (
                 echo_relaxation(
                     (q.t1_us for q in point_record.qubits),
-                    t1_guess_us=tun.current.t1_guess_us,
-                    relax_factor=tun.current.relax_factor,
-                    relax_min_us=tun.current.relax_min_us,
+                    t1_guess_us=current.t1_guess_us,
+                    relax_factor=current.relax_factor,
+                    relax_min_us=current.relax_min_us,
                 )
             )
-            t2_stop = tun.current.sweep_factor * tun.current.t2_guess_us
+            t2_stop = current.sweep_factor * current.t2_guess_us
             t2_cfg = MuxT2EchoCfg(
-                reps=tun.current.reps,
-                rounds=tun.current.rounds,
-                acquire_retry=tun.current.t2_acquire_retry,
-                earlystop_snr=tun.current.t2_earlystop_snr,
+                reps=current.reps,
+                rounds=current.rounds,
+                acquire_retry=current.t2_acquire_retry,
+                earlystop_snr=current.t2_earlystop_snr,
                 relax_delay=point_record.echo_relax_delay_us,
                 reset=plan.reset,
                 readout=plan.readout,
@@ -293,11 +318,25 @@ async def overnight_mux[C](
                     step=t2_stop / (plan.points - 1),
                 ),
             )
-            t2_record = await iteration.run(MuxT2EchoExp().run, t2_cfg, name="Mux Echo")
-            summary.observe(t2_record)
-            record_echo(
-                iteration, t2_record, point_record, plan, tun.current, env.plots
+            echo = await run_mux_echo_stage(
+                iteration,
+                stage_env,
+                t2_cfg,
+                FitSettings(
+                    max_rel_err=current.max_rel_err,
+                    max_fit_residual=current.max_fit_residual,
+                    min_lifetime_points=current.min_lifetime_points,
+                    max_model_window_factor=current.max_model_window_factor,
+                ),
             )
+            point_record.t2_file = echo.file
+            for fit in echo.qubits:
+                qubit = qubits[fit.index]
+                qubit.t2_status = fit.status
+                qubit.t2_us = fit.lifetime_us
+                qubit.t2_error_us = fit.error_us
+                qubit.t2_reason = fit.reason
+                qubit.t2_models = fit.models
             point_record.status = "skipped" if iteration.cancelled else "completed"
             last_actual_start = actual
             trend_points += (point_record,)

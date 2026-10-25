@@ -76,6 +76,11 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 Coherence 用 t1、t2ramsey、t2echo 三個欄位保存 lifetime，不再使用 measurements 列表。未量測或未到達的欄位為 None，讀取端不提供舊列表格式轉換。
 Coherence 的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
 校準遇到 unexpected exception 時不回傳 aggregate。Run 失敗，point 只保留主迴圈已填的欄位；已存的 native raw 仍在磁碟。Expected failed/rejected 正常回傳，不受影響。
+Overnight 的 `run_t1_stage`／`run_echo_stage` 接固定 native cfg 與本 stage 的 fit settings，分別回傳 frozen `T1Result`／`EchoResult`。它不共用 Coherence 的逐點校準 pulse stage。
+Overnight_mux 的 `run_mux_t1_stage`／`run_mux_echo_stage` 各執行一次 mux 量測並逐 participant 分析，回傳 `MuxT1StageResult`／`MuxEchoStageResult`。每個 fit 保留原始 tone index，不把 participant 順序當作 tone index。
+這兩個 workflow 的主迴圈讀 `tun.current`，在呼叫 stage 前捕捉 fit settings。`StageEnv` 只傳 plots、snapshot 與 summary。Stage 不修改 point record 或 history；主迴圈填結果、判斷取消、計算 Echo relax，再 commit 與追加 samples。
+T1／Echo 結果的拒絕原因列出未通過的 `Gate`，保留原接受門檻。Point record 仍使用原有的 status、reason、scalar、models 與 raw 檔名欄位，不加入 gates 欄位。
+Stage 遇到 unexpected exception 不回傳部分結果，point 只保留主迴圈已填欄位。已存 raw 留在磁碟；partial acquisition 則照常回傳 rejected/stopped 與 raw 檔名。
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
 在 helper 裡則用 return 退出目前點，不用主 workflow 的 return 結束整個 run。

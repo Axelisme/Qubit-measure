@@ -376,8 +376,9 @@ source_modules =
     zcu_lab.workflows.mist_fluxdep.workflow
     zcu_lab.workflows.overnight.workflow
     zcu_lab.workflows.overnight.analysis
+    zcu_lab.workflows.overnight.stages
     zcu_lab.workflows.overnight_mux.workflow
-    zcu_lab.workflows.overnight_mux.analysis
+    zcu_lab.workflows.overnight_mux.stages
     zcu_lab.workflows.coherence_fluxdep.t1
     zcu_lab.workflows.coherence_fluxdep.t2
 forbidden_modules =
