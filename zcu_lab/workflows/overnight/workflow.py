@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Literal
@@ -31,9 +32,12 @@ from zcu_lab.workflows.common.analysis import (
     compare_decay_fit,
     lifetime_rejection,
 )
+from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
+from zcu_lab.workflows.common.summary_points import overnight_summary_point
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
@@ -165,10 +169,18 @@ class OvernightPoint(BaseModel):
     scheduled_start: datetime
     actual_start: datetime | None = None
     flux: float
+    t1_status: StageStatus = Field(
+        default="skipped",
+        description="Accepted, rejected, failed, or skipped until attempted",
+    )
     t1_us: float | None = None
     t1_error_us: float | None = None
     t1_reason: str | None = None
     t1_models: tuple[LifetimeModelRecord, ...] = ()
+    t2_status: StageStatus = Field(
+        default="skipped",
+        description="Accepted, rejected, failed, or skipped until attempted",
+    )
     t2_us: float | None = None
     t2_error_us: float | None = None
     t2_reason: str | None = None
@@ -211,42 +223,64 @@ def _summary(
     return fit.lifetime_us, fit.error_us, None
 
 
+@dataclass(frozen=True)
+class OvernightStageInputs:
+    """Historical save identity, live lifetime gates and run-local reporting."""
+
+    snapshot: RunSnapshot
+    tun: Live[OvernightTunables]
+    summary: SummaryAccumulator
+
+
 async def run_t1_stage(
     iteration: Scope,
     cfg: T1Cfg,
     point_record: OvernightPoint,
     *,
-    snapshot: RunSnapshot,
-    tun: Live[OvernightTunables],
+    inputs: OvernightStageInputs,
     plots: Plots,
 ) -> bool:
     """Save T1 before fitting and retain its summary on point cancellation."""
     t1_record = await iteration.run(T1Exp().run, cfg, name="T1")
+    inputs.summary.observe(t1_record)
     if not isinstance(t1_record, Failed):
         save_native(
             t1_record,
             iteration.dir / "t1.h5",
             spec=T1Exp.AXES_SPEC,
-            snapshot=snapshot,
+            snapshot=inputs.snapshot,
             identity=iteration.identity,
         )
         point_record.t1_file = "t1.h5"
     if isinstance(t1_record, Failed):
-        summary = (None, None, t1_record.reason)
+        point_record.t1_status = "failed"
+        member_summary = (None, None, t1_record.reason)
     elif t1_record.partial_result:
-        summary = (None, None, "stopped")
+        point_record.t1_status = "rejected"
+        member_summary = (None, None, "stopped")
     else:
         fit = analyze_t1(t1_record.value.result)
         if not isinstance(fit, Failed):
             comparison = compare_decay_fit(
-                fit, t1=True, max_window_factor=tun.current.max_model_window_factor
+                fit,
+                t1=True,
+                max_window_factor=inputs.tun.current.max_model_window_factor,
             )
             point_record.t1_models = comparison.records
             show_lifetime_comparison(
                 plots, "t1-models", fit.times, fit.observed, comparison
             )
-        summary = _summary(fit, tun.current, "T1")
-    point_record.t1_us, point_record.t1_error_us, point_record.t1_reason = summary
+        member_summary = _summary(fit, inputs.tun.current, "T1")
+        point_record.t1_status = (
+            "failed"
+            if isinstance(fit, Failed)
+            else "accepted"
+            if member_summary[0] is not None
+            else "rejected"
+        )
+    point_record.t1_us, point_record.t1_error_us, point_record.t1_reason = (
+        member_summary
+    )
     if iteration.cancelled:
         point_record.status = "skipped"
     return iteration.cancelled
@@ -257,37 +291,50 @@ async def run_echo_stage(
     cfg: T2EchoCfg,
     point_record: OvernightPoint,
     *,
-    snapshot: RunSnapshot,
-    tun: Live[OvernightTunables],
+    inputs: OvernightStageInputs,
     plots: Plots,
 ) -> bool:
     """Save T2 Echo before fitting and retain its summary on point cancellation."""
     t2_record = await iteration.run(T2EchoExp().run, cfg, name="Echo")
+    inputs.summary.observe(t2_record)
     if not isinstance(t2_record, Failed):
         save_native(
             t2_record,
             iteration.dir / "t2echo.h5",
             spec=T2EchoExp.AXES_SPEC,
-            snapshot=snapshot,
+            snapshot=inputs.snapshot,
             identity=iteration.identity,
         )
         point_record.t2_file = "t2echo.h5"
     if isinstance(t2_record, Failed):
-        summary = (None, None, t2_record.reason)
+        point_record.t2_status = "failed"
+        member_summary = (None, None, t2_record.reason)
     elif t2_record.partial_result:
-        summary = (None, None, "stopped")
+        point_record.t2_status = "rejected"
+        member_summary = (None, None, "stopped")
     else:
         fit = analyze_t2echo(t2_record.value.result)
         if not isinstance(fit, Failed):
             comparison = compare_decay_fit(
-                fit, t1=False, max_window_factor=tun.current.max_model_window_factor
+                fit,
+                t1=False,
+                max_window_factor=inputs.tun.current.max_model_window_factor,
             )
             point_record.t2_models = comparison.records
             show_lifetime_comparison(
                 plots, "t2echo-models", fit.times, fit.observed, comparison
             )
-        summary = _summary(fit, tun.current, "T2 Echo")
-    point_record.t2_us, point_record.t2_error_us, point_record.t2_reason = summary
+        member_summary = _summary(fit, inputs.tun.current, "T2 Echo")
+        point_record.t2_status = (
+            "failed"
+            if isinstance(fit, Failed)
+            else "accepted"
+            if member_summary[0] is not None
+            else "rejected"
+        )
+    point_record.t2_us, point_record.t2_error_us, point_record.t2_reason = (
+        member_summary
+    )
     if iteration.cancelled:
         point_record.status = "skipped"
     return iteration.cancelled
@@ -298,7 +345,7 @@ async def overnight[C](
     env: WorkflowEnv[C],
     plan: OvernightPlan,
     tun: Live[OvernightTunables],
-) -> None:
+) -> RunSummary:
     """Acquire T1 then zero-detune Echo at fixed flux, committing complete pairs.
 
     Echo relax uses this round's accepted T1, or t1_guess_us if unavailable,
@@ -320,6 +367,10 @@ async def overnight[C](
     """
     _ = env.soc
     _ = env.devices
+    summary = SummaryAccumulator(plan.outer_rounds, plan.flux_unit)
+    inputs = OvernightStageInputs(plan.snapshot, tun, summary)
+    qubit_role = plan.snapshot.roles.get("qubit")
+    qubit_name = qubit_role if isinstance(qubit_role, str) else None
     last_actual_start: datetime | None = None
     trend_points: tuple[OvernightPoint, ...] = ()
     for round_index, iteration in zip(
@@ -378,8 +429,7 @@ async def overnight[C](
                 iteration,
                 t1_cfg,
                 point_record,
-                snapshot=plan.snapshot,
-                tun=tun,
+                inputs=inputs,
                 plots=env.plots,
             ):
                 continue
@@ -413,8 +463,7 @@ async def overnight[C](
                 iteration,
                 t2_cfg,
                 point_record,
-                snapshot=plan.snapshot,
-                tun=tun,
+                inputs=inputs,
                 plots=env.plots,
             )
             point_record.status = "skipped" if iteration.cancelled else "completed"
@@ -425,6 +474,8 @@ async def overnight[C](
             )
         finally:
             iteration.commit(point_record)
+            summary.points.append(overnight_summary_point(point_record, qubit_name))
     env.pbar("overnight rounds", total=plan.outer_rounds).set_progress(
         plan.outer_rounds
     )
+    return summary.finish()

@@ -25,6 +25,7 @@ from zcu_lab.workflows.common.calibration_analysis import (
 from zcu_lab.workflows.common.calibration_results import FrequencyScan
 from zcu_lab.workflows.common.frequency_tracking import FrequencyTracker, trusted_curve
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import observe_operation
 
 if TYPE_CHECKING:
     from zcu_lab.workflows.common.calibration import (
@@ -113,6 +114,7 @@ async def measure_frequency_scan(
     No history, predictor or linewidth feedback changes here.
     """
     outcome = await scope.run(FreqExp().run, cfg, name="frequency")
+    observe_operation(inputs.summary, outcome)
     if isinstance(outcome, Failed):
         return replace(scan, file=None), outcome
     if scan.file is None:
