@@ -18,7 +18,8 @@
 ## 撰寫 async workflow
 
 以 `@workflow(name, description)` 宣告一個
-`async def (env: WorkflowEnv[C], plan: Plan, tun: Live[Tunables]) -> None`。
+`async def (env: WorkflowEnv[C], plan: Plan, tun: Live[Tunables]) -> RunSummary`。
+四個內建 workflow 正常結束時都 return `common.summary.RunSummary`，由框架寫入 metadata root 的 `summary.json`。
 Plan 是 frozen、extra-forbid 的 Pydantic model。Tunables 是 extra-forbid model。
 每次 `tun.current` 取得目前已接受的完整 model。需要子 model 時直接讀
 `tun.current.t1` 或 `tun.current.cal`，再傳給該段 helper。
@@ -115,6 +116,25 @@ NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其�
 
 要回到過去某點，開新 run 並切 plan 範圍。History 初值用 `saved_run.read_records`
 從上一個 run 讀回，再在作者函式中初始化。框架不提供步驟回退或自動回灌 history。
+
+## Run 摘要
+
+`summary.json` 是框架 encoded record 信封，`value` 是 workflow return 的摘要。
+摘要包含各 stage 的 accepted／rejected／skipped／failed 次數、拒絕與跳過原因分布，以及可取得的平均／最大耗時（秒）。
+它也記錄計畫、已提交、完成與跳過點數、已提交 flux setpoints 的範圍與單位、physical recovery 嘗試數、early stop 與 acquire attempts > 1 的 acquisition 次數。
+完成點是 `status=completed`，即使某些 stage 被拒絕或失敗也計入。關閉的 stage 不計數。
+Overnight 與 overnight_mux 另列每個 qubit 的 T1／Echo 接受數、平均與母體標準差（µs）。
+單筆接受值的標準差是 0，沒有接受值時省略平均與標準差。單 qubit 名稱來自 snapshot 的 qubit role，未知時是 null，不從 channel 猜名稱。
+
+耗時先加總每點同 stage 的 delivered Completed operations，再算平均與最大。
+MIST both 的兩種 preparation 共用 MIST 耗時；mux 不依 participant 數重複計時。
+Failed 沒有可交付 facts，Pause 丟棄的 attempts 也不交給作者，因此它們不計入耗時或 acquisition 統計。
+沒有可用時間時省略 duration 欄位。完整的 attempt 事實仍保存在 point 信封與 journal。
+
+Stop 或錯誤中止時 workflow 沒有 return，框架不產生摘要，即使 finally 已提交部分 point。
+`workflow_records`／RPC 只回傳 commits，不含摘要。離線用 `saved_run.read_summary(metadata_root)` 讀取，或直接讀 `<metadata_root>/summary.json`。
+Data root 的 point `record.json` 與 metadata root 的 run 摘要是不同檔案，不能互相替代。
+詳細計數與狀態契約見 [definitions](definitions.md#run-摘要)。
 
 ## Async await guardrail
 

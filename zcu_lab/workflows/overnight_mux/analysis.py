@@ -68,6 +68,7 @@ def record_t1(
     """
     if isinstance(record, Failed):
         for qubit in point.qubits:
+            qubit.t1_status = "failed"
             qubit.t1_reason = record.reason
         return
     save_native(
@@ -80,6 +81,7 @@ def record_t1(
     point.t1_file = "t1.h5"
     if record.partial_result:
         for qubit in point.qubits:
+            qubit.t1_status = "rejected"
             qubit.t1_reason = "stopped"
         return
     # Native analyzers create fit_i figures afresh; keep them out of the trend
@@ -99,6 +101,7 @@ def record_t1(
     for row, fit in enumerate(fits):
         qubit = qubits[fit.index]
         if isinstance(fit, MuxFitFailure):
+            qubit.t1_status = "failed"
             qubit.t1_reason = fit.reason
         else:
             qubit.t1_models = (
@@ -117,6 +120,7 @@ def record_t1(
                     np.isfinite(record.value.result.signals[row])
                 ],
             )
+            qubit.t1_status = "accepted" if qubit.t1_us is not None else "rejected"
 
 
 def record_echo(
@@ -135,6 +139,7 @@ def record_echo(
     """
     if isinstance(record, Failed):
         for qubit in point.qubits:
+            qubit.t2_status = "failed"
             qubit.t2_reason = record.reason
         return
     save_native(
@@ -147,6 +152,7 @@ def record_echo(
     point.t2_file = "t2echo.h5"
     if record.partial_result:
         for qubit in point.qubits:
+            qubit.t2_status = "rejected"
             qubit.t2_reason = "stopped"
         return
     fit_plots = plots.fork()
@@ -164,6 +170,7 @@ def record_echo(
     for row, fit in enumerate(fits):
         qubit = qubits[fit.index]
         if isinstance(fit, MuxFitFailure):
+            qubit.t2_status = "failed"
             qubit.t2_reason = fit.reason
         else:
             qubit.t2_models = (
@@ -179,3 +186,4 @@ def record_echo(
                     np.isfinite(record.value.result.signals[row, 1:])
                 ],
             )
+            qubit.t2_status = "accepted" if qubit.t2_us is not None else "rejected"

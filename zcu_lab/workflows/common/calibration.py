@@ -76,6 +76,7 @@ from zcu_lab.workflows.common.rabi_feedback import RabiDriveFeedback
 from zcu_lab.workflows.common.rabi_measurement import measure_planned_rabi
 from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import SummaryAccumulator, observe_operation
 
 
 class CalibrationTunables(FrequencyTunables):
@@ -318,7 +319,8 @@ class CalibrationInputs:
     snapshot is the fixed historical entry/point/role state used by all three
     native saves, not a live source. directory is the allocated commit directory.
     Coherence and MIST reuse fixed modules/snapshot/directory across stages,
-    replacing tun from tun.current.cal before each stage. A stage does not
+    replacing tun from tun.current.cal before each stage. summary optionally
+    collects delivered operation facts for the normal-return report. A stage does not
     recapture sources or refresh its own policy during acquisition.
     flux/flux_unit label the current point's history rows in device coordinates.
     """
@@ -332,6 +334,7 @@ class CalibrationInputs:
     point_index: int
     flux: float
     flux_unit: str
+    summary: SummaryAccumulator | None = None
 
 
 def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
@@ -647,6 +650,7 @@ async def calibrate_rabi(
         ),
     )
     outcome = await scope.run(measure_planned_rabi, cfg, name="Rabi")
+    observe_operation(inputs.summary, outcome)
     diagnostics = RabiResult(
         "failed",
         None,
@@ -857,6 +861,7 @@ async def calibrate_readout(
         ),
     )
     outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
+    observe_operation(inputs.summary, outcome)
     if isinstance(outcome, Failed):
         return ReadoutResult("failed", outcome.reason, None, None, None)
     # Save the landscape and choose its best point meeting the SNR threshold.

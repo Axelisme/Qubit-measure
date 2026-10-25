@@ -12,7 +12,10 @@ from zcu_tools.program.v2.modules import MuxReadoutCfg, PulseCfg
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg, MuxT2EchoExp
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
+from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.relaxation import echo_relaxation
+from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
+from zcu_lab.workflows.common.summary_points import mux_summary_point
 from zcu_lab.workflows.overnight_mux.analysis import record_echo, record_t1
 from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
 
@@ -131,10 +134,18 @@ class OvernightMuxQubit(BaseModel):
     """
 
     name: str
+    t1_status: StageStatus = Field(
+        default="skipped",
+        description="Accepted, rejected, failed, or skipped until attempted",
+    )
     t1_us: float | None = None
     t1_error_us: float | None = None
     t1_reason: str | None = None
     t1_models: tuple[LifetimeModelRecord, ...] = ()
+    t2_status: StageStatus = Field(
+        default="skipped",
+        description="Accepted, rejected, failed, or skipped until attempted",
+    )
     t2_us: float | None = None
     t2_error_us: float | None = None
     t2_reason: str | None = None
@@ -169,7 +180,7 @@ class OvernightMuxPoint(BaseModel):
 @workflow("overnight_mux", "Monitor simultaneous mux T1 and Hahn-echo pairs.")
 async def overnight_mux[C](
     env: WorkflowEnv[C], plan: OvernightMuxPlan, tun: Live[OvernightMuxTunables]
-) -> None:
+) -> RunSummary:
     """Measure all participants' T1, then all participants' zero-detune Echo.
 
     Averaging, T1 sampling and acceptance follow overnight. Enter the longest
@@ -184,6 +195,7 @@ async def overnight_mux[C](
     follow max(now, previous completed pair's actual start + interval), matching
     overnight. Trends retain scalars only and are not automatically saved.
     """
+    summary = SummaryAccumulator(plan.outer_rounds)
     last_actual_start: datetime | None = None
     trend_points: tuple[OvernightMuxPoint, ...] = ()
     for round_index, iteration in zip(
@@ -237,6 +249,7 @@ async def overnight_mux[C](
                 ),
             )
             t1_record = await iteration.run(MuxT1Exp().run, t1_cfg, name="Mux T1")
+            summary.observe(t1_record)
             record_t1(iteration, t1_record, point_record, plan, tun.current, env.plots)
             if iteration.cancelled:
                 point_record.status = "skipped"
@@ -273,6 +286,7 @@ async def overnight_mux[C](
                 ),
             )
             t2_record = await iteration.run(MuxT2EchoExp().run, t2_cfg, name="Mux Echo")
+            summary.observe(t2_record)
             record_echo(
                 iteration, t2_record, point_record, plan, tun.current, env.plots
             )
@@ -284,6 +298,8 @@ async def overnight_mux[C](
             )
         finally:
             iteration.commit(point_record)
+            summary.points.append(mux_summary_point(point_record))
     env.pbar("overnight mux rounds", total=plan.outer_rounds).set_progress(
         plan.outer_rounds
     )
+    return summary.finish()
