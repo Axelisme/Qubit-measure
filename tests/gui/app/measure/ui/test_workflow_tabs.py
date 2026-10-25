@@ -287,6 +287,14 @@ def test_workflow_pane_shows_single_active_leaf_once(workflow_window, tmp_path):
     _open(driver, tmp_path / "scope-01-open.png")
     driver.click("Start")
     qt_until(lambda: _status(driver, "running"), label="workflow accepted")
+    # The operation scope is published after the lifecycle turns running.
+    qt_until(
+        lambda: (
+            driver.observe(object_name="workflow.active_path").text
+            == "workflow:synthetic/operation#1"
+        ),
+        label="operation scope published",
+    )
     _shot(driver, tmp_path, "scope-02-running")
     active = driver.observe(object_name="workflow.active_path")
     leaves = driver.observe(object_name="workflow.live_paths")
