@@ -39,7 +39,7 @@ client = [
   "numba",
   "psutil",
   "scikit-optimize",
-  "qick @ git+https://github.com/openquantumhardware/qick.git@ba47c4425e105558b8c40afb615398485d264ac4",
+  "qick==0.2.436",
   "pyyaml",
   "pyvisa",
   "pyro4",

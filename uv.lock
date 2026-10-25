@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and platform_machine == 'x86_64' and sys_platform == 'linux'",
@@ -1860,12 +1860,16 @@ wheels = [
 
 [[package]]
 name = "qick"
-version = "0.2.418"
-source = { git = "https://github.com/openquantumhardware/qick.git?rev=ba47c4425e105558b8c40afb615398485d264ac4#ba47c4425e105558b8c40afb615398485d264ac4" }
+version = "0.2.436"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
     { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/e8/813b3079a1493076055db53233f7bfdcfd8bd9d6d60dac35a1e1733cbf9d/qick-0.2.436.tar.gz", hash = "sha256:984dd0486d01087f6a6b87deece652a292b5b53e5b0b607bc172caa090d29428", size = 17342569, upload-time = "2026-10-09T20:19:56.296Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/d1/7d88680f508fb7f419a7b4ebb48c6820807f601f271994b57b369208dccb/qick-0.2.436-py3-none-any.whl", hash = "sha256:7d5980d8330c8527c08ef953d5a88c3f0024a069c922ace23247c582235f52f5", size = 17880427, upload-time = "2026-10-09T20:19:52.814Z" },
 ]
 
 [[package]]
@@ -2693,7 +2697,7 @@ requires-dist = [
     { name = "pyvisa", marker = "extra == 'client'" },
     { name = "pywavelets", marker = "extra == 'client'" },
     { name = "pyyaml", marker = "extra == 'client'" },
-    { name = "qick", marker = "extra == 'client'", git = "https://github.com/openquantumhardware/qick.git?rev=ba47c4425e105558b8c40afb615398485d264ac4" },
+    { name = "qick", marker = "extra == 'client'", specifier = "==0.2.436" },
     { name = "qtpy", marker = "extra == 'gui'" },
     { name = "quantum-metal", extras = ["gui", "ansys"], marker = "python_full_version < '3.13' and extra == 'design'", git = "https://github.com/qiskit-community/qiskit-metal.git" },
     { name = "ruamel-yaml", specifier = ">=0.18,<0.19" },

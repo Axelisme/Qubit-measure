@@ -32,6 +32,9 @@ class AcquisitionFacts:
     data condition ended the final attempt before requested_rounds. stop_value
     is its finite scalar with caller-defined meaning and units. None means no
     early stop, an unavailable value, or a nonfinite observation.
+    retry_reasons lists actual retries in order: "shot_overrun" for transport
+    excess shots, otherwise the producer exception's class name. Empty means
+    no retry; the final failure is not a retry reason.
     """
 
     requested_rounds: int
@@ -39,3 +42,4 @@ class AcquisitionFacts:
     attempts: int
     early_stopped: bool
     stop_value: float | None = None
+    retry_reasons: tuple[str, ...] = ()

@@ -125,6 +125,7 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict[str, object]:
         "gens": [_gen(d, i) for i, d in enumerate(dac_names)],
         "readouts": [_readout(a, i) for i, a in enumerate(adc_names)],
         "rf": {
+            "dac_power": "VOP",
             "dacs": {
                 d: {
                     "fs": _GEN_FS,

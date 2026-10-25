@@ -152,6 +152,7 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `Schedule.outcome.acquisitions` 按完成順序列出每次 program acquisition 的 `AcquisitionFacts`。
   `requested_rounds` 是傳給 producer 的 rounds，`completed_rounds` 是最後一次 attempt 的已完成 round hook 數，不累加失敗 retry 的資料。
   `attempts` 是實際 producer 呼叫次數，包含失敗；停止使 producer 未被呼叫時為零。
+  `retry_reasons` 按實際重試順序記錄原因，shot 超量為 `shot_overrun`，其他錯誤為 exception class name；最後一次失敗沒有重試時不追加原因。
   `early_stopped` 只在 data condition 讓最後一次 attempt 在設定 rounds 前正常結束時為 True，external stop、failure 與最後一輪才命中都不是 early stop。
   `stop_value` 保留條件命中時的有限 scalar，單位與意義由 caller 定義。沒有提前停止、條件沒提供數值或數值非有限時為 None。
   布林 condition 仍可使用。需要保留數值時，condition 回 `StopDecision(met=True, value=...)`，型別由 `experiment.acquisition_facts` 匯入。
@@ -173,6 +174,7 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
+- Shot 超量（`AcquisitionContractError`）的重試上限是 `max(options.retry, 1)`，預設也會重量一次。每次從第一 round 重跑，producer 重建 raw buffers；超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
   Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
   stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
