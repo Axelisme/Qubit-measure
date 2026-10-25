@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
@@ -23,20 +21,22 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
 from zcu_lab.workflows.common.analysis import fit_or_failed, validate_fit_trace
 from zcu_lab.workflows.common.calibration_plots import (
     CalibrationTrace,
-    draw_rabi,
-    retain_trace,
 )
 from zcu_lab.workflows.common.calibration_results import (
     AmpCalibrationResult,
     RabiResult,
 )
+from zcu_lab.workflows.common.calibration_stage_types import (
+    CalibrationPulses,
+    RabiGuess,
+    RabiStageResult,
+)
+from zcu_lab.workflows.common.calibration_tunables import CalibrationTunables
 from zcu_lab.workflows.common.frequency_tracking import trusted_curve
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import observe_operation
-
-if TYPE_CHECKING:
-    from zcu_lab.workflows.common.calibration import CalCarry, CalibrationInputs
 
 
 @dataclass(frozen=True)
@@ -82,8 +82,7 @@ def analyze_amp_rabi(result: AmpRabiResult) -> AmpFit | Failed:
     )
 
 
-def _accepted(fit: AmpFit, stop: float, inputs: CalibrationInputs) -> bool:
-    tun = inputs.tun
+def _accepted(fit: AmpFit, stop: float, tun: CalibrationTunables) -> bool:
     residual = fit.quality.normalized_residual_rms
     return (
         math.isfinite(fit.pi_gain)
@@ -99,13 +98,13 @@ def _accepted(fit: AmpFit, stop: float, inputs: CalibrationInputs) -> bool:
 
 async def calibrate_amp_rabi(
     scope: Scope,
+    env: StageEnv,
+    pulses: CalibrationPulses,
+    settings: CalibrationTunables,
     *,
-    plots: Plots,
-    inputs: CalibrationInputs,
-    carry: CalCarry,
+    guess: RabiGuess,
     rabi: RabiResult,
-    t1_estimate_us: float,
-) -> RabiResult:
+) -> RabiStageResult:
     """Sweep gain at rabi.pi_length_us, preserving its current accepted frequency.
 
     Caller supplies an accepted length (Len fit or amp-only target). len_then_amp
@@ -117,28 +116,24 @@ async def calibrate_amp_rabi(
     """
     if rabi.frequency_mhz is None or rabi.pi_length_us is None:
         raise ValueError("AmpRabi requires current frequency and fixed pulse length")
-    tun = inputs.tun
-    prior = carry.seed if carry.last is None else carry.last
-    drive = inputs.qub_pulse.model_copy(deep=True)
+    tun = settings
+    drive = pulses.qub.model_copy(deep=True)
     drive.set_param("freq", rabi.frequency_mhz)
     drive.set_param("length", rabi.pi_length_us)
     length = float(drive.waveform.length)
-    ro = inputs.readout.model_copy(deep=True)
-    ro.set_param("freq", prior.readout_freq_mhz)
+    ro = pulses.readout.model_copy(deep=True)
     gain_clamped: list[GainClamp] = []
-    ro.set_param(
-        "gain", clamp_gain(prior.readout_gain, "readout", gain_clamped, lower=0.0)
-    )
+    ro.set_param("gain", clamp_gain(float(ro.gain), "readout", gain_clamped, lower=0.0))
     start = 0.0
     if tun.rabi_mode == "len_then_amp":
         if rabi.drive_gain is None:
             raise ValueError("AmpRabi after Len requires its acquisition gain")
         stop = 2.5 * rabi.drive_gain
-    elif carry.last_amp_gain is None:
+    elif guess.last_amp_gain is None:
         stop = tun.amp_gain_max
     else:
-        start = carry.last_amp_gain - tun.amp_gain_half_width
-        stop = carry.last_amp_gain + tun.amp_gain_half_width
+        start = guess.last_amp_gain - tun.amp_gain_half_width
+        stop = guess.last_amp_gain + tun.amp_gain_half_width
     start = clamp_gain(start, "amp.start", gain_clamped, lower=0.0)
     stop = clamp_gain(
         stop,
@@ -152,7 +147,7 @@ async def calibrate_amp_rabi(
         rounds=tun.rabi_rounds,
         acquire_retry=tun.rabi_acquire_retry,
         earlystop_snr=tun.rabi_earlystop_snr,
-        relax_delay=max(tun.rabi_relax_min_us, tun.rabi_relax_factor * t1_estimate_us)
+        relax_delay=max(tun.rabi_relax_min_us, tun.rabi_relax_factor * guess.relax_us)
         if tun.rabi_relax_mode == "auto"
         else tun.rabi_relax_delay_us,
         qub_pulse=drive,
@@ -165,8 +160,9 @@ async def calibrate_amp_rabi(
         ),
     )
     outcome = await scope.run(AmpRabiExp().run, cfg, name="AmpRabi")
-    observe_operation(inputs.summary, outcome)
+    observe_operation(env.summary, outcome)
     amp = AmpCalibrationResult("failed", None, length, gain_clamped=tuple(gain_clamped))
+    trace = None
     accepted_gain = None
     pi2_gain = None
     if isinstance(outcome, Failed):
@@ -174,16 +170,16 @@ async def calibrate_amp_rabi(
     else:
         save_native(
             outcome,
-            inputs.directory / "amp-rabi.h5",
+            scope.dir / "amp-rabi.h5",
             spec=AmpRabiExp.AXES_SPEC,
-            snapshot=inputs.snapshot,
+            snapshot=env.snapshot,
             identity=scope.identity,
         )
         amp = replace(amp, file="amp-rabi.h5")
         if outcome.partial_result:
             amp = replace(amp, status="rejected", reason="stopped")
         else:
-            amp = _analyze_completed(outcome.value.result, amp, inputs, carry, plots)
+            amp, trace = _analyze_completed(outcome.value.result, amp, settings, guess)
     if amp.status == "accepted":
         accepted_gain = (
             None
@@ -196,53 +192,47 @@ async def calibrate_amp_rabi(
             else clamp_gain(amp.pi2_gain, "pi2", gain_clamped, lower=tun.amp_min_gain)
         )
         amp = replace(amp, gain_clamped=tuple(gain_clamped))
-        carry.last_amp_gain = accepted_gain
-        carry.last = replace(
-            prior,
-            f01_mhz=rabi.frequency_mhz,
-            pi_length_us=length,
+    return RabiStageResult(
+        record=replace(
+            rabi,
+            status=amp.status,
+            reason=amp.reason,
+            pi_length_us=length if amp.status == "accepted" else None,
+            pi2_length_us=length if pi2_gain is not None else None,
             drive_gain=accepted_gain,
-        )
-    return replace(
-        rabi,
-        status=amp.status,
-        reason=amp.reason,
-        pi_length_us=length if amp.status == "accepted" else None,
-        pi2_length_us=length if pi2_gain is not None else None,
-        drive_gain=accepted_gain,
-        pi2_drive_gain=pi2_gain,
-        file=rabi.file if tun.rabi_mode == "len_then_amp" else amp.file,
-        amp=amp,
-        len_status=rabi.status if tun.rabi_mode == "len_then_amp" else None,
+            pi2_drive_gain=pi2_gain,
+            file=rabi.file if tun.rabi_mode == "len_then_amp" else amp.file,
+            amp=amp,
+            len_status=rabi.status if tun.rabi_mode == "len_then_amp" else None,
+        ),
+        amp_trace=trace,
     )
 
 
 def _analyze_completed(
     result: AmpRabiResult,
     amp: AmpCalibrationResult,
-    inputs: CalibrationInputs,
-    carry: CalCarry,
-    plots: Plots,
-) -> AmpCalibrationResult:
+    settings: CalibrationTunables,
+    guess: RabiGuess,
+) -> tuple[AmpCalibrationResult, CalibrationTrace]:
     fit = analyze_amp_rabi(result)
     trace = CalibrationTrace(
-        inputs.point_index,
-        inputs.flux,
+        guess.point.index,
+        guess.point.flux,
         result.amps,
         result.signals.real if isinstance(fit, Failed) else fit.observed,
     )
-    retain_trace(carry.amp_traces, trace)
     if isinstance(fit, Failed):
         amp = replace(amp, reason=fit.reason)
     else:
-        accepted = _accepted(fit, float(np.max(result.amps)), inputs)
+        accepted = _accepted(fit, float(np.max(result.amps)), settings)
         pi2 = (
             fit.pi2_gain
             if (
                 accepted
                 and amp.length_us >= 0.03
                 and math.isfinite(fit.pi2_gain)
-                and inputs.tun.amp_min_gain <= fit.pi2_gain <= 1.0
+                and settings.amp_min_gain <= fit.pi2_gain <= 1.0
             )
             else None
         )
@@ -254,14 +244,7 @@ def _analyze_completed(
             pi_gain_error=fit.error,
             pi2_gain=pi2,
         )
-        carry.amp_traces[-1] = replace(
+        trace = replace(
             trace, fitted=fit.fitted, accepted=fit.pi_gain if accepted else None
         )
-    draw_rabi(
-        plots,
-        carry.amp_traces,
-        flux_unit=inputs.flux_unit,
-        directory=inputs.directory,
-        coordinate="gain",
-    )
-    return amp
+    return amp, trace

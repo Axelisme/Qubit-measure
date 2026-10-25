@@ -105,9 +105,9 @@ Coherence 固定 plan flags，按 T1、Ramsey、Echo 量 enabled 項目。三份
 
 2026-10-25 使用者選擇 point record 的獨立欄位形狀。目前沒有真實量測資料，不保留舊 measurements 格式的相容讀取；generic saved_run 只依 caller 指定的 model 讀取。
 
-同日使用者同意保留校準複合 stage，函式體依序呼叫單實驗 helper。Coherence 的 calibrate_point 依序呼叫 frequency、Rabi（含所選 AmpRabi）與 readout，再回傳 PointCalibrationResult，由主迴圈填 point。Expected failed/rejected 正常回傳；unexpected exception 不回傳 aggregate，point 只保留主迴圈已填的欄位，已存 native raw 保留在磁碟。例如 frequency 成功後 Rabi 內部 bug，point 沒有 frequency 結果，但 frequency h5 仍在。
+同日使用者同意保留校準複合 stage，函式體依序呼叫單實驗 helper。Coherence 與 MIST 共用的 calibrate_point 依序呼叫 frequency、Rabi（含所選 AmpRabi）與 readout，再回傳 PointCalibrationResult，由主迴圈填 point。Expected failed/rejected 正常回傳；unexpected exception 不回傳 aggregate，point 只保留主迴圈已填的欄位，已存 native raw 保留在磁碟。例如 frequency 成功後 Rabi 內部 bug，point 沒有 frequency 結果，但 frequency h5 仍在。
 
-校準與具體 lifetime policy 留在 zcu_lab.workflows。共用 CalibrationInputs 服務 Coherence 與 MIST 的三個 native stage，readout_due 讓兩個 caller 共用零基 flux index cadence。這些 module 不依賴 frontend，方向由 workflow-science-no-frontends 與 C16 保護。GUI forms/capture、單一 Controller 與 operation 邊界不改；不增加通用 pipeline、registry、export bridge 或 saved input migration。
+校準與具體 lifetime policy 留在 zcu_lab.workflows。共用 CalibrationPulses／StageEnv 服務 Coherence 與 MIST 的三個 native stage，readout_due 讓兩個 caller 共用零基 flux index cadence。這些 module 不依賴 frontend，方向由 workflow-science-no-frontends 與 C16 保護。GUI forms/capture、單一 Controller 與 operation 邊界不改；不增加通用 pipeline、registry、export bridge 或 saved input migration。
 
 ## Overnight live 趨勢與保存責任
 

@@ -10,6 +10,7 @@ import numpy as np
 from zcu_tools.analysis.fitting import detect_peaks
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program.v2.modules import PulseCfg
 
 from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions
 from zcu_lab.v2.twotone.freq.core import (
@@ -36,12 +37,10 @@ from zcu_lab.workflows.common.frequency_diagnostics import (
 )
 from zcu_lab.workflows.common.frequency_tracking import FrequencyTracker, trusted_curve
 from zcu_lab.workflows.common.gain import GainClamp
-from zcu_lab.workflows.common.saving import save_native
-from zcu_lab.workflows.common.summary import observe_operation
+from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 if TYPE_CHECKING:
     from zcu_lab.workflows.common.calibration import (
-        CalibrationInputs,
         CalibrationTunables,
     )
 
@@ -95,7 +94,8 @@ def observe_frequency_linewidth(
 
 
 def frequency_probe_gains(
-    inputs: CalibrationInputs,
+    probe: PulseCfg,
+    tun: CalibrationTunables,
     tracker: FrequencyTracker,
     gain_clamped: list[GainClamp] | None = None,
 ) -> tuple[float, float, float]:
@@ -105,8 +105,7 @@ def frequency_probe_gains(
     capped at half coarse gain. Explicit coarse/fine values override defaults.
     gain_clamped optionally records adaptive requests truncated by the cap.
     """
-    tun = inputs.tun
-    initial = float(inputs.probe_pulse.gain)
+    initial = float(probe.gain)
     adaptive = tracker.probe_gain(initial, tun, gain_clamped=gain_clamped)
     coarse = tun.coarse_gain if tun.coarse_gain is not None else initial
     fine = tun.fine_gain if tun.fine_gain is not None else 0.5 * min(adaptive, coarse)
@@ -115,10 +114,11 @@ def frequency_probe_gains(
 
 async def acquire_frequency_scan(
     scope: Scope,
+    env: StageEnv,
     cfg: FreqCfg,
     *,
     scan: FrequencyScan,
-    inputs: CalibrationInputs,
+    settings: CalibrationTunables,
 ) -> tuple[FrequencyScan, FreqResult | Failed]:
     """Save one Completed scan and detect candidates without selecting or fitting.
 
@@ -126,34 +126,29 @@ async def acquire_frequency_scan(
     failure. Partial acquisition returns Failed("stopped") without detection.
     Preserve raw data before analysis. Do not change history or feedback.
     """
-    outcome = await scope.run(FreqExp().run, cfg, name="frequency")
-    observe_operation(inputs.summary, outcome)
-    if isinstance(outcome, Failed):
-        return replace(
-            scan,
-            file=None,
-            diagnostics=FrequencyDiagnostics(fit_failure=outcome.reason),
-        ), outcome
     if scan.file is None:
         raise ValueError("A scan needs its planned native filename")
-    save_native(
-        outcome,
-        inputs.directory / scan.file,
-        spec=FreqExp.AXES_SPEC,
-        snapshot=inputs.snapshot,
-        identity=scope.identity,
+    outcome = await acquire_saved(
+        scope,
+        env,
+        FreqExp().run,
+        cfg,
+        name="frequency",
+        output=NativeOutput(filename=scan.file, spec=FreqExp.AXES_SPEC),
     )
-    if outcome.partial_result:
+    if outcome.result is None:
         return replace(
-            scan, diagnostics=FrequencyDiagnostics(fit_failure="stopped")
-        ), Failed("stopped")
-    result = outcome.value.result
+            scan,
+            file=outcome.file,
+            diagnostics=FrequencyDiagnostics(fit_failure=outcome.reason),
+        ), Failed(outcome.reason or "Acquisition failed")
+    result = outcome.result
     if not np.all(np.isfinite(result.signals)):
         return replace(
             scan, diagnostics=FrequencyDiagnostics(fit_failure="Nonfinite measured IQ")
         ), Failed("Nonfinite measured IQ")
     observed = qubfreq_signal2real(result.signals)
-    tun = inputs.tun
+    tun = settings
     peaks = tuple(
         detect_peaks(
             result.freqs,

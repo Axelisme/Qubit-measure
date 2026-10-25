@@ -74,7 +74,7 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 逐點量測用 `zip(plan.fluxes, env.iterations())`，變數命名為 `iteration`。
 一趟開始建可變的 Pydantic point_record，未填欄位為 None。每個結果到了再填。
 Coherence 用 t1、t2ramsey、t2echo 三個欄位保存 lifetime，不再使用 measurements 列表。未量測或未到達的欄位為 None，讀取端不提供舊列表格式轉換。
-Coherence 的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
+Coherence 與 MIST 共用的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
 校準遇到 unexpected exception 時不回傳 aggregate。Run 失敗，point 只保留主迴圈已填的欄位；已存的 native raw 仍在磁碟。Expected failed/rejected 正常回傳，不受影響。
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。

@@ -62,13 +62,13 @@ Amp 的 partial raw 先保存，不擬合、不更新 carry。下游只接受本
 `Calibrated.drive_gain` 與 `pi_length_us` 一起定義 π。`CalibratedPi2.pi2_drive_gain` 與 `pi2_length_us` 一起定義 π/2，gain 為 None 時沿用 π gain。
 
 `calibrate_frequency`、`calibrate_rabi`、`calibrate_readout` 可分別用 await 呼叫。
-`CalibrationInputs` 固定 Rabi/pi drive `qub_pulse`、獨立 spectroscopy `probe_pulse`、pulse-backed readout、point_index 與 captured policy。
+`CalibrationPulses` 固定 Rabi/pi drive `qub`、獨立 spectroscopy `probe` 與 pulse-backed readout；各 stage 另收自己的 settings、本點 guess 與 `StageEnv`（plots、snapshot、summary）。
 Coherence 與 MIST 的 plan 分別保存兩個 drive。Frequency cfg 複製 `probe_pulse` 的 waveform/長度，頻率仍由 tracker 掃描設定，gain 從 probe 的 gain 起跑，再依線寬自適應。
 新表單先引用 captured `$qubit.pulses.qub_probe`，沒有則複製 captured x180，設 freq 0 MHz、gain 0.1、長度 5 µs；缺 x180 時保留必填。
 Rabi 與下游仍複製 `qub_pulse`，不受 probe 長度或 gain 影響。Frequency result 的 `probe_gains` 保留每次 attempt 實際用值。
-Helper 收 Scope，需要 workflow 圖時明收 plots: Plots，不另收 env。
+Helper 收 Scope 與 `StageEnv`；frequency 與 Rabi 另明收各自的回饋控制器（tracker、rabi_drive），不收整個 `CalCarry`。
 三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
-Frequency 在接受時立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時更新 pi/pi2。
+Frequency 接受後，calibrate_point 立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時同樣由 calibrate_point 更新 pi/pi2。
 Readout 用本點 accepted π 與其配對頻率，不要求 π/2。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
 Index 0 自然先掃。到期但本點 Rabi 未接受就 skipped，不順延到下一點。失敗／拒絕不增加掃描，也不改下一個 due index。
 Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
@@ -119,7 +119,7 @@ Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
 Carry 與 lifetime history 是 async 函式的區域變數。每點先建可變 point_record，欄位尚未取得時為 None。
-Coherence 的 calibrate_point 是複合 stage，依序呼叫 frequency、Rabi 與 readout；Rabi 依模式包含 AmpRabi。它正常回傳 PointCalibrationResult，主迴圈再填 frequency/rabi/readout。Expected failed/rejected 仍回傳各 stage 的結果。
+Coherence 與 MIST 共用的 calibrate_point（`common/point_calibration.py`）是複合 stage，依序呼叫 frequency、Rabi 與 readout；Rabi 依模式包含 AmpRabi。它正常回傳 PointCalibrationResult，主迴圈再填 frequency/rabi/readout；`CalCarry` 的歷史欄位（last、f01_by_flux、traces、last_amp_gain、readout_source）由 calibrate_point 依各 stage 回傳的結果更新。Expected failed/rejected 仍回傳各 stage 的結果。
 校準的 unexpected exception 不回傳 aggregate。例如 frequency 成功後 Rabi 內部 bug，finally 保存的 point 不含 frequency 結果，但 frequency 已存的 h5 仍在磁碟，run 失敗。
 主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
 Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準與區域變數不重做。
