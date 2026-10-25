@@ -90,6 +90,29 @@ Post shows a per-qubit 3x3 g/e/other diagnostic with an isolated-other row.
 An infinite condition number or unresolved clusters makes it unsuitable for
 calibration. Four-state joint assignment needs a separate calibration.
 
+Core callers use `MuxGEExp.Options(default=GEAnalyzeOptions(...), overrides={...})`
+and `MuxGEExp.PostOptions(default=GEPostAnalyzeOptions(...), overrides={...})`.
+Override keys are original active indices, not positions in Participants.
+Invalid option indices, source shapes, shot/preparation axes or cfg associations
+raise before fitting. Both operations accept `source.cfg=None`.
+The caller must retain the primary's source association: another source with the
+same indices cannot be detected. Use fresh plots for another analysis; duplicate
+`fit_i` or `post_i` names are rejected.
+Numerical failures retain the original exception as `GENumericalError.__cause__`.
+
+`MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`,
+int64 `prepared_states=[0,1]` and int64 `shot_indices=arange(shots)`.
+ADC channel numbers and duplicate labels do not reorder these axes.
+One round avoids dropping earlier raw rounds because the program retains only
+the last raw buffer. `MuxReadout.collect_raw_iq(prog, read_index=0)` selects the
+same read on all tones without offsets, rotation, classification or averaging.
+A preparation with an incomplete first round remains missing across every tone.
+Framework [run records and persistence](../../../../lib/zcu_tools/experiment/README.md),
+[runtime lifecycle](../../../../lib/zcu_tools/experiment/v2/runtime/README.md) and
+[mux conversion](../../../../lib/zcu_tools/program/v2/README.md) own the remaining
+contracts. Native persistence requires cfg and retains full tones/readout and
+raw IQ; the core does not propose GUI writeback.
+
 ## Assignment and model quality
 
 Fidelity assigns the two prepared labels using their best projected-IQ histogram

@@ -15,6 +15,7 @@ from zcu_tools.gui.form import (
     InputConverter,
     Option,
 )
+from zcu_tools.gui.form_adapter import DeviceName
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
@@ -40,7 +41,7 @@ class OvernightPlanForm(FormModel):
     receives the historical host snapshot separately, not a live source.
     """
 
-    flux_dev: Annotated[str, Display(label="Flux device")] = Field(
+    flux_dev: Annotated[DeviceName, Display(label="Flux device")] = Field(
         min_length=1, description="Connected flux driver name"
     )
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (

@@ -3,6 +3,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from zcu_tools.cfg_model import DeviceName
 
 from .base import BuiltinComponent, Duration, Flux, Frequency, reject_null_channel
 
@@ -55,6 +56,6 @@ class QubitBaseSchema(BuiltinComponent):
     resonator: str | None = Field(
         default=None, description="Name of the readout resonator component."
     )
-    flux_source: str | None = Field(
+    flux_source: DeviceName | None = Field(
         default=None, description="Device name supplying this qubit's own DC line bias."
     )

@@ -38,6 +38,7 @@ from .model import (
     InputConverter,
     InputDefault,
     InputPolicy,
+    InputSuggestions,
     WriteRejected,
     field_error,
 )

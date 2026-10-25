@@ -1,9 +1,28 @@
 """Shared numeric mechanics for simultaneous qubit spectroscopy and Amp Rabi."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2.modules import MuxReadout
+
+
+def averaged_mux_signal(
+    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
+) -> NDArray[np.complex128]:
+    """Collect normalized complex IQ from the program's named readout module.
+
+    Preserve acquisition axis order (point, tone for a hardware sweep).
+    Raise ValueError when prog has no MuxReadout named readout. Collection
+    uses the initialized module owned by prog, not a builder's copied cfg.
+    """
+    for module in prog.modules:
+        if isinstance(module, MuxReadout) and module.name == "readout":
+            iq = module.collect_iq(prog, acquired, read_index=0)
+            return iq[..., 0] + 1j * iq[..., 1]
+    raise ValueError("Mux program is missing its named MuxReadout")
 
 
 @dataclass(frozen=True)

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
+
+
+def ge_signals_by_state(
+    signals: NDArray[np.complex128],
+    initial_state: Literal["ground", "excited"],
+) -> NDArray[np.complex128]:
+    """Map acquisition rows (probe off/on) to predominantly ground/excited."""
+    if initial_state == "ground":
+        return signals
+    if initial_state == "excited":
+        return signals[::-1]
+    raise ValueError(f"Unknown initial state: {initial_state!r}")
 
 
 class RawShotProgram(Protocol):

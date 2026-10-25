@@ -3,7 +3,8 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from .core import AcStarkCfg, AcStarkRamseyCfg
+from .core import AcStarkCfg
+from .ramsey_core import AcStarkRamseyCfg
 
 
 def make_form(ctx: FormContext) -> Form[AcStarkCfg]:

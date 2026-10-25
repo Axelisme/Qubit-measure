@@ -20,6 +20,7 @@ from ._structure import (
     list_model,
     model_types,
 )
+from ._suggestions import field_suggestions
 from .description import (
     FormCommandDescription,
     FormConstraints,
@@ -222,6 +223,11 @@ def _metadata(
                 tuple((*target.path, *path) for path in item.inputs),
             )
             for item in target.input_commands
+        )
+        + (
+            (FormCommandDescription("toggle_text", "Edit as text", target.path),)
+            if field_suggestions(info) is not None
+            else ()
         ),
         elements=_elements(target),
     )

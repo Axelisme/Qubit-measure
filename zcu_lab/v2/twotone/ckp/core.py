@@ -33,6 +33,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_heatmap
+from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
 @dataclass(frozen=True)
@@ -65,31 +66,6 @@ def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     max_amp = np.nanmax(amps, axis=2, keepdims=True)
     min_amp = np.nanmin(amps, axis=2, keepdims=True)
     return (amps - min_amp) / np.clip(max_amp - min_amp, 1e-12, None)
-
-
-def get_resonance_freq(
-    xs: NDArray[np.float64], freqs: NDArray[np.float64], amps: NDArray[np.float64]
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    s_xs = []
-    s_freqs = []
-
-    prev_freq = np.nan
-    for x, amp in zip(xs, amps, strict=False):
-        if np.any(np.isnan(amp)):
-            continue
-
-        param, _ = fitlor(freqs, amp)
-        curr_freq = param[3]
-
-        if abs(curr_freq - prev_freq) > 0.1 * (freqs[-1] - freqs[0]):
-            continue
-
-        prev_freq = curr_freq
-
-        s_xs.append(x)
-        s_freqs.append(curr_freq)
-
-    return np.array(s_xs), np.array(s_freqs)
 
 
 def _fit_resonance_traces(

@@ -21,6 +21,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
@@ -66,13 +67,16 @@ class AliasPanel(QWidget):
     ) -> None:
         """Build the panel and load the installed rows from control."""
         super().__init__(parent)
+        self._scope = LifetimeScope(self)
         self._control = control
         self._base: tuple[AliasRow, ...] = ()
         self._target: SavedPoint | None = None
         self._applying = False
         self._read_only = False
         layout = QVBoxLayout(self)
-        self._sync = PointFileBanner(control, "aliases", self._load, parent=self)
+        self._sync = PointFileBanner(
+            control, "aliases", self._scope.callback(self._load), parent=self
+        )
         layout.addWidget(self._sync)
         hint = QLabel(
             "Enter a component name, leave a value empty, or use a $ link "
@@ -95,9 +99,9 @@ class AliasPanel(QWidget):
 
         row_actions = QHBoxLayout()
         self._add_btn = self._action_button("Add", "inspect.aliases.add")
-        self._add_btn.clicked.connect(self._add_row)
+        self._scope.connect(self._add_btn.clicked, self._add_row)
         self._remove_btn = self._action_button("Remove", "inspect.aliases.remove")
-        self._remove_btn.clicked.connect(self._remove_rows)
+        self._scope.connect(self._remove_btn.clicked, self._remove_rows)
         row_actions.addWidget(self._add_btn)
         row_actions.addWidget(self._remove_btn)
         row_actions.addStretch()
@@ -109,7 +113,7 @@ class AliasPanel(QWidget):
         make_label_selectable(self._error)
         layout.addWidget(self._error)
         self._load()
-        self._table.cellChanged.connect(self._cell_finished)
+        self._scope.connect(self._table.cellChanged, self._cell_finished)
 
     def _action_button(self, text: str, name: str) -> QPushButton:
         button = QPushButton(text, self)
@@ -137,10 +141,13 @@ class AliasPanel(QWidget):
             self._sync.check(self._revision)
             self._control.apply_alias_rows(rows)
         except (FailedPreconditionError, InvalidInputError, OSError) as error:
-            self._error.setText(str(error))
+            if not self._scope.closed:
+                self._error.setText(str(error))
             return
         finally:
             self._applying = False
+        if self._scope.closed:
+            return
         self._base = rows
         self._revision = self._sync.capture()
         self._error.clear()
@@ -153,6 +160,13 @@ class AliasPanel(QWidget):
         self._revision = self._sync.capture()
         self._show_rows(self._base)
         self._refresh_resolutions()
+
+    def detach(self) -> None:
+        """Retire owner callbacks before the host closes or replaces the panel.
+
+        Idempotent on the Qt owner thread. Leaves saved rows and files unchanged.
+        """
+        self._scope.close()
 
     def refresh(self) -> None:
         """Follow point/entry switches and preserve same-point local input.

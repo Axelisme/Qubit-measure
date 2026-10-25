@@ -112,7 +112,7 @@ from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
+from zcu_tools.program.v2 import ResetCfg
 from zcu_tools.program.v2.modules import (
     ConstWaveform,
     FlatTopWaveform,
@@ -123,23 +123,12 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 from .analysis import MuxLenRabiFit, analyze_length
-
-
-def _averaged_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-) -> NDArray[np.complex128]:
-    # Builder copies modules; collect only through the initialized readout owner.
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[..., 0] + 1j * iq[..., 1]
-    raise ValueError("Mux scan program is missing its named MuxReadout")
 
 
 class MuxLenRabiCfg(ConfigBase):
@@ -339,7 +328,9 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
             # 3. Publish the full point/tone matrix after each completed round.
             _ = builder.run_program(
-                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+                prog,
+                raw2signal_fn=partial(averaged_mux_signal, prog),
+                rounds=cfg.rounds,
             )
         signals.trigger_update(flush=True)
         return MuxSweepResult(

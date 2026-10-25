@@ -218,6 +218,27 @@ cleanup runs.
 
 文字在 Enter 或失去焦點時提交，未解析文字留在 view，宿主提交前檢查 local_parse_errors。唯讀時仍能複製文字、折疊與捲動。選項與 Expression 的呈現、訂閱生命週期見 [FormEditor README](widgets/form/README.md)。
 
+## Callback lifetime (`lifetime.py`)
+
+`LifetimeScope` groups a view's callbacks and borrowed resources. `callback(fn)`
+returns a no-op after retirement. `connect(signal, fn)` also registers the Qt
+connection's disconnection and preserves Qt's trailing-argument adaptation.
+`install_event_filter(watched, callback)` forwards events through a Qt proxy and
+removes it on close. The proxy also ignores virtual calls during cyclic GC after
+Python attributes have been cleared. QObject bound slots use weak receivers.
+Owners register unsubscribers, timer stops, event-filter removal and matplotlib
+cid disconnections as acquired. `close()` first retires callbacks, then releases
+resources in reverse order. The first cleanup failure propagates; unfinished
+items remain for retry and completed items do not run again.
+
+Owners obtain domain close permission before retiring a view, and delete Qt
+children only after close succeeds. Child rows and replaceable editors have
+separate scopes. A scope neither owns the session nor drains background work.
+The optional Qt owner guard handles externally deleted C++ objects, but does
+not replace explicit cleanup. Form state subscriptions retain their weak-view
+boundary so a long-lived state does not keep a deleted widget alive.
+See ADR-0067 and `docs/code-quality.md` for the callback registration rule.
+
 ## EventBus Lifecycle
 
 `BaseEventBus` stays Qt-free and payload-type keyed. `subscribe()` returns an

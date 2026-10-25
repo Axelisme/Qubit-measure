@@ -6,6 +6,8 @@
 
 本 package 是 GUI 的 Qt-free 前端框架。它把輸入型別與作者寫的起始樹翻譯成 `gui.form` 的 `FormModel`，再把表單結果轉回驗證過的輸入物件。它供 measure、workflows、library 與 writeback 的表單定義共用。Measure 的註冊、protocol 與分頁 Form resource 使用 `Form`，workflows 的手寫 plan 表單使用 `ModuleInputField`。
 
+儀器名稱在 core 用 `cfg_model.DeviceName` 宣告，nullable 用 `DeviceName | None`。這是普通字串加中立標記，不查裝置、不增加 cfg 驗證。生成器將標記投影為 `InputSuggestions`，選項只取表單 Open／Reset 捕捉的 `FormEnv.devices` 名稱，nullable 另列 None。手寫 `FormModel` 使用本 package 的 `DeviceName` alias，自動附加同一建議 provider，不必逐表單寫 options hook。預設下拉保留清單外目前值，欄位右鍵或 `tab.run_cfg_command` 的 `toggle_text` 可切換文字輸入。模式不改 cfg、不保存。
+
 主要生成入口如下：
 
 - `Form(core_cfg, tree, *, fixed_elements=(), field_order=())`：生成 FormModel 子類別、defaults hook、choices、options 與 `to_cfg`。`Form[T_Input].to_cfg` 回傳 T_Input 或 FormErrors。輸入型別的 annotations 決定形狀與驗證；樹決定起始值、唯讀屬性、隱藏欄位與 module 預設。Expr 初值欄位在生成的 model 中不帶靜態預設，算不出時保持未填。Range 的端點與點數也沒有數值預設。端點為 None 或 Expr 求值失敗時保持空白必填。樹中明填的端點與點數保留原值。未宣告的掃描只選 Range + Expts，start／stop／n 留空必填。

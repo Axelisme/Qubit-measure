@@ -544,6 +544,9 @@ class TabFormResource:
         editor_state is read-only to callers; editors must use this entrypoint.
         """
         with self._mutation():
+            if self._state.run_presentation_command(path, name, self._sources.env):
+                self._notify()
+                return
             candidate = self._form.prepare_command(
                 self._state.input, path, name, self._sources.env
             )

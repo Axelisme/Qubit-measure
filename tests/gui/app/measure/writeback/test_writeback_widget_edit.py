@@ -44,6 +44,7 @@ from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
@@ -635,6 +636,19 @@ def module_host(module_widget, qapp):
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         qapp.processEvents()
+
+
+@pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
+def test_tab_retirement_closes_its_open_writeback_editor(module_host, tmp_path):
+    ctrl, window, _widget, tab_id, _pane, _presenter = module_host
+    driver = ComponentDriver(window)
+    driver.click("Edit")
+    dialog = _find_open_dialog("Edit module —")
+    editor = ComponentDriver(dialog)
+    editor.screenshot(tmp_path / "01-open-writeback.png")
+    ctrl.tab_control.close_tab(tab_id)
+    assert not editor.visible().widgets
+    driver.screenshot(tmp_path / "02-retired-tab.png")
 
 
 @pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)

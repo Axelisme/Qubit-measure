@@ -88,7 +88,7 @@ from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ResetCfg, sweep2param
+from zcu_tools.program.v2 import ResetCfg, sweep2param
 from zcu_tools.program.v2.modules import (
     Join,
     MuxReadout,
@@ -97,7 +97,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
 from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
@@ -201,17 +201,6 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqSca
     return MuxFreqScan(indices, np.asarray(coordinates, dtype=np.float64))
 
 
-def _averaged_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-) -> NDArray[np.complex128]:
-    # Builder copies modules; collect only through the initialized program owner.
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[..., 0] + 1j * iq[..., 1]
-    raise ValueError("Mux scan program is missing its named MuxReadout")
-
-
 class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
     """Measure qubit spectra with simultaneous drives and a shared mux readout.
 
@@ -306,7 +295,9 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
             # 4. Each completed round supplies the full point/tone IQ matrix.
             prog = builder.build()
             _ = builder.run_program(
-                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+                prog,
+                raw2signal_fn=partial(averaged_mux_signal, prog),
+                rounds=cfg.rounds,
             )
 
         # Publish the final spectra and restore tone-major result storage.

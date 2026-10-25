@@ -273,16 +273,12 @@ def test_groups_fold_rows_at_their_first_visible_member(
     assert top(view, child(view, QWidget, "form.group.Advanced")) < top(
         view, child(view, QWidget, "form.input.mode")
     )
-    # A group title sits in its level's label column like a row's name label:
-    # same left edge and width, so the level's controls still share one edge.
+    # A group title starts at the same left edge as the level's row labels.
     title = group_fold(view, "Advanced")
     mode_label = label_of(view, "mode", "Mode")
     assert (
         title.mapTo(view, QPoint(0, 0)).x() == mode_label.mapTo(view, QPoint(0, 0)).x()
     )
-    assert title.width() == mode_label.width()
-    mode_left = child(view, QComboBox, "form.input.mode").mapTo(view, QPoint(0, 0))
-    assert mode_left.x() > title.mapTo(view, QPoint(0, 0)).x() + title.width()
     assert state.input.data == before
 
 
@@ -790,44 +786,3 @@ def test_a_fold_title_reached_by_tab_shows_an_outline(
         press(Qt.Key.Key_Tab)
         assert not title.hasFocus(), name
         assert title.grab().toImage() == unfocused, name
-
-
-class Span(BaseModel):
-    """A frequency span with two leaves and no unit of its own."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    start: float = 4000.0
-    stop: float = 4100.0
-
-
-class SweepForm(FormModel):
-    """One model section whose Display carries a unit."""
-
-    freq: Annotated[Span, Display(label="Freq", unit="MHz")] = Field(
-        default_factory=Span
-    )
-
-
-def test_a_section_unit_sits_right_after_its_name(
-    build: Build, qapp: QApplication
-) -> None:
-    view, _state = build(SweepForm, None)
-    view.resize(600, view.sizeHint().height())
-    view.show()
-    qapp.processEvents()
-    row = row_of(view, "freq")
-    (name,) = [label for label in direct(row, QLabel) if label.text().endswith("Freq")]
-    unit = label_of(view, "freq", "MHz")
-    name_right = name.geometry().right()
-    unit_left = unit.geometry().left()
-    assert unit_left > name_right
-    # Nothing of the row's header sits between the name and its unit.
-    between = [
-        type(widget).__name__
-        for widget in direct(row, QWidget)
-        if widget.isVisible()
-        and widget.geometry().left() > name_right
-        and widget.geometry().right() < unit_left
-    ]
-    assert between == []

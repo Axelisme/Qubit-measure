@@ -17,7 +17,7 @@ from zcu_tools.gui.form import (
     Option,
     field_error,
 )
-from zcu_tools.gui.form_adapter import SweepInput
+from zcu_tools.gui.form_adapter import DeviceName, SweepInput
 
 from zcu_lab.workflows.coherence_fluxdep.singleshot_form import SingleshotTunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm
@@ -115,7 +115,7 @@ class CoherencePlanForm(FormModel):
     predictor: Annotated[FrequencyModelForm, Display(label="Fluxonium predictor")] = (
         Field(description="Captured physical model and native flux mapping")
     )
-    flux_dev: Annotated[str, Display(label="Flux device")] = Field(
+    flux_dev: Annotated[DeviceName, Display(label="Flux device")] = Field(
         min_length=1, description="Host flux device name"
     )
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (

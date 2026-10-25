@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from scipy.ndimage import gaussian_filter1d
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -54,7 +54,7 @@ class FluxCfg(ConfigBase):
         ),
     ] = 1.0
     jpa_flux_dev: Annotated[
-        str | None,
+        DeviceName | None,
         FieldMeta(
             label="JPA flux device",
             description="Connected flux device name; None skips bias control.",

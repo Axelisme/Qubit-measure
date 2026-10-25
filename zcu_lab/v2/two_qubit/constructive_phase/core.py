@@ -1,25 +1,27 @@
 """Thermal B11 relative-phase × duration experiment."""
 
+from functools import partial
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2.modules import MuxReadout
 
-from .._drive import DualLineCfg
-from .._rabi_scan import (
-    DurationScanCfg,
-    RabiScanResult,
-    joint_return,
-    plot_return_data,
-    run_duration_scan,
-)
+from zcu_lab.v2.support import live_line
+
+from .._drive import DualLineCfg, dual_line_drive
+from .._rabi_analysis import joint_return, plot_return_data
+from .._rabi_scan import DurationScanCfg, RabiScanResult
+from .._readout import collect_joint_shots
 from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
 
 
@@ -83,7 +85,72 @@ class ConstructivePhaseExp(Experiment[RabiScanResult, ConstructivePhaseCfg]):
             )
             for phase in phases
         ]
-        return run_duration_scan(config, phases, drives, context=context)
+        if not np.all(np.isfinite(phases)):
+            raise ValueError("Each finite coordinate requires one explicit drive pair")
+        cfg = config.model_copy(deep=True, update={"rounds": 1})
+        durations = sweep2array(cfg.duration)
+        ntones = len(cfg.readout.tones)
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Drive duration (us)",
+            "Completed shots (all coordinates)",
+            num_lines=1,
+        )
+
+        def update_view(raw: NDArray[np.complex128]) -> None:
+            viewer.update(
+                durations, np.all(np.isfinite(raw), axis=-1).sum(axis=(0, 2, 3))
+            )
+
+        buffer = SignalBuffer(
+            (len(drives), len(durations), config.rounds, cfg.reps, ntones),
+            on_update=update_view,
+        )
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            for index, step in sched.scan("coordinate", list(range(len(drives)))):
+                for duration, duration_step in step.scan(
+                    "duration", durations.tolist()
+                ):
+                    drive = drives[index].model_copy(deep=True)
+                    for pulse in (drive.f1, drive.f2):
+                        pulse.set_param("length", duration)
+                    builder = duration_step.prog_builder(
+                        context.soc,
+                        context.soccfg,
+                        reps=duration_step.cfg.reps,
+                        initial_delay=duration_step.cfg.initial_delay,
+                        relax_delay=duration_step.cfg.relax_delay,
+                    )
+                    builder.add_pulse("prepare_f1", cfg.x180_f1)
+                    builder.add_pulse("prepare_f2", cfg.x180_f2)
+                    builder.add(dual_line_drive(drive, frequency=float(drive.f1.freq)))
+                    builder.add_pulse("contrast_f1", cfg.x180_f1)
+                    builder.add_pulse("contrast_f2", cfg.x180_f2)
+                    builder.add(MuxReadout("readout", cfg.readout))
+                    prog = builder.build()
+                    for _, round_step in duration_step.repeat("round", config.rounds):
+                        _ = round_step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=round_step.cfg.reps,
+                            initial_delay=round_step.cfg.initial_delay,
+                            relax_delay=round_step.cfg.relax_delay,
+                        ).run_program(
+                            prog,
+                            raw2signal_fn=partial(collect_joint_shots, prog),
+                            rounds=round_step.cfg.rounds,
+                        )
+        buffer.trigger_update(flush=True)
+        return RabiScanResult(
+            phases,
+            durations,
+            np.arange(config.rounds * cfg.reps, dtype=np.int64),
+            np.arange(ntones, dtype=np.int64),
+            buffer.array.reshape(
+                len(drives), len(durations), config.rounds * cfg.reps, ntones
+            ),
+        )
 
     def analyze(
         self,
