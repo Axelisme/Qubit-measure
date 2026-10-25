@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
 from zcu_tools.cfg_model import Gain
-from zcu_tools.gui.form import FormEnv, FormModel, field_error
+from zcu_tools.gui.form import Display, FormEnv, FormModel, field_error
 
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel
 
@@ -60,8 +60,10 @@ class FrequencyTunablesForm(FormModel):
         gt=0,
         description="Coarse probe gain; None uses the probe pulse gain",
     )
-    coarse_span_factor: float = Field(
-        default=3.0, gt=0, description="Coarse span / span_mhz before widening"
+    coarse_span_mhz: Annotated[float, Display(label="Coarse span", unit="MHz")] = Field(
+        default=100.0,
+        gt=0,
+        description="Two-step coarse span in MHz; multiplied by widen during widening",
     )
     fine_gain: Gain | None = Field(
         default=None,

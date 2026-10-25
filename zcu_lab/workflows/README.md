@@ -129,7 +129,8 @@ Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校
 GE 要求本點 Rabi 已接受。主迴圈判斷資格與最小間距，呼叫 `stages.ge.measure_ge` 後填 `singleshot`；每個已保存 Completed（含 partial）更新最後 GE flux。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
 預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
 
-Coherence 與 MIST 的 frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。
+Coherence 與 MIST 的 frequency stage 預設使用 two-step 掃描，粗掃寬度 `coarse_span_mhz` 預設 100 MHz，widening 時乘上 `qf_widen` 的倍率。細掃寬度預設 30 MHz，可用 `fine_span_mhz` 覆寫。
+Frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。
 Probe gain 從這個 pulse 的 gain 起跑，再依線寬自適應；每次 attempt 的實際值保存在 `frequency.probe_gains`。
 `qub_pulse` 只供 Rabi 與下游 pi preparation，不作 spectroscopy probe。
 每次 frequency scan 的 `diagnostics` 保存 fitted center／error、FWHM、peak／trace SNR、normalized RMS 與 MAE/fit ptp。
