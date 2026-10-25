@@ -74,6 +74,7 @@ from zcu_lab.v2.two_qubit.joint_readout import core as ftf_joint_readout
 from zcu_lab.v2.two_qubit.local_z import core as ftf_local_z
 from zcu_lab.v2.two_qubit.rb import core as ftf_rb
 from zcu_lab.v2.twotone.ac_stark import core as twotone_ac_stark
+from zcu_lab.v2.twotone.ac_stark import ramsey_core as twotone_ac_stark_ramsey
 from zcu_lab.v2.twotone.allxy import core as twotone_allxy
 from zcu_lab.v2.twotone.ckp import core as twotone_ckp
 from zcu_lab.v2.twotone.dispersive import core as twotone_dispersive
@@ -112,6 +113,12 @@ from zcu_lab.v2.twotone.ro_optimize.length import core as twotone_ro_optimize_le
 from zcu_lab.v2.twotone.ro_optimize.power import core as twotone_ro_optimize_power
 from zcu_lab.v2.twotone.time_domain.cpmg import core as twotone_time_domain_cpmg
 from zcu_lab.v2.twotone.time_domain.t1 import core as twotone_time_domain_t1
+from zcu_lab.v2.twotone.time_domain.t1 import (
+    scan_t1_with_tone as twotone_time_domain_scan_t1_with_tone,
+)
+from zcu_lab.v2.twotone.time_domain.t1 import (
+    t1_with_tone as twotone_time_domain_t1_with_tone,
+)
 from zcu_lab.v2.twotone.time_domain.t2echo import core as twotone_time_domain_t2echo
 from zcu_lab.v2.twotone.time_domain.t2ramsey import core as twotone_time_domain_t2ramsey
 from zcu_lab.v2.twotone.zigzag import core as twotone_zigzag
@@ -240,7 +247,7 @@ MIGRATION_EXPERIMENTS = (
     _declaration(singleshot_t1_t1_with_tone.T1WithToneExp.AXES_SPEC),
     _declaration(singleshot_t1_tone_sweep.T1WithToneSweepExp.AXES_SPEC),
     _declaration(twotone_ac_stark.AcStarkExp.AXES_SPEC),
-    _declaration(twotone_ac_stark.AcStarkRamseyExp.AXES_SPEC),
+    _declaration(twotone_ac_stark_ramsey.AcStarkRamseyExp.AXES_SPEC),
     _declaration(twotone_allxy.AllXY_Exp.AXES_SPEC),
     _declaration(twotone_ckp.CKP_Exp.AXES_SPEC),
     _declaration(twotone_dispersive.DispersiveExp.AXES_SPEC),
@@ -270,8 +277,8 @@ MIGRATION_EXPERIMENTS = (
     _declaration(twotone_ro_optimize_power.PowerExp.AXES_SPEC),
     _declaration(twotone_time_domain_cpmg.CPMG_Exp.AXES_SPEC),
     _declaration(twotone_time_domain_t1.T1Exp.AXES_SPEC),
-    _declaration(twotone_time_domain_t1.T1WithToneExp.AXES_SPEC),
-    _declaration(twotone_time_domain_t1.ScanT1WithToneExp.AXES_SPEC),
+    _declaration(twotone_time_domain_t1_with_tone.T1WithToneExp.AXES_SPEC),
+    _declaration(twotone_time_domain_scan_t1_with_tone.ScanT1WithToneExp.AXES_SPEC),
     _declaration(twotone_time_domain_t2echo.T2EchoExp.AXES_SPEC),
     _declaration(twotone_time_domain_t2ramsey.T2RamseyExp.AXES_SPEC),
     _declaration(twotone_zigzag.ZigZagExp.AXES_SPEC),
