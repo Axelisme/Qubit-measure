@@ -53,7 +53,9 @@ class T2EchoTunables(BaseModel):
     times the caller's T1 estimate, floored at relax_min_us. Fixed modes use
     sweep_start_us/sweep_stop_us and relax_delay_us without auto clamps.
     detune_ratio adds fringes per delay step; zero selects pure Echo decay.
-    Acceptance retains the old two T2 rejection rules.
+    min_lifetime_points defaults to 5 fitted delays in [0, lifetime], including
+    endpoints. Invalid quality diagnostics and undersampling reject before the
+    twice-window and mean-error rules. Ramsey inherits the same gates.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -90,6 +92,11 @@ class T2EchoTunables(BaseModel):
     )
     relax_min_us: float = Field(
         default=1.0, ge=0, description="Auto relaxation lower bound in us"
+    )
+    min_lifetime_points: int = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
     )
     detune_ratio: float = Field(
         default=0.1,

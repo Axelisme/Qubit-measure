@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
+    decay_time_bounds,
     fit_decay,
 )
 from zcu_tools.experiment import AnalysisFailed
@@ -23,7 +24,9 @@ class DecayFit:
     lifetime_us/error_us are the decay constant and its marginal standard
     error. observed/fitted are float64 vectors aligned with source.times for
     T1, or source.times[1:] for T2echo (the native first-sample exclusion).
-    quality contains residual diagnostics with no parameter-error entries.
+    quality contains diagnostics from the actual parameters/covariance and
+    decay bounds. times contains the microsecond delays passed to the fitter,
+    aligned with observed/fitted, without resetting the delay origin.
     Native nonfinite values or unavailable diagnostics remain visible.
     """
 
@@ -32,6 +35,39 @@ class DecayFit:
     observed: NDArray[np.float64]
     fitted: NDArray[np.float64]
     quality: FitQuality
+    times: NDArray[np.float64]
+
+
+def lifetime_rejection(
+    quality: FitQuality | None,
+    times: NDArray[np.float64],
+    lifetime_us: float,
+    min_lifetime_points: int,
+) -> str | None:
+    """Reject invalid diagnostics or too few acquired delays within one lifetime.
+
+    quality is the actual fit diagnostics; None rejects unavailable quality.
+    times contains only delays used by the fitter, in microseconds, with no
+    origin shift. lifetime_us must be finite and positive or is rejected.
+    Count 0 <= delay <= lifetime_us, including the endpoints. Fewer than
+    min_lifetime_points (a positive integer, normally 5) rejects with the count.
+    Invalid quality issues retain their paths/reasons. Return None only when
+    both gates pass. This helper does not update history or change any fit.
+    """
+    if type(min_lifetime_points) is not int or min_lifetime_points < 1:
+        raise ValueError("min_lifetime_points must be a positive integer")
+    if not np.isfinite(lifetime_us) or lifetime_us <= 0:
+        return "Lifetime must be finite and positive"
+    if quality is None:
+        return "Fit quality unavailable"
+    reasons = [f"{issue.path}: {issue.reason}" for issue in quality.invalid]
+    count = int(np.count_nonzero((times >= 0) & (times <= lifetime_us)))
+    if count < min_lifetime_points:
+        reasons.append(
+            f"Only {count} delay points within first lifetime (0 <= delay <= "
+            f"{lifetime_us:.9g} us); require at least {min_lifetime_points}"
+        )
+    return "; ".join(reasons) if reasons else None
 
 
 def validate_fit_trace(
@@ -93,7 +129,14 @@ def analyze_t1(result: T1Result) -> DecayFit | Failed:
     fit = fit_or_failed(lambda: fit_decay(result.times, observed))
     if isinstance(fit, Failed):
         return fit
-    lifetime, error, fitted, _optimizer = fit
-    # Preserve the native estimate and error; residual diagnostics do not refit.
-    quality = compute_fit_quality(observed, fitted, {}, None)
-    return DecayFit(float(lifetime), float(error), observed, fitted, quality)
+    lifetime, error, fitted, (parameters, covariance) = fit
+    quality = compute_fit_quality(
+        observed,
+        fitted,
+        dict(zip(("y0", "yscale", "decay_time"), map(float, parameters), strict=True)),
+        covariance,
+        decay_bounds=decay_time_bounds(result.times),
+    )
+    return DecayFit(
+        float(lifetime), float(error), observed, fitted, quality, result.times
+    )

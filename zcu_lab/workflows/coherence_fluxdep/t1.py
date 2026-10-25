@@ -64,7 +64,9 @@ class T1Tunables(BaseModel):
     relax_delay_us. Auto timing uses the sweep bounds and relax_min_us; fixed
     values bypass those clamps. uniform selects linear or exponential sampling.
     max_rel_err and max_fit_residual are strict upper bounds for error/lifetime
-    and normalized residual RMS. Defaults are provisional, confirmed at CP-B/C.
+    and normalized residual RMS. min_lifetime_points defaults to 5 fitted delays
+    in [0, lifetime], including endpoints. Invalid quality diagnostics reject.
+    Defaults are provisional, confirmed at CP-B/C.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -112,6 +114,11 @@ class T1Tunables(BaseModel):
     uniform: bool = Field(
         default=True,
         description="Linear sampling; false selects exponential delay spacing",
+    )
+    min_lifetime_points: int = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
     )
     max_rel_err: float = Field(
         default=0.3, gt=0, le=1, description="Strict T1 error/lifetime upper bound"

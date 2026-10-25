@@ -1,7 +1,7 @@
 """overnight analysis helpers for lab workflows."""
 
 import numpy as np
-from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay
+from zcu_tools.analysis.fitting import compute_fit_quality, decay_time_bounds, fit_decay
 from zcu_tools.experiment.workflows import Failed
 
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoResult, t2echo_signal2real
@@ -46,6 +46,12 @@ def analyze_t2echo(result: T2EchoResult) -> DecayFit | Failed:
     fit = fit_or_failed(lambda: fit_decay(times, observed))
     if isinstance(fit, Failed):
         return fit
-    lifetime, error, fitted, _optimizer = fit
-    quality = compute_fit_quality(observed, fitted, {}, None)
-    return DecayFit(float(lifetime), float(error), observed, fitted, quality)
+    lifetime, error, fitted, (parameters, covariance) = fit
+    quality = compute_fit_quality(
+        observed,
+        fitted,
+        dict(zip(("y0", "yscale", "decay_time"), map(float, parameters), strict=True)),
+        covariance,
+        decay_bounds=decay_time_bounds(times),
+    )
+    return DecayFit(float(lifetime), float(error), observed, fitted, quality, times)

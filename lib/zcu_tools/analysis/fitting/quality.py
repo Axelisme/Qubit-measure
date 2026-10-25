@@ -28,7 +28,8 @@ class QualityIssue:
             (non-finite inputs, intermediate arithmetic, or result).
             Degeneracy adds "zero_standard_error" (zero covariance diagonal),
             "near_constant_prediction" (predicted span below 1e-8 of observed
-            span), or "窗口內無法解析衰減時間" (decay time at/outside scan bounds).
+            span), or a decay-bound reason naming the parameter, fitted value,
+            lower/upper endpoint and "窗口內無法解析衰減時間".
 
     These diagnostics do not implement calibration acceptance or writeback.
     """
@@ -142,7 +143,8 @@ def compute_fit_quality(
         decay_bounds: Optional (lower, upper) from decay_time_bounds, with finite
             0 < lower < upper, in the decay parameter units. Only decay_time,
             decay_time1 and decay_time2 are checked. At/outside bounds (including
-            1e-6 relative endpoint tolerance) adds 窗口內無法解析衰減時間 without
+            1e-6 relative endpoint tolerance) adds a reason with the parameter,
+            fitted value, lower/upper bound and 窗口內無法解析衰減時間 without
             altering numeric metrics. None disables this model-specific check.
         fixed_parameters: Names of deliberately fixed parameters from the fitting
             declaration, never inferred from zero covariance. These names must
@@ -235,8 +237,10 @@ def _parameter_metrics(
         ):
             lower, upper = decay_bounds
             # Include optimizer roundoff at active bounds, relative to each endpoint.
-            if value <= lower * (1 + 1e-6) or value >= upper * (1 - 1e-6):
-                issues.append(QualityIssue(name, "窗口內無法解析衰減時間"))
+            if value <= lower * (1 + 1e-6):
+                issues.append(_decay_bound_issue(name, value, "lower", lower))
+            elif value >= upper * (1 - 1e-6):
+                issues.append(_decay_bound_issue(name, value, "upper", upper))
         variance = None if covariance is None else float(covariance[index, index])
         error, reason = _relative_error(value, variance)
         relative_errors[name] = error
@@ -247,6 +251,15 @@ def _parameter_metrics(
         if name not in fixed and reason is not None:
             issues.append(QualityIssue(f"relative_parameter_errors.{name}", reason))
     return relative_errors, issues
+
+
+def _decay_bound_issue(
+    name: str, value: float, side: str, bound: float
+) -> QualityIssue:
+    return QualityIssue(
+        name,
+        f"{name}={value:.9g} at/outside {side} bound {bound:.9g}: 窗口內無法解析衰減時間",
+    )
 
 
 def _validate_float64_dtype(name: str, array: NDArray[np.float64]) -> None:

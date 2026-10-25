@@ -5,6 +5,9 @@ from __future__ import annotations
 from math import isfinite
 from typing import TYPE_CHECKING
 
+import numpy as np
+from numpy.typing import NDArray
+from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Completed, Failed
@@ -14,6 +17,7 @@ from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1Result
 from zcu_lab.v2.mux.t2echo.core import MuxT2EchoCfg, MuxT2EchoExp
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_coherence import MuxCoherenceResult
+from zcu_lab.workflows.common.analysis import lifetime_rejection
 from zcu_lab.workflows.common.saving import save_native
 
 if TYPE_CHECKING:
@@ -23,11 +27,15 @@ if TYPE_CHECKING:
 def _summary(
     lifetime: float,
     error: float,
-    residual: float | None,
+    quality: FitQuality | None,
     tun: OvernightMuxTunables,
     name: str,
+    times: NDArray[np.float64],
 ) -> tuple[float | None, float | None, str | None]:
-    # Native mux fits have different carriers from overnight's DecayFit.
+    rejection = lifetime_rejection(quality, times, lifetime, tun.min_lifetime_points)
+    if rejection is not None:
+        return None, None, f"{name} fit rejected: {rejection}"
+    residual = quality.normalized_residual_rms if quality is not None else None
     if not (
         isfinite(lifetime)
         and lifetime > 0
@@ -85,7 +93,7 @@ def record_t1(
         fit_plots.finish(present=False)
         fit_plots.release()
     qubits = dict(zip(plan.participants, point.qubits, strict=True))
-    for fit in fits:
+    for row, fit in enumerate(fits):
         qubit = qubits[fit.index]
         if isinstance(fit, MuxFitFailure):
             qubit.t1_reason = fit.reason
@@ -96,9 +104,12 @@ def record_t1(
             qubit.t1_us, qubit.t1_error_us, qubit.t1_reason = _summary(
                 fit.fit.t1,
                 fit.fit.t1_err,
-                quality.normalized_residual_rms if quality is not None else None,
+                quality,
                 tun,
                 "T1",
+                record.value.result.times[
+                    np.isfinite(record.value.result.signals[row])
+                ],
             )
 
 
@@ -141,11 +152,18 @@ def record_echo(
         fit_plots.finish(present=False)
         fit_plots.release()
     qubits = dict(zip(plan.participants, point.qubits, strict=True))
-    for fit in fits:
+    for row, fit in enumerate(fits):
         qubit = qubits[fit.index]
         if isinstance(fit, MuxFitFailure):
             qubit.t2_reason = fit.reason
         else:
             qubit.t2_us, qubit.t2_error_us, qubit.t2_reason = _summary(
-                fit.t2, fit.t2_err, fit.quality.normalized_residual_rms, tun, "T2 Echo"
+                fit.t2,
+                fit.t2_err,
+                fit.quality,
+                tun,
+                "T2 Echo",
+                record.value.result.times[1:][
+                    np.isfinite(record.value.result.signals[row, 1:])
+                ],
             )

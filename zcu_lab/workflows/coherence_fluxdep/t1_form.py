@@ -17,6 +17,7 @@ class T1TunablesForm(FormModel):
     guess_us has no static default: construction requires it, and its
     initial value comes from defaults. defaults read only captured
     parameters; these knobs need neither library nor device infos.
+    min_lifetime_points defaults to 5 fitted delays in [0, lifetime], inclusive.
     Submission belongs to the host.
     """
 
@@ -69,6 +70,11 @@ class T1TunablesForm(FormModel):
         Field(default=1.0, ge=0)
     )
     uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = True
+    min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
+    )
     max_rel_err: Annotated[float, Display(label="Max relative error")] = Field(
         default=0.3, gt=0, le=1, description="Strict T1 error/lifetime upper bound"
     )
@@ -108,6 +114,7 @@ class T1TunablesForm(FormModel):
         failures propagate after invalid direct edits.
         """
         return T1Tunables(
+            min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,
             acquire_retry=self.acquire_retry,
