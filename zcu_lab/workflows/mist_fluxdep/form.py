@@ -240,7 +240,7 @@ class MISTTunablesForm(FormModel):
         default_factory=CalibrationTunablesForm
     )
     reps: Annotated[int, Display(label="Averages")] = Field(
-        default=100, ge=1, description="MIST averages"
+        default=1000, ge=1, description="MIST averages"
     )
     rounds: int = Field(default=10, ge=1, description="MIST averaging rounds")
     acquire_retry: int = Field(

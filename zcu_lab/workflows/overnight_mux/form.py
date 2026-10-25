@@ -239,9 +239,9 @@ class OvernightMuxTunablesForm(FormModel):
         description="T1 only; False concentrates delays within the same start/stop window",
     )
     reps: Annotated[int, Display(label="Averages")] = Field(
-        default=100, ge=1, description="Native acquisition averages"
+        default=1000, ge=1, description="Native acquisition averages"
     )
-    rounds: int = Field(default=2, ge=1, description="Native acquisition rounds")
+    rounds: int = Field(default=10, ge=1, description="Native acquisition rounds")
     t1_guess_us: Annotated[float, Display(label="T1 guess", unit="µs")] = Field(
         default=20.0, gt=0, description="Fixed T1 timing guess, microseconds"
     )
@@ -252,7 +252,7 @@ class OvernightMuxTunablesForm(FormModel):
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     t1_earlystop_snr: float | None = Field(
-        default=None,
+        default=15.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )
@@ -260,7 +260,7 @@ class OvernightMuxTunablesForm(FormModel):
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     t2_earlystop_snr: float | None = Field(
-        default=None,
+        default=15.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )

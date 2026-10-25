@@ -22,7 +22,7 @@ class T1TunablesForm(FormModel):
     """
 
     reps: Annotated[int, Display(label="Averages")] = Field(
-        default=100, ge=1, description="T1 averages"
+        default=1000, ge=1, description="T1 averages"
     )
     rounds: Annotated[int, Display(label="Rounds")] = Field(
         default=10, ge=1, description="T1 averaging rounds"
@@ -31,7 +31,7 @@ class T1TunablesForm(FormModel):
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     earlystop_snr: float | None = Field(
-        default=20.0,
+        default=15.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )

@@ -59,13 +59,13 @@ class T2EchoTunables(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    reps: int = Field(default=100, ge=1)
+    reps: int = Field(default=1000, ge=1)
     rounds: int = Field(default=10, ge=1)
     acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     earlystop_snr: float | None = Field(
-        default=20.0,
+        default=15.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )

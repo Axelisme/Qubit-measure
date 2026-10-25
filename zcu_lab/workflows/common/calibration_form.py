@@ -22,38 +22,38 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
     """
 
     qf_reps: Annotated[int, Display(label="Spectroscopy averages")] = Field(
-        default=100, ge=1, description="Spectroscopy averages"
+        default=1000, ge=1, description="Spectroscopy averages"
     )
     qf_rounds: Annotated[int, Display(label="Spectroscopy rounds")] = Field(
-        default=1, ge=1, description="Spectroscopy averaging rounds"
+        default=10, ge=1, description="Spectroscopy averaging rounds"
     )
     qf_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     qf_earlystop_snr: float | None = Field(
-        default=50.0,
+        default=15.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )
     rabi_reps: Annotated[int, Display(label="Rabi averages")] = Field(
-        default=100, ge=1, description="Rabi averages"
+        default=1000, ge=1, description="Rabi averages"
     )
     rabi_rounds: Annotated[int, Display(label="Rabi rounds")] = Field(
-        default=1, ge=1, description="Rabi averaging rounds"
+        default=10, ge=1, description="Rabi averaging rounds"
     )
     rabi_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     rabi_earlystop_snr: float | None = Field(
-        default=30.0,
+        default=15.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )
     ro_reps: Annotated[int, Display(label="Readout averages")] = Field(
-        default=100, ge=1, description="Readout averages"
+        default=1000, ge=1, description="Readout averages"
     )
     ro_rounds: Annotated[int, Display(label="Readout rounds")] = Field(
-        default=1, ge=1, description="Readout averaging rounds"
+        default=10, ge=1, description="Readout averaging rounds"
     )
     ro_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
