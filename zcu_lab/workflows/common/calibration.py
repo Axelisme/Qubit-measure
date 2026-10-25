@@ -90,6 +90,8 @@ class CalCarry:
     their own fields. f01_by_flux contains accepted (device setpoint, MHz)
     frequency history even when a later stage fails. frequency_traces/rabi_traces
     retain one projected sweep row per point for run-local heatmaps, not Figures.
+    amp_traces retains gain-scan rows; last_amp_gain is the last accepted Amp pi
+    gain and centers the next amp-only window, or None before Amp acceptance.
     rabi_drive holds the pi-product history and query-aged gain controller.
     last_pi retains the frequency paired with accepted pi/pi2; pi_source and
     readout_source identify their producer points, or None before acceptance.

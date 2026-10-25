@@ -44,7 +44,7 @@ class FrequencyResult:
 class AmpCalibrationResult:
     """Fixed-length gain calibration, including rejected fit diagnostics.
 
-    status/reason follow StageStatus. length_us is the actual fixed pulse length.
+    status/reason follow StageStatus. length_us is the configured fixed pulse length.
     pi_gain/error retain fitted diagnostics even when rejected. pi2_gain is
     the trusted pi/2 gain on acceptance, otherwise None.
     file is amp-rabi.h5 only after Completed, including stopped partial data.
@@ -69,9 +69,10 @@ class RabiResult:
     when frequency was not accepted and Rabi is skipped. It never carries a
     previous point's frequency. Accepted implies a current accepted frequency.
     pi_length_us is the accepted fitted duration. pi2_length_us is the trusted
-    phase-aware duration >= .03 us, or None when pi2 is untrusted. drive_gain
-    records the actual acquisition gain even on failure/rejection, or None on
-    dependency skip. file is the relative native
+    phase-aware Len duration or fixed Amp duration >= .03 us, or None when
+    pi2 is untrusted. drive_gain is Len's acquisition gain, even on rejection,
+    or Amp's accepted fitted pi gain. It is None for skipped or nonaccepted Amp.
+    file is the relative native
     filename after Completed, including partial and failed/rejected fits,
     otherwise None. Partial returns rejected/stopped without fitting; expected
     fitting failures return failed/reason. Unexpected errors propagate.

@@ -159,8 +159,9 @@ def t2echo_cfg(
     """Build detached Echo cfg with the fitted pi/pi2 and optional fringes.
 
     guess_us is the positive finite delay-grid estimate in microseconds.
-    Template waveform and calibrated acquisition gain are identical for pi and
-    pi/2, with separate fitted durations. None drive_gain retains template gain.
+    Template waveform is shared. Len uses separate fitted pi/pi2 durations at
+    drive_gain. Amp uses one length and independent pi/pi2 gains. A missing
+    pi2_drive_gain uses drive_gain; missing drive_gain retains template gain.
     Readout scalars use calibration. Auto stop caps sweep_factor times guess_us
     at max_length_us. Auto relax uses the positive finite T1 estimate
     (current accepted T1, historical EWMA, then seed), floored at relax_min_us.
