@@ -15,7 +15,7 @@ Readout 優化預設 `reps=100`、`rounds=1`，其餘 workflow 量測與共用�
 `CoherencePlan` 固定 flux setpoints、明填的 flux_unit、resolved drive/readout modules、delay points 與 historical RunSnapshot。
 `measure_t1`、`measure_t2ramsey`、`measure_t2echo` 預設 true，至少開啟一項。全關在 acquisition 前拒絕。
 每點先設 flux，再依 frequency、Rabi、readout、可選 singleshot GE、T1、Ramsey、Echo 順序執行。
-關閉的 lifetime 不量、不保存、不產生 result 元素。
+關閉的 lifetime 不量、不保存，對應的 point 欄位保留 None。
 
 `measure_singleshot` 是固定 plan bool，預設 false，不取代至少開啟一項 lifetime 的要求。
 `CoherenceTunables` 分為共用 `cal` 與獨立 `singleshot`、`t1`、`t2ramsey`、`t2echo`。
@@ -26,7 +26,7 @@ Schedule failure 不更新間距基準，Completed partial 仍更新。預設間
 GE 使用本點 fitted pi pulse 與接受或保留的合法 readout，relax delay 使用 T1 的 relax_factor × 該點 history-based guess，即使 T1 關閉也沿用此公式。
 每個 Completed GE 保存 `singleshot-ge.h5`，partial 也先保存。Workflow 不呼叫 GE analyze，不做分類、擬合或 workflow 結果圖。Core 的 operation 即時圖保留。
 主模型有擬合結果時，每個 lifetime 都記兩種模型。T1 記含 baseline 的單指數與雙指數，T2 記指數與零中心高斯包絡；有條紋時兩者都帶 cosine。
-`measurements[].models` 記各模型的 lifetime、誤差、residual RMS、quality、BIC 與狀態，圖上疊加兩條可用曲線。
+`t1.models`、`t2ramsey.models`、`t2echo.models` 記各模型的 lifetime、誤差、residual RMS、quality、BIC 與狀態，圖上疊加兩條可用曲線。
 只有原有主模型參與接受、relax 與歷史。BIC 不選接受模型，副模型不改下游值。
 非有限、非正 lifetime、誤差大於值、負誤差、quality.invalid 或 lifetime 超過 `max_model_window_factor * max(fitted delays)` 時，模型診斷記 `discarded` 與原因。倍數預設 2，三種 lifetime 各自可調。
 有限但 discarded 的值仍保留，非有限值存 null。副模型失敗只記 failed/reason；主模型失敗不嘗試副模型，partial 不擬合。
@@ -39,7 +39,7 @@ Ramsey 的 detune_ratio 是有限 fringes/step 值，無論 plan 開關都驗證
 Requested detune 為 ratio/length_step；公開 acquisition result 保留原生量化後的 actual detune。
 Echo 的 detune_ratio 預設 0.1，零選純 decay，非零選 fringe；requested detune 同樣是 ratio/length_step。
 兩者仍以原有 fringe／whole-trace decay 作主模型，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
-T1 保留原有 relative error 與 normalized residual RMS 門檻。
+T1 保留原有 relative error 與 normalized residual RMS 門檻。拒絕 reason 先保留 lifetime_rejection 的原因，再逐項列出失敗 gate 的名稱、實際值、失敗比較與門檻；無法取得的值標為 unavailable。
 Pi2 使用所選 Rabi 模式的 fitted pulse，不取 pi duration 或 gain 除以二。Len 模式使用 phase-aware fitted duration 與相同 gain。Amp 模式使用相同固定長度與獨立 fitted pi/2 gain。
 `coherence_fluxdep.t1`、`coherence_fluxdep.t2` 提供 native cfg 科學 helper。其純資料 plan/point carrier 仍有既有 conversion caller，不代表 standalone workflow 入口。
 
@@ -77,10 +77,10 @@ T1、GE、readout 與 excited MIST 要求本點 accepted π；Ramsey／Echo 另�
 缺少本點 pulse 時，該 consumer 記 skipped 並寫明依賴。本點 π/2 不可信時，不阻擋只需 π 的 consumer。
 Point 的 calibration_sources 記 consumer、need=now、source_index、source_flux 與 fallback=False。readout_source 另記沿用的 readout 校準來源，source_index=None 代表固定 host seed。
 
-`CoherencePoint` 保存 frequency、rabi、readout、singleshot 與 enabled `measurements` tuple。
+`CoherencePoint` 保存 frequency、rabi、readout、singleshot，以及獨立的 t1、t2ramsey、t2echo 欄位。T1Result 是獨立型別；RamseyResult、EchoResult 暫時沿用共同欄位的具名版本。
 `singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
 完整擷取記 measured，Schedule failure 記 failed 且沒有檔名，partial 記 failed／partial 並保留檔名。未走到此 stage 的點記 skipped／not reached，歷史 record 缺欄位時為 None。
-Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
+三個 lifetime 欄位未量測或未到達時是 None，包含關閉的項目。開啟但失敗、拒絕或 skipped 時保存具名結果與原因。這是 2026-10-25 的格式切換；沒有真實舊資料，不支援舊 measurements 格式讀取。
 Frequency 預設 `frequency_mode="two_step"`。粗掃使用 probe pulse gain，
 span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain` 覆寫粗掃 gain。
 粗掃先選 predictor 加 IDW 中心最近的候選，其餘依 prominence 降序。
@@ -118,6 +118,8 @@ Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
 Carry 與 lifetime history 是 async 函式的區域變數。每點先建可變 point_record，欄位尚未取得時為 None。
+Coherence 的 calibrate_point 是複合 stage，依序呼叫 frequency、Rabi 與 readout；Rabi 依模式包含 AmpRabi。它正常回傳 PointCalibrationResult，主迴圈再填 frequency/rabi/readout。Expected failed/rejected 仍回傳各 stage 的結果。
+校準的 unexpected exception 不回傳 aggregate。例如 frequency 成功後 Rabi 內部 bug，finally 保存的 point 不含 frequency 結果，但 frequency 已存的 h5 仍在磁碟，run 失敗。
 主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
 Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準與區域變數不重做。
 子層取消讓 operation 回 partial。作者先保存 Completed raw，再檢查 partial_result，保留原有拒絕原因，不進擬合或接受。
@@ -221,7 +223,7 @@ Samples 需要明填 `--result <entry result>`，Labber 需要 `--database <Data
 各 writer 回報自己的 path/status/error。未配置的 Labber path 為 None，已配置的失敗保留 path，不自動重試或寫 ledger。
 
 工具讀固定 manifest，再用 `saved_run.read_records(run, CoherencePoint)` 或 MISTPoint 讀整個 run 的 typed commit list。
-每列的 directory 來自 commit 信封，工具只讀 point 中具名的 native reference。
+每列的 directory 來自 commit 信封，工具只讀 point 中具名的 native reference。Coherence 從 t1、t2ramsey、t2echo 欄位取各量測的原生檔名；None 不產生該量測的 channel。Generic saved_run 不解讀 lab 欄位，也不轉換舊 measurements 格式。
 沒有 record.json 的配置目錄不產生 row。Reader 不從 raw 檔推造遺失 record，export receipt 的 missing_records 保留為空 tuple。
 壞資料指名 source，不讀 journal、掃 native 候選或重抓目前 GUI。
 Coherence 各已量 lifetime 分別輸出 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay。

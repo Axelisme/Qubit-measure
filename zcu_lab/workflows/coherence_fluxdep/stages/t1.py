@@ -14,10 +14,10 @@ from zcu_tools.program.v2 import SweepCfg
 from zcu_lab.v2.support import LinePlot, live_line
 from zcu_lab.v2.support.lifetime_models import (
     LifetimeComparison,
+    LifetimeModelRecord,
     draw_lifetime_comparison,
 )
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
-from zcu_lab.workflows.coherence_fluxdep.measurements import LifetimeResult
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 from zcu_lab.workflows.common.analysis import (
@@ -26,27 +26,39 @@ from zcu_lab.workflows.common.analysis import (
     compare_decay_fit,
     lifetime_rejection,
 )
-from zcu_lab.workflows.common.calibration_results import FrequencyGate
-from zcu_lab.workflows.common.frequency_diagnostics import frequency_gate
+from zcu_lab.workflows.common.calibration_results import StageStatus
+from zcu_lab.workflows.common.gates import Gate, gate
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 
 @dataclass(frozen=True, kw_only=True)
-class T1Result(LifetimeResult):
-    """T1 outcome with optional accepted values and named acceptance gates.
+class T1Result:
+    """T1 outcome, independent of the dephasing experiments' result types.
 
-    Inherits LifetimeResult's status, reason, file and model semantics. kind is
-    always t1. Missing values default to None; gates is empty until the primary
-    fit succeeds. Each gate records its name, comparison, threshold and value.
+    kind is always t1. status is accepted, rejected, failed or skipped. reason
+    is None on acceptance, otherwise the dependency, acquisition or fit reason.
+    lifetime_us/error_us contain accepted microseconds only, otherwise None.
+    file is t1.h5 after saving a Completed, including partial/rejected traces;
+    acquisition failure and dependency skips have no file. detune_mhz remains
+    None for T1 and preserves the existing record shape.
+    models records both diagnostic fits, or is empty before primary-fit success.
+    gates records named comparisons after primary-fit success, otherwise empty.
+    Rejection reasons start with lifetime-quality diagnostics, then list failed
+    gates with actual values, failed comparisons and thresholds.
+    Partial saves raw then returns rejected/stopped without fitting. Expected
+    fit failure returns failed with the saved file; unexpected errors propagate.
     Construct with keywords; this result never changes point records or history.
     """
 
     kind: Literal["t1"] = "t1"
+    status: StageStatus
     reason: str | None = None
     lifetime_us: float | None = None
     error_us: float | None = None
     file: str | None = None
-    gates: tuple[FrequencyGate, ...] = ()
+    detune_mhz: float | None = None
+    models: tuple[LifetimeModelRecord, ...] = ()
+    gates: tuple[Gate, ...] = ()
 
 
 def _cfg(
@@ -142,7 +154,8 @@ async def measure_t1(
     Save t1.h5 before fitting; partial returns rejected/stopped without fitting.
     Acquisition failure returns failed without a file; expected fit failure
     returns failed with the saved file. Other exceptions propagate. Only the
-    primary fit controls acceptance. No point record or history is modified.
+    primary fit controls acceptance. Rejection reasons retain lifetime_rejection
+    first, followed by each failed numeric gate. No point record or history is modified.
     """
     cfg = _cfg(pulses, settings, points=points, guess_us=guess_us)
     plot = _plot(env.plots)
@@ -166,45 +179,55 @@ async def measure_t1(
         return T1Result(status="failed", reason=fit.reason, file=acquisition.file)
 
     gates = (
-        frequency_gate("positive_lifetime_us", ">", 0, fit.lifetime_us),
-        frequency_gate("nonnegative_error_us", ">=", 0, fit.error_us),
-        frequency_gate(
+        gate("positive_lifetime_us", ">", 0, fit.lifetime_us),
+        gate("nonnegative_error_us", ">=", 0, fit.error_us),
+        gate(
             "relative_error",
             "<",
             settings.max_rel_err,
             fit.error_us / fit.lifetime_us if fit.lifetime_us > 0 else None,
         ),
-        frequency_gate(
+        gate(
             "normalized_residual_rms",
             "<",
             settings.max_fit_residual,
             fit.quality.normalized_residual_rms,
         ),
-        frequency_gate(
+        gate(
             "lifetime_window_us",
             "<=",
             2.0 * float(np.max(acquisition.result.times)),
             fit.lifetime_us,
         ),
-        frequency_gate(
+        gate(
             "mean_absolute_fit_error",
             "<=",
             0.1 * float(np.ptp(fit.fitted)),
             float(np.mean(np.abs(fit.observed - fit.fitted))),
         ),
-        frequency_gate("invalid_quality_count", "==", 0, len(fit.quality.invalid)),
-        frequency_gate(
+        gate("invalid_quality_count", "==", 0, len(fit.quality.invalid)),
+        gate(
             "points_within_lifetime",
             ">=",
             settings.min_lifetime_points,
             int(np.count_nonzero((fit.times >= 0) & (fit.times <= fit.lifetime_us))),
         ),
     )
-    reason = lifetime_rejection(
+    reasons = []
+    lifetime_reason = lifetime_rejection(
         fit.quality, fit.times, fit.lifetime_us, settings.min_lifetime_points
     )
-    if reason is None and not all(gate.passed for gate in gates):
-        reason = "T1 fit rejected: error/RMS, twice-window or 10% span gate"
+    if lifetime_reason is not None:
+        reasons.append(lifetime_reason)
+    failed_comparison = {"<": ">=", "<=": ">", ">": "<=", ">=": "<", "==": "!="}
+    reasons.extend(
+        f"{item.name} {item.actual:.9g} {failed_comparison[item.comparison]} {item.threshold:.9g}"
+        if item.actual is not None
+        else f"{item.name} unavailable (requires {item.comparison} {item.threshold:.9g})"
+        for item in gates
+        if not item.passed
+    )
+    reason = "; ".join(reasons) or None
     comparison = compare_decay_fit(
         fit, t1=True, max_window_factor=settings.max_model_window_factor
     )

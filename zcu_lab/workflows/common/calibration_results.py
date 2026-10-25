@@ -9,25 +9,9 @@ from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
 
 from zcu_lab.workflows.common.frequency_tracking import RecoveryAttempt
+from zcu_lab.workflows.common.gates import Gate
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
-
-
-class FrequencyGate(BaseModel):
-    """One numeric decision with its comparison, threshold and observed value.
-
-    actual is null for unavailable/nonfinite values, which cannot pass.
-    applied=False marks final acceptance gates reported for a coarse fit but
-    not used to select it. name identifies the metric and its decision stage.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    name: str
-    comparison: Literal["<", "<=", ">", ">=", "=="]
-    threshold: float
-    actual: float | None
-    passed: bool
-    applied: bool = True
 
 
 class FrequencyDiagnostics(BaseModel):
@@ -50,7 +34,7 @@ class FrequencyDiagnostics(BaseModel):
     trace_snr: float | None = None
     normalized_rms: float | None = None
     mae_over_fit_ptp: float | None = None
-    gates: tuple[FrequencyGate, ...] = ()
+    gates: tuple[Gate, ...] = ()
     fit_failure: str | None = None
 
 

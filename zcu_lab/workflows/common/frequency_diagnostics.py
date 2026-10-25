@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import math
-import operator
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 from zcu_tools.experiment.v2.utils.snr import estimate_snr
@@ -13,9 +12,9 @@ from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
 from zcu_lab.workflows.common.calibration_analysis import FrequencyFit
 from zcu_lab.workflows.common.calibration_results import (
     FrequencyDiagnostics,
-    FrequencyGate,
     FrequencyScan,
 )
+from zcu_lab.workflows.common.gates import Gate, gate
 
 if TYPE_CHECKING:
     from zcu_lab.workflows.common.calibration import CalibrationTunables
@@ -28,42 +27,11 @@ def _finite(value: float | None) -> float | None:
     return value if value is not None and math.isfinite(value) else None
 
 
-def frequency_gate(
-    name: str,
-    comparison: Literal["<", "<=", ">", ">=", "=="],
-    threshold: float,
-    actual: float | None,
-    *,
-    applied: bool = True,
-) -> FrequencyGate:
-    """Record a comparison; missing/nonfinite observations fail, not JSON NaN.
-
-    applied=False reports a diagnostic comparison not used at this stage.
-    Thresholds must be finite. Callers supply values in the threshold's units.
-    """
-    compare = {
-        "<": operator.lt,
-        "<=": operator.le,
-        ">": operator.gt,
-        ">=": operator.ge,
-        "==": operator.eq,
-    }[comparison]
-    finite = _finite(actual)
-    return FrequencyGate(
-        name=name,
-        comparison=comparison,
-        threshold=threshold,
-        actual=finite,
-        passed=finite is not None and compare(finite, threshold),
-        applied=applied,
-    )
-
-
 def scan_diagnostics(result: FreqResult, candidate_count: int) -> FrequencyDiagnostics:
     """Record full-trace SNR and candidate presence before any local fitting."""
     return FrequencyDiagnostics(
         trace_snr=_finite(estimate_snr(qubfreq_signal2real(result.signals))),
-        gates=(frequency_gate("candidate_count", ">=", 1, candidate_count),),
+        gates=(gate("candidate_count", ">=", 1, candidate_count),),
     )
 
 
@@ -77,14 +45,14 @@ def selected_peak_diagnostics(
     """
     peak = scan.selected_peak
     gates = (
-        frequency_gate("candidate_present", "==", 1, float(peak is not None)),
-        frequency_gate(
+        gate("candidate_present", "==", 1, float(peak is not None)),
+        gate(
             "selected_peak_snr",
             ">=",
             tun.peak_min_snr,
             None if peak is None else peak.snr,
         ),
-        frequency_gate(
+        gate(
             "selected_peak_not_truncated",
             "==",
             1,
@@ -117,42 +85,38 @@ def fit_diagnostics(
     margin = tun.frequency_edge_margin * float(np.ptp(fit.source.freqs))
     applied = scan.stage != "coarse"
     gates = scan.diagnostics.gates + (
-        frequency_gate(
-            "positive_center_mhz", ">", 0, fit.frequency_mhz, applied=applied
-        ),
-        frequency_gate(
+        gate("positive_center_mhz", ">", 0, fit.frequency_mhz, applied=applied),
+        gate(
             "center_window_lower_mhz",
             ">=",
             float(np.min(fit.source.freqs)) + margin,
             fit.frequency_mhz,
             applied=applied,
         ),
-        frequency_gate(
+        gate(
             "center_window_upper_mhz",
             "<=",
             float(np.max(fit.source.freqs)) - margin,
             fit.frequency_mhz,
             applied=applied,
         ),
-        frequency_gate("positive_fwhm_mhz", ">", 0, fit.width_mhz, applied=applied),
-        frequency_gate(
-            "nonnegative_center_error_mhz", ">=", 0, fit.error_mhz, applied=applied
-        ),
-        frequency_gate(
+        gate("positive_fwhm_mhz", ">", 0, fit.width_mhz, applied=applied),
+        gate("nonnegative_center_error_mhz", ">=", 0, fit.error_mhz, applied=applied),
+        gate(
             "center_error_over_fwhm",
             "<",
             tun.max_frequency_rel_err,
             relative_error,
             applied=applied,
         ),
-        frequency_gate(
+        gate(
             "normalized_rms",
             "<",
             tun.max_fit_residual,
             fit.quality.normalized_residual_rms,
             applied=applied,
         ),
-        frequency_gate(
+        gate(
             "mae_over_fit_ptp",
             "<",
             MAX_FREQUENCY_MEAN_RESIDUAL_RATIO,
@@ -162,13 +126,13 @@ def fit_diagnostics(
     )
     if scan.stage == "coarse":
         gates += (
-            frequency_gate(
+            gate(
                 "coarse_interval_lower_mhz",
                 ">=",
                 float(np.min(fit.freqs)),
                 fit.frequency_mhz,
             ),
-            frequency_gate(
+            gate(
                 "coarse_interval_upper_mhz",
                 "<=",
                 float(np.max(fit.freqs)),
@@ -189,7 +153,7 @@ def fit_diagnostics(
 
 def confirmation_gates(
     coarse_fit: FrequencyFit, scan: FrequencyScan
-) -> tuple[FrequencyGate, ...]:
+) -> tuple[Gate, ...]:
     """Record fine-peak presence and displacement versus the coarse peak width.
 
     The strongest fine peak is used, as in confirm_frequency_candidate. No
@@ -200,8 +164,8 @@ def confirmation_gates(
         raise ValueError("Fine confirmation requires a coarse candidate")
     strongest = next(iter(scan.peaks), None)
     return (
-        frequency_gate("fine_candidate_present", "==", 1, float(strongest is not None)),
-        frequency_gate(
+        gate("fine_candidate_present", "==", 1, float(strongest is not None)),
+        gate(
             "fine_peak_distance_mhz",
             "<=",
             peak.width,

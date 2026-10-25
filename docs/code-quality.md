@@ -167,6 +167,19 @@ lib 與 tools 不得假設 zcu_lab 的欄位名、段落名、實驗名或 cfg �
 衝突時選一眼就懂的寫法，型別與驗證由 lib 在邊界承擔。不要在實驗定義中重做框架的檢查。
 lib 本身仍遵守前述品質判準。
 
+2026-10-25 使用者裁決：「迴圈內每一次的執行應該直接放在主迴圈，只有每一個實驗的量測與分析可以放在 helper，因為耦合比較高的是 workflow 內部的流程，還有每個實驗內部的邏輯。」
+使用者也指出：「workflow 超過門檻可能是沒辦法避免的…能包成 helper 的就包，不能的話還是保留在原函式」。
+
+Lab workflow 主函式，亦即逐點依序呼叫各 stage 的流程，可以超過 Ruff 複雜度門檻
+C901、PLR0912、PLR0915 與 radon。實驗的量測與分析抽成 stage helper；
+流程步驟留在主函式，不為了門檻另拆。
+同一校準目的的多個實驗可以構成複合 stage；它的函式體依序呼叫單實驗 helper，回傳具名校準結果，由主迴圈填 point record。複合 stage 不用 out-parameter，也不包整個 flux 點的校準與 lifetime 流程。
+在函式定義行用 `# noqa: C901, PLR0912, PLR0915  # tolerated: <reason>` 標記，
+radon 用 `# tolerated(radon): <reason>` 記錄流程必須放在一起的理由。
+此例外只涵蓋 workflow 主函式，不涵蓋實驗 stage，也不放寬型別或 import 規則。
+主體增長可能讓步驟更難追蹤；若無法直接讀出量測順序，重新檢視 stage 的實驗邊界，
+不把逐點流程藏進另一個 helper。機械 gate 的 regression 與 exit 仍照實回報。
+
 「加入自己的客製化修改也很自然」
 
 lab-author 改一段脈衝、多一個欄位或換分析步驟，應像改腳本，不必先理解基底或 helper 契約。

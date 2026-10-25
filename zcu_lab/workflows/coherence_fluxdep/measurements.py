@@ -50,7 +50,7 @@ class LifetimeResult:
     reason is None only on acceptance. lifetime_us/error_us
     contain accepted microseconds only, otherwise both None. file is relative
     to the iteration and exists only after Completed, including rejected fits.
-    Disabled lifetimes have no result or placeholder in the point tuple.
+    Disabled or unreached lifetimes leave their named point field None.
     Partial saves then returns rejected/stopped without fitting or acceptance.
     Expected fit failures return failed/reason after saving. Unexpected fit/
     adapter/writer/plot exceptions propagate, not a status.
@@ -147,13 +147,15 @@ def _t2_rejection(fit: DecayFit, min_lifetime_points: int) -> str | None:
     return None
 
 
-def _finish(
+def _finish[Result: LifetimeResult](
     plots: Plots,
     kind: LifetimeKind,
     fit: DecayFit,
     comparison: LifetimeComparison,
     reason: str | None,
-) -> LifetimeResult:
+    *,
+    result_type: type[Result],
+) -> Result:
     filename = f"{kind}.h5"
 
     def overlay(figure: Figure) -> None:
@@ -174,16 +176,22 @@ def _finish(
 
     plots.draw(kind, overlay)
     if reason is not None:
-        return LifetimeResult(
-            kind, "rejected", reason, None, None, filename, models=comparison.records
+        return result_type(
+            kind=kind,
+            status="rejected",
+            reason=reason,
+            lifetime_us=None,
+            error_us=None,
+            file=filename,
+            models=comparison.records,
         )
-    return LifetimeResult(
-        kind,
-        "accepted",
-        None,
-        fit.lifetime_us,
-        fit.error_us,
-        filename,
+    return result_type(
+        kind=kind,
+        status="accepted",
+        reason=None,
+        lifetime_us=fit.lifetime_us,
+        error_us=fit.error_us,
+        file=filename,
         models=comparison.records,
     )
 
@@ -196,7 +204,7 @@ async def measure_ramsey(
     snapshot: RunSnapshot,
     plots: Plots,
     summary: SummaryAccumulator | None = None,
-) -> LifetimeResult:
+) -> RamseyResult:
     """Measure Ramsey fringes to estimate dephasing without an echo pulse.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
@@ -219,7 +227,7 @@ async def measure_ramsey(
     outcome = await scope.run(run_t2ramsey, cfg, name="Ramsey")
     observe_operation(summary, outcome)
     if isinstance(outcome, Failed):
-        return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
+        return RamseyResult(status="failed", reason=outcome.reason)
     # Save every completed trace before plotting or analyzing it.
     save_t2ramsey(
         outcome,
@@ -228,15 +236,11 @@ async def measure_ramsey(
         identity=scope.identity,
     )
     if outcome.partial_result:
-        return LifetimeResult(
-            "t2ramsey", "rejected", "stopped", None, None, "t2ramsey.h5"
-        )
+        return RamseyResult(status="rejected", reason="stopped", file="t2ramsey.h5")
     plot.update(outcome.value.result.times, outcome.value.result.signals.real)
     fit = analyze_t2ramsey(outcome.value.result)
     if isinstance(fit, Failed):
-        return LifetimeResult(
-            "t2ramsey", "failed", fit.reason, None, None, "t2ramsey.h5"
-        )
+        return RamseyResult(status="failed", reason=fit.reason, file="t2ramsey.h5")
     result = _finish(
         plots,
         "t2ramsey",
@@ -245,6 +249,7 @@ async def measure_ramsey(
             fit, t1=False, fringe=True, max_window_factor=tun.max_model_window_factor
         ),
         _t2_rejection(fit, tun.min_lifetime_points),
+        result_type=RamseyResult,
     )
     return replace(
         result, detune_mhz=fit.detune_mhz if result.status == "accepted" else None
@@ -259,7 +264,7 @@ async def measure_echo(
     snapshot: RunSnapshot,
     plots: Plots,
     summary: SummaryAccumulator | None = None,
-) -> LifetimeResult:
+) -> EchoResult:
     """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
@@ -280,7 +285,7 @@ async def measure_echo(
     outcome = await scope.run(T2EchoExp().run, cfg, name="Echo")
     observe_operation(summary, outcome)
     if isinstance(outcome, Failed):
-        return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
+        return EchoResult(status="failed", reason=outcome.reason)
     # Save every completed trace before plotting or analyzing it.
     save_native(
         outcome,
@@ -290,11 +295,11 @@ async def measure_echo(
         identity=scope.identity,
     )
     if outcome.partial_result:
-        return LifetimeResult("t2echo", "rejected", "stopped", None, None, "t2echo.h5")
+        return EchoResult(status="rejected", reason="stopped", file="t2echo.h5")
     plot.update(outcome.value.result.times, outcome.value.result.signals.real)
     fit = analyze_t2echo_fluxdep(outcome.value.result, fit_fringe=cfg.detune != 0.0)
     if isinstance(fit, Failed):
-        return LifetimeResult("t2echo", "failed", fit.reason, None, None, "t2echo.h5")
+        return EchoResult(status="failed", reason=fit.reason, file="t2echo.h5")
     return _finish(
         plots,
         "t2echo",
@@ -306,4 +311,5 @@ async def measure_echo(
             max_window_factor=tun.max_model_window_factor,
         ),
         _t2_rejection(fit, tun.min_lifetime_points),
+        result_type=EchoResult,
     )
