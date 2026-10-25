@@ -8,11 +8,15 @@ runtime contract plus app-specific assembly/lifecycle behavior.
 
 from __future__ import annotations
 
+import atexit
+import faulthandler
+import logging
 import sys
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TextIO, TypeVar
 
 from zcu_tools.gui.logging_setup import setup_gui_logging
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
@@ -43,6 +47,96 @@ class GuiLaunchOptions:
     control_token: str | None = None
     control_allow_external: bool = False
     no_control: bool = False
+
+
+class ExitWatchdog(Protocol):
+    """Faulthandler-compatible process watchdog; file must remain open until cancel."""
+
+    def dump_traceback_later(
+        self, timeout: float, *, file: TextIO, exit: bool = False
+    ) -> None:
+        """Schedule one all-thread Python stack dump after timeout seconds."""
+        ...
+
+    def cancel_dump_traceback_later(self) -> None:
+        """Cancel the pending dump, waiting for any in-progress dump to finish."""
+        ...
+
+
+class GuiExitDiagnostics:
+    """Own a post-teardown stack watchdog and its fd-backed output.
+
+    log_file is the GUI log path, or None to use borrowed stderr. timeout is
+    positive seconds. watchdog defaults to the process-global faulthandler;
+    callers must not use another dump_traceback_later watchdog concurrently.
+    arm() registers atexit cleanup; close() may perform that cleanup explicitly.
+    Diagnostic I/O failures are logged without changing the GUI exit result.
+    """
+
+    def __init__(
+        self,
+        log_file: Path | None,
+        *,
+        timeout: float = 5,
+        watchdog: ExitWatchdog = faulthandler,
+    ) -> None:
+        if timeout <= 0:
+            raise ValueError("exit diagnostic timeout must be positive")
+        self._stack_path = (
+            Path(f"{log_file}.exit-stacks.txt") if log_file is not None else None
+        )
+        self._timeout = timeout
+        self._watchdog = watchdog
+        self._file: TextIO | None = None
+        self._armed = False
+
+    def arm(self) -> None:
+        """Arm once, retaining the output fd through Python's thread shutdown.
+
+        threading._shutdown joins non-daemon threads before atexit callbacks.
+        Cleanup there therefore leaves the watchdog active during those joins.
+        """
+        if self._armed:
+            return
+        try:
+            if self._stack_path is not None:
+                self._file = self._stack_path.open("w", encoding="utf-8")
+            self._watchdog.dump_traceback_later(
+                self._timeout,
+                file=self._file if self._file is not None else sys.stderr,
+                exit=False,
+            )
+        except (OSError, ValueError, RuntimeError):
+            logging.getLogger(__name__).warning(
+                "Could not arm GUI exit-stack watchdog", exc_info=True
+            )
+            self.close()
+            return
+        self._armed = True
+        atexit.register(self.close)
+
+    def close(self) -> None:
+        """Cancel before closing the owned fd; delete only empty stack output.
+
+        Nonempty dumps remain for reporting. stderr is never closed.
+        Repeated close calls have no effect.
+        """
+        atexit.unregister(self.close)
+        if self._armed:
+            self._watchdog.cancel_dump_traceback_later()
+            self._armed = False
+        if self._file is None:
+            return
+        try:
+            self._file.close()
+            if self._stack_path is not None and self._stack_path.stat().st_size == 0:
+                self._stack_path.unlink()
+        except OSError:
+            logging.getLogger(__name__).warning(
+                "Could not clean GUI exit-stack output", exc_info=True
+            )
+        finally:
+            self._file = None
 
 
 class GuiWindow(Protocol):
@@ -125,7 +219,7 @@ def launch_gui_runtime(
     Logging, construction and runtime failures propagate to the caller.
     """
     spec = behavior_cls.spec
-    setup_gui_logging(
+    log_file = setup_gui_logging(
         app_name=spec.app_name,
         log_root=options.log_root,
         to_file=options.to_file,
@@ -135,13 +229,23 @@ def launch_gui_runtime(
     )
     control = build_control_options(spec, options)
     behavior = behavior_cls(*args, **kwargs)
-    return run_gui_runtime(behavior, control)
+    return run_gui_runtime(
+        behavior, control, exit_diagnostics=GuiExitDiagnostics(log_file)
+    )
 
 
 def run_gui_runtime(
-    behavior: GuiRuntimeBehavior, control: ControlOptions | None
+    behavior: GuiRuntimeBehavior,
+    control: ControlOptions | None,
+    *,
+    exit_diagnostics: GuiExitDiagnostics | None = None,
 ) -> int:
-    """Run an already-instantiated GUI behavior on the Qt event loop."""
+    """Run behavior on Qt, then log live threads after app-owned resources close.
+
+    exit_diagnostics optionally arms a process-exit watchdog after close;
+    None records only the thread summary. The launcher supplies diagnostics
+    using the resolved GUI log path.
+    """
     app = _get_or_create_qapplication()
     _initialize_rendering(app)
 
@@ -167,6 +271,15 @@ def run_gui_runtime(
         # Runs after admission/drain on success and on every startup failure.
         # A close failure retains the original exception as its context.
         behavior.close(assembly)
+        threads = "; ".join(
+            f"name={thread.name!r} daemon={thread.daemon} ident={thread.ident}"
+            for thread in threading.enumerate()
+        )
+        logging.getLogger(__name__).info(
+            "GUI teardown complete; live Python threads: %s", threads
+        )
+        if exit_diagnostics is not None:
+            exit_diagnostics.arm()
 
 
 def _validate_control_assembly(
@@ -228,6 +341,8 @@ def _get_or_create_qapplication() -> QApplication:
 
 __all__ = [
     "ControlAdapter",
+    "ExitWatchdog",
+    "GuiExitDiagnostics",
     "GuiAssembly",
     "GuiLaunchOptions",
     "GuiRuntimeBehavior",

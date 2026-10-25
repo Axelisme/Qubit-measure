@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
+import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar
+from threading import Event, Thread
+from typing import ClassVar, TextIO
 
 import pytest
 from zcu_tools.gui import plotting, runtime
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 from zcu_tools.gui.runtime import (
     GuiAssembly,
+    GuiExitDiagnostics,
     GuiLaunchOptions,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
@@ -99,7 +103,10 @@ def test_launch_configures_logging_before_constructing_behavior(
             super().__init__(received_events)
 
     def run_behavior(
-        behavior: GuiRuntimeBehavior, control: ControlOptions | None
+        behavior: GuiRuntimeBehavior,
+        control: ControlOptions | None,
+        *,
+        exit_diagnostics: GuiExitDiagnostics | None = None,
     ) -> int:
         assert isinstance(behavior, LaunchBehavior)
         assert control is None
@@ -119,6 +126,108 @@ def test_launch_configures_logging_before_constructing_behavior(
     assert result == 17
     assert events == ["logging", "construct", "run"]
     assert LaunchBehavior.spec.logging_extra_namespaces == fixed_namespaces
+
+
+def test_teardown_summary_identifies_live_non_daemon_thread(
+    qapp, caplog: pytest.LogCaptureFixture
+) -> None:
+    from qtpy.QtCore import QTimer
+
+    release = Event()
+    worker = Thread(target=release.wait, name="exit-diagnostic-worker", daemon=False)
+
+    class ClosingBehavior(_Behavior):
+        def after_show(self, assembly: GuiAssembly) -> None:
+            QTimer.singleShot(0, qapp.closeAllWindows)
+
+        def assemble(self, control: ControlOptions | None) -> GuiAssembly:
+            from qtpy.QtWidgets import QWidget
+
+            return GuiAssembly(controller=object(), window=QWidget())
+
+        def close(self, assembly: GuiAssembly | None) -> None:
+            logging.getLogger("zcu_tools.gui.runtime").info("app resources closed")
+
+    worker.start()
+    try:
+        with caplog.at_level(logging.INFO, logger="zcu_tools.gui.runtime"):
+            assert run_gui_runtime(ClosingBehavior([]), None) == 0
+        summary = next(
+            record.message
+            for record in caplog.records
+            if "teardown complete" in record.message
+        )
+        assert "name='exit-diagnostic-worker'" in summary
+        assert "daemon=False" in summary
+        assert f"ident={worker.ident}" in summary
+        assert caplog.messages.index("app resources closed") < caplog.messages.index(
+            summary
+        )
+    finally:
+        release.set()
+        # release guarantees the worker can finish; join is only a deadlock guard.
+        worker.join(timeout=30)
+        assert not worker.is_alive()
+
+
+class _RecordingWatchdog:
+    def __init__(self) -> None:
+        self.requests: list[tuple[float, bool, TextIO]] = []
+        self.cancelled = False
+
+    def dump_traceback_later(
+        self, timeout: float, *, file: TextIO, exit: bool = False
+    ) -> None:
+        self.requests.append((timeout, exit, file))
+
+    def cancel_dump_traceback_later(self) -> None:
+        self.cancelled = True
+
+
+@pytest.mark.parametrize("to_file", [True, False], ids=["log-file", "stderr"])
+def test_runtime_arms_exit_watchdog_and_cleans_empty_stack_file(
+    qapp, tmp_path: Path, to_file: bool
+) -> None:
+    from qtpy.QtCore import QTimer
+
+    watchdog = _RecordingWatchdog()
+    log_file = tmp_path / "session.log" if to_file else None
+    diagnostics = GuiExitDiagnostics(log_file, timeout=9, watchdog=watchdog)
+    try:
+        QTimer.singleShot(0, qapp.quit)
+        assert run_gui_runtime(_Behavior([]), None, exit_diagnostics=diagnostics) == 0
+        assert len(watchdog.requests) == 1
+        timeout, exits_process, output = watchdog.requests[0]
+        assert timeout == 9
+        assert exits_process is False
+        if to_file:
+            assert Path(output.name) == tmp_path / "session.log.exit-stacks.txt"
+            assert output.fileno() >= 0
+        else:
+            assert output is sys.stderr
+        assert not output.closed
+    finally:
+        diagnostics.close()
+    assert watchdog.cancelled
+    assert output.closed is to_file
+    assert not (tmp_path / "session.log.exit-stacks.txt").exists()
+
+
+def test_exit_diagnostics_preserves_nonempty_stacks(tmp_path: Path) -> None:
+    watchdog = _RecordingWatchdog()
+    diagnostics = GuiExitDiagnostics(tmp_path / "session.log", watchdog=watchdog)
+    try:
+        diagnostics.arm()
+        timeout, exits_process, output = watchdog.requests[0]
+        assert timeout == 5
+        assert exits_process is False
+        output.write("diagnostic stack output\n")
+    finally:
+        diagnostics.close()
+    diagnostics.close()
+    assert (
+        tmp_path / "session.log.exit-stacks.txt"
+    ).read_text() == "diagnostic stack output\n"
 
 
 class _Signal:

@@ -115,6 +115,12 @@ behavior classes. Repo-root `apps.measure`, `apps.fluxdep` and `apps.dispersive`
 provide `main(argv)` composition roots and call `launch_gui_runtime(...)` directly.
 `scripts/app/run_*_gui.py` are user-facing thin shells that delegate to them.
 
+After app teardown, the runtime logs the remaining Python threads. If the
+process has not exited after 5 seconds, it writes all Python thread stacks to
+`<GUI log path>.exit-stacks.txt` beside the GUI log (or stderr when file logging
+is disabled). Send that file and the GUI log to the developers when reporting
+a slow exit. Normal exit removes empty stack files.
+
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
 `gui.session` owns measurement-session primitives. The three standalone GUI launchers (`measure`, `fluxdep`, `dispersive`) use this
