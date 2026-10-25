@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from qtpy.QtCore import Qt, QTimer
@@ -38,6 +37,7 @@ from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormModel, FormState
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.session.ui.progress_stack import ProgressStack
@@ -181,6 +181,7 @@ class ExpTabWidget(QWidget):
         preview_renderer: Any | None = None,
     ) -> None:
         super().__init__(parent)
+        self._init_lifetime()
         self.tab_id = tab_id
         self._ctrl = ctrl
         self._capabilities = capabilities
@@ -190,8 +191,6 @@ class ExpTabWidget(QWidget):
         self._writable = True
         self._progress_control = ctrl.progress_control
         self._cfg = ctrl.cfg_resources.lookup(tab_id)
-        # The action boundary is retained for Reset; button slots close over it.
-        self._actions: TabActions | None = None
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(4, 4, 4, 4)
@@ -215,8 +214,10 @@ class ExpTabWidget(QWidget):
         root_layout.addWidget(self.progress_stack, stretch=0)
 
         # Subscribe once by our own tab_id
-        self._progress_unsub = self._progress_control.attach_progress(
-            self.tab_id, self._on_progress_changed
+        self._scope.add_cleanup(
+            self._progress_control.attach_progress(
+                self.tab_id, self._scope.callback(self._on_progress_changed)
+            )
         )
 
         # splitter holds two panes: left (tab panel) | right (plot)
@@ -228,13 +229,13 @@ class ExpTabWidget(QWidget):
         self._splitter = splitter
         self._splitter_left_saved = ctrl.get_left_panel_width()
         self._left_panel_collapsed = False
-        self._splitter.splitterMoved.connect(self._on_splitter_moved)
+        self._scope.connect(self._splitter.splitterMoved, self._on_splitter_moved)
 
         # ── Left pane: QTabWidget with capability-driven tabs ──────
         self._left_tabs = QTabWidget()
 
         self._left_edge_handle = _PanelEdgeHandle(self._content_widget)
-        self._left_edge_handle.clicked.connect(self._toggle_left_panel)
+        self._scope.connect(self._left_edge_handle.clicked, self._toggle_left_panel)
 
         self._build_run_panel()
         self._build_analysis_panel()
@@ -256,7 +257,7 @@ class ExpTabWidget(QWidget):
         self._update_left_panel_controls()
         self._schedule_handle_layout()
         # Right pane follows left selection
-        self._left_tabs.currentChanged.connect(self._on_left_tab_changed)
+        self._scope.connect(self._left_tabs.currentChanged, self._on_left_tab_changed)
         # Initially show Run
         self._on_left_tab_changed(self._left_tabs.currentIndex())
 
@@ -273,8 +274,6 @@ class ExpTabWidget(QWidget):
         self._form_scroll.setWidgetResizable(True)
         self._editor: FormEditor[FormModel] | None = None
         self._editor_state: FormState[FormModel] | None = None
-        self._editing_enabled = True
-        self._cfg_unsub: Callable[[], None] | None = None
         self._follow_cfg()
         run_layout.addWidget(self._form_scroll, stretch=1)
         self._run_cfg_notice = QLabel()
@@ -345,6 +344,7 @@ class ExpTabWidget(QWidget):
             self.writeback_widget = WritebackWidget(
                 self._ctrl, tab_id=self.tab_id, pane="analysis"
             )
+            self._scope.add_cleanup(self.writeback_widget.detach)
             self.writeback_section.body_layout.addWidget(self.writeback_widget)
             self.writeback_section.setVisible(False)
             analysis_layout.addWidget(self.writeback_section)
@@ -383,6 +383,7 @@ class ExpTabWidget(QWidget):
             self.post_writeback_widget = WritebackWidget(
                 self._ctrl, tab_id=self.tab_id, pane="post_analysis"
             )
+            self._scope.add_cleanup(self.post_writeback_widget.detach)
             self.post_writeback_section.body_layout.addWidget(
                 self.post_writeback_widget
             )
@@ -495,12 +496,14 @@ class ExpTabWidget(QWidget):
         self._schedule_handle_layout()
 
     def _schedule_handle_layout(self) -> None:
-        QTimer.singleShot(0, self._layout_collapsed_handle)
+        QTimer.singleShot(0, self._scope.callback(self._layout_collapsed_handle))
 
     # ── attach / detach (whole-tab, snapshot-driven) ──────────────────────
 
     def attach(self, snapshot: TabSnapshot, actions: TabActions) -> None:
-        """Bring this tab widget to life from one snapshot."""
+        """Bring this tab widget to life from one snapshot; reject retired views."""
+        if self._scope.closed:
+            raise RuntimeError("Experiment tab is detached")
         if snapshot.capabilities is None:
             raise RuntimeError(
                 f"render snapshot for tab {self.tab_id!r} has no capabilities"
@@ -510,7 +513,6 @@ class ExpTabWidget(QWidget):
                 f"capability mismatch for tab {self.tab_id!r}: "
                 f"widget {self._capabilities!r} vs snapshot {snapshot.capabilities!r}"
             )
-        self._follow_cfg()
         if (
             self._has_analysis
             and snapshot.analysis is not None
@@ -788,23 +790,26 @@ class ExpTabWidget(QWidget):
         label = ".".join(str(part) for part in path)
         return f"{label}: {message}" if label else message
 
+    def _init_lifetime(self) -> None:
+        # Retain the action boundary only while the view is live.
+        self._actions: TabActions | None = None
+        self._editing_enabled = True
+        self._scope = LifetimeScope(self)
+        self._editor_scope = LifetimeScope()
+        self._scope.add_cleanup(lambda: self.setEnabled(False))
+        self._scope.add_cleanup(lambda: self._editor_scope.close())
+
     def _follow_cfg(self) -> None:
         """Mount an editor over the resource's current state and watch for swaps."""
-        if self._cfg_unsub is not None:
-            return
         self._mount_editor()
-        self._cfg_unsub = self._cfg.subscribe(self._on_cfg_published)
-
-    def _unfollow_cfg(self) -> None:
-        if self._cfg_unsub is not None:
-            self._cfg_unsub()
-            self._cfg_unsub = None
-        if self._editor is not None:
-            self._editor.detach()
+        self._scope.add_cleanup(
+            self._cfg.subscribe(self._scope.callback(self._on_cfg_published))
+        )
 
     def _mount_editor(self) -> None:
+        self._editor_scope.close()
+        self._editor_scope = LifetimeScope()
         if self._editor is not None:
-            self._editor.detach()
             self._form_scroll.takeWidget()
             self._editor.deleteLater()
             self._editor = None
@@ -831,7 +836,10 @@ class ExpTabWidget(QWidget):
             run_command=self._cfg.run_command,
         )
         editor.setContentsMargins(4, 4, 4, 4)
-        editor.validity_changed.connect(self._on_cfg_validity_changed)
+        self._editor_scope.add_cleanup(editor.detach)
+        self._editor_scope.connect(
+            editor.validity_changed, self._on_cfg_validity_changed
+        )
         editor.set_editing_enabled(enabled=self._editing_enabled)
         self._editor = editor
         self._editor_state = state
@@ -1058,41 +1066,55 @@ class ExpTabWidget(QWidget):
         self._actions = actions
 
         if self._has_analysis:
-            self.analyze_form.validity_changed.connect(
-                lambda _valid: actions.refresh_interaction(tab_id)
+            self._scope.connect(
+                self.analyze_form.validity_changed,
+                lambda _valid: actions.refresh_interaction(tab_id),
             )
-            self.analyze_form.params_changed.connect(
+            self._scope.connect(
+                self.analyze_form.params_changed,
                 lambda instance: self._ctrl.update_tab_analyze_param_instance(
                     tab_id, instance
-                )
+                ),
             )
         if self._has_post:
-            self.post_analyze_form.validity_changed.connect(
-                lambda _valid: actions.refresh_interaction(tab_id)
+            self._scope.connect(
+                self.post_analyze_form.validity_changed,
+                lambda _valid: actions.refresh_interaction(tab_id),
             )
-            self.post_analyze_form.params_changed.connect(
+            self._scope.connect(
+                self.post_analyze_form.params_changed,
                 lambda instance: self._ctrl.update_tab_post_analyze_param_instance(
                     tab_id, instance
-                )
+                ),
             )
-        self.reset_btn.clicked.connect(self._on_reset_cfg_clicked)
-        self.refresh_btn.clicked.connect(self._on_refresh_sources_clicked)
-        self.run_btn.clicked.connect(lambda: actions.run_or_stop(tab_id))
+        self._scope.connect(self.reset_btn.clicked, self._on_reset_cfg_clicked)
+        self._scope.connect(self.refresh_btn.clicked, self._on_refresh_sources_clicked)
+        self._scope.connect(self.run_btn.clicked, lambda: actions.run_or_stop(tab_id))
         if self._capabilities.load_data:
-            self._save_center.bind_load(lambda: actions.load_data(tab_id))
-        self._save_center.bind_save_all(lambda: actions.save_all(tab_id))
+            self._save_center.bind_load(
+                self._scope.callback(lambda: actions.load_data(tab_id))
+            )
+        self._save_center.bind_save_all(
+            self._scope.callback(lambda: actions.save_all(tab_id))
+        )
         if self._has_analysis:
-            self.analyze_btn.clicked.connect(lambda: actions.analyze(tab_id))
-            self.writeback_widget.apply_requested.connect(
-                lambda: actions.apply_writeback(tab_id)
+            self._scope.connect(
+                self.analyze_btn.clicked, lambda: actions.analyze(tab_id)
+            )
+            self._scope.connect(
+                self.writeback_widget.apply_requested,
+                lambda: actions.apply_writeback(tab_id),
             )
         if self._has_post:
-            self.post_analyze_btn.clicked.connect(lambda: actions.post_analyze(tab_id))
-            self.post_writeback_widget.apply_requested.connect(
-                lambda: actions.apply_post_writeback(tab_id)
+            self._scope.connect(
+                self.post_analyze_btn.clicked, lambda: actions.post_analyze(tab_id)
+            )
+            self._scope.connect(
+                self.post_writeback_widget.apply_requested,
+                lambda: actions.apply_post_writeback(tab_id),
             )
         self._save_center.bind_artifact_save(
-            lambda ref: actions.save_artifact(tab_id, ref)
+            self._scope.callback(lambda ref: actions.save_artifact(tab_id, ref))
         )
 
     def _on_progress_changed(self) -> None:
@@ -1100,9 +1122,6 @@ class ExpTabWidget(QWidget):
         self.progress_stack.render_models(models)
 
     def detach(self) -> None:
-        """Tear this tab widget down."""
-        if self._actions is None:
-            raise RuntimeError(f"tab {self.tab_id!r} is not attached")
-        self._progress_unsub()
-        self._unfollow_cfg()
+        """Retire callbacks and release subscriptions/editors without closing the resource."""
+        self._scope.close()
         self._actions = None

@@ -14,6 +14,29 @@ Measure 有 Qt 視窗與 remote 入口，Workflows 也複用量測 session。把
 
 GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner 公開的狀態或投影，寫入時呼叫 owning command，不另造一份可提交的業務狀態。這不表示各 GUI 都開放相同的 remote commands：dispersive 的 remote 入口目前只讀；fluxdep 與 Measure 的 remote 呼叫同一 owning commands。Measure 的 `Controller` 和 control facets 提供共用的應用入口；畫面預覽、canvas、焦點與 renderer 仍由 Qt 前端持有。Remote 的傳輸、診斷投遞及 wire 契約留給 Remote／Transport，不由本篇指定。
 
+## GUI callback lifetime
+
+2026-10-25 使用者要求：「这种生命周期的问题非常可怕，尤其是这种停用然后或释放或静态之类的，最好有个架构上就可以解决的方案，简单的方案就可以了。」比較只修 FormEditor 與統一 lifetime scope 後，使用者以「采用建议」選擇後者。
+
+`gui.lifetime.LifetimeScope` 取代原來只供 workflow 使用的 WorkflowBorrower。
+GUI 元件把對 owner 的 callback、Qt signal、訂閱、timer、eventFilter 與 matplotlib cid
+登記在 scope。可替換的 editor、row 或 frontend 各有自己的 scope。
+宿主先取得 domain 的關閉許可，再呼叫 scope.close，成功後才刪除 Qt children。
+Scope 不關閉 borrowed session，不 drain 工作，也不代替 operation 的取消或終局。
+
+Close 先永久停用 callback，再依登記的相反順序釋放資源。重複 close 不重做成功項。
+清理例外沿用 WorkflowBorrower 的語意，遇到第一個失敗即拋出，保留該項與較早項供重試。
+失敗不重新啟用 callback，也不表示可以刪除 children。
+已進入的 callback 不會被中斷，從可重入 owner command 返回後，仍須確認 scope 未關閉才更新畫面。
+
+Scope 集中檢查外部 Qt parent 是否已刪除 C++ owner，讓晚到 callback 成為 no-op。
+這只防止碰到已刪物件，不保證省略 close 的 owner 已解除所有訂閱。
+FormEditor 的 state 訂閱仍用 weak view，避免長壽 state 保留整棵 QWidget。
+Qt signal slot 的 QObject receiver 使用弱參照。EventFilter 經 scope 的 QObject proxy
+轉送，cyclic GC 清空 Python 屬性後的 Qt virtual call 在 proxy 內成為 no-op。
+不使用捕捉 owner 的 destroyed closure 做清理。
+此共用機制不依賴 app 或 domain，`.importlinter` 的 `gui-lifetime-no-domain` contract 保護此方向。
+
 ## Session、狀態與協作
 
 `gui.session` 提供 context、SoC、device、操作機制與 dialog 所需的窄 control facets。Measure 的 experiment 與 workflow tabs 使用同一份 `SessionServices`，共用背景執行、operation gate 與 RUN lease。Session 不決定 workflow 或 tab 呈現。

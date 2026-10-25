@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.form import FormErrors
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets import (
     accent_colour,
     error_colour,
@@ -316,7 +317,7 @@ class WritebackWidget(QWidget):
         self._checks: dict[str, QCheckBox] = {}
         self._applied_states: dict[str, bool] = {}
         self._invalid_modules: set[str] = set()
-        self._edit_dialogs = WritebackEditDialogs(self, ctrl, tab_id, pane)
+        self._init_lifetime(ctrl, tab_id, pane)
         self._foregrounds = ThemedForegrounds(self)
 
         # 13 px ledger per spec — item rows show current → proposed.
@@ -349,7 +350,7 @@ class WritebackWidget(QWidget):
         self._apply_btn = QPushButton("Apply Selected")
         self._apply_btn.setObjectName("writebackApply")
         self._apply_btn.setFixedHeight(30)
-        self._apply_btn.clicked.connect(self._on_apply_clicked)
+        self._scope.connect(self._apply_btn.clicked, self._on_apply_clicked)
         layout.addWidget(self._apply_btn)
 
         self._applied_legend = QLabel("* = not applied")
@@ -380,6 +381,18 @@ class WritebackWidget(QWidget):
         super().changeEvent(a0)
         if a0 is not None and a0.type() == QEvent.Type.PaletteChange:
             self._foregrounds.refresh()
+
+    def _init_lifetime(
+        self, ctrl: Controller, tab_id: str, pane: WritebackPane
+    ) -> None:
+        self._scope = LifetimeScope(self)
+        self._edit_dialogs = WritebackEditDialogs(self, ctrl, tab_id, pane)
+        self._scope.add_cleanup(lambda: self.setEnabled(False))
+        self._scope.add_cleanup(self._edit_dialogs.close)
+
+    def detach(self) -> None:
+        """Retire ledger callbacks and all open editors without changing the draft."""
+        self._scope.close()
 
     def show_preview_unavailable(
         self, reason: str, *, unavailable_reasons: tuple[str, ...] = ()
@@ -533,7 +546,9 @@ class WritebackWidget(QWidget):
         cb.setChecked(item.selected)
         cb.setToolTip(item.description)
         self._update_applied_presentation(item, cb)
-        cb.stateChanged.connect(lambda _state, it=item: self._on_check_toggled(it))
+        self._scope.connect(
+            cb.stateChanged, lambda _state, it=item: self._on_check_toggled(it)
+        )
         self._checks[item.session_id] = cb
 
         current_label = _value_label(item, self._display_current(item, compact=True))
@@ -610,7 +625,9 @@ class WritebackWidget(QWidget):
         if self._is_editable(item):
             button = QPushButton("Edit")
             button.setFixedSize(56, 26)
-            button.clicked.connect(lambda _=False, it=item: self._edit_item(it))
+            self._scope.connect(
+                button.clicked, lambda _=False, it=item: self._edit_item(it)
+            )
             return button
         if isinstance(item, RecordWriteback) or (
             isinstance(item, ParameterWriteback)
@@ -618,10 +635,11 @@ class WritebackWidget(QWidget):
         ):
             button = QPushButton("Copy")
             button.setFixedSize(56, 26)
-            button.clicked.connect(
+            self._scope.connect(
+                button.clicked,
                 lambda _=False, val=self._values[item.session_id].proposed: (
                     self._copy_value(val)
-                )
+                ),
             )
             return button
         placeholder = QLabel("")

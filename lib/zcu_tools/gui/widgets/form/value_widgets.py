@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 
 FIELD_INPUT_MIN_WIDTH = 20
@@ -130,21 +131,27 @@ def write_value_widget(widget: QWidget, value: object) -> None:
     raise TypeError(f"Unsupported value widget {type(widget).__name__}")
 
 
-def connect_value_widget(widget: QWidget, callback: Callable[..., object]) -> None:
-    """Connect the value-change signal of a supported scalar input widget."""
+def connect_value_widget(
+    widget: QWidget,
+    callback: Callable[..., object],
+    *,
+    scope: LifetimeScope | None = None,
+) -> None:
+    """Connect a scalar input, optionally retiring its notifications with scope."""
     if isinstance(widget, QComboBox):
-        widget.currentIndexChanged.connect(callback)
-        return
-    if isinstance(widget, QCheckBox):
-        widget.toggled.connect(callback)
-        return
-    if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
-        widget.valueChanged.connect(callback)
-        return
-    if isinstance(widget, QLineEdit):
-        widget.textChanged.connect(callback)
-        return
-    raise TypeError(f"Unsupported value widget {type(widget).__name__}")
+        signal = widget.currentIndexChanged
+    elif isinstance(widget, QCheckBox):
+        signal = widget.toggled
+    elif isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
+        signal = widget.valueChanged
+    elif isinstance(widget, QLineEdit):
+        signal = widget.textChanged
+    else:
+        raise TypeError(f"Unsupported value widget {type(widget).__name__}")
+    if scope is None:
+        signal.connect(callback)
+    else:
+        scope.connect(signal, callback)
 
 
 class _TextCommit(QObject):
@@ -164,27 +171,32 @@ class _TextCommit(QObject):
         widget: QLineEdit | QSpinBox | TrimDoubleSpinBox,
         text: QLineEdit,
         callback: Callable[..., object],
+        scope: LifetimeScope | None,
     ) -> None:
         super().__init__(widget)
+        self._scope = LifetimeScope(self)
+        if scope is not None:
+            scope.add_cleanup(self._scope.close)
         self._widget = widget
         self._text = text
-        self._callback = callback
+        self._callback = self._scope.callback(callback)
         self._last_text: str | None = text.text()
         self._pending_text: str | None = None
         self._interpreting = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(500)
-        self._timer.timeout.connect(self._expired)
-        text.textEdited.connect(self._edited)
-        text.textChanged.connect(self._text_changed)
-        widget.editingFinished.connect(self._finish)
-        widget.installEventFilter(self)
+        self._scope.add_cleanup(self._timer.stop)
+        self._scope.connect(self._timer.timeout, self._expired)
+        self._scope.connect(text.textEdited, self._edited)
+        self._scope.connect(text.textChanged, self._text_changed)
+        self._scope.connect(widget.editingFinished, self._finish)
+        self._scope.install_event_filter(widget, self._on_event)
         if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
-            text.installEventFilter(self)
+            self._scope.install_event_filter(text, self._on_event)
             widget.setKeyboardTracking(False)
-            self._numeric_committed.connect(callback)
-            widget.valueChanged.connect(self._numeric_changed)
+            self._scope.connect(self._numeric_committed, callback)
+            self._scope.connect(widget.valueChanged, self._numeric_changed)
 
     def _cancel(self) -> None:
         self._timer.stop()
@@ -238,7 +250,7 @@ class _TextCommit(QObject):
             self._last_text = self._text.text()
             self._numeric_committed.emit(value)
 
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+    def _on_event(self, a0: QObject | None, a1: QEvent | None) -> bool:
         """Cancel invalid lifetimes and commit ordinary focus/Enter immediately."""
         event = a1
         if a0 is None or event is None:
@@ -265,23 +277,27 @@ class _TextCommit(QObject):
 
 
 def connect_committed_value_widget(
-    widget: QWidget, callback: Callable[..., object]
+    widget: QWidget,
+    callback: Callable[..., object],
+    *,
+    scope: LifetimeScope | None = None,
 ) -> None:
     """Commit user text after 500 ms idle, Enter or ordinary focus loss.
 
     Line-edit commits call callback with no arguments. New input restarts the
     idle interval; explicit commits consume it. Programmatic text changes do not
-    schedule commits. Hidden, reparented, disabled or read-only controls cancel
+    schedule commits. A supplied scope retires callbacks, timer and filters on
+    close; otherwise Qt widget deletion owns their lifetime. Hidden, reparented, disabled or read-only controls cancel
     pending expiry without discarding text. The widget owns the connection.
     Spinbox text uses the same policy. Spinboxes deliver their numeric value
     through Qt, preserving its adaptation for no-argument callbacks. Stepping,
     checkboxes and dropdowns keep immediate value-change callbacks.
     """
     if isinstance(widget, QLineEdit):
-        _TextCommit(widget, widget, callback)
+        _TextCommit(widget, widget, callback, scope)
         return
     if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
         text = widget.findChild(QLineEdit)
-        _TextCommit(widget, text, callback)
+        _TextCommit(widget, text, callback, scope)
         return
-    connect_value_widget(widget, callback)
+    connect_value_widget(widget, callback, scope=scope)

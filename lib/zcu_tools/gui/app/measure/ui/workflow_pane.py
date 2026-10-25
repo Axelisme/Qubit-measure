@@ -38,13 +38,13 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.experiment.workflows import Actor
-from zcu_tools.gui.app.measure.services.workflow_borrower import WorkflowBorrower
 from zcu_tools.gui.app.measure.services.workflow_control import (
     WorkflowTabSnapshot,
 )
 from zcu_tools.gui.app.measure.services.workflow_run import QuestionExchange
 from zcu_tools.gui.app.measure.services.workflow_tab import FormKind
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -76,9 +76,8 @@ class WorkflowPane(QWidget):
         self._control = controller.workflow_control()
         self._tab_id = tab_id
         self._writable = True
-        self._retiring = False
-        self._borrower = WorkflowBorrower()
-        self._editor_borrowers: dict[FormKind, WorkflowBorrower] = {}
+        self._scope = LifetimeScope(self)
+        self._editor_scopes: dict[FormKind, LifetimeScope] = {}
         self._editors: dict[FormKind, FormEditor[FormModel]] = {}
         self._states: dict[FormKind, FormState[FormModel]] = {}
         self._envs: dict[FormKind, FormEnv] = {}
@@ -100,8 +99,9 @@ class WorkflowPane(QWidget):
         self._buttons: dict[str, QPushButton] = {}
         for caption in ("Refresh", "Start", "Pause", "Resume", "Stop"):
             button = QPushButton(caption, left)
-            button.clicked.connect(
-                lambda _checked=False, command=caption: self._command(command)
+            self._scope.connect(
+                button.clicked,
+                lambda _checked=False, command=caption: self._command(command),
             )
             self._buttons[caption] = button
             actions.addWidget(button)
@@ -113,10 +113,12 @@ class WorkflowPane(QWidget):
         splitter.addWidget(self._figures)
         splitter.setSizes([420, 780])
         layout.addWidget(splitter)
-        self._borrower.add_cleanup(self._figures.dispose)
+        self._scope.add_cleanup(self._figures.dispose)
         self._control.set_plot_host(tab_id, self._figures)
-        self._borrower.add_cleanup(self._control.subscribe(self.refresh))
-        self._borrower.add_cleanup(self._dispose_editors)
+        self._scope.add_cleanup(
+            self._control.subscribe(self._scope.callback(self.refresh))
+        )
+        self._scope.add_cleanup(self._dispose_editors)
         self.refresh()
 
     def _add_feedback(self, parent: QWidget, column: QVBoxLayout) -> None:
@@ -165,7 +167,9 @@ class WorkflowPane(QWidget):
         )
         layout.addWidget(self._answer_input)
         self._answer_button = QPushButton("Answer", page)
-        self._answer_button.clicked.connect(lambda: self._command("Answer"))
+        self._scope.connect(
+            self._answer_button.clicked, lambda: self._command("Answer")
+        )
         layout.addWidget(self._answer_button)
         self._answer_status = QLabel(page)
         self._answer_status.setObjectName("workflow.answer_status")
@@ -193,11 +197,11 @@ class WorkflowPane(QWidget):
             make_label_selectable(self._pause_hint)
             column.addWidget(self._pause_hint)
             button = QPushButton("Apply", page)
-            button.clicked.connect(lambda: self._command("Apply"))
+            self._scope.connect(button.clicked, lambda: self._command("Apply"))
             self._apply = button
             column.addWidget(button)
             self._discard = QPushButton("Discard", page)
-            self._discard.clicked.connect(lambda: self._command("Discard"))
+            self._scope.connect(self._discard.clicked, lambda: self._command("Discard"))
             column.addWidget(self._discard)
         self._subtabs.addTab(page, caption)
 
@@ -207,22 +211,24 @@ class WorkflowPane(QWidget):
         editor = self._editors.get(kind)
         if editor is None or self._states.get(kind) is not state:
             if editor is not None:
-                self._editor_borrowers[kind].dispose()
+                self._editor_scopes[kind].close()
                 self._pages[kind].removeWidget(editor)
                 editor.hide()
                 editor.deleteLater()
             editor = FormEditor(state, env, self)
-            lifetime = WorkflowBorrower()
+            lifetime = LifetimeScope()
             lifetime.add_cleanup(editor.detach)
-            self._editor_borrowers[kind] = lifetime
+            self._editor_scopes[kind] = lifetime
             self._pages[kind].addWidget(editor)
             self._editors[kind] = editor
             self._states[kind] = state
             self._envs[kind] = env
             self._editing.pop(kind, None)
             if kind == "tunables":
-                lifetime.add_cleanup(state.subscribe(self._refresh_discard))
-                editor.errors_changed.connect(self._refresh_discard)
+                lifetime.add_cleanup(
+                    state.subscribe(lifetime.callback(self._refresh_discard))
+                )
+                lifetime.connect(editor.errors_changed, self._refresh_discard)
         elif self._envs[kind] is not env:
             editor.refresh(env)
             self._envs[kind] = env
@@ -246,7 +252,7 @@ class WorkflowPane(QWidget):
 
     def refresh(self) -> None:
         """Read native status and current draft identity; never execute engine work."""
-        if self._retiring:
+        if self._scope.closed:
             return
         snapshot = next(
             (s for s in self._control.tabs() if s.tab_id == self._tab_id), None
@@ -434,8 +440,8 @@ class WorkflowPane(QWidget):
             raise ValueError(f"Unknown workflow command: {command}")
 
     def _dispose_editors(self) -> None:
-        for lifetime in self._editor_borrowers.values():
-            lifetime.dispose()
+        for lifetime in self._editor_scopes.values():
+            lifetime.close()
 
     def dispose(self) -> None:
         """Detach owner/editor subscriptions and redraw timers before Qt deletion.
@@ -445,5 +451,4 @@ class WorkflowPane(QWidget):
         Failure propagates and retains pending cleanup for a later dispose call;
         the caller must keep Qt children alive until disposal succeeds.
         """
-        self._retiring = True
-        self._borrower.dispose()
+        self._scope.close()

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QTabBar, QTabWidget, QToolButton, QWidget
 
-from zcu_tools.gui.app.measure.services.workflow_borrower import WorkflowBorrower
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.events import GateChangedPayload
 
 from .workflow_pane import WorkflowPane
@@ -45,9 +45,8 @@ class WorkflowTabs(QTabWidget):
         self._activate = activate
         self._lock_changed = lock_changed
         self._writable = True
-        self._retiring = False
-        self._borrower = WorkflowBorrower()
-        self._borrower.add_cleanup(self._dispose_panes)
+        self._scope = LifetimeScope(self)
+        self._scope.add_cleanup(self._dispose_panes)
         self._panes: dict[str, WorkflowPane] = {}
         self._labels: dict[str, str] = {}
         self._numbers: dict[str, int] = {}
@@ -56,21 +55,24 @@ class WorkflowTabs(QTabWidget):
         self.badge.setObjectName("workflow.badge")
         self.badge.setToolTip("Go to active workflow")
         self.badge.hide()
-        self.badge.clicked.connect(self._navigate)
-        self.tabCloseRequested.connect(self._close_requested)
-        self._borrower.add_cleanup(self._control.subscribe(self._sync))
+        self._scope.connect(self.badge.clicked, self._navigate)
+        self._scope.connect(self.tabCloseRequested, self._close_requested)
+        self._scope.add_cleanup(
+            self._control.subscribe(self._scope.callback(self._sync))
+        )
         bus = controller.get_bus()
-        bus.subscribe(GateChangedPayload, self._gate_changed)
-        self._borrower.add_cleanup(
-            lambda: bus.unsubscribe(GateChangedPayload, self._gate_changed)
+        self._scope.add_cleanup(
+            bus.subscribe(
+                GateChangedPayload, self._scope.callback(self._gate_changed)
+            ).unsubscribe
         )
         # Engine acceptance is off-owner and has no separate status event. Poll
         # only its read-only status; terminal delivery still comes via subscribe.
         self._timer = QTimer(self)
         self._timer.setInterval(100)
-        self._timer.timeout.connect(self._refresh)
+        self._scope.connect(self._timer.timeout, self._refresh)
         self._timer.start()
-        self._borrower.add_cleanup(self._timer.stop)
+        self._scope.add_cleanup(self._timer.stop)
 
     def synchronize(self) -> None:
         """Mount tabs that were opened before this view was constructed."""
@@ -81,7 +83,7 @@ class WorkflowTabs(QTabWidget):
         self._lock_changed()
 
     def _sync(self) -> None:
-        if self._retiring:
+        if self._scope.closed:
             return
         snapshots = self._control.tabs()
         live = {s.tab_id for s in snapshots}
@@ -122,7 +124,7 @@ class WorkflowTabs(QTabWidget):
         self._lock_changed()
 
     def _refresh(self) -> None:
-        if self._retiring:
+        if self._scope.closed:
             return
         snapshots = self._control.tabs()
         active = next((s for s in snapshots if s.busy), None)
@@ -177,8 +179,7 @@ class WorkflowTabs(QTabWidget):
         Failures propagate. Keep this widget and its children until a later call
         succeeds; completed cleanup callbacks are not executed again.
         """
-        self._retiring = True
-        self._borrower.dispose()
+        self._scope.close()
 
     def _dispose_panes(self) -> None:
         for pane in self._panes.values():
